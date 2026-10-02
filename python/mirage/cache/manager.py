@@ -621,18 +621,18 @@ class CacheManager:
         """Keep or drop the bytes a whole-file write just sent.
 
         Decided once, at the write, under the mutation lock: any mutation of
-        the mount by this process since the upload started drops (another
-        process's is not seen), a stored size other than
-        the bytes sent drops (SharePoint promotes properties into an
-        uploaded Office file), a token keeps the bytes with it, and a reply
-        that says nothing keeps them only under ``bounded``, where nothing
-        would verify them anyway. Bytes larger than ``cache_limit`` are
-        dropped too: on the RAM cache they would evict every warm entry and
-        then themselves. Keep or drop, in-flight reads and probe answers are
-        retired, so a read that began before the write cannot stamp its
-        bytes over these. The write has landed by now, so a fill the cache
-        store refuses is logged and skipped, as a background drain's is,
-        never raised.
+        this mount through this manager since the upload started drops (a
+        change at the backend, through another mount or workspace, or by
+        another process is not seen), a stored size other than the bytes sent
+        drops (SharePoint promotes properties into an uploaded Office file), a
+        token keeps the bytes with it, and a reply that says nothing keeps them
+        only under ``bounded``, where nothing would verify them anyway. Bytes
+        larger than the store's ``cache_limit`` are dropped too: on the RAM
+        cache they would evict every warm entry and then themselves. Keep or
+        drop, in-flight reads and probe answers are retired, so a read that
+        began before the write cannot stamp its bytes over these. The write has
+        landed by now, so a fill the cache store refuses is logged and skipped,
+        as a background drain's is, never raised.
 
         Args:
             path (PathSpec): Path that was written; only ``virtual`` is
