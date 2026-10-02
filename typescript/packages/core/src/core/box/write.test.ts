@@ -327,6 +327,7 @@ describe('box write ops', () => {
       vi.mocked(api.copyFile).mockImplementation(() =>
         fails ? Promise.reject(new Error('copy failed')) : Promise.resolve({} as ApiModule.BoxItem),
       )
+      vi.mocked(api.copyFile).mockClear()
       vi.mocked(invalidateSubtree).mockClear()
       try {
         const copied = copy(makeAccessor(), spec('/data/sub'), spec('/data/dst'))
