@@ -17,6 +17,7 @@ import hashlib
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import push_cache_manager
+from mirage.cache.types import WriteReceipt
 from mirage.core.s3 import driver as s3_driver
 from mirage.core.s3.write import write_bytes
 from mirage.types import PathSpec
@@ -34,6 +35,17 @@ class _FakeManager:
         self.ancestors.append(path.virtual)
 
     async def invalidate_after_write(self, path: PathSpec) -> None:
+        self.writes.append(path.mount_path)
+
+    generation = 0
+
+    async def settle_after_write(
+        self,
+        path: PathSpec,
+        data: bytes,
+        receipt: WriteReceipt | None,
+        started: int | None,
+    ) -> None:
         self.writes.append(path.mount_path)
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None:

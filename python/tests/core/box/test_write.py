@@ -472,10 +472,6 @@ async def test_write_records_the_virtual_path(root_accessor):
             patch(
                 "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
             ),
-            patch(
-                "mirage.core.box.write.invalidate_after_write",
-                new_callable=AsyncMock,
-            ),
         ):
             await write_bytes(root_accessor, spec, b"hello")
     finally:
@@ -485,8 +481,11 @@ async def test_write_records_the_virtual_path(root_accessor):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "target,upload", [("/data/new.txt", "upload_new_file"),
-                      ("/data/a.txt", "upload_file_version")]
+    "target,upload",
+    [
+        ("/data/new.txt", "upload_new_file"),
+        ("/data/a.txt", "upload_file_version"),
+    ],
 )
 async def test_write_settles_its_bytes_without_a_receipt(
     root_accessor, target, upload

@@ -385,7 +385,6 @@ async def _run_in_place(
     stdout = "".join(machine.stdout.chunks)
     return from_byte_view(stdout) if stdout else None, IOResult(
         writes=writes,
-        cache=[p.mount_path for p in edited],
         exit_code=exit_code,
         stderr=encode_text(stderr) if stderr else None,
     )

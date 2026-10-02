@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { settleAfterWrite, writeGeneration } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { dropboxUpload } from './client.ts'
@@ -28,8 +28,9 @@ export async function write(
   data: Uint8Array,
 ): Promise<void> {
   const timer = startOp()
+  const started = writeGeneration()
   await dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data)
   record('write', path.virtual, 'dropbox', data.byteLength, timer)
-  await invalidateAfterWrite(path)
+  await settleAfterWrite(path, data, null, started)
   await invalidateAncestors(path)
 }

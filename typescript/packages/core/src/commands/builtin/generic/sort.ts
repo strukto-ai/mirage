@@ -376,10 +376,7 @@ export async function sortGeneric(
         }),
       ]
     }
-    return [
-      new Uint8Array(),
-      new IOResult({ writes: { [outputPath.mountPath]: output }, cache: [outputPath.mountPath] }),
-    ]
+    return [new Uint8Array(), new IOResult({ writes: { [outputPath.mountPath]: output } })]
   }
   const out: ByteSource = output
   return [out, new IOResult()]

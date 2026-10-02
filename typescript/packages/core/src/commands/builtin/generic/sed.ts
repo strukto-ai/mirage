@@ -361,7 +361,6 @@ async function runInPlace(
     stdout === '' ? null : fromByteView(stdout),
     new IOResult({
       writes,
-      cache: edited,
       exitCode,
       stderr: stderr === '' ? null : encodeText(stderr),
     }),

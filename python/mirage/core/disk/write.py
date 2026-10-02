@@ -15,7 +15,7 @@
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import settle_after_write, write_generation
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record, start_op
@@ -28,8 +28,9 @@ async def write_bytes(
     root = accessor.root
     timer = start_op()
     p = await resolve_inside(root, path_spec)
+    started = write_generation()
     with disk_errors(path_spec.virtual):
         async with aiofiles.open(p, "wb") as f:
             await f.write(data)
     record("write", path_spec.virtual, "disk", len(data), timer)
-    await invalidate_after_write(path_spec)
+    await settle_after_write(path_spec, data, None, started)

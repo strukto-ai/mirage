@@ -324,7 +324,7 @@ describe('a guarded cp reads past the cache without refilling it', () => {
 })
 
 describe('a line that reads and writes one path (MIRAGE-14)', () => {
-  async function caching(): Promise<Workspace> {
+  function caching(): Workspace {
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     return new Workspace(
@@ -350,7 +350,7 @@ describe('a line that reads and writes one path (MIRAGE-14)', () => {
     it(`a read earlier on the line does not outlive the write: ${line}`, async () => {
       // The read's bytes used to be cached over the write's, so the next cat
       // served the pre-write content until the ttl ran out.
-      const ws = await caching()
+      const ws = caching()
       try {
         await out(ws, "printf 'old\\n' > /r/a; printf 'new\\n' > /r/b")
         await out(ws, line)
@@ -364,7 +364,7 @@ describe('a line that reads and writes one path (MIRAGE-14)', () => {
   it('a same-mount cp over a path read on the line is never empty', async () => {
     // cp lists its target in writes as an empty eviction marker; taking the
     // write side for a path also read would cache an empty file.
-    const ws = await caching()
+    const ws = caching()
     try {
       await out(ws, "printf 'old\\n' > /r/a; printf 'bee\\n' > /r/b")
       await out(ws, 'cat /r/a; cp /r/b /r/a')
@@ -376,7 +376,7 @@ describe('a line that reads and writes one path (MIRAGE-14)', () => {
 
   for (const line of ['echo new | tee /r/a; cat /r/a', 'echo new | tee /r/a']) {
     it(`a write then a read on one line serves the write: ${line}`, async () => {
-      const ws = await caching()
+      const ws = caching()
       try {
         await out(ws, "printf 'old\\n' > /r/a; cat /r/a")
         await out(ws, line)
@@ -389,7 +389,7 @@ describe('a line that reads and writes one path (MIRAGE-14)', () => {
 })
 
 describe('a whole-file write settles with the cache', () => {
-  async function caching(policy: ReadPolicy): Promise<Workspace> {
+  function caching(policy: ReadPolicy): Workspace {
     const ram = new RAMVFS()
     Object.assign(ram, { cachesReads: true, readRevalidatable: true })
     return new Workspace(
@@ -410,19 +410,17 @@ describe('a whole-file write settles with the cache', () => {
 
   for (const [line, path] of [
     ['echo new | tee /r/a', '/r/a'],
-    ['cp /r/b /r/c', '/r/c'],
-    ['split -l 1 /r/b /r/x', '/r/xaa'],
+    ['sed -i s/one/uno/ /r/b', '/r/b'],
+    ['sort -o /r/so /r/b', '/r/so'],
+    ['uniq /r/b /r/u', '/r/u'],
     ['shuf -o /r/s /r/b', '/r/s'],
     ['iconv -f utf-8 -t utf-8 -o /r/i /r/b', '/r/i'],
-    ['csplit -f /r/cs /r/b 2', '/r/cs00'],
-    ['sort -o /r/so /r/b', '/r/so'],
-    ['mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out', '/r/out/b'],
     ['zip -q /r/z.zip /r/b', '/r/z.zip'],
   ] as const) {
     it(`a same-mount write keeps its output under bounded: ${line}`, async () => {
-      // Every command whose output goes through the backend's whole-file
-      // write settles it: on a bounded mount the bytes stay warm.
-      const ws = await caching(ReadPolicy.BOUNDED)
+      // A command whose output goes through the backend's whole-file write
+      // inside the command settles it: on a bounded mount the bytes stay warm.
+      const ws = caching(ReadPolicy.BOUNDED)
       try {
         await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
         await out(ws, line)
@@ -435,10 +433,31 @@ describe('a whole-file write settles with the cache', () => {
     })
   }
 
+  for (const [line, path] of [
+    ['cp /r/b /r/c', '/r/c'],
+    ['split -l 1 /r/b /r/x', '/r/xaa'],
+    ['csplit -f /r/cs /r/b 2', '/r/cs00'],
+    ['mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out', '/r/out/b'],
+  ] as const) {
+    it(`a write outside the settle path stays evicted: ${line}`, async () => {
+      // A native copy only invalidates, and split, csplit and tar write
+      // through the dispatcher, which evicts after the op: these keep nothing
+      // until that path settles too.
+      const ws = caching(ReadPolicy.BOUNDED)
+      try {
+        await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+        await out(ws, line)
+        expect(await ws.cache.exists(path)).toBe(false)
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
   it('a silent write is not kept under fresh', async () => {
     // RAM's write answers no token, so nothing could verify the bytes on a
     // fresh mount: the entry is dropped rather than kept unverifiable.
-    const ws = await caching(ReadPolicy.FRESH)
+    const ws = caching(ReadPolicy.FRESH)
     try {
       await out(ws, 'echo new | tee /r/a')
       expect(await ws.cache.exists('/r/a')).toBe(false)
@@ -450,7 +469,7 @@ describe('a whole-file write settles with the cache', () => {
   it('a redirect is still evicted', async () => {
     // A redirect writes through the dispatcher, which runs no cache manager
     // and evicts after the op; it keeps nothing until that path settles.
-    const ws = await caching(ReadPolicy.BOUNDED)
+    const ws = caching(ReadPolicy.BOUNDED)
     try {
       await out(ws, 'echo old > /r/a')
       await out(ws, 'cat /r/a')

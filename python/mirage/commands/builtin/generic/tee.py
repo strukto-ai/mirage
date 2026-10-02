@@ -68,10 +68,9 @@ async def write_one(
     """Write one operand, returning its new content when that is known.
 
     ``None`` means "written, but the resulting bytes are not in hand" —
-    the native append case. The caller then lists the path in ``writes``
-    without listing it in ``cache``, which is how ``apply_io`` is told to
-    drop the stale entry instead of caching a wrong one. That costs one
-    read on the next access and saves reading and re-uploading the whole
+    the native append case, which drops the stale entry at its mutation
+    site instead of settling bytes it does not hold. That costs one read
+    on the next access and saves reading and re-uploading the whole
     object on this one.
 
     Args:
@@ -181,7 +180,6 @@ async def write_output(
         stat (StatFn | None): Stats a path, for the probed open.
     """
     writes: dict[str, ByteSource] = {}
-    cache: list[str] = []
     errors: list[bytes] = []
     if parsed.stop_on_error and stat is not None:
         opened: set[str] = set()
@@ -205,7 +203,6 @@ async def write_output(
                     ):
                         await write_bytes(prior, b"")
                         writes[prior.mount_path] = b""
-                        cache.append(prior.mount_path)
                 except Exception as exc:
                     failed, refusal = prior, exc
                     break
@@ -230,7 +227,6 @@ async def write_output(
                 exit_code=1,
                 stderr=error_line(failed, refusal),
                 writes=writes,
-                cache=cache,
             )
     for index, path in enumerate(paths):
         # A store keeps a key over a directory or under a file, where an
@@ -255,13 +251,11 @@ async def write_output(
                 break
             continue
         writes[path.mount_path] = raw if data is None else data
-        if data is not None and path.mount_path not in cache:
-            cache.append(path.mount_path)
     if errors:
         return raw, IOResult(
-            exit_code=1, stderr=b"".join(errors), writes=writes, cache=cache
+            exit_code=1, stderr=b"".join(errors), writes=writes
         )
-    return raw, IOResult(writes=writes, cache=cache)
+    return raw, IOResult(writes=writes)
 
 
 async def tee(

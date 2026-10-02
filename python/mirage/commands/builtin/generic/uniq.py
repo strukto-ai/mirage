@@ -284,7 +284,7 @@ async def uniq(
         await write_bytes(paths[1], data)
         return b"", IOResult(
             writes={paths[1].mount_path: data},
-            cache=cache + [paths[1].mount_path],
+            cache=cache,
         )
     return output, IOResult(cache=cache)
 

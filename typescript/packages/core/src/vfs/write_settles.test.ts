@@ -18,6 +18,12 @@ import { describe, expect, it } from 'vitest'
 
 type Writer = (...args: never[]) => Promise<void>
 
+interface Wired {
+  write: Writer
+  /** The source of the module that defines `write`. */
+  module: string
+}
+
 const IMPORT = /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'([^']+)'/g
 
 /**
@@ -25,7 +31,7 @@ const IMPORT = /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'([^']+)'/g
  * from the module that defines it rather than read off the built table,
  * which may wrap it (an error translator, a renderer) out of sight.
  */
-async function wiredWrite(ioPath: string, source: string): Promise<Writer | null> {
+async function wiredWrite(ioPath: string, source: string): Promise<Wired | null> {
   const writes = /\bwrites:\s*\{([^}]*)\}/.exec(source)?.[1] ?? ''
   const entry = /(?:^|[\s,])write(?::\s*([A-Za-z_$][\w$]*))?\s*(?:,|$)/m.exec(writes)
   if (entry === null) return null
@@ -34,22 +40,24 @@ async function wiredWrite(ioPath: string, source: string): Promise<Writer | null
     for (const item of names.split(',')) {
       const [exported = '', local = exported] = item.trim().split(/\s+as\s+/)
       if (local !== wired) continue
-      const module = (await import(join(dirname(ioPath), from))) as Record<string, unknown>
+      const file = join(dirname(ioPath), from)
+      const module = (await import(file)) as Record<string, unknown>
       const write = module[exported]
-      return typeof write === 'function' ? (write as Writer) : null
+      if (typeof write !== 'function') return null
+      return { write: write as Writer, module: readFileSync(file, 'utf8') }
     }
   }
   return null
 }
 
 /** Every whole-file `write` an IO table under `builtinDir` wires, by backend. */
-async function wiredWriters(builtinDir: string): Promise<Map<string, Writer>> {
-  const found = new Map<string, Writer>()
+async function wiredWriters(builtinDir: string): Promise<Map<string, Wired>> {
+  const found = new Map<string, Wired>()
   for (const name of readdirSync(builtinDir).sort()) {
     const ioPath = join(builtinDir, name, 'io.ts')
     if (!existsSync(ioPath)) continue
-    const write = await wiredWrite(ioPath, readFileSync(ioPath, 'utf8'))
-    if (write !== null) found.set(name, write)
+    const wired = await wiredWrite(ioPath, readFileSync(ioPath, 'utf8'))
+    if (wired !== null) found.set(name, wired)
   }
   return found
 }
@@ -71,12 +79,14 @@ describe('every whole-file write settles instead of invalidating', async () => {
     )
   })
 
-  for (const [name, write] of writers) {
+  for (const [name, { write, module }] of writers) {
     it(name, () => {
       // A writer holds the file's full new bytes, so it settles them with
       // the cache; one that still only invalidates would drop what it
-      // wrote, and applyIo no longer stores written paths.
-      const source = write.toString()
+      // wrote, and applyIo no longer stores written paths. A writer wrapped
+      // out of sight (an error translator) is judged by its module.
+      const own = write.toString()
+      const source = calls(own, 'settleAfterWrite') ? own : module
       expect(calls(source, 'settleAfterWrite')).toBe(true)
       expect(calls(source, 'writeGeneration')).toBe(true)
       expect(calls(source, 'invalidateAfterWrite')).toBe(false)

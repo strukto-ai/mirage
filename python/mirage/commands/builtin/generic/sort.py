@@ -463,10 +463,7 @@ async def sort(
                 stderr=sort_die(OPEN_FAILED, parsed.output.raw_path, strerror),
                 exit_code=2,
             )
-        return b"", IOResult(
-            writes={parsed.output.mount_path: output},
-            cache=[parsed.output.mount_path],
-        )
+        return b"", IOResult(writes={parsed.output.mount_path: output})
     return output, IOResult()
 
 

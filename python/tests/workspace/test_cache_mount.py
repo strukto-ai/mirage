@@ -285,29 +285,47 @@ def _caching_ram_under(policy: ReadPolicy) -> Workspace:
     "line,path",
     [
         ("echo new | tee /r/a", "/r/a"),
-        ("cp /r/b /r/c", "/r/c"),
-        ("split -l 1 /r/b /r/x", "/r/xaa"),
+        ("sed -i s/one/uno/ /r/b", "/r/b"),
+        ("sort -o /r/so /r/b", "/r/so"),
+        ("uniq /r/b /r/u", "/r/u"),
         ("shuf -o /r/s /r/b", "/r/s"),
         ("iconv -f utf-8 -t utf-8 -o /r/i /r/b", "/r/i"),
-        ("csplit -f /r/cs /r/b 2", "/r/cs00"),
-        ("sort -o /r/so /r/b", "/r/so"),
-        (
-            "mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out",
-            "/r/out/b",
-        ),
         ("zip -q /r/z.zip /r/b", "/r/z.zip"),
     ],
 )
 async def test_a_same_mount_write_keeps_its_output_under_bounded(line, path):
-    # Every command whose output goes through the backend's whole-file
-    # write settles it: on a bounded mount the bytes stay warm, so the
-    # next read of the output makes no backend read.
+    # A command whose output goes through the backend's whole-file write
+    # inside the command settles it: on a bounded mount the bytes stay
+    # warm, so the next read of the output makes no backend read.
     ws = _caching_ram_under(ReadPolicy.BOUNDED)
     await _out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
     await _out(ws, line)
     held = await ws._cache.get(path)
     assert held is not None
     assert held == await _out(ws, f"cat {path}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,path",
+    [
+        ("cp /r/b /r/c", "/r/c"),
+        ("split -l 1 /r/b /r/x", "/r/xaa"),
+        ("csplit -f /r/cs /r/b 2", "/r/cs00"),
+        (
+            "mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out",
+            "/r/out/b",
+        ),
+    ],
+)
+async def test_a_write_outside_the_settle_path_stays_evicted(line, path):
+    # A native copy only invalidates, and split, csplit and tar write
+    # through the dispatcher, which evicts after the op: these keep
+    # nothing until that path settles too.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+    await _out(ws, line)
+    assert await ws._cache.exists(path) is False
 
 
 @pytest.mark.asyncio

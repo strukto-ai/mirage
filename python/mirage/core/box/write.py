@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import settle_after_write, write_generation
 from mirage.core.box.api import upload_file_version, upload_new_file
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
 from mirage.observe.context import record, start_op
@@ -31,6 +31,7 @@ async def write_bytes(
     timer = start_op()
     existing = await resolve_item(accessor, parts)
     if existing is not None and existing.get("type") == "file":
+        started = write_generation()
         # Overwrite uploads a new version under the same id, keeping Box's
         # own name so a box-native file isn't renamed with the vfs suffix.
         await upload_file_version(tm, existing["id"], existing["name"], data)
@@ -38,6 +39,7 @@ async def write_bytes(
         parent_id = await resolve_parent_id(accessor, parts)
         if parent_id is None:
             raise enoent(path.virtual)
+        started = write_generation()
         await upload_new_file(tm, parent_id, parts[-1], data)
     record("write", path.virtual, "box", len(data), timer)
-    await invalidate_after_write(path)
+    await settle_after_write(path, data, None, started)

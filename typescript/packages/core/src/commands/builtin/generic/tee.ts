@@ -72,10 +72,9 @@ export async function teeGeneric(
  * Write one operand, returning its new content when that is known.
  *
  * `null` means "written, but the resulting bytes are not in hand" — the native
- * append case. The caller then lists the path in `writes` without listing it in
- * `cache`, which is how the cache layer is told to drop the stale entry instead
- * of caching a wrong one. That costs one read on the next access and saves
- * reading and re-uploading the whole object on this one.
+ * append case, which drops the stale entry at its mutation site instead of
+ * settling bytes it does not hold. That costs one read on the next access and
+ * saves reading and re-uploading the whole object on this one.
  */
 async function writeOne(
   path: PathSpec,
@@ -161,7 +160,6 @@ export async function writeOutput(
   stat?: StatFn,
 ): Promise<[ByteSource | null, IOResult]> {
   const writes: Record<string, ByteSource> = {}
-  const cache: string[] = []
   const errors: string[] = []
   // GNU opens every output before it reads a byte: under exit the first open
   // failure ends the run with nothing written, the outputs before it made
@@ -189,7 +187,6 @@ export async function writeOutput(
           if (!(parsed.append && (await entryKind(stat, prior)).exists)) {
             await write(prior, new Uint8Array(0))
             writes[prior.mountPath] = new Uint8Array(0)
-            cache.push(prior.mountPath)
           }
         } catch (err) {
           failed = prior
@@ -209,7 +206,7 @@ export async function writeOutput(
         }
       }
       const stderr = encodeText(errorLine(failed, refusal))
-      return [null, new IOResult({ exitCode: 1, stderr, writes, cache })]
+      return [null, new IOResult({ exitCode: 1, stderr, writes })]
     }
   }
   for (const [index, path] of paths.entries()) {
@@ -238,10 +235,9 @@ export async function writeOutput(
       continue
     }
     writes[path.mountPath] = data ?? raw
-    if (data !== null && !cache.includes(path.mountPath)) cache.push(path.mountPath)
   }
   if (errors.length > 0) {
-    return [raw, new IOResult({ exitCode: 1, stderr: encodeText(errors.join('')), writes, cache })]
+    return [raw, new IOResult({ exitCode: 1, stderr: encodeText(errors.join('')), writes })]
   }
-  return [raw, new IOResult({ writes, cache })]
+  return [raw, new IOResult({ writes })]
 }

@@ -15,7 +15,7 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import settle_after_write, write_generation
 from mirage.core.gdrive.resolve import (
     eacces_on_denied,
     resolve_key,
@@ -45,11 +45,13 @@ async def write_bytes(
     if node is not None and node.is_native:
         raise PermissionError(virtual)
     if node is not None:
+        started = write_generation()
         await update_file_content(token_manager, node.id, data)
     else:
         parent_id, _ = await resolve_parent(accessor, path)
+        started = write_generation()
         await upload_file(
             token_manager, posixpath.basename(key), parent_id, data
         )
     record("write", virtual, "gdrive", len(data), timer)
-    await invalidate_after_write(path)
+    await settle_after_write(path, data, None, started)

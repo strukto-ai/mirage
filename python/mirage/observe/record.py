@@ -14,34 +14,25 @@
 
 from dataclasses import dataclass, field
 
-# Ops whose record carries a token describing the bytes it moved, split
-# by direction: the file cache stores bytes from either `IOResult.reads`
-# or `IOResult.writes` and must ask about the side it took, since one
-# line can carry both for a path.
+# Ops whose record carries a token describing the bytes a read moved. The
+# file cache labels the bytes of `IOResult.reads` with it; a writer
+# settles its own bytes with the cache from its upload reply
+# (`settle_after_write`), so no write record ever labels an entry.
 #
 # `create` and `truncate` stamp a token on their own record too, but
 # neither ever hands bytes to the cache: no command builder can ask for
 # a create (`Operation` has no member for it) and truncate's command
-# returns an empty IOResult, so no created or truncated path is ever
-# listed in `IOResult.cache`. A script runtime can still issue either
+# returns an empty IOResult. A script runtime can still issue either
 # through `RuntimeVFS`, and those ops bubble into the enclosing line's
 # records, which is exactly why admitting them here could only pair one
 # op's token with another op's bytes.
-# "append" is absent because no object store implements it and the
-# backends that record one stamp no token.
-# `truncate` would also need its record's `bytes` corrected before it
-# could join: it reports 0 while its token describes `length` bytes, so
-# the byte-identity guard in `latest_fingerprint` would refuse every one.
 READ_FINGERPRINT_OPS = frozenset({"read"})
-WRITE_FINGERPRINT_OPS = frozenset({"write"})
 
 # What snapshot drift capture asks instead, and it is a different question
-# from the cache's, so these are deliberately not the two sets above.
-# `STAMP_FINGERPRINT_OPS` is a superset: capture reads the record, not the
-# bytes, so it has none of the pairing problem that narrowed
-# `WRITE_FINGERPRINT_OPS` to one member. The three overlap on purpose --
-# a write both describes and changes, and whether it carries a token is
-# what tells capture which.
+# from the cache's. `STAMP_FINGERPRINT_OPS` is a superset: capture reads
+# the record, not the bytes, so it has none of the pairing problem. The
+# sets overlap on purpose -- a write both describes and changes, and
+# whether it carries a token is what tells capture which.
 #
 # All three hold the op names a `record()` call spells, not the op-table
 # slots: the recursive delete is the `rm_recursive` slot but records as

@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
+import {
+  invalidateAfterWrite,
+  invalidateAncestors,
+  settleAfterWrite,
+  writeGeneration,
+} from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, enotsup, isMissingPath } from '../../utils/errors.ts'
@@ -63,15 +68,18 @@ export function makeWriteBytes<A extends Accessor, C>(driver: ObjectStoreDriver<
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     let meta: ObjectMeta | null
+    let started: number | null
     try {
+      started = writeGeneration()
       meta = await put(driver, conn, key, data, path)
     } finally {
       await close()
     }
-    record('write', path.virtual, driver.vfs, data.byteLength, timer, {
-      fingerprint: meta?.fingerprint ?? null,
-    })
-    await invalidateAfterWrite(path)
+    const token = meta?.fingerprint ?? null
+    record('write', path.virtual, driver.vfs, data.byteLength, timer, { fingerprint: token })
+    // The size a put reports is the request's length, not one the store read
+    // back, so only the token vouches for these bytes.
+    await settleAfterWrite(path, data, { storedSize: null, token }, started)
     // A put materializes every missing level of the key at once, so the
     // listings above the immediate parent gained entries too.
     await invalidateAncestors(path)

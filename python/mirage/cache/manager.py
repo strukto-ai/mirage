@@ -31,7 +31,6 @@ from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.cache.types import WriteReceipt
 from mirage.observe.context import active_recorder
-from mirage.observe.record import READ_FINGERPRINT_OPS
 from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec, ReadPolicy
 from mirage.utils.key_prefix import mount_key
 
@@ -571,9 +570,7 @@ class CacheManager:
                     records = (
                         recorder.sink[start:] if recorder is not None else None
                     )
-                    fingerprint = latest_fingerprint(
-                        records, key, READ_FINGERPRINT_OPS, len(data)
-                    )
+                    fingerprint = latest_fingerprint(records, key)
                     await cache.set(
                         key, data, fingerprint=fingerprint, ttl=self._read_ttl
                     )

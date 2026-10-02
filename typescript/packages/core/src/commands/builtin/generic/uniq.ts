@@ -289,7 +289,6 @@ export async function uniqGeneric(
     }
     const data = await materialize(output)
     await write(outputPath, data)
-    cache.push(outputPath.mountPath)
     return [new Uint8Array(), new IOResult({ writes: { [outputPath.mountPath]: data }, cache })]
   }
   return [output, new IOResult({ cache })]

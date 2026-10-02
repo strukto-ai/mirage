@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
+import { settleAfterWrite, writeGeneration } from '@struktoai/mirage-core/cache/context'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -28,6 +28,7 @@ export async function writeBytes(
   const sftp = await accessor.sftp()
   const key = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', key)
+  const started = writeGeneration()
   await new Promise<void>((resolveFn, rejectFn) => {
     sftp.writeFile(remote, Buffer.from(data), (err) => {
       if (err) rejectFn(err)
@@ -35,5 +36,5 @@ export async function writeBytes(
     })
   })
   record('write', p.virtual, VFSName.SSH, data.byteLength, timer)
-  await invalidateAfterWrite(p)
+  await settleAfterWrite(p, data, null, started)
 }

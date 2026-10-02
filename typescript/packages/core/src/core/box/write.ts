@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { settleAfterWrite, writeGeneration } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
 import { uploadFileVersion, uploadNewFile } from './api.ts'
@@ -28,14 +28,17 @@ export async function write(
   if (parts.length === 0) throw eisdir(path.virtual)
   const tm = accessor.tokenManager
   const existing = await resolveItem(accessor, parts)
+  let started: number | null
   if (existing !== null && existing.type === 'file') {
     // Overwrite uploads a new version under the same id, keeping Box's own
     // name so a box-native file isn't renamed with the vfs suffix.
+    started = writeGeneration()
     await uploadFileVersion(tm, existing.id, existing.name, data)
   } else {
     const parentId = await resolveParentId(accessor, parts)
     if (parentId === null) throw enoent(path.virtual)
+    started = writeGeneration()
     await uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
   }
-  await invalidateAfterWrite(path)
+  await settleAfterWrite(path, data, null, started)
 }

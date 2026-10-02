@@ -14,7 +14,7 @@
 
 import { CachableAsyncIterator, concat } from '../../io/cachable_iterator.ts'
 import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
-import { READ_FINGERPRINT_OPS, WRITE_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
+import { READ_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
 import type { CacheFacts } from '../../types.ts'
 import { drainBudget, type FileCache } from './mixin.ts'
 import { KeyLock } from '../lock.ts'
@@ -32,58 +32,32 @@ export function withCacheMutation<T>(cache: FileCache, fn: () => Promise<T>): Pr
 }
 
 /**
- * Latest backend fingerprint recorded for `path` by one of `ops`.
+ * Backend fingerprint of the newest read of `path`.
  *
  * Backends stamp a read record with the content identifier they returned
- * (S3 ETag, OneDrive cTag, Postgres sha256), and an object-store write
- * record with the token its PUT answered. Threading it into the cache
+ * (S3 ETag, OneDrive cTag, Postgres sha256). Threading it into the cache
  * entry lets a `fresh` mount's `isFresh` compare like with like. null means
  * the bytes carry no token, and the entry then stores none: an unverifiable
  * copy is dropped and re-read, which is what a fabricated one produced
  * anyway on every backend whose token is not an md5 of the content.
  *
- * `ops` is the direction the caller took, never both. One line's records
- * span every statement and pipeline segment (`IOResult.merge` unions
- * them), so a path read and written on the same line carries a record of
- * each; asking for the wrong direction stamps the write's token onto the
- * bytes the read produced, and the entry then reads as fresh forever.
+ * Only the newest read of the path counts: when it carries no token,
+ * neither does the entry, whatever an earlier read stamped. A write's token
+ * never labels read bytes; a writer settles its own bytes with the cache
+ * (`settleAfterWrite`).
  */
 export function latestFingerprint(
   records: readonly OpRecord[] | undefined,
   path: string,
-  ops: ReadonlySet<string>,
-  nbytes: number,
 ): string | null {
   if (records === undefined) return null
   for (let i = records.length - 1; i >= 0; i--) {
     const rec = records[i]
-    if (
-      rec !== undefined &&
-      READ_FINGERPRINT_OPS.has(rec.op) &&
-      ops.has(rec.op) &&
-      rec.path === path &&
-      !rec.fingerprint
-    ) {
-      // The newest read is the one whose bytes are stored, and the backend did
-      // not vouch for them: an older read's token would label bytes it never
-      // described, which a later revert to that token serves as fresh.
-      return null
-    }
-    if (rec !== undefined && ops.has(rec.op) && rec.path === path && rec.fingerprint) {
-      if (WRITE_FINGERPRINT_OPS.has(rec.op) && rec.bytes !== nbytes) {
-        // Direction is not identity: a line can hold several ops for one
-        // path while applyIo stores the bytes of just one of them, and
-        // `IOResult.merge` is right-wins on `writes`, so the empty
-        // eviction marker a server-side `cp` leaves there displaces the
-        // content `tee` wrote while `tee`'s record stays the last one (a
-        // copy that streams writes its own record, and the guard catches
-        // that one on the source's length instead). A token for a different
-        // length describes different bytes, and a wrong token reads as
-        // fresh for the life of the entry, so answer none and let the
-        // content default stand.
-        return null
-      }
-      return rec.fingerprint
+    if (rec !== undefined && READ_FINGERPRINT_OPS.has(rec.op) && rec.path === path) {
+      // The newest read is the one whose bytes are stored; an older read's
+      // token would label bytes it never described, which a later revert to
+      // that token serves as fresh.
+      return rec.fingerprint === '' ? null : rec.fingerprint
     }
   }
   return null
@@ -95,7 +69,6 @@ async function setCached(
   data: Uint8Array,
   records: readonly OpRecord[] | undefined,
   cacheFacts: ((path: string) => CacheFacts) | undefined,
-  ops: ReadonlySet<string>,
 ): Promise<void> {
   await withCacheMutation(cache, async () => {
     const facts = cacheFacts?.(path)
@@ -103,7 +76,7 @@ async function setCached(
     // consulted for a path that is not being cached. That ordering is
     // what keeps an unresolvable mount from being read as "no bound".
     if (facts === undefined || facts.cacheable) {
-      await setCachedLocked(cache, path, data, records, ops, facts?.ttl ?? null)
+      await setCachedLocked(cache, path, data, records, facts?.ttl ?? null)
     }
   })
 }
@@ -113,11 +86,10 @@ async function setCachedLocked(
   path: string,
   data: Uint8Array,
   records: readonly OpRecord[] | undefined,
-  ops: ReadonlySet<string>,
   ttl: number | null,
 ): Promise<void> {
-  const fingerprint = latestFingerprint(records, path, ops, data.byteLength)
-  if (ops.has('read') && fingerprint === null && (await cache.exists(path))) {
+  const fingerprint = latestFingerprint(records, path)
+  if (fingerprint === null && (await cache.exists(path))) {
     // A tokenless read over a live entry is a warm read: these bytes
     // came out of this entry, so re-setting would drop the backend
     // fingerprint and force a `fresh` mount to refetch, while fetching
@@ -125,48 +97,38 @@ async function setCachedLocked(
     // twice. Only `cp`'s guarded walk reads
     // the backend raw with an entry standing, and only under
     // `bounded`, which already calls that entry trusted.
-    //
-    // The direction gate keeps a write writing: a backend that stamps
-    // no write token would otherwise skip the set and leave pre-write
-    // bytes standing.
     return
   }
   await cache.set(path, data, { fingerprint, ttl })
 }
 
+/**
+ * Fill the cache with the bytes a command line read.
+ *
+ * `IOResult.cache` lists read paths only: a writer settles what it wrote
+ * with the cache at the write (`settleAfterWrite`), and every other
+ * mutation evicts at its mutation site.
+ */
 export async function applyIo(
   cache: FileCache,
   io: IOResult,
   cacheFacts?: (path: string) => CacheFacts,
   records?: readonly OpRecord[],
 ): Promise<void> {
-  const cacheSet = new Set(io.cache)
   for (const path of io.cache) {
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
-    if (io.reads[path] !== undefined && io.writes[path] !== undefined) {
-      // The line both read and wrote the path, and an IOResult keeps no
-      // order between the two: the read may be the pre-write bytes
-      // (`cat a; tee a`), and the write side may be `cp`'s empty eviction
-      // marker. Neither is safe to keep.
-      await cache.remove(path)
-      continue
-    }
-    // The token has to describe the bytes actually stored, so the lookup
-    // asks about the side this branch took. Set in the branch rather
-    // than recovered from the result, so the two cannot disagree.
-    let source: ByteSource | undefined = io.reads[path]
-    let ops = READ_FINGERPRINT_OPS
-    if (source === undefined) {
-      source = io.writes[path]
-      ops = WRITE_FINGERPRINT_OPS
-    }
+    // The line also wrote the path, and an IOResult keeps no order between
+    // a read and a write: the read may be the pre-write bytes
+    // (`cat a; tee a`). The write already settled what the cache holds.
+    if (io.writes[path] !== undefined) continue
+    const source: ByteSource | undefined = io.reads[path]
     if (source === undefined) continue
     if (source instanceof Uint8Array) {
-      await setCached(cache, path, source, records, cacheFacts, ops)
+      await setCached(cache, path, source, records, cacheFacts)
     } else if (source instanceof CachableAsyncIterator) {
       if (source.discarded) continue
       if (source.exhausted) {
-        await setCached(cache, path, concat(source.bufferedChunks), records, cacheFacts, ops)
+        await setCached(cache, path, concat(source.bufferedChunks), records, cacheFacts)
       } else {
         const tasks = cache.drainTasks
         if (tasks !== undefined && !tasks.has(path) && !(await cache.exists(path))) {
@@ -176,7 +138,6 @@ export async function applyIo(
             source,
             drainBudget(cache),
             () => tasks.get(path) === task,
-            ops,
             cacheFacts,
             records,
           )
@@ -188,13 +149,8 @@ export async function applyIo(
       }
     } else {
       const data = await materialize(source)
-      await setCached(cache, path, data, records, cacheFacts, ops)
+      await setCached(cache, path, data, records, cacheFacts)
     }
-  }
-  for (const path of Object.keys(io.writes)) {
-    if (cacheSet.has(path)) continue
-    if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
-    await cache.remove(path)
   }
 }
 
@@ -209,7 +165,6 @@ async function backgroundDrain(
   it: CachableAsyncIterator,
   maxBytes: number,
   isCurrent: () => boolean,
-  ops: ReadonlySet<string>,
   cacheFacts?: (path: string) => CacheFacts,
   records?: readonly OpRecord[],
 ): Promise<void> {
@@ -224,7 +179,7 @@ async function backgroundDrain(
       // callback rather than two.
       if (isCurrent() && (facts === undefined || facts.cacheable)) {
         await cache.add(path, materialized, {
-          fingerprint: latestFingerprint(records, path, ops, materialized.byteLength),
+          fingerprint: latestFingerprint(records, path),
           ttl: facts?.ttl ?? null,
         })
       }

@@ -7,7 +7,7 @@ from mirage.workspace import Workspace
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("overwrite", [False, True])
-async def test_relay_sort_caches_inputs_and_replacements(overwrite):
+async def test_relay_sort_caches_its_inputs(overwrite):
     left, right = RAMVFS(), RAMVFS()
     left.caches_reads = right.caches_reads = True
     left.load_state({"files": {"/input": b"z\na\n"}})
@@ -22,13 +22,17 @@ async def test_relay_sort_caches_inputs_and_replacements(overwrite):
         assert await result.materialize_stdout() == (
             b"" if overwrite else b"a\nm\nz\n"
         )
+        # The relay writes the replacement through the dispatcher, which
+        # evicts it; only a read lands in the cache.
         assert await ws.cache.get("/a/input") == (
-            b"a\nm\nz\n" if overwrite else b"z\na\n"
+            None if overwrite else b"z\na\n"
         )
         assert await ws.cache.get("/b/input") == b"m\n"
         assert result.reads["/b/input"] == b"m\n"
         left.load_state({"files": {"/input": b"changed\n"}})
         again = await ws.shell("cat /a/input" if overwrite else command)
-        assert await again.materialize_stdout() == b"a\nm\nz\n"
+        assert await again.materialize_stdout() == (
+            b"changed\n" if overwrite else b"a\nm\nz\n"
+        )
     finally:
         await ws.close()

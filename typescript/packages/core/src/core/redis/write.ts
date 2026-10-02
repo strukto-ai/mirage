@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { settleAfterWrite, writeGeneration } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -31,8 +31,9 @@ export async function writeBytes(
   const store = accessor.store
   await checkDestParents(store, path, p)
   await checkWriteTarget(store, path, p)
+  const started = writeGeneration()
   await store.setFile(p, data)
   await store.setModified(p, nowIso())
   record('write', path.virtual, VFSName.REDIS, data.byteLength, timer)
-  await invalidateAfterWrite(p)
+  await settleAfterWrite(path, data, null, started)
 }

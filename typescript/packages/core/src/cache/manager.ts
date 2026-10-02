@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { activeRecords } from '../observe/context.ts'
-import { READ_FINGERPRINT_OPS } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec, ReadPolicy } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -461,12 +460,7 @@ export class CacheManager {
     if (cache !== null) {
       await withCacheMutation(cache, async () => {
         if (this.ownsPath(key) && generation === this.readGeneration) {
-          const fingerprint = latestFingerprint(
-            records?.slice(start),
-            key,
-            READ_FINGERPRINT_OPS,
-            data.byteLength,
-          )
+          const fingerprint = latestFingerprint(records?.slice(start), key)
           await cache.set(key, data, { fingerprint, ttl: this.readTtl })
         }
       })

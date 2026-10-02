@@ -1,7 +1,7 @@
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import settle_after_write, write_generation
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.observe.context import record, start_op
@@ -18,9 +18,10 @@ async def write_bytes(
     key = nextcloud_key(path)
     op = accessor.operator()
     timer = start_op()
+    started = write_generation()
     try:
         await op.write(key, data)
     except NotFound as exc:
         raise enoent(path) from exc
     record("write", path.virtual, "nextcloud", len(data), timer)
-    await invalidate_after_write(path)
+    await settle_after_write(path, data, None, started)
