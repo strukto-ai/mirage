@@ -17,7 +17,7 @@ import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
-import { settling } from '../../_test_util.ts'
+import { settling } from '@struktoai/mirage-core/test-utils'
 
 let accessor: ReturnType<typeof makeMockAccessor>
 beforeEach(() => {

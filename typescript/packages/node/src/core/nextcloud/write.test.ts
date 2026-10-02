@@ -1,7 +1,7 @@
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '@struktoai/mirage-core/test-utils'
 import { FakeNextcloudOperator, installFakeOperator } from './mock.ts'
 import { write } from './write.ts'
 

@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { writeBytes } from './write.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '@struktoai/mirage-core/test-utils'
 
 let root: string
 let accessor: DiskAccessor

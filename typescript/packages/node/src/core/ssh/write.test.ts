@@ -18,7 +18,7 @@ import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '@struktoai/mirage-core/test-utils'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)

@@ -15,6 +15,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { calls, wiredWriteImport, wrappedSource } from '../test-utils.ts'
 
 type Writer = (...args: never[]) => Promise<void>
 
@@ -26,66 +27,24 @@ interface Wired {
   module: string
 }
 
-const IMPORT = /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'([^']+)'/g
-
-/**
- * The function an IO table source wires as its whole-file `write`, loaded
- * from the module that defines it rather than read off the built table,
- * which may wrap it (an error translator, a renderer) out of sight.
- */
-async function wiredWrite(ioPath: string, source: string): Promise<Wired | null> {
-  const writes = /\bwrites:\s*\{([^}]*)\}/.exec(source)?.[1] ?? ''
-  const entry = /(?:^|[\s,])write(?::\s*([A-Za-z_$][\w$]*))?\s*(?:,|$)/m.exec(writes)
-  if (entry === null) return null
-  const wired = entry[1] ?? 'write'
-  for (const [, names = '', from = ''] of source.matchAll(IMPORT)) {
-    for (const item of names.split(',')) {
-      const [exported = '', local = exported] = item.trim().split(/\s+as\s+/)
-      if (local !== wired) continue
-      const file = join(dirname(ioPath), from)
-      const module = (await import(file)) as Record<string, unknown>
-      const write = module[exported]
-      if (typeof write !== 'function') return null
-      return { write: write as Writer, exported, module: readFileSync(file, 'utf8') }
-    }
-  }
-  return null
-}
-
 /** Every whole-file `write` an IO table under `builtinDir` wires, by backend. */
 async function wiredWriters(builtinDir: string): Promise<Map<string, Wired>> {
   const found = new Map<string, Wired>()
   for (const name of readdirSync(builtinDir).sort()) {
     const ioPath = join(builtinDir, name, 'io.ts')
     if (!existsSync(ioPath)) continue
-    const wired = await wiredWrite(ioPath, readFileSync(ioPath, 'utf8'))
-    if (wired !== null) found.set(name, wired)
+    const wired = wiredWriteImport(readFileSync(ioPath, 'utf8'))
+    if (wired === null) continue
+    const file = join(dirname(ioPath), wired.from)
+    const write = ((await import(file)) as Record<string, unknown>)[wired.exported]
+    if (typeof write !== 'function') continue
+    found.set(name, {
+      write: write as Writer,
+      exported: wired.exported,
+      module: readFileSync(file, 'utf8'),
+    })
   }
   return found
-}
-
-/**
- * The source of the function an export wraps (`export const write =
- * eaccesOnDenied(writeImpl)` answers `writeImpl`'s), so a wrapped writer is
- * judged by the one function it runs, not by whatever else its module holds.
- */
-function wrappedSource(module: string, exported: string): string | null {
-  const inner = new RegExp(`export const ${exported} = \\w+\\((\\w+)\\)`).exec(module)?.[1]
-  if (inner === undefined) return null
-  const start = module.search(new RegExp(`function ${inner}\\b`))
-  if (start < 0) return null
-  const open = module.indexOf('{', module.indexOf(')', start))
-  let depth = 0
-  for (let i = open; i < module.length; i++) {
-    if (module[i] === '{') depth++
-    if (module[i] === '}' && --depth === 0) return module.slice(start, i + 1)
-  }
-  return null
-}
-
-/** Whether `source` calls `name`, however the transform spelled the import. */
-function calls(source: string, name: string): boolean {
-  return new RegExp(`\\b${name}\\)?\\(`).test(source)
 }
 
 const BUILTIN = join(dirname(fileURLToPath(import.meta.url)), '../commands/builtin')

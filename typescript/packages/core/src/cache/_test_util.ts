@@ -13,9 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type MockInstance, vi } from 'vitest'
-import type { FileStat, PathSpec } from '../types.ts'
-import { type CacheInvalidator, runWithCacheManager } from './context.ts'
-import type { WriteReceipt } from './types.ts'
 
 /**
  * Move performance.now() forward for the listing window without freezing it.
@@ -39,83 +36,4 @@ export function shiftPerformanceNow(): {
   }
 }
 
-export interface Settled {
-  path: string
-  data: string
-  receipt: WriteReceipt | null
-  generation: number | null
-}
-
-/**
- * A cache manager that records what a core mutator reports. `generation` is
- * fixed, so a writer that notes it before the upload hands the same number
- * to `settleAfterWrite`.
- */
-export class SettleRecorder implements CacheInvalidator {
-  generation = 5
-  readonly settled: Settled[] = []
-  readonly writes: string[] = []
-
-  settleAfterWrite(
-    path: PathSpec,
-    data: Uint8Array,
-    receipt: WriteReceipt | null,
-    generation: number | null,
-  ): Promise<void> {
-    this.settled.push({
-      path: path.virtual,
-      data: new TextDecoder().decode(data),
-      receipt,
-      generation,
-    })
-    return Promise.resolve()
-  }
-
-  invalidateAfterWrite(path: string | PathSpec): Promise<void> {
-    this.writes.push(typeof path === 'string' ? path : path.virtual)
-    return Promise.resolve()
-  }
-
-  invalidateAfterUnlink(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  invalidateSubtree(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  invalidateAncestors(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  cachedBytes(): Promise<Uint8Array | null> {
-    return Promise.resolve(null)
-  }
-
-  readThrough(_path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array> {
-    return fetch()
-  }
-
-  cachedSize(): Promise<number | null> {
-    return Promise.resolve(null)
-  }
-
-  listingTrusted(): boolean {
-    return false
-  }
-
-  probedStat(): FileStat | null {
-    return null
-  }
-}
-
-/** Run `fn` with a fresh {@link SettleRecorder} active, and return it. */
-export async function settling(
-  fn: (recorder: SettleRecorder) => Promise<unknown>,
-): Promise<SettleRecorder> {
-  const recorder = new SettleRecorder()
-  await runWithCacheManager(recorder, async () => {
-    await fn(recorder)
-  })
-  return recorder
-}
+export { SettleRecorder, settling, type Settled } from '../test-utils.ts'
