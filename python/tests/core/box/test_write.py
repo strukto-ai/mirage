@@ -498,3 +498,33 @@ async def test_write_settles_its_bytes_without_a_receipt(
         await write_bytes(root_accessor, _spec(target), b"hello")
     assert manager.settled == [Settled(target, b"hello", None, 5)]
     assert manager.writes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["/data/new.txt", "/data/a.txt"])
+async def test_a_change_during_the_lookup_reaches_settle(
+    root_accessor, target
+):
+    # The item id a lookup resolves can move (a concurrent mv) before the
+    # upload: the generation is noted before the lookup, so a change that
+    # lands during it makes settle drop the bytes.
+    with settling() as manager:
+
+        async def moving_list(_tm, folder_id, limit=1000):
+            manager.generation = 6
+            return _TREE.get(folder_id, [])
+
+        with (
+            patch(
+                "mirage.core.box.resolve.list_folder_items", new=moving_list
+            ),
+            patch(
+                "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
+            ),
+            patch(
+                "mirage.core.box.write.upload_file_version",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await write_bytes(root_accessor, _spec(target), b"hello")
+    assert [s.generation for s in manager.settled] == [5]

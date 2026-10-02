@@ -14,11 +14,25 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
+import type * as ResolveModule from './resolve.ts'
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
   const { driveModuleMock } = await import('./_test_util.ts')
   return driveModuleMock(actual)
+})
+
+const lookup = vi.hoisted(() => ({ onResolve: (): void => undefined }))
+
+vi.mock('./resolve.ts', async () => {
+  const actual = await vi.importActual<typeof ResolveModule>('./resolve.ts')
+  return {
+    ...actual,
+    resolveKey: (...args: Parameters<typeof actual.resolveKey>) => {
+      lookup.onResolve()
+      return actual.resolveKey(...args)
+    },
+  }
 })
 
 import { PathSpec } from '../../types.ts'
@@ -87,6 +101,29 @@ describe('gdrive write settles', () => {
         { path: '/a/new.txt', data: 'hello', receipt: null, generation: 5 },
       ])
       expect(manager.writes).toEqual([])
+    })
+  }
+})
+
+describe('gdrive write notes the generation before its lookup', () => {
+  for (const existing of [false, true]) {
+    it(`a change during the lookup reaches settle (existing: ${String(existing)})`, async () => {
+      // The node a lookup resolves can move (a concurrent mv) before the
+      // upload: the generation is noted before the lookup, so a change that
+      // lands during it makes settle drop the bytes.
+      fake.folder('a')
+      if (existing) await write(accessor, spec('/a/new.txt'), ENC.encode('old'))
+      try {
+        const manager = await settling(async (recorder) => {
+          lookup.onResolve = () => {
+            recorder.generation = 6
+          }
+          await write(accessor, spec('/a/new.txt'), ENC.encode('hello'))
+        })
+        expect(manager.settled.map((s) => s.generation)).toEqual([5])
+      } finally {
+        lookup.onResolve = () => undefined
+      }
     })
   }
 })

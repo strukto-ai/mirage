@@ -52,7 +52,7 @@ export interface Settled {
  * to `settleAfterWrite`.
  */
 export class SettleRecorder implements CacheInvalidator {
-  readonly generation = 5
+  generation = 5
   readonly settled: Settled[] = []
   readonly writes: string[] = []
 
@@ -110,10 +110,12 @@ export class SettleRecorder implements CacheInvalidator {
 }
 
 /** Run `fn` with a fresh {@link SettleRecorder} active, and return it. */
-export async function settling(fn: () => Promise<unknown>): Promise<SettleRecorder> {
+export async function settling(
+  fn: (recorder: SettleRecorder) => Promise<unknown>,
+): Promise<SettleRecorder> {
   const recorder = new SettleRecorder()
   await runWithCacheManager(recorder, async () => {
-    await fn()
+    await fn(recorder)
   })
   return recorder
 }

@@ -27,17 +27,17 @@ export async function write(
   const parts = pathParts(path)
   if (parts.length === 0) throw eisdir(path.virtual)
   const tm = accessor.tokenManager
+  // Noted before the lookup: an id it resolves can move before the upload,
+  // and a change in between must make settle drop the bytes.
+  const generation = writeGeneration()
   const existing = await resolveItem(accessor, parts)
-  let generation: number | null
   if (existing !== null && existing.type === 'file') {
     // Overwrite uploads a new version under the same id, keeping Box's own
     // name so a box-native file isn't renamed with the vfs suffix.
-    generation = writeGeneration()
     await uploadFileVersion(tm, existing.id, existing.name, data)
   } else {
     const parentId = await resolveParentId(accessor, parts)
     if (parentId === null) throw enoent(path.virtual)
-    generation = writeGeneration()
     await uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
   }
   await settleAfterWrite(path, data, null, generation)

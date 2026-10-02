@@ -37,6 +37,9 @@ async def write_bytes(
         raise eisdir(virtual)
     timer = start_op()
     token_manager = accessor.token_manager
+    # Noted before the lookup: a node it resolves can move before the
+    # upload, and a change in between must make settle drop the bytes.
+    generation = write_generation()
     node = await resolve_key(accessor, key)
     if node is not None and node.is_folder:
         raise eisdir(virtual)
@@ -45,11 +48,9 @@ async def write_bytes(
     if node is not None and node.is_native:
         raise PermissionError(virtual)
     if node is not None:
-        generation = write_generation()
         await update_file_content(token_manager, node.id, data)
     else:
         parent_id, _ = await resolve_parent(accessor, path)
-        generation = write_generation()
         await upload_file(
             token_manager, posixpath.basename(key), parent_id, data
         )

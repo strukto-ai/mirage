@@ -27,18 +27,18 @@ async function writeImpl(
   const key = path.vfsPath
   if (key === '') throw eisdir(path)
   const tm = accessor.tokenManager
+  // Noted before the lookup: a node it resolves can move before the upload,
+  // and a change in between must make settle drop the bytes.
+  const generation = writeGeneration()
   const node = await resolveKey(accessor, key)
   if (node !== null && isFolder(node)) throw eisdir(path)
   // Google-native files are written through the gws commands, not raw bytes.
   if (node !== null && isNative(node)) throw eacces(path)
-  let generation: number | null
   if (node !== null) {
-    generation = writeGeneration()
     await updateFileContent(tm, node.id, data)
   } else {
     const [parentId] = await resolveParent(accessor, path)
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-    generation = writeGeneration()
     await uploadFile(tm, basename, parentId, data)
   }
   await settleAfterWrite(path, data, null, generation)

@@ -386,7 +386,7 @@ The mount registers both tables when the driver is placed; a driver never regist
 
 Set `caches_reads=True` only for stable, read-mostly content. Implement `get_state()` with credentials redacted (`self.config_state(self.config)`) and close any network clients in `close()`.
 
-A whole-file `write` reports to the cache through `mirage.cache.context`: note `write_generation()` right before the upload, then call `settle_after_write(path, data, receipt, generation)` with a `WriteReceipt(stored_size, token)` built from the upload reply, or `None` when the reply carries nothing. Fill `stored_size` only from a size the backend read back, never the request's length. Every other mutation (`create`, `append`, `truncate`, `copy`, `mkdir`, `unlink`) calls `invalidate_after_write` or the matching `invalidate_*` at its mutation site; `tests/vfs/test_write_settles.py` checks every wired `write`.
+A whole-file `write` reports to the cache through `mirage.cache.context`: note `write_generation()` before the upload and before any lookup the upload depends on (an item id can move in between), then call `settle_after_write(path, data, receipt, generation)` with a `WriteReceipt(stored_size, token)` built from the upload reply, or `None` when the reply carries nothing. Fill `stored_size` only from a size the backend read back, never the request's length. Every other mutation (`create`, `append`, `truncate`, `copy`, `mkdir`, `unlink`) calls `invalidate_after_write` or the matching `invalidate_*` at its mutation site; `tests/vfs/test_write_settles.py` checks every wired `write`.
 
 ### Listing versions
 

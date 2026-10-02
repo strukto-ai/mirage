@@ -47,6 +47,7 @@ import {
   invalidateAfterWrite,
   invalidateSubtree,
   settleAfterWrite,
+  writeGeneration,
 } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
@@ -122,6 +123,27 @@ describe('box write ops', () => {
         5,
       )
       expect(vi.mocked(invalidateAfterWrite)).not.toHaveBeenCalled()
+    })
+  }
+
+  for (const target of ['/data/new.txt', '/data/a.txt']) {
+    it(`a change during the lookup reaches settle (${target})`, async () => {
+      // The item id a lookup resolves can move (a concurrent mv) before the
+      // upload: the generation is noted before the lookup, so a change that
+      // lands during it makes settle drop the bytes.
+      let generation = 5
+      vi.mocked(writeGeneration).mockImplementation(() => generation)
+      vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) => {
+        generation = 6
+        return Promise.resolve(TREE[folderId] ?? [])
+      })
+      vi.mocked(settleAfterWrite).mockClear()
+      try {
+        await write(makeAccessor(), spec(target), new Uint8Array([7]))
+        expect(vi.mocked(settleAfterWrite).mock.calls.map((c) => c[3])).toEqual([5])
+      } finally {
+        vi.mocked(writeGeneration).mockImplementation(() => 5)
+      }
     })
   }
 
