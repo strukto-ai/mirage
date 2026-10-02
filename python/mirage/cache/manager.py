@@ -706,7 +706,8 @@ class CacheManager:
         the path and its parent leaves stale entries one level down.
         The cheaper ``invalidate_after_write`` cannot be widened to do
         this, because it also runs on every ordinary write, where a
-        file has no subtree to drop.
+        file has no subtree to drop. A mount nested below keeps its
+        bodies: nothing done to this mount changes its backend.
 
         Args:
             path (PathSpec): Root of the stale subtree; only ``virtual``
@@ -716,7 +717,9 @@ class CacheManager:
         key = self._cache_key(path)
         if self._caches_reads and self._file_cache is not None:
             await self._file_cache.remove(key)
-            await self._file_cache.evict_prefix(key.rstrip("/") + "/")
+            await self._file_cache.evict_prefix(
+                key.rstrip("/") + "/", excluded=self._excluded_prefixes()
+            )
         await self._index.invalidate_prefix(key)
         await self._evict_dir(key)
         await self._invalidate_parent(key)

@@ -572,7 +572,8 @@ export class CacheManager {
    * independently, so evicting the path and its parent leaves stale entries
    * one level down. The cheaper `invalidateAfterWrite` cannot be widened to do
    * this, because it also runs on every ordinary write, where a file has no
-   * subtree to drop.
+   * subtree to drop. A mount nested below keeps its bodies: nothing done to
+   * this mount changes its backend.
    *
    * Mirrors Python `CacheManager.invalidate_subtree`.
    */
@@ -581,7 +582,7 @@ export class CacheManager {
     const key = this.cacheKey(path)
     if (this.cachesReads && this.fileCache !== null) {
       await this.fileCache.remove(key)
-      await this.fileCache.evictPrefix(rstripSlash(key) + '/')
+      await this.fileCache.evictPrefix(rstripSlash(key) + '/', this.excludedPrefixes())
     }
     if (this.index !== null) await this.index.invalidatePrefix(key)
     await this.evictDir(key)
