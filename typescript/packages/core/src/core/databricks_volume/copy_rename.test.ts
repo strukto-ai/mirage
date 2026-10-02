@@ -52,10 +52,7 @@ class FakeManager {
 
   readonly generation = 5
 
-  readonly settled: string[] = []
-
-  settleAfterWrite(path: PathSpec): Promise<void> {
-    this.settled.push(path.mountPath)
+  settleAfterWrite(): Promise<void> {
     return Promise.resolve()
   }
 
