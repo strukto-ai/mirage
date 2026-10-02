@@ -28,9 +28,9 @@ export async function write(
   data: Uint8Array,
 ): Promise<void> {
   const timer = startOp()
-  const started = writeGeneration()
+  const generation = writeGeneration()
   await dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data)
   record('write', path.virtual, 'dropbox', data.byteLength, timer)
-  await settleAfterWrite(path, data, null, started)
+  await settleAfterWrite(path, data, null, generation)
   await invalidateAncestors(path)
 }

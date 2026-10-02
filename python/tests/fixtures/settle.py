@@ -26,7 +26,7 @@ class Settled:
     path: str
     data: bytes
     receipt: WriteReceipt | None
-    started: int | None
+    generation: int | None
 
 
 @dataclass
@@ -46,9 +46,9 @@ class SettleRecorder:
         path: PathSpec,
         data: bytes,
         receipt: WriteReceipt | None,
-        started: int | None,
+        generation: int | None,
     ) -> None:
-        self.settled.append(Settled(path.virtual, data, receipt, started))
+        self.settled.append(Settled(path.virtual, data, receipt, generation))
 
     async def invalidate_after_write(self, path: PathSpec) -> None:
         self.writes.append(path.virtual)
@@ -83,8 +83,8 @@ class SettleRecorder:
 @contextmanager
 def settling() -> Iterator[SettleRecorder]:
     recorder = SettleRecorder()
-    prev = push_cache_manager(recorder)
+    prev_manager = push_cache_manager(recorder)
     try:
         yield recorder
     finally:
-        push_cache_manager(prev)
+        push_cache_manager(prev_manager)

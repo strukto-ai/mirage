@@ -701,13 +701,13 @@ describe('settleAfterWrite', () => {
     // bytes may no longer be what the backend holds.
     const cache = new RAMFileCacheStore()
     const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
-    const started = manager.generation
+    const generation = manager.generation
     await manager.invalidateAfterWrite(PathSpec.fromStrPath('/data/y.txt'))
-    await manager.settleAfterWrite(spec(), enc('new\n'), { storedSize: 4, token: 't1' }, started)
+    await manager.settleAfterWrite(spec(), enc('new\n'), { storedSize: 4, token: 't1' }, generation)
     expect(await cache.exists('/data/x.txt')).toBe(false)
   })
 
-  it('drops without a started generation', async () => {
+  it('drops without a noted generation', async () => {
     const cache = new RAMFileCacheStore()
     await cache.set('/data/x.txt', enc('old\n'))
     const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))

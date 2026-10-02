@@ -43,7 +43,7 @@ class CacheInvalidator(Protocol):
         path: PathSpec,
         data: bytes,
         receipt: WriteReceipt | None,
-        started: int | None,
+        generation: int | None,
     ) -> None: ...
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None: ...
@@ -126,7 +126,7 @@ async def settle_after_write(
     path: PathSpec,
     data: bytes,
     receipt: WriteReceipt | None,
-    started: int | None,
+    generation: int | None,
 ) -> None:
     """Report a whole-file write and let the cache keep what it sent.
 
@@ -140,11 +140,11 @@ async def settle_after_write(
         data (bytes): the bytes the write sent.
         receipt (WriteReceipt | None): what the upload reply said it
             stored, or None for a backend whose reply carries nothing.
-        started (int | None): :func:`write_generation` before the upload.
+        generation (int | None): :func:`write_generation` before the upload.
     """
     manager = _active.get()
     if manager is not None:
-        await manager.settle_after_write(path, data, receipt, started)
+        await manager.settle_after_write(path, data, receipt, generation)
 
 
 async def invalidate_after_unlink(path: PathSpec) -> None:

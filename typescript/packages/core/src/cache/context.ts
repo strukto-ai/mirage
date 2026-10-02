@@ -29,7 +29,7 @@ export interface CacheInvalidator {
     path: PathSpec,
     data: Uint8Array,
     receipt: WriteReceipt | null,
-    started: number | null,
+    generation: number | null,
   ): Promise<void>
   invalidateAfterUnlink(path: string | PathSpec): Promise<void>
   invalidateSubtree(path: string | PathSpec): Promise<void>
@@ -136,11 +136,11 @@ export async function settleAfterWrite(
   path: PathSpec,
   data: Uint8Array,
   receipt: WriteReceipt | null,
-  started: number | null,
+  generation: number | null,
 ): Promise<void> {
   const active = activeCacheManager()
   for (const manager of liveManagers()) {
-    if (manager === active) await manager.settleAfterWrite(path, data, receipt, started)
+    if (manager === active) await manager.settleAfterWrite(path, data, receipt, generation)
     else await manager.invalidateAfterWrite(path)
   }
 }

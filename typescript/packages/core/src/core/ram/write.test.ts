@@ -196,7 +196,9 @@ describe('core/ram writeBytes settles', () => {
   it('settles its bytes without a receipt', async () => {
     const acc = mkAccessor()
     const manager = await settling(() => writeBytes(acc, mkPath('/d/f.txt'), ENC.encode('hi')))
-    expect(manager.settled).toEqual([{ path: '/d/f.txt', data: 'hi', receipt: null, started: 5 }])
+    expect(manager.settled).toEqual([
+      { path: '/d/f.txt', data: 'hi', receipt: null, generation: 5 },
+    ])
     expect(manager.writes).toEqual([])
   })
 })

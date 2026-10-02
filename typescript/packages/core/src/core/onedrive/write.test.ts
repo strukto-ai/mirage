@@ -64,7 +64,9 @@ describe('OneDrive write settles with the upload reply', () => {
       )
       const accessor = new OneDriveAccessor({ accessToken: 'token' })
       const manager = await settling(() => write(accessor, SPEC, enc('hello')))
-      expect(manager.settled).toEqual([{ path: '/m/m/k.txt', data: 'hello', receipt, started: 5 }])
+      expect(manager.settled).toEqual([
+        { path: '/m/m/k.txt', data: 'hello', receipt, generation: 5 },
+      ])
       expect(manager.writes).toEqual([])
     })
   }
@@ -82,7 +84,7 @@ describe('OneDrive write settles with the upload reply', () => {
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
     const data = new Uint8Array(4 * 1024 * 1024 + 1)
     const manager = await settling(() => write(accessor, SPEC, data))
-    expect(manager.settled.map((s) => [s.path, s.receipt, s.started])).toEqual([
+    expect(manager.settled.map((s) => [s.path, s.receipt, s.generation])).toEqual([
       ['/m/m/k.txt', { storedSize: 9, token: 'c3' }, 5],
     ])
   })

@@ -93,7 +93,7 @@ def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
         key = kp.apply(driver.key_prefix_of(accessor), path)
         timer = start_op()
         async with driver.connect(accessor) as conn:
-            started = write_generation()
+            generation = write_generation()
             meta = await _put(driver, conn, key, data, path_spec)
         token = meta.fingerprint if meta else None
         record(
@@ -110,7 +110,7 @@ def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
             path_spec,
             data,
             WriteReceipt(stored_size=None, token=token),
-            started,
+            generation,
         )
         # A put materializes every missing level of the key at once, so
         # the listings above the immediate parent gained entries too.

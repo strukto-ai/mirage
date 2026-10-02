@@ -43,7 +43,7 @@ export interface Settled {
   path: string
   data: string
   receipt: WriteReceipt | null
-  started: number | null
+  generation: number | null
 }
 
 /**
@@ -60,13 +60,13 @@ export class SettleRecorder implements CacheInvalidator {
     path: PathSpec,
     data: Uint8Array,
     receipt: WriteReceipt | null,
-    started: number | null,
+    generation: number | null,
   ): Promise<void> {
     this.settled.push({
       path: path.virtual,
       data: new TextDecoder().decode(data),
       receipt,
-      started,
+      generation,
     })
     return Promise.resolve()
   }

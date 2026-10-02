@@ -28,9 +28,9 @@ async def write_bytes(
     root = accessor.root
     timer = start_op()
     p = await resolve_inside(root, path_spec)
-    started = write_generation()
+    generation = write_generation()
     with disk_errors(path_spec.virtual):
         async with aiofiles.open(p, "wb") as f:
             await f.write(data)
     record("write", path_spec.virtual, "disk", len(data), timer)
-    await settle_after_write(path_spec, data, None, started)
+    await settle_after_write(path_spec, data, None, generation)

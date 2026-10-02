@@ -68,9 +68,9 @@ export function makeWriteBytes<A extends Accessor, C>(driver: ObjectStoreDriver<
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     let meta: ObjectMeta | null
-    let started: number | null
+    let generation: number | null
     try {
-      started = writeGeneration()
+      generation = writeGeneration()
       meta = await put(driver, conn, key, data, path)
     } finally {
       await close()
@@ -79,7 +79,7 @@ export function makeWriteBytes<A extends Accessor, C>(driver: ObjectStoreDriver<
     record('write', path.virtual, driver.vfs, data.byteLength, timer, { fingerprint: token })
     // The size a put reports is the request's length, not one the store read
     // back, so only the token vouches for these bytes.
-    await settleAfterWrite(path, data, { storedSize: null, token }, started)
+    await settleAfterWrite(path, data, { storedSize: null, token }, generation)
     // A put materializes every missing level of the key at once, so the
     // listings above the immediate parent gained entries too.
     await invalidateAncestors(path)

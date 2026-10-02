@@ -36,10 +36,10 @@ async def write_bytes(
         data (bytes): file content.
     """
     timer = start_op()
-    started = write_generation()
+    generation = write_generation()
     await dropbox_upload(
         accessor.token_manager, dropbox_path_of(accessor, path), data
     )
     record("write", path.virtual, "dropbox", len(data), timer)
-    await settle_after_write(path, data, None, started)
+    await settle_after_write(path, data, None, generation)
     await invalidate_ancestors(path)

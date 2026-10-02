@@ -23,6 +23,7 @@ import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/const
 import { commandStarted, tick } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { withCacheMutation, latestFingerprint } from './file/io.ts'
+import { tokenOrNull } from './file/utils.ts'
 import type { WriteReceipt } from './types.ts'
 
 /**
@@ -498,7 +499,7 @@ export class CacheManager {
   /**
    * Keep or drop the bytes a whole-file write just sent.
    *
-   * Decided once, at the write, under the fill lock: any mutation of the
+   * Decided once, at the write, under the mutation lock: any mutation of the
    * mount since the upload started drops, a stored size other than the bytes
    * sent drops (SharePoint promotes properties into an uploaded Office file),
    * a token keeps the bytes with it, and a reply that says nothing keeps them
@@ -513,24 +514,25 @@ export class CacheManager {
     path: PathSpec,
     data: Uint8Array,
     receipt: WriteReceipt | null,
-    started: number | null,
+    generation: number | null,
   ): Promise<void> {
     const key = this.cacheKey(path)
     const cache = this.fileCache
     if (this.cachesReads && cache !== null) {
       await withCacheMutation(cache, async () => {
+        const token = tokenOrNull(receipt?.token)
         const keep =
-          started === this.readGeneration &&
+          generation === this.readGeneration &&
           this.ownsPath(key) &&
           data.byteLength <= cache.cacheLimit &&
-          this.vouched(receipt, data.byteLength)
+          this.vouched(receipt, token, data.byteLength)
         this.retire()
         // Removed first even on a keep: removal disowns a drain still
         // filling the old bytes in the background.
         await cache.remove(key)
         if (keep) {
           try {
-            await cache.set(key, data, { fingerprint: receipt?.token ?? null, ttl: this.readTtl })
+            await cache.set(key, data, { fingerprint: token, ttl: this.readTtl })
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
             console.warn(`cache fill after a write failed for ${key}: ${msg}`)
@@ -543,11 +545,9 @@ export class CacheManager {
     await this.invalidateParent(key)
   }
 
-  private vouched(receipt: WriteReceipt | null, sent: number): boolean {
-    if (receipt === null) return this.readPolicy === ReadPolicy.BOUNDED
-    if (receipt.storedSize !== null && receipt.storedSize !== sent) return false
-    if (receipt.token) return true
-    return this.readPolicy === ReadPolicy.BOUNDED
+  private vouched(receipt: WriteReceipt | null, token: string | null, sent: number): boolean {
+    if (receipt !== null && receipt.storedSize !== null && receipt.storedSize !== sent) return false
+    return token !== null || this.readPolicy === ReadPolicy.BOUNDED
   }
 
   /** Invalidate caches after a deletion of `path`; only `virtual` is read. */

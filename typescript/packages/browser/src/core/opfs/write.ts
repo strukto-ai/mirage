@@ -33,10 +33,10 @@ export async function writeBytes(
   } catch (err) {
     throw await openError(root, key, err, p)
   }
-  const started = writeGeneration()
+  const generation = writeGeneration()
   const writable = await handle.createWritable()
   await writable.write(toWritableChunk(data))
   await writable.close()
   record('write', p.virtual, VFSName.OPFS, data.byteLength, timer)
-  await settleAfterWrite(p, data, null, started)
+  await settleAfterWrite(p, data, null, generation)
 }

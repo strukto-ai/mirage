@@ -25,7 +25,7 @@ async def write_bytes(
 ) -> None:
     resolved = await resolve_item(accessor, path)
     timer = start_op()
-    started = write_generation()
+    generation = write_generation()
     receipt = await write_item(
         accessor.config,
         drive_loc(accessor.config, resolved, path.vfs_path),
@@ -33,4 +33,4 @@ async def write_bytes(
         session=accessor.pool,
     )
     record("write", path.virtual, "sharepoint", len(data), timer)
-    await settle_after_write(path, data, receipt, started)
+    await settle_after_write(path, data, receipt, generation)

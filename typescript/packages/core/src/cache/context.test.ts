@@ -54,9 +54,9 @@ class FakeManager {
     path: PathSpec,
     _data: Uint8Array,
     _receipt: WriteReceipt | null,
-    started: number | null,
+    generation: number | null,
   ): Promise<void> {
-    this.settled.push([path.virtual, started])
+    this.settled.push([path.virtual, generation])
     return Promise.resolve()
   }
 
@@ -124,8 +124,13 @@ describe('cache context', () => {
     const inner = new FakeManager()
     await runWithCacheManager(outer, async () => {
       await runWithCacheManager(inner, async () => {
-        const started = writeGeneration()
-        await settleAfterWrite(PathSpec.fromStrPath('/a.txt'), new Uint8Array([1]), null, started)
+        const generation = writeGeneration()
+        await settleAfterWrite(
+          PathSpec.fromStrPath('/a.txt'),
+          new Uint8Array([1]),
+          null,
+          generation,
+        )
       })
     })
     expect(inner.settled).toEqual([['/a.txt', 7]])

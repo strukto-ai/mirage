@@ -252,10 +252,10 @@ async def test_settle_reaches_the_active_manager_with_its_generation():
     manager = CacheManager(cache, RAMIndexCacheStore(ttl=600), "/", True)
     prev = push_cache_manager(manager)
     try:
-        started = write_generation()
-        assert started == manager.generation
+        generation = write_generation()
+        assert generation == manager.generation
         await settle_after_write(
-            _spec("/a.txt"), b"x", WriteReceipt(1, "t"), started
+            _spec("/a.txt"), b"x", WriteReceipt(1, "t"), generation
         )
     finally:
         push_cache_manager(prev)

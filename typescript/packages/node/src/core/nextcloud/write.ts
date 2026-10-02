@@ -14,7 +14,7 @@ export async function write(
   _index?: IndexCacheStore,
 ): Promise<void> {
   const timer = startOp()
-  const started = writeGeneration()
+  const generation = writeGeneration()
   try {
     const op = await accessor.operator()
     await op.write(nextcloudKey(path), Buffer.from(data))
@@ -23,5 +23,5 @@ export async function write(
     throw error
   }
   record('write', path.virtual, VFSName.NEXTCLOUD, data.byteLength, timer)
-  await settleAfterWrite(path, data, null, started)
+  await settleAfterWrite(path, data, null, generation)
 }

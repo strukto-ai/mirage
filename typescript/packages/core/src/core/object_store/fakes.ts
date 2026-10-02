@@ -279,10 +279,10 @@ export class FakeManager {
     path: PathSpec,
     data: Uint8Array,
     receipt: WriteReceipt | null,
-    started: number | null,
+    generation: number | null,
   ): Promise<void> {
     this.writes.push(path.mountPath)
-    this.settled.push([path.virtual, new TextDecoder().decode(data), receipt, started])
+    this.settled.push([path.virtual, new TextDecoder().decode(data), receipt, generation])
     return Promise.resolve()
   }
 

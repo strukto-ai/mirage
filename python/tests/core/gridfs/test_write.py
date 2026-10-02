@@ -43,7 +43,7 @@ class _FakeManager:
         path: PathSpec,
         data: bytes,
         receipt: WriteReceipt | None,
-        started: int | None,
+        generation: int | None,
     ) -> None:
         self.writes.append(path.mount_path)
 

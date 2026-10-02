@@ -18,10 +18,10 @@ async def write_bytes(
     key = nextcloud_key(path)
     op = accessor.operator()
     timer = start_op()
-    started = write_generation()
+    generation = write_generation()
     try:
         await op.write(key, data)
     except NotFound as exc:
         raise enoent(path) from exc
     record("write", path.virtual, "nextcloud", len(data), timer)
-    await settle_after_write(path, data, None, started)
+    await settle_after_write(path, data, None, generation)

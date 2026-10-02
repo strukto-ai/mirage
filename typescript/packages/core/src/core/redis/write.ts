@@ -31,9 +31,9 @@ export async function writeBytes(
   const store = accessor.store
   await checkDestParents(store, path, p)
   await checkWriteTarget(store, path, p)
-  const started = writeGeneration()
+  const generation = writeGeneration()
   await store.setFile(p, data)
   await store.setModified(p, nowIso())
   record('write', path.virtual, VFSName.REDIS, data.byteLength, timer)
-  await settleAfterWrite(path, data, null, started)
+  await settleAfterWrite(path, data, null, generation)
 }

@@ -26,12 +26,12 @@ export async function write(
 ): Promise<void> {
   const resolved = await resolveItem(accessor, path)
   const timer = startOp()
-  const started = writeGeneration()
+  const generation = writeGeneration()
   const receipt = await writeItem(
     accessor.config,
     driveLoc(accessor.config, resolved, path.vfsPath),
     data,
   )
   record('write', path.virtual, 'sharepoint', data.length, timer)
-  await settleAfterWrite(path, data, receipt, started)
+  await settleAfterWrite(path, data, receipt, generation)
 }

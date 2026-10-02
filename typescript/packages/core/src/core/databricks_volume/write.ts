@@ -53,7 +53,7 @@ export async function writeBytes(
   const remotePath = backendPath(accessor.config, p)
   const timer = startOp()
   await ensureParentDirectory(accessor, remoteParent, p.virtual)
-  const started = writeGeneration()
+  const generation = writeGeneration()
   try {
     await dbxFetch(accessor, 'PUT', 'files', remotePath, {
       query: { overwrite: 'true' },
@@ -65,5 +65,5 @@ export async function writeBytes(
     throw exc
   }
   record('write', p.virtual, VFSName.DATABRICKS_VOLUME, data.byteLength, timer)
-  await settleAfterWrite(p, data, null, started)
+  await settleAfterWrite(p, data, null, generation)
 }

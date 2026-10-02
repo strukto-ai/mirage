@@ -30,5 +30,5 @@ class WriteReceipt:
             cTag), spelled as the backend's read path stamps it.
     """
 
-    stored_size: int | None = None
-    token: str | None = None
+    stored_size: int | None
+    token: str | None

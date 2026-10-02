@@ -45,13 +45,13 @@ async def write_bytes(
     if node is not None and node.is_native:
         raise PermissionError(virtual)
     if node is not None:
-        started = write_generation()
+        generation = write_generation()
         await update_file_content(token_manager, node.id, data)
     else:
         parent_id, _ = await resolve_parent(accessor, path)
-        started = write_generation()
+        generation = write_generation()
         await upload_file(
             token_manager, posixpath.basename(key), parent_id, data
         )
     record("write", virtual, "gdrive", len(data), timer)
-    await settle_after_write(path, data, None, started)
+    await settle_after_write(path, data, None, generation)

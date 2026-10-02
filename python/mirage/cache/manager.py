@@ -616,11 +616,11 @@ class CacheManager:
         path: PathSpec,
         data: bytes,
         receipt: WriteReceipt | None,
-        started: int | None,
+        generation: int | None,
     ) -> None:
         """Keep or drop the bytes a whole-file write just sent.
 
-        Decided once, at the write, under the fill lock: any mutation of
+        Decided once, at the write, under the mutation lock: any mutation of
         the mount since the upload started drops, a stored size other than
         the bytes sent drops (SharePoint promotes properties into an
         uploaded Office file), a token keeps the bytes with it, and a reply
@@ -638,16 +638,19 @@ class CacheManager:
                 read.
             data (bytes): the bytes the write sent.
             receipt (WriteReceipt | None): the upload reply's account.
-            started (int | None): ``generation`` before the upload.
+            generation (int | None): ``generation`` before the upload.
         """
         key = self._cache_key(path)
         if self._caches_reads and self._file_cache is not None:
             async with mutation_lock(self._file_cache):
+                token = (
+                    (receipt.token or None) if receipt is not None else None
+                )
                 keep = (
-                    started == self._read_generation
+                    generation == self._read_generation
                     and self._owns_path(key)
                     and len(data) <= self._file_cache.cache_limit
-                    and self._vouched(receipt, len(data))
+                    and self._vouched(receipt, token, len(data))
                 )
                 self._retire()
                 # Removed first even on a keep: removal disowns a drain
@@ -658,7 +661,7 @@ class CacheManager:
                         await self._file_cache.set(
                             key,
                             data,
-                            fingerprint=receipt.token if receipt else None,
+                            fingerprint=token,
                             ttl=self._read_ttl,
                         )
                     except Exception:
@@ -671,14 +674,12 @@ class CacheManager:
             self._retire()
         await self._invalidate_parent(key)
 
-    def _vouched(self, receipt: WriteReceipt | None, sent: int) -> bool:
-        if receipt is None:
-            return self._read_policy == ReadPolicy.BOUNDED
-        if receipt.stored_size is not None and receipt.stored_size != sent:
+    def _vouched(
+        self, receipt: WriteReceipt | None, token: str | None, sent: int
+    ) -> bool:
+        if receipt is not None and receipt.stored_size not in (None, sent):
             return False
-        if receipt.token:
-            return True
-        return self._read_policy == ReadPolicy.BOUNDED
+        return token is not None or self._read_policy == ReadPolicy.BOUNDED
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         """Invalidate caches after a deletion of ``path``.

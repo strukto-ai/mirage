@@ -76,7 +76,7 @@ async def write_bytes(
         remote_parent,
         path.virtual,
     )
-    started = write_generation()
+    generation = write_generation()
     try:
         await asyncio.to_thread(
             _upload_bytes_sync, accessor, remote_path, data
@@ -86,4 +86,4 @@ async def write_bytes(
             raise enoent(path) from exc
         raise
     record("write", path.virtual, "databricks_volume", len(data), timer)
-    await settle_after_write(path, data, None, started)
+    await settle_after_write(path, data, None, generation)

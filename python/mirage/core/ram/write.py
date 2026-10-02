@@ -30,8 +30,8 @@ async def write_bytes(
     p = norm(path)
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
-    started = write_generation()
+    generation = write_generation()
     store.files[p] = data
     store.modified[p] = now_iso()
     record("write", path_spec.virtual, "ram", len(data), timer)
-    await settle_after_write(path_spec, data, None, started)
+    await settle_after_write(path_spec, data, None, generation)

@@ -29,10 +29,10 @@ export async function writeBytes(
   const p = norm(path.mountPath)
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
-  const started = writeGeneration()
+  const generation = writeGeneration()
   accessor.store.files.set(p, data)
   accessor.store.modified.set(p, nowIso())
   record('write', path.virtual, VFSName.RAM, data.byteLength, timer)
-  await settleAfterWrite(path, data, null, started)
+  await settleAfterWrite(path, data, null, generation)
   return Promise.resolve()
 }

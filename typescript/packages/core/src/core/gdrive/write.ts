@@ -31,17 +31,17 @@ async function writeImpl(
   if (node !== null && isFolder(node)) throw eisdir(path)
   // Google-native files are written through the gws commands, not raw bytes.
   if (node !== null && isNative(node)) throw eacces(path)
-  let started: number | null
+  let generation: number | null
   if (node !== null) {
-    started = writeGeneration()
+    generation = writeGeneration()
     await updateFileContent(tm, node.id, data)
   } else {
     const [parentId] = await resolveParent(accessor, path)
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-    started = writeGeneration()
+    generation = writeGeneration()
     await uploadFile(tm, basename, parentId, data)
   }
-  await settleAfterWrite(path, data, null, started)
+  await settleAfterWrite(path, data, null, generation)
 }
 
 export const write = eaccesOnDenied(writeImpl)

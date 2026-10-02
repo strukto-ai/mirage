@@ -84,7 +84,7 @@ describe('gdrive write settles', () => {
       if (existing) await write(accessor, spec('/a/new.txt'), ENC.encode('old'))
       const manager = await settling(() => write(accessor, spec('/a/new.txt'), ENC.encode('hello')))
       expect(manager.settled).toEqual([
-        { path: '/a/new.txt', data: 'hello', receipt: null, started: 5 },
+        { path: '/a/new.txt', data: 'hello', receipt: null, generation: 5 },
       ])
       expect(manager.writes).toEqual([])
     })

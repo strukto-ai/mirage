@@ -31,12 +31,12 @@ export async function writeBytes(
   // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent
   // rather than building the chain, and the store-backed backends refuse
   // the same way. Only the virtual path may reach a stderr line.
-  const started = writeGeneration()
+  const generation = writeGeneration()
   try {
     await writeFile(full, data)
   } catch (err) {
     throw diskError(err, p)
   }
   record('write', p.virtual, VFSName.DISK, data.byteLength, timer)
-  await settleAfterWrite(p, data, null, started)
+  await settleAfterWrite(p, data, null, generation)
 }

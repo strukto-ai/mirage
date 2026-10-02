@@ -27,8 +27,8 @@ async def write_bytes(
     sftp = await accessor.sftp()
     timer = start_op()
     remote_path = join_root(config.root, path)
-    started = write_generation()
+    generation = write_generation()
     async with sftp.open(remote_path, "wb") as f:
         await f.write(data)
     record("write", path_spec.virtual, "ssh", len(data), timer)
-    await settle_after_write(path_spec, data, None, started)
+    await settle_after_write(path_spec, data, None, generation)

@@ -233,7 +233,9 @@ describe('dropbox write settles', () => {
     const manager = await settling(() =>
       write(makeAccessor(), spec('/a.txt'), new TextEncoder().encode('hello')),
     )
-    expect(manager.settled).toEqual([{ path: '/a.txt', data: 'hello', receipt: null, started: 5 }])
+    expect(manager.settled).toEqual([
+      { path: '/a.txt', data: 'hello', receipt: null, generation: 5 },
+    ])
     expect(manager.writes).toEqual([])
   })
 })

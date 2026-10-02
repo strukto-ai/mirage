@@ -865,8 +865,8 @@ async def _settled(
     cache, index = _stores()
     await cache.set("/data/x.txt", b"old\n", fingerprint="t-old", ttl=600)
     manager = CacheManager(cache, index, "/data/", True, read_policy=policy)
-    started = manager.generation
-    await manager.settle_after_write(_spec(), data, receipt, started)
+    generation = manager.generation
+    await manager.settle_after_write(_spec(), data, receipt, generation)
     return cache
 
 
@@ -920,10 +920,10 @@ async def test_settle_drops_when_another_mutation_landed_mid_upload():
     # bytes may no longer be what the backend holds.
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
-    started = manager.generation
+    generation = manager.generation
     await manager.invalidate_after_write(_spec("/data/y.txt"))
     await manager.settle_after_write(
-        _spec(), b"new\n", WriteReceipt(4, "t1"), started
+        _spec(), b"new\n", WriteReceipt(4, "t1"), generation
     )
     assert await cache.exists("/data/x.txt") is False
 
@@ -991,9 +991,9 @@ async def test_settle_retires_a_read_that_began_before_the_keep():
 
     reader = asyncio.create_task(manager.read_through(_spec(), fetch))
     await fetched.wait()
-    started = manager.generation
+    generation = manager.generation
     await manager.settle_after_write(
-        _spec(), b"new\n", WriteReceipt(4, "t1"), started
+        _spec(), b"new\n", WriteReceipt(4, "t1"), generation
     )
     release.set()
     assert await reader == b"old\n"

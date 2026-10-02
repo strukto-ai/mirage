@@ -28,7 +28,7 @@ export async function writeBytes(
   const sftp = await accessor.sftp()
   const key = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', key)
-  const started = writeGeneration()
+  const generation = writeGeneration()
   await new Promise<void>((resolveFn, rejectFn) => {
     sftp.writeFile(remote, Buffer.from(data), (err) => {
       if (err) rejectFn(err)
@@ -36,5 +36,5 @@ export async function writeBytes(
     })
   })
   record('write', p.virtual, VFSName.SSH, data.byteLength, timer)
-  await settleAfterWrite(p, data, null, started)
+  await settleAfterWrite(p, data, null, generation)
 }

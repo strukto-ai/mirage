@@ -70,8 +70,8 @@ function recorder(): [
   const writes: string[] = []
   const manager: CacheInvalidator = {
     generation: 5,
-    settleAfterWrite(path, data, receipt, started) {
-      settled.push([path.virtual, new TextDecoder().decode(data), receipt, started])
+    settleAfterWrite(path, data, receipt, generation) {
+      settled.push([path.virtual, new TextDecoder().decode(data), receipt, generation])
       return Promise.resolve()
     },
     invalidateAfterWrite(path) {

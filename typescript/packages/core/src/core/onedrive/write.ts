@@ -25,8 +25,8 @@ export async function write(
   data: Uint8Array,
 ): Promise<void> {
   const timer = startOp()
-  const started = writeGeneration()
+  const generation = writeGeneration()
   const receipt = await writeItem(accessor.config, driveLoc(accessor.config, path.vfsPath), data)
   record('write', path.virtual, 'onedrive', data.length, timer)
-  await settleAfterWrite(path, data, receipt, started)
+  await settleAfterWrite(path, data, receipt, generation)
 }

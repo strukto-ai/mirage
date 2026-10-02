@@ -410,10 +410,10 @@ async def write_item(
         item = await upload_session_write(
             config, loc.item("/createUploadSession"), data, session=session
         )
-    return _receipt(item)
+    return _receipt_of(item)
 
 
-def _receipt(item: dict[str, Any] | None) -> WriteReceipt:
+def _receipt_of(item: dict[str, Any] | None) -> WriteReceipt:
     item = item or {}
     size = item.get("size")
     ctag = item.get("cTag")
