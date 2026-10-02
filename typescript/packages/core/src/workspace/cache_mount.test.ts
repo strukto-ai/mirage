@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser } from '../shell/parse/index.ts'
 import { ops } from '../test-utils.ts'
@@ -480,4 +480,31 @@ describe('a whole-file write settles with the cache', () => {
       await ws.close()
     }
   })
+
+  for (const [line, paths] of [
+    ['split -l 1 /r/b /r/x', ['/r/xaa', '/r/xab', '/r/xac']],
+    ['tar -cf /r/t.tar -C /r b', ['/r/t.tar']],
+    ['mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out', ['/r/out/b']],
+  ] as const) {
+    it(`a dispatched write inside a command fills nothing: ${line}`, async () => {
+      // The dispatcher evicts what its write op wrote, so a manager inherited
+      // from the enclosing command must not settle the bytes first: a fill the
+      // eviction then drops still costs a set, and can push warm entries out.
+      const ws = caching(ReadPolicy.BOUNDED)
+      try {
+        await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+        const filled: string[] = []
+        const realSet = ws.cache.set.bind(ws.cache)
+        vi.spyOn(ws.cache, 'set').mockImplementation((key, data, options) => {
+          filled.push(key)
+          return realSet(key, data, options)
+        })
+        await out(ws, line)
+        expect(filled.filter((key) => (paths as readonly string[]).includes(key))).toEqual([])
+      } finally {
+        vi.restoreAllMocks()
+        await ws.close()
+      }
+    })
+  }
 })

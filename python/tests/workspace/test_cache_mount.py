@@ -347,3 +347,37 @@ async def test_a_redirect_is_still_evicted():
     assert await ws._cache.exists("/r/a") is True
     await _out(ws, "echo new > /r/a")
     assert await ws._cache.exists("/r/a") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,paths",
+    [
+        ("split -l 1 /r/b /r/x", ["/r/xaa", "/r/xab", "/r/xac"]),
+        ("tar -cf /r/t.tar -C /r b", ["/r/t.tar"]),
+        (
+            "mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out",
+            ["/r/out/b"],
+        ),
+    ],
+)
+async def test_a_dispatched_write_inside_a_command_fills_nothing(
+    monkeypatch, line, paths
+):
+    # The dispatcher evicts what its write op wrote, so a manager inherited
+    # from the enclosing command must not settle the bytes first: a fill the
+    # eviction then drops still costs a set, and can push warm entries out.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+    filled: list[str] = []
+    real_set = ws._cache.set
+
+    async def counting_set(
+        key: str, data: bytes, **kwargs: str | int | None
+    ) -> None:
+        filled.append(key)
+        await real_set(key, data, **kwargs)
+
+    monkeypatch.setattr(ws._cache, "set", counting_set)
+    await _out(ws, line)
+    assert [key for key in filled if key in paths] == []
