@@ -22,7 +22,7 @@ import { create } from './create.ts'
 import { mkdir } from './mkdir.ts'
 import { truncate } from './truncate.ts'
 import { writeBytes } from './write.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '../../test-utils.ts'
 
 const ENC = new TextEncoder()
 

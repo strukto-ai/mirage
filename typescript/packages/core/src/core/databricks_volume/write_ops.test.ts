@@ -19,7 +19,7 @@ import { rmRecursive } from './rm.ts'
 import { rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
 import { writeBytes } from './write.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '../../test-utils.ts'
 import {
   jsonResponse,
   makeAccessor,

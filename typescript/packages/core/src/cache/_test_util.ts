@@ -35,5 +35,3 @@ export function shiftPerformanceNow(): {
     spy,
   }
 }
-
-export { SettleRecorder, settling, type Settled } from '../test-utils.ts'

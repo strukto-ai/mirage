@@ -39,7 +39,7 @@ import { PathSpec } from '../../types.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { write } from './write.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '../../test-utils.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '../../test-utils.ts'
 import { write } from './write.ts'
 
 // A key named like its mount: neither `m/k.txt` nor `/m/k.txt` is virtual.

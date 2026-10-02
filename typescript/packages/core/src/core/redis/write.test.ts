@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RedisAccessor } from '../../accessor/redis.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '../../test-utils.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { RedisStoreLike } from '../../vfs/redis/store.ts'

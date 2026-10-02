@@ -47,7 +47,7 @@ import { rmR } from './rm.ts'
 import { rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
 import { write } from './write.ts'
-import { settling } from '../../cache/_test_util.ts'
+import { settling } from '../../test-utils.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 
