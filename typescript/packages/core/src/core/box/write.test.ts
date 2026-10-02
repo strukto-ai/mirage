@@ -324,11 +324,19 @@ describe('box write ops', () => {
       vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
         Promise.resolve(merge[folderId] ?? []),
       )
-      vi.mocked(api.copyFile).mockImplementation(() =>
-        fails ? Promise.reject(new Error('copy failed')) : Promise.resolve({} as ApiModule.BoxItem),
-      )
-      vi.mocked(api.copyFile).mockClear()
+      let settled = false
+      let evictedAfterCopy = false
+      vi.mocked(api.copyFile).mockImplementation(async () => {
+        await Promise.resolve()
+        settled = true
+        if (fails) throw new Error('copy failed')
+        return {} as ApiModule.BoxItem
+      })
       vi.mocked(invalidateSubtree).mockClear()
+      vi.mocked(invalidateSubtree).mockImplementation(() => {
+        evictedAfterCopy = settled
+        return Promise.resolve()
+      })
       try {
         const copied = copy(makeAccessor(), spec('/data/sub'), spec('/data/dst'))
         if (fails) await expect(copied).rejects.toThrow('copy failed')
@@ -336,11 +344,10 @@ describe('box write ops', () => {
         expect(vi.mocked(invalidateSubtree)).toHaveBeenCalledWith(
           expect.objectContaining({ virtual: '/data/dst' }),
         )
-        const [copiedAt = 0] = vi.mocked(api.copyFile).mock.invocationCallOrder
-        const [evictedAt = 0] = vi.mocked(invalidateSubtree).mock.invocationCallOrder
-        expect(evictedAt).toBeGreaterThan(copiedAt)
+        expect(evictedAfterCopy).toBe(true)
       } finally {
         vi.mocked(api.copyFile).mockReset()
+        vi.mocked(invalidateSubtree).mockImplementation(() => Promise.resolve())
       }
     })
   }

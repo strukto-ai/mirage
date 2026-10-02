@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,7 +22,7 @@ from mirage.cache.context import push_cache_manager
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.core.box.client import BoxApiError
+from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.core.box.copy import copy
 from mirage.core.box.mkdir import mkdir
 from mirage.core.box.rename import rename
@@ -578,8 +579,14 @@ async def test_copy_folder_merge_evicts_a_replaced_childs_bytes(root_accessor):
     # the copy.
     cache = RAMFileCacheStore()
 
-    async def racing_read(*_args: object, **_kwargs: object) -> None:
+    async def racing_read(
+        _tm: BoxTokenManager,
+        _file_id: str,
+        _parent_id: str,
+        name: str | None = None,
+    ) -> dict[str, Any]:
         await cache.set("/data/dst/x.txt", b"old")
+        return {}
 
     await _merge_case(root_accessor, AsyncMock(side_effect=racing_read), cache)
     assert await cache.exists("/data/dst/x.txt") is False
