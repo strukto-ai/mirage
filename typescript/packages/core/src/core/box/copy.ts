@@ -14,7 +14,7 @@
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { evictAfter, invalidateAfterWrite, invalidateSubtree } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import { eisdir, enoent, enotdir } from '../../utils/errors.ts'
 import { copyFile, copyFolder, deleteFile, listFolderItems, type BoxItem } from './api.ts'
@@ -58,9 +58,19 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
   await invalidateAfterWrite(dst)
 }
 
+/**
+ * Copy a file or folder server-side.
+ *
+ * The whole destination subtree is invalidated, under its own path: a folder
+ * copy that merges into an existing folder replaces children below `dst`
+ * whose bytes were cached under their own keys. A failed copy invalidates
+ * too, since a merge may have landed some children before one failed.
+ */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))
   if (item === null) throw enoent(src.virtual)
-  await copyInto(accessor, item, dst)
-  await invalidateAfterWrite(dst)
+  await evictAfter(
+    () => copyInto(accessor, item, dst),
+    () => invalidateSubtree(dst),
+  )
 }

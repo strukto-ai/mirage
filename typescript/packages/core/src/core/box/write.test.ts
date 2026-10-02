@@ -38,7 +38,7 @@ vi.mock('../../cache/context.ts', async () => {
     evictAfter: actual.evictAfter,
     invalidateAfterWrite: vi.fn(),
     invalidateAfterUnlink: vi.fn(),
-    invalidateSubtree: vi.fn(),
+    invalidateSubtree: vi.fn(() => Promise.resolve()),
     settleAfterWrite: vi.fn(),
     writeGeneration: vi.fn(() => 5),
   }
