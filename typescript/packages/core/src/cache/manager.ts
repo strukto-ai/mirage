@@ -500,12 +500,12 @@ export class CacheManager {
    * Keep or drop the bytes a whole-file write just sent.
    *
    * Decided once, at the write, under the mutation lock: any mutation of the
-   * mount since the upload started drops, a stored size other than the bytes
-   * sent drops (SharePoint promotes properties into an uploaded Office file),
+   * mount by this process since the upload started drops (another process's
+   * is not seen), a stored size other than the bytes sent drops (SharePoint promotes properties into an uploaded Office file),
    * a token keeps the bytes with it, and a reply that says nothing keeps them
    * only under bounded, where nothing would verify them anyway. Bytes larger
-   * than the whole cache are dropped too: kept, they would evict every warm
-   * entry and then themselves. Keep or drop, in-flight reads and probe answers
+   * than `cacheLimit` are dropped too: on the RAM cache they would evict every
+   * warm entry and then themselves. Keep or drop, in-flight reads and probe answers
    * are retired, so a read that began before the write cannot stamp its bytes
    * over these. The write has landed by now, so a fill the cache store
    * refuses is logged and skipped, as a background drain's is, never thrown.
