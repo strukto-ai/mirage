@@ -820,6 +820,7 @@ describe('settleAfterWrite', () => {
     // itself: it is dropped instead, and the warm entry survives.
     const cache = new RAMFileCacheStore({ limit: 10 })
     await cache.set('/data/w.txt', enc('abc'))
+    await cache.set('/data/x.txt', enc('o'))
     const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
     await manager.settleAfterWrite(
       spec(),
@@ -852,6 +853,7 @@ describe('settleAfterWrite', () => {
       }
     }
     const cache = new RefusingCache()
+    await RAMFileCacheStore.prototype.set.call(cache, '/data/x.txt', enc('old\n'))
     const index = new RAMIndexCacheStore({ ttl: 600 })
     await index.setDir('/data', [
       ['x.txt', new IndexEntry({ id: 'x', name: 'x.txt', resourceType: 'file' })],
@@ -871,5 +873,12 @@ describe('settleAfterWrite', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+
+  it('treats an empty token as none', async () => {
+    // An empty token vouches for nothing: on a fresh mount the bytes are
+    // dropped rather than kept under a fingerprint of ''.
+    const cache = await settled({ storedSize: null, token: '' }, ReadPolicy.FRESH)
+    expect(await cache.exists('/data/x.txt')).toBe(false)
   })
 })

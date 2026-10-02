@@ -131,6 +131,25 @@ describe('cache invalidation on the fallback storage', () => {
     expect(log.sort()).toEqual(['a:write:/m/x', 'b:write:/m/x'])
   })
 
+  it('a write under a cleared frame drops instead of settling', async () => {
+    // The dispatcher clears the manager around a write it evicts itself. On
+    // the fallback storage the enclosing command's frame stays live, so no
+    // manager answers as active and the command's manager drops the path.
+    const log: string[] = []
+    const manager = fakeManager(log, 'a')
+    await runWithCacheManager(manager, () =>
+      runWithCacheManager(null, () =>
+        settleAfterWrite(
+          PathSpec.fromStrPath('/m/x'),
+          new Uint8Array([1]),
+          { storedSize: 1, token: 't' },
+          0,
+        ),
+      ),
+    )
+    expect(log).toEqual(['a:write:/m/x'])
+  })
+
   it('an unlink and a subtree drop broadcast the same way', async () => {
     const log: string[] = []
     const managerA = fakeManager(log, 'a')

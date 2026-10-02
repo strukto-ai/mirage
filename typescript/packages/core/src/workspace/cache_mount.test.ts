@@ -326,7 +326,8 @@ describe('a guarded cp reads past the cache without refilling it', () => {
 // A caching RAM mount that may carry either read policy.
 function caching(policy: ReadPolicy = ReadPolicy.BOUNDED): Workspace {
   const ram = new RAMVFS()
-  Object.assign(ram, { cachesReads: true, readRevalidatable: true })
+  // Only fresh needs it; bounded runs on a plain caching mount.
+  Object.assign(ram, { cachesReads: true, readRevalidatable: policy === ReadPolicy.FRESH })
   return new Workspace(
     { '/r/': ram },
     {

@@ -1033,6 +1033,7 @@ async def test_settle_keeps_nothing_bigger_than_the_cache():
     # then itself: it is dropped instead, and the warm entry survives.
     cache, index = RAMFileCacheStore(cache_limit=10), RAMIndexCacheStore(600)
     await cache.set("/data/w.txt", b"abc")
+    await cache.set("/data/x.txt", b"o")
     manager = CacheManager(cache, index, "/data/", True)
     await manager.settle_after_write(
         _spec(), b"x" * 11, WriteReceipt(11, "t1"), manager.generation
@@ -1067,6 +1068,7 @@ async def test_a_failed_fill_does_not_fail_the_write(caplog):
     # The upload already landed: like a background drain that fails, the
     # fill is skipped with a warning, and the parent listing still goes.
     cache, index = _RefusingCache(), RAMIndexCacheStore(ttl=600)
+    await RAMFileCacheStore.set(cache, "/data/x.txt", b"old\n")
     await index.set_dir(
         "/data",
         [("x.txt", IndexEntry(id="x", name="x.txt", resource_type="file"))],
@@ -1079,3 +1081,11 @@ async def test_a_failed_fill_does_not_fail_the_write(caplog):
     assert await cache.exists("/data/x.txt") is False
     assert (await index.list_dir("/data")).entries is None
     assert "/data/x.txt" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_settle_treats_an_empty_token_as_none():
+    # An empty token vouches for nothing: on a fresh mount the bytes are
+    # dropped rather than kept under a fingerprint of "".
+    cache = await _settled(WriteReceipt(None, ""), ReadPolicy.FRESH)
+    assert await cache.exists("/data/x.txt") is False

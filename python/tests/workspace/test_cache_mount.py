@@ -266,7 +266,8 @@ async def test_a_write_then_a_read_on_one_line_serves_the_write(line):
 def _caching_ram_under(policy: ReadPolicy) -> Workspace:
     ram = RAMVFS()
     ram.caches_reads = True
-    ram.read_revalidatable = True
+    # Only fresh needs it; bounded runs on a plain caching mount.
+    ram.read_revalidatable = policy == ReadPolicy.FRESH
     return Workspace(
         {"/r/": ram},
         mode=MountMode.WRITE,
