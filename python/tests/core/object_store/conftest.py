@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from mirage.accessor.base import Accessor
+from mirage.cache.types import WriteReceipt
 from mirage.core.object_store.driver import (
     ChildEntry,
     FindHints,
@@ -28,7 +29,6 @@ from mirage.core.object_store.driver import (
     ObjectStoreDriver,
     TreeEntry,
 )
-from mirage.cache.types import WriteReceipt
 from mirage.types import PathSpec
 from tests.fixtures.settle import Settled
 

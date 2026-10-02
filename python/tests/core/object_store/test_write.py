@@ -18,21 +18,21 @@ from dataclasses import replace
 import pytest
 
 from mirage.cache.context import push_cache_manager
+from mirage.cache.types import WriteReceipt
 from mirage.core.object_store.write import (
     make_create,
     make_mkdir,
     make_truncate,
     make_write_bytes,
 )
-from mirage.cache.types import WriteReceipt
 from mirage.observe.context import RecordingScope
-from tests.fixtures.settle import Settled
 from tests.core.object_store.conftest import (
     FakeManager,
     FakeStore,
     make_driver,
     spec,
 )
+from tests.fixtures.settle import Settled
 
 
 def _managed(coro):

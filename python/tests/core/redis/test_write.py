@@ -20,8 +20,8 @@ import pytest_asyncio
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.write import write_bytes
 from mirage.types import PathSpec
-from tests.fixtures.settle import Settled, settling
 from mirage.vfs.redis.store import RedisStore
+from tests.fixtures.settle import Settled, settling
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -213,7 +213,11 @@ async def test_write_settles_its_bytes_without_a_receipt(accessor):
     with settling() as manager:
         await write_bytes(
             accessor,
-            PathSpec(vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"),
+            PathSpec(
+                vfs_path="hello.txt",
+                virtual="/hello.txt",
+                directory="/hello.txt",
+            ),
             b"hello",
         )
     assert manager.settled == [Settled("/hello.txt", b"hello", None, 5)]

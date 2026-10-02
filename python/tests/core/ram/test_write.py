@@ -18,8 +18,8 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.append import append_bytes
 from mirage.core.ram.write import write_bytes
 from mirage.types import PathSpec
-from tests.fixtures.settle import Settled, settling
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.settle import Settled, settling
 
 
 @pytest.fixture
@@ -185,7 +185,11 @@ async def test_write_settles_its_bytes_without_a_receipt(store):
     with settling() as manager:
         await write_bytes(
             store,
-            PathSpec(vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"),
+            PathSpec(
+                vfs_path="hello.txt",
+                virtual="/hello.txt",
+                directory="/hello.txt",
+            ),
             b"hello",
         )
     assert manager.settled == [Settled("/hello.txt", b"hello", None, 5)]

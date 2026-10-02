@@ -900,8 +900,11 @@ async def test_settle_keeps_a_silent_write_tokenless_on_bounded(receipt):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "receipt",
-    [None, WriteReceipt(stored_size=None, token=None),
-     WriteReceipt(stored_size=4, token=None)],
+    [
+        None,
+        WriteReceipt(stored_size=None, token=None),
+        WriteReceipt(stored_size=4, token=None),
+    ],
 )
 async def test_settle_drops_a_silent_write_on_fresh(receipt):
     cache = await _settled(receipt, ReadPolicy.FRESH)

@@ -79,7 +79,7 @@ describe('gdrive write', () => {
 
 describe('gdrive write settles', () => {
   for (const existing of [false, true]) {
-    it(`settles its bytes without a receipt (existing: ${existing})`, async () => {
+    it(`settles its bytes without a receipt (existing: ${String(existing)})`, async () => {
       fake.folder('a')
       if (existing) await write(accessor, spec('/a/new.txt'), ENC.encode('old'))
       const manager = await settling(() => write(accessor, spec('/a/new.txt'), ENC.encode('hello')))

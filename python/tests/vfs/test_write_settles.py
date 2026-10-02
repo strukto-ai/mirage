@@ -26,7 +26,9 @@ def _writers() -> dict[str, Callable[..., Awaitable[None]]]:
     found: dict[str, Callable[..., Awaitable[None]]] = {}
     for info in pkgutil.iter_modules(builtin.__path__):
         try:
-            module = importlib.import_module(f"{builtin.__name__}.{info.name}.io")
+            module = importlib.import_module(
+                f"{builtin.__name__}.{info.name}.io"
+            )
         except ModuleNotFoundError:
             continue
         table = getattr(module, "IO", None)

@@ -281,7 +281,9 @@ describe('object_store write settles with the token its put answered', () => {
   })
 
   it('create still only invalidates', async () => {
-    const manager = await managed(() => makeCreate(makeDriver(new FakeStore()))(accessor, spec('/a/c.txt')))
+    const manager = await managed(() =>
+      makeCreate(makeDriver(new FakeStore()))(accessor, spec('/a/c.txt')),
+    )
     expect(manager.settled).toEqual([])
     expect(manager.writes).toEqual(['/a/c.txt'])
   })

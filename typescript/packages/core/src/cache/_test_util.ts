@@ -62,7 +62,12 @@ export class SettleRecorder implements CacheInvalidator {
     receipt: WriteReceipt | null,
     started: number | null,
   ): Promise<void> {
-    this.settled.push({ path: path.virtual, data: new TextDecoder().decode(data), receipt, started })
+    this.settled.push({
+      path: path.virtual,
+      data: new TextDecoder().decode(data),
+      receipt,
+      started,
+    })
     return Promise.resolve()
   }
 

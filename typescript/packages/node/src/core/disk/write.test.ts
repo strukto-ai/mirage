@@ -68,7 +68,11 @@ describe('core/disk/write', () => {
   })
 })
 
-function recorder(): [CacheInvalidator, [string, string, WriteReceipt | null, number | null][], string[]] {
+function recorder(): [
+  CacheInvalidator,
+  [string, string, WriteReceipt | null, number | null][],
+  string[],
+] {
   const settled: [string, string, WriteReceipt | null, number | null][] = []
   const writes: string[] = []
   const manager: CacheInvalidator = {

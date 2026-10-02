@@ -624,7 +624,8 @@ describe('what a probe saw this command', () => {
 
 describe('settleAfterWrite', () => {
   const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
-  const dec = (b: Uint8Array | null): string | null => (b === null ? null : new TextDecoder().decode(b))
+  const dec = (b: Uint8Array | null): string | null =>
+    b === null ? null : new TextDecoder().decode(b)
   const spec = (): PathSpec => PathSpec.fromStrPath('/data/x.txt')
 
   async function settled(
@@ -669,7 +670,7 @@ describe('settleAfterWrite', () => {
     })
 
     for (const size of [4, null]) {
-      it(`keeps vouched bytes with the backend token (${policy}, size ${size})`, async () => {
+      it(`keeps vouched bytes with the backend token (${policy}, size ${String(size)})`, async () => {
         const cache = await settled({ storedSize: size, token: 't1' }, policy)
         expect(dec(await cache.get('/data/x.txt'))).toBe('new\n')
         expect(await cache.isFresh('/data/x.txt', 't1')).toBe(true)
