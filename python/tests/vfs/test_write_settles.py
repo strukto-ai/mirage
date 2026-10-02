@@ -25,11 +25,14 @@ from mirage.commands.builtin.generic_bind.adapter import CommandIO
 def _writers() -> dict[str, Callable[..., Awaitable[None]]]:
     found: dict[str, Callable[..., Awaitable[None]]] = {}
     for info in pkgutil.iter_modules(builtin.__path__):
+        name = f"{builtin.__name__}.{info.name}.io"
         try:
-            module = importlib.import_module(
-                f"{builtin.__name__}.{info.name}.io"
-            )
-        except ModuleNotFoundError:
+            module = importlib.import_module(name)
+        except ModuleNotFoundError as exc:
+            # Only a package with no IO table is skipped; an IO table
+            # whose own imports fail must fail the scan, not drop out.
+            if exc.name != name:
+                raise
             continue
         table = getattr(module, "IO", None)
         if isinstance(table, CommandIO) and table.write is not None:

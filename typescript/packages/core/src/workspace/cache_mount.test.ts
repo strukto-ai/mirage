@@ -323,25 +323,27 @@ describe('a guarded cp reads past the cache without refilling it', () => {
   })
 })
 
+// A caching RAM mount that may carry either read policy.
+function caching(policy: ReadPolicy = ReadPolicy.BOUNDED): Workspace {
+  const ram = new RAMVFS()
+  Object.assign(ram, { cachesReads: true, readRevalidatable: true })
+  return new Workspace(
+    { '/r/': ram },
+    {
+      mode: MountMode.WRITE,
+      read: { policy, ttl: DEFAULT_READ_TTL },
+      shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+    },
+  )
+}
+
+async function out(ws: Workspace, line: string): Promise<string> {
+  const result = await ws.shell(line)
+  expect(result.exitCode, line).toBe(0)
+  return DEC.decode(result.stdout)
+}
+
 describe('a line that reads and writes one path (MIRAGE-14)', () => {
-  function caching(): Workspace {
-    const ram = new RAMVFS()
-    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-    return new Workspace(
-      { '/r/': ram },
-      {
-        mode: MountMode.WRITE,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
-      },
-    )
-  }
-
-  async function out(ws: Workspace, line: string): Promise<string> {
-    const result = await ws.shell(line)
-    expect(result.exitCode, line).toBe(0)
-    return DEC.decode(result.stdout)
-  }
-
   for (const line of [
     'cat /r/a; echo new | tee /r/a',
     'cat /r/a; echo new > /r/a',
@@ -389,25 +391,6 @@ describe('a line that reads and writes one path (MIRAGE-14)', () => {
 })
 
 describe('a whole-file write settles with the cache', () => {
-  function caching(policy: ReadPolicy): Workspace {
-    const ram = new RAMVFS()
-    Object.assign(ram, { cachesReads: true, readRevalidatable: true })
-    return new Workspace(
-      { '/r/': ram },
-      {
-        mode: MountMode.WRITE,
-        read: { policy, ttl: DEFAULT_READ_TTL },
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
-      },
-    )
-  }
-
-  async function out(ws: Workspace, line: string): Promise<string> {
-    const result = await ws.shell(line)
-    expect(result.exitCode, line).toBe(0)
-    return DEC.decode(result.stdout)
-  }
-
   for (const [line, path] of [
     ['echo new | tee /r/a', '/r/a'],
     ['sed -i s/one/uno/ /r/b', '/r/b'],
@@ -419,7 +402,8 @@ describe('a whole-file write settles with the cache', () => {
   ] as const) {
     it(`a same-mount write keeps its output under bounded: ${line}`, async () => {
       // A command whose output goes through the backend's whole-file write
-      // inside the command settles it: on a bounded mount the bytes stay warm.
+      // inside the command settles it: on a bounded mount the cache holds
+      // exactly the bytes the backend stored.
       const ws = caching(ReadPolicy.BOUNDED)
       try {
         await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
