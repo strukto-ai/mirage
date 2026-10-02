@@ -18,6 +18,7 @@ import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
+import { settling } from '@struktoai/mirage-core/test-utils'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -81,5 +82,24 @@ describe('core/ssh/write', () => {
     expect(records[0]?.op).toBe('write')
     expect(records[0]?.source).toBe(VFSName.SSH)
     expect(records[0]?.bytes).toBe(5)
+  })
+})
+
+describe('core/ssh/write settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    const accessor = makeFakeAccessor({
+      files: new Map(),
+      dirs: new Map([
+        ['/', {}],
+        ['/data', {}],
+      ]),
+    })
+    const manager = await settling(() =>
+      writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello')),
+    )
+    expect(manager.settled).toEqual([
+      { path: '/data/a.txt', data: 'hello', receipt: null, generation: 5 },
+    ])
+    expect(manager.writes).toEqual([])
   })
 })

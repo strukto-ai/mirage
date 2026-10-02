@@ -21,6 +21,10 @@ vi.mock('../google/drive.ts', async () => {
   return driveModuleMock(actual)
 })
 
+import { runWithCacheManager } from '../../cache/context.ts'
+import { RAMFileCacheStore } from '../../cache/file/ram.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { CacheManager } from '../../cache/manager.ts'
 import { PathSpec } from '../../types.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
@@ -98,5 +102,42 @@ describe('gdrive copy', () => {
     await expect(copy(accessor, spec('/missing.txt'), spec('/dst.txt'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+
+  async function merge(cache: RAMFileCacheStore): Promise<void> {
+    await cache.set('/dst/f.txt', ENC.encode('old'))
+    const manager = new CacheManager(cache, new RAMIndexCacheStore({ ttl: 600 }), '/', true)
+    await runWithCacheManager(manager, () => copy(accessor, spec('/src'), spec('/dst')))
+  }
+
+  it("a merge evicts a replaced child's cached bytes", async () => {
+    // Merging into an existing folder lands children the caller never named,
+    // and their bytes were cached under their own keys: evicting only the
+    // folder left `cat /dst/f.txt` serving the old file. A read during the
+    // merge refills the child, so the eviction must follow the copy.
+    const src = fake.folder('src')
+    fake.add('f.txt', src, undefined, ENC.encode('new'))
+    const dst = fake.folder('dst')
+    fake.add('f.txt', dst, undefined, ENC.encode('old'))
+    const cache = new RAMFileCacheStore()
+    const copyFile = fake.copyFile.bind(fake)
+    vi.spyOn(fake, 'copyFile').mockImplementation(async (...args) => {
+      const copied = await copyFile(...args)
+      await cache.set('/dst/f.txt', ENC.encode('old'))
+      return copied
+    })
+    await merge(cache)
+    expect(await cache.exists('/dst/f.txt')).toBe(false)
+  })
+
+  it('a merge that fails evicts too', async () => {
+    // A merge that fails partway may have landed some children already.
+    const src = fake.folder('src')
+    fake.add('f.txt', src, undefined, ENC.encode('new'))
+    fake.folder('dst')
+    vi.spyOn(fake, 'copyFile').mockRejectedValue(new Error('copy failed'))
+    const cache = new RAMFileCacheStore()
+    await expect(merge(cache)).rejects.toThrow('copy failed')
+    expect(await cache.exists('/dst/f.txt')).toBe(false)
   })
 })

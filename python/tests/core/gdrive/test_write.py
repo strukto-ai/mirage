@@ -14,9 +14,11 @@
 
 import pytest
 
+import mirage.core.gdrive.write as gdrive_write
 from mirage.core.gdrive.write import write_bytes
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from tests.fixtures.settle import Settled, settling
 
 DOC_MIME = "application/vnd.google-apps.document"
 
@@ -78,3 +80,40 @@ async def test_write_records_the_virtual_path(fake_drive, gdrive_accessor):
         scope.close()
     assert fake_drive.find("k.txt")["content"] == b"hello"
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [False, True])
+async def test_write_settles_its_bytes_without_a_receipt(
+    fake_drive, gdrive_accessor, existing
+):
+    fake_drive.folder("a")
+    if existing:
+        await write_bytes(gdrive_accessor, spec("/a/new.txt"), b"old")
+    with settling() as manager:
+        await write_bytes(gdrive_accessor, spec("/a/new.txt"), b"hello")
+    assert manager.settled == [Settled("/a/new.txt", b"hello", None, 5)]
+    assert manager.writes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [False, True])
+async def test_a_change_during_the_lookup_reaches_settle(
+    fake_drive, gdrive_accessor, monkeypatch, existing
+):
+    # The node a lookup resolves can move (a concurrent mv) before the
+    # upload: the generation is noted before the lookup, so a change that
+    # lands during it makes settle drop the bytes.
+    fake_drive.folder("a")
+    if existing:
+        await write_bytes(gdrive_accessor, spec("/a/new.txt"), b"old")
+    real_resolve = gdrive_write.resolve_key
+    with settling() as manager:
+
+        async def moving_resolve(accessor, key):
+            manager.generation = 6
+            return await real_resolve(accessor, key)
+
+        monkeypatch.setattr(gdrive_write, "resolve_key", moving_resolve)
+        await write_bytes(gdrive_accessor, spec("/a/new.txt"), b"hello")
+    assert [s.generation for s in manager.settled] == [5]

@@ -15,6 +15,7 @@
 // Test-only in-memory driver shared by the kit's colocated tests; the
 // python twin is tests/core/object_store/conftest.py.
 
+import type { WriteReceipt } from '../../cache/types.ts'
 import { Accessor } from '../../accessor/base.ts'
 import { PathSpec } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
@@ -270,6 +271,29 @@ export class FakeManager {
   readonly ancestors: string[] = []
   readonly unlinks: string[] = []
   readonly subtrees: string[] = []
+
+  generation = 5
+  readonly settled: {
+    path: string
+    data: string
+    receipt: WriteReceipt | null
+    generation: number | null
+  }[] = []
+
+  settleAfterWrite(
+    path: PathSpec,
+    data: Uint8Array,
+    receipt: WriteReceipt | null,
+    generation: number | null,
+  ): Promise<void> {
+    this.settled.push({
+      path: path.virtual,
+      data: new TextDecoder().decode(data),
+      receipt,
+      generation,
+    })
+    return Promise.resolve()
+  }
 
   invalidateAfterWrite(path: string | PathSpec): Promise<void> {
     this.writes.push(typeof path === 'string' ? path : path.mountPath)

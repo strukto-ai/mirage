@@ -131,6 +131,13 @@ This makes the OneDrive VFS `supports_snapshot = True`.
 The OneDrive VFS caches directory listings via `IndexCacheStore` to reduce
 repeated Graph calls during traversal.
 
+A write keeps the bytes it sent in the file cache only when Graph's upload
+reply reports the same size, with the reply's cTag as the entry's token. A
+library that promotes properties into an uploaded Office, `.eml`, `.msg` or
+`.tiff` file can store different bytes; when the reply reports a different
+size, the next read downloads the stored file. Only the size is compared: a
+rewrite that keeps the length goes unseen. See [writes](/home/cache#writes).
+
 ## Example
 
 ```python

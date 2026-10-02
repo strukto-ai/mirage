@@ -241,6 +241,7 @@ export class MountRegistry {
       },
       (folder) => this.mayServeListing(m, folder),
       () => this.descendantMounts(m.prefix).map((entry) => entry.prefix.replace(/\/$/, '')),
+      m.read.policy,
     )
   }
 

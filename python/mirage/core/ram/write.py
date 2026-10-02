@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import settle_after_write, write_generation
 from mirage.core.ram.dest import check_dest_parents, check_write_target
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -30,7 +30,8 @@ async def write_bytes(
     p = norm(path)
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
+    generation = write_generation()
     store.files[p] = data
     store.modified[p] = now_iso()
     record("write", path_spec.virtual, "ram", len(data), timer)
-    await invalidate_after_write(path_spec)
+    await settle_after_write(path_spec, data, None, generation)

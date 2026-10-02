@@ -215,3 +215,164 @@ async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
     assert served == "v1\n", (
         "the guarded walk overwrote the entry it read past"
     )
+
+
+async def _out(ws: Workspace, line: str) -> bytes:
+    result = await ws.shell(line)
+    out = await result.materialize_stdout()
+    assert result.exit_code == 0, (line, await result.stderr_str())
+    return out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cat /r/a; echo new | tee /r/a",
+        "cat /r/a; echo new > /r/a",
+        "cat /r/a; cat /r/b > /r/a",
+    ],
+)
+async def test_a_read_earlier_on_the_line_does_not_outlive_the_write(line):
+    # MIRAGE-14: the read's bytes used to be cached over the write's, so
+    # the next cat served the pre-write content until the ttl ran out.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'old\\n' > /r/a; printf 'new\\n' > /r/b")
+    await _out(ws, line)
+    assert await _out(ws, "cat /r/a") == b"new\n"
+
+
+@pytest.mark.asyncio
+async def test_a_same_mount_cp_over_a_path_read_on_the_line_is_never_empty():
+    # cp lists its target in writes as an empty eviction marker; taking
+    # the write side for a path also read would cache an empty file.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'old\\n' > /r/a; printf 'bee\\n' > /r/b")
+    await _out(ws, "cat /r/a; cp /r/b /r/a")
+    assert await _out(ws, "cat /r/a") == b"bee\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["echo new | tee /r/a; cat /r/a", "echo new | tee /r/a"]
+)
+async def test_a_write_then_a_read_on_one_line_serves_the_write(line):
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'old\\n' > /r/a; cat /r/a")
+    await _out(ws, line)
+    assert await _out(ws, "cat /r/a") == b"new\n"
+
+
+def _caching_ram_under(policy: ReadPolicy) -> Workspace:
+    ram = RAMVFS()
+    ram.caches_reads = True
+    # Only fresh needs it; bounded runs on a plain caching mount.
+    ram.read_revalidatable = policy == ReadPolicy.FRESH
+    return Workspace(
+        {"/r/": ram},
+        mode=MountMode.WRITE,
+        read=ReadSpec(policy=policy),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,path",
+    [
+        ("echo new | tee /r/a", "/r/a"),
+        ("sed -i s/one/uno/ /r/b", "/r/b"),
+        ("sort -o /r/so /r/b", "/r/so"),
+        ("uniq /r/b /r/u", "/r/u"),
+        ("shuf -o /r/s /r/b", "/r/s"),
+        ("iconv -f utf-8 -t utf-8 -o /r/i /r/b", "/r/i"),
+        ("zip -q /r/z.zip /r/b", "/r/z.zip"),
+    ],
+)
+async def test_a_same_mount_write_keeps_its_output_under_bounded(line, path):
+    # A command whose output goes through the backend's whole-file write
+    # inside the command settles it: on a bounded mount the cache holds
+    # exactly the bytes the backend stored.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+    await _out(ws, line)
+    held = await ws._cache.get(path)
+    store = ws.mount("/r/").vfs.accessor.store
+    assert held is not None
+    assert held == store.files[path.removeprefix("/r")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,path",
+    [
+        ("cp /r/b /r/c", "/r/c"),
+        ("split -l 1 /r/b /r/x", "/r/xaa"),
+        ("csplit -f /r/cs /r/b 2", "/r/cs00"),
+        (
+            "mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out",
+            "/r/out/b",
+        ),
+    ],
+)
+async def test_a_write_outside_the_settle_path_stays_evicted(line, path):
+    # A native copy only invalidates, and split, csplit and tar write
+    # through the dispatcher, which evicts after the op: these keep
+    # nothing until that path settles too.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+    await _out(ws, line)
+    assert await ws._cache.exists(path) is False
+
+
+@pytest.mark.asyncio
+async def test_a_silent_write_is_not_kept_under_fresh():
+    # RAM's write answers no token, so nothing could verify the bytes on a
+    # fresh mount: the entry is dropped rather than kept unverifiable.
+    ws = _caching_ram_under(ReadPolicy.FRESH)
+    await _out(ws, "echo new | tee /r/a")
+    assert await ws._cache.exists("/r/a") is False
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_is_still_evicted():
+    # A redirect writes through the dispatcher, which runs no cache manager
+    # and evicts after the op; it keeps nothing until that path settles.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "echo old > /r/a")
+    await _out(ws, "cat /r/a")
+    assert await ws._cache.exists("/r/a") is True
+    await _out(ws, "echo new > /r/a")
+    assert await ws._cache.exists("/r/a") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,paths",
+    [
+        ("split -l 1 /r/b /r/x", ["/r/xaa", "/r/xab", "/r/xac"]),
+        (
+            "mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out",
+            ["/r/t.tar", "/r/out/b"],
+        ),
+    ],
+)
+async def test_a_dispatched_write_inside_a_command_fills_nothing(
+    monkeypatch, line, paths
+):
+    # The dispatcher evicts what its write op wrote, so a manager inherited
+    # from the enclosing command must not settle the bytes first: a fill the
+    # eviction then drops still costs a set, and can push warm entries out.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+    filled: list[str] = []
+    real_set = ws._cache.set
+
+    async def counting_set(
+        key: str, data: bytes, **kwargs: str | int | None
+    ) -> None:
+        filled.append(key)
+        await real_set(key, data, **kwargs)
+
+    monkeypatch.setattr(ws._cache, "set", counting_set)
+    await _out(ws, line)
+    assert [key for key in filled if key in paths] == []

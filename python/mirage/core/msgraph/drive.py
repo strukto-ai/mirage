@@ -25,6 +25,7 @@ from mirage.cache.index import (
     IndexEntry,
     ResourceType,
 )
+from mirage.cache.types import WriteReceipt
 from mirage.commands.builtin.find_eval import (
     FindEntry,
     PredNode,
@@ -290,7 +291,7 @@ async def upload_session_write(
     session_url: str,
     data: bytes,
     session: SessionArg = None,
-) -> None:
+) -> dict[str, Any] | None:
     # createUploadSession defaults to "fail": without replace, overwriting
     # an existing file 409s on the final chunk.
     created = await graph_post(
@@ -302,6 +303,7 @@ async def upload_session_write(
     upload_url = created["uploadUrl"]
     total = len(data)
     start = 0
+    result: dict[str, Any] | None = None
     while start < total:
         chunk = data[start : start + UPLOAD_CHUNK]
         result = await upload_chunk(
@@ -312,6 +314,8 @@ async def upload_session_write(
             start = int(ranges[0].split("-", 1)[0])
         else:
             start += len(chunk)
+    # The chunk that completes the upload is answered with the item.
+    return result
 
 
 async def write_item(
@@ -319,26 +323,45 @@ async def write_item(
     loc: DriveLoc,
     data: bytes,
     session: SessionArg = None,
-) -> None:
+) -> WriteReceipt:
     """Replace a drive item's content, creating it and its parents.
 
     A small body is one ``PUT``; anything past the simple-upload limit
-    goes through an upload session.
+    goes through an upload session. Either way the request that completes
+    the upload is answered with the stored item, whose size and cTag can
+    differ from the body: SharePoint promotes library properties into an
+    uploaded Office file.
 
     Args:
         config (MsGraphConfig): Graph config.
         loc (DriveLoc): the item to write.
         data (bytes): its new content.
         session (SessionArg): pool or live session to ride.
+
+    Returns:
+        WriteReceipt: the stored item's size and cTag, each None when the
+        reply does not carry it.
     """
+    item: dict[str, Any] | None
     if len(data) <= SIMPLE_UPLOAD_MAX:
-        await graph_put_bytes(
+        item = await graph_put_bytes(
             config, loc.item("/content"), data, session=session
         )
     else:
-        await upload_session_write(
+        item = await upload_session_write(
             config, loc.item("/createUploadSession"), data, session=session
         )
+    return _receipt_of(item)
+
+
+def _receipt_of(item: dict[str, Any] | None) -> WriteReceipt:
+    item = item or {}
+    size = item.get("size")
+    ctag = item.get("cTag")
+    return WriteReceipt(
+        stored_size=size if isinstance(size, int) else None,
+        token=ctag if isinstance(ctag, str) and ctag else None,
+    )
 
 
 def folder_child_count(item: dict[str, Any]) -> int | None:

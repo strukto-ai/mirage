@@ -47,6 +47,7 @@ import { rmR } from './rm.ts'
 import { rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
 import { write } from './write.ts'
+import { settling } from '../../test-utils.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 
@@ -223,5 +224,18 @@ describe('dropbox exists', () => {
   it('maps 409 to false', async () => {
     vi.mocked(api.getMetadata).mockRejectedValue(NOT_FOUND)
     expect(await exists(makeAccessor(), spec('/ghost'))).toBe(false)
+  })
+})
+
+describe('dropbox write settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    vi.mocked(client.dropboxUpload).mockResolvedValue(undefined)
+    const manager = await settling(() =>
+      write(makeAccessor(), spec('/a.txt'), new TextEncoder().encode('hello')),
+    )
+    expect(manager.settled).toEqual([
+      { path: '/a.txt', data: 'hello', receipt: null, generation: 5 },
+    ])
+    expect(manager.writes).toEqual([])
   })
 })

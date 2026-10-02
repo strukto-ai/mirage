@@ -17,6 +17,7 @@ import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
+import { settling } from '@struktoai/mirage-core/test-utils'
 
 let accessor: ReturnType<typeof makeMockAccessor>
 beforeEach(() => {
@@ -56,5 +57,15 @@ describe('opfs/write.writeBytes', () => {
     await expect(
       writeBytes(accessor, spec('/a'), new TextEncoder().encode('x')),
     ).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+})
+
+describe('opfs/write.writeBytes settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    const manager = await settling(() =>
+      writeBytes(accessor, spec('/x'), new TextEncoder().encode('hi')),
+    )
+    expect(manager.settled).toEqual([{ path: '/x', data: 'hi', receipt: null, generation: 5 }])
+    expect(manager.writes).toEqual([])
   })
 })

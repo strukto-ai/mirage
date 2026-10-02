@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat, PathSpec } from '../types.ts'
+import type { WriteReceipt } from './types.ts'
 import { type ContextCall, createAsyncContext } from '../utils/async_context.ts'
 
 /**
@@ -22,7 +23,14 @@ import { type ContextCall, createAsyncContext } from '../utils/async_context.ts'
  * cache/context <- mount (which installs a manager).
  */
 export interface CacheInvalidator {
+  readonly generation: number
   invalidateAfterWrite(path: string | PathSpec): Promise<void>
+  settleAfterWrite(
+    path: PathSpec,
+    data: Uint8Array,
+    receipt: WriteReceipt | null,
+    generation: number | null,
+  ): Promise<void>
   invalidateAfterUnlink(path: string | PathSpec): Promise<void>
   invalidateSubtree(path: string | PathSpec): Promise<void>
   invalidateAncestors(path: PathSpec): Promise<void>
@@ -101,6 +109,39 @@ function liveManagers(): CacheInvalidator[] {
 export async function invalidateAfterWrite(path: string | PathSpec): Promise<void> {
   for (const manager of liveManagers()) {
     await manager.invalidateAfterWrite(path)
+  }
+}
+
+/**
+ * The active manager's generation, noted before a whole-file upload.
+ * `settleAfterWrite` compares it with the generation after the upload: any
+ * mutation of the mount in between means the written bytes may no longer
+ * be what the backend holds. Null without a manager.
+ */
+export function writeGeneration(): number | null {
+  return activeCacheManager()?.generation ?? null
+}
+
+/**
+ * Report a whole-file write and let the cache keep what it sent.
+ *
+ * Takes the place of {@link invalidateAfterWrite} for a writer that holds
+ * the file's full new bytes. Only the active manager may keep them, as only
+ * the active manager may serve them: every other live frame drops the path
+ * the way a plain write does, and on the fallback storage, where two frames
+ * disagree and none is active, every one of them drops it. No-op if no
+ * cache manager is live.
+ */
+export async function settleAfterWrite(
+  path: PathSpec,
+  data: Uint8Array,
+  receipt: WriteReceipt | null,
+  generation: number | null,
+): Promise<void> {
+  const active = activeCacheManager()
+  for (const manager of liveManagers()) {
+    if (manager === active) await manager.settleAfterWrite(path, data, receipt, generation)
+    else await manager.invalidateAfterWrite(path)
   }
 }
 

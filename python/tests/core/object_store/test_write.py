@@ -18,6 +18,7 @@ from dataclasses import replace
 import pytest
 
 from mirage.cache.context import push_cache_manager
+from mirage.cache.types import WriteReceipt
 from mirage.core.object_store.write import (
     make_create,
     make_mkdir,
@@ -31,6 +32,7 @@ from tests.core.object_store.conftest import (
     make_driver,
     spec,
 )
+from tests.fixtures.settle import Settled
 
 
 def _managed(coro):
@@ -51,7 +53,8 @@ def test_write_puts_and_invalidates_every_ancestor_listing(accessor):
         )
     )
     assert store.objects == {"a/b/c.txt": b"hi"}
-    assert manager.writes == ["/a/b/c.txt"]
+    assert [s.path for s in manager.settled] == ["/mnt/a/b/c.txt"]
+    assert manager.writes == []
     assert manager.ancestors == ["/mnt/a/b/c.txt"]
 
 
@@ -60,7 +63,8 @@ def test_write_at_mount_root_invalidates_only_itself(accessor):
     manager = _managed(
         make_write_bytes(make_driver(store))(accessor, spec("/c.txt"), b"x")
     )
-    assert manager.writes == ["/c.txt"]
+    assert [s.path for s in manager.settled] == ["/mnt/c.txt"]
+    assert manager.writes == []
 
 
 def test_create_puts_empty_and_invalidates_ancestors(accessor):
@@ -247,3 +251,60 @@ def test_mkdir_records_nothing(accessor):
         make_mkdir(make_driver(store))(accessor, spec("/a/b"), True)
     )
     assert records == []
+
+
+# ── a write settles with the token its put answered ─────────────────────
+
+
+def test_write_settles_with_the_puts_token_and_no_size(accessor):
+    # The size a put reports is the request's length, not one the store
+    # read back, so the receipt carries the token alone.
+    manager = _managed(
+        make_write_bytes(make_driver(store := FakeStore()))(
+            accessor, spec("/a/b/c.txt"), b"hi"
+        )
+    )
+    assert store.objects == {"a/b/c.txt": b"hi"}
+    assert manager.settled == [
+        Settled("/mnt/a/b/c.txt", b"hi", WriteReceipt(None, "fp-a/b/c.txt"), 5)
+    ]
+
+
+def test_a_put_that_answers_nothing_settles_a_silent_receipt(accessor):
+    driver = replace(make_driver(FakeStore()), put=_put_silently)
+    manager = _managed(
+        make_write_bytes(driver)(accessor, spec("/a/b/c.txt"), b"hi")
+    )
+    assert manager.settled == [
+        Settled("/mnt/a/b/c.txt", b"hi", WriteReceipt(None, None), 5)
+    ]
+
+
+def test_create_and_truncate_still_only_invalidate(accessor):
+    manager = _managed(
+        make_create(make_driver(FakeStore()))(accessor, spec("/a/c.txt"))
+    )
+    assert manager.settled == []
+    assert manager.writes == ["/a/c.txt"]
+
+
+def test_a_change_during_the_put_reaches_settle(accessor):
+    # The generation is noted before the put, so a change of the mount that
+    # lands while the put runs makes settle drop the bytes.
+    manager = FakeManager()
+    base = make_driver(FakeStore())
+
+    async def moving_put(conn: FakeStore, key: str, data: bytes):
+        manager.generation = 6
+        return await base.put(conn, key, data)
+
+    prev_manager = push_cache_manager(manager)
+    try:
+        asyncio.run(
+            make_write_bytes(replace(base, put=moving_put))(
+                accessor, spec("/a/c.txt"), b"hi"
+            )
+        )
+    finally:
+        push_cache_manager(prev_manager)
+    assert [s.generation for s in manager.settled] == [5]

@@ -15,7 +15,7 @@
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import evict_after, invalidate_subtree
 from mirage.core.box.api import (
     copy_file,
     copy_folder,
@@ -71,8 +71,22 @@ async def _copy_into(
 
 
 async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
+    """Copy a file or folder server-side.
+
+    The whole destination subtree is invalidated, under its own path: a
+    folder copy that merges into an existing folder replaces children
+    below ``dst`` whose bytes were cached under their own keys. A failed
+    copy invalidates too, since a merge may have landed some children
+    before one failed.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        src (PathSpec): the item to copy.
+        dst (PathSpec): where the copy lands.
+    """
     item = await resolve_item(accessor, path_parts(src))
     if item is None:
         raise enoent(src.virtual)
-    await _copy_into(accessor, item, dst)
-    await invalidate_after_write(dst)
+    await evict_after(
+        _copy_into(accessor, item, dst), lambda _: invalidate_subtree(dst)
+    )

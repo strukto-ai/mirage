@@ -15,6 +15,7 @@
 import { enotsup } from '../../utils/errors.ts'
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { WriteReceipt } from '../../cache/types.ts'
 import { buildTree, emitStartPath, keep, type PredNode } from '../../commands/builtin/find_eval.ts'
 import {
   record,
@@ -279,16 +280,17 @@ async function uploadSessionWrite(
   config: MsGraphConfigResolved,
   sessionUrl: string,
   data: Uint8Array,
-): Promise<void> {
+): Promise<Record<string, unknown> | null> {
   const session = await graphPost(config, sessionUrl, {
     item: { '@microsoft.graph.conflictBehavior': 'replace' },
   })
   const uploadUrl = asString(session.uploadUrl)
   if (uploadUrl === null) throw new GraphError(502, 'missingUploadUrl', sessionUrl)
   let start = 0
+  let result: Record<string, unknown> | null = null
   while (start < data.length) {
     const chunk = data.slice(start, start + UPLOAD_CHUNK)
-    const result = await uploadChunk(config, uploadUrl, chunk, start, data.length)
+    result = await uploadChunk(config, uploadUrl, chunk, start, data.length)
     const ranges = result.nextExpectedRanges
     if (Array.isArray(ranges) && typeof ranges[0] === 'string') {
       start = Number.parseInt(ranges[0].split('-', 1)[0] ?? '', 10)
@@ -296,17 +298,37 @@ async function uploadSessionWrite(
       start += chunk.length
     }
   }
+  // The chunk that completes the upload is answered with the item.
+  return result
 }
 
+/**
+ * Replace a drive item's content, creating it and its parents.
+ *
+ * A small body is one PUT; anything past the simple-upload limit goes through
+ * an upload session. Either way the request that completes the upload is
+ * answered with the stored item, whose size and cTag can differ from the
+ * body: SharePoint promotes library properties into an uploaded Office file.
+ * Returns that size and cTag, each null when the reply does not carry it.
+ */
 export async function writeItem(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
   data: Uint8Array,
-): Promise<void> {
-  if (data.length <= SIMPLE_UPLOAD_MAX) {
-    await graphPutBytes(config, loc.item('/content'), data)
-  } else {
-    await uploadSessionWrite(config, loc.item('/createUploadSession'), data)
+): Promise<WriteReceipt> {
+  const item =
+    data.length <= SIMPLE_UPLOAD_MAX
+      ? await graphPutBytes(config, loc.item('/content'), data)
+      : await uploadSessionWrite(config, loc.item('/createUploadSession'), data)
+  return receiptOf(item)
+}
+
+function receiptOf(item: Record<string, unknown> | null): WriteReceipt {
+  const size = item?.size
+  const ctag = asString(item?.cTag)
+  return {
+    storedSize: typeof size === 'number' && Number.isInteger(size) ? size : null,
+    token: ctag === '' ? null : ctag,
   }
 }
 

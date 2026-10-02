@@ -13,7 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
+from mirage.cache.context import (
+    invalidate_ancestors,
+    settle_after_write,
+    write_generation,
+)
 from mirage.core.dropbox.client import dropbox_upload
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.observe.context import record, start_op
@@ -32,9 +36,10 @@ async def write_bytes(
         data (bytes): file content.
     """
     timer = start_op()
+    generation = write_generation()
     await dropbox_upload(
         accessor.token_manager, dropbox_path_of(accessor, path), data
     )
     record("write", path.virtual, "dropbox", len(data), timer)
-    await invalidate_after_write(path)
+    await settle_after_write(path, data, None, generation)
     await invalidate_ancestors(path)

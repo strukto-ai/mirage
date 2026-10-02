@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { writeBytes } from './write.ts'
+import { settling } from '@struktoai/mirage-core/test-utils'
 
 let root: string
 let accessor: DiskAccessor
@@ -63,5 +64,15 @@ describe('core/disk/write', () => {
     await expect(
       writeBytes(accessor, spec('/plain/c.txt'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
+})
+
+describe('core/disk/write settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    const manager = await settling(() =>
+      writeBytes(accessor, spec('/x.txt'), new TextEncoder().encode('hi')),
+    )
+    expect(manager.settled).toEqual([{ path: '/x.txt', data: 'hi', receipt: null, generation: 5 }])
+    expect(manager.writes).toEqual([])
   })
 })

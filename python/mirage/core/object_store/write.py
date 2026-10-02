@@ -12,8 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
+from mirage.cache.context import (
+    invalidate_after_write,
+    invalidate_ancestors,
+    settle_after_write,
+    write_generation,
+)
 from mirage.cache.index import NULL_INDEX
+from mirage.cache.types import WriteReceipt
 from mirage.core.object_store.driver import (
     A,
     C,
@@ -86,16 +92,25 @@ def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
         key = kp.apply(driver.key_prefix_of(accessor), path)
         timer = start_op()
         async with driver.connect(accessor) as conn:
+            generation = write_generation()
             meta = await _put(driver, conn, key, data, path_spec)
+        token = meta.fingerprint if meta else None
         record(
             "write",
             path_spec.virtual,
             driver.vfs,
             len(data),
             timer,
-            fingerprint=meta.fingerprint if meta else None,
+            fingerprint=token,
         )
-        await invalidate_after_write(path_spec)
+        # The size a put reports is the request's length, not one the
+        # store read back, so only the token vouches for these bytes.
+        await settle_after_write(
+            path_spec,
+            data,
+            WriteReceipt(stored_size=None, token=token),
+            generation,
+        )
         # A put materializes every missing level of the key at once, so
         # the listings above the immediate parent gained entries too.
         await invalidate_ancestors(path_spec)

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 
 import pytest
 
@@ -25,7 +26,8 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.view import IndexView
 from mirage.cache.manager import CacheManager
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.cache.types import WriteReceipt
+from mirage.types import FileStat, FileType, PathSpec, ReadPolicy
 from mirage.utils.key_prefix import mount_key
 
 
@@ -441,6 +443,33 @@ def test_invalidate_subtree_drops_nested_bodies_and_listings():
     assert parent is False
 
 
+async def _subtree_over_a_nested_mount_case() -> tuple[bool, bool]:
+    cache, index = _stores()
+    await cache.set("/data/chan/day/chat.jsonl", b"one\n")
+    await cache.set("/data/chan/day/inner/kept.txt", b"kept")
+    manager = CacheManager(
+        cache,
+        index,
+        "/data/",
+        True,
+        excluded_prefixes=lambda: ("/data/chan/day/inner",),
+    )
+    await manager.invalidate_subtree(PathSpec.from_str_path("/chan/day"))
+    return (
+        await cache.exists("/data/chan/day/chat.jsonl"),
+        await cache.exists("/data/chan/day/inner/kept.txt"),
+    )
+
+
+def test_invalidate_subtree_leaves_a_nested_mounts_bodies():
+    # A mount nested under the subtree has its own backend, which nothing
+    # done to this mount changes: dropping its bodies only forced a
+    # re-download of every file it had cached.
+    own, nested_mount = _run(_subtree_over_a_nested_mount_case())
+    assert own is False
+    assert nested_mount is True
+
+
 async def _write_leaves_subtree_case() -> bool:
     cache, index = _stores()
     entry = IndexEntry(id="1", name="f", resource_type="file")
@@ -791,3 +820,237 @@ async def test_one_large_command_does_not_rescan_its_probes_on_every_insert(
             )
         assert len(manager._probed) == 64
     assert len(scans) <= 5
+
+
+async def _settled(
+    receipt: WriteReceipt | None,
+    policy: ReadPolicy = ReadPolicy.BOUNDED,
+    data: bytes = b"new\n",
+) -> RAMFileCacheStore:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"old\n", fingerprint="t-old", ttl=600)
+    manager = CacheManager(cache, index, "/data/", True, read_policy=policy)
+    generation = manager.generation
+    await manager.settle_after_write(_spec(), data, receipt, generation)
+    return cache
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", [ReadPolicy.BOUNDED, ReadPolicy.FRESH])
+async def test_settle_drops_bytes_the_backend_stored_differently(policy):
+    # SharePoint property promotion: 4 bytes sent, 15 stored.
+    cache = await _settled(WriteReceipt(stored_size=15, token="t1"), policy)
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", [ReadPolicy.BOUNDED, ReadPolicy.FRESH])
+@pytest.mark.parametrize("size", [4, None])
+async def test_settle_keeps_vouched_bytes_with_the_backend_token(policy, size):
+    cache = await _settled(WriteReceipt(stored_size=size, token="t1"), policy)
+    assert await cache.get("/data/x.txt") == b"new\n"
+    assert await cache.is_fresh("/data/x.txt", "t1") is True
+    assert await cache.is_unbounded("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "receipt", [None, WriteReceipt(stored_size=None, token=None)]
+)
+async def test_settle_keeps_a_silent_write_tokenless_on_bounded(receipt):
+    cache = await _settled(receipt, ReadPolicy.BOUNDED)
+    assert await cache.get("/data/x.txt") == b"new\n"
+    assert await cache.is_fresh("/data/x.txt", "t-old") is False
+    # Bounded: the kept bytes expire with the mount's ttl like a read.
+    assert await cache.is_unbounded("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        None,
+        WriteReceipt(stored_size=None, token=None),
+        WriteReceipt(stored_size=4, token=None),
+    ],
+)
+async def test_settle_drops_a_silent_write_on_fresh(receipt):
+    cache = await _settled(receipt, ReadPolicy.FRESH)
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_settle_drops_when_another_mutation_landed_mid_upload():
+    # Two writes race on one path and the earlier upload settles last: its
+    # bytes may no longer be what the backend holds.
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    generation = manager.generation
+    await manager.invalidate_after_write(_spec("/data/y.txt"))
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), generation
+    )
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_settle_drops_without_a_started_generation():
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"old\n")
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), None
+    )
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_settle_keeps_nothing_for_a_key_the_mount_does_not_own():
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"old\n")
+    manager = CacheManager(cache, index, "/data/", True, lambda _: False)
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+    )
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_settle_leaves_a_non_caching_mount_uncached():
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", False)
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+    )
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("receipt", [WriteReceipt(4, "t1"), None])
+async def test_settle_evicts_the_parent_listing(receipt):
+    cache, index = _stores()
+    await index.set_dir(
+        "/data",
+        [("x.txt", IndexEntry(id="x", name="x.txt", resource_type="file"))],
+    )
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.settle_after_write(
+        _spec(), b"new\n", receipt, manager.generation
+    )
+    assert (await index.list_dir("/data")).entries is None
+
+
+@pytest.mark.asyncio
+async def test_settle_retires_a_read_that_began_before_the_keep():
+    # A read_through that fetched the pre-write bytes and lands after the
+    # keep must not put them back over what the write kept.
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    fetched = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fetch() -> bytes:
+        fetched.set()
+        await release.wait()
+        return b"old\n"
+
+    reader = asyncio.create_task(manager.read_through(_spec(), fetch))
+    await fetched.wait()
+    generation = manager.generation
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), generation
+    )
+    release.set()
+    assert await reader == b"old\n"
+    assert await cache.get("/data/x.txt") == b"new\n"
+
+
+@pytest.mark.asyncio
+async def test_settle_retires_the_commands_probe_answers():
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    async with command_scope():
+        manager.note_probed(_spec(), _probed())
+        await manager.settle_after_write(
+            _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+        )
+        assert manager.probed_stat(_spec()) is None
+
+
+@pytest.mark.asyncio
+async def test_settle_retires_probe_answers_on_a_non_caching_mount():
+    # A probe answer is remembered whether or not the mount caches bytes;
+    # a write must still retire it, or a later stat in the same command
+    # serves the pre-write size.
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", False)
+    async with command_scope():
+        manager.note_probed(_spec(), _probed())
+        await manager.settle_after_write(
+            _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+        )
+        assert manager.probed_stat(_spec()) is None
+
+
+@pytest.mark.asyncio
+async def test_settle_keeps_nothing_bigger_than_the_cache():
+    # A write larger than the whole cache would evict every warm entry,
+    # then itself: it is dropped instead, and the warm entry survives.
+    cache, index = RAMFileCacheStore(cache_limit=10), RAMIndexCacheStore(600)
+    await cache.set("/data/w.txt", b"abc")
+    await cache.set("/data/x.txt", b"o")
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.settle_after_write(
+        _spec(), b"x" * 11, WriteReceipt(11, "t1"), manager.generation
+    )
+    assert await cache.exists("/data/x.txt") is False
+    assert await cache.get("/data/w.txt") == b"abc"
+
+
+@pytest.mark.asyncio
+async def test_settle_keeps_a_write_exactly_the_size_of_the_cache():
+    cache, index = RAMFileCacheStore(cache_limit=10), RAMIndexCacheStore(600)
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.settle_after_write(
+        _spec(), b"x" * 10, WriteReceipt(10, "t1"), manager.generation
+    )
+    assert await cache.get("/data/x.txt") == b"x" * 10
+
+
+class _RefusingCache(RAMFileCacheStore):
+    async def set(
+        self,
+        key: str,
+        data: bytes,
+        fingerprint: str | None = None,
+        ttl: int | None = None,
+    ) -> None:
+        raise ConnectionError("cache store refused the fill")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_fill_does_not_fail_the_write(caplog):
+    # The upload already landed: like a background drain that fails, the
+    # fill is skipped with a warning, and the parent listing still goes.
+    cache, index = _RefusingCache(), RAMIndexCacheStore(ttl=600)
+    await RAMFileCacheStore.set(cache, "/data/x.txt", b"old\n")
+    await index.set_dir(
+        "/data",
+        [("x.txt", IndexEntry(id="x", name="x.txt", resource_type="file"))],
+    )
+    manager = CacheManager(cache, index, "/data/", True)
+    with caplog.at_level(logging.WARNING, logger="mirage.cache.manager"):
+        await manager.settle_after_write(
+            _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+        )
+    assert await cache.exists("/data/x.txt") is False
+    assert (await index.list_dir("/data")).entries is None
+    assert "/data/x.txt" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_settle_treats_an_empty_token_as_none():
+    # An empty token vouches for nothing: on a fresh mount the bytes are
+    # dropped rather than kept under a fingerprint of "".
+    cache = await _settled(WriteReceipt(None, ""), ReadPolicy.FRESH)
+    assert await cache.exists("/data/x.txt") is False

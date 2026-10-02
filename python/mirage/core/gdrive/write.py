@@ -15,7 +15,7 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import settle_after_write, write_generation
 from mirage.core.gdrive.resolve import (
     eacces_on_denied,
     resolve_key,
@@ -37,6 +37,9 @@ async def write_bytes(
         raise eisdir(virtual)
     timer = start_op()
     token_manager = accessor.token_manager
+    # Noted before the lookup: a node it resolves can move before the
+    # upload, and a change in between must make settle drop the bytes.
+    generation = write_generation()
     node = await resolve_key(accessor, key)
     if node is not None and node.is_folder:
         raise eisdir(virtual)
@@ -52,4 +55,4 @@ async def write_bytes(
             token_manager, posixpath.basename(key), parent_id, data
         )
     record("write", virtual, "gdrive", len(data), timer)
-    await invalidate_after_write(path)
+    await settle_after_write(path, data, None, generation)

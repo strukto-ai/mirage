@@ -364,7 +364,6 @@ async function runInPlace(
     stdout === '' ? null : encodeText(stdout),
     new IOResult({
       writes,
-      cache: edited,
       exitCode,
       stderr: stderr === '' ? null : encodeText(stderr),
     }),

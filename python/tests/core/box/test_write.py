@@ -13,11 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.core.box.client import BoxApiError
+from mirage.cache.context import push_cache_manager
+from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.manager import CacheManager
+from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.core.box.copy import copy
 from mirage.core.box.mkdir import mkdir
 from mirage.core.box.rename import rename
@@ -26,6 +31,7 @@ from mirage.core.box.unlink import unlink
 from mirage.core.box.write import write_bytes
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from tests.fixtures.settle import Settled, settling
 
 _TREE = {
     "0": [
@@ -64,10 +70,6 @@ async def test_write_new_file_uploads_under_parent(root_accessor):
         patch(
             "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
         ) as up,
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         await write_bytes(root_accessor, _spec("/data/new.txt"), b"hello")
     up.assert_awaited_once_with(
@@ -82,10 +84,6 @@ async def test_write_existing_file_uploads_version(root_accessor):
         patch(
             "mirage.core.box.write.upload_file_version", new_callable=AsyncMock
         ) as ver,
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         await write_bytes(root_accessor, _spec("/data/a.txt"), b"OVER")
     ver.assert_awaited_once_with(
@@ -97,10 +95,6 @@ async def test_write_existing_file_uploads_version(root_accessor):
 async def test_write_missing_parent_raises(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(FileNotFoundError):
             await write_bytes(root_accessor, _spec("/data/ghost/x.txt"), b"x")
@@ -354,7 +348,7 @@ async def test_copy_file_onto_folder_raises_isdir(root_accessor):
             "mirage.core.box.copy.delete_file", new_callable=AsyncMock
         ) as df,
         patch(
-            "mirage.core.box.copy.invalidate_after_write",
+            "mirage.core.box.copy.invalidate_subtree",
             new_callable=AsyncMock,
         ),
     ):
@@ -376,7 +370,7 @@ async def test_copy_folder_onto_file_raises_notdir(root_accessor):
             "mirage.core.box.copy.delete_file", new_callable=AsyncMock
         ) as df,
         patch(
-            "mirage.core.box.copy.invalidate_after_write",
+            "mirage.core.box.copy.invalidate_subtree",
             new_callable=AsyncMock,
         ),
     ):
@@ -392,7 +386,7 @@ async def test_copy_file(root_accessor):
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
         patch("mirage.core.box.copy.copy_file", new_callable=AsyncMock) as cf,
         patch(
-            "mirage.core.box.copy.invalidate_after_write",
+            "mirage.core.box.copy.invalidate_subtree",
             new_callable=AsyncMock,
         ),
     ):
@@ -424,12 +418,127 @@ async def test_write_records_the_virtual_path(root_accessor):
             patch(
                 "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
             ),
-            patch(
-                "mirage.core.box.write.invalidate_after_write",
-                new_callable=AsyncMock,
-            ),
         ):
             await write_bytes(root_accessor, spec, b"hello")
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "target,upload",
+    [
+        ("/data/new.txt", "upload_new_file"),
+        ("/data/a.txt", "upload_file_version"),
+    ],
+)
+async def test_write_settles_its_bytes_without_a_receipt(
+    root_accessor, target, upload
+):
+    with (
+        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch(f"mirage.core.box.write.{upload}", new_callable=AsyncMock),
+        settling() as manager,
+    ):
+        await write_bytes(root_accessor, _spec(target), b"hello")
+    assert manager.settled == [Settled(target, b"hello", None, 5)]
+    assert manager.writes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["/data/new.txt", "/data/a.txt"])
+async def test_a_change_during_the_lookup_reaches_settle(
+    root_accessor, target
+):
+    # The item id a lookup resolves can move (a concurrent mv) before the
+    # upload: the generation is noted before the lookup, so a change that
+    # lands during it makes settle drop the bytes.
+    with settling() as manager:
+
+        async def moving_list(_tm, folder_id, limit=1000):
+            manager.generation = 6
+            return _TREE.get(folder_id, [])
+
+        with (
+            patch(
+                "mirage.core.box.resolve.list_folder_items", new=moving_list
+            ),
+            patch(
+                "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
+            ),
+            patch(
+                "mirage.core.box.write.upload_file_version",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await write_bytes(root_accessor, _spec(target), b"hello")
+    assert [s.generation for s in manager.settled] == [5]
+
+
+_MERGE_TREE = {
+    "0": [{"id": "100", "name": "data", "type": "folder"}],
+    "100": [
+        {"id": "300", "name": "sub", "type": "folder"},
+        {"id": "400", "name": "dst", "type": "folder"},
+    ],
+    "300": [{"id": "310", "name": "x.txt", "type": "file", "size": 3}],
+    "400": [{"id": "410", "name": "x.txt", "type": "file", "size": 3}],
+}
+
+
+async def _merge_list(_tm, folder_id, limit=1000):
+    return _MERGE_TREE.get(folder_id, [])
+
+
+async def _merge_case(
+    root_accessor, copy_file, cache: RAMFileCacheStore
+) -> None:
+    await cache.set("/data/dst/x.txt", b"old")
+    manager = CacheManager(cache, RAMIndexCacheStore(ttl=600), "/", True)
+    prev_manager = push_cache_manager(manager)
+    try:
+        with (
+            patch(
+                "mirage.core.box.resolve.list_folder_items", new=_merge_list
+            ),
+            patch("mirage.core.box.copy.list_folder_items", new=_merge_list),
+            patch("mirage.core.box.copy.delete_file", new_callable=AsyncMock),
+            patch("mirage.core.box.copy.copy_file", new=copy_file),
+        ):
+            await copy(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
+    finally:
+        push_cache_manager(prev_manager)
+
+
+@pytest.mark.asyncio
+async def test_copy_folder_merge_evicts_a_replaced_childs_bytes(root_accessor):
+    # Merging into an existing folder replaces children the caller never
+    # named, and their bytes were cached under their own keys: evicting
+    # only the folder left `cat /data/dst/x.txt` serving the old file. A
+    # read during the merge refills the child, so the eviction must follow
+    # the copy.
+    cache = RAMFileCacheStore()
+
+    async def racing_read(
+        _tm: BoxTokenManager,
+        _file_id: str,
+        _parent_id: str,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        await cache.set("/data/dst/x.txt", b"old")
+        return {}
+
+    await _merge_case(root_accessor, AsyncMock(side_effect=racing_read), cache)
+    assert await cache.exists("/data/dst/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_copy_folder_merge_that_fails_evicts_too(root_accessor):
+    # The replaced child was deleted before the copy failed, so its cached
+    # bytes are stale either way.
+    failing = AsyncMock(side_effect=OSError("copy failed"))
+    cache = RAMFileCacheStore()
+    with pytest.raises(OSError):
+        await _merge_case(root_accessor, failing, cache)
+    assert await cache.exists("/data/dst/x.txt") is False

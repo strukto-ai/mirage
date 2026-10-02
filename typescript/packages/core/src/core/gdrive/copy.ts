@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { evictAfter, invalidateSubtree } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent, enotdir } from '../../utils/errors.ts'
 import type { TokenManager } from '../google/client.ts'
@@ -41,10 +41,12 @@ async function copyChildren(tm: TokenManager, src: DriveNode, dstFolderId: strin
   }
 }
 
-async function copyImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+async function copyNode(
+  accessor: GDriveAccessor,
+  srcNode: DriveNode,
+  dst: PathSpec,
+): Promise<void> {
   const tm = accessor.tokenManager
-  const srcNode = await resolveKey(accessor, src.vfsPath)
-  if (srcNode === null) throw enoent(src)
   let dstNode = await resolveKey(accessor, dst.vfsPath)
   const dstKey = dst.vfsPath
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
@@ -69,7 +71,29 @@ async function copyImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec):
     const [dstParentId] = await resolveParent(accessor, dst)
     await copyFile(tm, srcNode.id, driveTargetName(basename, srcNode), dstParentId)
   }
-  await invalidateAfterWrite(dst)
+}
+
+/**
+ * Copy a file or folder server-side.
+ *
+ * The whole destination subtree is invalidated, under its own path: a folder
+ * copy that merges into an existing folder lands children below `dst` beside
+ * any of the same name (Drive keeps both), so a path whose bytes were cached
+ * under its own key can now name another file. A failed copy invalidates
+ * too, since a merge may have landed some children before one failed.
+ *
+ * Args:
+ *   accessor: Google Drive accessor.
+ *   src: the item to copy.
+ *   dst: where the copy lands.
+ */
+async function copyImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+  const srcNode = await resolveKey(accessor, src.vfsPath)
+  if (srcNode === null) throw enoent(src)
+  await evictAfter(
+    () => copyNode(accessor, srcNode, dst),
+    () => invalidateSubtree(dst),
+  )
 }
 
 export const copy = eaccesOnDenied(copyImpl)

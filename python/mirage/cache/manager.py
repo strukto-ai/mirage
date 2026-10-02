@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -23,10 +24,12 @@ from mirage.cache.index.constants import LISTING_TRUST_WINDOW, PROBED_LIMIT
 from mirage.cache.index.scope import command_started, tick
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
+from mirage.cache.types import WriteReceipt
 from mirage.observe.context import active_recorder
-from mirage.observe.record import READ_FINGERPRINT_OPS
-from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec
+from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec, ReadPolicy
 from mirage.utils.key_prefix import mount_key
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> float:
@@ -71,6 +74,7 @@ class CacheManager:
         on_gone: Callable[[list[Evicted]], Awaitable[None]] | None = None,
         may_serve_listing: Callable[[str], Awaitable[bool]] | None = None,
         excluded_prefixes: Callable[[], tuple[str, ...]] = tuple,
+        read_policy: ReadPolicy = ReadPolicy.BOUNDED,
     ) -> None:
         """Args:
         file_cache (FileCacheMixin | None): Workspace file cache
@@ -98,6 +102,8 @@ class CacheManager:
             serving a cached listing; None serves them all.
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
+        read_policy (ReadPolicy): the mount's read policy; a write the
+            backend did not vouch for is kept under ``bounded`` only.
         """
         self._file_cache = file_cache
         self._index = index
@@ -106,6 +112,7 @@ class CacheManager:
         self._owns_path = owns_path
         self._may_serve_cached = may_serve_cached
         self._read_ttl = read_ttl
+        self._read_policy = read_policy
         self._on_gone = on_gone
         self._excluded_prefixes = excluded_prefixes
         self._may_serve_listing = may_serve_listing
@@ -424,9 +431,7 @@ class CacheManager:
                     records = (
                         recorder.sink[start:] if recorder is not None else None
                     )
-                    fingerprint = latest_fingerprint(
-                        records, key, READ_FINGERPRINT_OPS, len(data)
-                    )
+                    fingerprint = latest_fingerprint(records, key)
                     await cache.set(
                         key, data, fingerprint=fingerprint, ttl=self._read_ttl
                     )
@@ -464,6 +469,77 @@ class CacheManager:
             await self._file_cache.remove(key)
         await self._invalidate_parent(key)
 
+    async def settle_after_write(
+        self,
+        path: PathSpec,
+        data: bytes,
+        receipt: WriteReceipt | None,
+        generation: int | None,
+    ) -> None:
+        """Keep or drop the bytes a whole-file write just sent.
+
+        Decided once, at the write, under the mutation lock: any mutation of
+        this mount through this manager since the upload started drops (a
+        change at the backend, through another mount or workspace, or by
+        another process is not seen), a stored size other than the bytes sent
+        drops (SharePoint promotes properties into an uploaded Office file), a
+        token keeps the bytes with it, and a reply that says nothing keeps them
+        only under ``bounded``, where nothing would verify them anyway. Bytes
+        larger than the store's ``cache_limit`` are dropped too: on the RAM
+        cache they would evict every warm entry and then themselves. Keep or
+        drop, in-flight reads and probe answers are retired, so a read that
+        began before the write cannot stamp its bytes over these. The write has
+        landed by now, so a fill the cache store refuses is logged and skipped,
+        as a background drain's is, never raised.
+
+        Args:
+            path (PathSpec): Path that was written; only ``virtual`` is
+                read.
+            data (bytes): the bytes the write sent.
+            receipt (WriteReceipt | None): the upload reply's account.
+            generation (int | None): ``generation`` before the upload.
+        """
+        key = self._cache_key(path)
+        if self._caches_reads and self._file_cache is not None:
+            async with mutation_lock(self._file_cache):
+                token = (
+                    (receipt.token or None) if receipt is not None else None
+                )
+                keep = (
+                    generation == self._read_generation
+                    and self._owns_path(key)
+                    and len(data) <= self._file_cache.cache_limit
+                    and self._vouched(receipt, token, len(data))
+                )
+                self._retire()
+                # Removed first even on a keep: removal disowns a drain
+                # still filling the old bytes in the background.
+                await self._file_cache.remove(key)
+                if keep:
+                    try:
+                        await self._file_cache.set(
+                            key,
+                            data,
+                            fingerprint=token,
+                            ttl=self._read_ttl,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "cache fill after a write failed for %s",
+                            key,
+                            exc_info=True,
+                        )
+        else:
+            self._retire()
+        await self._invalidate_parent(key)
+
+    def _vouched(
+        self, receipt: WriteReceipt | None, token: str | None, sent: int
+    ) -> bool:
+        if receipt is not None and receipt.stored_size not in (None, sent):
+            return False
+        return token is not None or self._read_policy == ReadPolicy.BOUNDED
+
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         """Invalidate caches after a deletion of ``path``.
 
@@ -488,7 +564,8 @@ class CacheManager:
         the path and its parent leaves stale entries one level down.
         The cheaper ``invalidate_after_write`` cannot be widened to do
         this, because it also runs on every ordinary write, where a
-        file has no subtree to drop.
+        file has no subtree to drop. A mount nested below keeps its
+        bodies: nothing done to this mount changes its backend.
 
         Args:
             path (PathSpec): Root of the stale subtree; only ``virtual``
@@ -498,7 +575,9 @@ class CacheManager:
         key = self._cache_key(path)
         if self._caches_reads and self._file_cache is not None:
             await self._file_cache.remove(key)
-            await self._file_cache.evict_prefix(key.rstrip("/") + "/")
+            await self._file_cache.evict_prefix(
+                key.rstrip("/") + "/", excluded=self._excluded_prefixes()
+            )
         await self._index.invalidate_prefix(key)
         await self._evict_dir(key)
         await self._invalidate_parent(key)

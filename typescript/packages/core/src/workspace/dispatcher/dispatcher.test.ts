@@ -17,9 +17,16 @@ import { materialize } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
+import type { RAMAccessor } from '../../accessor/ram.ts'
+import { activeCacheManager } from '../../cache/context.ts'
+import { CommandTimeoutError } from '../../commands/errors.ts'
+import { settling } from '../../test-utils.ts'
+import { IO as RAM_IO } from '../../commands/builtin/ram/io.ts'
+import { writeBytes as ramWrite } from '../../core/ram/write.ts'
+import { makeGenericOps } from '../../ops/generic/factory.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
+import { FileStat, FileType, Limit, MountMode, PathSpec, VFSName } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -999,6 +1006,124 @@ describe('a marked op is judged on the paths the door reaches', () => {
       expect(new TextDecoder().decode(read as Uint8Array)).toBe('s\n')
     } finally {
       spy.mockRestore()
+      await ws.close()
+    }
+  })
+})
+
+// RAM whose append and truncate are the generic read-modify-write emulations
+// and whose create writes an empty file: the shape of every backend without
+// those natively.
+function emulatedOps(
+  write: (accessor: RAMAccessor, path: PathSpec, data: Uint8Array) => Promise<void> = ramWrite,
+): RegisteredOp[] {
+  const table = {
+    ...RAM_IO,
+    write,
+    create: (accessor: RAMAccessor, path: PathSpec) => ramWrite(accessor, path, new Uint8Array()),
+  }
+  delete table.append
+  delete table.truncate
+  return makeGenericOps(VFSName.RAM, table, { emulateTruncate: true })
+}
+
+class EmulatedRAM extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    return emulatedOps()
+  }
+}
+
+class FailingWriteRAM extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    return emulatedOps(async (accessor, path, data) => {
+      await ramWrite(accessor, path, data)
+      throw new Error('op timed out after the upload landed')
+    })
+  }
+}
+
+class StallingWriteRAM extends RAMVFS {
+  release: () => void = () => undefined
+  private readonly gate = new Promise<void>((resolve) => {
+    this.release = resolve
+  })
+
+  override ops(): readonly RegisteredOp[] {
+    return emulatedOps(async (accessor, path, data) => {
+      await ramWrite(accessor, path, data)
+      await this.gate
+    })
+  }
+}
+
+async function cachingWorkspace(vfs: RAMVFS): Promise<Workspace> {
+  Object.assign(vfs, { cachesReads: true })
+  return new Workspace(
+    { '/r/': vfs },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+}
+
+describe('a dispatched write', () => {
+  for (const [op, args] of [
+    ['write', [ENC.encode('hi')]],
+    ['append', [ENC.encode('hi')]],
+    ['truncate', [1]],
+    ['create', []],
+  ] as const) {
+    it(`settles nothing and restores the manager: ${op}`, async () => {
+      // The dispatcher evicts what its op wrote, so the op must not settle
+      // under a manager the enclosing command left active (the emulated
+      // append and truncate, and a create that writes an empty file, all go
+      // through the core write), and the command's manager must be active
+      // again once the op returns.
+      const ws = await cachingWorkspace(new EmulatedRAM())
+      try {
+        await ws.dispatch('write', '/r/a.txt', [ENC.encode('old')])
+        const manager = await settling(async (recorder) => {
+          await ws.dispatch(op, '/r/a.txt', [...args])
+          expect(activeCacheManager()).toBe(recorder)
+        })
+        expect(manager.settled).toEqual([])
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  it('that fails after landing is evicted', async () => {
+    // Running with no manager, the op's own invalidation reaches nothing: the
+    // dispatcher must evict on failure too, or a write that landed and then
+    // timed out leaves the old bytes served.
+    const ws = await cachingWorkspace(new FailingWriteRAM())
+    try {
+      await ws.cache.set('/r/a.txt', ENC.encode('old'))
+      await expect(ws.dispatch('write', '/r/a.txt', [ENC.encode('new')])).rejects.toThrow(
+        'timed out',
+      )
+      expect(await ws.cache.exists('/r/a.txt')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('that outlives its op timeout is evicted', async () => {
+    // The deadline abandons the op rather than cancelling it, so the eviction
+    // must sit outside the race: inside it, the timeout skips it and the
+    // landed write leaves the old bytes served.
+    const vfs = new StallingWriteRAM()
+    const ws = await cachingWorkspace(vfs)
+    try {
+      for (const m of ws.registry.allMounts()) {
+        m.commandLimits.set('write', new Limit({ timeoutSeconds: 0.05 }))
+      }
+      await ws.cache.set('/r/a.txt', ENC.encode('old'))
+      await expect(ws.dispatch('write', '/r/a.txt', [ENC.encode('new')])).rejects.toBeInstanceOf(
+        CommandTimeoutError,
+      )
+      expect(await ws.cache.exists('/r/a.txt')).toBe(false)
+    } finally {
+      vfs.release()
       await ws.close()
     }
   })

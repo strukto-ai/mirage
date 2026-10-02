@@ -28,6 +28,12 @@ class RecordingInvalidator implements CacheInvalidator {
   readonly unlinks: string[] = []
   readonly subtrees: string[] = []
 
+  readonly generation = 5
+
+  settleAfterWrite(): Promise<void> {
+    return Promise.resolve()
+  }
+
   invalidateAfterWrite(path: string | PathSpec): Promise<void> {
     this.writes.push(typeof path === 'string' ? path : path.mountPath)
     return Promise.resolve()

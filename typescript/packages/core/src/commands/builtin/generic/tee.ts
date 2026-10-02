@@ -62,10 +62,9 @@ export async function teeGeneric(
  * Write one operand, returning its new content when that is known.
  *
  * `null` means "written, but the resulting bytes are not in hand" — the native
- * append case. The caller then lists the path in `writes` without listing it in
- * `cache`, which is how the cache layer is told to drop the stale entry instead
- * of caching a wrong one. That costs one read on the next access and saves
- * reading and re-uploading the whole object on this one.
+ * append case, which drops the stale entry at its mutation site instead of
+ * settling bytes it does not hold. That costs one read on the next access and
+ * saves reading and re-uploading the whole object on this one.
  */
 async function writeOne(
   path: PathSpec,
@@ -125,7 +124,6 @@ export async function writeOutput(
   append?: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<[ByteSource | null, IOResult]> {
   const writes: Record<string, ByteSource> = {}
-  const cache: string[] = []
   const errors: string[] = []
   for (const path of paths) {
     let data: Uint8Array | null
@@ -141,10 +139,9 @@ export async function writeOutput(
       continue
     }
     writes[path.mountPath] = data ?? raw
-    if (data !== null) cache.push(path.mountPath)
   }
   if (errors.length > 0) {
-    return [raw, new IOResult({ exitCode: 1, stderr: ENC.encode(errors.join('')), writes, cache })]
+    return [raw, new IOResult({ exitCode: 1, stderr: ENC.encode(errors.join('')), writes })]
   }
-  return [raw, new IOResult({ writes, cache })]
+  return [raw, new IOResult({ writes })]
 }

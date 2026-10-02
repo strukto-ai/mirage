@@ -17,6 +17,7 @@ import pytest
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.write import write_bytes
 from mirage.types import PathSpec
+from tests.fixtures.settle import Settled, settling
 
 
 @pytest.mark.asyncio
@@ -129,3 +130,15 @@ async def test_never_writes_through_a_host_symlink_out_of_the_root(tmp_path):
             b"pwned",
         )
     assert target.read_bytes() == b"original"
+
+
+@pytest.mark.asyncio
+async def test_write_settles_its_bytes_without_a_receipt(tmp_path):
+    with settling() as manager:
+        await write_bytes(
+            DiskAccessor(tmp_path),
+            PathSpec(vfs_path="new.txt", virtual="/new.txt", directory="/"),
+            b"hello",
+        )
+    assert manager.settled == [Settled("/new.txt", b"hello", None, 5)]
+    assert manager.writes == []

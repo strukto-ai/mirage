@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { activeRecords } from '../observe/context.ts'
-import { READ_FINGERPRINT_OPS } from '../observe/record.ts'
-import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
+import { DEFAULT_READ_TTL, type FileStat, PathSpec, ReadPolicy } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import type { FileCache } from './file/mixin.ts'
@@ -24,6 +23,8 @@ import { LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
 import { commandStarted, tick } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { withCacheMutation, latestFingerprint } from './file/io.ts'
+import { tokenOrNull } from './file/utils.ts'
+import type { WriteReceipt } from './types.ts'
 
 /**
  * Default read gate: trust the cache. A manager built outside a workspace
@@ -80,6 +81,9 @@ export class CacheManager {
     // cached listing; undefined serves them all.
     private readonly mayServeListing?: (folder: string) => Promise<boolean>,
     private readonly excludedPrefixes: () => readonly string[] = () => [],
+    // The mount's read policy; a write the backend did not vouch for is
+    // kept under bounded only.
+    private readonly readPolicy: ReadPolicy = ReadPolicy.BOUNDED,
   ) {
     this.fileCache = fileCache
     this.index = index
@@ -353,12 +357,7 @@ export class CacheManager {
     if (cache !== null) {
       await withCacheMutation(cache, async () => {
         if (this.ownsPath(key) && generation === this.readGeneration) {
-          const fingerprint = latestFingerprint(
-            records?.slice(start),
-            key,
-            READ_FINGERPRINT_OPS,
-            data.byteLength,
-          )
+          const fingerprint = latestFingerprint(records?.slice(start), key)
           await cache.set(key, data, { fingerprint, ttl: this.readTtl })
         }
       })
@@ -393,6 +392,62 @@ export class CacheManager {
     await this.invalidateParent(key)
   }
 
+  /**
+   * Keep or drop the bytes a whole-file write just sent.
+   *
+   * Decided once, at the write, under the mutation lock: any mutation of this
+   * mount through this manager since the upload started drops (a change at the
+   * backend, through another mount or workspace, or by another process is not
+   * seen), a stored size other than the bytes sent drops (SharePoint promotes
+   * properties into an uploaded Office file), a token keeps the bytes with it,
+   * and a reply that says nothing keeps them only under bounded, where nothing
+   * would verify them anyway. Bytes larger than the store's `cacheLimit` are
+   * dropped too: on the RAM cache they would evict every warm entry and then
+   * themselves. Keep or drop, in-flight reads and probe answers are retired, so
+   * a read that began before the write cannot stamp its bytes over these. The
+   * write has landed by now, so a fill the cache store refuses is logged and
+   * skipped, as a background drain's is, never thrown.
+   */
+  async settleAfterWrite(
+    path: PathSpec,
+    data: Uint8Array,
+    receipt: WriteReceipt | null,
+    generation: number | null,
+  ): Promise<void> {
+    const key = this.cacheKey(path)
+    const cache = this.fileCache
+    if (this.cachesReads && cache !== null) {
+      await withCacheMutation(cache, async () => {
+        const token = tokenOrNull(receipt?.token)
+        const keep =
+          generation === this.readGeneration &&
+          this.ownsPath(key) &&
+          data.byteLength <= cache.cacheLimit &&
+          this.vouched(receipt, token, data.byteLength)
+        this.retire()
+        // Removed first even on a keep: removal disowns a drain still
+        // filling the old bytes in the background.
+        await cache.remove(key)
+        if (keep) {
+          try {
+            await cache.set(key, data, { fingerprint: token, ttl: this.readTtl })
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.warn(`cache fill after a write failed for ${key}: ${msg}`)
+          }
+        }
+      })
+    } else {
+      this.retire()
+    }
+    await this.invalidateParent(key)
+  }
+
+  private vouched(receipt: WriteReceipt | null, token: string | null, sent: number): boolean {
+    if (receipt !== null && receipt.storedSize !== null && receipt.storedSize !== sent) return false
+    return token !== null || this.readPolicy === ReadPolicy.BOUNDED
+  }
+
   /** Invalidate caches after a deletion of `path`; only `virtual` is read. */
   async invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
     this.retire()
@@ -413,7 +468,8 @@ export class CacheManager {
    * independently, so evicting the path and its parent leaves stale entries
    * one level down. The cheaper `invalidateAfterWrite` cannot be widened to do
    * this, because it also runs on every ordinary write, where a file has no
-   * subtree to drop.
+   * subtree to drop. A mount nested below keeps its bodies: nothing done to
+   * this mount changes its backend.
    *
    * Mirrors Python `CacheManager.invalidate_subtree`.
    */
@@ -422,7 +478,7 @@ export class CacheManager {
     const key = this.cacheKey(path)
     if (this.cachesReads && this.fileCache !== null) {
       await this.fileCache.remove(key)
-      await this.fileCache.evictPrefix(rstripSlash(key) + '/')
+      await this.fileCache.evictPrefix(rstripSlash(key) + '/', this.excludedPrefixes())
     }
     if (this.index !== null) await this.index.invalidatePrefix(key)
     await this.evictDir(key)

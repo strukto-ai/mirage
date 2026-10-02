@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import hashlib
 
 import pytest
 
@@ -21,11 +20,7 @@ from mirage.cache.file import io as cache_io
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.io import CachableAsyncIterator, IOResult
 from mirage.io.stream import close_quietly
-from mirage.observe.record import (
-    READ_FINGERPRINT_OPS,
-    WRITE_FINGERPRINT_OPS,
-    OpRecord,
-)
+from mirage.observe.record import OpRecord
 from mirage.types import CacheFacts
 
 
@@ -71,26 +66,22 @@ async def test_apply_io_caches_reads(cache):
 
 
 @pytest.mark.asyncio
-async def test_apply_io_caches_writes(cache):
-    """Command writes a file and marks it cacheable → stored in cache."""
-    io = IOResult(
-        writes={"/data/out.txt": b"output"},
-        cache=["/data/out.txt"],
-    )
-    await cache_io.apply_io(cache, io)
-    assert await cache.get("/data/out.txt") == b"output"
-
-
-@pytest.mark.asyncio
-async def test_apply_io_reads_preferred_over_writes(cache):
-    """When both reads and writes exist for same path, read data wins."""
+@pytest.mark.parametrize("written", [b"write-data", b""])
+async def test_apply_io_leaves_a_path_written_on_the_line_to_its_writer(
+    cache, written
+):
+    # A line's IOResult carries no order between a path's read and its
+    # write, so the read may be the pre-write bytes (cat a; tee a), and
+    # the write side may be cp's empty eviction marker. The write settled
+    # the entry already; apply_io leaves it as the writer did.
+    await cache.set("/f.txt", b"settled")
     io = IOResult(
         reads={"/f.txt": b"read-data"},
-        writes={"/f.txt": b"write-data"},
+        writes={"/f.txt": written},
         cache=["/f.txt"],
     )
     await cache_io.apply_io(cache, io)
-    assert await cache.get("/f.txt") == b"read-data"
+    assert await cache.get("/f.txt") == b"settled"
 
 
 @pytest.mark.asyncio
@@ -144,19 +135,6 @@ async def test_apply_io_warm_reapply_preserves_fingerprint(cache):
     assert await cache.is_fresh("/s3/f.txt", "etag-3")
 
 
-@pytest.mark.asyncio
-async def test_apply_io_changed_data_without_record_resets_entry(cache):
-    """New bytes with no backend fingerprint still replace the entry."""
-    cold = IOResult(reads={"/s3/f.txt": b"old"}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(
-        cache, cold, records=[_read_record("/s3/f.txt", "etag-3")]
-    )
-    fresh = IOResult(writes={"/s3/f.txt": b"new"}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(cache, fresh, records=[])
-    assert await cache.get("/s3/f.txt") == b"new"
-    assert not await cache.is_fresh("/s3/f.txt", "etag-3")
-
-
 class _CountingCache(RAMFileCacheStore):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -190,29 +168,6 @@ async def test_apply_io_warm_reapply_does_not_refetch_the_blob():
     assert cache.gets == 0
     assert cache.exists_calls == 1
     assert await cache.is_fresh("/s3/f.txt", "etag-3")
-
-
-@pytest.mark.asyncio
-async def test_apply_io_write_of_identical_bytes_replaces_the_entry():
-    """A write always writes: the guard's existence check is gated on
-    the read direction, so a backend that stamps no write token cannot
-    skip the set and leave a pre-write entry standing. The bytes are
-    identical here, so only the fingerprint can show it happened -- and
-    the direction short-circuits before the cache is asked anything, so
-    the write path costs no lookup at all."""
-    cache = _CountingCache()
-    cold = IOResult(reads={"/s3/f.txt": b"hello"}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(
-        cache, cold, records=[_read_record("/s3/f.txt", "etag-3")]
-    )
-    cache.gets = 0
-    cache.exists_calls = 0
-    rewrite = IOResult(writes={"/s3/f.txt": b"hello"}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(cache, rewrite, records=[])
-    assert cache.gets == 0
-    assert cache.exists_calls == 0
-    assert await cache.get("/s3/f.txt") == b"hello"
-    assert not await cache.is_fresh("/s3/f.txt", "etag-3")
 
 
 @pytest.mark.asyncio
@@ -257,12 +212,13 @@ async def test_apply_io_drain_uses_fingerprint_recorded_during_drain():
 
 
 @pytest.mark.asyncio
-async def test_apply_io_write_without_cache_invalidates(cache):
-    """Write to a path NOT in cache list → invalidate (remove from cache)."""
-    await cache.set("/f.txt", b"old")
+async def test_apply_io_leaves_a_written_path_it_was_not_offered(cache):
+    """A mutation evicts at its mutation site, so a written path not
+    offered for caching is the writer's, not apply_io's, to drop."""
+    await cache.set("/f.txt", b"settled")
     io = IOResult(writes={"/f.txt": b"new"})
     await cache_io.apply_io(cache, io)
-    assert await cache.get("/f.txt") is None
+    assert await cache.get("/f.txt") == b"settled"
 
 
 # ── edge cases ───────────────────────────────────────────────────────────
@@ -487,77 +443,7 @@ async def test_drain_threshold_per_task_not_shared():
 
 
 @pytest.mark.asyncio
-async def test_apply_io_stamps_a_write_token_on_written_bytes(cache):
-    """A write record's token reaches a written path's entry; before
-    this, the entry fell back to a fabricated md5(content)."""
-    io = IOResult(writes={"/s3/f.txt": b"new"}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(
-        cache, io, records=[_record("write", "/s3/f.txt", "etag-put-2", 3)]
-    )
-    assert await cache.is_fresh("/s3/f.txt", "etag-put-2")
-
-
-@pytest.mark.asyncio
-async def test_a_write_token_for_other_bytes_leaves_the_entry_tokenless(cache):
-    """The byte-length guard refuses a token whose length disagrees with
-    the bytes being stored. The entry then carries no token at all, so it
-    matches neither the refused token nor a hash of its own content --
-    the fabricated md5 that used to stand in here was a valid validator
-    only on a simple-PUT S3 object, by coincidence of ETag format."""
-    io = IOResult(writes={"/s3/f.txt": b"new"}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(
-        cache, io, records=[_record("write", "/s3/f.txt", "etag-put-2", 99)]
-    )
-    assert await cache.get("/s3/f.txt") == b"new"
-    assert not await cache.is_fresh("/s3/f.txt", "etag-put-2")
-    assert not await cache.is_fresh(
-        "/s3/f.txt", hashlib.md5(b"new").hexdigest()
-    )
-
-
-@pytest.mark.asyncio
-async def test_apply_io_read_bytes_take_the_read_token_not_the_write(cache):
-    """A line that reads and writes one path caches the read's bytes --
-    apply_io prefers io.reads -- so the entry must carry the read's
-    token. Stamping the write's would make is_fresh call stale bytes
-    fresh for as long as the entry lives."""
-    io = IOResult(
-        reads={"/s3/f.txt": b"old"},
-        writes={"/s3/f.txt": b"new"},
-        cache=["/s3/f.txt"],
-    )
-    await cache_io.apply_io(
-        cache,
-        io,
-        records=[
-            _record("read", "/s3/f.txt", "etag-old-2", 3),
-            _record("write", "/s3/f.txt", "etag-new-2", 3),
-        ],
-    )
-    assert await cache.get("/s3/f.txt") == b"old"
-    assert await cache.is_fresh("/s3/f.txt", "etag-old-2")
-    assert not await cache.is_fresh("/s3/f.txt", "etag-new-2")
-
-
-@pytest.mark.asyncio
-async def test_apply_io_written_bytes_ignore_an_earlier_read_token(cache):
-    """sed -i lists the path in writes only, but emits its own pre-edit
-    read record; the entry must carry the post-edit write token."""
-    io = IOResult(writes={"/s3/f.txt": b"new"}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(
-        cache,
-        io,
-        records=[
-            _record("read", "/s3/f.txt", "etag-old-2", 3),
-            _record("write", "/s3/f.txt", "etag-new-2", 3),
-        ],
-    )
-    assert await cache.is_fresh("/s3/f.txt", "etag-new-2")
-    assert not await cache.is_fresh("/s3/f.txt", "etag-old-2")
-
-
-@pytest.mark.asyncio
-async def test_apply_io_streamed_read_takes_the_read_token(cache):
+async def test_apply_io_a_streamed_read_of_a_written_path_is_dropped(cache):
     """The stream branch is the same fork, so it answers the same way."""
     stream = CachableAsyncIterator(_one_chunk(b"old"))
     assert await stream.drain() == b"old"
@@ -574,67 +460,29 @@ async def test_apply_io_streamed_read_takes_the_read_token(cache):
             _record("write", "/s3/f.txt", "etag-new-2", 3),
         ],
     )
-    assert await cache.is_fresh("/s3/f.txt", "etag-old-2")
+    assert await cache.exists("/s3/f.txt") is False
 
 
 @pytest.mark.asyncio
-async def test_apply_io_drops_a_write_token_of_a_different_length(cache):
-    """`cp` overwrites `IOResult.writes` with an empty eviction marker
-    while the path stays in `cache` and the earlier `tee`'s record stays
-    the last one, so the token would land on bytes it does not describe.
-    A length disagreement is the proof it does not, and the entry falls
-    back to the content default rather than reading as fresh forever."""
-    io = IOResult(writes={"/s3/f.txt": b""}, cache=["/s3/f.txt"])
+async def test_apply_io_a_write_token_never_labels_read_bytes(cache):
+    """A writer settles its own bytes; a write record's token never labels
+    the bytes a read produced, even when the write record is newer."""
+    io = IOResult(reads={"/s3/f.txt": b"old"}, cache=["/s3/f.txt"])
     await cache_io.apply_io(
-        cache, io, records=[_record("write", "/s3/f.txt", "etag-tee-2", 2)]
+        cache,
+        io,
+        records=[
+            _record("read", "/s3/f.txt", "etag-2", 3),
+            _record("write", "/s3/f.txt", "etag-put-3", 3),
+        ],
     )
-    assert await cache.get("/s3/f.txt") == b""
-    assert not await cache.is_fresh("/s3/f.txt", "etag-tee-2")
+    assert await cache.is_fresh("/s3/f.txt", "etag-2")
+    assert not await cache.is_fresh("/s3/f.txt", "etag-put-3")
 
 
-@pytest.mark.parametrize("op", ["create", "truncate"])
-@pytest.mark.asyncio
-async def test_apply_io_ignores_ops_that_never_supply_bytes(cache, op):
-    """`create` and `truncate` stamp a token on their own record but
-    never hand bytes to the cache, so pairing one with another op's
-    bytes is the mispairing WRITE_FINGERPRINT_OPS exists to refuse."""
-    io = IOResult(writes={"/s3/f.txt": b"new"}, cache=["/s3/f.txt"])
-    await cache_io.apply_io(
-        cache, io, records=[_record(op, "/s3/f.txt", "etag-other-2", 3)]
-    )
-    assert not await cache.is_fresh("/s3/f.txt", "etag-other-2")
-
-
-def test_latest_fingerprint_matches_only_its_own_direction():
-    records = [_record("read", "/s3/f.txt", "etag-2", 3)]
-    assert (
-        cache_io.latest_fingerprint(
-            records, "/s3/f.txt", READ_FINGERPRINT_OPS, 3
-        )
-        == "etag-2"
-    )
-    assert (
-        cache_io.latest_fingerprint(
-            records, "/s3/f.txt", WRITE_FINGERPRINT_OPS, 3
-        )
-        is None
-    )
-
-
-def test_latest_fingerprint_ignores_an_op_in_neither_set():
+def test_latest_fingerprint_ignores_an_op_that_reads_no_bytes():
     records = [_record("readdir", "/s3/f.txt", "etag-2", 3)]
-    assert (
-        cache_io.latest_fingerprint(
-            records, "/s3/f.txt", READ_FINGERPRINT_OPS, 3
-        )
-        is None
-    )
-    assert (
-        cache_io.latest_fingerprint(
-            records, "/s3/f.txt", WRITE_FINGERPRINT_OPS, 3
-        )
-        is None
-    )
+    assert cache_io.latest_fingerprint(records, "/s3/f.txt") is None
 
 
 def test_latest_fingerprint_stops_at_a_newer_read_without_a_token():
@@ -645,27 +493,7 @@ def test_latest_fingerprint_stops_at_a_newer_read_without_a_token():
         _record("read", "/m/f.txt", "token-a", 3),
         _record("read", "/m/f.txt", None, 3),
     ]
-    assert (
-        cache_io.latest_fingerprint(
-            records, "/m/f.txt", READ_FINGERPRINT_OPS, 3
-        )
-        is None
-    )
-
-
-def test_latest_fingerprint_keeps_an_older_write_token():
-    # The write direction is unchanged: a tokenless write record does not
-    # hide the token of the write before it.
-    records = [
-        _record("write", "/m/f.txt", "put-a", 3),
-        _record("write", "/m/f.txt", None, 3),
-    ]
-    assert (
-        cache_io.latest_fingerprint(
-            records, "/m/f.txt", WRITE_FINGERPRINT_OPS, 3
-        )
-        == "put-a"
-    )
+    assert cache_io.latest_fingerprint(records, "/m/f.txt") is None
 
 
 @pytest.mark.asyncio
@@ -685,15 +513,9 @@ async def test_apply_io_leaves_bytes_from_an_unvouched_read_untokened(cache):
 
 def test_latest_fingerprint_does_not_size_check_a_read():
     """A read record's byte count tracks what was consumed, which a
-    partially drained stream makes smaller than the bytes cached, so the
-    identity rule is the write direction's alone."""
+    partially drained stream makes smaller than the bytes cached."""
     records = [_record("read", "/s3/f.txt", "etag-2", 1)]
-    assert (
-        cache_io.latest_fingerprint(
-            records, "/s3/f.txt", READ_FINGERPRINT_OPS, 9
-        )
-        == "etag-2"
-    )
+    assert cache_io.latest_fingerprint(records, "/s3/f.txt") == "etag-2"
 
 
 # ── the mount's staleness bound reaches the entry ───────────────────────

@@ -21,6 +21,7 @@ import {
   invalidateAncestors,
   invalidateSubtree,
   runWithCacheManager,
+  settleAfterWrite,
 } from './context.ts'
 import { PathSpec } from '../types.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
@@ -50,6 +51,11 @@ function fakeManager(log: string[], name: string): CacheInvalidator {
   return {
     listingTrusted: () => false,
     probedStat: () => null,
+    generation: 0,
+    settleAfterWrite(path) {
+      log.push(`${name}:settle:${path.virtual}`)
+      return Promise.resolve()
+    },
     invalidateAfterWrite(path) {
       log.push(`${name}:write:${typeof path === 'string' ? path : path.virtual}`)
       return Promise.resolve()
@@ -100,6 +106,48 @@ describe('cache invalidation on the fallback storage', () => {
     log.length = 0
     await invalidateAfterWrite('/m/x')
     expect(log).toEqual([])
+  })
+
+  it('a settled write keeps nothing while two managers disagree', async () => {
+    // With no one manager answering, a keep could land in the wrong mount;
+    // every live frame drops the path instead, as a plain write does.
+    const log: string[] = []
+    const managerA = fakeManager(log, 'a')
+    const managerB = fakeManager(log, 'b')
+    const [hold, release] = gate()
+    const long = runWithCacheManager(managerA, async () => {
+      await hold
+    })
+    const short = runWithCacheManager(managerB, async () => {
+      await settleAfterWrite(
+        PathSpec.fromStrPath('/m/x'),
+        new Uint8Array([1]),
+        { storedSize: 1, token: 't' },
+        0,
+      )
+      release()
+    })
+    await Promise.all([long, short])
+    expect(log.sort()).toEqual(['a:write:/m/x', 'b:write:/m/x'])
+  })
+
+  it('a write under a cleared frame drops instead of settling', async () => {
+    // The dispatcher clears the manager around a write it evicts itself. On
+    // the fallback storage the enclosing command's frame stays live, so no
+    // manager answers as active and the command's manager drops the path.
+    const log: string[] = []
+    const manager = fakeManager(log, 'a')
+    await runWithCacheManager(manager, () =>
+      runWithCacheManager(null, () =>
+        settleAfterWrite(
+          PathSpec.fromStrPath('/m/x'),
+          new Uint8Array([1]),
+          { storedSize: 1, token: 't' },
+          0,
+        ),
+      ),
+    )
+    expect(log).toEqual(['a:write:/m/x'])
   })
 
   it('an unlink and a subtree drop broadcast the same way', async () => {

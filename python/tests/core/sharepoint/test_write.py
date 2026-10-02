@@ -3,10 +3,12 @@ from aioresponses import CallbackResult, aioresponses
 
 import mirage.core.msgraph.drive as drive_ops
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
+from mirage.cache.types import WriteReceipt
 from mirage.core.sharepoint.write import write_bytes
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.settle import Settled, settling
 
 _BASE = "https://graph.microsoft.com/v1.0"
 _SITE_ID = "tenant.sharepoint.com,site-guid,web-guid"
@@ -121,3 +123,61 @@ async def test_write_records_the_virtual_path():
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/Documents/k.txt"]
+
+
+def _sp_path(name: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=mount_key(f"/sp/Engineering/Documents/{name}", "/sp"),
+        virtual=f"/sp/Engineering/Documents/{name}",
+        directory=f"/sp/Engineering/Documents/{name}",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply,receipt",
+    [
+        ({"id": "X", "size": 13, "cTag": "c2"}, WriteReceipt(13, "c2")),
+        ({"id": "X"}, WriteReceipt(None, None)),
+    ],
+)
+async def test_write_settles_with_the_upload_reply(reply, receipt):
+    # Property promotion rewrites an uploaded Office file: the reply's
+    # size is what the library stored, not the length of the body.
+    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/a.docx:/content"
+    with settling() as manager, aioresponses() as m:
+        m.put(url, status=201, payload=reply)
+        await write_bytes(_accessor(), _sp_path("a.docx"), b"hello")
+    assert manager.settled == [
+        Settled("/sp/Engineering/Documents/a.docx", b"hello", receipt, 5)
+    ]
+    assert manager.writes == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_upload_settles_with_the_final_chunk_reply(
+    monkeypatch,
+):
+    monkeypatch.setattr(drive_ops, "SIMPLE_UPLOAD_MAX", 4)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 4)
+    session_url = (
+        f"{_BASE}/drives/{_DRIVE_ID}/root:/big.bin:/createUploadSession"
+    )
+    upload_url = "https://upload.example/session5"
+    with settling() as manager, aioresponses() as m:
+        m.post(session_url, payload={"uploadUrl": upload_url})
+        m.put(upload_url, status=202, payload={"nextExpectedRanges": ["4-"]})
+        m.put(
+            upload_url,
+            status=201,
+            payload={"id": "X", "size": 9, "cTag": "c3"},
+        )
+        await write_bytes(_accessor(), _sp_path("big.bin"), b"abcdef")
+    assert manager.settled == [
+        Settled(
+            "/sp/Engineering/Documents/big.bin",
+            b"abcdef",
+            WriteReceipt(9, "c3"),
+            5,
+        )
+    ]

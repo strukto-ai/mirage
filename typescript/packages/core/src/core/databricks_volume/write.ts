@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { settleAfterWrite, writeGeneration } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
@@ -53,6 +53,7 @@ export async function writeBytes(
   const remotePath = backendPath(accessor.config, p)
   const timer = startOp()
   await ensureParentDirectory(accessor, remoteParent, p.virtual)
+  const generation = writeGeneration()
   try {
     await dbxFetch(accessor, 'PUT', 'files', remotePath, {
       query: { overwrite: 'true' },
@@ -64,5 +65,5 @@ export async function writeBytes(
     throw exc
   }
   record('write', p.virtual, VFSName.DATABRICKS_VOLUME, data.byteLength, timer)
-  await invalidateAfterWrite(p)
+  await settleAfterWrite(p, data, null, generation)
 }

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { settleAfterWrite, writeGeneration } from '@struktoai/mirage-core/cache/context'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -32,8 +33,10 @@ export async function writeBytes(
   } catch (err) {
     throw await openError(root, key, err, p)
   }
+  const generation = writeGeneration()
   const writable = await handle.createWritable()
   await writable.write(toWritableChunk(data))
   await writable.close()
   record('write', p.virtual, VFSName.OPFS, data.byteLength, timer)
+  await settleAfterWrite(p, data, null, generation)
 }

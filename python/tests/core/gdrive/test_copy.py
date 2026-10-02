@@ -12,9 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
+from mirage.cache.context import push_cache_manager
+from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.manager import CacheManager
 from mirage.core.gdrive.copy import copy
+from mirage.core.google.client import TokenManager
 from mirage.types import PathSpec
 
 
@@ -92,3 +100,62 @@ async def test_copy_dir_onto_file_raises(fake_drive, gdrive_accessor):
 async def test_copy_missing_src_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
         await copy(gdrive_accessor, spec("/missing.txt"), spec("/dst.txt"))
+
+
+async def _merge(gdrive_accessor, cache: RAMFileCacheStore) -> None:
+    await cache.set("/dst/f.txt", b"old")
+    manager = CacheManager(cache, RAMIndexCacheStore(ttl=600), "/", True)
+    prev_manager = push_cache_manager(manager)
+    try:
+        await copy(gdrive_accessor, spec("/src"), spec("/dst"))
+    finally:
+        push_cache_manager(prev_manager)
+
+
+@pytest.mark.asyncio
+async def test_copy_tree_merge_evicts_a_replaced_childs_bytes(
+    fake_drive, gdrive_accessor
+):
+    # Merging into an existing folder lands children the caller never
+    # named, and their bytes were cached under their own keys: evicting
+    # only the folder left `cat /dst/f.txt` serving the old file. A read
+    # during the merge refills the child, so the eviction must follow the
+    # copy.
+    src = fake_drive.folder("src")
+    fake_drive.add("f.txt", parent=src, content=b"new")
+    dst = fake_drive.folder("dst")
+    fake_drive.add("f.txt", parent=dst, content=b"old")
+    cache = RAMFileCacheStore()
+
+    async def copy_then_read(
+        token_manager: TokenManager, file_id: str, name: str, parent_id: str
+    ) -> dict[str, Any]:
+        copied = await fake_drive.copy_file(
+            token_manager, file_id, name, parent_id
+        )
+        await cache.set("/dst/f.txt", b"old")
+        return copied
+
+    with patch("mirage.core.gdrive.copy.copy_file", new=copy_then_read):
+        await _merge(gdrive_accessor, cache)
+    assert await cache.exists("/dst/f.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_copy_tree_merge_that_fails_evicts_too(
+    fake_drive, gdrive_accessor
+):
+    # A merge that fails partway may have landed some children already.
+    src = fake_drive.folder("src")
+    fake_drive.add("f.txt", parent=src, content=b"new")
+    fake_drive.folder("dst")
+    cache = RAMFileCacheStore()
+    with (
+        patch(
+            "mirage.core.gdrive.copy.copy_file",
+            new=AsyncMock(side_effect=OSError("copy failed")),
+        ),
+        pytest.raises(OSError),
+    ):
+        await _merge(gdrive_accessor, cache)
+    assert await cache.exists("/dst/f.txt") is False

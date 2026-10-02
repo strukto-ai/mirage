@@ -12,13 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
+from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from mirage.accessor.ram import RAMAccessor
+from mirage.cache.context import active_cache_manager
+from mirage.commands.builtin.ram.io import IO as RAM_IO
+from mirage.commands.errors import CommandTimeoutError
 from mirage.context import reset_current_session, set_current_session
+from mirage.core.ram.write import write_bytes as ram_write
 from mirage.errors import FsCondition, posix_errno
+from mirage.ops.generic import make_generic_ops
+from mirage.ops.registry import RegisteredOp
 from mirage.policy import (
     Action,
     CommandRule,
@@ -29,8 +39,16 @@ from mirage.policy import (
     PolicyDenied,
 )
 from mirage.policy.rule import RulePolicy
-from mirage.types import FileStat, FileType, HiddenPaths, MountMode, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    HiddenPaths,
+    Limit,
+    MountMode,
+    PathSpec,
+)
 from mirage.utils.errors import ReadOnlyError
+from mirage.utils.key_prefix import mount_key
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -39,6 +57,7 @@ from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
 from mirage.workspace.dispatcher.dispatcher import _MountChannel
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
+from tests.fixtures.settle import settling
 
 
 class DenyLocked(Policy):
@@ -1261,5 +1280,133 @@ async def test_the_mark_never_reaches_the_op(monkeypatch):
         await ws.dispatch("read", _path("/data/real/secret"), rule_gate=gate)
         assert seen and all("rule_gate" not in kw for kw in seen)
         assert gate.asked == ["/data/real/secret"]
+    finally:
+        await ws.close()
+
+
+async def _create_by_write(accessor: RAMAccessor, path: PathSpec) -> None:
+    await ram_write(accessor, path, b"")
+
+
+def _emulated_ops(
+    write: Callable[
+        [RAMAccessor, PathSpec, bytes], Awaitable[None]
+    ] = ram_write,
+) -> list[RegisteredOp]:
+    table = replace(
+        RAM_IO,
+        write=write,
+        append=None,
+        truncate=None,
+        create=_create_by_write,
+    )
+    return make_generic_ops("ram", table, emulate_truncate=True)
+
+
+class _EmulatedRAM(RAMVFS):
+    """RAM whose append and truncate are the generic read-modify-write
+    emulations, and whose create writes an empty file: the shape of every
+    backend without those natively."""
+
+    def ops(self) -> list[RegisteredOp]:
+        return _emulated_ops()
+
+
+async def _landing_then_failing_write(
+    accessor: RAMAccessor, path: PathSpec, data: bytes
+) -> None:
+    await ram_write(accessor, path, data)
+    raise TimeoutError("op timed out after the upload landed")
+
+
+class _FailingWriteRAM(RAMVFS):
+    def ops(self) -> list[RegisteredOp]:
+        return _emulated_ops(_landing_then_failing_write)
+
+
+async def _landing_then_stalling_write(
+    accessor: RAMAccessor, path: PathSpec, data: bytes
+) -> None:
+    await ram_write(accessor, path, data)
+    await asyncio.sleep(10)
+
+
+class _StallingWriteRAM(RAMVFS):
+    def ops(self) -> list[RegisteredOp]:
+        return _emulated_ops(_landing_then_stalling_write)
+
+
+def _scope(virtual: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=mount_key(virtual, "/r"),
+        virtual=virtual,
+        directory="/r",
+        resolved=True,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "op,kwargs",
+    [
+        ("write", {"data": b"hi"}),
+        ("append", {"data": b"hi"}),
+        ("truncate", {"length": 1}),
+        ("create", {}),
+    ],
+)
+async def test_a_dispatched_write_settles_nothing_and_restores_the_manager(
+    op, kwargs
+):
+    # The dispatcher evicts what its op wrote, so the op must not settle
+    # under a manager the enclosing command left active (the emulated
+    # append and truncate, and a create that writes an empty file, all go
+    # through the core write), and the command's manager must be active
+    # again once the op returns.
+    vfs = _EmulatedRAM()
+    vfs.caches_reads = True
+    ws = Workspace({"/r": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        await ws.dispatch("write", _scope("/r/a.txt"), data=b"old")
+        with settling() as manager:
+            await ws.dispatch(op, _scope("/r/a.txt"), **kwargs)
+            assert active_cache_manager() is manager
+        assert manager.settled == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_dispatched_write_that_fails_after_landing_is_evicted():
+    # Running with no manager, the op's own invalidation reaches nothing:
+    # the dispatcher must evict on failure too, or a write that landed and
+    # then timed out leaves the old bytes served.
+    vfs = _FailingWriteRAM()
+    vfs.caches_reads = True
+    ws = Workspace({"/r": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        await ws.cache.set("/r/a.txt", b"old")
+        with pytest.raises(TimeoutError):
+            await ws.dispatch("write", _scope("/r/a.txt"), data=b"new")
+        assert await ws.cache.exists("/r/a.txt") is False
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_dispatched_write_that_outlives_its_op_timeout_is_evicted():
+    # The deadline cancels the op after its write landed, and the cancel
+    # comes out as a timeout: the dispatcher must evict on that too, or the
+    # old bytes stay served.
+    vfs = _StallingWriteRAM()
+    vfs.caches_reads = True
+    ws = Workspace({"/r": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        for m in ws._registry._mounts:
+            m.command_limits["write"] = Limit(timeout_seconds=0.05)
+        await ws.cache.set("/r/a.txt", b"old")
+        with pytest.raises(CommandTimeoutError):
+            await ws.dispatch("write", _scope("/r/a.txt"), data=b"new")
+        assert await ws.cache.exists("/r/a.txt") is False
     finally:
         await ws.close()

@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiModule from './api.ts'
+import type * as ContextModule from '../../cache/context.ts'
 
 vi.mock('./api.ts', async () => {
   const actual = await vi.importActual<typeof ApiModule>('./api.ts')
@@ -31,11 +32,15 @@ vi.mock('./api.ts', async () => {
   }
 })
 
-vi.mock('../../cache/context.ts', () => {
+vi.mock('../../cache/context.ts', async () => {
+  const actual = await vi.importActual<typeof ContextModule>('../../cache/context.ts')
   return {
+    evictAfter: actual.evictAfter,
     invalidateAfterWrite: vi.fn(),
     invalidateAfterUnlink: vi.fn(),
-    invalidateSubtree: vi.fn(),
+    invalidateSubtree: vi.fn(() => Promise.resolve()),
+    settleAfterWrite: vi.fn(),
+    writeGeneration: vi.fn(() => 5),
   }
 })
 
@@ -44,6 +49,8 @@ import {
   invalidateAfterUnlink,
   invalidateAfterWrite,
   invalidateSubtree,
+  settleAfterWrite,
+  writeGeneration,
 } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
@@ -102,6 +109,46 @@ describe('box write ops', () => {
       new Uint8Array([9]),
     )
   })
+
+  for (const [target, upload] of [
+    ['/data/new.txt', 'uploadNewFile'],
+    ['/data/a.txt', 'uploadFileVersion'],
+  ] as const) {
+    it(`settles its bytes without a receipt (${upload})`, async () => {
+      vi.mocked(settleAfterWrite).mockClear()
+      vi.mocked(invalidateAfterWrite).mockClear()
+      await write(makeAccessor(), spec(target), new Uint8Array([7]))
+      expect(vi.mocked(api[upload])).toHaveBeenCalled()
+      expect(vi.mocked(settleAfterWrite)).toHaveBeenCalledWith(
+        spec(target),
+        new Uint8Array([7]),
+        null,
+        5,
+      )
+      expect(vi.mocked(invalidateAfterWrite)).not.toHaveBeenCalled()
+    })
+  }
+
+  for (const target of ['/data/new.txt', '/data/a.txt']) {
+    it(`a change during the lookup reaches settle (${target})`, async () => {
+      // The item id a lookup resolves can move (a concurrent mv) before the
+      // upload: the generation is noted before the lookup, so a change that
+      // lands during it makes settle drop the bytes.
+      let generation = 5
+      vi.mocked(writeGeneration).mockImplementation(() => generation)
+      vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) => {
+        generation = 6
+        return Promise.resolve(TREE[folderId] ?? [])
+      })
+      vi.mocked(settleAfterWrite).mockClear()
+      try {
+        await write(makeAccessor(), spec(target), new Uint8Array([7]))
+        expect(vi.mocked(settleAfterWrite).mock.calls.map((c) => c[3])).toEqual([5])
+      } finally {
+        vi.mocked(writeGeneration).mockImplementation(() => 5)
+      }
+    })
+  }
 
   it('mkdir creates under the resolved parent', async () => {
     vi.mocked(api.createFolder).mockResolvedValue({ type: 'folder', id: '400', name: 'x' })
@@ -230,4 +277,47 @@ describe('box write ops', () => {
     await copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt'))
     expect(vi.mocked(api.copyFile)).toHaveBeenCalledWith(STUB_TM, '200', '100', 'c.txt')
   })
+  for (const fails of [false, true]) {
+    it(`copy of a folder${fails ? ' that fails' : ''} evicts the merged destination subtree`, async () => {
+      // Merging into an existing folder replaces children the caller never
+      // named, and their bytes were cached under their own keys: evicting
+      // only the folder left the old child served. A merge that fails
+      // partway may have landed some children already, and either way the
+      // eviction must follow the copy, or a read during the merge refills
+      // the child.
+      const merge: Record<string, ApiModule.BoxItem[]> = {
+        ...TREE,
+        '300': [{ type: 'file', id: '310', name: 'x.txt', size: 3 }],
+        '400': [{ type: 'file', id: '410', name: 'x.txt', size: 3 }],
+      }
+      vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
+        Promise.resolve(merge[folderId] ?? []),
+      )
+      let settled = false
+      let evictedAfterCopy = false
+      vi.mocked(api.copyFile).mockImplementation(async () => {
+        await Promise.resolve()
+        settled = true
+        if (fails) throw new Error('copy failed')
+        return {} as ApiModule.BoxItem
+      })
+      vi.mocked(invalidateSubtree).mockClear()
+      vi.mocked(invalidateSubtree).mockImplementation(() => {
+        evictedAfterCopy = settled
+        return Promise.resolve()
+      })
+      try {
+        const copied = copy(makeAccessor(), spec('/data/sub'), spec('/data/dst'))
+        if (fails) await expect(copied).rejects.toThrow('copy failed')
+        else await copied
+        expect(vi.mocked(invalidateSubtree)).toHaveBeenCalledWith(
+          expect.objectContaining({ virtual: '/data/dst' }),
+        )
+        expect(evictedAfterCopy).toBe(true)
+      } finally {
+        vi.mocked(api.copyFile).mockReset()
+        vi.mocked(invalidateSubtree).mockImplementation(() => Promise.resolve())
+      }
+    })
+  }
 })

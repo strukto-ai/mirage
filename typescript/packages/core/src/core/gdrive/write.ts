@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+import { settleAfterWrite, writeGeneration } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eacces, eisdir } from '../../utils/errors.ts'
 import { updateFileContent, uploadFile } from '../google/drive.ts'
@@ -27,6 +27,9 @@ async function writeImpl(
   const key = path.vfsPath
   if (key === '') throw eisdir(path)
   const tm = accessor.tokenManager
+  // Noted before the lookup: a node it resolves can move before the upload,
+  // and a change in between must make settle drop the bytes.
+  const generation = writeGeneration()
   const node = await resolveKey(accessor, key)
   if (node !== null && isFolder(node)) throw eisdir(path)
   // Google-native files are written through the gws commands, not raw bytes.
@@ -38,7 +41,7 @@ async function writeImpl(
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
     await uploadFile(tm, basename, parentId, data)
   }
-  await invalidateAfterWrite(path)
+  await settleAfterWrite(path, data, null, generation)
 }
 
 export const write = eaccesOnDenied(writeImpl)

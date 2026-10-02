@@ -9,6 +9,7 @@ from mirage.core.nextcloud.truncate import truncate
 from mirage.core.nextcloud.unlink import unlink
 from mirage.core.nextcloud.write import write_bytes
 from mirage.types import PathSpec
+from tests.fixtures.settle import Settled, settling
 
 
 @pytest.mark.asyncio
@@ -81,3 +82,12 @@ async def test_truncate_pads_and_shrinks(make_acc):
     assert acc._fake.files["f.txt"] == b"abc"
     await truncate(acc, PathSpec.from_str_path("/f.txt"), 5)
     assert acc._fake.files["f.txt"] == b"abc\x00\x00"
+
+
+@pytest.mark.asyncio
+async def test_write_settles_its_bytes_without_a_receipt(make_acc):
+    acc = make_acc({})
+    with settling() as manager:
+        await write_bytes(acc, PathSpec.from_str_path("/hello.txt"), b"hi")
+    assert manager.settled == [Settled("/hello.txt", b"hi", None, 5)]
+    assert manager.writes == []

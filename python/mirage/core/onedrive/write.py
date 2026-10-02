@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import settle_after_write, write_generation
 from mirage.core.msgraph.drive import write_item
 from mirage.core.onedrive.client import drive_loc
 from mirage.observe.context import record, start_op
@@ -24,11 +24,12 @@ async def write_bytes(
     accessor: OneDriveAccessor, path: PathSpec, data: bytes
 ) -> None:
     timer = start_op()
-    await write_item(
+    generation = write_generation()
+    receipt = await write_item(
         accessor.config,
         drive_loc(accessor.config, path.vfs_path),
         data,
         session=accessor.pool,
     )
     record("write", path.virtual, "onedrive", len(data), timer)
-    await invalidate_after_write(path)
+    await settle_after_write(path, data, receipt, generation)

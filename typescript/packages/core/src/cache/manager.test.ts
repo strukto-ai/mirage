@@ -15,7 +15,7 @@
 import { mountKey } from '../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { FileStat, FileType, PathSpec } from '../types.ts'
+import { FileStat, FileType, PathSpec, ReadPolicy } from '../types.ts'
 import { withCacheMutation } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { IndexEntry } from './index/config.ts'
@@ -24,6 +24,7 @@ import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
+import type { WriteReceipt } from './types.ts'
 import { shiftPerformanceNow } from './_test_util.ts'
 import { enoent } from '../utils/errors.ts'
 
@@ -140,6 +141,31 @@ describe('CacheManager', () => {
     expect((await index.listDir('/data/chan/day')).entries).toBeUndefined()
     expect((await index.listDir('/data/chan/day/files')).entries).toBeUndefined()
     expect((await index.listDir('/data/chan')).entries).toBeUndefined()
+  })
+
+  it("invalidateSubtree leaves a nested mount's bodies", async () => {
+    // A mount nested under the subtree has its own backend, which nothing
+    // done to this mount changes: dropping its bodies only forced a
+    // re-download of every file it had cached.
+    const cache = new RAMFileCacheStore()
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await cache.set('/data/chan/day/chat.jsonl', new TextEncoder().encode('one\n'))
+    await cache.set('/data/chan/day/inner/kept.txt', new TextEncoder().encode('kept'))
+    const manager = new CacheManager(
+      cache,
+      index,
+      '/data/',
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => ['/data/chan/day/inner'],
+    )
+    await manager.invalidateSubtree(PathSpec.fromStrPath('/chan/day'))
+    expect(await cache.exists('/data/chan/day/chat.jsonl')).toBe(false)
+    expect(await cache.exists('/data/chan/day/inner/kept.txt')).toBe(true)
   })
 
   it('a write does not reach into the subtree', async () => {
@@ -556,5 +582,266 @@ describe('what a probe saw this command', () => {
       expect((manager as unknown as { probed: Map<string, unknown> }).probed.size).toBe(1)
       return Promise.resolve()
     })
+  })
+})
+
+describe('settleAfterWrite', () => {
+  const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
+  const dec = (b: Uint8Array | null): string | null =>
+    b === null ? null : new TextDecoder().decode(b)
+  const spec = (): PathSpec => PathSpec.fromStrPath('/data/x.txt')
+
+  async function settled(
+    receipt: WriteReceipt | null,
+    policy: ReadPolicy = ReadPolicy.BOUNDED,
+  ): Promise<RAMFileCacheStore> {
+    const cache = new RAMFileCacheStore()
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await cache.set('/data/x.txt', enc('old\n'), { fingerprint: 't-old', ttl: 600 })
+    const manager = newManager(cache, index, true, policy)
+    await manager.settleAfterWrite(spec(), enc('new\n'), receipt, manager.generation)
+    return cache
+  }
+
+  function newManager(
+    cache: RAMFileCacheStore,
+    index: RAMIndexCacheStore,
+    cachesReads = true,
+    policy: ReadPolicy = ReadPolicy.BOUNDED,
+    ownsPath: (path: string) => boolean = () => true,
+  ): CacheManager {
+    return new CacheManager(
+      cache,
+      index,
+      '/data/',
+      cachesReads,
+      ownsPath,
+      undefined,
+      600,
+      undefined,
+      undefined,
+      undefined,
+      policy,
+    )
+  }
+
+  for (const policy of [ReadPolicy.BOUNDED, ReadPolicy.FRESH]) {
+    it(`drops bytes the backend stored differently (${policy})`, async () => {
+      // SharePoint property promotion: 4 bytes sent, 15 stored.
+      const cache = await settled({ storedSize: 15, token: 't1' }, policy)
+      expect(await cache.exists('/data/x.txt')).toBe(false)
+    })
+
+    for (const size of [4, null]) {
+      it(`keeps vouched bytes with the backend token (${policy}, size ${String(size)})`, async () => {
+        const cache = await settled({ storedSize: size, token: 't1' }, policy)
+        expect(dec(await cache.get('/data/x.txt'))).toBe('new\n')
+        expect(await cache.isFresh('/data/x.txt', 't1')).toBe(true)
+        expect(await cache.isUnbounded('/data/x.txt')).toBe(false)
+      })
+    }
+  }
+
+  for (const receipt of [null, { storedSize: null, token: null }]) {
+    it(`keeps a silent write tokenless on bounded (${JSON.stringify(receipt)})`, async () => {
+      const cache = await settled(receipt, ReadPolicy.BOUNDED)
+      expect(dec(await cache.get('/data/x.txt'))).toBe('new\n')
+      expect(await cache.isFresh('/data/x.txt', 't-old')).toBe(false)
+      // Bounded: the kept bytes expire with the mount's ttl like a read.
+      expect(await cache.isUnbounded('/data/x.txt')).toBe(false)
+    })
+  }
+
+  for (const receipt of [null, { storedSize: null, token: null }, { storedSize: 4, token: null }]) {
+    it(`drops a silent write on fresh (${JSON.stringify(receipt)})`, async () => {
+      const cache = await settled(receipt, ReadPolicy.FRESH)
+      expect(await cache.exists('/data/x.txt')).toBe(false)
+    })
+  }
+
+  it('drops when another mutation landed mid-upload', async () => {
+    // Two writes race on one path and the earlier upload settles last: its
+    // bytes may no longer be what the backend holds.
+    const cache = new RAMFileCacheStore()
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    const generation = manager.generation
+    await manager.invalidateAfterWrite(PathSpec.fromStrPath('/data/y.txt'))
+    await manager.settleAfterWrite(spec(), enc('new\n'), { storedSize: 4, token: 't1' }, generation)
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+  })
+
+  it('drops without a noted generation', async () => {
+    const cache = new RAMFileCacheStore()
+    await cache.set('/data/x.txt', enc('old\n'))
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    await manager.settleAfterWrite(spec(), enc('new\n'), { storedSize: 4, token: 't1' }, null)
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+  })
+
+  it('keeps nothing for a key the mount does not own', async () => {
+    const cache = new RAMFileCacheStore()
+    await cache.set('/data/x.txt', enc('old\n'))
+    const manager = newManager(
+      cache,
+      new RAMIndexCacheStore({ ttl: 600 }),
+      true,
+      ReadPolicy.BOUNDED,
+      () => false,
+    )
+    await manager.settleAfterWrite(
+      spec(),
+      enc('new\n'),
+      { storedSize: 4, token: 't1' },
+      manager.generation,
+    )
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+  })
+
+  it('leaves a non-caching mount uncached', async () => {
+    const cache = new RAMFileCacheStore()
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }), false)
+    await manager.settleAfterWrite(
+      spec(),
+      enc('new\n'),
+      { storedSize: 4, token: 't1' },
+      manager.generation,
+    )
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+  })
+
+  for (const receipt of [{ storedSize: 4, token: 't1' }, null]) {
+    it(`evicts the parent listing (${JSON.stringify(receipt)})`, async () => {
+      const index = new RAMIndexCacheStore({ ttl: 600 })
+      await index.setDir('/data', [
+        ['x.txt', new IndexEntry({ id: 'x', name: 'x.txt', resourceType: 'file' })],
+      ])
+      const manager = newManager(new RAMFileCacheStore(), index)
+      await manager.settleAfterWrite(spec(), enc('new\n'), receipt, manager.generation)
+      expect((await index.listDir('/data')).entries ?? null).toBeNull()
+    })
+  }
+
+  it('retires a read that began before the keep', async () => {
+    // A readThrough that fetched the pre-write bytes and lands after the
+    // keep must not put them back over what the write kept.
+    const cache = new RAMFileCacheStore()
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    let fetched!: () => void
+    const fetchedP = new Promise<void>((r) => (fetched = r))
+    let release!: () => void
+    const releaseP = new Promise<void>((r) => (release = r))
+    const reader = manager.readThrough(spec(), async () => {
+      fetched()
+      await releaseP
+      return enc('old\n')
+    })
+    await fetchedP
+    await manager.settleAfterWrite(
+      spec(),
+      enc('new\n'),
+      { storedSize: 4, token: 't1' },
+      manager.generation,
+    )
+    release()
+    expect(dec(await reader)).toBe('old\n')
+    expect(dec(await cache.get('/data/x.txt'))).toBe('new\n')
+  })
+
+  it("retires the command's probe answers", async () => {
+    const manager = newManager(new RAMFileCacheStore(), new RAMIndexCacheStore({ ttl: 600 }))
+    await runInCommandScope(async () => {
+      manager.noteProbed(spec(), new FileStat({ name: 'x.txt', size: 4, type: FileType.FILE }))
+      await manager.settleAfterWrite(
+        spec(),
+        enc('new\n'),
+        { storedSize: 4, token: 't1' },
+        manager.generation,
+      )
+      expect(manager.probedStat(spec())).toBeNull()
+    })
+  })
+
+  it('retires probe answers on a non-caching mount', async () => {
+    // A probe answer is remembered whether or not the mount caches bytes; a
+    // write must still retire it, or a later stat in the same command serves
+    // the pre-write size.
+    const manager = newManager(new RAMFileCacheStore(), new RAMIndexCacheStore({ ttl: 600 }), false)
+    await runInCommandScope(async () => {
+      manager.noteProbed(spec(), new FileStat({ name: 'x.txt', size: 4, type: FileType.FILE }))
+      await manager.settleAfterWrite(
+        spec(),
+        enc('new\n'),
+        { storedSize: 4, token: 't1' },
+        manager.generation,
+      )
+      expect(manager.probedStat(spec())).toBeNull()
+    })
+  })
+
+  it('keeps nothing bigger than the cache', async () => {
+    // A write larger than the whole cache would evict every warm entry, then
+    // itself: it is dropped instead, and the warm entry survives.
+    const cache = new RAMFileCacheStore({ limit: 10 })
+    await cache.set('/data/w.txt', enc('abc'))
+    await cache.set('/data/x.txt', enc('o'))
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    await manager.settleAfterWrite(
+      spec(),
+      enc('x'.repeat(11)),
+      { storedSize: 11, token: 't1' },
+      manager.generation,
+    )
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+    expect(dec(await cache.get('/data/w.txt'))).toBe('abc')
+  })
+
+  it('keeps a write exactly the size of the cache', async () => {
+    const cache = new RAMFileCacheStore({ limit: 10 })
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    await manager.settleAfterWrite(
+      spec(),
+      enc('x'.repeat(10)),
+      { storedSize: 10, token: 't1' },
+      manager.generation,
+    )
+    expect(dec(await cache.get('/data/x.txt'))).toBe('x'.repeat(10))
+  })
+
+  it('a failed fill does not fail the write', async () => {
+    // The upload already landed: like a background drain that fails, the
+    // fill is skipped with a warning, and the parent listing still goes.
+    class RefusingCache extends RAMFileCacheStore {
+      override set(): Promise<void> {
+        return Promise.reject(new Error('cache store refused the fill'))
+      }
+    }
+    const cache = new RefusingCache()
+    await RAMFileCacheStore.prototype.set.call(cache, '/data/x.txt', enc('old\n'))
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await index.setDir('/data', [
+      ['x.txt', new IndexEntry({ id: 'x', name: 'x.txt', resourceType: 'file' })],
+    ])
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const manager = newManager(cache, index)
+      await manager.settleAfterWrite(
+        spec(),
+        enc('new\n'),
+        { storedSize: 4, token: 't1' },
+        manager.generation,
+      )
+      expect(await cache.exists('/data/x.txt')).toBe(false)
+      expect((await index.listDir('/data')).entries ?? null).toBeNull()
+      expect(String(warn.mock.calls[0]?.[0])).toContain('/data/x.txt')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('treats an empty token as none', async () => {
+    // An empty token vouches for nothing: on a fresh mount the bytes are
+    // dropped rather than kept under a fingerprint of ''.
+    const cache = await settled({ storedSize: null, token: '' }, ReadPolicy.FRESH)
+    expect(await cache.exists('/data/x.txt')).toBe(false)
   })
 })

@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "cache_settle_seed",
+      "seq": 943000,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix"
+      ],
+      "command": "printf 'old\\n' > {mount}/settle_a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cache_settle_read_then_write_one_line",
+      "seq": 943001,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix"
+      ],
+      "command": "cat {mount}/settle_a.txt; echo new | tee {mount}/settle_a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "old\nnew\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cache_settle_next_read_serves_the_write",
+      "seq": 943002,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix"
+      ],
+      "command": "cat {mount}/settle_a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "new\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cache_settle_cleanup",
+      "seq": 943003,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix"
+      ],
+      "command": "rm {mount}/settle_a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

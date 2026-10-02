@@ -286,6 +286,7 @@ class MountRegistry:
             excluded_prefixes=lambda: tuple(
                 e.prefix.rstrip("/") for e in self.descendant_mounts(m.prefix)
             ),
+            read_policy=m.read.policy,
         )
 
     def check_vfs_available(self, vfs: BaseVFS) -> None:

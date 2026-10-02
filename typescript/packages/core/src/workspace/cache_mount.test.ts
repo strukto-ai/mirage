@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser } from '../shell/parse/index.ts'
 import { ops } from '../test-utils.ts'
@@ -321,4 +321,178 @@ describe('a guarded cp reads past the cache without refilling it', () => {
       await ws.close()
     }
   })
+})
+
+// A caching RAM mount that may carry either read policy.
+function caching(policy: ReadPolicy = ReadPolicy.BOUNDED): Workspace {
+  const ram = new RAMVFS()
+  // Only fresh needs it; bounded runs on a plain caching mount.
+  Object.assign(ram, { cachesReads: true, readRevalidatable: policy === ReadPolicy.FRESH })
+  return new Workspace(
+    { '/r/': ram },
+    {
+      mode: MountMode.WRITE,
+      read: { policy, ttl: DEFAULT_READ_TTL },
+      shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+    },
+  )
+}
+
+async function out(ws: Workspace, line: string): Promise<string> {
+  const result = await ws.shell(line)
+  expect(result.exitCode, line).toBe(0)
+  return DEC.decode(result.stdout)
+}
+
+describe('a line that reads and writes one path (MIRAGE-14)', () => {
+  for (const line of [
+    'cat /r/a; echo new | tee /r/a',
+    'cat /r/a; echo new > /r/a',
+    'cat /r/a; cat /r/b > /r/a',
+  ]) {
+    it(`a read earlier on the line does not outlive the write: ${line}`, async () => {
+      // The read's bytes used to be cached over the write's, so the next cat
+      // served the pre-write content until the ttl ran out.
+      const ws = caching()
+      try {
+        await out(ws, "printf 'old\\n' > /r/a; printf 'new\\n' > /r/b")
+        await out(ws, line)
+        expect(await out(ws, 'cat /r/a')).toBe('new\n')
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  it('a same-mount cp over a path read on the line is never empty', async () => {
+    // cp lists its target in writes as an empty eviction marker; taking the
+    // write side for a path also read would cache an empty file.
+    const ws = caching()
+    try {
+      await out(ws, "printf 'old\\n' > /r/a; printf 'bee\\n' > /r/b")
+      await out(ws, 'cat /r/a; cp /r/b /r/a')
+      expect(await out(ws, 'cat /r/a')).toBe('bee\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  for (const line of ['echo new | tee /r/a; cat /r/a', 'echo new | tee /r/a']) {
+    it(`a write then a read on one line serves the write: ${line}`, async () => {
+      const ws = caching()
+      try {
+        await out(ws, "printf 'old\\n' > /r/a; cat /r/a")
+        await out(ws, line)
+        expect(await out(ws, 'cat /r/a')).toBe('new\n')
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+})
+
+describe('a whole-file write settles with the cache', () => {
+  for (const [line, path] of [
+    ['echo new | tee /r/a', '/r/a'],
+    ['sed -i s/one/uno/ /r/b', '/r/b'],
+    ['sort -o /r/so /r/b', '/r/so'],
+    ['uniq /r/b /r/u', '/r/u'],
+    ['shuf -o /r/s /r/b', '/r/s'],
+    ['iconv -f utf-8 -t utf-8 -o /r/i /r/b', '/r/i'],
+    ['zip -q /r/z.zip /r/b', '/r/z.zip'],
+  ] as const) {
+    it(`a same-mount write keeps its output under bounded: ${line}`, async () => {
+      // A command whose output goes through the backend's whole-file write
+      // inside the command settles it: on a bounded mount the cache holds
+      // exactly the bytes the backend stored.
+      const ws = caching(ReadPolicy.BOUNDED)
+      try {
+        await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+        await out(ws, line)
+        const held = await ws.cache.get(path)
+        const store = (ws.mount('/r/').vfs as RAMVFS).store
+        expect(held).not.toBeNull()
+        expect(held).toEqual(store.files.get(path.slice('/r'.length)))
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  for (const [line, path] of [
+    ['cp /r/b /r/c', '/r/c'],
+    ['split -l 1 /r/b /r/x', '/r/xaa'],
+    ['csplit -f /r/cs /r/b 2', '/r/cs00'],
+    ['mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out', '/r/out/b'],
+  ] as const) {
+    it(`a write outside the settle path stays evicted: ${line}`, async () => {
+      // A native copy only invalidates, and split, csplit and tar write
+      // through the dispatcher, which evicts after the op: these keep nothing
+      // until that path settles too.
+      const ws = caching(ReadPolicy.BOUNDED)
+      try {
+        await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+        await out(ws, line)
+        expect(await ws.cache.exists(path)).toBe(false)
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  it('a silent write is not kept under fresh', async () => {
+    // RAM's write answers no token, so nothing could verify the bytes on a
+    // fresh mount: the entry is dropped rather than kept unverifiable.
+    const ws = caching(ReadPolicy.FRESH)
+    try {
+      await out(ws, 'echo new | tee /r/a')
+      expect(await ws.cache.exists('/r/a')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a redirect is still evicted', async () => {
+    // A redirect writes through the dispatcher, which runs no cache manager
+    // and evicts after the op; it keeps nothing until that path settles.
+    const ws = caching(ReadPolicy.BOUNDED)
+    try {
+      await out(ws, 'echo old > /r/a')
+      await out(ws, 'cat /r/a')
+      expect(await ws.cache.exists('/r/a')).toBe(true)
+      await out(ws, 'echo new > /r/a')
+      expect(await ws.cache.exists('/r/a')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  for (const [line, paths] of [
+    ['split -l 1 /r/b /r/x', ['/r/xaa', '/r/xab', '/r/xac']],
+    [
+      'mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out',
+      ['/r/t.tar', '/r/out/b'],
+    ],
+  ] as const) {
+    it(`a dispatched write inside a command fills nothing: ${line}`, async () => {
+      // The dispatcher evicts what its write op wrote, so a manager inherited
+      // from the enclosing command must not settle the bytes first: a fill the
+      // eviction then drops still costs a set, and can push warm entries out.
+      const ws = caching(ReadPolicy.BOUNDED)
+      try {
+        await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+        const filled: string[] = []
+        const realSet = ws.cache.set.bind(ws.cache)
+        vi.spyOn(ws.cache, 'set').mockImplementation((key, data, options) => {
+          filled.push(key)
+          return realSet(key, data, options)
+        })
+        await out(ws, line)
+        expect(filled.filter((key) => (paths as readonly string[]).includes(key))).toEqual([])
+      } finally {
+        vi.restoreAllMocks()
+        await ws.close()
+      }
+    })
+  }
 })

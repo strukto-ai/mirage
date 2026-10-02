@@ -16,7 +16,7 @@ import asyncio
 from io import BytesIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.context import invalidate_after_write
+from mirage.cache.context import settle_after_write, write_generation
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import (
     is_directory_metadata,
@@ -76,6 +76,7 @@ async def write_bytes(
         remote_parent,
         path.virtual,
     )
+    generation = write_generation()
     try:
         await asyncio.to_thread(
             _upload_bytes_sync, accessor, remote_path, data
@@ -85,4 +86,4 @@ async def write_bytes(
             raise enoent(path) from exc
         raise
     record("write", path.virtual, "databricks_volume", len(data), timer)
-    await invalidate_after_write(path)
+    await settle_after_write(path, data, None, generation)

@@ -40,6 +40,15 @@ class FakeManager {
   writes: string[] = []
   ancestors: string[] = []
 
+  readonly generation = 5
+
+  readonly settled: string[] = []
+
+  settleAfterWrite(path: PathSpec): Promise<void> {
+    this.settled.push(path.mountPath)
+    return Promise.resolve()
+  }
+
   invalidateAfterWrite(path: PathSpec): Promise<void> {
     this.writes.push(path.mountPath)
     return Promise.resolve()
@@ -115,13 +124,15 @@ describe('gridfs core write', () => {
     const { manager, keys } = await runWrite('/a/b/c.txt')
     expect(keys).toEqual(['a/b/c.txt'])
     // The upload materializes `a` and `a/b` too, so their listings are stale.
-    expect(manager.writes).toEqual(['/a/b/c.txt'])
+    expect(manager.settled).toEqual(['/a/b/c.txt'])
+    expect(manager.writes).toEqual([])
     expect(manager.ancestors).toEqual(['/mnt/a/b/c.txt'])
   })
 
   it('invalidates only itself at the mount root', async () => {
     const { manager } = await runWrite('/c.txt')
-    expect(manager.writes).toEqual(['/c.txt'])
+    expect(manager.settled).toEqual(['/c.txt'])
+    expect(manager.writes).toEqual([])
   })
 })
 

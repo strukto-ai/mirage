@@ -33,6 +33,23 @@ export const DISPATCH_WRITE_OPS: ReadonlySet<string> = new Set([
   'rename',
 ])
 
+// The dispatch ops that can reach a backend's whole-file write: write itself,
+// the generic emulations of append and truncate that rewrite the whole file
+// through it, and the create of backends that write an empty file. The
+// dispatcher evicts what they wrote itself, failed, timed out or not, so they
+// run without the enclosing command's cache manager: settling under it would fill an entry
+// the eviction drops straight after. On the fallback storage (no task
+// isolation) the enclosing frame stays live while the op runs, so no manager
+// answers as active: every live one drops the path instead of keeping it, and
+// a command running alongside reads uncached until the op returns.
+export const EVICTED_WRITE_OPS: ReadonlySet<string> = new Set([
+  'write',
+  'write_bytes',
+  'append',
+  'truncate',
+  'create',
+])
+
 // What the admission gates classify as a write (OpsContext.write). A
 // superset of DISPATCH_WRITE_OPS: setattr mutates the mount but keeps
 // its own overlay bookkeeping in applySetattr, and symlink writes only
