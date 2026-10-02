@@ -36,11 +36,14 @@ DISPATCH_WRITE_OPS = frozenset(
     }
 )
 
-# The dispatch ops that reach a backend's whole-file write. The dispatcher
-# evicts what they wrote itself, so they run without the enclosing
-# command's cache manager: settling under it would fill an entry the
-# eviction drops straight after.
-EVICTED_WRITE_OPS = frozenset({"write", "write_bytes"})
+# The dispatch ops that can reach a backend's whole-file write: write
+# itself, and the generic emulations of append, truncate and create that
+# rewrite the whole file through it. The dispatcher evicts what they wrote
+# itself, so they run without the enclosing command's cache manager:
+# settling under it would fill an entry the eviction drops straight after.
+EVICTED_WRITE_OPS = frozenset(
+    {"write", "write_bytes", "append", "truncate", "create"}
+)
 
 # What the admission gates classify as a write (``OpsContext.write``).
 # A superset of DISPATCH_WRITE_OPS: setattr mutates the mount but keeps

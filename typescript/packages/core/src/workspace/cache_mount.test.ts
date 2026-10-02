@@ -16,9 +16,14 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
+import { activeCacheManager } from '../cache/context.ts'
+import { settling } from '../cache/_test_util.ts'
+import { RAM_IO } from '../commands/builtin/ram/io.ts'
+import { makeGenericOps } from '../ops/generic/factory.ts'
+import type { RegisteredOp } from '../ops/registry.ts'
 import { createShellParser } from '../shell/parse/index.ts'
 import { ops } from '../test-utils.ts'
-import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy } from '../types.ts'
+import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy, VFSName } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { IOResult } from '../io/types.ts'
 import { Mount } from './mount/spec.ts'
@@ -488,6 +493,44 @@ describe('a whole-file write settles with the cache', () => {
         expect(filled.filter((key) => (paths as readonly string[]).includes(key))).toEqual([])
       } finally {
         vi.restoreAllMocks()
+        await ws.close()
+      }
+    })
+  }
+})
+
+// RAM whose append is the generic read-modify-write emulation, the shape of
+// every backend without a native append.
+class EmulatedAppendRAM extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    const table = Object.create(RAM_IO, { append: { value: undefined } }) as typeof RAM_IO
+    return makeGenericOps(VFSName.RAM, table)
+  }
+}
+
+describe('a dispatched write', () => {
+  for (const op of ['write', 'append'] as const) {
+    it(`settles nothing and restores the manager: ${op}`, async () => {
+      // The dispatcher evicts what its op wrote, so the op must not settle
+      // under a manager the enclosing command left active (the emulated
+      // append rewrites the whole file through the core write), and the
+      // command's manager must be active again once the op returns.
+      const vfs = new EmulatedAppendRAM()
+      Object.assign(vfs, { cachesReads: true })
+      const ws = new Workspace(
+        { '/r/': vfs },
+        {
+          mode: MountMode.WRITE,
+          shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+        },
+      )
+      try {
+        const manager = await settling(async (recorder) => {
+          await ws.dispatch(op, '/r/a.txt', [ENC.encode('hi')])
+          expect(activeCacheManager()).toBe(recorder)
+        })
+        expect(manager.settled).toEqual([])
+      } finally {
         await ws.close()
       }
     })
