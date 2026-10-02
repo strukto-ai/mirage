@@ -605,7 +605,7 @@ export class Dispatcher {
                 const call = Promise.resolve(
                   opName === 'setattr'
                     ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                    : this.callOp(opName, vfs, scope, fullArgs, opKwargs),
+                    : this.callOp(opName, vfs, scope, fullArgs, opKwargs, p.virtual),
                 )
                 onCall?.(call)
                 return runWithTimeout(call, opTimeout, opName)
@@ -1606,6 +1606,35 @@ export class Dispatcher {
   }
 
   /**
+   * Run one registered op. An op in EVICTED_WRITE_OPS runs without the
+   * enclosing command's cache manager: the dispatcher evicts what it wrote,
+   * also when the op fails after its write landed (a timeout after the
+   * upload), since its own invalidation reached no manager.
+   */
+  private async callOp(
+    opName: string,
+    vfs: BaseVFS,
+    scope: PathSpec,
+    args: readonly unknown[],
+    kwargs: OpKwargs,
+    virtual: string,
+  ): Promise<unknown> {
+    const call = (): Promise<unknown> =>
+      this.opsRegistry.call(opName, vfs, vfs.accessor, scope, args, kwargs)
+    if (!EVICTED_WRITE_OPS.has(opName)) return call()
+    try {
+      return await runWithCacheManager(null, call)
+    } catch (err) {
+      try {
+        await this.invalidateAfterWriteByPath(virtual)
+      } catch (evictError) {
+        console.warn(`evicting after a failed write: ${String(evictError)}`)
+      }
+      throw err
+    }
+  }
+
+  /**
    * The cache manager that owns a mount's listings and bodies.
    *
    * One manager for both halves, as Python's invalidate_after_write does: it
@@ -1613,21 +1642,6 @@ export class Dispatcher {
    * not be, and evicting the index inline here spelled the key the other way
    * and missed.
    */
-  /**
-   * Run one registered op. An op in EVICTED_WRITE_OPS runs without the
-   * enclosing command's cache manager: the dispatcher evicts what it wrote.
-   */
-  private callOp(
-    opName: string,
-    vfs: BaseVFS,
-    scope: PathSpec,
-    args: readonly unknown[],
-    kwargs: OpKwargs,
-  ): Promise<unknown> {
-    const call = (): Promise<unknown> =>
-      this.opsRegistry.call(opName, vfs, vfs.accessor, scope, args, kwargs)
-    return EVICTED_WRITE_OPS.has(opName) ? runWithCacheManager(null, call) : call()
-  }
 
   private managerFor(mount: MountEntry): CacheManager {
     return (

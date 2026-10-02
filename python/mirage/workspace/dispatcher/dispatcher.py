@@ -14,6 +14,7 @@
 
 import errno
 import functools
+import logging
 import os
 import posixpath
 import time
@@ -92,6 +93,8 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.snapshot.drift import DriftQueue
+
+logger = logging.getLogger(__name__)
 
 
 def _memory_answered(
@@ -670,6 +673,13 @@ class Dispatcher:
                             result = await mount.execute_op(
                                 op, path.virtual, **kwargs
                             )
+                        except BaseException:
+                            # With no manager, the op's own invalidation
+                            # reached nothing, and a write may have landed
+                            # before the op failed (a timeout after the
+                            # upload): evict here.
+                            await self._evict_after_failed_write(mount, path)
+                            raise
                         finally:
                             push_cache_manager(prev_manager)
                     else:
@@ -1627,6 +1637,20 @@ class Dispatcher:
         reset the next `cat /data/x` would serve the stale "old".
         """
         await self._namespace.registry.invalidate_after_external()
+
+    async def _evict_after_failed_write(
+        self, mount: MountEntry, path: PathSpec
+    ) -> None:
+        """Evict a path whose write op failed, keeping the op's own error.
+
+        Args:
+            mount (MountEntry): the mount that was written.
+            path (PathSpec): the path the op wrote.
+        """
+        try:
+            await self.invalidate_after_write(mount, path)
+        except Exception as exc:
+            logger.debug("evicting after a failed write: %s", exc)
 
     def _manager_for(self, mount: MountEntry) -> CacheManager:
         """The cache manager that owns a mount's listings and bodies.

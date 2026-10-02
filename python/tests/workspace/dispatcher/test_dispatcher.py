@@ -13,16 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import copy
 import errno
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import active_cache_manager
 from mirage.commands.builtin.ram.io import IO as RAM_IO
 from mirage.context import reset_current_session, set_current_session
+from mirage.core.ram.write import write_bytes as ram_write
 from mirage.errors import FsCondition, posix_errno
 from mirage.ops.generic import make_generic_ops
 from mirage.ops.registry import RegisteredOp
@@ -1409,38 +1411,98 @@ async def test_offset_writes_through_two_mounts_of_one_store_all_land():
         assert bytes(got) == b"A12B45C78D"
 
 
-def _emulated_append_ops() -> list[RegisteredOp]:
-    table = copy.copy(RAM_IO)
-    object.__setattr__(table, "append", None)
-    return make_generic_ops("ram", table)
+async def _create_by_write(accessor: RAMAccessor, path: PathSpec) -> None:
+    await ram_write(accessor, path, b"")
 
 
-class _EmulatedAppendRAM(RAMVFS):
-    """RAM whose append is the generic read-modify-write emulation, the
-    shape of every backend without a native append."""
+def _emulated_ops(
+    write: Callable[
+        [RAMAccessor, PathSpec, bytes], Awaitable[None]
+    ] = ram_write,
+) -> list[RegisteredOp]:
+    table = replace(
+        RAM_IO,
+        write=write,
+        append=None,
+        truncate=None,
+        create=_create_by_write,
+    )
+    return make_generic_ops("ram", table, emulate_truncate=True)
+
+
+class _EmulatedRAM(RAMVFS):
+    """RAM whose append and truncate are the generic read-modify-write
+    emulations, and whose create writes an empty file: the shape of every
+    backend without those natively."""
 
     def ops(self) -> list[RegisteredOp]:
-        return _emulated_append_ops()
+        return _emulated_ops()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("op", ["write", "append"])
-async def test_a_dispatched_write_settles_nothing_and_restores_the_manager(op):
-    # The dispatcher evicts what its op wrote, so the op must not settle
-    # under a manager the enclosing command left active (the emulated
-    # append rewrites the whole file through the core write), and the
-    # command's manager must be active again once the op returns.
-    vfs = _EmulatedAppendRAM()
-    vfs.caches_reads = True
-    ws = Workspace({"/r": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
-    scope = PathSpec(
-        vfs_path=mount_key("/r/a.txt", "/r"),
-        virtual="/r/a.txt",
+async def _landing_then_failing_write(
+    accessor: RAMAccessor, path: PathSpec, data: bytes
+) -> None:
+    await ram_write(accessor, path, data)
+    raise TimeoutError("op timed out after the upload landed")
+
+
+class _FailingWriteRAM(RAMVFS):
+    def ops(self) -> list[RegisteredOp]:
+        return _emulated_ops(_landing_then_failing_write)
+
+
+def _scope(virtual: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=mount_key(virtual, "/r"),
+        virtual=virtual,
         directory="/r",
         resolved=True,
     )
-    with settling() as manager:
-        await ws.dispatch(op, scope, data=b"hi")
-        assert active_cache_manager() is manager
-    assert manager.settled == []
-    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "op,kwargs",
+    [
+        ("write", {"data": b"hi"}),
+        ("append", {"data": b"hi"}),
+        ("truncate", {"length": 1}),
+        ("create", {}),
+    ],
+)
+async def test_a_dispatched_write_settles_nothing_and_restores_the_manager(
+    op, kwargs
+):
+    # The dispatcher evicts what its op wrote, so the op must not settle
+    # under a manager the enclosing command left active (the emulated
+    # append and truncate, and a create that writes an empty file, all go
+    # through the core write), and the command's manager must be active
+    # again once the op returns.
+    vfs = _EmulatedRAM()
+    vfs.caches_reads = True
+    ws = Workspace({"/r": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        await ws.dispatch("write", _scope("/r/a.txt"), data=b"old")
+        with settling() as manager:
+            await ws.dispatch(op, _scope("/r/a.txt"), **kwargs)
+            assert active_cache_manager() is manager
+        assert manager.settled == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_dispatched_write_that_fails_after_landing_is_evicted():
+    # Running with no manager, the op's own invalidation reaches nothing:
+    # the dispatcher must evict on failure too, or a write that landed and
+    # then timed out leaves the old bytes served.
+    vfs = _FailingWriteRAM()
+    vfs.caches_reads = True
+    ws = Workspace({"/r": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        await ws._cache.set("/r/a.txt", b"old")
+        with pytest.raises(TimeoutError):
+            await ws.dispatch("write", _scope("/r/a.txt"), data=b"new")
+        assert await ws._cache.exists("/r/a.txt") is False
+    finally:
+        await ws.close()
