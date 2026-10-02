@@ -20,6 +20,8 @@ type Writer = (...args: never[]) => Promise<void>
 
 interface Wired {
   write: Writer
+  /** The name the defining module exports `write` under. */
+  exported: string
   /** The source of the module that defines `write`. */
   module: string
 }
@@ -44,7 +46,7 @@ async function wiredWrite(ioPath: string, source: string): Promise<Wired | null>
       const module = (await import(file)) as Record<string, unknown>
       const write = module[exported]
       if (typeof write !== 'function') return null
-      return { write: write as Writer, module: readFileSync(file, 'utf8') }
+      return { write: write as Writer, exported, module: readFileSync(file, 'utf8') }
     }
   }
   return null
@@ -60,6 +62,25 @@ async function wiredWriters(builtinDir: string): Promise<Map<string, Wired>> {
     if (wired !== null) found.set(name, wired)
   }
   return found
+}
+
+/**
+ * The source of the function an export wraps (`export const write =
+ * eaccesOnDenied(writeImpl)` answers `writeImpl`'s), so a wrapped writer is
+ * judged by the one function it runs, not by whatever else its module holds.
+ */
+function wrappedSource(module: string, exported: string): string | null {
+  const inner = new RegExp(`export const ${exported} = \\w+\\((\\w+)\\)`).exec(module)?.[1]
+  if (inner === undefined) return null
+  const start = module.search(new RegExp(`function ${inner}\\b`))
+  if (start < 0) return null
+  const open = module.indexOf('{', module.indexOf(')', start))
+  let depth = 0
+  for (let i = open; i < module.length; i++) {
+    if (module[i] === '{') depth++
+    if (module[i] === '}' && --depth === 0) return module.slice(start, i + 1)
+  }
+  return null
 }
 
 /** Whether `source` calls `name`, however the transform spelled the import. */
@@ -79,14 +100,15 @@ describe('every whole-file write settles instead of invalidating', async () => {
     )
   })
 
-  for (const [name, { write, module }] of writers) {
+  for (const [name, { write, exported, module }] of writers) {
     it(name, () => {
       // A writer holds the file's full new bytes, so it settles them with
       // the cache; one that still only invalidates would drop what it
       // wrote, and applyIo no longer stores written paths. A writer wrapped
-      // out of sight (an error translator) is judged by its module.
+      // out of sight (an error translator) is judged by the function it
+      // wraps.
       const own = write.toString()
-      const source = calls(own, 'settleAfterWrite') ? own : module
+      const source = calls(own, 'settleAfterWrite') ? own : (wrappedSource(module, exported) ?? own)
       expect(calls(source, 'settleAfterWrite')).toBe(true)
       expect(calls(source, 'writeGeneration')).toBe(true)
       expect(calls(source, 'invalidateAfterWrite')).toBe(false)

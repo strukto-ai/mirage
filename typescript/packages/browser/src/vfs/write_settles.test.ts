@@ -95,9 +95,7 @@ describe('every whole-file write settles instead of invalidating', async () => {
 
   it('the scan reaches every whole-file writer', () => {
     // A scan that found nothing would pass every assertion below.
-    expect([...writers.keys()]).toEqual(
-      expect.arrayContaining(['disk', 'gridfs', 'hf_buckets', 'nextcloud', 'ssh']),
-    )
+    expect([...writers.keys()]).toEqual(expect.arrayContaining(['opfs']))
   })
 
   for (const [name, { write, exported, module }] of writers) {
