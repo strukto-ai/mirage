@@ -573,9 +573,15 @@ async def _merge_case(
 async def test_copy_folder_merge_evicts_a_replaced_childs_bytes(root_accessor):
     # Merging into an existing folder replaces children the caller never
     # named, and their bytes were cached under their own keys: evicting
-    # only the folder left `cat /data/dst/x.txt` serving the old file.
+    # only the folder left `cat /data/dst/x.txt` serving the old file. A
+    # read during the merge refills the child, so the eviction must follow
+    # the copy.
     cache = RAMFileCacheStore()
-    await _merge_case(root_accessor, AsyncMock(), cache)
+
+    async def racing_read(*_args: object, **_kwargs: object) -> None:
+        await cache.set("/data/dst/x.txt", b"old")
+
+    await _merge_case(root_accessor, AsyncMock(side_effect=racing_read), cache)
     assert await cache.exists("/data/dst/x.txt") is False
 
 

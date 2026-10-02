@@ -65,6 +65,11 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
  * copy that merges into an existing folder replaces children below `dst`
  * whose bytes were cached under their own keys. A failed copy invalidates
  * too, since a merge may have landed some children before one failed.
+ *
+ * Args:
+ *   accessor: Box accessor.
+ *   src: the item to copy.
+ *   dst: where the copy lands.
  */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))

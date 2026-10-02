@@ -77,9 +77,15 @@ async function copyNode(
  * Copy a file or folder server-side.
  *
  * The whole destination subtree is invalidated, under its own path: a folder
- * copy that merges into an existing folder replaces children below `dst`
- * whose bytes were cached under their own keys. A failed copy invalidates
+ * copy that merges into an existing folder lands children below `dst` beside
+ * any of the same name (Drive keeps both), so a path whose bytes were cached
+ * under its own key can now name another file. A failed copy invalidates
  * too, since a merge may have landed some children before one failed.
+ *
+ * Args:
+ *   accessor: Google Drive accessor.
+ *   src: the item to copy.
+ *   dst: where the copy lands.
  */
 async function copyImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const srcNode = await resolveKey(accessor, src.vfsPath)

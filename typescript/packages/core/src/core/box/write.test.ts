@@ -308,15 +308,14 @@ describe('box write ops', () => {
     await copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt'))
     expect(vi.mocked(api.copyFile)).toHaveBeenCalledWith(STUB_TM, '200', '100', 'c.txt')
   })
-  for (const [label, copyFile] of [
-    ['', () => Promise.resolve({})],
-    [' that fails', () => Promise.reject(new Error('copy failed'))],
-  ] as const) {
-    it(`copy of a folder${label} evicts the merged destination subtree`, async () => {
+  for (const fails of [false, true]) {
+    it(`copy of a folder${fails ? ' that fails' : ''} evicts the merged destination subtree`, async () => {
       // Merging into an existing folder replaces children the caller never
       // named, and their bytes were cached under their own keys: evicting
       // only the folder left the old child served. A merge that fails
-      // partway may have landed some children already.
+      // partway may have landed some children already, and either way the
+      // eviction must follow the copy, or a read during the merge refills
+      // the child.
       const merge: Record<string, ApiModule.BoxItem[]> = {
         ...TREE,
         '300': [{ type: 'file', id: '310', name: 'x.txt', size: 3 }],
@@ -325,13 +324,23 @@ describe('box write ops', () => {
       vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
         Promise.resolve(merge[folderId] ?? []),
       )
-      vi.mocked(api.copyFile).mockImplementation(copyFile as typeof api.copyFile)
-      vi.mocked(invalidateSubtree).mockClear()
-      await copy(makeAccessor(), spec('/data/sub'), spec('/data/dst')).catch(() => undefined)
-      expect(vi.mocked(invalidateSubtree)).toHaveBeenCalledWith(
-        expect.objectContaining({ virtual: '/data/dst' }),
+      vi.mocked(api.copyFile).mockImplementation(() =>
+        fails ? Promise.reject(new Error('copy failed')) : Promise.resolve({} as ApiModule.BoxItem),
       )
-      vi.mocked(api.copyFile).mockReset()
+      vi.mocked(invalidateSubtree).mockClear()
+      try {
+        const copied = copy(makeAccessor(), spec('/data/sub'), spec('/data/dst'))
+        if (fails) await expect(copied).rejects.toThrow('copy failed')
+        else await copied
+        expect(vi.mocked(invalidateSubtree)).toHaveBeenCalledWith(
+          expect.objectContaining({ virtual: '/data/dst' }),
+        )
+        const [copiedAt = 0] = vi.mocked(api.copyFile).mock.invocationCallOrder
+        const [evictedAt = 0] = vi.mocked(invalidateSubtree).mock.invocationCallOrder
+        expect(evictedAt).toBeGreaterThan(copiedAt)
+      } finally {
+        vi.mocked(api.copyFile).mockReset()
+      }
     })
   }
 })

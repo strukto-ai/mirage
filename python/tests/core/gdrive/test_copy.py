@@ -116,13 +116,22 @@ async def test_copy_tree_merge_evicts_a_replaced_childs_bytes(
 ):
     # Merging into an existing folder lands children the caller never
     # named, and their bytes were cached under their own keys: evicting
-    # only the folder left `cat /dst/f.txt` serving the old file.
+    # only the folder left `cat /dst/f.txt` serving the old file. A read
+    # during the merge refills the child, so the eviction must follow the
+    # copy.
     src = fake_drive.folder("src")
     fake_drive.add("f.txt", parent=src, content=b"new")
     dst = fake_drive.folder("dst")
     fake_drive.add("f.txt", parent=dst, content=b"old")
     cache = RAMFileCacheStore()
-    await _merge(gdrive_accessor, cache)
+
+    async def copy_then_read(*args: object) -> dict:
+        copied = await fake_drive.copy_file(*args)
+        await cache.set("/dst/f.txt", b"old")
+        return copied
+
+    with patch("mirage.core.gdrive.copy.copy_file", new=copy_then_read):
+        await _merge(gdrive_accessor, cache)
     assert await cache.exists("/dst/f.txt") is False
 
 
