@@ -895,6 +895,8 @@ async def test_settle_keeps_a_silent_write_tokenless_on_bounded(receipt):
     cache = await _settled(receipt, ReadPolicy.BOUNDED)
     assert await cache.get("/data/x.txt") == b"new\n"
     assert await cache.is_fresh("/data/x.txt", "t-old") is False
+    # Bounded: the kept bytes expire with the mount's ttl like a read.
+    assert await cache.is_unbounded("/data/x.txt") is False
 
 
 @pytest.mark.asyncio
@@ -1001,6 +1003,21 @@ async def test_settle_retires_a_read_that_began_before_the_keep():
 async def test_settle_retires_the_commands_probe_answers():
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
+    async with command_scope():
+        manager.note_probed(_spec(), _probed())
+        await manager.settle_after_write(
+            _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+        )
+        assert manager.probed_stat(_spec()) is None
+
+
+@pytest.mark.asyncio
+async def test_settle_retires_probe_answers_on_a_non_caching_mount():
+    # A probe answer is remembered whether or not the mount caches bytes;
+    # a write must still retire it, or a later stat in the same command
+    # serves the pre-write size.
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", False)
     async with command_scope():
         manager.note_probed(_spec(), _probed())
         await manager.settle_after_write(

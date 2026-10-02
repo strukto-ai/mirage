@@ -463,6 +463,23 @@ async def test_apply_io_a_streamed_read_of_a_written_path_is_dropped(cache):
     assert await cache.exists("/s3/f.txt") is False
 
 
+@pytest.mark.asyncio
+async def test_apply_io_a_write_token_never_labels_read_bytes(cache):
+    """A writer settles its own bytes; a write record's token never labels
+    the bytes a read produced, even when the write record is newer."""
+    io = IOResult(reads={"/s3/f.txt": b"old"}, cache=["/s3/f.txt"])
+    await cache_io.apply_io(
+        cache,
+        io,
+        records=[
+            _record("read", "/s3/f.txt", "etag-2", 3),
+            _record("write", "/s3/f.txt", "etag-put-3", 3),
+        ],
+    )
+    assert await cache.is_fresh("/s3/f.txt", "etag-2")
+    assert not await cache.is_fresh("/s3/f.txt", "etag-put-3")
+
+
 def test_latest_fingerprint_ignores_an_op_that_reads_no_bytes():
     records = [_record("readdir", "/s3/f.txt", "etag-2", 3)]
     assert cache_io.latest_fingerprint(records, "/s3/f.txt") is None

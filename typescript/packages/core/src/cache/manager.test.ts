@@ -684,6 +684,8 @@ describe('settleAfterWrite', () => {
       const cache = await settled(receipt, ReadPolicy.BOUNDED)
       expect(dec(await cache.get('/data/x.txt'))).toBe('new\n')
       expect(await cache.isFresh('/data/x.txt', 't-old')).toBe(false)
+      // Bounded: the kept bytes expire with the mount's ttl like a read.
+      expect(await cache.isUnbounded('/data/x.txt')).toBe(false)
     })
   }
 
@@ -784,6 +786,23 @@ describe('settleAfterWrite', () => {
 
   it("retires the command's probe answers", async () => {
     const manager = newManager(new RAMFileCacheStore(), new RAMIndexCacheStore({ ttl: 600 }))
+    await runInCommandScope(async () => {
+      manager.noteProbed(spec(), new FileStat({ name: 'x.txt', size: 4, type: FileType.FILE }))
+      await manager.settleAfterWrite(
+        spec(),
+        enc('new\n'),
+        { storedSize: 4, token: 't1' },
+        manager.generation,
+      )
+      expect(manager.probedStat(spec())).toBeNull()
+    })
+  })
+
+  it('retires probe answers on a non-caching mount', async () => {
+    // A probe answer is remembered whether or not the mount caches bytes; a
+    // write must still retire it, or a later stat in the same command serves
+    // the pre-write size.
+    const manager = newManager(new RAMFileCacheStore(), new RAMIndexCacheStore({ ttl: 600 }), false)
     await runInCommandScope(async () => {
       manager.noteProbed(spec(), new FileStat({ name: 'x.txt', size: 4, type: FileType.FILE }))
       await manager.settleAfterWrite(
