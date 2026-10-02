@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser } from '../shell/parse/index.ts'
 import { ops } from '../test-utils.ts'
+import { OpsRegistry } from '../ops/registry.ts'
 import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { IOResult } from '../io/types.ts'
@@ -317,6 +318,44 @@ describe('a guarded cp reads past the cache without refilling it', () => {
       expect(DEC.decode(made.stdout)).toBe('v2\n')
       const served = await ws.shell('cat /dir/a.txt', { sessionId: 'agent' })
       expect(DEC.decode(served.stdout)).toBe('v1\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a renderer registered beside the VFS', () => {
+  // Commands fill the cache with what their own reads return, which a
+  // renderer registered beside the VFS never sees.
+  it.each([
+    ['cat', 'cat /data/books.tally'],
+    ['tee', 'echo T | tee /data/books.tally'],
+  ])('still renders after a shell %s fills the cache', async (_name, line) => {
+    const ram = new RAMVFS()
+    Object.assign(ram, { cachesReads: true })
+    const registry = new OpsRegistry()
+    registry.registerVfs(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+    registry.register({
+      name: 'read',
+      vfs: ram.name,
+      filetype: '.tally',
+      write: false,
+      fn: () => Promise.resolve(ENC.encode('RENDERED')),
+    })
+    try {
+      await ops(ram).write(PathSpec.fromStrPath('/books.tally'), ENC.encode('STORED\n'))
+      const result = await ws.shell(line)
+      expect(result.exitCode).toBe(0)
+      expect(await ws.cache.exists('/data/books.tally')).toBe(true)
+      expect(await ws.vfs.readFileText('/data/books.tally')).toBe('RENDERED')
     } finally {
       await ws.close()
     }

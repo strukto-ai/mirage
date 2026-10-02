@@ -21,6 +21,16 @@ When the check cannot be made — the backend supplies no fingerprint, registers
 
 A fresh directory listing proves a child absent only when that child is not listed. If a listed child's metadata has been evicted independently, object-store stat fetches it from the backend.
 
+A read that resolves a filetype renderer is never served from the file cache. A filetype renderer is a `read` op scoped to an extension, whether the VFS ships it (Google Docs, Sheets and Slides do) or it is registered beside the VFS. The file cache holds what commands read through the VFS's own IO. For a renderer registered beside the VFS, those cached bytes need not be what the renderer returns, and the dispatcher does not tell the two kinds apart, so a shipped renderer whose bytes match the cache refetches too.
+
+The rule covers any read through the dispatcher: `ws.vfs.read`, FUSE, a cross-mount `cp` or relay, `< file` and a symlinked operand always run the renderer. Under `read: fresh` the cached entry is still checked first, so a path the backend reports gone fails as it does for any other read.
+
+It does not cover:
+
+- commands that read a file operand through the VFS's own IO (`cat`, `grep`, `head`, `wc`), which keep their cache hits;
+- a user override of the plain `read` op (one registered with no filetype), since only filetype-scoped `read` ops are checked;
+- a user-registered command that reports rendered bytes in its result's `cache` list: the file cache stores whatever a command reports, and command reads such as `cat` then serve it.
+
 ## Stores
 
 Each layer is a pluggable store with two built-ins:

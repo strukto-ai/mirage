@@ -1285,8 +1285,10 @@ describe('the read-token contract', () => {
         // that cached a truncated buffer cannot pass.
         let second = await line(ws, command)
         if (row === 'bytes') second = await line(ws, 'cat /r/a.txt')
-        // Reconcile answered FRESH: the warm read made no content fetch.
-        expect(fake.fetches()).toBe(1)
+        // Reconcile answered FRESH: the warm read made no content fetch,
+        // except that a cp of a rendered Google file reads through the
+        // dispatcher, where a filetype read op always renders.
+        expect(fake.fetches()).toBe(row === 'bytes' && name in GAPPS ? 2 : 1)
         expect(second).toEqual(data)
         expect(H.reach).toEqual([])
       } finally {

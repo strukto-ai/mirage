@@ -460,18 +460,27 @@ export class Dispatcher {
       throw enotempty(p.virtual)
     }
     const caches = vfs.cachesReads
-    // The file cache is keyed on the path alone, and what a command put
-    // there is the rendered read. A raw read asks for a different value
-    // under the same key, so it must not be served from that cache;
-    // nothing populates it from here, so skipping the probe is the
-    // whole fix. Mirrors Python's Dispatcher.dispatch.
+    // The file cache holds what commands read, keyed on the path alone. A
+    // raw read asks for a different value under the same key, so it skips
+    // the probe. A read through a filetype renderer (whoever registered it)
+    // still gets the freshness check, so a path the backend reports gone
+    // fails, but is never served the cached bytes. Mirrors Python's
+    // Dispatcher.dispatch.
     await mount.ensureReady()
     const raw = kwargs?.filetype === null
+    const requested = kwargs?.filetype
     if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
+      const readType =
+        requested === undefined
+          ? getExtension(p.virtual)
+          : typeof requested === 'string'
+            ? requested
+            : null
       if (
         cached !== null &&
         (await this.reconciler.mayServeCached(mount, p.virtual)) &&
+        !(readType !== null && this.opsRegistry.find('read', vfs, readType) !== null) &&
         !mount.retiring &&
         this.namespace.tryMountFor(p.virtual) === mount
       ) {
