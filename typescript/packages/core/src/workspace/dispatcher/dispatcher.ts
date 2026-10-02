@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runWithCacheManager } from '../../cache/context.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -77,6 +78,7 @@ import {
   DISPATCH_READ_OPS,
   DISPATCH_WRITE_OPS,
   ENTRY_CREATE_OPS,
+  EVICTED_WRITE_OPS,
   FILE_CREATE_OPS,
   HIDDEN_CREATE_OPS,
   LINK_ENTRY_OPS,
@@ -603,7 +605,13 @@ export class Dispatcher {
                 const call = Promise.resolve(
                   opName === 'setattr'
                     ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                    : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
+                    : EVICTED_WRITE_OPS.has(opName)
+                      ? runWithCacheManager(null, () =>
+                          Promise.resolve(
+                            this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
+                          ),
+                        )
+                      : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
                 )
                 onCall?.(call)
                 return runWithTimeout(call, opTimeout, opName)

@@ -425,8 +425,9 @@ describe('a whole-file write settles with the cache', () => {
         await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
         await out(ws, line)
         const held = await ws.cache.get(path)
+        const store = (ws.mount('/r/').vfs as RAMVFS).store
         expect(held).not.toBeNull()
-        expect(DEC.decode(held ?? undefined)).toBe(await out(ws, `cat ${path}`))
+        expect(held).toEqual(store.files.get(path.slice('/r'.length)))
       } finally {
         await ws.close()
       }

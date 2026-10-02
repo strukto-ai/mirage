@@ -121,8 +121,9 @@ The SharePoint VFS caches site, drive, and directory listings via
 A write keeps the bytes it sent in the file cache only when Graph's upload
 reply reports the same size, with the reply's cTag as the entry's token. A
 library that promotes properties into an uploaded Office, `.eml`, `.msg` or
-`.tiff` file stores more bytes than were sent, so the next read downloads the
-stored file. See [writes](/home/cache#writes).
+`.tiff` file can store different bytes; when the reply reports a different
+size, the next read downloads the stored file. See
+[writes](/home/cache#writes).
 
 ## Example
 

@@ -301,8 +301,9 @@ async def test_a_same_mount_write_keeps_its_output_under_bounded(line, path):
     await _out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
     await _out(ws, line)
     held = await ws._cache.get(path)
+    store = ws.mount("/r/").vfs.accessor.store
     assert held is not None
-    assert held == await _out(ws, f"cat {path}")
+    assert held == store.files[path.removeprefix("/r")]
 
 
 @pytest.mark.asyncio

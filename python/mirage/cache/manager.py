@@ -658,12 +658,12 @@ class CacheManager:
 
     def _vouched(self, receipt: WriteReceipt | None, sent: int) -> bool:
         if receipt is None:
-            return self._read_policy is ReadPolicy.BOUNDED
+            return self._read_policy == ReadPolicy.BOUNDED
         if receipt.stored_size is not None and receipt.stored_size != sent:
             return False
         if receipt.token:
             return True
-        return self._read_policy is ReadPolicy.BOUNDED
+        return self._read_policy == ReadPolicy.BOUNDED
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         """Invalidate caches after a deletion of ``path``.
