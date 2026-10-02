@@ -814,4 +814,62 @@ describe('settleAfterWrite', () => {
       expect(manager.probedStat(spec())).toBeNull()
     })
   })
+
+  it('keeps nothing bigger than the cache', async () => {
+    // A write larger than the whole cache would evict every warm entry, then
+    // itself: it is dropped instead, and the warm entry survives.
+    const cache = new RAMFileCacheStore({ limit: 10 })
+    await cache.set('/data/w.txt', enc('abc'))
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    await manager.settleAfterWrite(
+      spec(),
+      enc('x'.repeat(11)),
+      { storedSize: 11, token: 't1' },
+      manager.generation,
+    )
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+    expect(dec(await cache.get('/data/w.txt'))).toBe('abc')
+  })
+
+  it('keeps a write exactly the size of the cache', async () => {
+    const cache = new RAMFileCacheStore({ limit: 10 })
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    await manager.settleAfterWrite(
+      spec(),
+      enc('x'.repeat(10)),
+      { storedSize: 10, token: 't1' },
+      manager.generation,
+    )
+    expect(dec(await cache.get('/data/x.txt'))).toBe('x'.repeat(10))
+  })
+
+  it('a failed fill does not fail the write', async () => {
+    // The upload already landed: like a background drain that fails, the
+    // fill is skipped with a warning, and the parent listing still goes.
+    class RefusingCache extends RAMFileCacheStore {
+      override set(): Promise<void> {
+        return Promise.reject(new Error('cache store refused the fill'))
+      }
+    }
+    const cache = new RefusingCache()
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await index.setDir('/data', [
+      ['x.txt', new IndexEntry({ id: 'x', name: 'x.txt', resourceType: 'file' })],
+    ])
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const manager = newManager(cache, index)
+      await manager.settleAfterWrite(
+        spec(),
+        enc('new\n'),
+        { storedSize: 4, token: 't1' },
+        manager.generation,
+      )
+      expect(await cache.exists('/data/x.txt')).toBe(false)
+      expect((await index.listDir('/data')).entries ?? null).toBeNull()
+      expect(String(warn.mock.calls[0]?.[0])).toContain('/data/x.txt')
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })

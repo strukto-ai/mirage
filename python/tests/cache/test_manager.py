@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 
 import pytest
 
@@ -1024,3 +1025,57 @@ async def test_settle_retires_probe_answers_on_a_non_caching_mount():
             _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
         )
         assert manager.probed_stat(_spec()) is None
+
+
+@pytest.mark.asyncio
+async def test_settle_keeps_nothing_bigger_than_the_cache():
+    # A write larger than the whole cache would evict every warm entry,
+    # then itself: it is dropped instead, and the warm entry survives.
+    cache, index = RAMFileCacheStore(cache_limit=10), RAMIndexCacheStore(600)
+    await cache.set("/data/w.txt", b"abc")
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.settle_after_write(
+        _spec(), b"x" * 11, WriteReceipt(11, "t1"), manager.generation
+    )
+    assert await cache.exists("/data/x.txt") is False
+    assert await cache.get("/data/w.txt") == b"abc"
+
+
+@pytest.mark.asyncio
+async def test_settle_keeps_a_write_exactly_the_size_of_the_cache():
+    cache, index = RAMFileCacheStore(cache_limit=10), RAMIndexCacheStore(600)
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.settle_after_write(
+        _spec(), b"x" * 10, WriteReceipt(10, "t1"), manager.generation
+    )
+    assert await cache.get("/data/x.txt") == b"x" * 10
+
+
+class _RefusingCache(RAMFileCacheStore):
+    async def set(
+        self,
+        key: str,
+        data: bytes,
+        fingerprint: str | None = None,
+        ttl: int | None = None,
+    ) -> None:
+        raise ConnectionError("cache store refused the fill")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_fill_does_not_fail_the_write(caplog):
+    # The upload already landed: like a background drain that fails, the
+    # fill is skipped with a warning, and the parent listing still goes.
+    cache, index = _RefusingCache(), RAMIndexCacheStore(ttl=600)
+    await index.set_dir(
+        "/data",
+        [("x.txt", IndexEntry(id="x", name="x.txt", resource_type="file"))],
+    )
+    manager = CacheManager(cache, index, "/data/", True)
+    with caplog.at_level(logging.WARNING, logger="mirage.cache.manager"):
+        await manager.settle_after_write(
+            _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+        )
+    assert await cache.exists("/data/x.txt") is False
+    assert (await index.list_dir("/data")).entries is None
+    assert "/data/x.txt" in caplog.text

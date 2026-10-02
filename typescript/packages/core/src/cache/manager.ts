@@ -502,9 +502,12 @@ export class CacheManager {
    * mount since the upload started drops, a stored size other than the bytes
    * sent drops (SharePoint promotes properties into an uploaded Office file),
    * a token keeps the bytes with it, and a reply that says nothing keeps them
-   * only under bounded, where nothing would verify them anyway. Keep or drop,
-   * in-flight reads and probe answers are retired, so a read that began
-   * before the write cannot stamp its bytes over these.
+   * only under bounded, where nothing would verify them anyway. Bytes larger
+   * than the whole cache are dropped too: kept, they would evict every warm
+   * entry and then themselves. Keep or drop, in-flight reads and probe answers
+   * are retired, so a read that began before the write cannot stamp its bytes
+   * over these. The write has landed by now, so a fill the cache store
+   * refuses is logged and skipped, as a background drain's is, never thrown.
    */
   async settleAfterWrite(
     path: PathSpec,
@@ -519,13 +522,19 @@ export class CacheManager {
         const keep =
           started === this.readGeneration &&
           this.ownsPath(key) &&
+          data.byteLength <= cache.cacheLimit &&
           this.vouched(receipt, data.byteLength)
         this.retire()
         // Removed first even on a keep: removal disowns a drain still
         // filling the old bytes in the background.
         await cache.remove(key)
         if (keep) {
-          await cache.set(key, data, { fingerprint: receipt?.token ?? null, ttl: this.readTtl })
+          try {
+            await cache.set(key, data, { fingerprint: receipt?.token ?? null, ttl: this.readTtl })
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.warn(`cache fill after a write failed for ${key}: ${msg}`)
+          }
         }
       })
     } else {
