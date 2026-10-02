@@ -19,8 +19,9 @@ import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { activeCacheManager } from '../../cache/context.ts'
+import { CommandTimeoutError } from '../../commands/errors.ts'
 import { settling } from '../../cache/_test_util.ts'
-import { RAM_IO } from '../../commands/builtin/ram/io.ts'
+import { IO as RAM_IO } from '../../commands/builtin/ram/io.ts'
 import { writeBytes as ramWrite } from '../../core/ram/write.ts'
 import { makeGenericOps } from '../../ops/generic/factory.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
@@ -1049,7 +1050,31 @@ describe('a marked op is judged on the paths the door reaches', () => {
         }
       })
       expect(asked).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
 
+  // The door lifts the mark at entry: the mount's op sees only its own
+  // arguments. A null mark is no mark, as Python's rule_gate=None.
+  it('never forwards the mark to the op', async () => {
+    const ws = await linkedWs()
+    const spy = vi.spyOn(OpsRegistry.prototype, 'call')
+    try {
+      const { gate, asked } = refusing('/nothing')
+      await ws.dispatch('read', '/data/real/secret', [], { ruleGate: gate })
+      const seen = spy.mock.calls.map((call) => call[5])
+      expect(seen.length).toBeGreaterThan(0)
+      expect(seen.every((kw) => kw === undefined || !('ruleGate' in kw))).toBe(true)
+      expect(asked).toEqual(['/data/real/secret'])
+      const read = await ws.dispatch('read', '/data/real/secret', [], { ruleGate: null })
+      expect(new TextDecoder().decode(read as Uint8Array)).toBe('s\n')
+    } finally {
+      spy.mockRestore()
+      await ws.close()
+    }
+  })
+})
 
 // RAM whose append and truncate are the generic read-modify-write emulations
 // and whose create writes an empty file: the shape of every backend without
@@ -1078,6 +1103,20 @@ class FailingWriteRAM extends RAMVFS {
     return emulatedOps(async (accessor, path, data) => {
       await ramWrite(accessor, path, data)
       throw new Error('op timed out after the upload landed')
+    })
+  }
+}
+
+class StallingWriteRAM extends RAMVFS {
+  release: () => void = () => undefined
+  private readonly gate = new Promise<void>((resolve) => {
+    this.release = resolve
+  })
+
+  override ops(): readonly RegisteredOp[] {
+    return emulatedOps(async (accessor, path, data) => {
+      await ramWrite(accessor, path, data)
+      await this.gate
     })
   }
 }
@@ -1133,22 +1172,23 @@ describe('a dispatched write', () => {
     }
   })
 
-  // The door lifts the mark at entry: the mount's op sees only its own
-  // arguments. A null mark is no mark, as Python's rule_gate=None.
-  it('never forwards the mark to the op', async () => {
-    const ws = await linkedWs()
-    const spy = vi.spyOn(OpsRegistry.prototype, 'call')
+  it('that outlives its op timeout is evicted', async () => {
+    // The deadline abandons the op rather than cancelling it, so the eviction
+    // must sit outside the race: inside it, the timeout skips it and the
+    // landed write leaves the old bytes served.
+    const vfs = new StallingWriteRAM()
+    const ws = await cachingWorkspace(vfs)
     try {
-      const { gate, asked } = refusing('/nothing')
-      await ws.dispatch('read', '/data/real/secret', [], { ruleGate: gate })
-      const seen = spy.mock.calls.map((call) => call[5])
-      expect(seen.length).toBeGreaterThan(0)
-      expect(seen.every((kw) => kw === undefined || !('ruleGate' in kw))).toBe(true)
-      expect(asked).toEqual(['/data/real/secret'])
-      const read = await ws.dispatch('read', '/data/real/secret', [], { ruleGate: null })
-      expect(new TextDecoder().decode(read as Uint8Array)).toBe('s\n')
+      for (const m of ws.registry.allMounts()) {
+        m.commandLimits.set('write', new Limit({ timeoutSeconds: 0.05 }))
+      }
+      await ws.cache.set('/r/a.txt', ENC.encode('old'))
+      await expect(ws.dispatch('write', '/r/a.txt', [ENC.encode('new')])).rejects.toBeInstanceOf(
+        CommandTimeoutError,
+      )
+      expect(await ws.cache.exists('/r/a.txt')).toBe(false)
     } finally {
-      spy.mockRestore()
+      vfs.release()
       await ws.close()
     }
   })

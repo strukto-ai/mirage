@@ -23,6 +23,7 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import active_cache_manager
 from mirage.commands.builtin.ram.io import IO as RAM_IO
+from mirage.commands.errors import CommandTimeoutError
 from mirage.context import reset_current_session, set_current_session
 from mirage.core.ram.write import write_bytes as ram_write
 from mirage.errors import FsCondition, posix_errno
@@ -39,7 +40,14 @@ from mirage.policy import (
     PolicyDenied,
 )
 from mirage.policy.rule import RulePolicy
-from mirage.types import FileStat, FileType, HiddenPaths, MountMode, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    HiddenPaths,
+    Limit,
+    MountMode,
+    PathSpec,
+)
 from mirage.utils.errors import ReadOnlyError
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import slice_window, splice_window
@@ -1451,6 +1459,18 @@ class _FailingWriteRAM(RAMVFS):
         return _emulated_ops(_landing_then_failing_write)
 
 
+async def _landing_then_stalling_write(
+    accessor: RAMAccessor, path: PathSpec, data: bytes
+) -> None:
+    await ram_write(accessor, path, data)
+    await asyncio.sleep(10)
+
+
+class _StallingWriteRAM(RAMVFS):
+    def ops(self) -> list[RegisteredOp]:
+        return _emulated_ops(_landing_then_stalling_write)
+
+
 def _scope(virtual: str) -> PathSpec:
     return PathSpec(
         vfs_path=mount_key(virtual, "/r"),
@@ -1500,9 +1520,28 @@ async def test_a_dispatched_write_that_fails_after_landing_is_evicted():
     vfs.caches_reads = True
     ws = Workspace({"/r": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     try:
-        await ws._cache.set("/r/a.txt", b"old")
+        await ws.cache.set("/r/a.txt", b"old")
         with pytest.raises(TimeoutError):
             await ws.dispatch("write", _scope("/r/a.txt"), data=b"new")
-        assert await ws._cache.exists("/r/a.txt") is False
+        assert await ws.cache.exists("/r/a.txt") is False
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_dispatched_write_that_outlives_its_op_timeout_is_evicted():
+    # The deadline cancels the op after its write landed, and the cancel
+    # comes out as a timeout: the dispatcher must evict on that too, or the
+    # old bytes stay served.
+    vfs = _StallingWriteRAM()
+    vfs.caches_reads = True
+    ws = Workspace({"/r": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        for m in ws._registry._mounts:
+            m.command_limits["write"] = Limit(timeout_seconds=0.05)
+        await ws.cache.set("/r/a.txt", b"old")
+        with pytest.raises(CommandTimeoutError):
+            await ws.dispatch("write", _scope("/r/a.txt"), data=b"new")
+        assert await ws.cache.exists("/r/a.txt") is False
     finally:
         await ws.close()
