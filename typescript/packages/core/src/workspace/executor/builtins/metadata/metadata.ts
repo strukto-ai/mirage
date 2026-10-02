@@ -19,6 +19,7 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import { fsStrerror, isEnoent, isEnotdir, walkRefusal } from '../../../../utils/errors.ts'
+import { epochToIsoZ, isoToEpochMicros } from '../../../../utils/dates.ts'
 import { CycleError } from '../../../../utils/path.ts'
 
 export function parseOwner(text: string): [number | string | null, number | string | null] {
@@ -87,9 +88,9 @@ export function parseTouchStamp(t: string | null, d: string | null): string | nu
     let normalized = d.replace('Z', '+00:00').replace(' ', 'T')
     if (!normalized.includes('T')) normalized += 'T00:00:00'
     const hasZone = /[+-]\d{2}:\d{2}$/.test(normalized)
-    const dt = new Date(hasZone ? normalized : normalized + '+00:00')
-    if (Number.isNaN(dt.getTime())) throw new Error(d)
-    return isoformat(dt)
+    const seconds = isoToEpochMicros(hasZone ? normalized : normalized + '+00:00')
+    if (Number.isNaN(seconds)) throw new Error(d)
+    return epochToIsoZ(seconds).replace(/Z$/, '+00:00')
   }
   return null
 }

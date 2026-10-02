@@ -443,6 +443,19 @@ def epoch_to_iso(seconds: float) -> str:
     )
 
 
+def epoch_to_iso_z(seconds: float) -> str:
+    """Convert unix epoch seconds to ``to_iso_z``'s spelling, the fraction
+    kept.
+
+    What an attribute overlay renders a time it holds as: ``touch -d``
+    stores a fraction, and a backend that keeps its own times keeps it.
+
+    Args:
+        seconds (float): unix epoch seconds.
+    """
+    return to_iso_z(datetime.fromtimestamp(seconds, tz=timezone.utc))
+
+
 def iso_to_epoch(iso: str) -> int:
     """Convert an ISO-8601 string to whole unix epoch seconds.
 

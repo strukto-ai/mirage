@@ -314,6 +314,10 @@ class NativeCopy:
     # Lets the per-entry policy path (--update/--backup, which cannot use a
     # whole-tree dir_copy) still materialize directories that hold no files.
     mkdir: CopyFn | None = None
+    # Settles each file a whole-tree dir_copy wrote in the attr overlay
+    # (``NamespaceView.settle_write``), so a replaced file drops the
+    # ``touch -d`` time it had; the copy itself names no files.
+    settle: CopyFn | None = None
 
 
 @dataclass(frozen=True, slots=True)

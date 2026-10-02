@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 def _stat_from_entry(entry: dict[str, Any]) -> FileStat:
     modified = (
-        entry.get("server_modified") or entry.get("client_modified") or ""
+        entry.get("server_modified") or entry.get("client_modified") or None
     )
     name = entry.get("name", "")
     entry_id = entry.get("id") or entry.get("path_display") or name
@@ -49,7 +49,7 @@ def _stat_from_entry(entry: dict[str, Any]) -> FileStat:
         type=FileType.FILE,
         content=content_type_for_path(name),
         modified=modified,
-        fingerprint=modified or None,
+        fingerprint=modified,
         extra={
             "dropbox_id": entry_id,
             "resource_type": "dropbox/file",
@@ -117,7 +117,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name or result.entry.name,
             type=FileType.DIRECTORY,
-            modified=result.entry.remote_time,
+            modified=result.entry.remote_time or None,
             extra={"dropbox_id": result.entry.id},
         )
     return FileStat(
@@ -125,7 +125,7 @@ async def stat(
         size=result.entry.size,
         type=FileType.FILE,
         content=content_type_for_path(result.entry.vfs_name),
-        modified=result.entry.remote_time,
+        modified=result.entry.remote_time or None,
         fingerprint=result.entry.remote_time or None,
         extra={
             "dropbox_id": result.entry.id,

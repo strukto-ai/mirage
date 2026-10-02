@@ -180,13 +180,13 @@ function directiveValue(
   if (spec === 'f') return (typeBits(s) | effectiveMode(s)).toString(16)
   if (spec === 'u' || spec === 'U') return ownerName(s.uid, identity)
   if (spec === 'g' || spec === 'G') return groupName(s.gid, identity)
-  if (spec === 'x') return s.atime ?? s.modified ?? ''
+  if (spec === 'x') return statTime(s.atime ?? s.modified)
   if (spec === 'X') return epoch(s.atime ?? s.modified)
-  if (spec === 'y') return s.modified ?? ''
+  if (spec === 'y') return statTime(s.modified)
   if (spec === 'Y') return epoch(s.modified)
-  if (spec === 'z') return s.ctime ?? '-'
+  if (spec === 'z') return statTime(s.ctime)
   if (spec === 'Z') return epoch(s.ctime)
-  if (spec === 'w') return s.birthtime ?? '-'
+  if (spec === 'w') return statTime(s.birthtime)
   if (spec === 'W') return epoch(s.birthtime)
   if (spec === 'B') return '512'
   const device = s.extra[DEVICE_NUMBERS_KEY]

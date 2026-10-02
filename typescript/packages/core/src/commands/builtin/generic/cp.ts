@@ -1234,6 +1234,7 @@ export async function cpGeneric(
         for (const entryMount of await strategy.find(src, { type: 'f' })) {
           const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
           writes[entryDst.mountPath] = new Uint8Array()
+          if (strategy.settle !== undefined) await strategy.settle('write', entryDst.virtual)
         }
         if (flags.verbose) {
           lines.push(...(await treeLines(strategy, src, target, srcBase, dstBase)))

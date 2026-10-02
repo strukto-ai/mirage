@@ -129,6 +129,12 @@ class ReadOnlyProd implements Policy {
   }
 }
 
+class NoStat implements Policy {
+  preOps(ctx: OpsContext): Action | null {
+    return ctx.op === 'stat' ? { kind: 'deny', reason: 'stat is sealed' } : null
+  }
+}
+
 class NoInterpreters implements Policy {
   async preCommand(ctx: CommandContext): Promise<Action | null> {
     await Promise.resolve()
@@ -436,6 +442,24 @@ describe('workspace policies', () => {
       expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
       const ok = await ws.shell('touch /data/free && echo done')
       expect(new TextDecoder().decode(ok.stdout)).toContain('done')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('mkdir -p needs no stat permission', async () => {
+    // mkdir -p asks the backend whether the operand is already there; a
+    // policy that refuses stat but allows mkdir still gets its mkdir.
+    const ws = executableWorkspace()
+    try {
+      const noStat = new NoStat()
+      ws.policies.add(noStat)
+      const made = await ws.shell('mkdir -p /data/a/b && mkdir -p /data/a/b')
+      expect(new TextDecoder().decode(made.stderr)).toBe('')
+      expect(made.exitCode).toBe(0)
+      ws.policies.remove(noStat)
+      const listed = await ws.shell('ls /data/a')
+      expect(new TextDecoder().decode(listed.stdout)).toBe('b\n')
     } finally {
       await ws.close()
     }

@@ -50,7 +50,7 @@
       "command": "touch -t 202401010000 /data/metao/sc.txt && stat -c \"%y|%Y\" /data/metao/sc.txt",
       "expect": {
         "exit": 0,
-        "stdout": "2024-01-01T00:00:00Z|1704067200\n",
+        "stdout": "2024-01-01 00:00:00.000000000 +0000|1704067200\n",
         "stderr": ""
       }
     },
@@ -78,6 +78,33 @@
       "expect": {
         "exit": 0,
         "stdout": "640|-rw-r-----\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_stat_y_keeps_touch_microseconds",
+      "seq": 201018,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "echo a > /data/metao/us.txt && touch -d '2024-01-01 00:00:00.123456' /data/metao/us.txt && stat -c %y /data/metao/us.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2024-01-01 00:00:00.123456000 +0000\n",
         "stderr": ""
       }
     }

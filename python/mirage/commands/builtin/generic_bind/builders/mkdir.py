@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,
     Operation,
+    bound_op,
 )
 from mirage.commands.builtin.utils.paths import descendant_path, entry_kind
 from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
@@ -30,7 +31,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.context import DEFAULT_UMASK, get_walk_probe, session_umask
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType, PathSpec, StatFn
 from mirage.utils.errors import (
     ELOOP_STRERROR,
     FS_ERRORS,
@@ -57,29 +58,9 @@ async def mkdir(
     mode_text = fl.as_str("mode")
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("mkdir: missing operand")
-    mode: int | None = None
-    if mode_text is not None:
-        # Symbolic clauses build on what mirage renders for a new
-        # directory; `-m` is applied after the create, so the session's
-        # umask does not reach it, which is GNU's rule too.
-        mode = parse_chmod(mode_text, DEFAULT_DIR_MODE)
-        if mode is None:
-            raise ValueError(f"mkdir: invalid mode '{mode_text}'")
-        if ops.set_attrs is None:
-            raise NotImplementedError(
-                "mkdir: --mode is not supported on this backend"
-            )
-    elif ops.set_attrs is not None:
-        # A new directory is 0777 masked by the session's umask. Only a
-        # mask away from bash's default costs a setattr, because 755 is
-        # what every backend already renders for a fresh directory;
-        # parents made by `-p` keep that default (GNU gives them
-        # `u+wx` on top of the mask, which the one backend op cannot
-        # tell apart from the named directory).
-        umask = session_umask()
-        if umask != DEFAULT_UMASK:
-            mode = 0o777 & ~umask
+    mode = mkdir_mode(ops, opts, mode_text)
     mkdir_fn = ops.require(Operation.MKDIR)
+    stat = bound_op(ops.stat, accessor, opts.index)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     lines: list[str] = []
     errors: list[str] = []
@@ -90,19 +71,92 @@ async def mkdir(
             if refusal is not None:
                 errors.append(refusal)
             continue
-        failed = await make_directory(mkdir_fn, accessor, path, parents, links)
+        made, failed = await make_directory(
+            mkdir_fn, accessor, path, parents, links, stat
+        )
         if failed is not None:
             errors.append(failed)
+        if not made:
             continue
-        if mode is not None and ops.set_attrs is not None:
+        if mode is not None:
             # -m applies to the named directory only; any parents made by
             # -p keep the default mode (GNU).
-            await ops.set_attrs(accessor, path, mode=mode)
+            await apply_mode(ops, accessor, path, mode, opts)
         if verbose:
             lines.append(f"mkdir: created directory '{path.virtual}'")
     output = ("\n".join(lines) + "\n").encode() if lines else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
     return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
+
+
+def mkdir_mode(
+    ops: CommandIO, opts: CommandOpts, mode_text: str | None
+) -> int | None:
+    """The mode a mkdir gives each directory it names.
+
+    The mode goes through the op door, the way chmod's does (see
+    ``apply_mode``). Shared by the generic builder and the keyed-store
+    override, so a mode means the same on every backend.
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+        opts (CommandOpts): the invocation, whose dispatch is the door.
+        mode_text (str | None): the ``-m`` operand, None without one.
+
+    Raises:
+        ValueError: the mode is one GNU cannot read.
+        NotImplementedError: this mount has no way to set a mode.
+    """
+    can_set_mode = ops.set_attrs is not None or opts.dispatch is not None
+    if mode_text is not None:
+        # Symbolic clauses build on what mirage renders for a new
+        # directory; `-m` is applied after the create, so the session's
+        # umask does not reach it, which is GNU's rule too.
+        mode = parse_chmod(mode_text, DEFAULT_DIR_MODE)
+        if mode is None:
+            raise ValueError(f"mkdir: invalid mode '{mode_text}'")
+        if not can_set_mode:
+            raise NotImplementedError(
+                "mkdir: --mode is not supported on this backend"
+            )
+        return mode
+    if not can_set_mode:
+        return None
+    # A new directory is 0777 masked by the session's umask. Only a mask
+    # away from bash's default costs a setattr, because 755 is what every
+    # backend already renders for a fresh directory; parents made by
+    # `-p` keep that default (GNU gives them `u+wx` on top of the mask,
+    # which the one backend op cannot tell apart from the named
+    # directory).
+    umask = session_umask()
+    return 0o777 & ~umask if umask != DEFAULT_UMASK else None
+
+
+async def apply_mode(
+    ops: CommandIO,
+    accessor: Accessor,
+    path: PathSpec,
+    mode: int,
+    opts: CommandOpts,
+) -> None:
+    """Set a made directory's mode through the op door, else the slot.
+
+    The door applies what the backend holds natively and keeps the rest
+    in the attr overlay, where a bare ``set_attrs`` slot drops what its
+    store cannot hold. The slot answers only outside a workspace, with
+    no door.
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+        accessor (Accessor): backend handle.
+        path (PathSpec): the directory made.
+        mode (int): the permission bits.
+        opts (CommandOpts): the invocation, whose dispatch is the door.
+    """
+    if opts.dispatch is not None:
+        await opts.dispatch("setattr", path, mode=mode)
+    elif ops.set_attrs is not None:
+        await ops.set_attrs(accessor, path, mode=mode)
 
 
 async def make_directory(
@@ -111,14 +165,20 @@ async def make_directory(
     path: PathSpec,
     parents: bool,
     links: LinkView | None = None,
-) -> str | None:
-    """Make one mkdir operand, or the line GNU reports when it cannot.
+    stat: StatFn | None = None,
+) -> tuple[bool, str | None]:
+    """Make one mkdir operand: whether it was made, and the line GNU
+    reports when it cannot be.
 
     One unusable operand is not an aborted command: GNU reports it and
     still makes the remaining directories. The error names the path to
     quote: usually the operand, but ``mkdir -p`` blames the component of
-    the chain it tripped on. Every mkdir makes its operands here, a keyed
-    store's override included, so they report alike.
+    the chain it tripped on. ``mkdir -p`` leaves a directory the
+    backend already holds alone, so it gets no new time, no ``-m`` mode
+    and no ``-v`` line (GNU); the backend's own stat says so, since the
+    workspace also shows a directory a nested mount implies. Every mkdir
+    makes its operands here, a keyed store's override included, so they
+    report alike.
 
     Args:
         mkdir_fn (OperationFn): the guarded backend mkdir.
@@ -126,6 +186,7 @@ async def make_directory(
         path (PathSpec): the operand.
         parents (bool): whether ``-p`` makes the missing ancestors.
         links (LinkView | None): the namespace's symlink facts.
+        stat (StatFn | None): the backend's stat, None to always make.
     """
     # -p enters the names in front of the operand one at a time, so a
     # dot among them, or a link loop the walk refused the operand for,
@@ -135,18 +196,24 @@ async def make_directory(
             mkdir_fn, accessor, path, path.dotted or path.virtual, links
         )
         if failed is not None:
-            return failed
+            return False, failed
         # The walk has entered every name the spelling passes through, so
         # the operand is made by its resolved path alone: walking it again
         # would ask a store that shows no empty directory (hf) for one the
         # walk just made.
         path = replace(path, dotted=None)
+    if parents and stat is not None and path.walk_error is None:
+        exists, is_dir = await entry_kind(stat, path)
+        if exists and is_dir:
+            return False, None
     try:
         await mkdir_fn(accessor, path, parents=parents)
     except FS_ERRORS as exc:
         named = operand_spelling(error_path(exc), path)
-        return f"mkdir: cannot create directory '{named}': {fs_strerror(exc)}"
-    return None
+        return False, (
+            f"mkdir: cannot create directory '{named}': {fs_strerror(exc)}"
+        )
+    return True, None
 
 
 async def _make_walked(

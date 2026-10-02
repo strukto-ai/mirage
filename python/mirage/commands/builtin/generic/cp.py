@@ -1582,6 +1582,10 @@ async def cp(
                         target, dst_base + entry_mount[len(src_base) :]
                     )
                     writes[entry_dst.mount_path] = b""
+                    if strategy.settle is not None:
+                        await strategy.settle(
+                            "write", entry_dst.virtual, False
+                        )
                 if flags.verbose:
                     lines.extend(
                         await _tree_lines(

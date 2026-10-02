@@ -29,6 +29,7 @@ import {
   withPolicyGuard,
   withRuleGuard,
   withPathGuards,
+  withSettledWrites,
   requireOp,
   type CommandIO,
 } from './adapter.ts'
@@ -1035,5 +1036,45 @@ describe('directory EOF', () => {
       expect(await drain(ops.readStream(accessor, path))).toEqual([new Uint8Array()])
       expect(await ops.readRange?.(accessor, path, undefined, 0, null)).toEqual(new Uint8Array())
     }
+  })
+})
+
+describe('withSettledWrites', () => {
+  const spec = (virtual: string): PathSpec => PathSpec.fromStrPath(virtual)
+
+  it('settles each write once the backend op succeeded, as the dispatcher names it', async () => {
+    const settled: [string, string, boolean | undefined][] = []
+    const io = {
+      write: () => Promise.resolve(),
+      mkdir: () => Promise.resolve(),
+      copy: () => Promise.resolve(),
+      rmR: () => Promise.resolve(),
+    } as unknown as CommandIO
+    const ops = withSettledWrites(io, (op, path, parents) => {
+      settled.push([op, path, parents])
+      return Promise.resolve()
+    })
+    const accessor = {} as Accessor
+    await ops.write?.(accessor, spec('/data/f'), new Uint8Array())
+    await ops.mkdir?.(accessor, spec('/data/a/b'), true)
+    await ops.copy?.(accessor, spec('/data/f'), spec('/data/g'))
+    await ops.rmR?.(accessor, spec('/data/a'))
+    expect(settled).toEqual([
+      ['write', '/data/f', false],
+      ['mkdir', '/data/a/b', true],
+      ['write', '/data/g', false],
+      ['rmdir', '/data/a', false],
+    ])
+  })
+
+  it('settles nothing when the backend op fails', async () => {
+    const settled: string[] = []
+    const io = { write: () => Promise.reject(enoent(spec('/data/f'))) } as unknown as CommandIO
+    const ops = withSettledWrites(io, (op) => {
+      settled.push(op)
+      return Promise.resolve()
+    })
+    await expect(ops.write?.({} as Accessor, spec('/data/f'), new Uint8Array())).rejects.toThrow()
+    expect(settled).toEqual([])
   })
 })

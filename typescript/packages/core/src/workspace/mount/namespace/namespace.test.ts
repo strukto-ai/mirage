@@ -234,6 +234,43 @@ describe('Namespace node metadata overlay', () => {
     await ws.close()
   })
 
+  it('settleWrite drops a removed directory and what lies below it', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    await ws.namespace.setAttrs('/data/d', { mode: 0o700, mtime: 1 })
+    await ws.namespace.setAttrs('/data/d/f.txt', { mode: 0o600 })
+    await ws.namespace.settleWrite('rmdir', '/data/d', null)
+    expect(ws.namespace.metaFor('/data/d')).toBeNull()
+    expect(ws.namespace.metaFor('/data/d/f.txt')).toBeNull()
+    await ws.close()
+  })
+
+  it('holdsTimesUnder sees a time at or below a path, never a link or a sibling', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    await ws.namespace.setAttrs('/data/d/f.txt', { mtime: 1 })
+    await ws.namespace.setAttrs('/data/m', { mode: 0o600 })
+    await ws.namespace.symlink('/data/l/ln', '/data/d', 1)
+    expect(ws.namespace.holdsTimesUnder('/data')).toBe(true)
+    expect(ws.namespace.holdsTimesUnder('/data/d/')).toBe(true)
+    expect(ws.namespace.holdsTimesUnder('/data/d/f.txt')).toBe(true)
+    expect(ws.namespace.holdsTimesUnder('/data/m')).toBe(false)
+    expect(ws.namespace.holdsTimesUnder('/data/l')).toBe(false)
+    expect(ws.namespace.holdsTimesUnder('/data/d/f')).toBe(false)
+    expect(ws.namespace.holdsTimesUnder('/')).toBe(true)
+    await ws.close()
+  })
+
+  it('settleWrite stamps the part of a mkdir -p chain that has no time', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    await ws.namespace.setAttrs('/data/a', { mtime: 1 })
+    await ws.namespace.settleWrite('mkdir', '/data/a/b/c', 5, true)
+    expect(ws.namespace.metaFor('/data')).toBeNull()
+    expect(ws.namespace.metaFor('/data/a')?.mtime).toBe(1)
+    expect(ws.namespace.metaFor('/data/a')?.observedMtime).toBeUndefined()
+    expect(ws.namespace.metaFor('/data/a/b')?.observedMtime).toBe(5)
+    expect(ws.namespace.metaFor('/data/a/b/c')?.observedMtime).toBe(5)
+    await ws.close()
+  })
+
   it('dropAttrs removes applied fields and deletes emptied nodes', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() })
     await ws.namespace.setAttrs('/data/f.txt', { mode: 0o601, uid: 500 })

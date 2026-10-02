@@ -45,11 +45,16 @@ export const FIND_BUILDER: Builder = {
       !pathRulesActive() &&
       !resolved.some((p) => hiddenPathsIntersect(p.virtual))
     ) {
-      // -mtime must see namespace times (touch results, observed
-      // writes), so local backends post-filter through the overlay-
-      // aware stat instead of pushing the window into the core.
+      // Time tests must see namespace times (touch results, observed
+      // writes), so a local backend, or a remote one whose operand holds
+      // overlay times, post-filters through the overlay-aware stat
+      // instead of pushing the window into the backend's find, which
+      // judges by its own times. A remote operand with no overlay times
+      // keeps the push-down and its one-request listing.
+      const timesUnder = opts.ns?.timesUnder
       const stat =
-        ops.local === true
+        ops.local === true ||
+        (timesUnder !== undefined && resolved.some((p) => timesUnder(p.virtual)))
           ? overlaidStat((spec) => ops.stat(accessor, spec, idx), opts.ns?.statOverlay)
           : undefined
       return findGeneric(

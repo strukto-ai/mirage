@@ -16,8 +16,16 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
-from mirage.commands.builtin.generic_bind.builders.mkdir import make_directory
+from mirage.commands.builtin.generic_bind.adapter import (
+    CommandIO,
+    Operation,
+    bound_op,
+)
+from mirage.commands.builtin.generic_bind.builders.mkdir import (
+    apply_mode,
+    make_directory,
+    mkdir_mode,
+)
 from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
@@ -26,15 +34,16 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
+def make_mkdir(
+    vfs: str, io_for: Callable[[CommandOpts], CommandIO]
+) -> Callable[..., Any]:
     """Build the implicit-parents mkdir override for one keyed store.
 
     Args:
         vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire mkdir.
+        io_for (Callable[[CommandOpts], CommandIO]): the op table for one
+            invocation; must wire mkdir.
     """
-    mkdir_impl = io.require(Operation.MKDIR)
-    resolve_glob = io.resolve_glob
 
     async def mkdir(
         accessor: Accessor,
@@ -47,7 +56,11 @@ def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
         verbose = fl.as_bool("verbose")
         if not paths:
             raise ValueError("mkdir: missing operand")
-        paths = await resolve_glob(accessor, paths, opts.index)
+        io = io_for(opts)
+        mkdir_impl = io.require(Operation.MKDIR)
+        stat = bound_op(io.stat, accessor, opts.index)
+        mode = mkdir_mode(io, opts, fl.as_str("mode"))
+        paths = await io.resolve_glob(accessor, paths, opts.index)
         lines: list[str] = []
         errors: list[str] = []
         writes: dict[str, ByteSource] = {}
@@ -62,13 +75,18 @@ def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
                 if refusal is not None:
                     errors.append(refusal)
                 continue
-            failed = await make_directory(
-                mkdir_impl, accessor, path, parents, links
+            made, failed = await make_directory(
+                mkdir_impl, accessor, path, parents, links, stat
             )
             if failed is not None:
                 errors.append(failed)
+            if not made:
                 continue
             writes[path.mount_path] = b""
+            if mode is not None:
+                # -m applies to the named directory only; any parents
+                # made by -p keep the default mode (GNU).
+                await apply_mode(io, accessor, path, mode, opts)
             if verbose:
                 lines.append(f"mkdir: created directory '{path.virtual}'")
         output = ("\n".join(lines) + "\n").encode() if lines else None

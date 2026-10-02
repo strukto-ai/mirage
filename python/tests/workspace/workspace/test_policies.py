@@ -466,6 +466,30 @@ async def test_pre_ops_policy_holds_on_the_dispatcher_door():
         await ws.close()
 
 
+class NoStat(Policy):
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        if ctx.op == "stat":
+            return Deny("stat is sealed")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_mkdir_p_needs_no_stat_permission():
+    # mkdir -p asks the backend whether the operand is already there; a
+    # policy that refuses stat but allows mkdir still gets its mkdir.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        no_stat = NoStat()
+        ws.policies.add(no_stat)
+        made = await ws.shell("mkdir -p /data/a/b && mkdir -p /data/a/b")
+        assert made.exit_code == 0, made.stderr
+        ws.policies.remove(no_stat)
+        listed = await ws.shell("ls /data/a")
+        assert listed.stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
 class SealedPaths(Policy):
     async def pre_ops(self, ctx: OpsContext) -> Action | None:
         if not ctx.write and ctx.path.virtual == "/data/secret.txt":

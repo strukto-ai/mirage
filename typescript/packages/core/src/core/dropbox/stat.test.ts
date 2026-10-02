@@ -115,10 +115,10 @@ describe('dropbox stat', () => {
     })
   })
 
-  // statFromEntry fallbacks: server_modified→client_modified→'',
+  // statFromEntry fallbacks: server_modified→client_modified→null,
   // id→path_display→name, and a non-number/absent size renders as null (the
   // unknown-size machinery, never a fabricated number).
-  const fallbackCases: [DropboxEntry, string, number | null, string, string | null][] = [
+  const fallbackCases: [DropboxEntry, string, number | null, string | null, string | null][] = [
     [
       {
         '.tag': 'file',
@@ -132,17 +132,23 @@ describe('dropbox stat', () => {
       '2026-01-02T00:00:00Z',
       '2026-01-02T00:00:00Z',
     ],
-    [{ '.tag': 'file', id: 'id:x', name: 'f.txt', size: 3 }, 'id:x', 3, '', null],
-    [{ '.tag': 'file', name: 'f.txt', path_display: '/d/f.txt', size: 3 }, '/d/f.txt', 3, '', null],
-    [{ '.tag': 'file', name: 'f.txt', size: 3 }, 'f.txt', 3, '', null],
-    [{ '.tag': 'file', id: 'id:x', name: 'f.txt' }, 'id:x', null, '', null],
+    [{ '.tag': 'file', id: 'id:x', name: 'f.txt', size: 3 }, 'id:x', 3, null, null],
+    [
+      { '.tag': 'file', name: 'f.txt', path_display: '/d/f.txt', size: 3 },
+      '/d/f.txt',
+      3,
+      null,
+      null,
+    ],
+    [{ '.tag': 'file', name: 'f.txt', size: 3 }, 'f.txt', 3, null, null],
+    [{ '.tag': 'file', id: 'id:x', name: 'f.txt' }, 'id:x', null, null, null],
     // size is typed number, but the wire is untyped JSON; a non-number
     // from the API must render as null, not a fabricated size.
     [
       { '.tag': 'file', id: 'id:x', name: 'f.txt', size: 'big' as unknown as number },
       'id:x',
       null,
-      '',
+      null,
       null,
     ],
   ]

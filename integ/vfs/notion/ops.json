@@ -61,7 +61,7 @@
       "command": "stat -c '%n %y' /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777",
       "expect": {
         "exit": 0,
-        "stdout": "/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777 2026-01-02T00:00:00.000Z\n",
+        "stdout": "/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777 2026-01-02 00:00:00.000000000 +0000\n",
         "stderr": ""
       }
     },

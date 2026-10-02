@@ -1,0 +1,137 @@
+{
+  "cases": [
+    {
+      "id": "ometa_cp_over_a_touched_file_takes_the_write_time",
+      "seq": 201019,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "echo a > /data/metao/cpd && echo b > /data/metao/cps && touch -d 2000-01-01 /data/metao/cpd && cp /data/metao/cps /data/metao/cpd && find /data/metao/cpd -newermt 2010-01-01",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/metao/cpd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_mkdir_after_rmdir_starts_with_a_fresh_time",
+      "seq": 201020,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "mkdir /data/metao/rd && touch -d 2000-01-01 /data/metao/rd && rmdir /data/metao/rd && mkdir /data/metao/rd && find /data/metao/rd -newermt 2010-01-01",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/metao/rd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_mkdir_p_times_every_directory_it_makes",
+      "seq": 201021,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "mkdir -p /data/metao/pp/x/y && echo f > /data/metao/pp/x/y/f && find /data/metao/pp -type d -newermt 2010-01-01 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/metao/pp\n/data/metao/pp/x\n/data/metao/pp/x/y\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_mkdir_m_sets_the_mode",
+      "seq": 201022,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "mkdir -m 700 /data/metao/mm && echo f > /data/metao/mm/f && stat -c %A /data/metao/mm",
+      "expect": {
+        "exit": 0,
+        "stdout": "drwx------\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_mkdir_p_leaves_an_existing_directory_alone",
+      "seq": 201026,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "mkdir /data/metao/pe && echo f > /data/metao/pe/f && mkdir -pv -m 700 /data/metao/pe && stat -c %a /data/metao/pe",
+      "expect": {
+        "exit": 0,
+        "stdout": "755\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

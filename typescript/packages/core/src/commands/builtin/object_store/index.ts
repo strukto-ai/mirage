@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
-import type { RegisteredCommand } from '../../config.ts'
+import type { CommandOpts, RegisteredCommand } from '../../config.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
-import { withPathGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
+import { withPathGuards, withPolicyGuard, withSettledWrites } from '../generic_bind/adapter.ts'
 import { withProbeAnswers, withSlashGuard } from '../generic_bind/factory.ts'
 import { makeMkdir } from './mkdir.ts'
 import { makeRm } from './rm.ts'
@@ -48,11 +48,17 @@ export function makeObjectStoreCommands<A extends Accessor>(
 ): RegisteredCommand[] {
   const guarded = withPolicyGuard(withSlashGuard(withPathGuards(rawIo)))
   const answered = withPolicyGuard(withSlashGuard(withPathGuards(withProbeAnswers(rawIo))))
+  // The overrides that write bind their chain per invocation, as the
+  // factory binds every generic's, so their writes settle in the attr
+  // overlay through the invocation's namespace door, innermost. rm's
+  // overlay goes with the shell's rm, which drops what it removed.
+  const settledFor = (opts: CommandOpts): CommandIO<A> =>
+    withPolicyGuard(withSlashGuard(withPathGuards(withSettledWrites(rawIo, opts.ns?.settleWrite))))
   return [
-    ...makeMkdir(vfs, guarded),
+    ...makeMkdir(vfs, settledFor),
     ...makeRm(vfs, guarded),
     ...makeStat(vfs, answered),
-    ...makeTee(vfs, guarded),
-    ...makeTouch(vfs, guarded),
+    ...makeTee(vfs, settledFor),
+    ...makeTouch(vfs, settledFor),
   ]
 }

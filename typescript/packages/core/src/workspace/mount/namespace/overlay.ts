@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat } from '../../../types.ts'
-import { epochToIso } from '../../../utils/dates.ts'
+import { epochToIsoZ } from '../../../utils/dates.ts'
 import type { NodeMeta } from './namespace.ts'
 
 /**
@@ -38,7 +38,7 @@ export function mergeOverlayStat(meta: NodeMeta | null, stat: FileStat): FileSta
   if (meta.gid !== undefined) update.gid = meta.gid
   if (meta.atime !== undefined) update.atime = meta.atime
   if (meta.mtime !== undefined && meta.target === undefined) {
-    update.modified = epochToIso(meta.mtime)
+    update.modified = epochToIsoZ(meta.mtime)
   } else if (
     meta.observedMtime !== undefined &&
     meta.target === undefined &&
@@ -47,7 +47,7 @@ export function mergeOverlayStat(meta: NodeMeta | null, stat: FileStat): FileSta
     // Fallback only: a backend-reported mtime always wins; the observed
     // write time fills the gap on mtime-less backends so `find -mtime`
     // and `ls -l` see when mirage last wrote the file.
-    update.modified = epochToIso(meta.observedMtime)
+    update.modified = epochToIsoZ(meta.observedMtime)
   }
   if (Object.keys(update).length === 0) return stat
   return stat.with(update)

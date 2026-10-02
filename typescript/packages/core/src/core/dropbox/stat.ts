@@ -24,7 +24,7 @@ import { enoent, isEnoent } from '../../utils/errors.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
 function statFromEntry(entry: DropboxEntry): FileStat {
-  const modified = entry.server_modified ?? entry.client_modified ?? ''
+  const modified = entry.server_modified ?? entry.client_modified ?? null
   if (entry['.tag'] === 'folder') {
     return new FileStat({
       name: entry.name,
@@ -39,7 +39,7 @@ function statFromEntry(entry: DropboxEntry): FileStat {
     type: FileType.FILE,
     content: contentTypeForPath(entry.name),
     modified,
-    fingerprint: modified !== '' ? modified : null,
+    fingerprint: modified,
     extra: {
       dropbox_id: entry.id ?? entry.path_display ?? entry.name,
       resource_type: 'dropbox/file',
@@ -105,7 +105,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
       type: FileType.DIRECTORY,
-      modified: result.entry.remoteTime,
+      modified: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
       extra: { dropbox_id: result.entry.id },
     })
   }
@@ -114,7 +114,7 @@ export async function stat(
     size: result.entry.size,
     type: FileType.FILE,
     content: contentTypeForPath(result.entry.vfsName),
-    modified: result.entry.remoteTime,
+    modified: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
     fingerprint: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
     extra: {
       dropbox_id: result.entry.id,

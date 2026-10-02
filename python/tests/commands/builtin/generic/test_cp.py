@@ -751,6 +751,33 @@ async def test_no_op_policy_modes_keep_the_native_dir_copy():
 
 
 @pytest.mark.asyncio
+async def test_a_native_dir_copy_settles_each_file_it_copied():
+    # The whole-tree copy names no files, so cp settles the ones its find
+    # listed; a file only the destination holds keeps its overlay time.
+    files = {"/t/f.txt": b"F", "/t/s/g.txt": b"G", "/c/own.txt": b"O"}
+    dirs = {"/t", "/t/s", "/c"}
+    stat, copy, find, mkdir = _typed_backend(files, dirs)
+    settled: list[tuple[str, str]] = []
+
+    async def dir_copy(src, dst) -> None:
+        dirs.add(_key(dst))
+
+    async def settle(op, path, parents) -> None:
+        settled.append((op, path))
+
+    _, io = await cp(
+        [_spec(p) for p in ["/t", "/c/t"]],
+        strategy=NativeCopy(
+            copy=copy, find=find, dir_copy=dir_copy, mkdir=mkdir, settle=settle
+        ),
+        stat=stat,
+        flags=CpFlags(recursive=True),
+    )
+    assert io.exit_code == 0
+    assert settled == [("write", "/c/t/f.txt"), ("write", "/c/t/s/g.txt")]
+
+
+@pytest.mark.asyncio
 async def test_backup_version_scan_failure_aborts_the_overwrite():
     # Reading a failed listing as "no numbered backups" would pick .~1~ and
     # overwrite backup history, so the transfer must abort instead.

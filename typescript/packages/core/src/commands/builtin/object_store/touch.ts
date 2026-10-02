@@ -25,17 +25,20 @@ import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 const ENC = new TextEncoder()
 
 /** Build the create-if-missing touch override for one keyed store. */
-export function makeTouch<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const exists = requireOp(io.exists, 'exists')
-  const writeBytes = requireOp(io.write, 'write')
-  const resolveGlob = resolveGlobOf(io)
-
+export function makeTouch<A extends Accessor>(
+  vfs: string,
+  ioFor: (opts: CommandOpts) => CommandIO<A>,
+): RegisteredCommand[] {
   async function touchCommand(
     accessor: A,
     paths: PathSpec[],
     _texts: string[],
     opts: CommandOpts,
   ): Promise<CommandFnResult> {
+    const io = ioFor(opts)
+    const exists = requireOp(io.exists, 'exists')
+    const writeBytes = requireOp(io.write, 'write')
+    const resolveGlob = resolveGlobOf(io)
     if (paths.length === 0) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('touch: missing operand\n') })]
     }

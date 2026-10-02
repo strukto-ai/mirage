@@ -18,7 +18,9 @@ from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.find import find
 from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
+from mirage.ops.types import NamespaceView
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.dates import epoch_to_iso_z
 
 TREE = {
     "/mnt": ["/mnt/table1", "/mnt/notes.txt"],
@@ -161,3 +163,42 @@ async def test_native_find_honors_multiple_start_points():
     assert lines.index("/mnt/table1/rows.jsonl") < lines.index(
         "/mnt/notes.txt"
     )
+
+
+def _touched(virtual: str, stat: FileStat) -> FileStat:
+    if virtual != "/mnt/notes.txt":
+        return stat
+    return stat.model_copy(update={"modified": epoch_to_iso_z(1704067200)})
+
+
+async def _newer_than_mid_2024(holds_times: bool) -> tuple[list[str], dict]:
+    pushed: dict = {}
+
+    async def find_op(_accessor, _path, **kw):
+        pushed.update(kw)
+        return ["/notes.txt", "/table1/rows.jsonl"]
+
+    ns = NamespaceView(
+        stat_overlay=_touched, times_under=lambda _path: holds_times
+    )
+    stdout, _io = await find(
+        _ops([], find_op=find_op),
+        None,
+        [_root()],
+        ["-type", "f", "-newermt", "2024-06-01"],
+        CommandOpts(ns=ns),
+    )
+    return (await materialize(stdout)).decode().splitlines(), pushed
+
+
+@pytest.mark.asyncio
+async def test_remote_find_judges_times_by_the_overlay_that_holds_them():
+    lines, pushed = await _newer_than_mid_2024(True)
+    assert pushed["mtime_min"] is None
+    assert lines == ["/mnt/table1/rows.jsonl"]
+
+
+@pytest.mark.asyncio
+async def test_remote_find_pushes_the_window_down_without_overlay_times():
+    _lines_out, pushed = await _newer_than_mid_2024(False)
+    assert pushed["mtime_min"] is not None

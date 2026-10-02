@@ -147,7 +147,7 @@
       }
     },
     {
-      "id": "stat_y_never_prints_zero_millis",
+      "id": "stat_y_prints_the_gnu_layout",
       "seq": 96,
       "targets": [
         "s3",
@@ -158,10 +158,77 @@
         "databricks",
         "databricks-prefix"
       ],
-      "command": "stat -c '%y' /data/a.txt | grep -vc '\\.000Z'",
+      "command": "stat -c '%y' /data/a.txt | grep -Ec '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{9} \\+0000$'",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stat_y_x_print_a_fraction_the_gnu_way",
+      "seq": 97,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo a > /data/stf && touch -d '2024-01-01 00:00:00.5' /data/stf && stat -c '%y|%x' /data/stf; rm -f /data/stf",
+      "expect": {
+        "exit": 0,
+        "stdout": "2024-01-01 00:00:00.500000000 +0000|2024-01-01 00:00:00.500000000 +0000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stat_y_pads_a_whole_second_to_nine_digits",
+      "seq": 98,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo a > /data/stg && touch -d '2024-01-01 00:00:00' /data/stg && stat -c '%y' /data/stg; rm -f /data/stg",
+      "expect": {
+        "exit": 0,
+        "stdout": "2024-01-01 00:00:00.000000000 +0000\n",
         "stderr": ""
       }
     }

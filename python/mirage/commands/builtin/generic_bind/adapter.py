@@ -37,7 +37,12 @@ from mirage.context import (
     path_allowed,
 )
 from mirage.context.session_context import require_paths_writable
-from mirage.ops.types import ChildMounts, LinkTargetStat, StatOverlay
+from mirage.ops.types import (
+    ChildMounts,
+    LinkTargetStat,
+    SettleWrite,
+    StatOverlay,
+)
 from mirage.policy.policies import Policies, pre_ops_gate
 from mirage.types import FileStat, FileType, MountMode, PathSpec, WalkProbe
 from mirage.utils.errors import (
@@ -1489,6 +1494,100 @@ async def _guarded_read(
     if not data and await _read_hit_a_dir(ops, accessor, index, path, None):
         raise eisdir(path)
     return data
+
+
+# The slots whose writes settle in the attr overlay, each with the op the
+# dispatcher would name it and where the written path sits in its
+# arguments: a copy writes its destination, and ``rm -r`` removes a tree
+# the way rmdir removes a directory. mkdir has its own wrapper, which
+# carries ``-p`` to the settle.
+_SETTLED = (
+    ("write", "write", 1),
+    ("append", "append", 1),
+    ("create", "create", 1),
+    ("truncate", "truncate", 1),
+    ("unlink", "unlink", 1),
+    ("rmdir", "rmdir", 1),
+    ("rm_r", "rmdir", 1),
+    ("copy", "write", 2),
+)
+
+
+async def _settled_call(
+    settle: SettleWrite,
+    fn: OperationFn,
+    op: str,
+    at: int,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Run a backend write, then settle it in the attr overlay.
+
+    Args:
+        settle (SettleWrite): the namespace's settle door.
+        fn (OperationFn): the backend op.
+        op (str): the op the dispatcher would name it.
+        at (int): the position of the written PathSpec in ``args``.
+        *args: the call's positionals.
+        **kwargs: forwarded untouched.
+    """
+    result = await fn(*args, **kwargs)
+    await settle(op, args[at].virtual, False)
+    return result
+
+
+async def _settled_mkdir(
+    settle: SettleWrite,
+    fn: OperationFn,
+    accessor: Accessor,
+    path: PathSpec,
+    parents: bool = False,
+) -> None:
+    """Run a backend mkdir, then settle it, ``-p`` and all.
+
+    Args:
+        settle (SettleWrite): the namespace's settle door.
+        fn (OperationFn): the backend mkdir.
+        accessor (Accessor): backend handle.
+        path (PathSpec): the directory made.
+        parents (bool): the mkdir was ``-p``.
+    """
+    await fn(accessor, path, parents=parents)
+    await settle("mkdir", path.virtual, parents)
+
+
+def with_settled_writes(
+    ops: CommandIO, settle: SettleWrite | None
+) -> CommandIO:
+    """Return ``ops`` whose mutation slots settle each write in the attr
+    overlay.
+
+    The dispatcher settles the ops it runs, and a command reaches its
+    backend through these slots instead, so without this a ``cp`` over a
+    file kept the ``touch -d`` time it overwrote, an ``rmdir`` left the
+    directory's times for the next ``mkdir`` of that name, and a
+    directory made on a store that keeps no directory times had none. A
+    write settles once the backend op succeeded, on the path the backend
+    was handed. A rename settles in the shell's mv, which sees the whole
+    move.
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+        settle (SettleWrite | None): the namespace's settle door, None
+            outside a workspace.
+    """
+    if settle is None:
+        return ops
+    changes: dict[str, Any] = {}
+    for slot, op, at in _SETTLED:
+        fn = getattr(ops, slot)
+        if fn is not None:
+            changes[slot] = functools.partial(
+                _settled_call, settle, fn, op, at
+            )
+    if ops.mkdir is not None:
+        changes["mkdir"] = functools.partial(_settled_mkdir, settle, ops.mkdir)
+    return replace(ops, **changes)
 
 
 def with_dir_guard(ops: CommandIO) -> CommandIO:

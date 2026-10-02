@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
 from collections.abc import Callable
 from typing import Any
 
@@ -19,6 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     CommandIO,
     with_path_guards,
     with_policy_guard,
+    with_settled_writes,
 )
 from mirage.commands.builtin.generic_bind.factory import (
     with_probe_answers,
@@ -29,6 +31,7 @@ from mirage.commands.builtin.object_store.rm import make_rm
 from mirage.commands.builtin.object_store.stat import make_stat
 from mirage.commands.builtin.object_store.tee import make_tee
 from mirage.commands.builtin.object_store.touch import make_touch
+from mirage.commands.config import CommandOpts
 
 # Keyed-store behaviours kept as overrides of the generic commands: no
 # real directories (mkdir -p, rm not-empty), write-tracking (touch/tee),
@@ -60,10 +63,28 @@ def make_object_store_commands(
     answered = with_policy_guard(
         with_slash_guard(with_path_guards(with_probe_answers(io)))
     )
+    # The overrides that write bind their chain per invocation, as the
+    # factory binds every generic's, so their writes settle in the attr
+    # overlay through the invocation's namespace door, innermost. rm's
+    # overlay goes with the shell's rm, which drops what it removed.
+    settled_for = functools.partial(_settled_chain, io)
     return [
-        make_mkdir(vfs, guarded),
+        make_mkdir(vfs, settled_for),
         make_rm(vfs, guarded),
         make_stat(vfs, answered),
-        make_tee(vfs, guarded),
-        make_touch(vfs, guarded),
+        make_tee(vfs, settled_for),
+        make_touch(vfs, settled_for),
     ]
+
+
+def _settled_chain(io: CommandIO, opts: CommandOpts) -> CommandIO:
+    """The override chain for one invocation, its writes settled.
+
+    Args:
+        io (CommandIO): the backend's op table.
+        opts (CommandOpts): the invocation, whose namespace door settles.
+    """
+    settle = opts.ns.settle_write if opts.ns is not None else None
+    return with_policy_guard(
+        with_slash_guard(with_path_guards(with_settled_writes(io, settle)))
+    )

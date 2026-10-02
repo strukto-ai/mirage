@@ -22,17 +22,20 @@ import { requireOp } from '../generic_bind/adapter.ts'
 import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 
 /** Build the write-tracking tee override for one keyed store. */
-export function makeTee<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const readStream = io.readStream
-  const writeBytes = requireOp(io.write, 'write')
-  const resolveGlob = resolveGlobOf(io)
-
+export function makeTee<A extends Accessor>(
+  vfs: string,
+  ioFor: (opts: CommandOpts) => CommandIO<A>,
+): RegisteredCommand[] {
   async function teeCommand(
     accessor: A,
     paths: PathSpec[],
     texts: string[],
     opts: CommandOpts,
   ): Promise<CommandFnResult> {
+    const io = ioFor(opts)
+    const readStream = io.readStream
+    const writeBytes = requireOp(io.write, 'write')
+    const resolveGlob = resolveGlobOf(io)
     const resolved =
       paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
     // Wiring only: every flag semantic, the write to each operand and the

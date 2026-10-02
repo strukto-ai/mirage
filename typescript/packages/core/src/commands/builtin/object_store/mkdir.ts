@@ -14,23 +14,23 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { PathSpec, StatFn } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { requireOp } from '../generic_bind/adapter.ts'
-import { makeDirectory } from '../generic_bind/builders/mkdir.ts'
+import { makeDirectory, mkdirMode } from '../generic_bind/builders/mkdir.ts'
 import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 import { mkdirLinkRefusal } from '../utils/slash_links.ts'
 
 const ENC = new TextEncoder()
 
 /** Build the implicit-parents mkdir override for one keyed store. */
-export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
-  const mkdirImpl = requireOp(io.mkdir, 'mkdir')
-  const resolveGlob = resolveGlobOf(io)
-
+export function makeMkdir<A extends Accessor>(
+  vfs: string,
+  ioFor: (opts: CommandOpts) => CommandIO<A>,
+): RegisteredCommand[] {
   async function mkdirCommand(
     accessor: A,
     paths: PathSpec[],
@@ -40,10 +40,14 @@ export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
     if (paths.length === 0) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('mkdir: missing operand\n') })]
     }
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
+    const io = ioFor(opts)
+    const mkdirImpl = requireOp(io.mkdir, 'mkdir')
+    const stat: StatFn = (at: PathSpec) => io.stat(accessor, at, opts.index ?? undefined)
     const fl = new FlagView(opts.flags, specOf('mkdir'))
     const verbose = fl.asBool('verbose')
     const parents = fl.asBool('parents')
+    const [mode, applyMode] = mkdirMode(io, accessor, opts, fl.asStr('mode') ?? null)
+    const resolved = await resolveGlobOf(io)(accessor, paths, opts.index ?? undefined)
     const lines: string[] = []
     const writes: Record<string, Uint8Array> = {}
     const errors: string[] = []
@@ -56,12 +60,13 @@ export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
         if (collision.message !== null) errors.push(collision.message)
         continue
       }
-      const failed = await makeDirectory(mkdirImpl, accessor, path, parents, links)
-      if (failed !== null) {
-        errors.push(failed)
-        continue
-      }
+      const [made, failed] = await makeDirectory(mkdirImpl, accessor, path, parents, links, stat)
+      if (failed !== null) errors.push(failed)
+      if (!made) continue
       writes[path.mountPath] = new Uint8Array()
+      // -m applies to the named directory only; any parents made by -p keep
+      // the default mode (GNU).
+      if (mode !== null && applyMode !== undefined) await applyMode(path, mode)
       if (verbose) lines.push(`mkdir: created directory '${path.virtual}'`)
     }
     const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null

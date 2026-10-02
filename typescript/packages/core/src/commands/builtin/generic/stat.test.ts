@@ -35,6 +35,7 @@ import { statGeneric } from './stat.ts'
 
 const MTIME = '2026-01-02T15:30:45Z'
 const MTIME_EPOCH = '1767367845'
+const GNU_MTIME = '2026-01-02 15:30:45.000000000 +0000'
 const DEC = new TextDecoder()
 
 function fs(overrides: Partial<FileStatInit> = {}): FileStat {
@@ -221,17 +222,26 @@ describe('stat -c directive formatting', () => {
 
   it('renders time directives and epochs', async () => {
     const s = fs({ modified: MTIME, ctime: MTIME, atime: '2026-03-04T05:06:07Z' })
-    expect(await render('%y', s)).toBe(MTIME)
+    expect(await render('%y', s)).toBe(GNU_MTIME)
     expect(await render('%Y', s)).toBe(MTIME_EPOCH)
-    expect(await render('%z', s)).toBe(MTIME)
+    expect(await render('%z', s)).toBe(GNU_MTIME)
     expect(await render('%Z', s)).toBe(MTIME_EPOCH)
-    expect(await render('%x', s)).toBe('2026-03-04T05:06:07Z')
+    expect(await render('%x', s)).toBe('2026-03-04 05:06:07.000000000 +0000')
     expect(await render('%X', s)).toBe('1772600767')
+  })
+
+  it("keeps the stamp's fraction in a time directive", async () => {
+    for (const stamp of ['2026-01-02T15:30:45.5Z', '2026-01-02T15:30:45.500000+00:00']) {
+      expect(await render('%y', fs({ modified: stamp }))).toBe(
+        '2026-01-02 15:30:45.500000000 +0000',
+      )
+    }
+    expect(await render('%y', fs({ modified: null }))).toBe('-')
   })
 
   it('falls back atime to mtime when absent', async () => {
     const s = fs({ modified: MTIME, ctime: MTIME, atime: null })
-    expect(await render('%x', s)).toBe(MTIME)
+    expect(await render('%x', s)).toBe(GNU_MTIME)
     expect(await render('%X', s)).toBe(MTIME_EPOCH)
   })
 
@@ -385,7 +395,7 @@ it('renders GNU default layout with explicit unknown metadata', async () => {
   )
   expect(await render('%z %Z %w %W', info)).toBe('- 0 - 0')
   expect(await render('%z %Z %w %W', fs({ ctime: '2026-03-04T05:06:07Z', birthtime: MTIME }))).toBe(
-    `2026-03-04T05:06:07Z 1772600767 ${MTIME} ${MTIME_EPOCH}`,
+    `2026-03-04 05:06:07.000000000 +0000 1772600767 ${GNU_MTIME} ${MTIME_EPOCH}`,
   )
 })
 

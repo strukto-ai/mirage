@@ -60,7 +60,7 @@ import {
   walkRefusal,
 } from '../../../utils/errors.ts'
 import { dotRefusal } from '../utils/paths.ts'
-import type { ChildMounts } from '../../../ops/types.ts'
+import type { ChildMounts, SettleWrite } from '../../../ops/types.ts'
 import {
   DEFAULT_MAX_GLOB_MATCHES,
   resolveGlobWith,
@@ -729,6 +729,60 @@ function policyCall<T extends (...args: never[]) => unknown>(
     }
     return fn(...args)
   }) as T
+}
+
+// The slots whose writes settle in the attr overlay, each with the op the
+// dispatcher would name it and where the written path sits in its
+// arguments: a copy writes its destination, and `rm -r` removes a tree the
+// way rmdir removes a directory. mkdir has its own wrapper, which carries
+// `-p` to the settle.
+const SETTLED: readonly (readonly [MutationSlot, string, number])[] = [
+  ['write', 'write', 1],
+  ['append', 'append', 1],
+  ['create', 'create', 1],
+  ['truncate', 'truncate', 1],
+  ['unlink', 'unlink', 1],
+  ['rmdir', 'rmdir', 1],
+  ['rmR', 'rmdir', 1],
+  ['copy', 'write', 2],
+]
+
+/**
+ * Return `ops` whose mutation slots settle each write in the attr overlay.
+ *
+ * The dispatcher settles the ops it runs, and a command reaches its backend
+ * through these slots instead, so without this a `cp` over a file kept the
+ * `touch -d` time it overwrote, an `rmdir` left the directory's times for
+ * the next `mkdir` of that name, and a directory made on a store that keeps
+ * no directory times had none. A write settles once the backend op
+ * succeeded, on the path the backend was handed. A rename settles in the
+ * shell's mv, which sees the whole move.
+ */
+export function withSettledWrites<A extends Accessor = Accessor>(
+  ops: CommandIO<A>,
+  settle: SettleWrite | undefined,
+): CommandIO<A> {
+  if (settle === undefined) return ops
+  const guarded: CommandIO<A> = { ...ops }
+  for (const [slot, op, at] of SETTLED) {
+    const fn = ops[slot] as ((...args: unknown[]) => Promise<unknown>) | undefined
+    if (fn === undefined) continue
+    Object.assign(guarded, {
+      [slot]: async (...args: unknown[]) => {
+        const out = await fn(...args)
+        await settle(op, (args[at] as PathSpec).virtual, false)
+        return out
+      },
+    })
+  }
+  const mkdir = ops.mkdir
+  if (mkdir !== undefined) {
+    guarded.mkdir = async (accessor, path, parents = false) => {
+      await mkdir(accessor, path, parents)
+      await settle('mkdir', path.virtual, parents)
+    }
+  }
+  return guarded
 }
 
 /** `fn`, refused with the line's abort instead of started once `signal` has fired. */

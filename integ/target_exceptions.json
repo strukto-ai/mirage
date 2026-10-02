@@ -600,6 +600,10 @@
       "databricks": "This case creates a file directly under /data. This target cannot serve arbitrary file creation there, as with the existing printf-based seeding cases. All 19 writable sibling targets exercise the dispatcher writes, and every read-only getline case in this file runs here.",
       "databricks-prefix": "This case creates a file directly under /data. This target cannot serve arbitrary file creation there, as with the existing printf-based seeding cases. All 19 writable sibling targets exercise the dispatcher writes, and every read-only getline case in this file runs here.",
       "sharepoint-prefix": "This case creates a file directly under /data. This target cannot serve arbitrary file creation there, as with the existing printf-based seeding cases. All 19 writable sibling targets exercise the dispatcher writes, and every read-only getline case in this file runs here."
+    },
+    "integ/unix/meta_overlay/settle.json :: ometa_mkdir_after_rmdir_starts_with_a_fresh_time": {
+      "hf": "An HF bucket holds no empty directory: mkdir leaves no marker, so the directory this case makes, removes and makes again never exists on the backend for rmdir to remove or for find to list. The settle itself is namespace state and runs on every other overlay backend.",
+      "hf-prefix": "An HF bucket holds no empty directory: mkdir leaves no marker, so the directory this case makes, removes and makes again never exists on the backend for rmdir to remove or for find to list. The settle itself is namespace state and runs on every other overlay backend."
     }
   }
 }

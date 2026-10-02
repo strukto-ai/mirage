@@ -22,6 +22,7 @@ from mirage.workspace import Workspace
 
 _MTIME = "2026-01-02T15:30:45Z"
 _MTIME_EPOCH = "1767367845"
+_GNU_MTIME = "2026-01-02 15:30:45.000000000 +0000"
 
 
 class _OverlayRAMVFS(RAMVFS):
@@ -231,18 +232,27 @@ async def test_owner_directives():
 @pytest.mark.asyncio
 async def test_time_directives():
     fs = _fs(modified=_MTIME, ctime=_MTIME, atime="2026-03-04T05:06:07Z")
-    assert await _render("%y", fs) == _MTIME
+    assert await _render("%y", fs) == _GNU_MTIME
     assert await _render("%Y", fs) == _MTIME_EPOCH
-    assert await _render("%z", fs) == _MTIME
+    assert await _render("%z", fs) == _GNU_MTIME
     assert await _render("%Z", fs) == _MTIME_EPOCH
-    assert await _render("%x", fs) == "2026-03-04T05:06:07Z"
+    assert await _render("%x", fs) == "2026-03-04 05:06:07.000000000 +0000"
     assert await _render("%X", fs) == "1772600767"
+
+
+@pytest.mark.asyncio
+async def test_time_directives_keep_the_stamps_fraction():
+    want = "2026-01-02 15:30:45.500000000 +0000"
+    stamps = ("2026-01-02T15:30:45.5Z", "2026-01-02T15:30:45.500000+00:00")
+    for stamp in stamps:
+        assert await _render("%y", _fs(modified=stamp)) == want
+    assert await _render("%y", _fs(modified=None)) == "-"
 
 
 @pytest.mark.asyncio
 async def test_atime_falls_back_to_mtime():
     fs = _fs(modified=_MTIME, atime=None)
-    assert await _render("%x", fs) == _MTIME
+    assert await _render("%x", fs) == _GNU_MTIME
     assert await _render("%X", fs) == _MTIME_EPOCH
 
 
@@ -499,9 +509,9 @@ async def test_default_stat_layout_and_unknown_metadata():
     )
     assert await _render("%z %Z %w %W", info) == "- 0 - 0"
     info = _fs(ctime="2026-03-04T05:06:07Z", birthtime=_MTIME)
-    assert (
-        await _render("%z %Z %w %W", info)
-        == f"2026-03-04T05:06:07Z 1772600767 {_MTIME} {_MTIME_EPOCH}"
+    assert await _render("%z %Z %w %W", info) == (
+        f"2026-03-04 05:06:07.000000000 +0000 1772600767 "
+        f"{_GNU_MTIME} {_MTIME_EPOCH}"
     )
 
 

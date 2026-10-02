@@ -44,6 +44,7 @@ export const CP_BUILDER: Builder = {
   write: true,
   fn: async (ops, accessor, paths, _texts, opts) => {
     const { dirCopy, find } = ops
+    const settleWrite = opts.ns?.settleWrite
     // Without a file transfer capability, creating directories would
     // leave an uncopyable destination tree. Keep the refusal guarded.
     const mkdir =
@@ -96,6 +97,9 @@ export const CP_BUILDER: Builder = {
               ? {}
               : { dirCopy: (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target) }),
             ...(mkdir === undefined ? {} : { mkdir: (p: PathSpec) => mkdir(accessor, p) }),
+            ...(settleWrite === undefined
+              ? {}
+              : { settle: (op: string, path: string) => settleWrite(op, path) }),
           }
     const links = opts.ns?.links ?? null
     const cwd = opts.cwd

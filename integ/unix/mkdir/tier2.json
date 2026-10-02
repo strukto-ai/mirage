@@ -5,6 +5,7 @@
       "seq": 910036,
       "targets": [
         "ram",
+        "opfs",
         "disk"
       ],
       "command": "mkdir --parents --verbose --mode=700 --context=ctx /data/t2mkdir/a/b > /dev/null && test -d /data/t2mkdir/a/b && echo ok",
@@ -24,7 +25,8 @@
       "id": "mkdir_tier2_mode_applied",
       "seq": 910042,
       "targets": [
-        "ram"
+        "ram",
+        "opfs"
       ],
       "command": "mkdir -p /data/t2mkdirmode && mkdir -p -m 700 /data/t2mkdirmode/a/kid && ls -l /data/t2mkdirmode | cut -d' ' -f1 && ls -l /data/t2mkdirmode/a | cut -d' ' -f1",
       "expect": {

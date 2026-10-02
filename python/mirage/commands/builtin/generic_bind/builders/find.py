@@ -94,9 +94,19 @@ async def find(
             readdir=partial(ops.readdir, accessor),
             stat=walk_stat,
         )
-    stat: Callable[..., Awaitable[FileStat]] | None = (
-        partial(ops.stat, accessor, index=opts.index) if ops.local else None
+    # Time tests must see namespace times (touch results, observed
+    # writes), so a local backend, or a remote one whose operand holds
+    # overlay times, post-filters through the overlay-aware stat instead
+    # of pushing the window into the backend's find, which judges by its
+    # own times. A remote operand with no overlay times keeps the
+    # push-down and its one-request listing.
+    times_under = opts.ns.times_under if opts.ns is not None else None
+    overlaid = times_under is not None and any(
+        times_under(p.virtual) for p in resolved
     )
+    stat: Callable[..., Awaitable[FileStat]] | None = None
+    if ops.local or overlaid:
+        stat = partial(ops.stat, accessor, index=opts.index)
     if stat is not None and overlay is not None:
         stat = partial(
             overlaid_stat,

@@ -241,19 +241,19 @@ def _directive_value(
     if spec in ("g", "G"):
         return group_name(s.gid, identity)
     if spec == "x":
-        return s.atime or s.modified or ""
+        return _stat_time(s.atime or s.modified)
     if spec == "X":
         return _epoch(s.atime or s.modified)
     if spec == "y":
-        return s.modified or ""
+        return _stat_time(s.modified)
     if spec == "Y":
         return _epoch(s.modified)
     if spec == "z":
-        return s.ctime or "-"
+        return _stat_time(s.ctime)
     if spec == "Z":
         return _epoch(s.ctime)
     if spec == "w":
-        return s.birthtime or "-"
+        return _stat_time(s.birthtime)
     if spec == "W":
         return _epoch(s.birthtime)
     if spec == "B":

@@ -565,31 +565,18 @@ class Dispatcher:
                 self._namespace.meta_for(path.virtual), result
             )
         if op in DISPATCH_WRITE_OPS:
+            # A removed name takes what was set on it (overlay mode and
+            # owner, extended attributes) with it, so a file created there
+            # next starts bare on every surface; settle_write is the one
+            # place that says so.
             observed = time.time() if op in STAMP_WRITE_OPS else None
-            await self.invalidate_after_write(mount, path, observed=observed)
-            if op in ("unlink", "rmdir"):
-                # The name no longer holds that file, so what was set on
-                # it (overlay mode and owner, extended attributes) goes
-                # with it, as the shell's rm already drops it: a file
-                # created there next starts bare on every surface.
-                await self._namespace.drop_overlay(path.virtual)
-                if op == "rmdir":
-                    # The link check ran before the backend was asked, so
-                    # a visible link below now was created since: it is
-                    # younger than this rmdir, lands after it in the
-                    # serial order (a link synthesizes its parents), and
-                    # the purge taking the directory's hidden nodes must
-                    # not take it too.
-                    arrived = frozenset(
-                        link
-                        for link, _ in self._namespace.link_stats_below(
-                            path.virtual
-                        )
-                        if path_allowed(link)
-                    )
-                    await self._namespace.purge_under(
-                        path.virtual, keep=arrived
-                    )
+            await self.invalidate_after_write(
+                mount,
+                path,
+                observed=observed,
+                op=op,
+                parents=kwargs.get("parents") is True,
+            )
             if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
                 await self.invalidate_after_rename(mount, path, kwargs["dst"])
                 # rename(2) replaces the destination, so a node the
@@ -1444,9 +1431,16 @@ class Dispatcher:
         return manager
 
     async def invalidate_after_write(
-        self, mount: MountEntry, path: PathSpec, observed: float | None = None
+        self,
+        mount: MountEntry,
+        path: PathSpec,
+        observed: float | None = None,
+        op: str = "write",
+        parents: bool = False,
     ) -> None:
-        await self._namespace.clear_times(path.virtual, observed=observed)
+        await self._namespace.settle_write(
+            op, path.virtual, observed, parents=parents
+        )
         manager = self._manager_for(mount)
         await manager.invalidate_after_write(path)
         await manager.invalidate_ancestors(path)

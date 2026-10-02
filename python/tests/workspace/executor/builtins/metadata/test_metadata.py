@@ -92,6 +92,10 @@ def test_parse_touch_stamp_keeps_a_fraction():
         parse_touch_stamp(None, "2024-01-01 00:00:00.5")
         == "2024-01-01T00:00:00.500000+00:00"
     )
+    assert (
+        parse_touch_stamp(None, "2024-01-01 00:00:00.123456")
+        == "2024-01-01T00:00:00.123456+00:00"
+    )
 
 
 def test_parse_touch_stamp_invalid():

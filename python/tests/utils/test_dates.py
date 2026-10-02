@@ -5,6 +5,7 @@ import pytest
 
 from mirage.utils.dates import (
     epoch_to_iso,
+    epoch_to_iso_z,
     iso_timestamp,
     iso_to_epoch,
     now_iso,
@@ -279,6 +280,19 @@ def test_epoch_to_iso_whole_second():
 
 def test_epoch_to_iso_truncates_sub_second():
     assert epoch_to_iso(1609459200.987) == "2021-01-01T00:00:00Z"
+
+
+def test_epoch_to_iso_z_whole_second():
+    assert epoch_to_iso_z(1609459200) == "2021-01-01T00:00:00Z"
+
+
+def test_epoch_to_iso_z_keeps_the_fraction():
+    assert epoch_to_iso_z(1609459200.5) == "2021-01-01T00:00:00.500000Z"
+
+
+def test_epoch_to_iso_z_keeps_microseconds():
+    assert epoch_to_iso_z(1704067200.123456) == "2024-01-01T00:00:00.123456Z"
+    assert epoch_to_iso_z(-0.5) == "1969-12-31T23:59:59.500000Z"
 
 
 def test_iso_to_epoch_inverts_epoch_to_iso():

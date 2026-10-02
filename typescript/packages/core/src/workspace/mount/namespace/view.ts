@@ -15,6 +15,7 @@
 import type { FileStat } from '../../../types.ts'
 import type { LinkView, MountView, NamespaceView, StatOverlay } from '../../../ops/types.ts'
 import { namespaceNames } from '../../../ops/namespace_view.ts'
+import { STAMP_WRITE_OPS } from '../../../ops/config.ts'
 import { pathAllowed } from '../../../context/session_context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -121,6 +122,26 @@ export function namespaceViewOf(
     mounts: mountView(registry),
     ...(statOverlay !== null ? { statOverlay } : {}),
     childMounts: (parent: string) => namespaceNames(registry.mountPrefixes(), namespace, parent),
+    ...(namespace !== null
+      ? {
+          settleWrite: (op: string, path: string, parents = false) =>
+            settleOverlayWrite(namespace, op, path, parents),
+          timesUnder: (path: string) => namespace.holdsTimesUnder(path),
+        }
+      : {}),
     ...(namespace !== null && namespace.user !== null ? { user: namespace.user } : {}),
   }
+}
+
+// Settle a command slot's write in the attr overlay, stamped the way the
+// dispatcher stamps its own ops: a content write or mkdir records when it
+// happened, a removal records nothing.
+function settleOverlayWrite(
+  namespace: Namespace,
+  op: string,
+  path: string,
+  parents = false,
+): Promise<void> {
+  const observed = STAMP_WRITE_OPS.has(op) ? Date.now() / 1000 : null
+  return namespace.settleWrite(op, path, observed, parents)
 }

@@ -25,16 +25,16 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_tee(vfs: str, io: CommandIO) -> Callable[..., Any]:
+def make_tee(
+    vfs: str, io_for: Callable[[CommandOpts], CommandIO]
+) -> Callable[..., Any]:
     """Build the write-tracking tee override for one keyed store.
 
     Args:
         vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire write.
+        io_for (Callable[[CommandOpts], CommandIO]): the op table for one
+            invocation; must wire write.
     """
-    read_stream = io.read_stream
-    write_bytes = io.require(Operation.WRITE)
-    resolve_glob = io.resolve_glob
 
     async def tee(
         accessor: Accessor,
@@ -42,6 +42,10 @@ def make_tee(vfs: str, io: CommandIO) -> Callable[..., Any]:
         texts: list[str],
         opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
+        io = io_for(opts)
+        read_stream = io.read_stream
+        write_bytes = io.require(Operation.WRITE)
+        resolve_glob = io.resolve_glob
         paths = (
             await resolve_glob(accessor, paths, opts.index) if paths else []
         )

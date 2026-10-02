@@ -29,7 +29,7 @@ function statFromItem(item: BoxItem): FileStat {
     return new FileStat({
       name: vfsName,
       type: FileType.DIRECTORY,
-      modified: item.modified_at ?? '',
+      modified: item.modified_at ?? null,
       extra: { box_id: item.id },
     })
   }
@@ -39,14 +39,14 @@ function statFromItem(item: BoxItem): FileStat {
   // the same second apart and does not move at all on a re-upload of
   // identical bytes.
   const sha1 = typeof item.sha1 === 'string' && item.sha1 !== '' ? item.sha1 : null
-  const modified = item.modified_at ?? ''
+  const modified = item.modified_at ?? null
   return new FileStat({
     name: vfsName,
     size,
     type: FileType.FILE,
     content: contentTypeForPath(vfsName),
     modified,
-    fingerprint: sha1 ?? (modified !== '' ? modified : null),
+    fingerprint: sha1 ?? modified,
     extra: { box_id: item.id, resource_type: rt, ...(sha1 === null ? {} : { sha1 }) },
   })
 }
@@ -68,7 +68,7 @@ export async function stat(
     return new FileStat({
       name: '/',
       type: FileType.DIRECTORY,
-      modified: info.modified_at ?? '',
+      modified: info.modified_at ?? null,
       extra: { box_id: accessor.rootFolderId },
     })
   }
@@ -113,7 +113,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
       type: FileType.DIRECTORY,
-      modified: result.entry.remoteTime,
+      modified: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
       extra: { box_id: result.entry.id },
     })
   }
@@ -124,7 +124,7 @@ export async function stat(
     size: result.entry.size,
     type: FileType.FILE,
     content: contentTypeForPath(result.entry.vfsName),
-    modified: result.entry.remoteTime,
+    modified: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
     fingerprint: sha1 ?? (result.entry.remoteTime !== '' ? result.entry.remoteTime : null),
     extra: {
       box_id: result.entry.id,

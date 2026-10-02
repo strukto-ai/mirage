@@ -151,7 +151,7 @@ describe('OPFS commands — namespace attr overlay', () => {
     expect((await run('touch -t 202401010000 /data/hello.txt')).exitCode).toBe(0)
     const r = await run('stat -c "%y|%Y" /data/hello.txt')
     expect(r.exitCode).toBe(0)
-    expect(r.stdout).toBe('2024-01-01T00:00:00Z|1704067200\n')
+    expect(r.stdout).toBe('2024-01-01 00:00:00.000000000 +0000|1704067200\n')
   })
 
   it('stat -c reports the chmod mode', async () => {

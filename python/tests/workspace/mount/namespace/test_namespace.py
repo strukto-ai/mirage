@@ -225,6 +225,26 @@ async def test_clear_times_leaves_links_alone(namespace):
 
 
 @pytest.mark.asyncio
+async def test_settle_write_drops_a_removed_directory_and_below(namespace):
+    await namespace.set_attrs("/data/d", mode=0o700, mtime=1.0)
+    await namespace.set_attrs("/data/d/f.txt", mode=0o600)
+    await namespace.settle_write("rmdir", "/data/d", None)
+    assert namespace.meta_for("/data/d") is None
+    assert namespace.meta_for("/data/d/f.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_settle_write_stamps_the_untimed_mkdir_p_chain(namespace):
+    await namespace.set_attrs("/data/a", mtime=1.0)
+    await namespace.settle_write("mkdir", "/data/a/b/c", 5.0, parents=True)
+    assert namespace.meta_for("/data") is None
+    assert namespace.meta_for("/data/a").mtime == 1.0
+    assert namespace.meta_for("/data/a").observed_mtime is None
+    assert namespace.meta_for("/data/a/b").observed_mtime == 5.0
+    assert namespace.meta_for("/data/a/b/c").observed_mtime == 5.0
+
+
+@pytest.mark.asyncio
 async def test_unlink_glob_matches_segment_wise(namespace):
     await namespace.set_attrs("/data/a.log", mode=0o600)
     await namespace.set_attrs("/data/sub/b.log", mode=0o600)
@@ -476,6 +496,22 @@ async def test_link_stats_below_does_not_match_a_sibling_name_prefix(
     await namespace.symlink("/database/b", "/t2", 1.0)
     found = [path for path, _ in namespace.link_stats_below("/data")]
     assert found == ["/data/a"]
+
+
+@pytest.mark.asyncio
+async def test_holds_times_under_sees_a_time_never_a_link_or_a_sibling(
+    namespace,
+):
+    await namespace.set_attrs("/data/d/f.txt", mtime=1.0)
+    await namespace.set_attrs("/data/m", mode=0o600)
+    await namespace.symlink("/data/l/ln", "/data/d", 1.0)
+    assert namespace.holds_times_under("/data")
+    assert namespace.holds_times_under("/data/d/")
+    assert namespace.holds_times_under("/data/d/f.txt")
+    assert not namespace.holds_times_under("/data/m")
+    assert not namespace.holds_times_under("/data/l")
+    assert not namespace.holds_times_under("/data/d/f")
+    assert namespace.holds_times_under("/")
 
 
 @pytest.mark.asyncio

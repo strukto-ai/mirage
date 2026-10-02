@@ -40,6 +40,7 @@ import {
 } from '../../utils/errors.ts'
 import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../../policy/index.ts'
 import { PolicyError } from '../../policy/errors.ts'
+import { isoToEpochMicros } from '../../utils/dates.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { CycleError, norm, parent } from '../../utils/path.ts'
@@ -560,27 +561,11 @@ export class Dispatcher {
       )
     }
     if (DISPATCH_WRITE_OPS.has(opName)) {
+      // A removed name takes what was set on it (overlay mode and owner,
+      // extended attributes) with it, so a file created there next starts
+      // bare on every surface; settleWrite is the one place that says so.
       const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
-      await this.invalidateAfterWriteByPath(p.virtual, observed)
-      if (opName === 'unlink' || opName === 'rmdir') {
-        // The name no longer holds that file, so what was set on it
-        // (overlay mode and owner, extended attributes) goes with it, as
-        // the shell's rm already drops it: a file created there next
-        // starts bare on every surface.
-        await this.namespace.dropOverlay(p.virtual)
-        if (opName === 'rmdir') {
-          // The link check ran before the backend was asked, so a visible
-          // link below now was created since: it is younger than this
-          // rmdir, lands after it in the serial order (a link synthesizes
-          // its parents), and the purge taking the directory's hidden nodes
-          // must not take it too.
-          const arrived = new Set<string>()
-          for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
-            if (pathAllowed(link)) arrived.add(link)
-          }
-          await this.namespace.purgeUnder(p.virtual, arrived)
-        }
-      }
+      await this.invalidateAfterWriteByPath(p.virtual, observed, opName, kwargs?.parents === true)
       if (renameDst !== null) {
         await this.invalidateAfterRenameByPath(p.virtual, renameDst.virtual)
         // rename(2) replaces the destination, so a node the table holds
@@ -1337,7 +1322,7 @@ export class Dispatcher {
     await this.namespace.setAttrs(virtual, {
       ...rest,
       ...(mtime !== undefined
-        ? { mtime: typeof mtime === 'string' ? new Date(mtime).getTime() / 1000 : mtime }
+        ? { mtime: typeof mtime === 'string' ? isoToEpochMicros(mtime) : mtime }
         : {}),
     })
   }
@@ -1362,7 +1347,12 @@ export class Dispatcher {
     )
   }
 
-  async invalidateAfterWriteByPath(rawPath: string, observed: number | null = null): Promise<void> {
+  async invalidateAfterWriteByPath(
+    rawPath: string,
+    observed: number | null = null,
+    op = 'write',
+    parents = false,
+  ): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
     // invalidate the written directory itself instead of its parent
@@ -1370,7 +1360,7 @@ export class Dispatcher {
     const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return
-    await this.namespace.clearTimes(path, observed)
+    await this.namespace.settleWrite(op, path, observed, parents)
     const manager = this.managerFor(mount)
     await manager.invalidateAfterWrite(path)
     await manager.invalidateAncestors(path)

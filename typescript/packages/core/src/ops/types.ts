@@ -42,6 +42,17 @@ export type MountRoot = (path: string) => string
 // the door merges into its own readdir.
 export type ChildMounts = (parent: string) => string[]
 
+// Settle the overlay half of a write a command's backend slot made, as the
+// dispatcher settles its own ops, so a write drops a stale `touch -d` time
+// and a removal its mode whichever door it came through: `(op, path,
+// parents)`, `op` named the way the dispatcher names it (`write`, `mkdir`,
+// `unlink`, `rmdir`).
+export type SettleWrite = (op: string, path: string, parents?: boolean) => Promise<void>
+
+// Whether the attr overlay holds a time at or under a path, which a
+// backend's native find cannot see.
+export type TimesUnder = (path: string) => boolean
+
 // Where the mount boundaries are, as one injected object.
 //
 // A command runs bound to one backend, and that backend cannot see a
@@ -179,6 +190,10 @@ export interface NamespaceView {
   statOverlay?: StatOverlay
   // Child names the namespace owes a directory (mounts and links).
   childMounts?: ChildMounts
+  // Where a command's slot writes settle in the attr overlay.
+  settleWrite?: SettleWrite
+  // Whether the overlay holds a time under a path (find).
+  timesUnder?: TimesUnder
   // The workspace user (what whoami prints), absent when no agent ever
   // claimed the workspace. What an owner-rendering command prints in the
   // owner column for an entry whose backend reports no uid.

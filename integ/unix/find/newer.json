@@ -6,7 +6,8 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs"
       ],
       "command": "echo a > /data/nwa && echo b > /data/nwb && touch -d '2024-01-01 00:00:00' /data/nwa && touch -d '2024-01-01 00:00:00.5' /data/nwb && find /data -maxdepth 1 -name 'nw*' -newer /data/nwa; rm -f /data/nwa /data/nwb",
       "expect": {

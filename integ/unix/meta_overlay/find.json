@@ -1,0 +1,85 @@
+{
+  "cases": [
+    {
+      "id": "ometa_find_newer_compares_overlay_times",
+      "seq": 201023,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "echo a > /data/metao/nwa && echo b > /data/metao/nwb && touch -d '2024-01-01 00:00:00' /data/metao/nwa && touch -d '2025-01-01 00:00:00' /data/metao/nwb && find /data/metao -name 'nw?' -newer /data/metao/nwa",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/metao/nwb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_find_newermt_judges_overlay_times",
+      "seq": 201024,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "find /data/metao -name 'nw?' -newermt 2024-06-01",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/metao/nwb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ometa_find_mtime_judges_overlay_times",
+      "seq": 201025,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "find /data/metao -name 'nw?' -mtime -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

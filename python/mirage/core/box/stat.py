@@ -36,10 +36,10 @@ def _stat_from_item(item: dict[str, Any]) -> FileStat:
         return FileStat(
             name=vfs_name,
             type=FileType.DIRECTORY,
-            modified=item.get("modified_at") or "",
+            modified=item.get("modified_at") or None,
             extra={"box_id": item["id"]},
         )
-    remote_time = item.get("modified_at") or ""
+    remote_time = item.get("modified_at") or None
     # Box returns the content sha1 in the same listing, so prefer it:
     # it is content-addressed, where modified_at cannot tell two writes
     # in the same second apart and does not move at all on a re-upload
@@ -51,7 +51,7 @@ def _stat_from_item(item: dict[str, Any]) -> FileStat:
         type=FileType.FILE,
         content=content_type_for_path(vfs_name),
         modified=remote_time,
-        fingerprint=sha1 or remote_time or None,
+        fingerprint=sha1 or remote_time,
         extra={
             "box_id": item["id"],
             "resource_type": rt,
@@ -79,7 +79,7 @@ async def stat(
         return FileStat(
             name="/",
             type=FileType.DIRECTORY,
-            modified=info.get("modified_at") or "",
+            modified=info.get("modified_at") or None,
             extra={"box_id": root_id},
         )
     virtual_key = prefix + "/" + key if prefix else "/" + key
@@ -115,7 +115,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name or result.entry.name,
             type=FileType.DIRECTORY,
-            modified=result.entry.remote_time,
+            modified=result.entry.remote_time or None,
             extra={"box_id": result.entry.id},
         )
     sha1 = result.entry.extra.get("sha1")
@@ -124,7 +124,7 @@ async def stat(
         size=result.entry.size,
         type=FileType.FILE,
         content=content_type_for_path(result.entry.vfs_name),
-        modified=result.entry.remote_time,
+        modified=result.entry.remote_time or None,
         fingerprint=sha1 or result.entry.remote_time or None,
         extra={
             "box_id": result.entry.id,

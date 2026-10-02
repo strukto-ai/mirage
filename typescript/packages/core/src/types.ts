@@ -835,6 +835,12 @@ export interface NativeCopy {
    * whole-tree dirCopy) still materialize directories that hold no files.
    */
   mkdir?: CopyFn<[path: PathSpec]>
+  /**
+   * Settles each file a whole-tree dirCopy wrote in the attr overlay
+   * (`NamespaceView.settleWrite`), so a replaced file drops the `touch -d`
+   * time it had; the copy itself names no files.
+   */
+  settle?: (op: string, path: string) => Promise<void>
 }
 
 export interface PrimitiveCopy {

@@ -29,6 +29,7 @@ import {
   withDirGuard,
   withPathGuards,
   withPolicyGuard,
+  withSettledWrites,
 } from './adapter.ts'
 import { type StatOp } from '../../../vfs/types.ts'
 import { BUILDERS } from './builders/index.ts'
@@ -270,14 +271,18 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // scopes return. The abort guard sits outermost: once the
     // invocation's signal has fired no slot starts, so a handler the
     // caller was released from begins no further read or write
-    // between its operands.
+    // between its operands. Writes settle in the attr overlay innermost,
+    // once the backend op succeeded and on the path it was handed.
     const fn: CommandFn = (accessor, paths, texts, opts) => {
       const guarded = withAbortGuard(
         withDirGuard(
           withPolicyGuard(
             finish(
               withPathGuards(
-                stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links),
+                withSettledWrites(
+                  stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links),
+                  opts.ns?.settleWrite,
+                ),
                 opts.mountPrefix,
               ),
             ),

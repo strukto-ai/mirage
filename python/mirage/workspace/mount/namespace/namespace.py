@@ -18,8 +18,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from mirage.context.session_context import path_allowed
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, MountMode
-from mirage.utils.dates import epoch_to_iso
+from mirage.utils.dates import epoch_to_iso_z
 from mirage.utils.path import ancestors, glob_prefix_match, resolve_symlinks
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.mount import MountEntry
@@ -139,7 +140,9 @@ def link_stat(name: str, meta: NodeMeta) -> FileStat:
     return FileStat(
         name=name,
         size=len(target.encode("utf-8")),
-        modified=epoch_to_iso(meta.mtime) if meta.mtime is not None else None,
+        modified=epoch_to_iso_z(meta.mtime)
+        if meta.mtime is not None
+        else None,
         type=FileType.SYMLINK,
         uid=meta.uid,
         gid=meta.gid,
@@ -455,6 +458,62 @@ class Namespace:
             return
         await self._store.set(path, meta.to_fields())
 
+    async def settle_write(
+        self, op: str, path: str, observed: float | None, parents: bool = False
+    ) -> None:
+        """Settle the overlay half of a mount write, whichever door made it.
+
+        The dispatcher's op and a command's backend slot both settle
+        here. A write drops the stale overlay times and stamps the
+        observed one; a removal takes the name's overlay with it, and a
+        removed directory takes everything below except the visible
+        links that arrived after the emptiness check passed (a link
+        synthesizes its parents, so one there now is younger than the
+        rmdir). ``mkdir -p`` instead stamps each directory of the chain
+        that holds no time yet, as a store keeping its own times does,
+        leaving the ones that have one alone.
+
+        Args:
+            op (str): the op that wrote (``write``, ``mkdir``, ``unlink``,
+                ``rmdir``, ...).
+            path (str): absolute virtual path it wrote.
+            observed (float | None): epoch seconds of a content write to
+                record; None for a removal.
+            parents (bool): the write was ``mkdir -p``.
+        """
+        key = path.rstrip("/") or "/"
+        if op == "mkdir" and parents and observed is not None:
+            await self._stamp_chain(key, observed)
+            return
+        await self.clear_times(key, observed=observed)
+        if op not in ("unlink", "rmdir"):
+            return
+        await self.drop_overlay(key)
+        if op == "rmdir":
+            arrived = frozenset(
+                link
+                for link, _ in self.link_stats_below(key)
+                if path_allowed(link)
+            )
+            await self.purge_under(key, keep=arrived)
+
+    async def _stamp_chain(self, path: str, observed: float) -> None:
+        mount = self.try_mount_for(path)
+        root = mount.prefix.rstrip("/") if mount is not None else ""
+        for directory in [*ancestors(path), path]:
+            if len(directory) <= len(root):
+                continue
+            meta = self._nodes.get(directory) or NodeMeta()
+            if (
+                meta.target is not None
+                or meta.mtime is not None
+                or meta.observed_mtime is not None
+            ):
+                continue
+            meta.observed_mtime = observed
+            self._nodes[directory] = meta
+            await self._store.set(directory, meta.to_fields())
+
     async def unlink(self, path: str) -> bool:
         if path in self._nodes:
             del self._nodes[path]
@@ -548,6 +607,28 @@ class Namespace:
         if meta is None or meta.target is None:
             return None
         return link_stat(path.rstrip("/").rsplit("/", 1)[-1], meta)
+
+    def holds_times_under(self, path: str) -> bool:
+        """Whether a node at or under ``path`` holds a time of its own.
+
+        A ``touch`` or a write observed through mirage keeps its time
+        here only, so a time test a backend judges by its own times
+        misses it. Links are left out: a walker merges their rows with
+        their own stat.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        key = path.rstrip("/") or "/"
+        base = key.rstrip("/") + "/"
+        for node, meta in self._nodes.items():
+            if meta.target is not None:
+                continue
+            if meta.mtime is None and meta.observed_mtime is None:
+                continue
+            if node == key or node.startswith(base):
+                return True
+        return False
 
     def link_stats_below(self, directory: str) -> list[tuple[str, FileStat]]:
         """Every link at any depth under a directory, with its own stat.

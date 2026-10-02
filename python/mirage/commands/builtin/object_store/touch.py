@@ -24,17 +24,16 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_touch(vfs: str, io: CommandIO) -> Callable[..., Any]:
+def make_touch(
+    vfs: str, io_for: Callable[[CommandOpts], CommandIO]
+) -> Callable[..., Any]:
     """Build the create-if-missing touch override for one keyed store.
 
     Args:
         vfs (str): VFS name the command registers under.
-        io (CommandIO): the backend's op table; must wire exists and
-            write.
+        io_for (Callable[[CommandOpts], CommandIO]): the op table for one
+            invocation; must wire exists and write.
     """
-    exists = io.require(Operation.EXISTS)
-    write_bytes = io.require(Operation.WRITE)
-    resolve_glob = io.resolve_glob
 
     async def touch(
         accessor: Accessor,
@@ -42,6 +41,10 @@ def make_touch(vfs: str, io: CommandIO) -> Callable[..., Any]:
         texts: list[str],
         opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
+        io = io_for(opts)
+        exists = io.require(Operation.EXISTS)
+        write_bytes = io.require(Operation.WRITE)
+        resolve_glob = io.resolve_glob
         if not paths:
             raise ValueError("touch: missing operand")
         fl = FlagView(opts.flags, spec=SPECS["touch"])

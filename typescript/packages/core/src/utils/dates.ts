@@ -35,6 +35,25 @@ export function epochToIso(seconds: number): string {
   return new Date(Math.floor(seconds) * 1000).toISOString().replace('.000Z', 'Z')
 }
 
+// Epoch seconds in toIsoZ's spelling, the fraction kept to the microsecond,
+// matching Python epoch_to_iso_z: what an attribute overlay renders a time it
+// holds as, since `touch -d` stores a fraction and a backend that keeps its
+// own times keeps it. A Date alone would round it to milliseconds.
+export function epochToIsoZ(seconds: number): string {
+  const total = Math.round(seconds * 1e6)
+  const micros = ((total % 1e6) + 1e6) % 1e6
+  const whole = new Date(((total - micros) / 1e6) * 1000).toISOString().slice(0, 19)
+  return micros === 0 ? `${whole}Z` : `${whole}.${String(micros).padStart(6, '0')}Z`
+}
+
+// Epoch seconds of an ISO stamp, its microseconds kept, matching Python's
+// `datetime.fromisoformat(...).timestamp()`: Date.parse truncates the
+// fraction to milliseconds, so digits four to six are added back.
+export function isoToEpochMicros(iso: string): number {
+  const digits = /\.(\d+)/.exec(iso)?.[1] ?? ''
+  return Date.parse(iso) / 1000 + Number(digits.slice(3, 6).padEnd(3, '0')) / 1e6
+}
+
 // Inverse of epochToIso; a naive stamp (no Z/offset, e.g. a `touch -t`
 // overlay time) is read as UTC so this matches the Python isoToEpoch. JS
 // interprets an offset-less date-time as local, so append Z when absent.

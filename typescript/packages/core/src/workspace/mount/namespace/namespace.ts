@@ -20,8 +20,9 @@ import {
   type MountMode,
   type PathSpec,
 } from '../../../types.ts'
+import { pathAllowed } from '../../../context/session_context.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
-import { epochToIso } from '../../../utils/dates.ts'
+import { epochToIsoZ } from '../../../utils/dates.ts'
 import { ancestors, globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { ResolveFn } from '../../dispatcher/index.ts'
@@ -74,7 +75,7 @@ function linkStat(name: string, meta: NodeMeta): FileStat {
   return new FileStat({
     name,
     size: new TextEncoder().encode(target).length,
-    modified: meta.mtime !== undefined ? epochToIso(meta.mtime) : null,
+    modified: meta.mtime !== undefined ? epochToIsoZ(meta.mtime) : null,
     type: FileType.SYMLINK,
     ...(meta.uid !== undefined ? { uid: meta.uid } : {}),
     ...(meta.gid !== undefined ? { gid: meta.gid } : {}),
@@ -378,6 +379,51 @@ export class Namespace {
     await this.store.set(path, metaToFields(meta))
   }
 
+  // The overlay half of a mount write, the same whichever door made it:
+  // the dispatcher's op and a command's backend slot both settle here. A
+  // write drops the stale overlay times and stamps the observed one; a
+  // removal takes the name's overlay with it, and a removed directory
+  // takes everything below except the visible links that arrived after
+  // the emptiness check passed (a link synthesizes its parents, so one
+  // there now is younger than the rmdir). `mkdir -p` instead stamps each
+  // directory of the chain that holds no time yet, as a store keeping its
+  // own times does, leaving the ones that have one alone.
+  async settleWrite(
+    op: string,
+    path: string,
+    observed: number | null,
+    parents = false,
+  ): Promise<void> {
+    const key = rstripSlash(path) || '/'
+    if (op === 'mkdir' && parents && observed !== null) {
+      await this.stampChain(key, observed)
+      return
+    }
+    await this.clearTimes(key, observed)
+    if (op !== 'unlink' && op !== 'rmdir') return
+    await this.dropOverlay(key)
+    if (op === 'rmdir') {
+      const arrived = new Set<string>()
+      for (const [link] of this.linkStatsBelow(key)) {
+        if (pathAllowed(link)) arrived.add(link)
+      }
+      await this.purgeUnder(key, arrived)
+    }
+  }
+
+  private async stampChain(path: string, observed: number): Promise<void> {
+    const root = rstripSlash(this.tryMountFor(path)?.prefix ?? '/')
+    for (const dir of [...ancestors(path), path]) {
+      if (dir.length <= root.length) continue
+      const meta = this.nodeTable.get(dir) ?? {}
+      if (meta.target !== undefined || meta.mtime !== undefined) continue
+      if (meta.observedMtime !== undefined) continue
+      meta.observedMtime = observed
+      this.nodeTable.set(dir, meta)
+      await this.store.set(dir, metaToFields(meta))
+    }
+  }
+
   async unlink(path: string): Promise<boolean> {
     const removed = this.nodeTable.delete(path)
     if (removed) await this.store.delete([path])
@@ -446,6 +492,21 @@ export class Namespace {
   // Every link at any depth under a directory, with its own stat. A
   // walker (find, du) needs the whole subtree, unlike a listing (ls)
   // which wants one level.
+  // Whether a node at or under `path` holds a time of its own. A touch or a
+  // write observed through mirage keeps its time here only, so a time test a
+  // backend judges by its own times misses it. Links are left out: a walker
+  // merges their rows with their own stat.
+  holdsTimesUnder(path: string): boolean {
+    const key = rstripSlash(path) || '/'
+    const base = key === '/' ? '/' : `${key}/`
+    for (const [node, meta] of this.nodeTable) {
+      if (meta.target !== undefined) continue
+      if (meta.mtime === undefined && meta.observedMtime === undefined) continue
+      if (node === key || node.startsWith(base)) return true
+    }
+    return false
+  }
+
   linkStatsBelow(directory: string): [string, FileStat][] {
     const base = rstripSlash(directory) + '/'
     const out: [string, FileStat][] = []

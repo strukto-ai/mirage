@@ -147,6 +147,7 @@ async def cp(
             find=_make_find(ops, accessor, opts.index),
             dir_copy=dir_copy,
             mkdir=mkdir,
+            settle=opts.ns.settle_write if opts.ns is not None else None,
         )
     overlay = opts.ns.stat_overlay if opts.ns is not None else None
     links = opts.ns.links if opts.ns is not None else None

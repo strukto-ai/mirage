@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import time
 
 from mirage.context import path_allowed
-from mirage.ops.config import NamespaceLinks
+from mirage.ops.config import STAMP_WRITE_OPS, NamespaceLinks
 from mirage.ops.namespace_view import namespace_names
 from mirage.ops.types import LinkView, MountView, NamespaceView
 from mirage.runtime.types import DispatchFn
@@ -183,6 +184,14 @@ def namespace_view_of(
         child_mounts=functools.partial(
             registry_child_mounts, registry, namespace
         ),
+        settle_write=(
+            functools.partial(settle_overlay_write, namespace)
+            if namespace is not None
+            else None
+        ),
+        times_under=(
+            namespace.holds_times_under if namespace is not None else None
+        ),
         user=namespace.user if namespace is not None else None,
     )
 
@@ -204,3 +213,21 @@ def namespace_stat_overlay(
         stat (FileStat): backend stat result.
     """
     return merge_overlay_stat(namespace.meta_for(virtual), stat)
+
+
+async def settle_overlay_write(
+    namespace: Namespace, op: str, path: str, parents: bool = False
+) -> None:
+    """Settle a command slot's write in the attr overlay.
+
+    Stamped the way the dispatcher stamps its own ops: a content write
+    or mkdir records when it happened, a removal records nothing.
+
+    Args:
+        namespace (Namespace): addressing authority holding the overlay.
+        op (str): the op the slot ran, named as the dispatcher names it.
+        path (str): absolute virtual path it wrote.
+        parents (bool): the write was ``mkdir -p``.
+    """
+    observed = time.time() if op in STAMP_WRITE_OPS else None
+    await namespace.settle_write(op, path, observed, parents=parents)

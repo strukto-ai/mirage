@@ -96,11 +96,11 @@ async def test_stat_c_applies_namespace_overlay():
     the generic_bind builder does, or stat -c disagrees with ls -l."""
     code, out = await _render("%a|%y", stat_overlay=_overlay)
     assert code == 0
-    assert out == f"600|{_OVERLAY_MTIME}\n"
+    assert out == "600|2024-01-01 00:00:00.000000000 +0000\n"
 
 
 @pytest.mark.asyncio
 async def test_stat_c_without_overlay_reports_backend_values():
     code, out = await _render("%a|%y")
     assert code == 0
-    assert out == f"644|{_BACKEND_MTIME}\n"
+    assert out == "644|2020-05-05 05:05:05.000000000 +0000\n"

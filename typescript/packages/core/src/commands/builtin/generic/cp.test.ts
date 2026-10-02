@@ -932,6 +932,38 @@ describe('per-entry policy still materializes directories', () => {
       expect(used).toBe(true)
     }
   })
+
+  it('settles each file a native dirCopy copied, not the whole destination', async () => {
+    // The whole-tree copy names no files, so cp settles the ones its find
+    // listed; a file only the destination holds keeps its overlay time.
+    const files = new Map([
+      ['/t/f.txt', new Uint8Array([70])],
+      ['/t/s/g.txt', new Uint8Array([71])],
+      ['/c/own.txt', new Uint8Array([79])],
+    ])
+    const dirs = new Set(['/t', '/t/s', '/c'])
+    const { stat, copy, find, mkdir } = typedBackend(files, dirs)
+    const settled: [string, string][] = []
+    const dirCopy = (_src: PathSpec, dst: PathSpec): Promise<void> => {
+      dirs.add(key(dst))
+      return Promise.resolve()
+    }
+    const settle = (op: string, path: string): Promise<void> => {
+      settled.push([op, path])
+      return Promise.resolve()
+    }
+    const [, io] = await cpGeneric(
+      ['/t', '/c/t'].map(spec),
+      stat,
+      { copy, find, dirCopy, mkdir, settle },
+      cpFlags({ recursive: true }),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(settled).toEqual([
+      ['write', '/c/t/f.txt'],
+      ['write', '/c/t/s/g.txt'],
+    ])
+  })
 })
 
 describe('backup version scan failures', () => {
