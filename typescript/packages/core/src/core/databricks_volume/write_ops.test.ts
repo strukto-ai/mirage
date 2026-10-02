@@ -19,6 +19,7 @@ import { rmRecursive } from './rm.ts'
 import { rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
 import { writeBytes } from './write.ts'
+import { settling } from '../../cache/_test_util.ts'
 import {
   jsonResponse,
   makeAccessor,
@@ -217,5 +218,20 @@ describe('rmRecursive', () => {
     const removed = await rmRecursive(makeAccessor(), spec('/volume/a.txt'))
     expect(removed).toEqual(['/a.txt'])
     expect(calls.at(-1)?.method).toBe('DELETE')
+  })
+})
+
+describe('writeBytes settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    const { fetch } = routedFetch((call) => {
+      if (isDirHead(call)) return new Response(null, { status: 200 })
+      return new Response(null, { status: 204 })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const manager = await settling(() =>
+      writeBytes(makeAccessor(), spec('/volume/reports/a.txt'), ENC.encode('hi')),
+    )
+    expect(manager.settled.map((s) => [s.data, s.receipt, s.generation])).toEqual([['hi', null, 5]])
+    expect(manager.writes).toEqual([])
   })
 })

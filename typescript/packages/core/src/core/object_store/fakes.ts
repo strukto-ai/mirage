@@ -272,8 +272,13 @@ export class FakeManager {
   readonly unlinks: string[] = []
   readonly subtrees: string[] = []
 
-  readonly generation = 5
-  readonly settled: [string, string, WriteReceipt | null, number | null][] = []
+  generation = 5
+  readonly settled: {
+    path: string
+    data: string
+    receipt: WriteReceipt | null
+    generation: number | null
+  }[] = []
 
   settleAfterWrite(
     path: PathSpec,
@@ -281,8 +286,12 @@ export class FakeManager {
     receipt: WriteReceipt | null,
     generation: number | null,
   ): Promise<void> {
-    this.writes.push(path.mountPath)
-    this.settled.push([path.virtual, new TextDecoder().decode(data), receipt, generation])
+    this.settled.push({
+      path: path.virtual,
+      data: new TextDecoder().decode(data),
+      receipt,
+      generation,
+    })
     return Promise.resolve()
   }
 

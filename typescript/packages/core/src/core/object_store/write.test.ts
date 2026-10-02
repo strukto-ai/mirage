@@ -58,7 +58,8 @@ describe('object_store write', () => {
       makeWriteBytes(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
     )
     expect(store.contents()).toEqual({ 'a/b/c.txt': 'hi' })
-    expect(manager.writes).toEqual(['/a/b/c.txt'])
+    expect(manager.settled.map((w) => w.path)).toEqual(['/mnt/a/b/c.txt'])
+    expect(manager.writes).toEqual([])
     expect(manager.ancestors).toEqual(['/mnt/a/b/c.txt'])
   })
 
@@ -67,7 +68,8 @@ describe('object_store write', () => {
     const manager = await managed(() =>
       makeWriteBytes(makeDriver(store))(accessor, spec('/c.txt'), ENC.encode('x')),
     )
-    expect(manager.writes).toEqual(['/c.txt'])
+    expect(manager.settled.map((w) => w.path)).toEqual(['/mnt/c.txt'])
+    expect(manager.writes).toEqual([])
   })
 
   it('create puts empty and invalidates ancestors', async () => {
@@ -263,7 +265,12 @@ describe('object_store write settles with the token its put answered', () => {
       makeWriteBytes(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
     )
     expect(manager.settled).toEqual([
-      ['/mnt/a/b/c.txt', 'hi', { storedSize: null, token: 'fp-a/b/c.txt' }, 5],
+      {
+        path: '/mnt/a/b/c.txt',
+        data: 'hi',
+        receipt: { storedSize: null, token: 'fp-a/b/c.txt' },
+        generation: 5,
+      },
     ])
   })
 
@@ -276,7 +283,12 @@ describe('object_store write settles with the token its put answered', () => {
       makeWriteBytes(driver)(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
     )
     expect(manager.settled).toEqual([
-      ['/mnt/a/b/c.txt', 'hi', { storedSize: null, token: null }, 5],
+      {
+        path: '/mnt/a/b/c.txt',
+        data: 'hi',
+        receipt: { storedSize: null, token: null },
+        generation: 5,
+      },
     ])
   })
 
@@ -286,5 +298,25 @@ describe('object_store write settles with the token its put answered', () => {
     )
     expect(manager.settled).toEqual([])
     expect(manager.writes).toEqual(['/a/c.txt'])
+  })
+})
+
+describe('object_store write notes the generation before its put', () => {
+  it('a change during the put reaches settle', async () => {
+    // The generation is noted before the put, so a change of the mount that
+    // lands while the put runs makes settle drop the bytes.
+    const manager = new FakeManager()
+    const base = makeDriver(new FakeStore())
+    const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+      ...base,
+      put: (conn, key, data) => {
+        manager.generation = 6
+        return base.put(conn, key, data)
+      },
+    }
+    await runWithCacheManager(manager, () =>
+      makeWriteBytes(driver)(accessor, spec('/a/c.txt'), ENC.encode('hi')),
+    )
+    expect(manager.settled.map((w) => w.generation)).toEqual([5])
   })
 })

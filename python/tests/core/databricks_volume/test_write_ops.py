@@ -19,6 +19,7 @@ from mirage.core.databricks_volume.unlink import unlink
 from mirage.core.databricks_volume.write import write_bytes
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.settle import Settled, settling
 
 
 def _path(path: str) -> PathSpec:
@@ -165,3 +166,14 @@ async def test_file_mutation_paths_cannot_escape_root(
         await create(accessor, escaping, index)
     with pytest.raises(ValueError):
         await unlink(accessor, escaping, index)
+
+
+@pytest.mark.asyncio
+async def test_write_settles_its_bytes_without_a_receipt(
+    accessor, files, remote_root, index
+):
+    _seed_directory(files, remote_root)
+    with settling() as manager:
+        await write_bytes(accessor, _path("/dbx/new.txt"), b"hello", index)
+    assert manager.settled == [Settled("/dbx/new.txt", b"hello", None, 5)]
+    assert manager.writes == []

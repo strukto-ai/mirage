@@ -18,8 +18,7 @@ import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
-import { runWithCacheManager, type CacheInvalidator } from '@struktoai/mirage-core/cache/context'
-import type { WriteReceipt } from '@struktoai/mirage-core/cache/types'
+import { settling } from '../../cache/_test_util.ts'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -86,35 +85,6 @@ describe('core/ssh/write', () => {
   })
 })
 
-function recorder(): [
-  CacheInvalidator,
-  [string, string, WriteReceipt | null, number | null][],
-  string[],
-] {
-  const settled: [string, string, WriteReceipt | null, number | null][] = []
-  const writes: string[] = []
-  const manager: CacheInvalidator = {
-    generation: 5,
-    settleAfterWrite(path, data, receipt, generation) {
-      settled.push([path.virtual, new TextDecoder().decode(data), receipt, generation])
-      return Promise.resolve()
-    },
-    invalidateAfterWrite(path) {
-      writes.push(typeof path === 'string' ? path : path.virtual)
-      return Promise.resolve()
-    },
-    invalidateAfterUnlink: () => Promise.resolve(),
-    invalidateSubtree: () => Promise.resolve(),
-    invalidateAncestors: () => Promise.resolve(),
-    cachedBytes: () => Promise.resolve(null),
-    readThrough: (_path, fetch) => fetch(),
-    cachedSize: () => Promise.resolve(null),
-    listingTrusted: () => false,
-    probedStat: () => null,
-  }
-  return [manager, settled, writes]
-}
-
 describe('core/ssh/write settles', () => {
   it('settles its bytes without a receipt', async () => {
     const accessor = makeFakeAccessor({
@@ -124,11 +94,12 @@ describe('core/ssh/write settles', () => {
         ['/data', {}],
       ]),
     })
-    const [manager, settled, writes] = recorder()
-    await runWithCacheManager(manager, () =>
+    const manager = await settling(() =>
       writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello')),
     )
-    expect(settled).toEqual([['/data/a.txt', 'hello', null, 5]])
-    expect(writes).toEqual([])
+    expect(manager.settled).toEqual([
+      { path: '/data/a.txt', data: 'hello', receipt: null, generation: 5 },
+    ])
+    expect(manager.writes).toEqual([])
   })
 })

@@ -89,3 +89,22 @@ describe('OneDrive write settles with the upload reply', () => {
     ])
   })
 })
+
+describe('OneDrive write notes the generation before its upload', () => {
+  it('a change during the upload reaches settle', async () => {
+    // The generation is noted before the upload, so a change of the mount
+    // that lands while the PUT runs makes settle drop the bytes.
+    const accessor = new OneDriveAccessor({ accessToken: 'token' })
+    const manager = await settling(async (recorder) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => {
+          recorder.generation = 6
+          return Promise.resolve(new Response(JSON.stringify({ id: 'X' }), { status: 201 }))
+        }),
+      )
+      await write(accessor, SPEC, new TextEncoder().encode('hello'))
+    })
+    expect(manager.settled.map((s) => s.generation)).toEqual([5])
+  })
+})

@@ -170,3 +170,21 @@ async def test_a_session_upload_settles_with_the_final_chunk_reply(
     assert manager.settled == [
         Settled("/Docs/a.txt", b"abcdef", WriteReceipt(9, "c3"), 5)
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_change_during_the_upload_reaches_settle():
+    # The generation is noted before the upload, so a change of the mount
+    # that lands while the PUT runs makes settle drop the bytes.
+    with settling() as manager:
+
+        def _cb(url, **kwargs):
+            manager.generation = 6
+            return CallbackResult(status=201, payload={"id": "X"})
+
+        with aioresponses() as m:
+            m.put(_CONTENT, callback=_cb)
+            await write_bytes(
+                _accessor(), PathSpec.from_str_path("/Docs/a.txt"), b"hello"
+            )
+    assert [s.generation for s in manager.settled] == [5]

@@ -53,7 +53,8 @@ def test_write_puts_and_invalidates_every_ancestor_listing(accessor):
         )
     )
     assert store.objects == {"a/b/c.txt": b"hi"}
-    assert manager.writes == ["/a/b/c.txt"]
+    assert [s.path for s in manager.settled] == ["/mnt/a/b/c.txt"]
+    assert manager.writes == []
     assert manager.ancestors == ["/mnt/a/b/c.txt"]
 
 
@@ -62,7 +63,8 @@ def test_write_at_mount_root_invalidates_only_itself(accessor):
     manager = _managed(
         make_write_bytes(make_driver(store))(accessor, spec("/c.txt"), b"x")
     )
-    assert manager.writes == ["/c.txt"]
+    assert [s.path for s in manager.settled] == ["/mnt/c.txt"]
+    assert manager.writes == []
 
 
 def test_create_puts_empty_and_invalidates_ancestors(accessor):
@@ -312,3 +314,25 @@ def test_create_and_truncate_still_only_invalidate(accessor):
     )
     assert manager.settled == []
     assert manager.writes == ["/a/c.txt"]
+
+
+def test_a_change_during_the_put_reaches_settle(accessor):
+    # The generation is noted before the put, so a change of the mount that
+    # lands while the put runs makes settle drop the bytes.
+    manager = FakeManager()
+    base = make_driver(FakeStore())
+
+    async def moving_put(conn: FakeStore, key: str, data: bytes):
+        manager.generation = 6
+        return await base.put(conn, key, data)
+
+    prev_manager = push_cache_manager(manager)
+    try:
+        asyncio.run(
+            make_write_bytes(replace(base, put=moving_put))(
+                accessor, spec("/a/c.txt"), b"hi"
+            )
+        )
+    finally:
+        push_cache_manager(prev_manager)
+    assert [s.generation for s in manager.settled] == [5]

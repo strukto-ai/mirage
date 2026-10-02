@@ -17,8 +17,7 @@ import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
-import { runWithCacheManager, type CacheInvalidator } from '@struktoai/mirage-core/cache/context'
-import type { WriteReceipt } from '@struktoai/mirage-core/cache/types'
+import { settling } from '../../_test_util.ts'
 
 let accessor: ReturnType<typeof makeMockAccessor>
 beforeEach(() => {
@@ -61,42 +60,12 @@ describe('opfs/write.writeBytes', () => {
   })
 })
 
-function recorder(): [
-  CacheInvalidator,
-  [string, string, WriteReceipt | null, number | null][],
-  string[],
-] {
-  const settled: [string, string, WriteReceipt | null, number | null][] = []
-  const writes: string[] = []
-  const manager: CacheInvalidator = {
-    generation: 5,
-    settleAfterWrite(path, data, receipt, generation) {
-      settled.push([path.virtual, new TextDecoder().decode(data), receipt, generation])
-      return Promise.resolve()
-    },
-    invalidateAfterWrite(path) {
-      writes.push(typeof path === 'string' ? path : path.virtual)
-      return Promise.resolve()
-    },
-    invalidateAfterUnlink: () => Promise.resolve(),
-    invalidateSubtree: () => Promise.resolve(),
-    invalidateAncestors: () => Promise.resolve(),
-    cachedBytes: () => Promise.resolve(null),
-    readThrough: (_path, fetch) => fetch(),
-    cachedSize: () => Promise.resolve(null),
-    listingTrusted: () => false,
-    probedStat: () => null,
-  }
-  return [manager, settled, writes]
-}
-
 describe('opfs/write.writeBytes settles', () => {
   it('settles its bytes without a receipt', async () => {
-    const [manager, settled, writes] = recorder()
-    await runWithCacheManager(manager, () =>
+    const manager = await settling(() =>
       writeBytes(accessor, spec('/x'), new TextEncoder().encode('hi')),
     )
-    expect(settled).toEqual([['/x', 'hi', null, 5]])
-    expect(writes).toEqual([])
+    expect(manager.settled).toEqual([{ path: '/x', data: 'hi', receipt: null, generation: 5 }])
+    expect(manager.writes).toEqual([])
   })
 })

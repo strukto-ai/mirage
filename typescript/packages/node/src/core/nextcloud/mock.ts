@@ -53,6 +53,11 @@ export class FakeNextcloudOperator {
     }
   }
 
+  write(key: string, data: Buffer): Promise<void> {
+    this.files.set(key, data)
+    return Promise.resolve()
+  }
+
   createDir(key: string): Promise<void> {
     this.directories.add(`${rstripSlash(key)}/`)
     return Promise.resolve()

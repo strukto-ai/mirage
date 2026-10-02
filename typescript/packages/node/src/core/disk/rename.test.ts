@@ -34,10 +34,12 @@ class FakeManager {
   unlinks: string[] = []
   subtrees: string[] = []
 
-  readonly generation = 0
+  readonly generation = 5
+
+  readonly settled: string[] = []
 
   settleAfterWrite(path: PathSpec): Promise<void> {
-    this.writes.push(path.mountPath)
+    this.settled.push(path.mountPath)
     return Promise.resolve()
   }
 

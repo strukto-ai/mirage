@@ -238,7 +238,6 @@ class FakeManager:
         receipt: WriteReceipt | None,
         generation: int | None,
     ) -> None:
-        self.writes.append(path.mount_path)
         self.settled.append(Settled(path.virtual, data, receipt, generation))
 
     async def invalidate_ancestors(self, path: PathSpec) -> None:

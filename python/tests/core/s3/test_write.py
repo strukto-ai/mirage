@@ -27,6 +27,7 @@ from mirage.vfs.s3.config import S3Config
 class _FakeManager:
     def __init__(self) -> None:
         self.writes: list[str] = []
+        self.settled: list[str] = []
         self.ancestors: list[str] = []
         self.unlinks: list[str] = []
         self.subtrees: list[str] = []
@@ -37,7 +38,7 @@ class _FakeManager:
     async def invalidate_after_write(self, path: PathSpec) -> None:
         self.writes.append(path.mount_path)
 
-    generation = 0
+    generation = 5
 
     async def settle_after_write(
         self,
@@ -46,7 +47,7 @@ class _FakeManager:
         receipt: WriteReceipt | None,
         generation: int | None,
     ) -> None:
-        self.writes.append(path.mount_path)
+        self.settled.append(path.mount_path)
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         self.unlinks.append(path.mount_path)
@@ -114,13 +115,15 @@ def test_write_invalidates_every_ancestor_listing(monkeypatch):
     manager, puts = asyncio.run(_write(monkeypatch, "/a/b/c.txt"))
     assert puts == [("a/b/c.txt", b"hi", None)]
     # The put materializes `a` and `a/b` too, so their listings are stale.
-    assert manager.writes == ["/a/b/c.txt"]
+    assert manager.settled == ["/a/b/c.txt"]
+    assert manager.writes == []
     assert manager.ancestors == ["/mnt/a/b/c.txt"]
 
 
 def test_write_at_mount_root_invalidates_only_itself(monkeypatch):
     manager, _ = asyncio.run(_write(monkeypatch, "/c.txt"))
-    assert manager.writes == ["/c.txt"]
+    assert manager.settled == ["/c.txt"]
+    assert manager.writes == []
 
 
 def test_write_stamps_the_mounts_default_content_type(monkeypatch):
