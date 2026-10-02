@@ -143,6 +143,31 @@ describe('CacheManager', () => {
     expect((await index.listDir('/data/chan')).entries).toBeUndefined()
   })
 
+  it("invalidateSubtree leaves a nested mount's bodies", async () => {
+    // A mount nested under the subtree has its own backend, which nothing
+    // done to this mount changes: dropping its bodies only forced a
+    // re-download of every file it had cached.
+    const cache = new RAMFileCacheStore()
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await cache.set('/data/chan/day/chat.jsonl', new TextEncoder().encode('one\n'))
+    await cache.set('/data/chan/day/inner/kept.txt', new TextEncoder().encode('kept'))
+    const manager = new CacheManager(
+      cache,
+      index,
+      '/data/',
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => ['/data/chan/day/inner'],
+    )
+    await manager.invalidateSubtree(PathSpec.fromStrPath('/chan/day'))
+    expect(await cache.exists('/data/chan/day/chat.jsonl')).toBe(false)
+    expect(await cache.exists('/data/chan/day/inner/kept.txt')).toBe(true)
+  })
+
   it('a write does not reach into the subtree', async () => {
     const cache = new RAMFileCacheStore()
     const index = new RAMIndexCacheStore({ ttl: 600 })

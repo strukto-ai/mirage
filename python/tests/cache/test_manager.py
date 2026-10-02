@@ -443,6 +443,33 @@ def test_invalidate_subtree_drops_nested_bodies_and_listings():
     assert parent is False
 
 
+async def _subtree_over_a_nested_mount_case() -> tuple[bool, bool]:
+    cache, index = _stores()
+    await cache.set("/data/chan/day/chat.jsonl", b"one\n")
+    await cache.set("/data/chan/day/inner/kept.txt", b"kept")
+    manager = CacheManager(
+        cache,
+        index,
+        "/data/",
+        True,
+        excluded_prefixes=lambda: ("/data/chan/day/inner",),
+    )
+    await manager.invalidate_subtree(PathSpec.from_str_path("/chan/day"))
+    return (
+        await cache.exists("/data/chan/day/chat.jsonl"),
+        await cache.exists("/data/chan/day/inner/kept.txt"),
+    )
+
+
+def test_invalidate_subtree_leaves_a_nested_mounts_bodies():
+    # A mount nested under the subtree has its own backend, which nothing
+    # done to this mount changes: dropping its bodies only forced a
+    # re-download of every file it had cached.
+    own, nested_mount = _run(_subtree_over_a_nested_mount_case())
+    assert own is False
+    assert nested_mount is True
+
+
 async def _write_leaves_subtree_case() -> bool:
     cache, index = _stores()
     entry = IndexEntry(id="1", name="f", resource_type="file")
