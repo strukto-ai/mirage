@@ -20,6 +20,8 @@ import type { PathSpec } from '../../types.ts'
 import { listingError } from '../../utils/errors.ts'
 import { DropboxApiError } from './client.ts'
 import { getMetadata, listFolder, type DropboxEntry } from './api.ts'
+import { CONTENT_HASH } from './constants.ts'
+import { tokenOf } from './fingerprint.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 function resourceTypeFor(entry: DropboxEntry): string {
@@ -32,7 +34,8 @@ function dropboxPathFromKey(root: string, key: string): string {
   return `${root}/${key}`
 }
 
-async function metadataOrNull(
+/** One path's get_metadata answer, or null when the API 409s on it. */
+export async function metadataOrNull(
   accessor: DropboxAccessor,
   key: string,
 ): Promise<DropboxEntry | null> {
@@ -47,11 +50,13 @@ async function metadataOrNull(
   }
 }
 
+/** Whether a mount-local path exists as a file. */
 async function isFile(accessor: DropboxAccessor, key: string): Promise<boolean> {
   const entry = await metadataOrNull(accessor, key)
   return entry !== null && entry['.tag'] !== 'folder'
 }
 
+/** Whether a mount-local path exists as a folder. */
 async function isDir(accessor: DropboxAccessor, key: string): Promise<boolean> {
   const entry = await metadataOrNull(accessor, key)
   return entry !== null && entry['.tag'] === 'folder'
@@ -95,19 +100,21 @@ export async function readdir(
 
   const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
   for (const f of files) {
-    const isDir = f['.tag'] === 'folder'
+    const folder = f['.tag'] === 'folder'
     const filename = f.name
     const modified = f.server_modified ?? f.client_modified ?? ''
     const size = typeof f.size === 'number' ? f.size : null
+    const token = folder ? null : tokenOf(f[CONTENT_HASH])
     const entry = new IndexEntry({
       id: f.id ?? f.path_display ?? filename,
       name: filename,
       resourceType: resourceTypeFor(f),
       remoteTime: modified,
       vfsName: filename,
-      size: !isDir ? size : null,
+      size: !folder ? size : null,
+      extra: token === null ? {} : { [CONTENT_HASH]: token },
     })
-    entries.push({ name: filename, entry, isDir })
+    entries.push({ name: filename, entry, isDir: folder })
   }
 
   if (index !== undefined) {

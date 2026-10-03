@@ -13,13 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
 import { getMetadata, type DropboxEntry } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
-import { readdir as coreReaddir } from './readdir.ts'
+import { CONTENT_HASH } from './constants.ts'
+import { entryToken, tokenOf } from './fingerprint.ts'
+import { metadataOrNull, readdir as coreReaddir } from './readdir.ts'
 import { enoent, isEnoent } from '../../utils/errors.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
@@ -39,7 +42,7 @@ function statFromEntry(entry: DropboxEntry): FileStat {
     type: FileType.FILE,
     content: contentTypeForPath(entry.name),
     modified,
-    fingerprint: modified !== '' ? modified : null,
+    fingerprint: tokenOf(entry[CONTENT_HASH]),
     extra: {
       dropbox_id: entry.id ?? entry.path_display ?? entry.name,
       resource_type: 'dropbox/file',
@@ -62,6 +65,22 @@ async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<F
   return statFromEntry(entry)
 }
 
+// Stat one path with one get_metadata, writing nothing to the index. Only a
+// scratch store asks this way, and its callers (the reconcile probe, the drift
+// check) treat ENOENT and ENOTDIR alike, so a miss is ENOENT with no further
+// lookup. get_metadata matches case-insensitively where a listing's names are
+// exact, so an answer naming the last component in another case is not this
+// path.
+async function pointStat(
+  accessor: DropboxAccessor,
+  path: PathSpec,
+  key: string,
+): Promise<FileStat> {
+  const entry = await metadataOrNull(accessor, key)
+  if (entry?.name !== key.slice(key.lastIndexOf('/') + 1)) throw enoent(path.virtual)
+  return statFromEntry(entry)
+}
+
 export async function stat(
   accessor: DropboxAccessor,
   path: PathSpec,
@@ -75,9 +94,12 @@ export async function stat(
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
-    const parentVirtual = virtualKey.includes('/')
-      ? virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
-      : '/'
+    // The throwaway store a fresh probe or the drift check stats through is
+    // dropped right after: ask for this one path rather than list a whole
+    // folder into it. A mount's own index lists the parent and keeps it, so
+    // siblings and repeats cost nothing.
+    if (index.scratch) return pointStat(accessor, path, stripSlash(key))
+    const parentVirtual = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
     try {
       await coreReaddir(
         accessor,
@@ -91,15 +113,12 @@ export async function stat(
       )
     } catch (err) {
       // readdir already maps a genuinely missing path to ENOENT; a listing
-      // that fails any other way — ENOTDIR under a file, or a 5xx/429 from
-      // the API — is not absence and must surface, never read back as a
-      // (destructively actionable) false ENOENT.
+      // that fails any other way (ENOTDIR under a file, or a 5xx/429 from
+      // the API) is not absence and must surface.
       if (!isEnoent(err)) throw err
     }
     result = await index.get(virtualKey)
-    if (result.entry === undefined || result.entry === null) {
-      throw enoent(path.virtual)
-    }
+    if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
   }
   if (result.entry.resourceType === 'dropbox/folder') {
     return new FileStat({
@@ -115,7 +134,7 @@ export async function stat(
     type: FileType.FILE,
     content: contentTypeForPath(result.entry.vfsName),
     modified: result.entry.remoteTime,
-    fingerprint: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
+    fingerprint: entryToken(result.entry),
     extra: {
       dropbox_id: result.entry.id,
       resource_type: result.entry.resourceType,

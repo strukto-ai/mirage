@@ -19,6 +19,8 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.dropbox.api import get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
+from mirage.core.dropbox.constants import CONTENT_HASH
+from mirage.core.dropbox.fingerprint import token_of
 from mirage.types import PathSpec
 from mirage.utils.errors import listing_error
 from mirage.utils.key_prefix import mount_prefix_of
@@ -36,9 +38,16 @@ def dropbox_path_from_key(root: str, key: str) -> str:
     return f"{root}/{key}"
 
 
-async def _metadata_or_none(
+async def metadata_or_none(
     accessor: DropboxAccessor, key: str
 ) -> dict[str, Any] | None:
+    """One path's get_metadata answer, or None when the API 409s on it.
+
+    Args:
+        accessor (DropboxAccessor): Dropbox accessor; its root_path is
+            prepended.
+        key (str): mount-local path, slashes at either end ignored.
+    """
     path = dropbox_path_from_key(accessor.root_path, key.strip("/"))
     try:
         return await get_metadata(accessor.token_manager, path)
@@ -49,12 +58,24 @@ async def _metadata_or_none(
 
 
 async def _is_file(accessor: DropboxAccessor, key: str) -> bool:
-    entry = await _metadata_or_none(accessor, key)
+    """Whether a mount-local path exists as a file.
+
+    Args:
+        accessor (DropboxAccessor): Dropbox accessor.
+        key (str): mount-local path.
+    """
+    entry = await metadata_or_none(accessor, key)
     return entry is not None and entry.get(".tag") != "folder"
 
 
 async def _is_dir(accessor: DropboxAccessor, key: str) -> bool:
-    entry = await _metadata_or_none(accessor, key)
+    """Whether a mount-local path exists as a folder.
+
+    Args:
+        accessor (DropboxAccessor): Dropbox accessor.
+        key (str): mount-local path.
+    """
+    entry = await metadata_or_none(accessor, key)
     return entry is not None and entry.get(".tag") == "folder"
 
 
@@ -93,19 +114,21 @@ async def readdir(
 
     entries: list[tuple[str, IndexEntry, bool]] = []
     for f in files:
-        is_dir = f.get(".tag") == "folder"
+        folder = f.get(".tag") == "folder"
         filename = f["name"]
         modified = f.get("server_modified") or f.get("client_modified") or ""
         size = f.get("size")
+        token = None if folder else token_of(f.get(CONTENT_HASH))
         entry = IndexEntry(
             id=f.get("id") or f.get("path_display") or filename,
             name=filename,
             resource_type=_resource_type(f),
             remote_time=modified,
             vfs_name=filename,
-            size=size if not is_dir and isinstance(size, int) else None,
+            size=size if not folder and isinstance(size, int) else None,
+            extra={} if token is None else {CONTENT_HASH: token},
         )
-        entries.append((filename, entry, is_dir))
+        entries.append((filename, entry, folder))
 
     await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
     path_prefix = f"/{key}/" if key else "/"

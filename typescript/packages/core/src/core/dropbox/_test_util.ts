@@ -39,6 +39,10 @@ export class FakeDropboxRpc {
   listRequests = 0
   deleted: string[] = []
   moves: [string, string][] = []
+  // Every path get_metadata was asked for, so a test can pin a point lookup
+  // against a listing.
+  metadataPaths: string[] = []
+  metadataByPath: Record<string, DropboxEntry> | null
   private cursors = new Map<string, DropboxEntry[]>()
   private limits = new Map<string, number>()
 
@@ -46,11 +50,15 @@ export class FakeDropboxRpc {
     opts: {
       entries?: DropboxEntry[]
       metadata?: DropboxEntry | null
+      // Per-path answers to get_metadata, a missing path a 409; overrides
+      // `metadata` when given.
+      metadataByPath?: Record<string, DropboxEntry>
       moveErrors?: (DropboxApiError | null)[]
     } = {},
   ) {
     this.entries = opts.entries ?? []
     this.metadata = opts.metadata ?? null
+    this.metadataByPath = opts.metadataByPath ?? null
     this.moveErrors = opts.moveErrors ?? []
   }
 
@@ -81,8 +89,12 @@ export class FakeDropboxRpc {
       return Promise.resolve(this.page(rest, this.limits.get(token) ?? 2000))
     }
     if (endpoint === '/files/get_metadata') {
-      if (this.metadata === null) throw new DropboxApiError('nf', 409, 'path/not_found/...')
-      return Promise.resolve(this.metadata)
+      const path = String(req.path)
+      this.metadataPaths.push(path)
+      const found =
+        this.metadataByPath === null ? this.metadata : (this.metadataByPath[path] ?? null)
+      if (found === null) throw new DropboxApiError('nf', 409, 'path/not_found/...')
+      return Promise.resolve(found)
     }
     if (endpoint === '/files/delete_v2') {
       this.deleted.push(String(req.path))

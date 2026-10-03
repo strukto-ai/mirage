@@ -42,7 +42,7 @@
         "stdout": "v1\nv1\n/data2/a.txt:v1\n/data2/b.txt:v2\n",
         "stderr": ""
       },
-      "note": "A recursive walk never names its files as operands, so the routing reconcile never sees them; the cached copy must be checked where it is served. The two named cats warm the cache first, because grep -r fills none of its own and would read cold either way. Narrowed to the backends that may declare `read: fresh`: the other five cache reads but stamp no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list."
+      "note": "A recursive walk never names its files as operands, so the routing reconcile never sees them; the cached copy must be checked where it is served. The two named cats warm the cache first, because grep -r fills none of its own and would read cold either way. Narrowed to the backends that may declare `read: fresh`: of the bounded control's other five, ssh caches reads but stamps no comparable content token, so the mount-time verdict refuses the policy there; dropbox, onedrive, sharepoint and sharepoint-prefix accept fresh but stay out so the directory's modal target set does not move. The bounded control keeps the full list."
     },
     {
       "id": "read_bounded_walk_serves_stale",
@@ -136,7 +136,7 @@
         "stdout": "v1\nv1\nv1\nv2\n",
         "stderr": ""
       },
-      "note": "A glob expands after routing, so its files are never named operands and the pre-command reconcile skips them; the copy is checked where it is served. Narrowed to the backends that may declare `read: fresh`: the other five cache reads but stamp no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list."
+      "note": "A glob expands after routing, so its files are never named operands and the pre-command reconcile skips them; the copy is checked where it is served. Narrowed to the backends that may declare `read: fresh`: of the bounded control's other five, ssh caches reads but stamps no comparable content token, so the mount-time verdict refuses the policy there; dropbox, onedrive, sharepoint and sharepoint-prefix accept fresh but stay out so the directory's modal target set does not move. The bounded control keeps the full list."
     },
     {
       "id": "read_fresh_revalidates_a_fanout",
@@ -189,7 +189,7 @@
         "stdout": "v1\nv1\nv1\n/data/consf.txt:v1\n/data2/a.txt:v1\n/data2/b.txt:v2\n",
         "stderr": ""
       },
-      "note": "A line spanning two mounts fans out per mount, so the walk of /data2 runs under that mount's own cache manager rather than the single-mount routing path; its files are never named operands and the cached copy must be checked where it is served. A named cat of the same files across sibling mounts would not do: named operands were already reconciled at routing. Narrowed to the backends that may declare `read: fresh`: the other five cache reads but stamp no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list."
+      "note": "A line spanning two mounts fans out per mount, so the walk of /data2 runs under that mount's own cache manager rather than the single-mount routing path; its files are never named operands and the cached copy must be checked where it is served. A named cat of the same files across sibling mounts would not do: named operands were already reconciled at routing. Narrowed to the backends that may declare `read: fresh`: of the bounded control's other five, ssh caches reads but stamps no comparable content token, so the mount-time verdict refuses the policy there; dropbox, onedrive, sharepoint and sharepoint-prefix accept fresh but stay out so the directory's modal target set does not move. The bounded control keeps the full list."
     }
   ]
 }

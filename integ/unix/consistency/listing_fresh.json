@@ -10,6 +10,7 @@
         "gridfs-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
         "onedrive",
         "sharepoint",
         "sharepoint-prefix",
@@ -71,6 +72,7 @@
       "targets": [
         "s3",
         "s3-prefix",
+        "dropbox",
         "onedrive",
         "sharepoint",
         "sharepoint-prefix"
@@ -127,7 +129,7 @@
         "stdout": "a.txt\nb.txt\na\nb.txt\n1\n",
         "stderr": ""
       },
-      "note": "A re-list that no longer names a file evicts its cached row, so stat stops answering for it; before, msgraph's stat answered from the old row and test -e said it still existed. s3 names the directory's own targets; box and dropbox cannot run this until Task 1.4 (box also has no TS shadow, #1341 item 2)."
+      "note": "A re-list that no longer names a file evicts its cached row, so stat stops answering for it; before, msgraph's stat answered from the old row and test -e said it still existed. s3 names the directory's own targets; dropbox runs it since its stat answers content_hash from the re-listed rows (Task 1.4); box cannot yet, it has no TS shadow (#1341 item 2)."
     },
     {
       "id": "listing_relist_drops_descendants_of_a_replaced_directory",
@@ -135,6 +137,7 @@
       "targets": [
         "s3",
         "s3-prefix",
+        "dropbox",
         "onedrive",
         "sharepoint",
         "sharepoint-prefix"
@@ -191,7 +194,7 @@
         "stdout": "old.txt\nold\nsub\n1\nreplacement\n",
         "stderr": ""
       },
-      "note": "Replacing a listed directory with a file removes its cached descendants when the parent is re-listed. MSGraph stat otherwise serves the old child row after the replacement; object stores must discard the old prefix while preserving the new file."
+      "note": "Replacing a listed directory with a file removes its cached descendants when the parent is re-listed. MSGraph and Dropbox stat otherwise serve the old child row after the replacement (Dropbox's rows are typed dropbox/folder and dropbox/file, which the stores read by their kind suffix); object stores must discard the old prefix while preserving the new file."
     }
   ]
 }

@@ -33,6 +33,16 @@ export function malformed(): Reply {
   return { status: 400, body: { error_summary: 'path/malformed' } }
 }
 
+// A header is a ByteString, so JSON carried in one (Dropbox-API-Arg,
+// Dropbox-API-Result) goes with every character from U+007F (DEL) up as a
+// \uXXXX escape, the way Dropbox writes it.
+export function headerJson(value: JsonValue): string {
+  return JSON.stringify(value).replace(
+    /[\u007f-\uffff]/g,
+    (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  )
+}
+
 export function basename(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1)
 }
