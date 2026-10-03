@@ -59,11 +59,14 @@ function norm(path: string): string {
  * `Dropbox-API-Result` with the file's metadata on a full read and on a
  * ranged one (206), as the real service does. A rewrite keeps
  * `server_modified`: the real service repeated it across same-size writes,
- * so only `content_hash` tells them apart.
+ * so only `content_hash` tells them apart. A path in `restricted` exists but
+ * answers get_metadata and download with a `path/restricted_content` 409, the
+ * way Dropbox refuses content it may not serve.
  */
 export class InlineDropbox {
   readonly files = new Map<string, Uint8Array>()
   readonly log: string[] = []
+  readonly restricted = new Set<string>()
   readonly url = 'http://dropbox.test'
 
   constructor(files: Record<string, Uint8Array> = {}) {
@@ -146,10 +149,21 @@ export class InlineDropbox {
     )
   }
 
+  private static refused(): Response {
+    return InlineDropbox.json(
+      {
+        error_summary: 'path/restricted_content/..',
+        error: { '.tag': 'path', path: { '.tag': 'restricted_content' } },
+      },
+      409,
+    )
+  }
+
   private download(req: Request): Response {
     const arg = JSON.parse(req.headers.get('Dropbox-API-Arg') ?? '{}') as { path?: string }
     const path = norm(arg.path ?? '')
     this.log.push('download')
+    if (this.restricted.has(path)) return InlineDropbox.refused()
     const data = this.files.get(path)
     if (data === undefined) return InlineDropbox.missing()
     const result = { 'Dropbox-API-Result': headerJson(this.fileEntry(path, data)) }
@@ -190,6 +204,7 @@ export class InlineDropbox {
     }
     if (route === '/2/files/get_metadata') {
       this.log.push('get_metadata')
+      if (this.restricted.has(path)) return InlineDropbox.refused()
       const data = this.files.get(path)
       if (data !== undefined) return InlineDropbox.json(this.fileEntry(path, data))
       if (this.folders().has(path)) return InlineDropbox.json(this.folderEntry(path))

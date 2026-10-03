@@ -1415,6 +1415,30 @@ describe('the read-token contract', () => {
     }
   })
 
+  // A fresh probe that hears a 409 other than not_found cannot verify the
+  // copy: it reads cold, which fails, but never calls the file gone and drops
+  // its overlay. Read as gone, chmod's 600 would be lost.
+  it('a dropbox file that 409s without a miss keeps its overlay', async () => {
+    const dropbox = new InlineDropbox({ '/d/a.txt': SEED })
+    vi.stubGlobal('fetch', dropbox.fetch)
+    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
+    const ws = freshWorkspace(vfs)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await line(ws, 'cat /m/d/a.txt')
+      await line(ws, 'chmod 600 /m/d/a.txt')
+      dropbox.restricted.add('/d/a.txt')
+      const result = await ws.shell('cat /m/d/a.txt')
+      dropbox.restricted.delete('/d/a.txt')
+      expect(result.exitCode).toBe(1)
+      expect(new TextDecoder().decode(result.stderr)).not.toContain('No such file')
+      expect(new TextDecoder().decode(await line(ws, 'stat -c %a /m/d/a.txt'))).toBe('600\n')
+    } finally {
+      warn.mockRestore()
+      await ws.close()
+    }
+  })
+
   it('a dropbox same-size rewrite is refetched on content_hash', async () => {
     // The real service repeated server_modified across same-size writes
     // (probed 2026-10-02) while content_hash moved on every one. A token

@@ -63,12 +63,16 @@ class FakeDropbox:
         listed (dict[str, str]): a content_hash ``list_folder`` reports for
             a path in place of the true one, as a listing that lags a write
             would; downloads keep naming the true hash.
+        restricted (set[str]): paths that exist but answer get_metadata
+            and download with a ``path/restricted_content`` 409, the way
+            Dropbox refuses content it may not serve.
     """
 
     files: dict[str, bytes] = field(default_factory=dict)
     log: list[tuple[str, str]] = field(default_factory=list)
     url: str = ""
     listed: dict[str, str] = field(default_factory=dict)
+    restricted: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         self.files = {_norm(k): v for k, v in self.files.items()}
@@ -138,6 +142,18 @@ class FakeDropbox:
             status=409,
         )
 
+    def _restricted(self) -> web.Response:
+        return web.json_response(
+            {
+                "error_summary": "path/restricted_content/..",
+                "error": {
+                    ".tag": "path",
+                    "path": {".tag": "restricted_content"},
+                },
+            },
+            status=409,
+        )
+
     async def token(self, _req: web.Request) -> web.Response:
         self.log.append(("token", ""))
         return web.json_response(
@@ -156,6 +172,8 @@ class FakeDropbox:
     async def get_metadata(self, req: web.Request) -> web.Response:
         path = _norm((await req.json())["path"])
         self.log.append(("get_metadata", path))
+        if path in self.restricted:
+            return self._restricted()
         if path in self.files:
             return web.json_response(self._file_entry(path))
         if path in self._folders():
@@ -165,6 +183,8 @@ class FakeDropbox:
     async def download(self, req: web.Request) -> web.Response:
         path = _norm(json.loads(req.headers["Dropbox-API-Arg"])["path"])
         self.log.append(("download", path))
+        if path in self.restricted:
+            return self._restricted()
         if path not in self.files:
             return self._missing()
         data = self.files[path]
