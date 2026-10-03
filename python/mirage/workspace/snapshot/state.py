@@ -202,7 +202,9 @@ async def to_state_dict(ws) -> dict[str, Any]:
         await mount.ensure_ready()
     mounts_state = []
     for idx, m in enumerate(
-        mt for mt in mounted if mt.prefix not in auto_prefixes
+        mt
+        for mt in mounted
+        if mt.prefix not in auto_prefixes and mt.vfs.name != "document"
     ):
         async with m.use():
             vfs_state = m.vfs.get_state()

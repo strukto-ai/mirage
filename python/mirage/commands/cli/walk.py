@@ -24,6 +24,7 @@ from mirage.commands.spec.compile import (
 )
 from mirage.commands.spec.constants import FLOAT_VALUE, HELP_OPTION, INT_VALUE
 from mirage.commands.spec.help import (
+    argparse_help,
     clap_group_refusal,
     clap_unexpected_argument,
     render_help,
@@ -296,13 +297,16 @@ def node_help(
             program answers in one voice at every level, the same rule
             the leaf refusal follows.
         visible (Callable[[str], bool] | None): filter on a child's
-            canonical name, None to list every child. Only ``man``
-            passes one, since it renders for a session; a line that
-            reaches ``--help`` or the bare-group refusal was admitted
-            whole, so there is nothing left to filter there.
+            canonical name, None to list every child. Help, man and
+            generated skills use the reading session's visibility.
     """
+    if style is UsageStyle.ARGPARSE:
+        return argparse_help(name, _listed(node, style), _rows(node, visible))
     return render_help(
-        name, _listed(node), subcommands=_rows(node, visible), style=style
+        name,
+        _listed(node, style),
+        subcommands=_rows(node, visible),
+        style=style,
     )
 
 
@@ -323,7 +327,7 @@ def _rows(
     ]
 
 
-def _listed(node: CLISpec) -> CLISpec:
+def _listed(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE) -> CLISpec:
     """The node as the renderer shows it, with `--help` filled in.
 
     --help is a registered option everywhere (argparse add_help, click
@@ -340,7 +344,13 @@ def _listed(node: CLISpec) -> CLISpec:
         node
     ):
         return node
-    return replace(node, options=node.options + (HELP_OPTION,))
+    help_option = (
+        replace(HELP_OPTION, short="-h")
+        if style is UsageStyle.ARGPARSE
+        and not any(o.short == "-h" for o in node.options)
+        else HELP_OPTION
+    )
+    return replace(node, options=node.options + (help_option,))
 
 
 def _usage_error(
@@ -374,7 +384,9 @@ def _usage_error(
             clap_unexpected_argument(token) if token is not None else message
         )
         return WalkResult(
-            output=clap_group_refusal(name, _listed(node), _rows(node), first),
+            output=clap_group_refusal(
+                name, _listed(node, style), _rows(node), first
+            ),
             stream="stderr",
             exit_code=CLAP_EXIT,
         )
@@ -651,6 +663,7 @@ def walk(
     argv: Sequence[str],
     cwd: str = "/",
     env: Mapping[str, str] | None = None,
+    visible: Callable[[tuple[str, ...]], bool] | None = None,
 ) -> WalkResult:
     """Resolve one command line against a CLI tree.
 
@@ -673,6 +686,8 @@ def walk(
         env (Mapping[str, str] | None): session environment, so a group
             option declaring ``Option.env`` fills at its own level
             exactly as a leaf one does in the flat parser.
+        visible (Callable[[tuple[str, ...]], bool] | None): filter child
+            command paths in generated help for the current session.
     """
     node = spec
     # Read once off the root and never off a node: a program answers in
@@ -714,6 +729,24 @@ def walk(
                 i += 1
                 descended = True
                 break
+            if (
+                not options_ended
+                and token == "-h"
+                and style is UsageStyle.ARGPARSE
+                and "-h" not in cs.dest
+            ):
+                return WalkResult(
+                    output=node_help(
+                        name,
+                        node,
+                        style,
+                        visible=lambda child: (
+                            visible(path + (child,))
+                            if visible is not None
+                            else True
+                        ),
+                    ).encode()
+                )
             if not options_ended and token == "--":
                 if style is UsageStyle.GIT and not path:
                     return _usage_error(
@@ -779,7 +812,16 @@ def walk(
                             style,
                         )
                     return WalkResult(
-                        output=node_help(name, node, style).encode()
+                        output=node_help(
+                            name,
+                            node,
+                            style,
+                            visible=lambda child: (
+                                visible(path + (child,))
+                                if visible is not None
+                                else True
+                            ),
+                        ).encode()
                     )
                 else:
                     return _usage_error(
@@ -860,7 +902,14 @@ def walk(
         if refused is not None:
             return refused
         return WalkResult(
-            output=node_help(name, node, style).encode(),
+            output=node_help(
+                name,
+                node,
+                style,
+                visible=lambda child: (
+                    visible(path + (child,)) if visible is not None else True
+                ),
+            ).encode(),
             stream="stdout",
             exit_code=1,
         )

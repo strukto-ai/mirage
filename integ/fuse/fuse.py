@@ -257,6 +257,8 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
     result["session_host_reads_hidden"] = (
         asyncio.run(ws.vfs.read("/data/vault/secret.txt")).decode().strip()
     )
+    asyncio.run(ws.vfs_md("/VFS.md"))
+    asyncio.run(ws.skill_md("/SKILL.md", session_id="agent"))
     mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-session-")
     mount_background(ws.vfs, mountpoint, session=session)
     data = f"{mountpoint}/data"
@@ -282,6 +284,31 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
             result["session_kernel_write_refused"] = (
                 refused and fh.read() == b"pub\n"
             )
+        document_path = f"{mountpoint}/VFS.md"
+        expected = asyncio.run(ws.vfs_md(session_id="agent")).encode()
+        with open(document_path, "rb", buffering=0) as document:
+            body = document.read(65536)
+            result["document_kernel_profile"] = body == expected
+            result["document_kernel_size"] = os.path.getsize(
+                document_path
+            ) == len(body)
+            asyncio.run(
+                ws.set_session_profile("agent", {"paths": {"hide": ["/data"]}})
+            )
+            document.seek(0)
+            result["document_kernel_live_handle"] = (
+                b"/data" not in document.read(65536)
+            )
+        with open(f"{mountpoint}/SKILL.md", "rb") as skill:
+            result["document_kernel_skill"] = skill.read().startswith(
+                b"---\nname: mirage\n"
+            )
+        try:
+            with open(document_path, "wb") as document:
+                document.write(b"changed")
+            result["document_kernel_readonly"] = False
+        except OSError:
+            result["document_kernel_readonly"] = True
     finally:
         if sys.platform == "darwin":
             subprocess.run(

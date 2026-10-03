@@ -9,7 +9,7 @@
       "command": "airtable --help",
       "expect": {
         "exit": 0,
-        "stdout": "airtable: Airtable Web API client\n\nUsage: airtable [flags] <command> [<args>]\n\nCommands:\n  base     Read bases\n  comment  Read and add record comments\n  record   Read and write records\n  table    Read table schemas\n\nFlags:\n  --help  Show this help and exit\n",
+        "stdout": "usage: airtable [-h] {base,table,record,comment} ...\n\nAirtable Web API client\n\ncommands:\n  base     Read bases\n  table    Read table schemas\n  record   Read and write records\n  comment  Read and add record comments\n\noptions:\n  -h, --help  Show this help and exit\n",
         "stderr": ""
       }
     },
@@ -22,7 +22,7 @@
       "command": "airtable record update --help",
       "expect": {
         "exit": 0,
-        "stdout": "airtable record update: Update records' cells (PATCH) from RECORD --fields or stdin\n\nUsage: airtable record update [flags] <RECORD>\n\nFlags:\n  --base <text>    Base ID (app...)\n  --table <text>   Table ID or name\n  --fields <text>  Cell values as a JSON object keyed by field name\n  --typecast       Let Airtable convert string values to the field types\n  --help           Show this help and exit\n\nWithout RECORD --fields, reads records.jsonl lines from stdin and patches\neach \"record_id\" with its \"fields\"; computed fields are dropped.\n",
+        "stdout": "usage: airtable record update --base BASE --table TABLE [--fields FIELDS] [--typecast] [-h] [RECORD]\n\nUpdate records' cells (PATCH) from RECORD --fields or stdin\n\npositional arguments:\n  RECORD\n\noptions:\n  --base BASE      Base ID (app...) (required)\n  --table TABLE    Table ID or name (required)\n  --fields FIELDS  Cell values as a JSON object keyed by field name\n  --typecast       Let Airtable convert string values to the field types\n  -h, --help       Show this help and exit\n\nWithout RECORD --fields, reads records.jsonl lines from stdin and patches\neach \"record_id\" with its \"fields\"; computed fields are dropped.\n",
         "stderr": ""
       }
     },

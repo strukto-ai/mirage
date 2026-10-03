@@ -35,7 +35,7 @@
       "command": "gws gmail --help | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "gws gmail: Google gmail API commands\n",
+        "stdout": "usage: gws gmail [-h] {users,send,read,reply,reply-all,forward,triage} ...\n",
         "stderr": ""
       }
     },

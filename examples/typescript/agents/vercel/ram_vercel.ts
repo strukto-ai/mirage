@@ -30,7 +30,7 @@ const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 
-const system = buildSystemPrompt({
+const system = await buildSystemPrompt({
   mountInfo: { '/': 'In-memory filesystem (read/write)' },
   extraInstructions:
     'All file paths start from /. Use the execute tool to run shell commands ' +

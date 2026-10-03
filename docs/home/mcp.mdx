@@ -95,3 +95,7 @@ through one stamps the file for a `write` or `edit` through another.
 ## Errors
 
 A tool the server does not serve is a protocol error (`-32602 Tool <name> not found`). Arguments outside a tool's input schema, and a failing call, come back as the tool's answer with `isError` set, so the agent reads them and can retry.
+
+## Select sessions per call
+
+Use the `session` tool to create, list, update, or close sessions, and pass `session_id` to individual file or shell tools. See [Workspace](/home/workspace#mcp-ssh-and-fuse) for profile-aware documents and examples. SSH MCP remains bound to its login session.

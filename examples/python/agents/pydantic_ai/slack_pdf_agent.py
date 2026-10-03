@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 import time
 from dataclasses import dataclass
@@ -42,21 +43,21 @@ class Deps:
 
 backend = PydanticAIWorkspace(ws)
 
-agent = Agent(
-    "openai:gpt-5.4-mini",
-    system_prompt=ws.file_prompt,
-    deps_type=Deps,
-    toolsets=[
-        create_console_toolset(
-            require_execute_approval=False,
-            image_support=True,
-            document_support=True,
-        )
-    ],
-)
 
+async def main() -> None:
+    agent = Agent(
+        "openai:gpt-5.4-mini",
+        system_prompt=(await ws.vfs_md()),
+        deps_type=Deps,
+        toolsets=[
+            create_console_toolset(
+                require_execute_approval=False,
+                image_support=True,
+                document_support=True,
+            )
+        ],
+    )
 
-def main() -> None:
     task = (
         "Read and summarize the latest PNG and PDF in the slack "
         "general channel. Open each file with read_file before responding."
@@ -64,7 +65,7 @@ def main() -> None:
     print(f"=== Task: {task} ===")
     print()
     t0 = time.perf_counter()
-    result = agent.run_sync(task, deps=Deps(backend=backend))
+    result = await agent.run(task, deps=Deps(backend=backend))
     elapsed = time.perf_counter() - t0
     print(result.output)
     print()
@@ -82,4 +83,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

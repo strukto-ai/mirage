@@ -43,7 +43,10 @@ import {
 } from './vfs_facts.ts'
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..')
-const SPEC_ROOT = resolve(__dirname, '..', '..', 'spec', 'typescript')
+const SPEC_ROOT = resolve(
+  process.env.MIRAGE_SPEC_DIR ?? resolve(__dirname, '..', '..', '.cache', 'spec'),
+  'typescript',
+)
 const PACKAGES = resolve(__dirname, '..', 'packages')
 
 // Bespoke Google Workspace API passthroughs. They register command names that
@@ -362,6 +365,9 @@ function emitVfsCommands(name: string, registry: Record<string, RegisteredComman
   const outDir = resolve(SPEC_ROOT, name, 'vfs_commands')
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
+  for (const stale of readdirSync(outDir)) {
+    if (stale.endsWith('.json')) rmSync(resolve(outDir, stale))
+  }
   const own = Object.entries(registry)
     .filter(([cmd]) => !(cmd in SPECS))
     .sort(([a], [b]) => compareCodePoints(a, b))
@@ -394,6 +400,9 @@ function emitVariant(
   const registry = collectRegistrations(modules)
   const outDir = resolve(SPEC_ROOT, name, 'general')
   mkdirSync(outDir, { recursive: true })
+  for (const stale of readdirSync(outDir)) {
+    if (stale.endsWith('.json')) rmSync(resolve(outDir, stale))
+  }
   // Entries, not keys: a key read back through `SPECS[cmd]` is
   // `CommandSpec | undefined` under `noUncheckedIndexedAccess`, and the only
   // ways to spend that are a cast or a skip that would emit fewer specs than

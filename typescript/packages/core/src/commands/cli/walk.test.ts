@@ -109,12 +109,10 @@ describe('walk', () => {
     expect(result.leaf).toBeNull()
     expect(result.stream).toBe('stdout')
     expect(result.exitCode).toBe(1)
-    expect(
-      text(result.output).startsWith(
-        'gws: Google Workspace\n\nUsage: gws [flags] <command> [<args>]',
-      ),
-    ).toBe(true)
-    expect(text(result.output)).toContain('Commands:')
+    expect(text(result.output).startsWith('usage: gws [-C CWD] [-v] [-h] {gmail,docs} ...')).toBe(
+      true,
+    )
+    expect(text(result.output)).toContain('commands:')
   })
 
   it('prints the same usage for --help with exit 0', () => {
@@ -130,7 +128,7 @@ describe('walk', () => {
     expect(result.exitCode).toBe(0)
     expect(
       text(result.output).startsWith(
-        'gws gmail: Gmail messages\n\nUsage: gws gmail [flags] <command> [<args>]',
+        'usage: gws gmail [--account {primary,work}] [-h] {send,list} ...',
       ),
     ).toBe(true)
   })
@@ -160,9 +158,7 @@ describe('walk', () => {
     const result = walk('gws', tree(), ['--zzz', 'gmail'])
     expect(result.stream).toBe('stderr')
     expect(result.exitCode).toBe(129)
-    expect(text(result.output).startsWith('unknown option: --zzz\n\ngws: Google Workspace')).toBe(
-      true,
-    )
+    expect(text(result.output).startsWith('unknown option: --zzz\n\nusage: gws')).toBe(true)
   })
 
   it("answers a clap group refusal in clap's words and exit", () => {
@@ -236,7 +232,7 @@ describe('walk', () => {
 
   it('lists the injected help flag in group help', () => {
     const result = walk('gws', tree(), ['--help'])
-    expect(text(result.output)).toContain('\n  --help')
+    expect(text(result.output)).toContain('-h, --help')
     expect(text(result.output)).toContain('Show this help and exit')
   })
 
@@ -443,7 +439,7 @@ describe('a script root', () => {
     // man renders from the spec, so it must not advertise a --help the
     // program answers itself.
     const text = nodeHelp('pager', new CLISpec({ name: 'pager', script: new ScriptSource('1') }))
-    expect(text.startsWith('pager\n')).toBe(true)
+    expect(text.startsWith('usage: pager\n')).toBe(true)
     expect(text).not.toContain('--help')
   })
 })

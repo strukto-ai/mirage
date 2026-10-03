@@ -32,7 +32,7 @@ ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 agent = Agent(
     name="Mirage RAM Agent",
     model="gpt-5.5-mini",
-    instructions=build_system_prompt(
+    instructions=await build_system_prompt(
         mount_info={"/": "In-memory filesystem (read/write)"},
     ),
     tools=[

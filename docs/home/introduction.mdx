@@ -191,7 +191,7 @@ grep -r "mirage" /slack /gmail /github
     agent = SandboxAgent(
         name="Design feedback triage",
         model="gpt-5.5",
-        instructions=ws.file_prompt,
+        instructions=(await ws.vfs_md()),
     )
     config = RunConfig(sandbox=SandboxRunConfig(client=MirageSandboxClient(ws)))
 
@@ -242,7 +242,7 @@ grep -r "mirage" /slack /gmail /github
     const agent = new Agent({
       name: 'Design feedback triage',
       model: 'gpt-5.5',
-      instructions: buildSystemPrompt({ workspace: ws }),
+      instructions: await buildSystemPrompt({ workspace: ws }),
       tools: [shellTool({ shell: new MirageShell(ws) })],
     })
 

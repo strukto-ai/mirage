@@ -17,13 +17,13 @@ import type { ProcessView } from '../../../process/types.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
 import { clapMissingOperands, leafRefusal } from '../../../commands/cli/refusal.ts'
 import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
-import { ownsArgv, walk } from '../../../commands/cli/walk.ts'
+import { nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
+import { verbVisible } from '../../lookup/lookup.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
 import { HELP_OPTION } from '../../../commands/spec/constants.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
-import { UsageStyle } from '../../../commands/spec/types.ts'
-import { renderHelp } from '../../../commands/spec/help.ts'
+import { Option, UsageStyle } from '../../../commands/spec/types.ts'
 import { Operand, type FlagValue } from '../../../commands/spec/types.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -65,12 +65,24 @@ const PASSTHROUGH_REST = new Operand({ type: 'str' })
  * is mirage's to answer. CLISpec init accepts instance fields, so each
  * spread is a plain init bag (the withHelpSupport pattern).
  */
-function parseSpecFor(leaf: CLISpec): [CLISpec, boolean] {
+function parseSpecFor(leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): [CLISpec, boolean] {
   // eslint-disable-next-line @typescript-eslint/no-misused-spread
   if (ownsArgv(leaf)) return [new CLISpec({ ...leaf, rest: PASSTHROUGH_REST }), false]
   if (leaf.options.some((option) => option.long === '--help')) return [leaf, false]
-  // eslint-disable-next-line @typescript-eslint/no-misused-spread
-  return [new CLISpec({ ...leaf, options: [...leaf.options, HELP_OPTION] }), true]
+
+  return [
+    new CLISpec({
+      // eslint-disable-next-line @typescript-eslint/no-misused-spread
+      ...leaf,
+      options: [
+        ...leaf.options,
+        style === UsageStyle.ARGPARSE && !leaf.options.some((o) => o.short === '-h')
+          ? new Option({ long: '--help', short: '-h', description: 'Show this help and exit' })
+          : HELP_OPTION,
+      ],
+    }),
+    true,
+  ]
 }
 
 /**
@@ -232,7 +244,9 @@ export async function handleCli(
   // The walk takes the same environment the leaf parse below does, so
   // a group-level option declaring `Option.env` fills at its own
   // level; without it the fetched credential never enters groupFlags.
-  const result = walk(install.name, install.spec, argv, session.cwd, envSnapshot(session))
+  const result = walk(install.name, install.spec, argv, session.cwd, envSnapshot(session), (path) =>
+    verbVisible(install.name, path, session),
+  )
   if (result.leaf === null) {
     const stderr = result.stream === 'stderr' ? result.output : new Uint8Array(0)
     const stdout = result.stream === 'stdout' ? result.output : null
@@ -244,7 +258,7 @@ export async function handleCli(
   const leaf = result.leaf
   // No injected --version: that is a GNU coreutils convention, not an
   // argparse one.
-  const [parseSpec, mirageHelp] = parseSpecFor(leaf)
+  const [parseSpec, mirageHelp] = parseSpecFor(leaf, install.spec.usageStyle)
 
   // The dialect is the root's, not the leaf's: a program answers in one voice
   // at every level.
@@ -267,7 +281,7 @@ export async function handleCli(
   )
   const { paths, texts, flagKwargs, warnings } = parsed
   if (mirageHelp && flagKwargs.help === true) {
-    const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec, [], style))
+    const helpText = new TextEncoder().encode(nodeHelp(prog, parseSpec, style))
     return [helpText, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
 

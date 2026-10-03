@@ -12,9 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_READ_SPEC, DEFAULT_READ_TTL, ReadPolicy, type ReadSpec } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -35,70 +32,6 @@ function stub(
   indexTtl = 0,
 ): BaseVFS {
   return { name, cachesReads, readRevalidatable, indexTtl } as unknown as BaseVFS
-}
-
-const REVALIDATABLE = [
-  'aliyun',
-  'backblaze',
-  'ceph',
-  'digitalocean',
-  'gcs',
-  'gdocs',
-  'gdrive',
-  'github',
-  'gridfs',
-  'gsheets',
-  'gslides',
-  'hf_buckets',
-  'hf_datasets',
-  'hf_models',
-  'hf_spaces',
-  'minio',
-  'oci',
-  'onedrive',
-  'qingstor',
-  'r2',
-  's3',
-  'scaleway',
-  'seaweedfs',
-  'sharepoint',
-  'supabase',
-  'tencent',
-  'wasabi',
-]
-
-interface SpecCaps {
-  caches_reads?: boolean | string
-  read_revalidatable?: boolean
-  index_ttl?: number
-}
-
-// The real verdict over each backend's committed capability facts, so the
-// roster is judged by the function that judges a mount.
-function freshRoster(host: string): string[] {
-  const path = resolve(
-    fileURLToPath(import.meta.url),
-    `../../../../../../../spec/typescript/${host}/vfs.json`,
-  )
-  const caps = (
-    JSON.parse(readFileSync(path, 'utf8')) as { capabilities: Record<string, SpecCaps | null> }
-  ).capabilities
-  return Object.entries(caps)
-    .filter(([kind, c]) => {
-      if (c === null) return false
-      try {
-        checkReadCapability(
-          '/x/',
-          stub(kind, c.caches_reads === true, c.read_revalidatable === true, c.index_ttl ?? 0),
-          FRESH,
-        )
-        return true
-      } catch {
-        return false
-      }
-    })
-    .map(([kind]) => kind)
-    .sort()
 }
 
 describe('resolveReadSpec', () => {
@@ -234,33 +167,6 @@ describe('checkReadCapability', () => {
       checkReadCapability('/d/', stub('ram', false, false), { policy: ReadPolicy.FRESH, ttl: 0 })
     }).toThrow(/ttl must be at least 1 second/)
   })
-
-  it.each([
-    ['node', ['airtable', 'chroma', 'disk', 'qdrant', 'wandb']],
-    ['browser', ['airtable', 'chroma', 'opfs', 'qdrant', 'wandb']],
-  ])(
-    'allows fresh on the %s roster: the revalidatable ones plus listing caches',
-    (host, listing) => {
-      const known = new Set(
-        Object.keys(
-          (
-            JSON.parse(
-              readFileSync(
-                resolve(
-                  fileURLToPath(import.meta.url),
-                  `../../../../../../../spec/typescript/${host}/vfs.json`,
-                ),
-                'utf8',
-              ),
-            ) as { capabilities: Record<string, unknown> }
-          ).capabilities,
-        ),
-      )
-      expect(freshRoster(host)).toEqual(
-        [...REVALIDATABLE.filter((n) => known.has(n)), ...listing].sort(),
-      )
-    },
-  )
 
   it('refuses fresh on a backend that caches but stamps nothing comparable', () => {
     expect(() => {

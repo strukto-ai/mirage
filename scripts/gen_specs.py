@@ -15,6 +15,7 @@
 import importlib
 import json
 import logging
+import os
 import pkgutil
 import sys
 from collections.abc import Sequence
@@ -34,7 +35,12 @@ from mirage.vfs.registry import REGISTRY, resolve_class
 
 logger = logging.getLogger(__name__)
 
-OUT = Path(__file__).resolve().parent.parent / "spec" / "python" / "general"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = (
+    Path(os.environ.get("MIRAGE_SPEC_DIR", ROOT / ".cache" / "spec"))
+    / "python"
+    / "general"
+)
 VFS_COMMANDS = OUT.parent / "vfs_commands"
 
 BUILTIN = Path(mirage.commands.builtin.__file__).resolve().parent
@@ -430,6 +436,8 @@ def main() -> None:
         )
     registry = _collect_registrations()
     OUT.mkdir(parents=True, exist_ok=True)
+    for stale in OUT.glob("*.json"):
+        stale.unlink()
     for name, spec in sorted(SPECS.items()):
         _emit_one(name, spec, registry.get(name, []))
     print(f"emitted {len(SPECS)} specs to {OUT}")

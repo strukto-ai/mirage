@@ -30,7 +30,7 @@ from mirage.commands.cli.refusal import (
     leaf_refusal,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
-from mirage.commands.cli.walk import owns_argv, walk
+from mirage.commands.cli.walk import node_help, owns_argv, walk
 from mirage.commands.errors import (
     CommandTimeoutError,
     PartialOutputError,
@@ -39,7 +39,6 @@ from mirage.commands.errors import (
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.constants import HELP_OPTION
 from mirage.commands.spec.flag_view import FlagBag
-from mirage.commands.spec.help import render_help
 from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.concurrency.limiter import run_blocking
 from mirage.io import IOResult
@@ -56,6 +55,7 @@ from mirage.types import Limit, PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
+from mirage.workspace.lookup.lookup import verb_visible
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
@@ -91,7 +91,9 @@ async def call_leaf(fn: Callable[..., Any], inv: CLIInvocation[Any]) -> Any:
     return result
 
 
-def parse_spec_for(leaf: CLISpec) -> tuple[CLISpec, bool]:
+def parse_spec_for(
+    leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE
+) -> tuple[CLISpec, bool]:
     """The spec a leaf's argv parses against, and who answers ``--help``.
 
     Usually mirage: a leaf declares its grammar, the parser enforces it,
@@ -114,7 +116,13 @@ def parse_spec_for(leaf: CLISpec) -> tuple[CLISpec, bool]:
         return replace(leaf, rest=PASSTHROUGH_REST), False
     if any(option.long == "--help" for option in leaf.options):
         return leaf, False
-    return replace(leaf, options=leaf.options + (HELP_OPTION,)), True
+    help_option = (
+        replace(HELP_OPTION, short="-h")
+        if style is UsageStyle.ARGPARSE
+        and not any(o.short == "-h" for o in leaf.options)
+        else HELP_OPTION
+    )
+    return replace(leaf, options=leaf.options + (help_option,)), True
 
 
 def _select_runtime(
@@ -331,7 +339,12 @@ async def handle_cli(
     # a group-level option declaring ``Option.env`` fills at its own
     # level; without it the fetched credential never enters group_flags.
     result = walk(
-        install.name, install.spec, argv, session.cwd, env_snapshot(session)
+        install.name,
+        install.spec,
+        argv,
+        session.cwd,
+        env_snapshot(session),
+        visible=lambda path: verb_visible(install.name, path, session),
     )
     if result.leaf is None:
         stderr = result.output if result.stream == "stderr" else b""
@@ -350,7 +363,7 @@ async def handle_cli(
     # argparse add_help, minus the two nodes that answer for themselves
     # (parse_spec_for). No injected --version: that is a GNU coreutils
     # convention, not an argparse one.
-    parse_spec, mirage_help = parse_spec_for(leaf)
+    parse_spec, mirage_help = parse_spec_for(leaf, install.spec.usage_style)
 
     # The dialect is the root's, not the leaf's: a program answers in
     # one voice at every level.
@@ -376,7 +389,7 @@ async def handle_cli(
         abbreviations=abbreviations,
     )
     if mirage_help and parsed.flag_kwargs.get("help") is True:
-        help_text = render_help(prog, parse_spec, style=style).encode()
+        help_text = node_help(prog, parse_spec, style=style).encode()
         return (
             help_text,
             IOResult(),

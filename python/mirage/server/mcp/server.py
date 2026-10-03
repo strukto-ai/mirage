@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import jsonschema
@@ -41,6 +42,8 @@ from mirage.agents.tool_descriptions import (
     LS_INPUT,
     READ_DESCRIPTION,
     READ_INPUT,
+    SESSION_DESCRIPTION,
+    SESSION_INPUT,
     SHELL_DESCRIPTION,
     SHELL_INPUT,
     WRITE_DESCRIPTION,
@@ -57,6 +60,11 @@ logger = logging.getLogger(__name__)
 READ_ONLY = ToolAnnotations(read_only_hint=True)
 
 TOOLS = [
+    Tool(
+        name="session",
+        description=SESSION_DESCRIPTION,
+        input_schema=SESSION_INPUT,
+    ),
     Tool(
         name="shell",
         description=SHELL_DESCRIPTION,
@@ -99,6 +107,23 @@ TOOLS = [
 ]
 
 
+for _tool in TOOLS:
+    if _tool.name != "session":
+        _tool.input_schema = {
+            **_tool.input_schema,
+            "properties": {
+                **_tool.input_schema["properties"],
+                "session_id": {
+                    "type": "string",
+                    "description": (
+                        "Session to use for this call; "
+                        "omit for the connection default."
+                    ),
+                },
+            },
+        }
+
+
 def _to_mcp(result: ToolResult) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=result.text)],
@@ -134,7 +159,14 @@ class MirageMcpServer:
         version: str = __version__,
         session_id: str | None = None,
         operations: MirageToolOperations | None = None,
+        operations_for: Callable[[str], Awaitable[MirageToolOperations]]
+        | None = None,
     ) -> None:
+        self._workspace = workspace
+        self._bound_session_id = session_id
+        self._stale_write_protection = stale_write_protection
+        self._operations_for = operations_for
+        self._sessions: dict[str, tuple[float, MirageToolOperations]] = {}
         self._ops = (
             operations
             if operations is not None
@@ -207,7 +239,33 @@ class MirageMcpServer:
                 )
             )
         try:
-            return _to_mcp(await self._ops.call(params.name, arguments))
+            operations = self._ops
+            if params.name != "session" and "session_id" in arguments:
+                sid = arguments["session_id"]
+                if self._operations_for is not None:
+                    operations = await self._operations_for(sid)
+                elif sid != (
+                    self._bound_session_id
+                    or self._workspace.default_session_id
+                ):
+                    await self._workspace.ensure_sessions_loaded()
+                    session = self._workspace.get_session(sid)
+                    cached = self._sessions.get(sid)
+                    if cached is None or cached[0] != session.created_at:
+                        cached = (
+                            session.created_at,
+                            MirageToolOperations(
+                                self._workspace,
+                                self._stale_write_protection,
+                                sid,
+                            ),
+                        )
+                        self._sessions[sid] = cached
+                    operations = cached[1]
+                arguments = {
+                    k: v for k, v in arguments.items() if k != "session_id"
+                }
+            return _to_mcp(await operations.call(params.name, arguments))
         except Exception as exc:
             logger.debug("mcp tool %s failed", params.name, exc_info=True)
             return _to_mcp(ToolResult(str(exc), True))

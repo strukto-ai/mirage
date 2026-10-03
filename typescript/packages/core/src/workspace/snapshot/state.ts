@@ -85,7 +85,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   const skip = new Set(['/dev/', normMountPrefix(HISTORY_PREFIX), normMountPrefix(BIN_PREFIX)])
   const mounted = [...ws.registry.allMounts()]
   for (const mount of mounted) await mount.ensureReady()
-  const mounts = mounted.filter((m) => !skip.has(m.prefix))
+  const mounts = mounted.filter((m) => !skip.has(m.prefix) && m.vfs.name !== 'document')
   const mountSnapshots: MountSnapshot[] = []
   for (let i = 0; i < mounts.length; i++) {
     const m = mounts[i]

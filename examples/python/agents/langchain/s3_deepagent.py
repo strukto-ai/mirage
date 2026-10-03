@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 from deepagents import create_deep_agent
@@ -38,35 +39,46 @@ config = S3Config(
 s3 = S3VFS(config)
 ws = Workspace({"/s3/": s3}, mode=MountMode.READ)
 
-agent = create_deep_agent(
-    model=ChatAnthropic(model="claude-sonnet-4-6"),
-    system_prompt=build_system_prompt(
-        mount_info={"/s3/": "S3 bucket (CSV, Parquet, ORC, HDF5, JSONL)"},
-    ),
-    backend=LangchainWorkspace(ws),
-)
 
-task = (
-    "Explore and summarize the data in /s3/data/."
-    " Use head command for large files."
-)
-result = agent.invoke({"messages": [{"role": "user", "content": task}]})
+async def main():
+    agent = create_deep_agent(
+        model=ChatAnthropic(model="claude-sonnet-4-6"),
+        system_prompt=await build_system_prompt(
+            mount_info={"/s3/": "S3 bucket (CSV, Parquet, ORC, HDF5, JSONL)"},
+        ),
+        backend=LangchainWorkspace(ws),
+    )
 
-for text in extract_text(result["messages"][-1:]):
-    print(text)
+    task = (
+        "Explore and summarize the data in /s3/data/."
+        " Use head command for large files."
+    )
+    result = await agent.ainvoke(
+        {"messages": [{"role": "user", "content": task}]}
+    )
 
-task2 = "How many rows are in the parquet, orc, and h5 files under /s3/data/? "
-result2 = agent.invoke({"messages": [{"role": "user", "content": task2}]})
+    for text in extract_text(result["messages"][-1:]):
+        print(text)
 
-for text in extract_text(result2["messages"][-1:]):
-    print(text)
+    task2 = (
+        "How many rows are in the parquet, orc, and h5 files under /s3/data/? "
+    )
+    result2 = await agent.ainvoke(
+        {"messages": [{"role": "user", "content": task2}]}
+    )
 
-records = ws.vfs.records
-if records:
-    total = sum(r.bytes for r in records)
-    print(f"\n--- {len(records)} ops, {total:,} bytes ---")
-    for r in records:
-        print(
-            f"  {r.op:<8} {r.source:<8} {r.bytes:>10,} B "
-            f"{r.duration_ms:>5} ms  {r.path}"
-        )
+    for text in extract_text(result2["messages"][-1:]):
+        print(text)
+
+    records = ws.vfs.records
+    if records:
+        total = sum(r.bytes for r in records)
+        print(f"\n--- {len(records)} ops, {total:,} bytes ---")
+        for r in records:
+            print(
+                f"  {r.op:<8} {r.source:<8} {r.bytes:>10,} B "
+                f"{r.duration_ms:>5} ms  {r.path}"
+            )
+
+
+asyncio.run(main())

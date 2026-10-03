@@ -42,10 +42,6 @@ export function mirageExtension(ws: Workspace, opts: MirageExtensionOptions = {}
   const cwd = opts.cwd ?? '/'
   const ops = mirageOperations(ws, opts)
   const userBash = bashAtCwd(ops.bash, cwd)
-  const systemPrompt =
-    opts.systemPrompt === false
-      ? undefined
-      : (opts.systemPrompt ?? buildSystemPrompt({ workspace: ws }))
   return {
     name: 'mirage',
     factory: (pi) => {
@@ -57,9 +53,10 @@ export function mirageExtension(ws: Workspace, opts: MirageExtensionOptions = {}
       pi.registerTool(createFindToolDefinition(cwd, { operations: ops.find }))
       pi.registerTool(createLsToolDefinition(cwd, { operations: ops.ls }))
       pi.on('user_bash', () => ({ operations: userBash }))
-      if (systemPrompt !== undefined) {
-        pi.on('before_agent_start', (event) => ({
-          systemPrompt: `${event.systemPrompt}\n\n${systemPrompt}`,
+      const systemPrompt = opts.systemPrompt
+      if (systemPrompt !== false) {
+        pi.on('before_agent_start', async (event) => ({
+          systemPrompt: `${event.systemPrompt}\n\n${systemPrompt ?? (await buildSystemPrompt({ workspace: ws, sessionId: opts.sessionId }))}`,
         }))
       }
     },

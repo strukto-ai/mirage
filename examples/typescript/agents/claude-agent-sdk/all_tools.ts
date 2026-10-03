@@ -54,7 +54,7 @@ const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 
-const options = buildOptions(ws)
+const options = await buildOptions(ws)
 options.model = 'claude-sonnet-4-6'
 options.permissionMode = 'bypassPermissions'
 options.allowDangerouslySkipPermissions = true

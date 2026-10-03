@@ -1,0 +1,36 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from collections.abc import Callable
+
+from mirage.accessor.document import DocumentAccessor
+from mirage.commands.builtin.document.io import IO
+from mirage.vfs.base import BaseVFS
+
+
+class DocumentVFS(BaseVFS):
+    """A live Markdown file; no backend storage or content cache."""
+
+    def __init__(
+        self, name: str, render: Callable[[], str], kind: str
+    ) -> None:
+        super().__init__(
+            name="document",
+            accessor=DocumentAccessor(name, render),
+            io=IO,
+            sizes_always_known=True,
+        )
+        self.kind = kind
+        self.global_view = False
+        self.sessions: set[tuple[str, float]] = set()

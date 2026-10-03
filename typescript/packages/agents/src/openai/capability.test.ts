@@ -33,10 +33,11 @@ function mkWs(): Workspace {
 describe('MirageCapability', () => {
   it('lists each mount with its mode', async () => {
     const session = await new MirageSandboxClient(mkWs()).create()
-    const text = new MirageCapability().bind(session).instructions(new Manifest({ root: '/' }))
+    const text = await new MirageCapability()
+      .bind(session)
+      .instructions(new Manifest({ root: '/' }))
     expect(text.startsWith(MOUNTS_INTRO)).toBe(true)
-    const data = text.slice(text.indexOf('/data')).split('\n\n')[0] ?? ''
-    expect(data).toContain('Mode: read-only')
+    expect(text).toContain('## `/data`\n\nBackend: `ram`. Access: read-only.')
   })
 
   it('refuses a session from another backend', () => {

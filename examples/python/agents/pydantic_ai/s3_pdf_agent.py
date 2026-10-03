@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 from dataclasses import dataclass
 
@@ -43,28 +44,33 @@ class Deps:
 
 backend = PydanticAIWorkspace(ws)
 
-agent = Agent(
-    "anthropic:claude-sonnet-4-6",
-    system_prompt=build_system_prompt(
-        mount_info={"/s3/": "S3 bucket with PDF documents"}
-    ),
-    deps_type=Deps,
-    toolsets=[create_console_toolset(document_support=True)],
-)
 
-task = (
-    "Read the PDF at /s3/data/example.pdf."
-    " Summarize the first 5 pages of the paper."
-)
-result = agent.run_sync(task, deps=Deps(backend=backend))
-print(result.output)
+async def main():
+    agent = Agent(
+        "anthropic:claude-sonnet-4-6",
+        system_prompt=await build_system_prompt(
+            mount_info={"/s3/": "S3 bucket with PDF documents"}
+        ),
+        deps_type=Deps,
+        toolsets=[create_console_toolset(document_support=True)],
+    )
 
-records = ws.vfs.records
-if records:
-    total = sum(r.bytes for r in records)
-    print(f"\n--- {len(records)} ops, {total:,} bytes ---")
-    for r in records:
-        print(
-            f"  {r.op:<8} {r.source:<8} {r.bytes:>10,} B "
-            f"{r.duration_ms:>5} ms  {r.path}"
-        )
+    task = (
+        "Read the PDF at /s3/data/example.pdf."
+        " Summarize the first 5 pages of the paper."
+    )
+    result = await agent.run(task, deps=Deps(backend=backend))
+    print(result.output)
+
+    records = ws.vfs.records
+    if records:
+        total = sum(r.bytes for r in records)
+        print(f"\n--- {len(records)} ops, {total:,} bytes ---")
+        for r in records:
+            print(
+                f"  {r.op:<8} {r.source:<8} {r.bytes:>10,} B "
+                f"{r.duration_ms:>5} ms  {r.path}"
+            )
+
+
+asyncio.run(main())

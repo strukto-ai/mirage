@@ -30,36 +30,36 @@ load_dotenv(".env.development")
 ram = RAMVFS()
 ws = Workspace({"/": ram}, mode=MountMode.WRITE)
 
-system_prompt = build_system_prompt(
-    mount_info={"/": "In-memory filesystem (read/write)"},
-    extra_instructions=(
-        "All file paths start from /. "
-        "For example: /hello.txt, /data/numbers.csv. "
-        "Use the shell tool to run commands like: "
-        "echo 'content' > /hello.txt, mkdir /data, "
-        "cat /hello.txt, ls /."
-    ),
-)
-
-agent = Agent(
-    name="Mirage RAM Agent",
-    model="gpt-5.5-mini",
-    instructions=system_prompt,
-    tools=[
-        ShellTool(executor=MirageShellExecutor(ws)),
-        ApplyPatchTool(editor=MirageEditor(ws)),
-    ],
-)
-
-task = (
-    "Create a file /hello.txt with the content 'Hello from Mirage!'. "
-    "Then create a directory /data and write a CSV file /data/numbers.csv "
-    "with columns: name, value. Add 3 rows of sample data. "
-    "Finally, list all files and cat the CSV."
-)
-
 
 async def main():
+    system_prompt = await build_system_prompt(
+        mount_info={"/": "In-memory filesystem (read/write)"},
+        extra_instructions=(
+            "All file paths start from /. "
+            "For example: /hello.txt, /data/numbers.csv. "
+            "Use the shell tool to run commands like: "
+            "echo 'content' > /hello.txt, mkdir /data, "
+            "cat /hello.txt, ls /."
+        ),
+    )
+
+    agent = Agent(
+        name="Mirage RAM Agent",
+        model="gpt-5.5-mini",
+        instructions=system_prompt,
+        tools=[
+            ShellTool(executor=MirageShellExecutor(ws)),
+            ApplyPatchTool(editor=MirageEditor(ws)),
+        ],
+    )
+
+    task = (
+        "Create a file /hello.txt with the content 'Hello from Mirage!'. "
+        "Then create a directory /data and write a CSV file /data/numbers.csv "
+        "with columns: name, value. Add 3 rows of sample data. "
+        "Finally, list all files and cat the CSV."
+    )
+
     result = await Runner.run(agent, task)
     print(result.final_output)
 

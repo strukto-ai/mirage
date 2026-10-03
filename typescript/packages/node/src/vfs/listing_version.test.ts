@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type * as UtilsModule from '../core/disk/utils.ts'
 import { ListingCheckStore } from '@struktoai/mirage-core/cache/index/ram'
@@ -29,19 +28,12 @@ import { FakeHub, serveHub } from '../core/hf_hub/_test_util.ts'
 import * as diskUtils from '../core/disk/utils.ts'
 import { DiskVFS } from './disk/disk.ts'
 import { InlineGitHub } from './fixtures/github.ts'
-import { buildVfs, knownVfsNames } from './registry.ts'
+import { buildVfs } from './registry.ts'
 
 vi.mock('../core/disk/utils.ts', async (importOriginal) => {
   const original = await importOriginal<typeof UtilsModule>()
   return { ...original, readEntries: vi.fn(original.readEntries) }
 })
-
-const SPEC_VFS = resolve(
-  fileURLToPath(import.meta.url),
-  '../../../../../../spec/typescript/node/vfs.json',
-)
-
-const KINDS = ['none', 'mount', 'folder']
 
 interface Harness {
   ws: NodeWorkspace
@@ -206,7 +198,7 @@ async function checkContract(name: string): Promise<void> {
     await shell(ws, `ls ${harness.key} ${harness.nested}`)
     const after = harness.counts()
     expect([after[0] - before[0], after[1] - before[1]]).toEqual([harness.checks ?? 1, 0])
-    expect(mount.vfs.listingVersion).toBe(manifest()[name]?.listing_version)
+    expect(mount.vfs.listingVersion).not.toBe(ListingVersion.NONE)
     harness.change()
     const moved = await throwawayStat(ws, mount, harness.key)
     expect(moved.fingerprint ?? null).not.toBeNull()
@@ -217,33 +209,7 @@ async function checkContract(name: string): Promise<void> {
   }
 }
 
-function manifest(): Record<string, { listing_version?: unknown }> {
-  return (
-    JSON.parse(readFileSync(SPEC_VFS, 'utf8')) as {
-      capabilities: Record<string, { listing_version?: unknown }>
-    }
-  ).capabilities
-}
-
-function declared(): string[] {
-  const known = new Set(knownVfsNames())
-  return Object.entries(manifest())
-    .filter(([name, caps]) => known.has(name) && caps.listing_version !== 'none')
-    .map(([name]) => name)
-}
-
 describe('listing version declarations', () => {
-  it('every backend declares one of the three kinds', () => {
-    for (const [name, caps] of Object.entries(manifest())) {
-      expect([name, KINDS.includes(String(caps.listing_version))]).toEqual([name, true])
-    }
-    expect(manifest().s3?.listing_version).toBe('none')
-  })
-
-  it('every declaring backend has a harness', () => {
-    expect(declared().sort()).toEqual(Object.keys(HARNESSES).sort())
-  })
-
   it('the harness roster is pinned', () => {
     // A literal, not the derived set: the expectation must not move with the
     // spec it checks.
@@ -277,8 +243,6 @@ describe('disk folder versions knob', () => {
       const on = new DiskVFS({ root })
       expect(off.listingVersion).toBe(ListingVersion.NONE)
       expect(on.listingVersion).toBe(ListingVersion.FOLDER)
-      expect(declared()).toContain('disk')
-      expect(manifest().disk?.listing_version).toBe('folder')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

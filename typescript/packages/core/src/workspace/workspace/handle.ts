@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../types.ts'
 import type { Ops } from '../../ops/ops.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecuteOptions, ExecuteResult } from './types.ts'
@@ -57,5 +58,14 @@ export class Session {
   /** The paths a pattern matches as this session; `Workspace.glob` with the session fixed. */
   glob(pattern: string): Promise<string[]> {
     return this.ws.glob(pattern, this.sessionId)
+  }
+  /** Render this session's VFS Markdown, optionally at a virtual path. */
+  vfsMd(path?: string | PathSpec): Promise<string> {
+    return this.ws.vfsMd(path, { sessionId: this.sessionId })
+  }
+
+  /** Render this session's CLI skill, optionally at a virtual path. */
+  skillMd(path?: string | PathSpec): Promise<string> {
+    return this.ws.skillMd(path, { sessionId: this.sessionId })
   }
 }

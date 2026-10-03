@@ -38,7 +38,7 @@ TS_PACKAGES = {
     "agents": "agents",
 }
 
-EXCEPTIONS = ROOT / "spec" / "layout_exceptions.json"
+EXCEPTIONS = ROOT / "scripts" / "parity" / "layout_exceptions.json"
 
 TS_IMPORT = re.compile(
     r"""(?:\bfrom\s*|\bimport\s*\(?\s*|\bmock\(\s*)['"]([^'"]+)['"]"""

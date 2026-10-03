@@ -60,7 +60,7 @@ EXPECTED = {
 
 async def main() -> None:
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    options = build_options(ws)
+    options = await build_options(ws)
     options.model = "claude-sonnet-4-6"
     options.permission_mode = "bypassPermissions"
 

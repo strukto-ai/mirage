@@ -38,6 +38,7 @@ async def test_lists_the_tools(server):
         "grep",
         "ls",
         "read",
+        "session",
         "shell",
         "write",
     ]
@@ -195,3 +196,24 @@ async def test_stale_write_protection_reaches_the_tools(workspace):
         {"path": "/a.txt", "old_string": "hello", "new_string": "goodbye"},
     )
     assert result.is_error is False
+
+
+@pytest.mark.asyncio
+async def test_explicit_default_session_shares_the_read_ledger(
+    workspace, server
+):
+    await workspace.vfs.write("/doc.txt", b"first")
+    await call_tool(server, "read", {"path": "/doc.txt"})
+    await workspace.vfs.write("/doc.txt", b"external")
+    result = await call_tool(
+        server,
+        "edit",
+        {
+            "path": "/doc.txt",
+            "old_string": "external",
+            "new_string": "changed",
+            "session_id": workspace.default_session_id,
+        },
+    )
+    assert result.is_error
+    assert "changed since it was last read" in result.content[0].text

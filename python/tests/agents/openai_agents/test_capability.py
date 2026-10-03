@@ -79,8 +79,7 @@ def test_instructions_list_each_mount_with_its_mode():
         text = await capability.instructions(Manifest(root="/"))
         assert text is not None
         assert text.startswith(MOUNTS_INTRO)
-        data = text[text.index("/data") :]
-        assert "Mode: read-only" in data.split("\n\n")[0]
+        assert "## `/data`\n\nBackend: `ram`. Access: read-only." in text
 
     asyncio.run(_run())
 

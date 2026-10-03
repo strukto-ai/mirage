@@ -43,7 +43,7 @@ const openAI = configureOpenAIExample(ws, 'gpt-5.5-mini')
 const agent = new Agent({
   name: 'Snapshot Demo',
   model: openAI.model,
-  instructions: buildSystemPrompt({
+  instructions: await buildSystemPrompt({
     workspace: ws,
     extraInstructions:
       'Write a 3-line note about Mirage to /report.txt using the shell or execute tool.',

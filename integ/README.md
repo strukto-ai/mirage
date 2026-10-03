@@ -123,6 +123,7 @@ set more:
 | the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds | observability           |
 | `integ/runners/`, `integ/targets.json`                                                                       | database, observability |
 | the FUSE modules and the workspace's FUSE wiring in either language; `integ/fuse/`, `integ/check_json.py`    | fuse                    |
+| generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language       | fuse                    |
 | `data/`                                                                                                      | core only               |
 | `test_integ.yml`                                                                                             | every filter            |
 
@@ -193,3 +194,5 @@ The core facet also needs redis and mongo on their default ports (CI uses a
 it) and `MIRAGE_QUICKJS_HOME` pointing at the quickjs-ng WASI build for the
 scripted target. If a pinned port is taken locally, copy `ci/fakes.json` and
 move that one entry.
+
+Generated-document cases live in `session/documents.json`. The shared runner applies `session_profiles` (create or update) and `documents` (kind, exact path, optional session) before the shell command. The cases run on RAM, disk, S3, S3 with a prefix, Redis, and registered Git and Airtable CLIs. `doors.py` checks the HTTP and host CLI getters/bindings, per-call MCP session selection over HTTP and stdio, live profile changes, and SSH confinement. FUSE core and kernel probes hold an open document handle across profile changes, check rendered sizes and read-only behavior, and read session-scoped skills.

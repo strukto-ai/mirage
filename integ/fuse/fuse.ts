@@ -233,6 +233,8 @@ async function runSessionProbe(
   const capped = await ws.shell('echo x > /data/pub.txt', { sessionId: 'agent' })
   result.session_shell_write_refused = capped.exitCode !== 0
   result.session_host_reads_hidden = (await ws.vfs.cat('/data/vault/secret.txt')).trim()
+  await ws.vfsMd('/VFS.md')
+  await ws.skillMd('/SKILL.md', { sessionId: 'agent' })
   const handle = await fuseMount(ws, { session })
   const data = join(handle.mountpoint, 'data')
   try {
@@ -252,6 +254,31 @@ async function runSessionProbe(
     }
     result.session_kernel_write_refused =
       refused && (await readFile(`${data}/pub.txt`, 'utf8')) === 'pub\n'
+    const documentPath = join(handle.mountpoint, 'VFS.md')
+    const expected = await ws.vfsMd(undefined, { sessionId: 'agent' })
+    const document = await open(documentPath, 'r')
+    try {
+      const body = await document.read(Buffer.alloc(65536), 0, 65536, 0)
+      result.document_kernel_profile =
+        dec.decode(body.buffer.subarray(0, body.bytesRead)) === expected
+      result.document_kernel_size = (await stat(documentPath)).size === body.bytesRead
+      await ws.setSessionProfile('agent', parseSessionProfile({ paths: { hide: ['/data'] } }))
+      const updated = await document.read(Buffer.alloc(65536), 0, 65536, 0)
+      result.document_kernel_live_handle = !dec
+        .decode(updated.buffer.subarray(0, updated.bytesRead))
+        .includes('/data')
+    } finally {
+      await document.close()
+    }
+    result.document_kernel_skill = (
+      await readFile(join(handle.mountpoint, 'SKILL.md'), 'utf8')
+    ).startsWith('---\nname: mirage\n')
+    try {
+      await writeFile(documentPath, 'changed')
+      result.document_kernel_readonly = false
+    } catch {
+      result.document_kernel_readonly = true
+    }
   } finally {
     await handle.unmount()
     await ws.close()

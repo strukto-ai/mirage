@@ -61,7 +61,16 @@ async def test_serves_the_tools(tmp_path):
                 "write", {"path": "/a.txt", "content": "hi\n"}
             )
             read = await client.call_tool("read", {"path": "/a.txt"})
-    assert tools == ["edit", "glob", "grep", "ls", "read", "shell", "write"]
+    assert tools == [
+        "edit",
+        "glob",
+        "grep",
+        "ls",
+        "read",
+        "session",
+        "shell",
+        "write",
+    ]
     assert written.is_error is False
     assert read.content[0].text == "     1\thi\n"
 
@@ -159,7 +168,7 @@ async def test_the_endpoint_sits_behind_auth(tmp_path, monkeypatch):
             async with Client(transport) as client:
                 tools = (await client.list_tools()).tools
     assert refused.status_code == 401
-    assert len(tools) == 7
+    assert len(tools) == 8
 
 
 @pytest.mark.asyncio

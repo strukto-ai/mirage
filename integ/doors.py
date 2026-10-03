@@ -75,7 +75,7 @@ GUARDED = {
 HIDDEN = "/vault/key.txt"
 HIDDEN_READ = f"Error: file '{HIDDEN}' not found"
 HIDDEN_CAT = f"cat: {HIDDEN}: No such file or directory\n"
-TOOLS = "edit glob grep ls read shell write"
+TOOLS = "edit glob grep ls read session shell write"
 EXPECTED = {
     "mcp_http.tools": TOOLS,
     "mcp_http.reads_http": "from-http\n",
@@ -83,7 +83,7 @@ EXPECTED = {
     "mcp_stdio.reads_mcp_http": "from-mcp-http\n",
     "cli.reads_mcp_stdio": "from-mcp-stdio\n",
     "ssh.reads_cli": "from-cli\n",
-    "ssh_mcp.tools": TOOLS,
+    "ssh_mcp.tools": "edit glob grep ls read shell write",
     "ssh_mcp.reads_ssh": "from-ssh\n",
     "sftp.reads_ssh_mcp": "from-ssh-mcp\n",
     "http.reads_sftp": "from-sftp\n",
@@ -432,7 +432,178 @@ async def sessions(
     async with Client(stdio(subsystem, env)) as client:
         result = await client.call_tool("read", read)
         got["session.ssh_key_mcp_read"] = result.content[0].text
+    await documents(host, env, api, workspace, keyed, login)
     return got
+
+
+async def documents(
+    host: str,
+    env: dict[str, str],
+    api: httpx.Client,
+    workspace: str,
+    keyed: dict[str, str],
+    login: str,
+) -> None:
+    """Generated files and live profile changes through the actual transports.
+
+    Args:
+        host (str): Python or TypeScript daemon under test.
+        env (dict[str, str]): CLI and MCP process environment.
+        api (httpx.Client): Authenticated HTTP client.
+        workspace (str): Workspace API path.
+        keyed (dict[str, str]): SSH environment with a restricted key.
+        login (str): SSH workspace login.
+    """
+    wid = workspace.rsplit("/", 1)[-1]
+    param = "session_id" if host == "python" else "sessionId"
+
+    async def read(path: str, session: str | None = None) -> str:
+        reply = api.post(
+            f"{workspace}/shell",
+            json={
+                "command": f"cat {path}",
+                **({param: session} if session else {}),
+            },
+        )
+        reply.raise_for_status()
+        return reply.json()["stdout"]
+
+    assert await read("/VFS.md") == ""
+    full = api.get(f"{workspace}/vfs-md")
+    full.raise_for_status()
+    assert full.headers["content-type"].startswith("text/markdown")
+    assert "/vault" in full.text
+    preview = api.get(f"{workspace}/vfs-md", params={"profile": "guarded"})
+    preview.raise_for_status()
+    assert "/vault" not in preview.text
+    exposed = api.put(
+        f"{workspace}/sessions/agent/vfs-md", json={"path": "/VFS.md"}
+    )
+    exposed.raise_for_status()
+    assert await read("/VFS.md", "agent") == preview.text
+    assert await read("/VFS.md") == ""
+    api.put(f"{workspace}/vfs-md", json={"path": "/VFS.md"}).raise_for_status()
+    assert await read("/VFS.md") == full.text
+    assert await read("/VFS.md", "agent") == preview.text
+    assert (
+        api.put(f"{workspace}/skill-md", json={"path": "/VFS.md"}).status_code
+        == 409
+    )
+    assert (
+        api.put(
+            f"{workspace}/skill-md", json={"path": "/skills/mirage/SKILL.md"}
+        ).status_code
+        == 404
+    )
+    assert api.get(f"{workspace}/sessions/missing/vfs-md").status_code == 404
+    assert (
+        api.put(f"{workspace}/vfs-md", json={"path": "relative"}).status_code
+        == 422
+    )
+    _, out, _ = await run_raw(
+        mirage_cli(host, "workspace", "vfs-md", wid, "--session", "agent"), env
+    )
+    assert out == preview.text
+    await run(
+        mirage_cli(host, "workspace", "skill-md", wid, "--path", "/SKILL.md"),
+        env=env,
+    )
+    assert (await read("/SKILL.md")).startswith("---\nname: mirage\n")
+    assert (
+        api.put(f"{workspace}/vfs-md", json={"path": HIDDEN}).status_code
+        == 409
+    )
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    url = f"{env['MIRAGE_DAEMON_URL']}{workspace}/mcp"
+    async with (
+        httpx2.AsyncClient(headers=auth) as http,
+        Client(streamable_http_client(url, http_client=http)) as client,
+    ):
+        created = await client.call_tool(
+            "session",
+            {
+                "action": "create",
+                "session_id": "dynamic",
+                "profile": "guarded",
+            },
+        )
+        assert not created.is_error
+        selected = await client.call_tool(
+            "shell", {"command": "cat /VFS.md", "session_id": "dynamic"}
+        )
+        assert selected.content[0].text == preview.text
+        unrestricted = await client.call_tool(
+            "shell", {"command": "cat /VFS.md"}
+        )
+        assert unrestricted.content[0].text == full.text
+        api.patch(
+            f"{workspace}/sessions/dynamic", json={"profile": None}
+        ).raise_for_status()
+        opened = await client.call_tool(
+            "shell", {"command": "cat /VFS.md", "session_id": "dynamic"}
+        )
+        assert opened.content[0].text == full.text
+        updated = await client.call_tool(
+            "session",
+            {
+                "action": "update",
+                "session_id": "dynamic",
+                "profile": "guarded",
+            },
+        )
+        assert not updated.is_error
+        assert await read("/VFS.md", "dynamic") == preview.text
+        # Stale-write tracking follows the selected session across requests.
+        await client.call_tool(
+            "read", {"path": "/SKILL.md", "session_id": "dynamic"}
+        )
+        listed = await client.call_tool("session", {"action": "list"})
+        assert any(
+            row["session_id"] == "dynamic"
+            for row in json.loads(listed.content[0].text)
+        )
+        closed = await client.call_tool(
+            "session", {"action": "close", "session_id": "dynamic"}
+        )
+        assert not closed.is_error
+        missing = await client.call_tool(
+            "read", {"path": "/VFS.md", "session_id": "dynamic"}
+        )
+        assert missing.is_error
+    # The stdio relay forwards per-call selectors without a restart.
+    relay = mirage_cli(host, "mcp", "-w", wid)
+    async with Client(stdio(relay, env)) as client:
+        selected = await client.call_tool(
+            "shell", {"command": "cat /VFS.md", "session_id": "agent"}
+        )
+        assert selected.content[0].text == preview.text
+    await run(
+        mirage_cli(
+            host, "session", "update", wid, "agent", "--default-profile"
+        ),
+        env=env,
+    )
+    reset = api.get(f"{workspace}/sessions/agent/vfs-md")
+    assert "/vault" in reset.text
+    await run(
+        mirage_cli(
+            host, "session", "update", wid, "agent", "--profile", "guarded"
+        ),
+        env=env,
+    )
+    _, out, _ = await run_raw(ssh_command(keyed, "-T", login, "cat /VFS.md"))
+    assert out == preview.text
+    async with Client(
+        stdio(ssh_command(keyed, "-T", login, "-s", "mcp"), env)
+    ) as client:
+        names = await tool_names(client)
+        assert "session" not in names.split()
+        result = await client.call_tool("read", {"path": "/VFS.md"})
+        assert "/vault" not in result.content[0].text
+        refused = await client.call_tool(
+            "read", {"path": HIDDEN, "session_id": "agent"}
+        )
+        assert refused.is_error
 
 
 async def corpus(

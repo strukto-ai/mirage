@@ -236,4 +236,31 @@ __all__ = [
     "LS_INPUT",
     "GREP_INPUT",
     "GLOB_INPUT",
+    "SESSION_INPUT",
+    "SESSION_DESCRIPTION",
 ]
+
+
+SESSION_DESCRIPTION = (
+    "Create, inspect, update, or close workspace sessions and their profiles."
+)
+SESSION_INPUT = {
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": ["create", "list", "update", "close"],
+            "description": "Session lifecycle operation.",
+        },
+        "session_id": {
+            "type": "string",
+            "description": "Session id; required except for list.",
+        },
+        "profile": {
+            "type": ["string", "null"],
+            "description": "Named profile; null selects the workspace default.",
+        },
+    },
+    "required": ["action"],
+    "additionalProperties": False,
+}

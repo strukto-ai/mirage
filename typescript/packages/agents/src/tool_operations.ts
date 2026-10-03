@@ -267,6 +267,36 @@ export class MirageToolOperations {
    * them. Throws for a name no tool has. Mirrors Python's `call`.
    */
   async call(name: string, args: Readonly<Record<string, unknown>>): Promise<ToolResult> {
+    if (name === 'session') {
+      await this.ws.ensureSessionsLoaded()
+      const action = args.action
+      const row = (session: { sessionId: string; profile: string | null; cwd: string }) => ({
+        session_id: session.sessionId,
+        profile: session.profile,
+        cwd: session.cwd,
+      })
+      if (action === 'list') return textResult(JSON.stringify(this.ws.listSessions().map(row)))
+      const sid = args.session_id
+      if (typeof sid !== 'string' || sid.length === 0) throw new Error('session_id is required')
+      const profile = typeof args.profile === 'string' ? args.profile : undefined
+      if (action === 'create') {
+        const session = this.ws.createSession(sid, profile === undefined ? {} : { profile })
+        await this.ws.flushSessions()
+        return textResult(JSON.stringify(row(session)))
+      }
+      if (action === 'update') {
+        if (!('profile' in args)) throw new Error('profile is required for update')
+        return textResult(
+          JSON.stringify(row(await this.ws.setSessionProfile(sid, profile ?? null))),
+        )
+      }
+      if (action === 'close') {
+        this.ws.getSession(sid)
+        await this.ws.closeSession(sid)
+        return textResult(JSON.stringify({ session_id: sid }))
+      }
+      throw new Error('unknown session action')
+    }
     switch (name) {
       case 'shell':
         return this.shell(args.command as string)

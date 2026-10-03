@@ -70,6 +70,7 @@
             "group": "Learn",
             "pages": [
               "home/architecture",
+              "home/workspace",
               "home/bash",
               "home/vfs-matrix",
               "home/cache",

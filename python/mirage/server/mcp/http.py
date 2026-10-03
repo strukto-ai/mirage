@@ -14,6 +14,7 @@
 
 import asyncio
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 from fastapi import FastAPI
@@ -254,7 +255,11 @@ class McpDoor:
                 entry,
                 session,
                 operations,
-                MirageMcpServer(ws, operations=operations),
+                MirageMcpServer(
+                    ws,
+                    operations=operations,
+                    operations_for=partial(self.tools, workspace_id),
+                ),
             )
             self._served[key] = served
         return served

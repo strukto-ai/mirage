@@ -37,7 +37,7 @@ const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 
 for await (const msg of query({
   prompt: "Write /hello.txt with 'hi from mirage', then cat it.",
-  options: buildOptions(ws),
+  options: await buildOptions(ws),
 })) {
   console.log(msg)
 }
@@ -53,7 +53,7 @@ import { MirageServer, buildSystemPrompt } from '@struktoai/mirage-agents/claude
 const options = {
   mcpServers: { mirage: MirageServer(ws), github: githubServer },
   allowedTools: ['mcp__mirage__*', 'mcp__github__*'],
-  systemPrompt: buildSystemPrompt({ workspace: ws }),
+  systemPrompt: await buildSystemPrompt({ workspace: ws }),
 }
 ```
 

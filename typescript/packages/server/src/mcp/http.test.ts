@@ -83,7 +83,7 @@ describe('the MCP door over HTTP', () => {
       arguments: { path: '/a.txt', content: 'hi\n' },
     })
     const read = await client.callTool({ name: 'read', arguments: { path: '/a.txt' } })
-    expect(tools).toEqual(['edit', 'glob', 'grep', 'ls', 'read', 'shell', 'write'])
+    expect(tools).toEqual(['edit', 'glob', 'grep', 'ls', 'read', 'session', 'shell', 'write'])
     expect(written.isError).not.toBe(true)
     expect((read.content as { text: string }[])[0]?.text).toBe('     1\thi\n')
   })
@@ -161,7 +161,7 @@ describe('the MCP door over HTTP', () => {
     })
     const client = await connect(url, auth)
     expect(refused.status).toBe(401)
-    expect((await client.listTools()).tools).toHaveLength(7)
+    expect((await client.listTools()).tools).toHaveLength(8)
   })
 
   it('starts a fresh tool table for a recreated session', async () => {

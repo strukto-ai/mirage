@@ -192,3 +192,23 @@ export const GLOB_INPUT = {
   },
   required: ['pattern'],
 } as const
+
+export const SESSION_DESCRIPTION =
+  'Create, inspect, update, or close workspace sessions and their profiles.'
+export const SESSION_INPUT = {
+  type: 'object',
+  properties: {
+    action: {
+      type: 'string',
+      enum: ['create', 'list', 'update', 'close'],
+      description: 'Session lifecycle operation.',
+    },
+    session_id: { type: 'string', description: 'Session id; required except for list.' },
+    profile: {
+      type: ['string', 'null'],
+      description: 'Named profile; null selects the workspace default.',
+    },
+  },
+  required: ['action'],
+  additionalProperties: false,
+}

@@ -26,6 +26,7 @@ import { registerShellRoutes } from './routers/shell.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerHealthRoutes } from './routers/health.ts'
 import { registerJobsRoutes } from './routers/jobs.ts'
+import { registerDocumentsRoutes } from './routers/documents.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
 import { registerVersionsRoutes } from './routers/versions.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
@@ -108,6 +109,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerWorkspacesRoutes(app, { registry, snapshotRoot, stateRoot, versionBackend })
   registerVersionsRoutes(app, { registry, versionBackend })
   registerSessionsRoutes(app, { registry })
+  registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
   registerShellRoutes(app, { registry, jobs })
   registerJobsRoutes(app, { jobs })

@@ -178,7 +178,9 @@ def main() -> int:
     if args.selftest:
         selftest()
     gaps = differences(REPO)
-    exceptions = json.loads((REPO / "spec/prompt_exceptions.json").read_text())
+    exceptions = json.loads(
+        (REPO / "scripts/parity/prompt_exceptions.json").read_text()
+    )
     errors = violations(gaps, exceptions)
     if errors:
         print("\n".join(errors))
