@@ -168,11 +168,12 @@ describe('dropboxRpc', () => {
   // A 409 body without a string error_summary is no verdict: the summary is
   // '', so no caller reads it as a miss or trips on a non-string.
   it.each([
-    ['null summary', '{"error_summary":null}'],
-    ['number summary', '{"error_summary":5}'],
-    ['not an object', '["path/not_found/.."]'],
-    ['not json', 'oops'],
-  ])('leaves the summary empty for a 409 with %s', async (_id, body) => {
+    ['null-body', 'null'],
+    ['null-summary', '{"error_summary":null}'],
+    ['number-summary', '{"error_summary":5}'],
+    ['not-object', '["path/not_found/.."]'],
+    ['not-json', 'oops'],
+  ])('leaves the summary empty for a 409 body (%s)', async (_id, body) => {
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(body, { status: 409 })))
     await expect(dropboxRpc(tokenManager(), '/files/get_metadata', {})).rejects.toMatchObject({
       status: 409,

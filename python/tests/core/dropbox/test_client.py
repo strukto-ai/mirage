@@ -216,14 +216,21 @@ async def test_a_stream_hands_a_plain_lower_cased_map():
 @pytest.mark.parametrize(
     "text",
     [
+        "null",
         '{"error_summary": null}',
         '{"error_summary": 5}',
         '["path/not_found/.."]',
         "oops",
     ],
-    ids=["null-summary", "number-summary", "not-object", "not-json"],
+    ids=[
+        "null-body",
+        "null-summary",
+        "number-summary",
+        "not-object",
+        "not-json",
+    ],
 )
-def test_a_body_without_a_string_summary_has_none(text):
+def test_a_body_without_a_string_summary_is_empty(text):
     # A 409 body without a string error_summary is no verdict: the summary
     # is "", so no caller reads it as a miss or trips on a non-string.
     assert summary_of(text) == ""
