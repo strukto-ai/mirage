@@ -20,9 +20,9 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
 import { getMetadata, type DropboxEntry } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
-import { CONTENT_HASH } from './constants.ts'
+import { CONTENT_HASH, MISS_SUMMARIES } from './constants.ts'
 import { entryToken, tokenOf } from './fingerprint.ts'
-import { metadataOrNull, readdir as coreReaddir } from './readdir.ts'
+import { dropboxPathFromKey, readdir as coreReaddir } from './readdir.ts'
 import { enoent, isEnoent } from '../../utils/errors.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
@@ -68,7 +68,10 @@ async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<F
 // Stat one path with one get_metadata, writing nothing to the index. Only a
 // scratch store asks this way, and its callers (the reconcile probe, the drift
 // check) treat ENOENT and ENOTDIR alike, so a miss is ENOENT with no further
-// lookup. get_metadata matches case-insensitively where a listing's names are
+// lookup. Only a not_found or not_folder 409 is a miss: the probe calls ENOENT
+// gone and drops the path's overlay, so a 409 for a file that exists
+// (restricted_content, ...) propagates and the probe reads it as unverifiable.
+// get_metadata matches case-insensitively where a listing's names are
 // exact, so an answer naming the last component in another case is not this
 // path.
 async function pointStat(
@@ -76,8 +79,23 @@ async function pointStat(
   path: PathSpec,
   key: string,
 ): Promise<FileStat> {
-  const entry = await metadataOrNull(accessor, key)
-  if (entry?.name !== key.slice(key.lastIndexOf('/') + 1)) throw enoent(path.virtual)
+  let entry: DropboxEntry
+  try {
+    entry = await getMetadata(
+      accessor.tokenManager,
+      dropboxPathFromKey(accessor.rootPath, stripSlash(key)),
+    )
+  } catch (err) {
+    if (
+      err instanceof DropboxApiError &&
+      err.status === 409 &&
+      MISS_SUMMARIES.some((miss) => err.summary.startsWith(miss))
+    ) {
+      throw enoent(path.virtual)
+    }
+    throw err
+  }
+  if (entry.name !== key.slice(key.lastIndexOf('/') + 1)) throw enoent(path.virtual)
   return statFromEntry(entry)
 }
 

@@ -69,6 +69,14 @@ async def _all_absent(_tm, _endpoint, _body):
     raise DropboxApiError("nf", 409, "path/not_found/...")
 
 
+async def _restricted(_tm, _endpoint, _body):
+    raise DropboxApiError("restricted", 409, "path/restricted_content/..")
+
+
+async def _not_folder(_tm, _endpoint, _body):
+    raise DropboxApiError("nf", 409, "path/not_folder/..")
+
+
 async def _under_file(_tm, endpoint, body):
     if endpoint == "/files/list_folder":
         raise DropboxApiError("nf", 409, "path/not_folder/...")
@@ -387,6 +395,35 @@ async def test_stat_scratch_miss_under_a_missing_parent_names_the_child(
                 scratch,
             )
     assert str(excinfo.value) == "/ghost/missing.txt"
+
+
+@pytest.mark.asyncio
+async def test_stat_scratch_409_that_is_not_a_miss_propagates(
+    dropbox_accessor, scratch
+):
+    # A restricted file exists: its 409 is no miss, so the fresh probe must
+    # not hear ENOENT and call it gone, dropping its overlay.
+    with patch(RPC, new=_restricted):
+        with pytest.raises(DropboxApiError) as excinfo:
+            await stat(
+                dropbox_accessor,
+                PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+                scratch,
+            )
+    assert excinfo.value.summary.startswith("path/restricted_content")
+
+
+@pytest.mark.asyncio
+async def test_stat_scratch_not_folder_is_a_miss(dropbox_accessor, scratch):
+    with patch(RPC, new=_not_folder):
+        with pytest.raises(FileNotFoundError):
+            await stat(
+                dropbox_accessor,
+                PathSpec(
+                    vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt"
+                ),
+                scratch,
+            )
 
 
 @pytest.mark.asyncio

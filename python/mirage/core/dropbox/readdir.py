@@ -38,7 +38,7 @@ def dropbox_path_from_key(root: str, key: str) -> str:
     return f"{root}/{key}"
 
 
-async def metadata_or_none(
+async def _metadata_or_none(
     accessor: DropboxAccessor, key: str
 ) -> dict[str, Any] | None:
     """One path's get_metadata answer, or None when the API 409s on it.
@@ -64,7 +64,7 @@ async def _is_file(accessor: DropboxAccessor, key: str) -> bool:
         accessor (DropboxAccessor): Dropbox accessor.
         key (str): mount-local path.
     """
-    entry = await metadata_or_none(accessor, key)
+    entry = await _metadata_or_none(accessor, key)
     return entry is not None and entry.get(".tag") != "folder"
 
 
@@ -75,7 +75,7 @@ async def _is_dir(accessor: DropboxAccessor, key: str) -> bool:
         accessor (DropboxAccessor): Dropbox accessor.
         key (str): mount-local path.
     """
-    entry = await metadata_or_none(accessor, key)
+    entry = await _metadata_or_none(accessor, key)
     return entry is not None and entry.get(".tag") == "folder"
 
 

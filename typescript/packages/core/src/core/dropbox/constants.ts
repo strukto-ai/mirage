@@ -20,3 +20,7 @@ export const TOKEN_BUFFER_SECONDS = 300
 // metadata field that is its content token.
 export const RESULT_HEADER = 'Dropbox-API-Result'
 export const CONTENT_HASH = 'content_hash'
+// The get_metadata 409 summaries that mean the path is not there. Any other
+// 409 (restricted_content, malformed_path, locked, ...) names a path that may
+// well exist.
+export const MISS_SUMMARIES = ['path/not_found', 'path/not_folder'] as const
