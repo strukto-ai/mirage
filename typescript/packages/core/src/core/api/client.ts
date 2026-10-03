@@ -78,6 +78,18 @@ export type ReadMode =
   | 'location'
   | 'response'
 
+/**
+ * A response's headers as a plain record, names lower-cased; fetch already
+ * joins a repeated header, as python's lowered_headers does.
+ */
+export function loweredHeaders(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {}
+  headers.forEach((value, name) => {
+    out[name.toLowerCase()] = value
+  })
+  return out
+}
+
 /** Decoded body plus the wire metadata cursor pagination reads. Mirrors
  * python's `ApiResponse`; a caller asking for `read: 'response'` gets this
  * rather than the bare body, because a `Link` header is the only thing that
@@ -249,10 +261,7 @@ export async function apiRequest(
       return windowOf(data, response.status, options.window)
     }
     if (read === 'bytes_response') {
-      const headers: Record<string, string> = {}
-      response.headers.forEach((value, name) => {
-        headers[name.toLowerCase()] = value
-      })
+      const headers = loweredHeaders(response.headers)
       const data = windowOf(
         new Uint8Array(await response.arrayBuffer()),
         response.status,
@@ -263,10 +272,7 @@ export async function apiRequest(
     const text = await response.text()
     if (read === 'text') return text
     if (read === 'response') {
-      const headers: Record<string, string> = {}
-      response.headers.forEach((value, name) => {
-        headers[name.toLowerCase()] = value
-      })
+      const headers = loweredHeaders(response.headers)
       let data: unknown = null
       if (text !== '') {
         try {
