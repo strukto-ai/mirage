@@ -266,7 +266,7 @@ export class Dispatcher {
       // Resolve backend IDs afresh without consulting the restored index.
       await this.drift.drain(this.namespace, async (p) => {
         const [stat] = await this.dispatch('stat', PathSpec.fromStrPath(p), [], {
-          index: new RAMIndexCacheStore(),
+          index: new RAMIndexCacheStore({ scratch: true }),
         })
         return stat
       })

@@ -92,7 +92,7 @@ class Reconciler:
             # Resolve backend IDs without reusing cached metadata.
             try:
                 remote_stat = await mount.execute_op(
-                    "stat", path, index=RAMIndexCacheStore()
+                    "stat", path, index=RAMIndexCacheStore(scratch=True)
                 )
             except (FileNotFoundError, NotADirectoryError):
                 await self.on_missing(path)

@@ -115,7 +115,7 @@
       "has_write_prompt": false,
       "index_ttl": 86400,
       "listing_version": "none",
-      "read_revalidatable": false,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false

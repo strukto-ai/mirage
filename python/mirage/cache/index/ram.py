@@ -20,7 +20,8 @@ from mirage.cache.index.config import (
     ListResult,
     LookupResult,
     LookupStatus,
-    ResourceType,
+    is_file_kind,
+    is_folder_kind,
 )
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.lock import KeyLockMixin
@@ -31,9 +32,10 @@ from mirage.utils.key_prefix import under_path
 class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     """In-memory index cache using plain dicts + asyncio locks."""
 
-    def __init__(self, ttl: float = 600) -> None:
+    def __init__(self, ttl: float = 600, scratch: bool = False) -> None:
         super().__init__()
         self._ttl = ttl
+        self._scratch = scratch
         self._entries: dict[str, IndexEntry] = {}
         self._children: dict[str, list[str]] = {}
         self._expiry: dict[str, datetime] = {}
@@ -76,6 +78,10 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
     async def entries(self) -> dict[str, IndexEntry]:
         return dict(self._entries)
+
+    @property
+    def scratch(self) -> bool:
+        return self._scratch
 
     @property
     def ttl(self) -> float:
@@ -181,7 +187,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                     if (
                         key not in rows
                         or (
-                            rows[key].resource_type == ResourceType.FILE
+                            is_file_kind(rows[key].resource_type)
                             and (
                                 buried.get(key, False)
                                 or key in self._children
@@ -222,10 +228,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         folder = (
             buried_folder
             or key in self._children
-            or (
-                entry is not None
-                and entry.resource_type == ResourceType.FOLDER
-            )
+            or (entry is not None and is_folder_kind(entry.resource_type))
         )
         if folder:
             self._drop_prefix(key, excluded=excluded)
@@ -273,7 +276,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
     def _is_folder(self, key: str) -> bool:
         entry = self._entries.get(key)
-        return entry is not None and entry.resource_type == ResourceType.FOLDER
+        return entry is not None and is_folder_kind(entry.resource_type)
 
     def _drop_prefix(
         self,

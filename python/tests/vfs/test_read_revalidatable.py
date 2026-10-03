@@ -30,6 +30,7 @@ from bson import ObjectId
 from moto.server import ThreadedMotoServer
 
 import mirage.cache.file.io as cache_io
+import mirage.core.dropbox.read as dropbox_read
 import mirage.core.gdocs.read as gdocs_read
 import mirage.core.gdrive.read as gdrive_read
 import mirage.core.github.read as github_read
@@ -48,6 +49,7 @@ import mirage.core.msgraph.drive as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
+from mirage.commands.builtin.dropbox.io import IO as DROPBOX_IO
 from mirage.commands.builtin.gdocs.io import IO as GDOCS_IO
 from mirage.commands.builtin.gdrive.io import IO as GDRIVE_IO
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
@@ -78,6 +80,8 @@ from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
+from tests.fixtures.dropbox_api import FakeDropbox
+from tests.fixtures.dropbox_api import serve as serve_dropbox
 from tests.fixtures.github_api import FakeGitHub, blob_sha
 from tests.fixtures.github_api import serve as serve_github
 from tests.fixtures.hf_buckets_opendal import FakeAsyncOperator
@@ -127,6 +131,7 @@ HARNESSES = {
     "gdocs": "gdocs",
     "gsheets": "gsheets",
     "gslides": "gslides",
+    "dropbox": "dropbox",
 }
 
 # The drive each Graph backend addresses in the fake: OneDrive the signed-in
@@ -189,6 +194,7 @@ S3_CONFIG = {
 S3_EXTRA = {"oci": {"namespace": "ns"}}
 GRIDFS_CONFIG = {"uri": "mongodb://127.0.0.1:27017", "database": "d"}
 GDRIVE_CONFIG = {"client_id": "i", "client_secret": "s", "refresh_token": "r"}
+DROPBOX_CONFIG = {"client_id": "i", "client_secret": "s", "refresh_token": "r"}
 
 PREFIX = "pfx/"
 
@@ -623,9 +629,42 @@ def _github_fake(
 
 
 @contextmanager
+def _dropbox_fake(shape: str, data: bytes) -> Iterator[Fake]:
+    # Dropbox has no key_prefix; the prefixed shape mounts a root_path
+    # instead, with a decoy at the same key outside it.
+    key = KEYS[shape]
+    root = "/" + PREFIX.strip("/") if shape == "prefixed" else "/"
+    stored = root.rstrip("/") + "/" + key
+    files = {stored: data}
+    if shape == "prefixed":
+        files["/" + key] = DECOY
+    dropbox = FakeDropbox(files=files)
+    with serve_dropbox(dropbox):
+        vfs = build_vfs(
+            "dropbox",
+            {**DROPBOX_CONFIG, "root_path": root, "endpoint": dropbox.url},
+        )
+        yield Fake(
+            vfs=vfs,
+            key=key,
+            fetches=lambda: dropbox.count("download"),
+            rewrite=lambda new: dropbox.write(stored, new),
+            reach=[],
+            io=DROPBOX_IO,
+            read_mod=dropbox_read,
+            stream_mod=dropbox_read,
+            index=RAMIndexCacheStore(),
+        )
+
+
+@contextmanager
 def _fake(
     name: str, shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[Fake]:
+    if HARNESSES[name] == "dropbox":
+        with _dropbox_fake(shape, data) as fake:
+            yield fake
+        return
     if HARNESSES[name] == "hf_buckets":
         with _hf_buckets_fake(shape, data) as fake:
             yield fake
@@ -819,6 +858,7 @@ def test_each_family_runs_exactly_its_rows():
                 "onedrive",
                 "sharepoint",
                 "hf_buckets",
+                "dropbox",
             )
             for shape in shapes
             for row in rows
@@ -1139,6 +1179,172 @@ def test_a_changed_object_is_refetched(name, shape, monkeypatch):
     assert third_fetched == 0
     assert third == CHANGED
     assert fake.reach == []
+
+
+def test_a_dropbox_same_size_rewrite_is_refetched_on_content_hash():
+    # The real service repeated server_modified across same-size writes
+    # (probed 2026-10-02) while content_hash moved on every one. A token
+    # built on the modified stamp calls the rewrite fresh and serves SEED.
+    with _dropbox_fake("root", SEED) as fake:
+        virtual = "/m/" + fake.key
+
+        async def run():
+            ws = _fresh_workspace(fake.vfs)
+            try:
+                await _line(ws, f"cat {virtual}")
+                before = await _reconcile_stat(ws, virtual)
+                fake.rewrite(CHANGED)
+                after = await _reconcile_stat(ws, virtual)
+                fetched = fake.fetches()
+                out = await _line(ws, f"cat {virtual}")
+                return before, after, fake.fetches() - fetched, out
+            finally:
+                await ws.close()
+
+        before, after, refetched, out = asyncio.run(run())
+
+    assert len(SEED) == len(CHANGED)
+    assert before.modified == after.modified
+    assert before.fingerprint != after.fingerprint
+    assert refetched == 1
+    assert out == CHANGED
+
+
+def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder():
+    # The probe stats through a scratch store, so dropbox answers it with
+    # one get_metadata rather than listing the whole folder into a store
+    # dropped right after.
+    files = {"/d/a.txt": SEED, **{f"/d/f{i}.txt": DECOY for i in range(5)}}
+    dropbox = FakeDropbox(files=files)
+    with serve_dropbox(dropbox):
+        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
+
+        async def run():
+            ws = _fresh_workspace(vfs)
+            try:
+                await _line(ws, "cat /m/d/a.txt")
+                before = len(dropbox.log)
+                out = await _line(ws, "cat /m/d/a.txt")
+                return out, [
+                    r for r, _ in dropbox.log[before:] if r != "token"
+                ]
+            finally:
+                await ws.close()
+
+        out, routes = asyncio.run(run())
+    assert out == SEED
+    assert "list_folder" not in routes
+    assert "download" not in routes
+    assert "get_metadata" in routes
+
+
+def test_a_dropbox_file_deleted_outside_is_checked_with_one_get_metadata():
+    # The freshness check is the one get_metadata. A gone verdict clears
+    # the mount index, so cat's own stat that follows misses it and lists
+    # the folder, the way a mount index answers any miss.
+    files = {"/d/a.txt": SEED, **{f"/d/f{i}.txt": DECOY for i in range(5)}}
+    dropbox = FakeDropbox(files=files)
+    with serve_dropbox(dropbox):
+        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
+
+        async def run():
+            ws = _fresh_workspace(vfs)
+            try:
+                await _line(ws, "cat /m/d/a.txt")
+                del dropbox.files["/d/a.txt"]
+                before = len(dropbox.log)
+                result = await ws.shell("cat /m/d/a.txt")
+                err = await result.stderr_str()
+                return (
+                    result.exit_code,
+                    err,
+                    [r for r, _ in dropbox.log[before:] if r != "token"],
+                )
+            finally:
+                await ws.close()
+
+        code, err, routes = asyncio.run(run())
+    assert (code, err) == (1, "cat: /m/d/a.txt: No such file or directory\n")
+    assert routes == ["get_metadata", "list_folder"]
+
+
+def test_a_dropbox_name_past_latin1_is_stamped_and_read_fresh():
+    # A name past Latin-1 comes back in Dropbox-API-Result and must parse
+    # to the content_hash stat reads from the listing row. aiohttp carries
+    # raw UTF-8 in a header, so unlike fetch this does not pin the escape;
+    # the client test does.
+    name = "/d/\u4e2d\U0001f600.txt"
+    dropbox = FakeDropbox(files={name: SEED})
+    with serve_dropbox(dropbox):
+        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
+
+        async def run():
+            ws = _fresh_workspace(vfs)
+            try:
+                first = await _line(ws, f'cat "/m{name}"')
+                second = await _line(ws, f'cat "/m{name}"')
+                return first, second
+            finally:
+                await ws.close()
+
+        first, second = asyncio.run(run())
+    assert first == second == SEED
+    assert dropbox.count("download") == 1
+
+
+def test_a_dropbox_file_that_409s_without_a_miss_keeps_its_overlay():
+    # A fresh probe that hears a 409 other than not_found cannot verify
+    # the copy: it reads cold, which fails, but never calls the file gone
+    # and drops its overlay. Read as gone, chmod's 600 would be lost.
+    dropbox = FakeDropbox(files={"/d/a.txt": SEED})
+    with serve_dropbox(dropbox):
+        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
+
+        async def run():
+            ws = _fresh_workspace(vfs)
+            try:
+                await _line(ws, "cat /m/d/a.txt")
+                await _line(ws, "chmod 600 /m/d/a.txt")
+                dropbox.restricted.add("/d/a.txt")
+                result = await ws.shell("cat /m/d/a.txt")
+                err = await result.stderr_str()
+                dropbox.restricted.discard("/d/a.txt")
+                mode = await _line(ws, "stat -c %a /m/d/a.txt")
+                return result.exit_code, err, mode
+            finally:
+                await ws.close()
+
+        code, err, mode = asyncio.run(run())
+    assert code == 1
+    assert "No such file" not in err
+    assert mode == b"600\n"
+
+
+def test_a_dropbox_file_deleted_outside_drops_its_overlay():
+    # The twin of the case above: a real not_found 409 is a miss, so the
+    # probe calls the file gone and drops its overlay. Kept, chmod's 600
+    # would carry over to a file re-created at the path.
+    dropbox = FakeDropbox(files={"/d/a.txt": SEED})
+    with serve_dropbox(dropbox):
+        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
+
+        async def run():
+            ws = _fresh_workspace(vfs)
+            try:
+                await _line(ws, "cat /m/d/a.txt")
+                await _line(ws, "chmod 600 /m/d/a.txt")
+                del dropbox.files["/d/a.txt"]
+                result = await ws.shell("cat /m/d/a.txt")
+                err = await result.stderr_str()
+                dropbox.write("/d/a.txt", SEED)
+                mode = await _line(ws, "stat -c %a /m/d/a.txt")
+                return result.exit_code, err, mode
+            finally:
+                await ws.close()
+
+        code, err, mode = asyncio.run(run())
+    assert (code, err) == (1, "cat: /m/d/a.txt: No such file or directory\n")
+    assert mode == b"644\n"
 
 
 @pytest.fixture()

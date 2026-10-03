@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 import aiohttp
 from aiohttp.payload import JsonPayload
+from multidict import CIMultiDictProxy
 from tenacity import (
     AsyncRetrying,
     RetryCallState,
@@ -39,6 +40,18 @@ logger = logging.getLogger(__name__)
 ReadMode = Literal[
     "json", "none", "bytes", "bytes_response", "text", "location", "response"
 ]
+
+
+def lowered_headers(headers: CIMultiDictProxy[str]) -> dict[str, str]:
+    """A response's headers as a plain map, names lower-cased.
+
+    A repeated header is joined the way fetch joins it, so a response
+    carrying two ETags reads as neither on both hosts.
+
+    Args:
+        headers (CIMultiDictProxy[str]): the aiohttp response headers.
+    """
+    return {key.lower(): ", ".join(headers.getall(key)) for key in headers}
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,15 +381,10 @@ async def _attempt(
         if read == "bytes":
             return window_of(await resp.read(), resp.status, window)
         if read == "bytes_response":
-            # A repeated header is joined the way fetch joins it, so a
-            # response carrying two ETags reads as neither on both hosts.
             return ApiResponse(
                 window_of(await resp.read(), resp.status, window),
                 resp.status,
-                {
-                    key.lower(): ", ".join(resp.headers.getall(key))
-                    for key in resp.headers.keys()
-                },
+                lowered_headers(resp.headers),
             )
         if read == "text":
             return await resp.text()
@@ -396,9 +404,7 @@ async def _attempt(
             data = json.loads(text)
         if read == "response":
             return ApiResponse(
-                data,
-                resp.status,
-                {key.lower(): value for key, value in resp.headers.items()},
+                data, resp.status, lowered_headers(resp.headers)
             )
         return data
 

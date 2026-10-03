@@ -99,7 +99,7 @@ export class Reconciler {
       const generation = manager?.generation
       try {
         remoteStat = await this.opsRegistry.call('stat', vfs, vfs.accessor, scope, [], {
-          index: new RAMIndexCacheStore(),
+          index: new RAMIndexCacheStore({ scratch: true }),
         })
       } catch (err) {
         if (isEnoent(err) || isEnotdir(err)) {

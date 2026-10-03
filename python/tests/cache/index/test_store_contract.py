@@ -354,13 +354,28 @@ async def test_prefix_invalidation_preserves_excluded_subtrees(store):
     assert (await store.get("/dir/nested2/a")).status == LookupStatus.NOT_FOUND
 
 
+# A backend may spell its kinds with its own prefix (dropbox/folder,
+# box/file); a folder replaced by a file is the same swap either way.
+KINDS = [
+    ("folder", "file"),
+    ("dropbox/folder", "dropbox/file"),
+    ("box/folder", "box/file"),
+    ("gdrive/folder", "gdrive/file"),
+]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prior", ["listed", "invalidated", "unlisted"])
-async def test_directory_replaced_by_file_evicts_old_subtree(store, prior):
+@pytest.mark.parametrize(("folder_kind", "file_kind"), KINDS)
+async def test_directory_replaced_by_file_evicts_old_subtree(
+    store, prior, folder_kind, file_kind
+):
+    old = IndexEntry(id="sub", name="sub", resource_type=folder_kind)
+    new = IndexEntry(id="sub", name="sub", resource_type=file_kind)
     if prior == "unlisted":
-        await store.put("/dir/sub", folder("sub"))
+        await store.put("/dir/sub", old)
     else:
-        await store.set_dir("/dir", [("sub", folder("sub"))])
+        await store.set_dir("/dir", [("sub", old)])
     await store.set_dir("/dir/sub", [("old", entry("old"))])
     await store.put("/dir/sub/unlisted", entry("unlisted"))
     await store.set_dir("/dir/sub/nested", [("keep", entry("keep"))])
@@ -368,21 +383,76 @@ async def test_directory_replaced_by_file_evicts_old_subtree(store, prior):
     if prior == "invalidated":
         await store.invalidate_dir("/dir")
     assert await store.set_dir(
-        "/dir", [("sub", entry("sub"))], excluded=("/dir/sub/nested",)
+        "/dir", [("sub", new)], excluded=("/dir/sub/nested",)
     ) == [Evicted("/dir/sub", folder=True)]
-    assert (await store.get("/dir/sub")).entry.resource_type == "file"
+    assert (await store.get("/dir/sub")).entry.resource_type == file_kind
     assert (await store.list_dir("/dir")).entries == ["/dir/sub"]
     assert (await store.list_dir("/dir/sub")).status == LookupStatus.NOT_FOUND
     for path in ["/dir/sub/old", "/dir/sub/unlisted"]:
         assert (await store.get(path)).status == LookupStatus.NOT_FOUND
     for path in ["/dir/sub/nested", "/dir/sub2"]:
         assert (await store.list_dir(path)).entries == [path + "/keep"]
-    assert await store.set_dir("/dir", [("sub", entry("sub"))]) == []
+    assert await store.set_dir("/dir", [("sub", new)]) == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prior", ["listed", "invalidated", "unlisted"])
-@pytest.mark.parametrize("resource_type", ["wandb/directory", "notion/page"])
+@pytest.mark.parametrize(("folder_kind", "file_kind"), KINDS)
+async def test_folder_known_by_its_row_replaced_by_file_evicts_rows(
+    store, prior, folder_kind, file_kind
+):
+    # The folder's own listing was never cached, so only its row's kind
+    # says it was a folder; a store reading the generic type alone keeps
+    # the rows under it.
+    old = IndexEntry(id="sub", name="sub", resource_type=folder_kind)
+    new = IndexEntry(id="sub", name="sub", resource_type=file_kind)
+    if prior == "unlisted":
+        await store.put("/dir/sub", old)
+    else:
+        await store.set_dir("/dir", [("sub", old)])
+    await store.put("/dir/sub/stray", entry("stray"))
+    if prior == "invalidated":
+        await store.invalidate_dir("/dir")
+    assert await store.set_dir("/dir", [("sub", new)]) == [
+        Evicted("/dir/sub", folder=True)
+    ]
+    assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prior", ["listed", "invalidated", "unlisted"])
+@pytest.mark.parametrize(
+    ("old_kind", "new_kind"),
+    [
+        ("trello/boards_dir", "trello/board"),
+        ("dropbox/folder", "postgres/entity_file"),
+    ],
+)
+async def test_unknown_kind_change_preserves_subtree(
+    store, prior, old_kind, new_kind
+):
+    # Only a type spelled as a file (`file` or `<backend>/file`) proves a
+    # folder became a file; `entity_file` ends in "file" without being
+    # one. Any other change of type proves nothing, so a cached subtree,
+    # and the overlays a cleanup would drop with it, stay.
+    old = IndexEntry(id="sub", name="sub", resource_type=old_kind)
+    new = IndexEntry(id="sub", name="sub", resource_type=new_kind)
+    if prior == "unlisted":
+        await store.put("/dir/sub", old)
+    else:
+        await store.set_dir("/dir", [("sub", old)])
+    await store.set_dir("/dir/sub", [("keep", entry("keep"))])
+    if prior == "invalidated":
+        await store.invalidate_dir("/dir")
+    assert await store.set_dir("/dir", [("sub", new)]) == []
+    assert (await store.list_dir("/dir/sub")).entries == ["/dir/sub/keep"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prior", ["listed", "invalidated", "unlisted"])
+@pytest.mark.parametrize(
+    "resource_type", ["wandb/directory", "notion/page", "dropbox/folder"]
+)
 async def test_backend_directory_relist_preserves_subtree(
     store, prior, resource_type
 ):
