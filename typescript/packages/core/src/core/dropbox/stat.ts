@@ -22,7 +22,7 @@ import { getMetadata, type DropboxEntry } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
 import { CONTENT_HASH, MISS_SUMMARIES } from './constants.ts'
 import { entryToken, tokenOf } from './fingerprint.ts'
-import { dropboxPathFromKey, readdir as coreReaddir } from './readdir.ts'
+import { readdir as coreReaddir } from './readdir.ts'
 import { enoent, isEnoent } from '../../utils/errors.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
@@ -51,7 +51,9 @@ function statFromEntry(entry: DropboxEntry): FileStat {
 }
 
 // API-truthful stat for index-less callers (unlink/rmdir classification,
-// the wired find core): get_metadata resolves the entry directly.
+// the wired find core): get_metadata resolves the entry directly. Every 409
+// is ENOENT here, as on main; only the fresh probe's point stat narrows it,
+// since only there does ENOENT drop an overlay.
 async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
   let entry: DropboxEntry
   try {
@@ -66,25 +68,17 @@ async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<F
 }
 
 // Stat one path with one get_metadata, writing nothing to the index. Only a
-// scratch store asks this way, and its callers (the reconcile probe, the drift
-// check) treat ENOENT and ENOTDIR alike, so a miss is ENOENT with no further
-// lookup. Only a not_found or not_folder 409 is a miss: the probe calls ENOENT
-// gone and drops the path's overlay, so a 409 for a file that exists
-// (restricted_content, ...) propagates and the probe reads it as unverifiable.
-// get_metadata matches case-insensitively where a listing's names are
-// exact, so an answer naming the last component in another case is not this
-// path.
-async function pointStat(
-  accessor: DropboxAccessor,
-  path: PathSpec,
-  key: string,
-): Promise<FileStat> {
+// scratch store asks this way, and the reconcile probe that builds it treats
+// ENOENT and ENOTDIR alike, so a miss is ENOENT with no further lookup. Only a
+// not_found or not_folder 409 is a miss: the probe calls ENOENT gone and drops
+// the path's overlay, so a 409 for a file that exists (restricted_content,
+// ...) propagates and the probe reads it as unverifiable. get_metadata matches
+// case-insensitively where a listing's names are exact, so an answer naming
+// the last component in another case is not this path.
+async function pointStat(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
   let entry: DropboxEntry
   try {
-    entry = await getMetadata(
-      accessor.tokenManager,
-      dropboxPathFromKey(accessor.rootPath, stripSlash(key)),
-    )
+    entry = await getMetadata(accessor.tokenManager, dropboxPathOf(accessor, path))
   } catch (err) {
     if (
       err instanceof DropboxApiError &&
@@ -95,6 +89,7 @@ async function pointStat(
     }
     throw err
   }
+  const key = stripSlash(path.vfsPath)
   if (entry.name !== key.slice(key.lastIndexOf('/') + 1)) throw enoent(path.virtual)
   return statFromEntry(entry)
 }
@@ -116,7 +111,7 @@ export async function stat(
     // dropped right after: ask for this one path rather than list a whole
     // folder into it. A mount's own index lists the parent and keeps it, so
     // siblings and repeats cost nothing.
-    if (index.scratch) return pointStat(accessor, path, stripSlash(key))
+    if (index.scratch) return pointStat(accessor, path)
     const parentVirtual = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
     try {
       await coreReaddir(
