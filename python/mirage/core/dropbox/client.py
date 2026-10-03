@@ -45,11 +45,17 @@ class DropboxApiError(RuntimeError):
 
 
 def summary_of(text: str) -> str:
+    """An error body's ``error_summary``, or "" when it carries no string.
+
+    Args:
+        text (str): the response body.
+    """
     try:
-        summary: str = json.loads(text).get("error_summary", "")
+        body = json.loads(text)
     except ValueError:
         return ""
-    return summary
+    summary = body.get("error_summary") if isinstance(body, dict) else None
+    return summary if isinstance(summary, str) else ""
 
 
 def _token_url(config: DropboxConfig) -> str:

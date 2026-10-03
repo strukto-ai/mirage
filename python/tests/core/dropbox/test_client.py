@@ -25,6 +25,7 @@ from mirage.core.dropbox.client import (
     _token_url,
     dropbox_download,
     dropbox_download_stream,
+    summary_of,
 )
 from mirage.core.dropbox.constants import (
     DROPBOX_API_BASE,
@@ -210,3 +211,19 @@ async def test_a_stream_hands_a_plain_lower_cased_map():
     await _stream(handed.append, [])
     assert type(handed[0]) is dict
     assert "dropbox-api-result" in handed[0]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"error_summary": null}',
+        '{"error_summary": 5}',
+        '["path/not_found/.."]',
+        "oops",
+    ],
+    ids=["null-summary", "number-summary", "not-object", "not-json"],
+)
+def test_a_body_without_a_string_summary_has_none(text):
+    # A 409 body without a string error_summary is no verdict: the summary
+    # is "", so no caller reads it as a miss or trips on a non-string.
+    assert summary_of(text) == ""

@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DropboxTokenManager, dropboxDownload, dropboxDownloadStream } from './client.ts'
+import {
+  DropboxTokenManager,
+  dropboxDownload,
+  dropboxDownloadStream,
+  dropboxRpc,
+} from './client.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 
 const BODY = '0123456789'
@@ -156,5 +161,22 @@ describe('dropboxDownloadStream', () => {
       void _
     expect(handed[0] instanceof Headers).toBe(false)
     expect(Object.keys(handed[0] ?? {})).toContain('dropbox-api-result')
+  })
+})
+
+describe('dropboxRpc', () => {
+  // A 409 body without a string error_summary is no verdict: the summary is
+  // '', so no caller reads it as a miss or trips on a non-string.
+  it.each([
+    ['null summary', '{"error_summary":null}'],
+    ['number summary', '{"error_summary":5}'],
+    ['not an object', '["path/not_found/.."]'],
+    ['not json', 'oops'],
+  ])('leaves the summary empty for a 409 with %s', async (_id, body) => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(body, { status: 409 })))
+    await expect(dropboxRpc(tokenManager(), '/files/get_metadata', {})).rejects.toMatchObject({
+      status: 409,
+      summary: '',
+    })
   })
 })
