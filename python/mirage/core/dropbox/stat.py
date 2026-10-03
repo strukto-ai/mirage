@@ -23,7 +23,7 @@ from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.constants import CONTENT_HASH, MISS_SUMMARIES
 from mirage.core.dropbox.fingerprint import entry_token, token_of
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.core.dropbox.readdir import dropbox_path_from_key, readdir
+from mirage.core.dropbox.readdir import readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
@@ -65,6 +65,8 @@ async def _stat_from_api(
 ) -> FileStat:
     # API-truthful stat for index-less callers (unlink/rmdir
     # classification, walk fallbacks): get_metadata resolves directly.
+    # Every 409 is ENOENT here, as on main; only the fresh probe's point
+    # stat narrows it, since only there does ENOENT drop an overlay.
     try:
         entry = await get_metadata(
             accessor.token_manager, dropbox_path_of(accessor, path)
@@ -76,35 +78,31 @@ async def _stat_from_api(
     return _stat_from_entry(entry)
 
 
-async def _point_stat(
-    accessor: DropboxAccessor, path: PathSpec, key: str
-) -> FileStat:
+async def _point_stat(accessor: DropboxAccessor, path: PathSpec) -> FileStat:
     """Stat one path with one get_metadata, writing nothing to the index.
 
-    Only a scratch store asks this way, and its callers (the reconcile
-    probe, the drift check) treat ENOENT and ENOTDIR alike, so a miss is
-    ENOENT with no further lookup. Only a not_found or not_folder 409 is a
-    miss: the probe calls ENOENT gone and drops the path's overlay, so a
-    409 for a file that exists (restricted_content, ...) propagates and
-    the probe reads it as unverifiable. get_metadata matches case-insensitively
-    where a listing's names are exact, so an answer naming the last
-    component in another case is not this path.
+    Only a scratch store asks this way, and the reconcile probe that builds
+    it treats ENOENT and ENOTDIR alike, so a miss is ENOENT with no further
+    lookup. Only a not_found or not_folder 409 is a miss: the probe calls
+    ENOENT gone and drops the path's overlay, so a 409 for a file that
+    exists (restricted_content, ...) propagates and the probe reads it as
+    unverifiable. get_metadata matches case-insensitively where a
+    listing's names are exact, so an answer naming the last component in
+    another case is not this path.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): the operand.
-        key (str): the mount-local key to look up.
     """
     try:
         entry = await get_metadata(
-            accessor.token_manager,
-            dropbox_path_from_key(accessor.root_path, key.strip("/")),
+            accessor.token_manager, dropbox_path_of(accessor, path)
         )
     except DropboxApiError as exc:
         if exc.status == 409 and exc.summary.startswith(MISS_SUMMARIES):
             raise enoent(path.virtual) from exc
         raise
-    if entry.get("name") != posixpath.basename(key):
+    if entry.get("name") != posixpath.basename(path.vfs_path.strip("/")):
         raise enoent(path.virtual)
     return _stat_from_entry(entry)
 
@@ -130,7 +128,7 @@ async def stat(
         # than list a whole folder into it. A mount's own index lists the
         # parent and keeps it, so siblings and repeats cost nothing.
         if index.scratch:
-            return await _point_stat(accessor, path, key.strip("/"))
+            return await _point_stat(accessor, path)
         parent_virtual = virtual_key.rsplit("/", 1)[0] or "/"
         try:
             await readdir(

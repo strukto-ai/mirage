@@ -29,11 +29,12 @@ function resourceTypeFor(entry: DropboxEntry): string {
   return 'dropbox/file'
 }
 
-export function dropboxPathFromKey(root: string, key: string): string {
+function dropboxPathFromKey(root: string, key: string): string {
   if (key === '') return root
   return `${root}/${key}`
 }
 
+/** One path's get_metadata answer, or null when the API 409s on it. */
 async function metadataOrNull(
   accessor: DropboxAccessor,
   key: string,
