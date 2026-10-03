@@ -72,11 +72,14 @@ def test_a_result_header_without_a_content_hash_is_no_token(raw):
     assert result_token(raw) is None
 
 
-def test_an_unreadable_result_header_warns(caplog):
-    # Real Dropbox always sends JSON here, so a reply that isn't explains
-    # why every fresh read of the file goes cold.
+@pytest.mark.parametrize(
+    "raw", ["not json", json.dumps(["a"])], ids=["unparseable", "not-object"]
+)
+def test_an_unreadable_result_header_warns(raw, caplog):
+    # Real Dropbox always sends a JSON object here, so a reply that isn't
+    # explains why every fresh read of the file goes cold.
     with caplog.at_level(logging.WARNING, logger="mirage.core.dropbox"):
-        assert result_token("not json") is None
+        assert result_token(raw) is None
     assert "Dropbox-API-Result" in caplog.text
 
 

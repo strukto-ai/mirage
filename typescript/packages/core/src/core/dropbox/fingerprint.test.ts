@@ -66,11 +66,14 @@ describe('dropbox fingerprint', () => {
       vi.restoreAllMocks()
     })
 
-    // Real Dropbox always sends JSON here, so a reply that isn't explains why
-    // every fresh read of the file goes cold.
-    it('warns', () => {
+    // Real Dropbox always sends a JSON object here, so a reply that isn't
+    // explains why every fresh read of the file goes cold.
+    it.each([
+      ['unparseable', 'not json'],
+      ['not-object', JSON.stringify(['a'])],
+    ])('warns (%s)', (_id, raw) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-      expect(resultToken('not json')).toBeNull()
+      expect(resultToken(raw)).toBeNull()
       expect(warn).toHaveBeenCalledTimes(1)
       expect(String(warn.mock.calls[0]?.[0])).toContain('Dropbox-API-Result')
     })
