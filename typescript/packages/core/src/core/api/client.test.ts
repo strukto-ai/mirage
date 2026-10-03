@@ -384,3 +384,21 @@ describe('bytes_response read', () => {
     expect(drain).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('a repeated header', () => {
+  it.each(['bytes_response', 'response'] as const)(
+    'reads joined on a %s read, the way python joins it',
+    async (read) => {
+      // Two ETags name no single version; joined, the value matches no token.
+      const headers = new Headers({ 'Content-Type': 'application/json' })
+      headers.append('ETag', '"one"')
+      headers.append('ETag', '"two"')
+      const fakeFetch: typeof fetch = () =>
+        Promise.resolve(new Response('{"ok":true}', { status: 200, headers }))
+      const out = (await apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, read })) as {
+        headers: Record<string, string>
+      }
+      expect(out.headers.etag).toBe('"one", "two"')
+    },
+  )
+})
