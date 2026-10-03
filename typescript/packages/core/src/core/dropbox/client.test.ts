@@ -165,6 +165,20 @@ describe('dropboxDownloadStream', () => {
 })
 
 describe('dropboxRpc', () => {
+  // The point stat tells a miss from a refusal by this summary alone, so a
+  // 409 body's error_summary has to reach DropboxApiError intact.
+  it('keeps a 409 body summary for the miss check', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error_summary: 'path/not_found/..' }), { status: 409 }),
+      ),
+    )
+    await expect(dropboxRpc(tokenManager(), '/files/get_metadata', {})).rejects.toMatchObject({
+      status: 409,
+      summary: 'path/not_found/..',
+    })
+  })
+
   // A 409 body without a string error_summary is no verdict: the summary is
   // '', so no caller reads it as a miss or trips on a non-string.
   it.each([
