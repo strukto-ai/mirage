@@ -111,9 +111,10 @@ export function parseConfigWithSchema<T extends ZodRawShape>(
  * `unrecognized_keys` issue per key: the summary then reads
  * `<vfs>: team_idz: unrecognized_keys` where python's reads
  * `<vfs>: team_idz: extra_forbidden`, the same field named the same way.
- * Exported for the backends that take their options without a schema
- * (`ram`, `disk`, `redis`, `opfs`), which python builds from constructor
- * keywords and refuses the same way.
+ * Exported for the configs that take their options without a schema (the
+ * `ram`, `disk`, `redis` and `opfs` backends, and the workspace cache and
+ * index), which python builds from constructor keywords or a model that
+ * forbids extra fields and refuses the same way.
  */
 export function refuseUnknownKeys(
   input: Record<string, unknown>,
@@ -134,6 +135,37 @@ export function refuseUnknownKeys(
       message: `Unrecognized key: ${JSON.stringify(key)}`,
     })),
   )
+}
+
+/**
+ * Refuse a config block that names one field under two spellings.
+ *
+ * `normalizeFields` writes `key_prefix` and `keyPrefix` to the same key,
+ * so without this the later one would win by object order. Python's
+ * models take only the snake_case spelling and refuse the camelCase one
+ * as an extra field, so each clash is reported the way
+ * `refuseUnknownKeys` reports a key: an `unrecognized_keys` issue naming
+ * the camelCase spelling, whose summary then reads as python's
+ * `keyPrefix: extra_forbidden` does.
+ */
+export function refuseRepeatedFields(input: Record<string, unknown>): void {
+  const seen = new Map<string, string>()
+  const issues: z.core.$ZodIssue[] = []
+  for (const key of Object.keys(input)) {
+    const field = normalizedKey(key)
+    const first = seen.get(field)
+    if (first === undefined) {
+      seen.set(field, key)
+      continue
+    }
+    issues.push({
+      code: 'unrecognized_keys',
+      keys: [field],
+      path: [],
+      message: `${JSON.stringify(first)} and ${JSON.stringify(key)} name the same field`,
+    })
+  }
+  if (issues.length > 0) throw new z.ZodError(issues)
 }
 
 // A schema that declares its own policy for extra keys keeps it: a loose

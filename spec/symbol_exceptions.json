@@ -35,6 +35,27 @@
    "python_only": {
     "_scan": "Python moves the blocking os.scandir to a thread; Node's fs readdir is already async."
    }
+  },
+  "cache/file/config": {
+   "typescript_only": {
+    "CACHE_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
+    "CacheTypeField": "Python checks the type through the model's enum field; a TypeScript config is a plain object, so the code door parses its type with this schema.",
+    "REDIS_CACHE_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
+    "normalizeCacheConfig": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables."
+   }
+  },
+  "cache/index/config": {
+   "typescript_only": {
+    "INDEX_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
+    "IndexTypeField": "Python checks the type through the model's enum field; a TypeScript config is a plain object, so the code door parses its type with this schema.",
+    "REDIS_INDEX_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
+    "normalizeIndexConfig": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables."
+   }
+  },
+  "vfs/secrets": {
+   "typescript_only": {
+    "refuseRepeatedFields": "Python's models take one spelling of a field, so a second spelling is an extra field pydantic refuses; a TypeScript config takes either spelling, so the code door refuses one field named in both."
+   }
   }
  }
 }

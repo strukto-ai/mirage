@@ -23,3 +23,12 @@ onlyBuiltDependencies:
 # a workspace pnpm overwrites .npmrc settings from this file, so the
 # equivalent verify-deps-before-run= line there is silently inert.
 verifyDepsBeforeRun: error
+
+# braces has no fixed release: GHSA-vfj7-8cjw-p6xm covers every version
+# through 3.0.3, the latest. It reaches this tree only through micromatch
+# under fast-glob (the Daytona SDKs) and deepagents, which are dev or
+# example dependencies no published package ships. Drop the entry once
+# braces publishes a fix.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm

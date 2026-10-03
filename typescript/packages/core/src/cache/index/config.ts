@@ -14,6 +14,9 @@
 
 import { z } from 'zod'
 
+import { normalizeFields } from '../../utils/normalize.ts'
+import { refuseRepeatedFields, refuseUnknownKeys } from '../../vfs/secrets.ts'
+
 export const ResourceType = Object.freeze({
   FILE: 'file',
   FOLDER: 'folder',
@@ -195,4 +198,38 @@ export interface IndexConfig {
 export interface RedisIndexConfig extends IndexConfig {
   url?: string
   keyPrefix?: string
+}
+
+const INDEX_FIELDS: Record<keyof IndexConfig, true> = { type: true, ttl: true }
+const REDIS_INDEX_FIELDS: Record<keyof RedisIndexConfig, true> = {
+  ...INDEX_FIELDS,
+  url: true,
+  keyPrefix: true,
+}
+const IndexTypeField = z.object({ type: z.enum(IndexType).optional() })
+
+/**
+ * Refuse an index config's unknown type and keys and camelize the rest.
+ *
+ * The interface checks only a fresh literal, at compile time; python's
+ * `IndexConfig` forbids extra fields and an unknown `type` at
+ * construction, and this is its twin. A type outside `IndexType` is
+ * refused, and so is a key no field of its type takes; a field's
+ * snake_case spelling is taken at runtime and written under its
+ * camelCase name, as `refuseUnknownKeys` and `normalizeFields` do for a
+ * schemaless VFS block. Unlike those blocks, one field named in both
+ * spellings is refused rather than resolved by key order. Only the type
+ * and the key names are checked: the values are the interface's to
+ * type. The fields are picked by `type`, where python picks them by
+ * class, since a TS config has no class to pick by.
+ *
+ * @param config the index config as the caller passed it.
+ * @returns the config with every key in its camelCase spelling.
+ */
+export function normalizeIndexConfig(config: IndexConfig): IndexConfig {
+  const ram = (IndexTypeField.parse(config).type ?? IndexType.RAM) === IndexType.RAM
+  const input = { ...config }
+  refuseUnknownKeys(input, Object.keys(ram ? INDEX_FIELDS : REDIS_INDEX_FIELDS))
+  refuseRepeatedFields(input)
+  return normalizeFields(input) as IndexConfig
 }

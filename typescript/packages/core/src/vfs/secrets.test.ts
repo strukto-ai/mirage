@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { errorSummary } from '../secrets/summary.ts'
-import { parseConfigWithSchema, refuseUnknownKeys, z } from './secrets.ts'
+import { parseConfigWithSchema, refuseRepeatedFields, refuseUnknownKeys, z } from './secrets.ts'
 
 const Schema = z.object({ apiKey: z.string(), teamIds: z.array(z.string()).optional() })
 
@@ -91,5 +91,48 @@ describe('refuseUnknownKeys', () => {
         refuseUnknownKeys({ constructor: 1 }, [])
       }),
     ).toBe('constructor: unrecognized_keys')
+  })
+})
+
+describe('refuseRepeatedFields', () => {
+  it('refuses one field named in both spellings as an unrecognized key', () => {
+    expect(
+      refusal(() => {
+        refuseRepeatedFields({ key_prefix: 'b:', keyPrefix: 'a:' })
+      }),
+    ).toBe('keyPrefix: unrecognized_keys')
+  })
+
+  it("keeps the block's values out of the error", () => {
+    try {
+      refuseRepeatedFields({
+        url: 'redis://:hunter2@h:6379',
+        keyPrefix: 'hunter2',
+        key_prefix: 'hunter3',
+      })
+    } catch (err) {
+      expect(String(err)).not.toMatch(/hunter/)
+      return
+    }
+    throw new Error('expected a refusal')
+  })
+
+  it('names every repeated field, one issue each', () => {
+    expect(
+      refusal(() => {
+        refuseRepeatedFields({
+          keyPrefix: 'a:',
+          key_prefix: 'b:',
+          max_drain_bytes: 1,
+          maxDrainBytes: 2,
+        })
+      }),
+    ).toBe('keyPrefix: unrecognized_keys; maxDrainBytes: unrecognized_keys')
+  })
+
+  it('takes each field once under either spelling', () => {
+    expect(() => {
+      refuseRepeatedFields({ key_prefix: 'a:', url: 'redis://x' })
+    }).not.toThrow()
   })
 })

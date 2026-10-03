@@ -41,7 +41,7 @@ One check answers for a whole command: later listings of the same mount (or, on 
 
 Each layer is a pluggable store with two built-ins:
 
-- **RAM** (default): in-process, zero setup, 512 MB file cache and 10-minute index TTL. Best for single-process apps and notebooks.
+- **RAM** (default): in-process, zero setup, 512 MB file cache. Best for single-process apps and notebooks.
 - **Redis**: shared across workers, processes, and machines. Best for serverless, multi-replica services, or for cache state that survives restarts.
 
 <CodeGroup>
@@ -73,14 +73,34 @@ const ws = new Workspace(
 
 </CodeGroup>
 
+Both configs refuse a field they do not take, in code as in YAML: `CacheConfig(limti="1MB")` raises rather than building the defaults, and so does a Redis-only field (`url`, `key_prefix` / `keyPrefix`) on a RAM config. Python refuses when the config is built; TypeScript, whose options are plain objects, refuses when the `Workspace` is built, and at runtime takes a field under either spelling (`keyPrefix` or `key_prefix`), as its VFS configs do, but refuses a field given in both; the TypeScript interfaces declare the camelCase one.
+
+### Index TTL
+
+How long a cached listing lives comes from the first of these that applies:
+
+1. **A per-mount index**, `Mount(vfs, index=IndexConfig(ttl=60))` in Python or `new Mount(vfs, { index: { ttl: 60 } })` in TypeScript. This is code-only: a YAML mount block has no `index` key. A second mount of the same VFS instance shares the first mount's index, so its own `index` is not used.
+2. **The workspace index**, the `index:` block in YAML or the `index` option in code. Its `ttl` applies to every mount without its own index, and is 600 seconds when left out, including on backends whose own TTL is shorter or zero.
+3. **The backend's own `index_ttl`** (`indexTtl` in TypeScript), on a RAM index, when no index is configured at all:
+
+| `index_ttl` | Backends |
+| --- | --- |
+| 86 400 s (24 h) | Google Drive, Docs, Sheets, Slides, Gmail, GitHub, Dropbox, Box, OneDrive, SharePoint, email, HF Models, HF Datasets, HF Spaces |
+| 600 s | S3 and every backend not listed here |
+| 300 s | Google Calendar |
+| 60 s | Disk, SSH |
+| 0 (listings are not cached) | RAM, Redis, Postgres, MongoDB, LanceDB |
+
+Whichever applies, each listing write is capped by the mount's `ttl:`, which is 600 seconds unless the mount sets one. Listings already in a shared Redis index keep their stored expiry until rewritten or invalidated, so a workspace or process that starts with a lower `ttl:` can still serve them; an unmount or remount clears the mount's listings. A 24-hour backend TTL therefore takes effect only on a mount whose `ttl:` is raised to match; in YAML a mount's `ttl:` needs a `read:` beside it.
+
 ## Eviction & Limits
 
 The two layers are bounded differently:
 
 | Layer | Holds | Default | Bound | Eviction |
 | --- | --- | --- | --- | --- |
-| **File cache** | object bytes per virtual path | RAM, 512 MB | `cache_limit` (Py) / `cacheLimit` (TS) | LRU: least-recently-used bytes drop once the total exceeds the limit |
-| **Index cache** | directory listings + `FileStat` metadata | RAM, 10-min TTL | backend listing expiry, capped by the mount's `ttl` (seconds) | time-based: entries expire after the TTL, then re-fetch on next access |
+| **File cache** | object bytes per virtual path | RAM, 512 MB | `cache: {limit}` (`CacheConfig(limit=...)`); without a `cache` config, `cache_limit` (Py) / `cacheLimit` (TS) | LRU on RAM: least-recently-used bytes drop once the total exceeds the limit. On Redis nothing is evicted client-side and the server evicts (below); the limit still caps what each file's background fill buffers when `max_drain_bytes` is unset, and bounds `max_drain_bytes` |
+| **Index cache** | directory listings + `FileStat` metadata | RAM, the backend's `index_ttl` | `index: {ttl}` (`IndexConfig(ttl=...)`), else the backend's `index_ttl` ([Index TTL](#index-ttl)); capped by the mount's `ttl` (seconds) | time-based: listings expire after the TTL, then re-fetch on next access |
 
 Raising the file limit keeps more bytes warm at the cost of memory; lengthening the index TTL reduces API walks at the cost of staleness, up to the mount's `ttl`.
 
@@ -155,15 +175,18 @@ these synchronous calls and flushes them before the next index operation or
 failed flushes remain queued for retry. `entries()` returns all stored metadata,
 including entries whose directory listing has expired.
 
-Redis stores each entry as the `IndexEntry` JSON under `mirage:idx:entry:`
-and each directory's children and deadline as the `IndexDirectory` JSON under
-`mirage:idx:directory:`. Both are the documents pydantic writes, snake_case
+Every Redis index key starts with the config's `key_prefix`, `mirage:index:`
+by default, so the default layout is
+`mirage:index:mirage:idx:entry:<absolute-path>`. Redis stores each entry as
+the `IndexEntry` JSON under `{key_prefix}mirage:idx:entry:` and each
+directory's children and deadline as the `IndexDirectory` JSON under
+`{key_prefix}mirage:idx:directory:`. Both are the documents pydantic writes, snake_case
 and every field, and TypeScript writes and reads the same bytes
 (`IndexEntry.toJSON` / `IndexEntry.fromJSON`), so one Redis serves both
 languages and a row that does not parse is an error rather than a miss.
 Invalidation uses permanent keys beside the payload:
-`mirage:idx:generation` for the whole store and
-`mirage:idx:generation:<absolute-directory>` for each directory.
+`{key_prefix}mirage:idx:generation` for the whole store and
+`{key_prefix}mirage:idx:generation:<absolute-directory>` for each directory.
 Each listing records both tokens, and one `MGET` reads the listing and its two
 current tokens. A missing or changed token makes the listing `EXPIRED`.
 New tokens are unique so eviction or a refill cannot revive an old listing.
@@ -185,8 +208,10 @@ worker that shares an index together, and flush the key prefix first
 (`clear()`, or delete the keys under it), so no worker opens a row another
 release wrote.
 
-The Redis **file cache** likewise uses server-side limits instead of RAM's
-`cache_size`, `cache_entries`, or LRU. File bytes and metadata occupy separate
+The Redis **file cache** likewise uses server-side limits: nothing is evicted
+client-side (its `limit` caps each file's background fill when
+`max_drain_bytes` is unset, and bounds `max_drain_bytes`), so cap
+memory with `maxmemory` and an LRU `maxmemory-policy`. File bytes and metadata occupy separate
 keys, so server eviction can remove either independently: a freshness check
 alone does not guarantee the bytes remain cached.
 

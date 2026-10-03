@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IndexDirectorySchema, IndexEntry } from './config.ts'
+import { ZodError } from 'zod'
+import { errorSummary } from '../../secrets/summary.ts'
+import {
+  type IndexConfig,
+  IndexDirectorySchema,
+  IndexEntry,
+  IndexType,
+  normalizeIndexConfig,
+} from './config.ts'
 
 // The one wire format: what pydantic writes for the Python IndexEntry,
 // snake_case and every field. `test_config.py` pins the same literal.
@@ -84,3 +92,85 @@ describe('IndexDirectory JSON', () => {
     expect(() => IndexDirectorySchema.parse({ entries: [], expires_at: 1 })).toThrow()
   })
 })
+
+describe('normalizeIndexConfig', () => {
+  it('takes the fields of a RAM index', () => {
+    expect(normalizeIndexConfig({ ttl: 5 })).toEqual({ ttl: 5 })
+  })
+
+  it('takes the fields of a redis index', () => {
+    const config = {
+      type: IndexType.REDIS,
+      ttl: 5,
+      url: 'redis://localhost:6379/0',
+      keyPrefix: 's3:',
+    } as IndexConfig
+    expect(normalizeIndexConfig(config)).toEqual(config)
+  })
+
+  it('refuses an unknown field on a redis index', () => {
+    expect(() =>
+      normalizeIndexConfig({ type: IndexType.REDIS, urll: 'redis://x' } as IndexConfig),
+    ).toThrow(/"urll"/)
+  })
+
+  it('refuses a redis field on an explicit RAM index', () => {
+    expect(() =>
+      normalizeIndexConfig({ type: IndexType.RAM, keyPrefix: 's3:' } as IndexConfig),
+    ).toThrow(/"keyPrefix"/)
+  })
+
+  it('refuses an unknown field', () => {
+    expect(() => {
+      normalizeIndexConfig({ ttll: 5 } as IndexConfig)
+    }).toThrow(/"ttll"/)
+  })
+
+  it('refuses a redis field on a default RAM index', () => {
+    expect(() => {
+      normalizeIndexConfig({ keyPrefix: 's3:' } as IndexConfig)
+    }).toThrow(/"keyPrefix"/)
+  })
+
+  it('refuses an unknown index type rather than building RAM', () => {
+    expect(() => normalizeIndexConfig({ type: 'redsi' as IndexType })).toThrow(ZodError)
+  })
+
+  it('refuses a null index type rather than building RAM', () => {
+    expect(() => normalizeIndexConfig({ type: null } as unknown as IndexConfig)).toThrow(ZodError)
+  })
+
+  it('writes a snake_case field under its camelCase name', () => {
+    expect(
+      normalizeIndexConfig({ type: IndexType.REDIS, key_prefix: 's3:' } as IndexConfig),
+    ).toEqual({
+      type: IndexType.REDIS,
+      keyPrefix: 's3:',
+    })
+  })
+
+  it.each([
+    [{ type: IndexType.REDIS, keyPrefix: 'tenant:', key_prefix: 'default:' }],
+    [{ type: IndexType.REDIS, key_prefix: 'default:', keyPrefix: 'tenant:' }],
+  ])('refuses one field named in both spellings: %j', (config) => {
+    expect(() => normalizeIndexConfig(config as IndexConfig)).toThrow(ZodError)
+    expect(() => normalizeIndexConfig(config as IndexConfig)).toThrow(/name the same field/)
+  })
+
+  it('names an unknown key before a repeated field', () => {
+    const config = { type: IndexType.REDIS, keyPrefix: 'a:', key_prefix: 'b:', urll: 'x' }
+    expect(refusal(() => normalizeIndexConfig(config as IndexConfig))).toBe(
+      'urll: unrecognized_keys',
+    )
+  })
+})
+
+function refusal(run: () => unknown): string {
+  try {
+    run()
+  } catch (err) {
+    if (err instanceof ZodError) return errorSummary(err)
+    throw err
+  }
+  throw new Error('expected a refusal')
+}

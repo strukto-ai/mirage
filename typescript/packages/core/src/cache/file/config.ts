@@ -12,6 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
+
+import { normalizeFields } from '../../utils/normalize.ts'
+import { refuseRepeatedFields, refuseUnknownKeys } from '../../vfs/secrets.ts'
+
 export const CacheType = Object.freeze({
   RAM: 'ram',
   REDIS: 'redis',
@@ -32,4 +37,43 @@ export interface CacheConfig {
 export interface RedisCacheConfig extends CacheConfig {
   url?: string
   keyPrefix?: string
+}
+
+const CACHE_FIELDS: Record<keyof CacheConfig, true> = {
+  type: true,
+  limit: true,
+  maxDrainBytes: true,
+}
+const REDIS_CACHE_FIELDS: Record<keyof RedisCacheConfig, true> = {
+  ...CACHE_FIELDS,
+  url: true,
+  keyPrefix: true,
+}
+const CacheTypeField = z.object({ type: z.string().optional() })
+
+/**
+ * Refuse a cache config's unknown keys and camelize the rest.
+ *
+ * The interface checks only a fresh literal, at compile time; python's
+ * `CacheConfig` forbids extra fields at construction, and this is its
+ * twin at the door that builds the cache. A key no field of its type
+ * takes is refused; a field's snake_case spelling is taken at runtime
+ * and written under its camelCase name, as `refuseUnknownKeys` and
+ * `normalizeFields` do for a schemaless VFS block. Unlike those blocks,
+ * one field named in both spellings is refused rather than resolved by
+ * key order. Only the type and the key names are checked: the values
+ * are the interface's to type. The fields are picked by `type`, where
+ * python picks them by class: a RAM cache takes no connection fields,
+ * and any other type takes the redis set, which is what its registered
+ * factory receives.
+ *
+ * @param config the cache config as the caller passed it.
+ * @returns the config with every key in its camelCase spelling.
+ */
+export function normalizeCacheConfig(config: CacheConfig): CacheConfig {
+  const ram = (CacheTypeField.parse(config).type ?? CacheType.RAM) === CacheType.RAM
+  const input = { ...config }
+  refuseUnknownKeys(input, Object.keys(ram ? CACHE_FIELDS : REDIS_CACHE_FIELDS))
+  refuseRepeatedFields(input)
+  return normalizeFields(input) as CacheConfig
 }
