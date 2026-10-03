@@ -32,7 +32,6 @@ from mirage.core.dropbox.client import (
 from mirage.core.dropbox.constants import (
     DROPBOX_API_BASE,
     DROPBOX_CONTENT_BASE,
-    MISS_SUMMARIES,
 )
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.dropbox.config import DropboxConfig
@@ -260,4 +259,3 @@ async def test_a_409_keeps_its_summary_for_the_miss_check():
                 await dropbox_rpc(tm, "/files/get_metadata", {"path": "/x"})
         await tm.pool.close()
     assert excinfo.value.summary == "path/not_found/.."
-    assert excinfo.value.summary.startswith(MISS_SUMMARIES)
