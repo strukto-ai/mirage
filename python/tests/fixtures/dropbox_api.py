@@ -142,7 +142,7 @@ class FakeDropbox:
             status=409,
         )
 
-    def _restricted(self) -> web.Response:
+    def _refused(self) -> web.Response:
         return web.json_response(
             {
                 "error_summary": "path/restricted_content/..",
@@ -173,7 +173,7 @@ class FakeDropbox:
         path = _norm((await req.json())["path"])
         self.log.append(("get_metadata", path))
         if path in self.restricted:
-            return self._restricted()
+            return self._refused()
         if path in self.files:
             return web.json_response(self._file_entry(path))
         if path in self._folders():
@@ -184,7 +184,7 @@ class FakeDropbox:
         path = _norm(json.loads(req.headers["Dropbox-API-Arg"])["path"])
         self.log.append(("download", path))
         if path in self.restricted:
-            return self._restricted()
+            return self._refused()
         if path not in self.files:
             return self._missing()
         data = self.files[path]
