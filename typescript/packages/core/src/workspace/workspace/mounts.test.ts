@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { IndexConfig } from '../../cache/index/config.ts'
 
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type ReadSpec, DEFAULT_READ_TTL, Limit, MountMode, ReadPolicy } from '../../types.ts'
@@ -130,5 +131,31 @@ describe('normalizeMounts', () => {
     expect(normalized.modes['/a']).toBe(MountMode.READ)
     expect(normalized.read['/a']).toEqual({ policy: ReadPolicy.BOUNDED, ttl: 30 })
     expect(normalized.commandLimits['/a']).toEqual({ curl: guard })
+  })
+
+  it('refuses an unknown per-mount index field', () => {
+    expect(() =>
+      normalizeMounts(
+        { '/a': new Mount(new RAMVFS(), { index: { ttll: 5 } as IndexConfig }) },
+        DEFAULT_READ,
+      ),
+    ).toThrow(/"ttll"/)
+  })
+
+  // Both checks would refuse this mount; the first one ends normalization,
+  // and the caller should be told about the typo rather than the bound it
+  // never reached.
+  it('names an unknown per-mount index field before judging the read policy', () => {
+    expect(() =>
+      normalizeMounts(
+        {
+          '/a': new Mount(new RAMVFS(), {
+            index: { ttll: 5 } as IndexConfig,
+            read: { policy: ReadPolicy.BOUNDED, ttl: 0 },
+          }),
+        },
+        DEFAULT_READ,
+      ),
+    ).toThrow(/"ttll"/)
   })
 })

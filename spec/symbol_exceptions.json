@@ -136,6 +136,22 @@
    "typescript_only": {
     "JobCopy": "A JS promise cannot be cancelled, so a TypeScript job races each write it passes on against its kill signal; Python's cancelled job task unwinds at the same await on its own."
    }
+  },
+  "cache/file/config": {
+   "typescript_only": {
+    "CACHE_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
+    "CacheTypeField": "Python checks the type through the model's enum field; a TypeScript config is a plain object, so the code door parses its type with this schema.",
+    "REDIS_CACHE_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
+    "normalizeCacheConfig": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables."
+   }
+  },
+  "cache/index/config": {
+   "typescript_only": {
+    "INDEX_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
+    "IndexTypeField": "Python checks the type through the model's enum field; a TypeScript config is a plain object, so the code door parses its type with this schema.",
+    "REDIS_INDEX_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
+    "normalizeIndexConfig": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables."
+   }
   }
  }
 }

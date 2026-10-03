@@ -17,7 +17,7 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { checkCliVerbs } from '../session/validate.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
-import type { IndexConfig } from '../../cache/index/config.ts'
+import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -218,8 +218,9 @@ export class Workspace {
     }
     // The workspace-level default a mount overrides, as `mode` is.
     this.readDefault = options.read ?? DEFAULT_READ_SPEC
-    const normalized = normalizeMounts(mounts, this.readDefault, options.index)
-    this.indexConfig = options.index
+    const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
+    const normalized = normalizeMounts(mounts, this.readDefault, index)
+    this.indexConfig = index
     this.registry = new MountRegistry(
       normalized.bare,
       options.mode ?? MountMode.READ,
@@ -227,7 +228,7 @@ export class Workspace {
       this.readDefault,
       normalized.read,
       {
-        ...(options.index !== undefined ? { index: options.index } : {}),
+        ...(index !== undefined ? { index } : {}),
         refs: normalized.refs,
         indexes: normalized.indexes,
       },

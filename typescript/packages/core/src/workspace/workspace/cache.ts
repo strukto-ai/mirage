@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CacheType, type CacheConfig, type RedisCacheConfig } from '../../cache/file/config.ts'
+import {
+  CacheType,
+  normalizeCacheConfig,
+  type CacheConfig,
+  type RedisCacheConfig,
+} from '../../cache/file/config.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -42,26 +47,27 @@ export function registerFileCacheStore(type: CacheType, factory: FileCacheFactor
  * including its failure mode: asking for a store whose package has not
  * been loaded names the package rather than silently degrading to RAM.
  *
- * @param cache the cache config; undefined keeps the RAM store sized by
+ * @param config the cache config; undefined keeps the RAM store sized by
  *   `cacheLimit`.
  * @param cacheLimit the size knob used only when no config is given.
  */
 export function buildFileCache(
-  cache: CacheConfig | undefined,
+  config: CacheConfig | undefined,
   cacheLimit: string | number = '512MB',
 ): FileCacheStore {
   // Every CacheConfig field is optional, so a built store is
   // structurally assignable to it and would slip through to the RAM
   // branch below — silently replaced by a cache that never sees a read.
   // Structural typing cannot refuse this; say so instead.
-  if (cache !== undefined && typeof (cache as Partial<FileCache>).get === 'function') {
+  if (config !== undefined && typeof (config as Partial<FileCache>).get === 'function') {
     throw new Error(
       'options.cache takes the config to build a cache from, not a built store; ' +
         'register a factory for its type with registerFileCacheStore(type, ...) ' +
         'and name that type here',
     )
   }
-  const type = cache?.type ?? CacheType.RAM
+  const normalized = config === undefined ? undefined : normalizeCacheConfig(config)
+  const type = normalized?.type ?? CacheType.RAM
   if (type !== CacheType.RAM) {
     const factory = FACTORIES[type]
     if (factory === undefined) {
@@ -70,10 +76,10 @@ export function buildFileCache(
           `(which registers it) or call registerFileCacheStore('${type}', ...)`,
       )
     }
-    return factory(cache as RedisCacheConfig)
+    return factory(normalized as RedisCacheConfig)
   }
   return new RAMFileCacheStore({
-    limit: cache?.limit ?? cacheLimit,
-    maxDrainBytes: cache?.maxDrainBytes ?? null,
+    limit: normalized?.limit ?? cacheLimit,
+    maxDrainBytes: normalized?.maxDrainBytes ?? null,
   })
 }
