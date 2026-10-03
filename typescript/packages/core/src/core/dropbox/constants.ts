@@ -16,3 +16,7 @@ export const DROPBOX_TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'
 export const DROPBOX_API_BASE = 'https://api.dropboxapi.com/2'
 export const DROPBOX_CONTENT_BASE = 'https://content.dropboxapi.com/2'
 export const TOKEN_BUFFER_SECONDS = 300
+// The download response header that names the file's metadata, and the
+// metadata field that is its content token.
+export const RESULT_HEADER = 'Dropbox-API-Result'
+export const CONTENT_HASH = 'content_hash'

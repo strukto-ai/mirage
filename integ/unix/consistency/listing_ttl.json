@@ -134,6 +134,7 @@
         "s3-prefix",
         "hf",
         "hf-prefix",
+        "dropbox",
         "onedrive",
         "sharepoint",
         "sharepoint-prefix",

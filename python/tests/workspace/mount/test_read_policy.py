@@ -22,12 +22,12 @@ from mirage.types import DEFAULT_READ_TTL, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.aliyun.aliyun import AliyunVFS
 from mirage.vfs.backblaze.backblaze import BackblazeVFS
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.box.box import BoxVFS
+from mirage.vfs.box.config import BoxConfig
 from mirage.vfs.ceph.ceph import CephVFS
 from mirage.vfs.dev.dev import DevVFS
 from mirage.vfs.digitalocean.digitalocean import DigitalOceanVFS
 from mirage.vfs.disk.disk import DiskVFS
-from mirage.vfs.dropbox.config import DropboxConfig
-from mirage.vfs.dropbox.dropbox import DropboxVFS
 from mirage.vfs.gcs.gcs import GCSVFS
 from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
@@ -281,14 +281,14 @@ def test_fresh_is_allowed_on_a_listing_cache_without_a_file_cache(
 
 
 def test_fresh_is_refused_on_a_backend_that_caches_but_stamps_nothing():
-    # dropbox reaches the gate -- it caches reads -- but its read record
+    # box reaches the gate -- it caches reads -- but its read record
     # carries no fingerprint, so there is nothing to compare.
-    vfs = DropboxVFS(
-        DropboxConfig(client_id="i", client_secret="s", refresh_token="r")
+    vfs = BoxVFS(
+        BoxConfig(client_id="i", client_secret="s", refresh_token="r")
     )
     assert vfs.caches_reads is True
     with pytest.raises(ValueError) as exc:
-        check_read_capability("/dbx/", vfs, FRESH)
+        check_read_capability("/box/", vfs, FRESH)
     assert "comparable content token" in str(exc.value)
 
 
@@ -413,6 +413,7 @@ REVALIDATABLE = {
     "sharepoint",
     "hf_buckets",
     "github",
+    "dropbox",
 }
 
 FRESH_BY_LISTING = {"disk", "chroma", "qdrant", "airtable", "wandb"}

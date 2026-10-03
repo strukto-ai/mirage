@@ -16,3 +16,7 @@ DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token"
 DROPBOX_API_BASE = "https://api.dropboxapi.com/2"
 DROPBOX_CONTENT_BASE = "https://content.dropboxapi.com/2"
 TOKEN_BUFFER_SECONDS = 300
+# The download response header that names the file's metadata, and the
+# metadata field that is its content token.
+RESULT_HEADER = "Dropbox-API-Result"
+CONTENT_HASH = "content_hash"
