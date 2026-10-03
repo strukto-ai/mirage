@@ -17,7 +17,8 @@ import { underPath } from '../../utils/key_prefix.ts'
 import { KeyLock } from '../lock.ts'
 import {
   LookupStatus,
-  ResourceType,
+  isFileKind,
+  isFolderKind,
   type Evicted,
   type IndexEntry,
   type ListResult,
@@ -160,10 +161,10 @@ export class RAMIndexCacheStore extends IndexCacheStore {
             .filter(
               (key) =>
                 (!rows.has(key) ||
-                  (rows.get(key)?.resourceType === ResourceType.FILE &&
+                  (isFileKind(rows.get(key)?.resourceType) &&
                     (buried.get(key) === true ||
                       this.children.has(key) ||
-                      this.entryMap.get(key)?.resourceType === ResourceType.FOLDER))) &&
+                      isFolderKind(this.entryMap.get(key)?.resourceType)))) &&
                 !excluded.some((prefix) => underPath(key, prefix)),
             )
             .map((key) => this.evict(key, buried.get(key) ?? false, excluded))
@@ -182,8 +183,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private evict(key: string, buriedFolder = false, excluded: readonly string[] = []): Evicted {
     const entry = this.entryMap.get(key)
     this.entryMap.delete(key)
-    const folder =
-      buriedFolder || this.children.has(key) || entry?.resourceType === ResourceType.FOLDER
+    const folder = buriedFolder || this.children.has(key) || isFolderKind(entry?.resourceType)
     if (folder) this.dropPrefix(key, false, excluded)
     return { path: key, folder }
   }
@@ -208,7 +208,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
           child,
           buried.get(child) === true ||
             this.children.has(child) ||
-            this.entryMap.get(child)?.resourceType === ResourceType.FOLDER,
+            isFolderKind(this.entryMap.get(child)?.resourceType),
         )
       }
       this.tombstones.set(
