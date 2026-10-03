@@ -71,6 +71,8 @@ describe('dropbox fingerprint', () => {
     it.each([
       ['unparseable', 'not json'],
       ['not-object', JSON.stringify(['a'])],
+      ['null', 'null'],
+      ['number', '5'],
     ])('warns (%s)', (_id, raw) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
       expect(resultToken(raw)).toBeNull()
