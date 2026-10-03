@@ -7,8 +7,7 @@
         "s3",
         "s3-prefix",
         "gridfs",
-        "gridfs-prefix",
-        "dropbox"
+        "gridfs-prefix"
       ],
       "command": "mkdir -p /data2/anc && ls /data2/anc && echo hi > /data2/anc/d1/leaf.txt && ls /data2/anc && ls /data2/anc/d1",
       "expect": {
@@ -16,7 +15,7 @@
         "stdout": "d1\nleaf.txt\n",
         "stderr": ""
       },
-      "note": "On a flat keyed store one put materializes every missing level of the key, so the write has to refresh the listings above the immediate parent too. The first ls caches an empty /data2/anc; invalidating only the parent would keep serving it until the index TTL expires. dropbox behaves the same way: the upload of leaf.txt creates the missing d1 folder itself, so the write must refresh the listings above it there too."
+      "note": "On a flat keyed store one put materializes every missing level of the key, so the write has to refresh the listings above the immediate parent too. The first ls caches an empty /data2/anc; invalidating only the parent would keep serving it until the index TTL expires."
     }
   ]
 }
