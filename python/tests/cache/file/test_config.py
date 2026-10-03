@@ -42,6 +42,11 @@ def test_redis_cache_config_takes_its_fields():
     assert config.key_prefix == "w1:"
 
 
+def test_redis_cache_config_refuses_the_camel_case_spelling():
+    with pytest.raises(ValidationError, match="keyPrefix"):
+        RedisCacheConfig(key_prefix="a:", keyPrefix="b:")
+
+
 def test_redis_cache_config_refuses_an_unknown_field():
     with pytest.raises(ValidationError, match="key_prefx"):
         RedisCacheConfig(key_prefx="w1:")

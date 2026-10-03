@@ -131,6 +131,11 @@ def test_index_config_refuses_a_redis_field_on_a_default_ram_type():
         IndexConfig(key_prefix="s3:")
 
 
+def test_redis_index_config_refuses_the_camel_case_spelling():
+    with pytest.raises(ValidationError, match="keyPrefix"):
+        RedisIndexConfig(key_prefix="a:", keyPrefix="b:")
+
+
 def test_redis_index_config_refuses_an_unknown_field():
     with pytest.raises(ValidationError, match="urll"):
         RedisIndexConfig(urll="redis://localhost:6379/0")
