@@ -1,0 +1,129 @@
+---
+title: Workspace
+description: Give each agent a live view of its mounts and registered CLI arguments, scoped to its session profile.
+---
+
+A workspace owns mounts, registered CLIs, and sessions. A session chooses a profile and carries its own working directory and shell state. Workspace-level configuration is shared within that workspace; it is not global to other workspaces or the host machine.
+
+## VFS.md and SKILL.md
+
+Both documents are optional. Nothing is added by default. Generate Markdown without a path, or pass an absolute virtual path to expose a live, read-only file there.
+
+- **VFS.md** describes visible mount paths, backend types, effective access modes, and available navigation guidance. It does not enumerate backend files or include credentials. Under restricted profiles it omits backend prose that could advertise hidden paths or commands.
+- **SKILL.md** is one self-contained skill with frontmatter and help for visible registered CLIs: descriptions, subcommands, positional arguments, option value names, choices, defaults, and environment-variable names. A script that parses its own arguments has only its registered description; MIRAGE does not run arbitrary programs to discover help.
+
+A workspace binding is visible to every session that can access its path. Its contents are generated for the **reading session's current profile**. A session binding is visible only to that session. Changing a profile or registering a CLI updates subsequent reads, including reads through an already open FUSE handle.
+
+<Tabs>
+<Tab title="Python">
+```python
+from mirage import MountMode, RAMVFS, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS(), "/private": RAMVFS()},
+    mode=MountMode.WRITE,
+    profiles={"reader": {"paths": {"hide": ["/private"]}}},
+)
+
+# Inside your application's async entry point:
+agent = await ws.session("agent-a", profile="reader")
+
+# Return Markdown without exposing a file.
+vfs_text = await agent.vfs_md()
+skill_text = await ws.skill_md(profile="reader")
+
+# Expose these paths only in agent-a's view.
+await agent.vfs_md("/VFS.md")
+await agent.skill_md("/SKILL.md")
+
+# Or expose a workspace-wide path, rendered separately for each reader.
+await ws.vfs_md("/VFS.md")
+await ws.skill_md("/SKILL.md")
+
+await ws.set_session_profile("agent-a", "reader")
+result = await agent.shell("cat /VFS.md; cat /SKILL.md")
+```
+</Tab>
+<Tab title="TypeScript">
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new RAMVFS(), '/private': new RAMVFS() },
+  {
+    mode: MountMode.WRITE,
+    profiles: { reader: { paths: { hide: ['/private'] } } },
+  },
+)
+const agent = await ws.session('agent-a', { profile: 'reader' })
+
+const vfsText = await agent.vfsMd()
+const skillText = await ws.skillMd(undefined, { profile: 'reader' })
+
+await agent.vfsMd('/VFS.md')
+await agent.skillMd('/SKILL.md')
+
+await ws.vfsMd('/VFS.md')
+await ws.skillMd('/SKILL.md')
+
+await ws.setSessionProfile('agent-a', 'reader')
+const result = await agent.shell('cat /VFS.md; cat /SKILL.md')
+```
+</Tab>
+</Tabs>
+
+The path belongs to MIRAGE. Exposing it does not write to the host or to an underlying disk, S3 bucket, or other backend. Its parent must already exist and an existing file, directory, or symlink is never replaced. Repeating the same binding is idempotent; using the same path for the other kind of document is an error. A workspace binding can promote an existing session binding to workspace scope.
+
+For example, `/SKILL.md` works at the root without a `/skills` mount. `/skills/mirage/SKILL.md` requires that parent directory to exist. MIRAGE does not install host skills or create missing directory trees. These are live bindings for the running workspace; recreate them after loading a snapshot or restarting the workspace. Their generated content is not persisted to backend storage.
+
+The `profile` selector previews Markdown without changing a session or adding a file. To expose a document for a profile, create or select a session with that profile and call its method with a path.
+
+## CLI
+
+The workspace commands call the daemon API. With no `--path` they print Markdown; with a path they expose the file inside MIRAGE.
+
+```bash
+mirage session create WS --id agent-a --profile reader
+mirage workspace vfs-md WS --session agent-a
+mirage workspace vfs-md WS --session agent-a --path /VFS.md
+mirage workspace skill-md WS --session agent-a --path /SKILL.md
+
+# Shared binding; every reader still gets its own profile's content.
+mirage workspace vfs-md WS --path /VFS.md
+mirage workspace skill-md WS --profile reader
+
+mirage session update WS agent-a --profile reader
+# Restore the workspace default when needed:
+mirage session update WS agent-a --default-profile
+mirage shell -w WS -s agent-a -c 'cat /VFS.md'
+```
+
+Inside the virtual terminal, registered CLIs answer `--help`; the default help style also supports `-h` when a CLI has not assigned it another meaning. `man <cli> [subcommand...]` uses the same help renderer. `which <cli>` and `/usr/bin/<cli>` refer to the registered executable. Group options go before the subcommand, as shown on the group's help page. CLIs that imitate another program retain their declared help style and upstream license notices.
+
+## HTTP
+
+Replace `vfs-md` with `skill-md` for the other document.
+
+| Operation | Route | Input |
+| --- | --- | --- |
+| Get workspace Markdown | `GET /v1/workspaces/WS/vfs-md` | Optional `?profile=reader` |
+| Expose a workspace file | `PUT /v1/workspaces/WS/vfs-md` | `{"path":"/VFS.md"}` |
+| Get session Markdown | `GET /v1/workspaces/WS/sessions/agent-a/vfs-md` | Session's current profile |
+| Expose a session file | `PUT /v1/workspaces/WS/sessions/agent-a/vfs-md` | `{"path":"/VFS.md"}` |
+| Change session profile | `PATCH /v1/workspaces/WS/sessions/agent-a` | `{"profile":"reader"}`, or `null` for the workspace default |
+
+Document responses use `text/markdown`. Missing sessions or parents return 404; collisions return 409; invalid paths or profile selectors return 422. Existing session creation accepts a named `profile`. Python's existing create route names the id `session_id`; TypeScript's names it `sessionId`.
+
+## MCP, SSH, and FUSE
+
+MCP exposes the normal `read`, `ls`, and `shell` tools for these files. It does not add document-specific tools. Host MCP clients can create and switch sessions without restarting the server:
+
+```json
+{"name":"session","arguments":{"action":"create","session_id":"agent-a","profile":"reader"}}
+{"name":"read","arguments":{"path":"/VFS.md","session_id":"agent-a"}}
+{"name":"session","arguments":{"action":"update","session_id":"agent-a","profile":"reader"}}
+```
+
+The `session` tool also supports `list` and `close`. Omit `session_id` on a file or shell tool to use the connection's default session. `profile: null` selects the workspace default during an update.
+
+SSH and its MCP subsystem use the session authorized by the login key. They read exposed workspace documents through that session and cannot switch to another session using MCP. FUSE and FSKit use their bound session and ordinary file reads; they do not need additional document APIs.

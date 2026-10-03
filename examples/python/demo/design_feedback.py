@@ -90,7 +90,7 @@ async def main() -> None:
     agent = SandboxAgent(
         name="Mirage design feedback agent",
         model="gpt-5.5",
-        instructions=ws.file_prompt,
+        instructions=(await ws.vfs_md()),
     )
 
     task = (

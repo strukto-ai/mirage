@@ -41,7 +41,7 @@ class Deps:
 
 agent = Agent(
     "openai:gpt-4.1",
-    system_prompt=build_system_prompt(
+    system_prompt=await build_system_prompt(
         mount_info={"/": "In-memory filesystem (read/write)"},
     ),
     deps_type=Deps,

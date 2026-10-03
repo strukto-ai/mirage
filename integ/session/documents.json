@@ -1,0 +1,410 @@
+{
+  "cases": [
+    {
+      "id": "documents_default_absent",
+      "seq": 960000,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "test ! -e /VFS.md && test ! -e /SKILL.md && echo absent",
+      "expect": {
+        "exit": 0,
+        "stdout": "absent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "documents_create_session_view",
+      "seq": 960001,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "grep -c '^# Virtual filesystem' /VFS.md; test ! -e /SKILL.md && echo independent",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\nindependent\n",
+        "stderr": ""
+      },
+      "session": "docs-a",
+      "session_profiles": {
+        "docs-a": {
+          "paths": {
+            "hide": [
+              "/data2"
+            ]
+          }
+        },
+        "docs-b": {}
+      },
+      "documents": [
+        {
+          "kind": "vfs",
+          "path": "/VFS.md",
+          "session": "docs-a"
+        }
+      ]
+    },
+    {
+      "id": "documents_other_session_cannot_discover",
+      "seq": 960002,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "test ! -e /VFS.md && ls / | grep -c '^VFS.md$'",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      },
+      "session": "docs-b"
+    },
+    {
+      "id": "documents_hidden_mount_not_advertised",
+      "seq": 960003,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "grep -c '/data2' /VFS.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      },
+      "session": "docs-a"
+    },
+    {
+      "id": "documents_global_view_renders_for_reader",
+      "seq": 960004,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "grep -c '^## `/data2`' /VFS.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "session": "docs-b",
+      "documents": [
+        {
+          "kind": "vfs",
+          "path": "/VFS.md"
+        }
+      ]
+    },
+    {
+      "id": "documents_same_global_view_still_restricted",
+      "seq": 960005,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "grep -c '/data2' /VFS.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      },
+      "session": "docs-a"
+    },
+    {
+      "id": "documents_live_profile_update",
+      "seq": 960006,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "grep -c '/data2' /VFS.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      },
+      "session": "docs-b",
+      "session_profiles": {
+        "docs-b": {
+          "paths": {
+            "hide": [
+              "/data2"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "documents_independent_skill",
+      "seq": 960007,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "head -n 3 /SKILL.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "---\nname: mirage\ndescription: Work with data and registered commands inside a MIRAGE workspace.\n",
+        "stderr": ""
+      },
+      "session": "docs-a",
+      "documents": [
+        {
+          "kind": "skill",
+          "path": "/SKILL.md",
+          "session": "docs-a"
+        }
+      ]
+    },
+    {
+      "id": "documents_skill_not_shared",
+      "seq": 960008,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "test ! -e /SKILL.md && echo hidden",
+      "expect": {
+        "exit": 0,
+        "stdout": "hidden\n",
+        "stderr": ""
+      },
+      "session": "docs-b"
+    },
+    {
+      "id": "documents_readonly",
+      "seq": 960009,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "if { echo overwrite > /VFS.md; } 2>/dev/null; then echo wrote; else echo readonly; fi; head -n 1 /VFS.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "readonly\n# Virtual filesystem\n",
+        "stderr": ""
+      },
+      "session": "docs-a"
+    },
+    {
+      "id": "documents_backend_directory",
+      "seq": 960010,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "mkdir -p /data/mirage-guides",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "documents_custom_path_on_backend",
+      "seq": 960011,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "head -n 1 /data/mirage-guides/VFS.md; ls /data/mirage-guides",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Virtual filesystem\nVFS.md\n",
+        "stderr": ""
+      },
+      "documents": [
+        {
+          "kind": "vfs",
+          "path": "/data/mirage-guides/VFS.md"
+        }
+      ]
+    },
+    {
+      "id": "documents_stat_matches_read",
+      "seq": 960012,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "test \"$(stat -c %s /VFS.md)\" -eq \"$(cat /VFS.md | wc -c)\" && echo exact",
+      "expect": {
+        "exit": 0,
+        "stdout": "exact\n",
+        "stderr": ""
+      },
+      "session": "docs-a"
+    },
+    {
+      "id": "documents_namespace_copy",
+      "seq": 960013,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "command": "cat /VFS.md > /data/copied-vfs.md; cmp /VFS.md /data/copied-vfs.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "session": "docs-a"
+    },
+    {
+      "id": "documents_skill_cli_profile",
+      "seq": 960014,
+      "targets": [
+        "git-ram",
+        "git-disk"
+      ],
+      "command": "grep -c '^## `git status`' /SKILL.md; grep -c '^## `git add`' /SKILL.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n0\n",
+        "stderr": ""
+      },
+      "session": "docs-cli",
+      "session_profiles": {
+        "docs-cli": {
+          "commands": {
+            "allow": [
+              "git status",
+              "grep",
+              "cat",
+              "man",
+              "which",
+              "type"
+            ]
+          }
+        }
+      },
+      "documents": [
+        {
+          "kind": "skill",
+          "path": "/SKILL.md",
+          "session": "docs-cli"
+        }
+      ]
+    },
+    {
+      "id": "documents_skill_cli_bin_man",
+      "seq": 960015,
+      "targets": [
+        "git-ram",
+        "git-disk"
+      ],
+      "command": "which git; type -t git; man git status | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/usr/bin/git\nfile\ngit status: Show the working tree status\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "documents_argparse_help_man_skill",
+      "seq": 960016,
+      "targets": [
+        "cli-airtable"
+      ],
+      "documents": [
+        {
+          "kind": "skill",
+          "path": "/SKILL.md"
+        }
+      ],
+      "command": "airtable record list --help > /scratch/help.txt; man airtable record list > /scratch/man.txt; cmp /scratch/help.txt /scratch/man.txt; grep -c '^usage: airtable record list' /SKILL.md; which airtable; type -t airtable",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n/usr/bin/airtable\nfile\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "documents_short_help_matches_long",
+      "seq": 960017,
+      "targets": [
+        "cli-airtable"
+      ],
+      "command": "airtable -h > /scratch/short.txt; airtable --help > /scratch/long.txt; cmp /scratch/short.txt /scratch/long.txt && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "documents_subtree_mode",
+      "seq": 960018,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis"
+      ],
+      "session": "docs-a",
+      "session_profiles": {
+        "docs-a": {
+          "paths": {
+            "hide": [
+              "/data2"
+            ],
+            "show": {
+              "/data/mirage-guides": "r"
+            }
+          }
+        }
+      },
+      "command": "grep -F -c -- '- `/data/mirage-guides`: read-only.' /VFS.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

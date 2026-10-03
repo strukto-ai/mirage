@@ -185,7 +185,7 @@ describe('mirage mcp over stdio', () => {
         name: 'shell',
         arguments: { command: 'wc -l /a.txt' },
       })
-      expect(tools).toEqual(['edit', 'glob', 'grep', 'ls', 'read', 'shell', 'write'])
+      expect(tools).toEqual(['edit', 'glob', 'grep', 'ls', 'read', 'session', 'shell', 'write'])
       expect(text(read.content)).toBe('     1\thi\n')
       expect(text(ran.content)).toBe('1 /a.txt\n')
       expect(await listWorkspaces(d)).toHaveLength(1)

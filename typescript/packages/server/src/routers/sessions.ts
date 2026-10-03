@@ -101,4 +101,33 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
       return { sessionId }
     },
   )
+  app.patch<{ Params: WsSessionParams; Body: { profile: string | null } }>(
+    '/v1/workspaces/:wsId/sessions/:sessionId',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['profile'],
+          properties: { profile: { type: ['string', 'null'] } },
+          additionalProperties: false,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!deps.registry.has(req.params.wsId))
+        return reply.status(404).send({ detail: 'workspace not found' })
+      const ws = deps.registry.get(req.params.wsId).runner.ws
+      await ws.ensureSessionsLoaded()
+      if (!ws.listSessions().some((s) => s.sessionId === req.params.sessionId))
+        return reply.status(404).send({ detail: 'session not found' })
+      try {
+        const session = await ws.setSessionProfile(req.params.sessionId, req.body.profile)
+        return { sessionId: session.sessionId, cwd: session.cwd }
+      } catch (error) {
+        return reply
+          .status(422)
+          .send({ detail: error instanceof Error ? error.message : String(error) })
+      }
+    },
+  )
 }

@@ -54,6 +54,7 @@ class Handle:
     path: str
     # Where the path really points once namespace links are followed.
     key: str
+    live: bool = False
     data: bytes | None = None
     write_buf: WriteBuf = field(default_factory=list)
     # A large file reads a chunk at a time rather than hydrating whole.
@@ -445,6 +446,10 @@ class MountCore:
             bytes: the requested slice, possibly short at EOF.
         """
         ctx = self._ctx(fh)
+        if ctx is not None and ctx.live:
+            return self._run(
+                self._ops.read(self.resolve(ctx.path), offset, size)
+            )
         if ctx is not None and ctx.data is not None:
             return ctx.data[offset : offset + size]
         if ctx is not None and ctx.chunked is not None:
@@ -688,7 +693,11 @@ class MountCore:
             FileNotFoundError: no such entry.
         """
         s = self._run(self._ops.stat(self.resolve(path)))
-        ctx = Handle(path=path, key=self.identity(path))
+        ctx = Handle(
+            path=path,
+            key=self.identity(path),
+            live=s.extra.get("mirage.live") is True,
+        )
         if s.type == FileType.DIRECTORY:
             return self._handles.add(ctx)
         if flags & os.O_TRUNC:
@@ -699,6 +708,8 @@ class MountCore:
             # setattr first, which is why dropping it here only showed on a
             # fuse3-only host, where a shorter overwrite kept the old tail.
             self.truncate(path, 0)
+        if ctx.live:
+            return self._handles.add(ctx)
         if s.size is None:
             # API-backed mounts cannot size a file without fetching it, so
             # hydrate now: getattr(fh) and read() then serve real bytes, and

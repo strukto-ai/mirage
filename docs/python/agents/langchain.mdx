@@ -32,7 +32,7 @@ ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 agent = create_deep_agent(
     model=ChatAnthropic(model="claude-sonnet-4-20250514"),
-    system_prompt=build_system_prompt(
+    system_prompt=await build_system_prompt(
         mount_info={"/": "In-memory filesystem (read/write)"},
     ),
     backend=LangchainWorkspace(ws),

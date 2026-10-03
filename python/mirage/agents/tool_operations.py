@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import posixpath
 import shlex
 from collections.abc import Mapping
@@ -353,6 +354,51 @@ class MirageToolOperations:
         Raises:
             KeyError: No tool has the name.
         """
+        if name == "session":
+            await self._ws.ensure_sessions_loaded()
+            action = arguments["action"]
+            if action == "list":
+                return ToolResult(
+                    json.dumps(
+                        [
+                            {
+                                "session_id": s.session_id,
+                                "profile": s.profile,
+                                "cwd": s.cwd,
+                            }
+                            for s in self._ws.list_sessions()
+                        ]
+                    )
+                )
+            sid = arguments.get("session_id")
+            if not isinstance(sid, str) or not sid:
+                raise ValueError("session_id is required")
+            if action == "create":
+                session = self._ws.create_session(
+                    sid, profile=arguments.get("profile")
+                )
+                await self._ws.flush_sessions()
+            elif action == "update":
+                if "profile" not in arguments:
+                    raise ValueError("profile is required for update")
+                session = await self._ws.set_session_profile(
+                    sid, arguments["profile"]
+                )
+            elif action == "close":
+                self._ws.get_session(sid)
+                await self._ws.close_session(sid)
+                return ToolResult(json.dumps({"session_id": sid}))
+            else:
+                raise ValueError("unknown session action")
+            return ToolResult(
+                json.dumps(
+                    {
+                        "session_id": sid,
+                        "profile": session.profile,
+                        "cwd": session.cwd,
+                    }
+                )
+            )
         if name == "shell":
             return await self.shell(arguments["command"])
         if name == "read":

@@ -34,23 +34,23 @@ ram = RAMVFS()
 disk = DiskVFS(root=str(REPO_ROOT))
 ws = Workspace({"/ram": ram, "/disk": disk}, mode=MountMode.READ)
 
-agent = Agent(
-    name="Multimodal Mirage Agent",
-    model="gpt-5.4-mini",
-    instructions=build_system_prompt(
-        mount_info={
-            "/ram": "In-memory filesystem",
-            "/disk": "Read-only repo files",
-        },
-        extra_instructions=(
-            "You will be shown attachments inline. "
-            "Describe what you see in 1-2 sentences."
-        ),
-    ),
-)
-
 
 async def main():
+    agent = Agent(
+        name="Multimodal Mirage Agent",
+        model="gpt-5.4-mini",
+        instructions=await build_system_prompt(
+            mount_info={
+                "/ram": "In-memory filesystem",
+                "/disk": "Read-only repo files",
+            },
+            extra_instructions=(
+                "You will be shown attachments inline. "
+                "Describe what you see in 1-2 sentences."
+            ),
+        ),
+    )
+
     if not os.environ.get("OPENAI_API_KEY"):
         print("OPENAI_API_KEY not set; skipping live agent run.")
         return

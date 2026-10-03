@@ -9,7 +9,7 @@
       "command": "discord --help | head -n 1",
       "expect": {
         "exit": 0,
-        "stdout": "discord: Discord REST API client\n",
+        "stdout": "usage: discord [-h] {send,read,edit,delete,react,search,thread-create,poll,members,server-info} ...\n",
         "stderr": ""
       }
     },

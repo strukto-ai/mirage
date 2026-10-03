@@ -41,18 +41,18 @@ const VERBS = {
 
 const WRITES = new Set(['record create', 'record update', 'record delete', 'comment add'])
 
-const HELP = `airtable: Airtable Web API client
+const HELP = `usage: airtable [-h] {base,table,record,comment} ...
 
-Usage: airtable [flags] <command> [<args>]
+Airtable Web API client
 
-Commands:
+commands:
   base     Read bases
-  comment  Read and add record comments
-  record   Read and write records
   table    Read table schemas
+  record   Read and write records
+  comment  Read and add record comments
 
-Flags:
-  --help  Show this help and exit
+options:
+  -h, --help  Show this help and exit
 `
 
 function leaf(...path: string[]): CLISpec {

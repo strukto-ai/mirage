@@ -101,7 +101,7 @@ import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { explainLine } from '../node/explain.ts'
-import { buildFilePrompt } from '../file_prompt.ts'
+import { Documents } from '../documentation/documents.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
 import { abortable, hasAborted, makeAbortError } from '../abort.ts'
 import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
@@ -166,6 +166,7 @@ export class Workspace {
   readonly observer: Observer
   readonly vfs: Ops
   private closed = false
+  private readonly documents: Documents
   private readonly lineLock = new KeyLock()
   private readonly closers: (() => Promise<void>)[] = []
   private closing: Promise<void> | null = null
@@ -448,6 +449,16 @@ export class Workspace {
         return mount === null ? null : { prefix: mount.prefix, kind: mount.vfs.name }
       },
       { bind: (sessionId, run) => this.bindSession(sessionId, run) },
+    )
+    this.documents = new Documents(
+      this.registry,
+      this.opsRegistry,
+      this.vfs,
+      this.sessionManager,
+      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.opSession(),
+      (name) => compileProfile(this.baseProfile(name), name),
+      () => this.ensureSessionsLoaded(),
+      (path) => this.unmount(path),
     )
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
@@ -1003,6 +1014,7 @@ export class Workspace {
     // that did close takes its jobs with it, so a later session reusing
     // the id inherits nothing.
     await this.sessionManager.close(sessionId)
+    await this.documents.releaseSession(sessionId)
     await this.jobTable.closeSession(sessionId)
   }
 
@@ -1011,7 +1023,10 @@ export class Workspace {
       .map((s) => s.sessionId)
       .filter((id) => id !== this.defaultSessionId)
     await this.sessionManager.closeAll()
-    for (const id of closed) await this.jobTable.closeSession(id)
+    for (const id of closed) {
+      await this.documents.releaseSession(id)
+      await this.jobTable.closeSession(id)
+    }
   }
 
   /**
@@ -1173,6 +1188,7 @@ export class Workspace {
       },
       prefix,
     )
+    this.documents.views.delete(prefix.replace(/\/+$/, '') || '/')
   }
 
   /**
@@ -1221,8 +1237,20 @@ export class Workspace {
     return this.vfs.cacheBytes
   }
 
-  get filePrompt(): string {
-    return buildFilePrompt(this.registry.allMounts())
+  /** Render VFS Markdown, optionally exposing a live, profile-aware workspace file. */
+  vfsMd(
+    path?: string | PathSpec,
+    options: { profile?: string | undefined; sessionId?: string | undefined } = {},
+  ): Promise<string> {
+    return this.documents.get('vfs', path, options.profile, options.sessionId)
+  }
+
+  /** Render a self-contained CLI skill, optionally exposing a live workspace file. */
+  skillMd(
+    path?: string | PathSpec,
+    options: { profile?: string | undefined; sessionId?: string | undefined } = {},
+  ): Promise<string> {
+    return this.documents.get('skill', path, options.profile, options.sessionId)
   }
 
   /**
@@ -1560,7 +1588,10 @@ export class Workspace {
    * console reports and keeps going); only a missing/incapable
    * runtime throws.
    */
-  async executePythonRepl(code: string, options: { sessionId?: string } = {}): Promise<EvalResult> {
+  async executePythonRepl(
+    code: string,
+    options: { sessionId?: string | undefined } = {},
+  ): Promise<EvalResult> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const sessionId = options.sessionId ?? this.sessionManager.defaultId
     const bound = this.runtimeWorld.bindings.python3

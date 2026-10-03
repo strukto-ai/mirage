@@ -26,6 +26,8 @@ import {
   LS_INPUT,
   READ_DESCRIPTION,
   READ_INPUT,
+  SESSION_DESCRIPTION,
+  SESSION_INPUT,
   SHELL_DESCRIPTION,
   SHELL_INPUT,
   WRITE_DESCRIPTION,
@@ -44,7 +46,21 @@ export interface MirageMcpServerOptions extends MirageToolOperationsOptions {
    * when absent. The HTTP door builds a server per request around one
    * table, so the read a request stamps guards the next request's edit.
    */
+  operationsFor?: (sessionId: string) => Promise<MirageToolOperations>
   operations?: MirageToolOperations
+}
+
+function withSession(schema: { properties: Record<string, unknown> }): JsonSchemaType {
+  return {
+    ...schema,
+    properties: {
+      ...schema.properties,
+      session_id: {
+        type: 'string',
+        description: 'Session to use for this call; omit for the connection default.',
+      },
+    },
+  } as JsonSchemaType
 }
 
 export function createMirageMcpServer(
@@ -52,6 +68,30 @@ export function createMirageMcpServer(
   options: MirageMcpServerOptions = {},
 ): McpServer {
   const operations = options.operations ?? new MirageToolOperations(workspace, options)
+  const sessions = new Map<string, { createdAt: number; operations: MirageToolOperations }>()
+  const call = async (name: string, args: Record<string, unknown>) => {
+    let selected = operations
+    if (name !== 'session' && typeof args.session_id === 'string') {
+      const sid = args.session_id
+      if (options.operationsFor !== undefined) selected = await options.operationsFor(sid)
+      else if (sid !== (options.sessionId ?? workspace.defaultSessionId)) {
+        await workspace.ensureSessionsLoaded()
+        const state = workspace.getSession(sid)
+        let cached = sessions.get(sid)
+        if (cached?.createdAt !== state.createdAt) {
+          cached = {
+            createdAt: state.createdAt,
+            operations: new MirageToolOperations(workspace, { ...options, sessionId: sid }),
+          }
+          sessions.set(sid, cached)
+        }
+        selected = cached.operations
+      }
+      args = { ...args }
+      delete args.session_id
+    }
+    return selected.call(name, args)
+  }
   const server = new McpServer({
     name: options.name ?? 'mirage',
     version: options.version ?? VERSION,
@@ -61,28 +101,28 @@ export function createMirageMcpServer(
     'shell',
     {
       description: SHELL_DESCRIPTION,
-      inputSchema: fromJsonSchema<{ command: string }>(SHELL_INPUT as JsonSchemaType),
+      inputSchema: fromJsonSchema<{ command: string }>(withSession(SHELL_INPUT)),
     },
-    (args) => operations.call('shell', args),
+    (args) => call('shell', args),
   )
   server.registerTool(
     'read',
     {
       description: READ_DESCRIPTION,
       inputSchema: fromJsonSchema<{ path: string; offset?: number; limit?: number }>(
-        READ_INPUT as JsonSchemaType,
+        withSession(READ_INPUT),
       ),
       annotations: { readOnlyHint: true },
     },
-    (args) => operations.call('read', args),
+    (args) => call('read', args),
   )
   server.registerTool(
     'write',
     {
       description: WRITE_DESCRIPTION,
-      inputSchema: fromJsonSchema<{ path: string; content: string }>(WRITE_INPUT as JsonSchemaType),
+      inputSchema: fromJsonSchema<{ path: string; content: string }>(withSession(WRITE_INPUT)),
     },
-    (args) => operations.call('write', args),
+    (args) => call('write', args),
   )
   server.registerTool(
     'edit',
@@ -93,18 +133,18 @@ export function createMirageMcpServer(
         old_string: string
         new_string: string
         replace_all?: boolean
-      }>(EDIT_INPUT as JsonSchemaType),
+      }>(withSession(EDIT_INPUT)),
     },
-    (args) => operations.call('edit', args),
+    (args) => call('edit', args),
   )
   server.registerTool(
     'ls',
     {
       description: LS_DESCRIPTION,
-      inputSchema: fromJsonSchema<{ path: string }>(LS_INPUT as JsonSchemaType),
+      inputSchema: fromJsonSchema<{ path: string }>(withSession(LS_INPUT)),
       annotations: { readOnlyHint: true },
     },
-    (args) => operations.call('ls', args),
+    (args) => call('ls', args),
   )
   server.registerTool(
     'grep',
@@ -120,20 +160,30 @@ export function createMirageMcpServer(
         files_with_matches?: boolean
         count?: boolean
         max_count?: number
-      }>(GREP_INPUT as JsonSchemaType),
+      }>(withSession(GREP_INPUT)),
       annotations: { readOnlyHint: true },
     },
-    (args) => operations.call('grep', args),
+    (args) => call('grep', args),
   )
   server.registerTool(
     'glob',
     {
       description: GLOB_DESCRIPTION,
-      inputSchema: fromJsonSchema<{ pattern: string; path?: string }>(GLOB_INPUT as JsonSchemaType),
+      inputSchema: fromJsonSchema<{ pattern: string; path?: string }>(withSession(GLOB_INPUT)),
       annotations: { readOnlyHint: true },
     },
-    (args) => operations.call('glob', args),
+    (args) => call('glob', args),
   )
 
+  server.registerTool(
+    'session',
+    {
+      description: SESSION_DESCRIPTION,
+      inputSchema: fromJsonSchema<{ action: string; session_id?: string; profile?: string }>(
+        SESSION_INPUT as JsonSchemaType,
+      ),
+    },
+    (args) => call('session', args),
+  )
   return server
 }

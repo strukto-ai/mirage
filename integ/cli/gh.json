@@ -295,7 +295,7 @@
       "command": "gh repo rename --help | head -4",
       "expect": {
         "exit": 0,
-        "stdout": "gh repo rename: Rename a repository\n\nUsage: gh repo rename [flags] <NEW-NAME>\n\n",
+        "stdout": "usage: gh repo rename [-R REPO] [-h] NEW-NAME\n\nRename a repository\n\n",
         "stderr": ""
       }
     },

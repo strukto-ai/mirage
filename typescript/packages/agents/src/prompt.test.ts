@@ -27,18 +27,18 @@ function mkWs(): Workspace {
 }
 
 describe('buildSystemPrompt', () => {
-  it('returns base prompt when no options provided', () => {
-    expect(buildSystemPrompt()).toBe(MIRAGE_SYSTEM_PROMPT)
+  it('returns base prompt when no options provided', async () => {
+    expect(await buildSystemPrompt()).toBe(MIRAGE_SYSTEM_PROMPT)
   })
 
-  it('appends extraInstructions', () => {
-    const out = buildSystemPrompt({ extraInstructions: 'be terse.' })
+  it('appends extraInstructions', async () => {
+    const out = await buildSystemPrompt({ extraInstructions: 'be terse.' })
     expect(out).toContain(MIRAGE_SYSTEM_PROMPT)
     expect(out.endsWith('be terse.')).toBe(true)
   })
 
-  it('formats mountInfo entries', () => {
-    const out = buildSystemPrompt({
+  it('formats mountInfo entries', async () => {
+    const out = await buildSystemPrompt({
       mountInfo: { '/': 'In-memory FS', '/s3': 'AWS S3 bucket' },
     })
     expect(out).toContain('Mounted data sources:')
@@ -46,26 +46,26 @@ describe('buildSystemPrompt', () => {
     expect(out).toContain('- /s3 — AWS S3 bucket')
   })
 
-  it('uses workspace.filePrompt when workspace given', () => {
+  it('uses (await workspace.vfsMd()) when workspace given', async () => {
     const ws = mkWs()
-    const out = buildSystemPrompt({ workspace: ws })
-    expect(out).toContain('Mounted data sources:\n' + ws.filePrompt)
+    const out = await buildSystemPrompt({ workspace: ws })
+    expect(out).toContain('Mounted data sources:\n' + (await ws.vfsMd()))
   })
 
-  it('workspace takes precedence over mountInfo', () => {
+  it('workspace takes precedence over mountInfo', async () => {
     const ws = mkWs()
-    const out = buildSystemPrompt({
+    const out = await buildSystemPrompt({
       workspace: ws,
       mountInfo: { '/foo': 'should not appear' },
     })
     expect(out).not.toContain('/foo')
   })
 
-  it('omits mount header when mountInfo is empty', () => {
-    expect(buildSystemPrompt({ mountInfo: {} })).toBe(MIRAGE_SYSTEM_PROMPT)
+  it('omits mount header when mountInfo is empty', async () => {
+    expect(await buildSystemPrompt({ mountInfo: {} })).toBe(MIRAGE_SYSTEM_PROMPT)
   })
 
-  it('omits empty extraInstructions', () => {
-    expect(buildSystemPrompt({ extraInstructions: '' })).toBe(MIRAGE_SYSTEM_PROMPT)
+  it('omits empty extraInstructions', async () => {
+    expect(await buildSystemPrompt({ extraInstructions: '' })).toBe(MIRAGE_SYSTEM_PROMPT)
   })
 })

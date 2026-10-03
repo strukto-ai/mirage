@@ -114,7 +114,7 @@ async def serve_mcp(
                 cast("anyio.AsyncFile[str]", ChannelWriter(process.stdout)),
             ) as (read_stream, write_stream),
         ):
-            server = McpRelay(upstream).server
+            server = McpRelay(upstream, session_id=session_id).server
             await server.run(
                 read_stream,
                 write_stream,

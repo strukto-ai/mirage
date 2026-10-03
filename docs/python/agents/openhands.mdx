@@ -36,7 +36,7 @@ with MirageWorkspace(workspace=ws, working_dir="/") as mirage_ws:
     agent = Agent(
         llm=llm,
         tools=[Tool(name=tool_name)],
-        system_message=ws.file_prompt,
+        system_message=(await ws.vfs_md()),
     )
     conversation = Conversation(agent=agent, workspace=mirage_ws)
     conversation.send_message("Create /hello.txt with 'hi' and ls /.")

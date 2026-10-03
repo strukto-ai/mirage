@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -60,7 +61,7 @@ def build_workspace() -> Workspace:
     )
 
 
-def main() -> None:
+async def main() -> None:
     ws = build_workspace()
     llm = LLM(
         model=os.getenv("LLM_MODEL", "anthropic/claude-sonnet-4-6"),
@@ -73,7 +74,7 @@ def main() -> None:
         agent = Agent(
             llm=llm,
             tools=[Tool(name=tool_name)],
-            system_message=ws.file_prompt,
+            system_message=(await ws.vfs_md()),
         )
         conversation = Conversation(agent=agent, workspace=mirage_ws)
         conversation.send_message(TASK)
@@ -81,4 +82,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

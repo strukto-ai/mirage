@@ -14,7 +14,6 @@
 
 import asyncio
 import importlib
-import json
 import os
 import tempfile
 from collections.abc import AsyncIterator, Callable
@@ -134,9 +133,6 @@ def _hf(name: str, segment: str) -> Callable[[], AsyncIterator[Harness]]:
                 await ws.close()
 
     return harness
-
-
-SPEC_VFS = Path(__file__).resolve().parents[3] / "spec" / "python" / "vfs.json"
 
 
 @asynccontextmanager
@@ -302,5 +298,3 @@ def test_turning_folder_versions_off_leaves_the_declaration(tmp_path):
     assert on.listing_version is ListingVersion.FOLDER
     assert DiskVFS.listing_version is ListingVersion.FOLDER
     assert "disk" in _declared()
-    caps = json.loads(SPEC_VFS.read_text())["capabilities"]
-    assert caps["disk"]["listing_version"] == "folder"

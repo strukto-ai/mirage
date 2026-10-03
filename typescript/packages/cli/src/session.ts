@@ -112,4 +112,32 @@ export function registerSessionCommands(program: Command): void {
         ),
       )
     })
+  sess
+    .command('update')
+    .argument('<wsId>')
+    .argument('<sessionId>')
+    .option('-p, --profile <name>', "Replace the live session's profile.")
+    .option('--default-profile', 'Use the workspace default profile.')
+    .action(
+      async (
+        wsId: string,
+        sessionId: string,
+        opts: { profile?: string; defaultProfile?: boolean },
+      ) => {
+        if ((opts.profile === undefined) === (opts.defaultProfile !== true)) {
+          throw new Error('choose --profile or --default-profile')
+        }
+        const c = buildClient()
+        await c.ensureRunning({ allowSpawn: false })
+        emit(
+          await handleResponse(
+            await c.request(
+              'PATCH',
+              `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}`,
+              { body: JSON.stringify({ profile: opts.profile ?? null }) },
+            ),
+          ),
+        )
+      },
+    )
 }

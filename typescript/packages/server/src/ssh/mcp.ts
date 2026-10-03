@@ -68,7 +68,7 @@ export async function serveMcp(
         fetch: (input, init) => door.fetch(new Request(input, init)),
       }),
     )
-    const { server } = new McpRelay(upstream)
+    const { server } = new McpRelay(upstream, sessionId)
     await server.connect(new StdioServerTransport(channel, channel))
     await ended
     await server.close()

@@ -497,3 +497,66 @@ def checkout_cmd(
             json=body,
         )
     emit(handle_response(r), human=_format_workspace_detail)
+
+
+def _document_cmd(
+    workspace_id: str,
+    kind: str,
+    path: str | None,
+    session: str | None,
+    profile: str | None,
+) -> None:
+    if profile is not None and (path is not None or session is not None):
+        raise typer.BadParameter("--profile requires no --path or --session")
+    route = f"/v1/workspaces/{quote(workspace_id, safe='')}"
+    if session is not None:
+        route += f"/sessions/{quote(session, safe='')}"
+    route += f"/{kind}-md"
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        if path is None:
+            r = client.request(
+                "GET",
+                route,
+                params={"profile": profile} if profile is not None else {},
+            )
+        else:
+            r = client.request("PUT", route, json={"path": path})
+    if r.is_error:
+        handle_response(r)
+    if path is None:
+        typer.echo(r.text, nl=False)
+
+
+@app.command("vfs-md")
+def vfs_md_cmd(
+    workspace_id: str = typer.Argument(...),
+    path: str | None = typer.Option(
+        None, help="Expose a live file at this workspace path."
+    ),
+    session: str | None = typer.Option(
+        None, help="Limit exposure or generation to this session."
+    ),
+    profile: str | None = typer.Option(
+        None, help="Preview this profile without creating a file."
+    ),
+) -> None:
+    """Generate VFS Markdown, or expose it inside the workspace with --path."""
+    _document_cmd(workspace_id, "vfs", path, session, profile)
+
+
+@app.command("skill-md")
+def skill_md_cmd(
+    workspace_id: str = typer.Argument(...),
+    path: str | None = typer.Option(
+        None, help="Expose a live file at this workspace path."
+    ),
+    session: str | None = typer.Option(
+        None, help="Limit exposure or generation to this session."
+    ),
+    profile: str | None = typer.Option(
+        None, help="Preview this profile without creating a file."
+    ),
+) -> None:
+    """Generate a CLI skill, or expose it inside the workspace with --path."""
+    _document_cmd(workspace_id, "skill", path, session, profile)

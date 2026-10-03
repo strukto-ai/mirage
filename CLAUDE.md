@@ -33,13 +33,13 @@ semantics.
 
 - `scripts/check_layout_parity.py --strict`: module sets of `mirage/<pkg>/`
   against the TypeScript twin; the count must equal the committed baseline.
-  Exceptions live in `spec/layout_exceptions.json` with a reason.
+  Exceptions live in `scripts/parity/layout_exceptions.json` with a reason.
 - `scripts/check_symbol_parity.py --strict`: the top-level names of each
-  module pair, the same ratchet over `spec/symbol_exceptions.json`. A module
+  module pair, the same ratchet over `scripts/parity/symbol_exceptions.json`. A module
   constant uses the short name (`BUILDER`, `PROMPT`, `IO`); a file needing
   several imports them as namespaces (`import * as column`).
-- `scripts/gen_specs.py` and `typescript/scripts/gen-specs.ts` regenerate
-  `spec/`; `scripts/check_spec_parity.py` diffs command specs, VFS registries
+- `scripts/gen_specs.py` and `typescript/scripts/gen-specs.ts` generate temporary parity manifests
+  (`MIRAGE_SPEC_DIR`, default `.cache/spec/`); `scripts/check_spec_parity.py` diffs command specs, VFS registries
   and config fields across the two languages.
 - `scripts/check_barrel_surface.py`: every `core` export has a consumer.
 - `integ/`: one JSON case corpus runs on both hosts against the same targets
@@ -101,7 +101,7 @@ same PR.
   gated against that program (`integ/ntn_conformance.ts`).
 - **Mount configs** are one snake_case block with one door per language,
   `build_vfs` and `buildVfs` (`parseConfigWithSchema`). Field sets are gated
-  by `spec/*/vfs.json` and `integ/config/`.
+  by live VFS manifests and `integ/config/`.
 - **YAML keys**, the `mirage` CLI output, the server API and the agent
   adapters are public. A TypeScript API change gets a changeset.
 - **Handlers** take `(accessor, paths, texts, opts)`. Read flags through a
@@ -204,8 +204,7 @@ touch your own TypeScript mountpoint synchronously.
 `workspace/record/`: keyed-record clients (disk lockfile plus rename, s3
 CAS) that sessions, the node table and metadata import, never the reverse.
 `cache/`: the read-through file cache and the index a readdir fills.
-`watch/`: external changes as mount events. `spec/`: generated specs per
-host. `integ/`: runners, fake services (`server/`), goldens (`truth/`),
+`watch/`: external changes as mount events. `scripts/parity/`: maintained parity baselines; generated manifests stay local. `integ/`: runners, fake services (`server/`), goldens (`truth/`),
 `targets.json`; spawn asynchronously, a fake on the same loop deadlocks a
 sync spawn.
 
@@ -249,5 +248,5 @@ typescript/packages/
   core/          runtime-agnostic twin; no Node-only or browser-only API
   node/ browser/ runtime-specific VFS, commands, wiring, FUSE (node)
   cli/ server/ agents/ dsh/ opencode/
-spec/ integ/ docs/ examples/ scripts/
+integ/ docs/ examples/ scripts/
 ```

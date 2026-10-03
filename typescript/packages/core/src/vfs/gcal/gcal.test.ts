@@ -48,9 +48,9 @@ describe('gcal VFS', () => {
     expect(JSON.parse(text)).toMatchObject({ bucketTimeZone: HK })
   })
 
-  it.each([1, 7, 30])('shows the mount its own tree (%i)', (size) => {
+  it.each([1, 7, 30])('shows the mount its own tree (%i)', async (size) => {
     const vfs = new GCalVFS(gcalConfig({ bucket_days: size }))
-    const text = new Workspace({ '/cal': vfs }).filePrompt
+    const text = await new Workspace({ '/cal': vfs }).vfsMd()
     const [, bucket = '', name = ''] = /\/primary\/([^/]+)\/<eventId>__(\S+)/.exec(text) ?? []
     expect(parseBucket(bucket, size)).not.toBeNull()
     expect(name.startsWith('2026-08-11_')).toBe(size > 1)

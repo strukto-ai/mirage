@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Outcome, Scope } from '@struktoai/mirage-core/policy/index'
-import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { resolveReadSpec } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import type { ReadSpec } from '@struktoai/mirage-node'
@@ -166,6 +166,8 @@ export interface StatCheck {
 }
 
 export interface Case {
+  session_profiles?: Record<string, unknown>
+  documents?: { kind: 'vfs' | 'skill'; path: string; session?: string }[]
   id: string
   seq?: number
   targets: string[]
@@ -866,6 +868,17 @@ export async function runCase(
   checkOut: string | null
   notes: string[]
 }> {
+  for (const [id, raw] of Object.entries(c.session_profiles ?? {})) {
+    const profile = parseSessionProfile(raw, `session ${id}`)
+    if (ws.listSessions().some((session) => session.sessionId === id))
+      await ws.setSessionProfile(id, profile)
+    else ws.createSession(id, { profile })
+  }
+  for (const document of c.documents ?? []) {
+    const options = document.session === undefined ? {} : { sessionId: document.session }
+    if (document.kind === 'vfs') await ws.vfsMd(document.path, options)
+    else await ws.skillMd(document.path, options)
+  }
   if (c.clear_cache === true) {
     // A full clear means the file cache AND every mount's index cache:
     // remote listings live in the mount's index, and a listing

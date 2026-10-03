@@ -29,12 +29,44 @@ import { VERSION } from '@struktoai/mirage-core/version'
 export class McpRelay {
   readonly server: McpServer
 
-  constructor(private readonly upstream: Client) {
+  constructor(
+    private readonly upstream: Client,
+    private readonly sessionId?: string,
+  ) {
     this.server = new McpServer({ name: 'mirage', version: VERSION })
     const inner = this.server.server
     inner.registerCapabilities({ tools: {} })
-    inner.setRequestHandler('tools/list', (request) => this.upstream.listTools(request.params))
-    inner.setRequestHandler('tools/call', (request) => this.upstream.callTool(request.params))
+    inner.setRequestHandler('tools/list', async (request) => {
+      const result = await this.upstream.listTools(request.params)
+      if (this.sessionId !== undefined) {
+        result.tools = result.tools
+          .filter((tool) => tool.name !== 'session')
+          .map((tool) => ({
+            ...tool,
+            inputSchema: {
+              ...tool.inputSchema,
+              properties: Object.fromEntries(
+                Object.entries(tool.inputSchema.properties ?? {}).filter(
+                  ([key]) => key !== 'session_id',
+                ),
+              ),
+            },
+          }))
+      }
+      return result
+    })
+    inner.setRequestHandler('tools/call', (request) => {
+      if (
+        this.sessionId !== undefined &&
+        (request.params.name === 'session' || 'session_id' in (request.params.arguments ?? {}))
+      ) {
+        return Promise.resolve({
+          content: [{ type: 'text' as const, text: 'SSH MCP is bound to its login session' }],
+          isError: true,
+        })
+      }
+      return this.upstream.callTool(request.params)
+    })
   }
 }
 

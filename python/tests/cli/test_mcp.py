@@ -108,7 +108,16 @@ async def test_relays_the_daemons_tools_over_stdio(daemon, tree):
         read = await client.call_tool("read", {"path": "/a.txt"})
         ran = await client.call_tool("shell", {"command": "wc -l /a.txt"})
         listed = httpx.get(f"{daemon['url']}/v1/workspaces").json()
-    assert tools == ["edit", "glob", "grep", "ls", "read", "shell", "write"]
+    assert tools == [
+        "edit",
+        "glob",
+        "grep",
+        "ls",
+        "read",
+        "session",
+        "shell",
+        "write",
+    ]
     assert read.content[0].text == "     1\thi\n"
     assert ran.content[0].text == "1 /a.txt\n"
     assert len(listed) == 1

@@ -60,6 +60,8 @@ describe('mirage CLI program', () => {
         'load',
         'log',
         'snapshot',
+        'vfs-md',
+        'skill-md',
       ].sort(),
     )
   })

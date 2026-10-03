@@ -180,7 +180,16 @@ export class McpDoor {
     if (current?.session === session) return current
     await this.forget(key)
     const operations = new DaemonToolOperations(entry, this.jobs, sessionId)
-    const handler = createMcpHandler(() => createMirageMcpServer(ws, { operations }))
+    const handler = createMcpHandler(() =>
+      createMirageMcpServer(ws, {
+        operations,
+        operationsFor: async (sid) => {
+          const selected = await this.tools(workspaceId, sid)
+          if (typeof selected === 'string') throw new Error(selected)
+          return selected
+        },
+      }),
+    )
     const served = { entry, session, operations, handler }
     this.served.set(key, served)
     return served

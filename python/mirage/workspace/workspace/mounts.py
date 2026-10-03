@@ -285,7 +285,7 @@ async def unmount(
         raise ValueError(f"cannot unmount history view: {HISTORY_PREFIX!r}")
     if norm == BIN_PREFIX + "/":
         raise ValueError(f"cannot unmount program view: {BIN_PREFIX!r}")
-    entry = registry.try_mount_for_prefix(prefix)
+    entry = registry.try_mount_for_prefix(prefix, include_hidden=True)
     if entry is None:
         raise ValueError(f"no mount at prefix: {norm!r}")
     if entry.retiring:
@@ -295,7 +295,10 @@ async def unmount(
         await clear_mount_cache(registry.file_cache, norm, [entry.index_store])
         if is_shutting_down():
             raise RuntimeError("Workspace is closed")
-        if registry.try_mount_for_prefix(prefix) is not entry:
+        if (
+            registry.try_mount_for_prefix(prefix, include_hidden=True)
+            is not entry
+        ):
             raise ValueError(f"mount changed while unmounting: {prefix!r}")
         removed = registry.unmount(prefix)
     except BaseException:

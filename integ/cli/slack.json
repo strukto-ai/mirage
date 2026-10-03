@@ -7,7 +7,7 @@
       "command": "slack --help | head -n 1",
       "expect": {
         "exit": 0,
-        "stdout": "slack: Slack Web API client\n",
+        "stdout": "usage: slack [-h] {send-message,read-messages,react,reactions,pin-message,unpin-message,list-pins,member-info,list-members,emoji-list,search} ...\n",
         "stderr": ""
       }
     },
@@ -234,9 +234,7 @@
     {
       "id": "slack_search_bare_channel_scope",
       "seq": 9901223,
-      "targets": [
-        "cli-slack"
-      ],
+      "targets": ["cli-slack"],
       "command": "slack search --query 'deploying in:engineering' | jq -r '.messages.total'",
       "expect": {
         "exit": 0,
@@ -247,9 +245,7 @@
     {
       "id": "slack_search_hash_channel_scope",
       "seq": 9901224,
-      "targets": [
-        "cli-slack"
-      ],
+      "targets": ["cli-slack"],
       "command": "slack search --query 'deploying in:#engineering' | jq -r '.messages.total'",
       "expect": {
         "exit": 0,

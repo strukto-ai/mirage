@@ -621,6 +621,16 @@ async def run_case(
         for the case's ``check`` (None when it declares none), and any
         notes on where the dry run disagreed with the run.
     """
+    for session_id, profile in case.get("session_profiles", {}).items():
+        if any(
+            session.session_id == session_id for session in ws.list_sessions()
+        ):
+            await ws.set_session_profile(session_id, profile)
+        else:
+            ws.create_session(session_id, profile=profile)
+    for document in case.get("documents", []):
+        method = ws.vfs_md if document["kind"] == "vfs" else ws.skill_md
+        await method(document["path"], session_id=document.get("session"))
     if case.get("clear_cache"):
         # A full clear means the file cache AND every mount's index
         # cache: remote listings live in the mount's index, and a

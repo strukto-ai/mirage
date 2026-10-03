@@ -115,3 +115,28 @@ def delete_cmd(
         sid = quote(session_id, safe="")
         r = client.request("DELETE", f"/v1/workspaces/{wid}/sessions/{sid}")
     emit(handle_response(r))
+
+
+@app.command("update")
+def update_cmd(
+    workspace_id: str = typer.Argument(...),
+    session_id: str = typer.Argument(...),
+    profile: str | None = typer.Option(
+        None, "--profile", "-p", help="Replace the live session's profile."
+    ),
+    default_profile: bool = typer.Option(
+        False, "--default-profile", help="Use the workspace default profile."
+    ),
+) -> None:
+    if (profile is None) == (not default_profile):
+        raise typer.BadParameter("choose --profile or --default-profile")
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        wid = quote(workspace_id, safe="")
+        sid = quote(session_id, safe="")
+        r = client.request(
+            "PATCH",
+            f"/v1/workspaces/{wid}/sessions/{sid}",
+            json={"profile": profile},
+        )
+    emit(handle_response(r))

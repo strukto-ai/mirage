@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from mirage.policy.errors import PolicyError
 
@@ -96,3 +96,29 @@ async def delete_session(
         raise HTTPException(status_code=404, detail="session not found")
     await entry.runner.call(entry.runner.ws.close_session(session_id))
     return DeleteSessionResponse(session_id=session_id)
+
+
+class UpdateSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str | None
+
+
+@router.patch("/{session_id}", response_model=SessionResponse)
+async def update_session(
+    workspace_id: str,
+    session_id: str,
+    req: UpdateSessionRequest,
+    request: Request,
+) -> SessionResponse:
+    entry = _require_entry(request, workspace_id)
+    await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
+    try:
+        sess = await entry.runner.call(
+            entry.runner.ws.set_session_profile(session_id, req.profile)
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "session not found") from exc
+    except (ValueError, PolicyError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return SessionResponse(session_id=sess.session_id, cwd=sess.cwd)

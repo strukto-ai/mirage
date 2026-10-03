@@ -24,6 +24,7 @@ from mcp.types import (
     CallToolResult,
     ListToolsResult,
     PaginatedRequestParams,
+    TextContent,
 )
 
 from mirage import __version__
@@ -41,8 +42,11 @@ class McpRelay:
         upstream (Client): an MCP client connected to the endpoint.
     """
 
-    def __init__(self, upstream: Client) -> None:
+    def __init__(
+        self, upstream: Client, session_id: str | None = None
+    ) -> None:
         self._upstream = upstream
+        self._session_id = session_id
         self.server: Server[dict[str, Any]] = Server(
             "mirage",
             version=__version__,
@@ -66,7 +70,23 @@ class McpRelay:
             ListToolsResult: the endpoint's answer.
         """
         cursor = params.cursor if params is not None else None
-        return await self._upstream.list_tools(cursor=cursor)
+        result = await self._upstream.list_tools(cursor=cursor)
+        if self._session_id is not None:
+            result.tools = [
+                tool for tool in result.tools if tool.name != "session"
+            ]
+            for tool in result.tools:
+                tool.input_schema = {
+                    **tool.input_schema,
+                    "properties": {
+                        k: v
+                        for k, v in tool.input_schema.get(
+                            "properties", {}
+                        ).items()
+                        if k != "session_id"
+                    },
+                }
+        return result
 
     async def call_tool(
         self,
@@ -84,6 +104,19 @@ class McpRelay:
             CallToolResult: the endpoint's answer; its protocol errors
                 propagate as this server's.
         """
+        if self._session_id is not None and (
+            params.name == "session"
+            or "session_id" in (params.arguments or {})
+        ):
+            return CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text="SSH MCP is bound to its login session",
+                    )
+                ],
+                is_error=True,
+            )
         return await self._upstream.call_tool(
             params.name, params.arguments or {}
         )

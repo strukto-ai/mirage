@@ -32,7 +32,7 @@ const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 const agent = new Agent({
   id: 'mirage-ram-agent',
   name: 'Mirage RAM Agent',
-  instructions: buildSystemPrompt({
+  instructions: await buildSystemPrompt({
     mountInfo: { '/': 'In-memory filesystem (read/write)' },
   }),
   model: 'openai/gpt-5.4-mini',

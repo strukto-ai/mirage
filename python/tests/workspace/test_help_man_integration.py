@@ -14,6 +14,8 @@
 
 import asyncio
 
+import pytest
+
 from mirage.commands.cli.types import CLISpec
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -196,7 +198,7 @@ def test_installed_cli_is_discoverable_from_the_shell():
     assert _out(_exec(ws, "type -t linear")) == "file\n"
     assert _out(_exec(ws, "which linear")) == "/usr/bin/linear\n"
     assert "command linear" in _out(_exec(ws, "cat /usr/bin/linear"))
-    assert "Usage: linear" in _out(_exec(ws, "man linear"))
+    assert "usage: linear" in _out(_exec(ws, "man linear"))
     assert "# clis" in _out(_exec(ws, "man"))
 
 
@@ -237,9 +239,10 @@ def test_a_shell_function_shadows_a_cli_and_type_a_shows_both():
     )
 
 
-def test_workspace_file_prompt_mentions_help_and_man():
+@pytest.mark.asyncio
+async def test_workspace_vfs_md_mentions_help_and_man():
     ws = _ws()
-    prompt = ws.file_prompt
+    prompt = await ws.vfs_md()
     assert "--help" in prompt
     assert "man <cmd>" in prompt
     assert "`man`" in prompt

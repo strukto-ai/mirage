@@ -30,7 +30,7 @@ for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 const openAI = configureOpenAIExample(ws, 'gpt-5.5-mini')
 
-const instructions = buildSystemPrompt({
+const instructions = await buildSystemPrompt({
   mountInfo: { '/': 'In-memory filesystem (read/write)' },
   extraInstructions:
     'All file paths start from /. ' +

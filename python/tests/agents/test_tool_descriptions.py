@@ -1,6 +1,6 @@
 from mirage.agents import tool_descriptions as shared
 
-TOOLS = ["SHELL", "READ", "WRITE", "EDIT", "LS", "GREP", "GLOB"]
+TOOLS = ["SHELL", "READ", "WRITE", "EDIT", "LS", "GREP", "GLOB", "SESSION"]
 
 
 def test_every_tool_has_a_description_and_an_input_schema():
