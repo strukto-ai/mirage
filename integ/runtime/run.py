@@ -15,8 +15,9 @@
 import sys
 from pathlib import Path
 
+_RUNTIME_DIR = str(Path(__file__).parent)
 _INTEG_DIR = str(Path(__file__).parent.parent)
-sys.path[:] = [p for p in sys.path if p not in (_INTEG_DIR, "")]
+sys.path[:] = [p for p in sys.path if p not in (_RUNTIME_DIR, _INTEG_DIR, "")]
 
 import asyncio  # noqa: E402
 import copy  # noqa: E402
