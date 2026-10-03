@@ -1320,6 +1320,33 @@ def test_a_dropbox_file_that_409s_without_a_miss_keeps_its_overlay():
     assert mode == b"600\n"
 
 
+def test_a_dropbox_file_deleted_outside_drops_its_overlay():
+    # The twin of the case above: a real not_found 409 is a miss, so the
+    # probe calls the file gone and drops its overlay. Kept, chmod's 600
+    # would carry over to a file re-created at the path.
+    dropbox = FakeDropbox(files={"/d/a.txt": SEED})
+    with serve_dropbox(dropbox):
+        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
+
+        async def run():
+            ws = _fresh_workspace(vfs)
+            try:
+                await _line(ws, "cat /m/d/a.txt")
+                await _line(ws, "chmod 600 /m/d/a.txt")
+                del dropbox.files["/d/a.txt"]
+                result = await ws.shell("cat /m/d/a.txt")
+                err = await result.stderr_str()
+                dropbox.write("/d/a.txt", SEED)
+                mode = await _line(ws, "stat -c %a /m/d/a.txt")
+                return result.exit_code, err, mode
+            finally:
+                await ws.close()
+
+        code, err, mode = asyncio.run(run())
+    assert (code, err) == (1, "cat: /m/d/a.txt: No such file or directory\n")
+    assert mode == b"644\n"
+
+
 @pytest.fixture()
 def moto_endpoint() -> Iterator[str]:
     server = ThreadedMotoServer(ip_address="127.0.0.1", port=0, verbose=False)

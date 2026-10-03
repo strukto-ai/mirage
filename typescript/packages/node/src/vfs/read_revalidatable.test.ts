@@ -1439,6 +1439,30 @@ describe('the read-token contract', () => {
     }
   })
 
+  // The twin of the case above: a real not_found 409 is a miss, so the probe
+  // calls the file gone and drops its overlay. Kept, chmod's 600 would carry
+  // over to a file re-created at the path.
+  it('a dropbox file deleted outside drops its overlay', async () => {
+    const dropbox = new InlineDropbox({ '/d/a.txt': SEED })
+    vi.stubGlobal('fetch', dropbox.fetch)
+    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
+    const ws = freshWorkspace(vfs)
+    try {
+      await line(ws, 'cat /m/d/a.txt')
+      await line(ws, 'chmod 600 /m/d/a.txt')
+      dropbox.files.delete('/d/a.txt')
+      const result = await ws.shell('cat /m/d/a.txt')
+      dropbox.write('/d/a.txt', SEED)
+      expect([result.exitCode, new TextDecoder().decode(result.stderr)]).toEqual([
+        1,
+        'cat: /m/d/a.txt: No such file or directory\n',
+      ])
+      expect(new TextDecoder().decode(await line(ws, 'stat -c %a /m/d/a.txt'))).toBe('644\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a dropbox same-size rewrite is refetched on content_hash', async () => {
     // The real service repeated server_modified across same-size writes
     // (probed 2026-10-02) while content_hash moved on every one. A token

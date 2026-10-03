@@ -21,15 +21,18 @@ from aioresponses import aioresponses
 from yarl import URL
 
 from mirage.core.dropbox.client import (
+    DropboxApiError,
     DropboxTokenManager,
     _token_url,
     dropbox_download,
     dropbox_download_stream,
+    dropbox_rpc,
     summary_of,
 )
 from mirage.core.dropbox.constants import (
     DROPBOX_API_BASE,
     DROPBOX_CONTENT_BASE,
+    MISS_SUMMARIES,
 )
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.dropbox.config import DropboxConfig
@@ -234,3 +237,27 @@ def test_a_body_without_a_string_summary_is_empty(text):
     # A 409 body without a string error_summary is no verdict: the summary
     # is "", so no caller reads it as a miss or trips on a non-string.
     assert summary_of(text) == ""
+
+
+@pytest.mark.asyncio
+async def test_a_409_keeps_its_summary_for_the_miss_check():
+    # The point stat tells a miss from a refusal by this summary alone, so
+    # a 409 body's error_summary has to reach DropboxApiError intact.
+    tm = DropboxTokenManager(make_config())
+    url = f"{DROPBOX_API_BASE}/files/get_metadata"
+    with patch(
+        "mirage.core.dropbox.client.dropbox_auth_headers",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        with aioresponses() as m:
+            m.post(
+                url,
+                status=409,
+                payload={"error_summary": "path/not_found/.."},
+            )
+            with pytest.raises(DropboxApiError) as excinfo:
+                await dropbox_rpc(tm, "/files/get_metadata", {"path": "/x"})
+        await tm.pool.close()
+    assert excinfo.value.summary == "path/not_found/.."
+    assert excinfo.value.summary.startswith(MISS_SUMMARIES)
