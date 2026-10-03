@@ -1292,6 +1292,34 @@ def test_a_dropbox_name_past_latin1_is_stamped_and_read_fresh():
     assert dropbox.count("download") == 1
 
 
+def test_a_dropbox_file_that_409s_without_a_miss_keeps_its_overlay():
+    # A fresh probe that hears a 409 other than not_found cannot verify
+    # the copy: it reads cold, which fails, but never calls the file gone
+    # and drops its overlay. Read as gone, chmod's 600 would be lost.
+    dropbox = FakeDropbox(files={"/d/a.txt": SEED})
+    with serve_dropbox(dropbox):
+        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
+
+        async def run():
+            ws = _fresh_workspace(vfs)
+            try:
+                await _line(ws, "cat /m/d/a.txt")
+                await _line(ws, "chmod 600 /m/d/a.txt")
+                dropbox.restricted.add("/d/a.txt")
+                result = await ws.shell("cat /m/d/a.txt")
+                err = await result.stderr_str()
+                dropbox.restricted.discard("/d/a.txt")
+                mode = await _line(ws, "stat -c %a /m/d/a.txt")
+                return result.exit_code, err, mode
+            finally:
+                await ws.close()
+
+        code, err, mode = asyncio.run(run())
+    assert code == 1
+    assert "No such file" not in err
+    assert mode == b"600\n"
+
+
 @pytest.fixture()
 def moto_endpoint() -> Iterator[str]:
     server = ThreadedMotoServer(ip_address="127.0.0.1", port=0, verbose=False)
