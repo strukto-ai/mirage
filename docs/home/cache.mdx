@@ -73,7 +73,7 @@ const ws = new Workspace(
 
 </CodeGroup>
 
-Both configs refuse a field they do not take, in code as in YAML: `CacheConfig(limti="1MB")` raises rather than building the defaults, and so does a Redis-only field (`url`, `key_prefix` / `keyPrefix`) on a RAM config. Python refuses when the config is built; TypeScript, whose options are plain objects, refuses when the `Workspace` is built, and at runtime takes a field under either spelling (`keyPrefix` or `key_prefix`), as its VFS configs do; the TypeScript interfaces declare the camelCase one.
+Both configs refuse a field they do not take, in code as in YAML: `CacheConfig(limti="1MB")` raises rather than building the defaults, and so does a Redis-only field (`url`, `key_prefix` / `keyPrefix`) on a RAM config. Python refuses when the config is built; TypeScript, whose options are plain objects, refuses when the `Workspace` is built, and at runtime takes a field under either spelling (`keyPrefix` or `key_prefix`), as its VFS configs do, but refuses a field given in both; the TypeScript interfaces declare the camelCase one.
 
 ### Index TTL
 
@@ -91,7 +91,7 @@ How long a cached listing lives comes from the first of these that applies:
 | 60 s | Disk, SSH |
 | 0 (listings are not cached) | RAM, Redis, Postgres, MongoDB, LanceDB |
 
-Whichever applies, a listing never outlives the mount's `ttl:`, which is 600 seconds unless the mount sets one. A 24-hour backend TTL therefore takes effect only on a mount whose `ttl:` is raised to match; in YAML a mount's `ttl:` needs a `read:` beside it.
+Whichever applies, each listing write is capped by the mount's `ttl:`, which is 600 seconds unless the mount sets one. Listings already in a shared Redis index keep their stored expiry until rewritten or invalidated, so a workspace or process that starts with a lower `ttl:` can still serve them; an unmount or remount clears the mount's listings. A 24-hour backend TTL therefore takes effect only on a mount whose `ttl:` is raised to match; in YAML a mount's `ttl:` needs a `read:` beside it.
 
 ## Eviction & Limits
 
