@@ -185,7 +185,7 @@
         "stdout": "a.txt\na.txt\nb.txt\na.txt\nb.txt\na\n3\n",
         "stderr": ""
       },
-      "note": "fresh checks the listing too (Task 1.2): the next command re-lists a folder it reads from the cache, so b.txt shows at once instead of after the ttl. Uses the bounded case's fresh-capable targets: dropbox, ssh and box reject fresh. Setup and remaining exclusions match listing_ttl_bounded_new_file_appears."
+      "note": "fresh checks the listing too (Task 1.2): the next command re-lists a folder it reads from the cache, so b.txt shows at once instead of after the ttl. Uses the bounded case's fresh-capable targets: ssh and box reject fresh. Setup and remaining exclusions match listing_ttl_bounded_new_file_appears."
     }
   ]
 }
