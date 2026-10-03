@@ -650,7 +650,10 @@ def _check(
 ) -> list[str]:
     problems = []
     if "exit" in expect and exit_code != expect["exit"]:
-        problems.append(f"exit: expected {expect['exit']}, got {exit_code}")
+        problems.append(
+            f"exit: expected {expect['exit']}, got {exit_code} "
+            f"(stderr {stderr[-300:]!r})"
+        )
     if "stdout" in expect and stdout != expect["stdout"]:
         problems.append(
             f"stdout: expected {expect['stdout']!r}, got {stdout!r}"
