@@ -73,6 +73,10 @@ async def _restricted(_tm, _endpoint, _body):
     raise DropboxApiError("restricted", 409, "path/restricted_content/..")
 
 
+async def _server_error_naming_a_miss(_tm, _endpoint, _body):
+    raise DropboxApiError("relay", 502, "path/not_found/..")
+
+
 async def _not_folder(_tm, _endpoint, _body):
     raise DropboxApiError("nf", 409, "path/not_folder/..")
 
@@ -411,6 +415,20 @@ async def test_stat_scratch_409_that_is_not_a_miss_propagates(
                 scratch,
             )
     assert excinfo.value.summary.startswith("path/restricted_content")
+
+
+@pytest.mark.asyncio
+async def test_stat_scratch_miss_needs_a_409(dropbox_accessor, scratch):
+    # Only a 409 carries Dropbox's verdict; a relay's 5xx whose body happens
+    # to read path/not_found is no evidence the file is gone.
+    with patch(RPC, new=_server_error_naming_a_miss):
+        with pytest.raises(DropboxApiError) as excinfo:
+            await stat(
+                dropbox_accessor,
+                PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+                scratch,
+            )
+    assert excinfo.value.status == 502
 
 
 @pytest.mark.asyncio
