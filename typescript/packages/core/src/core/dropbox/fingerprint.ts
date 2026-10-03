@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexEntry } from '../../cache/index/config.ts'
-import { CONTENT_HASH } from './constants.ts'
+import { CONTENT_HASH, RESULT_HEADER } from './constants.ts'
 
 /**
  * A file's content token: its content_hash, or null. The one rule stat,
@@ -34,14 +34,17 @@ export function entryToken(entry: IndexEntry): string | null {
  * The content token a download's `Dropbox-API-Result` names. The header
  * carries the file's metadata on a full and on a ranged (206) download
  * alike, so a read stamps the token stat answers with no request of its
- * own. A missing or unreadable header is no token.
+ * own. A missing or unreadable header is no token; an unreadable one warns,
+ * since Dropbox always sends JSON there and every fresh read of the file then
+ * goes cold.
  */
 export function resultToken(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined || raw === '') return null
   let result: unknown
   try {
     result = JSON.parse(raw)
-  } catch {
+  } catch (err) {
+    console.warn(`unreadable ${RESULT_HEADER} header: ${String(err)}`)
     return null
   }
   if (typeof result !== 'object' || result === null || Array.isArray(result)) return null

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import logging
 
 import pytest
 
@@ -69,3 +70,17 @@ def test_a_result_header_without_a_content_hash_is_no_token(raw):
     # Never the modified stamp: stat stamps content_hash, so any other kind
     # here would compare unequal forever, or worse, equal by chance.
     assert result_token(raw) is None
+
+
+def test_an_unreadable_result_header_warns(caplog):
+    # Real Dropbox always sends JSON here, so a reply that isn't explains
+    # why every fresh read of the file goes cold.
+    with caplog.at_level(logging.WARNING, logger="mirage.core.dropbox"):
+        assert result_token("not json") is None
+    assert "Dropbox-API-Result" in caplog.text
+
+
+def test_an_absent_result_header_does_not_warn(caplog):
+    with caplog.at_level(logging.WARNING, logger="mirage.core.dropbox"):
+        assert result_token(None) is None
+    assert caplog.text == ""

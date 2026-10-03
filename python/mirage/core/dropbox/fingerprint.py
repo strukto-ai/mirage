@@ -49,7 +49,9 @@ def result_token(raw: str | None) -> str | None:
 
     The header carries the file's metadata on a full and on a ranged (206)
     download alike, so a read stamps the token stat answers with no
-    request of its own. A missing or unreadable header is no token.
+    request of its own. A missing or unreadable header is no token; an
+    unreadable one warns, since Dropbox always sends JSON there and every
+    fresh read of the file then goes cold.
 
     Args:
         raw (str | None): the header's value, or None when absent.
@@ -59,7 +61,7 @@ def result_token(raw: str | None) -> str | None:
     try:
         result = json.loads(raw)
     except ValueError as exc:
-        logger.debug("unreadable %s header: %s", RESULT_HEADER, exc)
+        logger.warning("unreadable %s header: %s", RESULT_HEADER, exc)
         return None
     if not isinstance(result, dict):
         return None

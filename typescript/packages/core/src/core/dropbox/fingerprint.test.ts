@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { CONTENT_HASH } from './constants.ts'
 import { entryToken, resultToken, tokenOf } from './fingerprint.ts'
@@ -59,5 +59,26 @@ describe('dropbox fingerprint', () => {
     ['empty', JSON.stringify({ [CONTENT_HASH]: '' })],
   ] as const)('a result header without a content_hash is no token (%s)', (_id, raw) => {
     expect(resultToken(raw)).toBeNull()
+  })
+
+  describe('an unreadable header', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    // Real Dropbox always sends JSON here, so a reply that isn't explains why
+    // every fresh read of the file goes cold.
+    it('warns', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      expect(resultToken('not json')).toBeNull()
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]?.[0])).toContain('Dropbox-API-Result')
+    })
+
+    it('stays quiet when the header is absent', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      expect(resultToken(null)).toBeNull()
+      expect(warn).not.toHaveBeenCalled()
+    })
   })
 })
