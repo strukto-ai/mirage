@@ -37,9 +37,12 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private readonly versions = new Map<string, string>()
   private readonly lock = new KeyLock()
 
-  constructor(options: { ttl?: number } = {}) {
+  override readonly scratch: boolean
+
+  constructor(options: { ttl?: number; scratch?: boolean } = {}) {
     super()
     this.ttl = options.ttl ?? 600
+    this.scratch = options.scratch ?? false
   }
 
   seed(
