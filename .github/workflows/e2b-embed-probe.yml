@@ -1,0 +1,148 @@
+name: E2B Embed probe
+
+"on":
+  push:
+    branches: [e2b-embed-probe]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      E2B_RUNTIME_COMMIT: 92197909dce5a1bef33e764ae4af76f0732fd7a8
+      HUGEPAGES: "1024"
+      PF_MIN_FREE_GIB: "15"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Host facts
+        run: |
+          echo "kernel $(uname -r), $(nproc) cpus, page $(getconf PAGESIZE)"
+          free -g
+          df -h /
+          ls -l /dev/kvm /dev/net/tun || true
+          sudo modprobe -n -v nbd || echo "no nbd module for $(uname -r)"
+          ldd --version | head -1
+          docker version --format 'docker {{.Server.Version}}'
+          docker compose version
+
+      - name: Open /dev/kvm to the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+
+      - name: Start E2B Embed (background)
+        run: |
+          mkdir -p "$RUNNER_TEMP/e2b"
+          cd "$RUNNER_TEMP/e2b"
+          curl -fsSL --remote-name-all \
+            "https://raw.githubusercontent.com/e2b-dev/runtime/$E2B_RUNTIME_COMMIT/embed/compose/{compose.yaml,.env}"
+          nohup bash -c '
+            start=$(date +%s)
+            docker compose up -d --wait --wait-timeout 1500
+            rc=$?
+            end=$(date +%s)
+            echo "$rc $((end - start))" > up.rc' > up.log 2>&1 &
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: ./.github/actions/setup-uv
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: '24'
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build TypeScript packages
+        working-directory: typescript
+        run: pnpm -r build
+
+      - name: Wait for E2B Embed
+        timeout-minutes: 30
+        run: |
+          cd "$RUNNER_TEMP/e2b"
+          while [ ! -f up.rc ]; do sleep 5; done
+          tail -n 40 up.log
+          read -r rc secs < up.rc
+          echo "docker compose up exited $rc after ${secs}s"
+          free -g
+          df -h /
+          [ "$rc" = 0 ] || exit 1
+          docker compose exec -T ready cat /run/e2b/sdk.env | sed 's/^export //' > sdk.env
+          echo "::add-mask::$(grep '^E2B_API_KEY=' sdk.env | cut -d= -f2-)"
+          cat sdk.env >> "$GITHUB_ENV"
+
+      - name: E2B smoke test
+        run: |
+          cd "$RUNNER_TEMP/e2b"
+          time docker compose --profile test run --rm smoke
+
+      - name: Create a sandbox
+        run: |
+          ./python/.venv/bin/python - <<'EOF'
+          import asyncio
+          import os
+          import time
+
+          from e2b import AsyncSandbox
+
+
+          async def main():
+              start = time.monotonic()
+              sandbox = await AsyncSandbox.create(timeout=1800)
+              print(f"sandbox {sandbox.sandbox_id} in {time.monotonic() - start:.1f}s")
+              with open(os.environ["GITHUB_ENV"], "a") as env:
+                  env.write(f"MIRAGE_INTEG_E2B_SANDBOX={sandbox.sandbox_id}\n")
+
+
+          asyncio.run(main())
+          EOF
+
+      - name: Run the e2b suite (python)
+        if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
+        run: ./python/.venv/bin/python integ/runtime/run.py e2b
+
+      - name: Run the e2b suite (typescript)
+        if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
+        working-directory: integ
+        run: pnpm exec tsx runtime/run.ts e2b
+
+      - name: Run the e2b suite through the CLI and both daemons
+        if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
+        run: |
+          bash integ/runtime/cli.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js" \
+            e2b
+
+      - name: E2B diagnostics
+        if: ${{ failure() }}
+        run: |
+          cd "$RUNNER_TEMP/e2b" || exit 0
+          cat up.log || true
+          docker compose ps -a || true
+          docker compose logs --no-color --tail 60 || true

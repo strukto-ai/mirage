@@ -1,0 +1,264 @@
+{
+  "suite": "e2b",
+  "optional": true,
+  "optional_reason": "Needs a live E2B sandbox: a self-hosted E2B Embed stack (KVM) with MIRAGE_INTEG_E2B_SANDBOX set to a sandbox id and E2B_API_KEY, E2B_API_URL and E2B_SANDBOX_URL pointing the SDK at it.",
+  "requires": [
+    "env:MIRAGE_INTEG_E2B_SANDBOX"
+  ],
+  "cases": [
+    {
+      "id": "echo",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi-from-container",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi-from-container\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "exit_code",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "sh -c 'exit 7'",
+          "expect": {
+            "exit": 7
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "wc -l",
+          "stdin": "a\nb\nc\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_absent_eof",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "timeout 5 wc -c",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_empty_eof",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "timeout 5 wc -c",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          },
+          "stdin": ""
+        }
+      ]
+    },
+    {
+      "id": "quoting",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "printf '%s\\n' \"it's\" 'two  spaces'",
+          "expect": {
+            "exit": 0,
+            "stdout": "it's\ntwo  spaces\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "config_env",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}",
+              "env": {
+                "BOX_MARKER": "from-config"
+              }
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo $BOX_MARKER",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-config\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "line_timeout",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "limits": {
+              "sleep": {
+                "timeout_seconds": 1
+              }
+            }
+          }
+        },
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "*"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "sleep 5",
+          "expect": {
+            "exit": 124
+          }
+        }
+      ]
+    },
+    {
+      "id": "captured_only",
+      "world": {
+        "runtimes": [
+          {
+            "name": "e2b",
+            "captures": [
+              "uname"
+            ],
+            "config": {
+              "sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"
+            }
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "uname",
+          "expect": {
+            "exit": 0,
+            "stdout": "Linux\n"
+          }
+        },
+        {
+          "command": "echo local-vfs",
+          "expect": {
+            "exit": 0,
+            "stdout": "local-vfs\n"
+          }
+        }
+      ]
+    }
+  ]
+}
