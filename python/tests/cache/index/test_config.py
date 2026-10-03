@@ -115,3 +115,41 @@ def test_redis_index_config():
 def test_redis_index_config_is_index_config():
     config = RedisIndexConfig()
     assert isinstance(config, IndexConfig)
+
+
+def test_index_config_takes_ttl():
+    assert IndexConfig(ttl=5).ttl == 5
+
+
+def test_index_config_refuses_an_unknown_field():
+    with pytest.raises(ValidationError, match="ttll"):
+        IndexConfig(ttll=5)
+
+
+def test_index_config_refuses_a_redis_field_on_a_default_ram_type():
+    with pytest.raises(ValidationError, match="key_prefix"):
+        IndexConfig(key_prefix="s3:")
+
+
+def test_redis_index_config_refuses_an_unknown_field():
+    with pytest.raises(ValidationError, match="urll"):
+        RedisIndexConfig(urll="redis://localhost:6379/0")
+
+
+def test_index_config_refuses_an_unknown_type():
+    with pytest.raises(
+        ValidationError, match="Input should be 'ram' or 'redis'"
+    ):
+        IndexConfig(type="redsi")
+
+
+def test_index_config_refuses_a_null_type():
+    with pytest.raises(
+        ValidationError, match="Input should be 'ram' or 'redis'"
+    ):
+        IndexConfig(type=None)
+
+
+def test_index_config_refuses_a_redis_field_on_an_explicit_ram_type():
+    with pytest.raises(ValidationError, match="key_prefix"):
+        IndexConfig(type="ram", key_prefix="s3:")
