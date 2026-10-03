@@ -73,7 +73,9 @@ def test_a_result_header_without_a_content_hash_is_no_token(raw):
 
 
 @pytest.mark.parametrize(
-    "raw", ["not json", json.dumps(["a"])], ids=["unparseable", "not-object"]
+    "raw",
+    ["not json", json.dumps(["a"]), "null", "5"],
+    ids=["unparseable", "not-object", "null", "number"],
 )
 def test_an_unreadable_result_header_warns(raw, caplog):
     # Real Dropbox always sends a JSON object here, so a reply that isn't
