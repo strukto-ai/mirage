@@ -7,7 +7,8 @@
         "s3",
         "s3-prefix",
         "gridfs",
-        "gridfs-prefix"
+        "gridfs-prefix",
+        "dropbox"
       ],
       "command": "mkdir -p /data2/anc && ls /data2/anc && echo hi > /data2/anc/d1/leaf.txt && ls /data2/anc && ls /data2/anc/d1",
       "expect": {

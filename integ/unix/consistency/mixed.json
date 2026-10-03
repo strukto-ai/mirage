@@ -5,7 +5,8 @@
       "seq": 310040,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "dropbox"
       ],
       "read": "fresh",
       "mount_read": {
@@ -64,7 +65,8 @@
       "seq": 310041,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "dropbox"
       ],
       "read": "bounded",
       "mount_read": {
