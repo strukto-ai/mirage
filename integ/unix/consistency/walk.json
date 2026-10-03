@@ -93,7 +93,7 @@
         "stdout": "v1\nv1\n/data2/a.txt:v1\n/data2/b.txt:v1\n",
         "stderr": ""
       },
-      "note": "The control for the `fresh` twin: the walk really does read the warm cache, so under `bounded` it serves the stale copy. Without this, the `fresh` case could pass because the walk never touched the cache at all. It runs on all seven targets where its twin runs on two, because `bounded` is allowed everywhere."
+      "note": "The control for the `fresh` twin: the walk really does read the warm cache, so under `bounded` it serves the stale copy. Without this, the `fresh` case could pass because the walk never touched the cache at all. It runs on all seven targets where its twin runs on three, because `bounded` is allowed everywhere."
     },
     {
       "id": "read_fresh_revalidates_a_glob",
