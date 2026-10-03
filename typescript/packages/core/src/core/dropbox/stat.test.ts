@@ -288,6 +288,34 @@ describe('dropbox stat', () => {
     ).rejects.toMatchObject({ code: 'ENOENT', virtualPath: '/ghost/missing.txt' })
   })
 
+  it('propagates a scratch 409 that is not a miss', async () => {
+    // A restricted file exists: its 409 is no miss, so the fresh probe must
+    // not hear ENOENT and call it gone, dropping its overlay.
+    vi.mocked(client.dropboxRpc).mockImplementation(() =>
+      Promise.reject(new DropboxApiError('restricted', 409, 'path/restricted_content/..')),
+    )
+    await expect(
+      stat(
+        makeAccessor(),
+        new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
+        new RAMIndexCacheStore({ scratch: true }),
+      ),
+    ).rejects.toMatchObject({ status: 409, summary: 'path/restricted_content/..' })
+  })
+
+  it('reads a scratch not_folder 409 as a miss', async () => {
+    vi.mocked(client.dropboxRpc).mockImplementation(() =>
+      Promise.reject(new DropboxApiError('nf', 409, 'path/not_folder/..')),
+    )
+    await expect(
+      stat(
+        makeAccessor(),
+        new PathSpec({ vfsPath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt' }),
+        new RAMIndexCacheStore({ scratch: true }),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('propagates a 5xx from the scratch lookup instead of ENOENT', async () => {
     // A 5xx/429 from the point lookup is not absence: stat must let it
     // surface, never collapse it into a (destructively actionable) false

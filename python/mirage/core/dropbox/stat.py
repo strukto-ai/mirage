@@ -20,10 +20,10 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dropbox.api import get_metadata
 from mirage.core.dropbox.client import DropboxApiError
-from mirage.core.dropbox.constants import CONTENT_HASH
+from mirage.core.dropbox.constants import CONTENT_HASH, MISS_SUMMARIES
 from mirage.core.dropbox.fingerprint import entry_token, token_of
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.core.dropbox.readdir import metadata_or_none, readdir
+from mirage.core.dropbox.readdir import dropbox_path_from_key, readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
@@ -83,7 +83,10 @@ async def _point_stat(
 
     Only a scratch store asks this way, and its callers (the reconcile
     probe, the drift check) treat ENOENT and ENOTDIR alike, so a miss is
-    ENOENT with no further lookup. get_metadata matches case-insensitively
+    ENOENT with no further lookup. Only a not_found or not_folder 409 is a
+    miss: the probe calls ENOENT gone and drops the path's overlay, so a
+    409 for a file that exists (restricted_content, ...) propagates and
+    the probe reads it as unverifiable. get_metadata matches case-insensitively
     where a listing's names are exact, so an answer naming the last
     component in another case is not this path.
 
@@ -92,8 +95,16 @@ async def _point_stat(
         path (PathSpec): the operand.
         key (str): the mount-local key to look up.
     """
-    entry = await metadata_or_none(accessor, key)
-    if entry is None or entry.get("name") != posixpath.basename(key):
+    try:
+        entry = await get_metadata(
+            accessor.token_manager,
+            dropbox_path_from_key(accessor.root_path, key.strip("/")),
+        )
+    except DropboxApiError as exc:
+        if exc.status == 409 and exc.summary.startswith(MISS_SUMMARIES):
+            raise enoent(path.virtual) from exc
+        raise
+    if entry.get("name") != posixpath.basename(key):
         raise enoent(path.virtual)
     return _stat_from_entry(entry)
 
