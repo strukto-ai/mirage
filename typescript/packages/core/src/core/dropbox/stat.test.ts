@@ -303,6 +303,21 @@ describe('dropbox stat', () => {
     ).rejects.toMatchObject({ status: 409, summary: 'path/restricted_content/..' })
   })
 
+  it('needs a 409 before a scratch summary reads as a miss', async () => {
+    // Only a 409 carries Dropbox's verdict; a relay's 5xx whose body happens
+    // to read path/not_found is no evidence the file is gone.
+    vi.mocked(client.dropboxRpc).mockImplementation(() =>
+      Promise.reject(new DropboxApiError('relay', 502, 'path/not_found/..')),
+    )
+    await expect(
+      stat(
+        makeAccessor(),
+        new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
+        new RAMIndexCacheStore({ scratch: true }),
+      ),
+    ).rejects.toMatchObject({ status: 502 })
+  })
+
   it('reads a scratch not_folder 409 as a miss', async () => {
     vi.mocked(client.dropboxRpc).mockImplementation(() =>
       Promise.reject(new DropboxApiError('nf', 409, 'path/not_folder/..')),
