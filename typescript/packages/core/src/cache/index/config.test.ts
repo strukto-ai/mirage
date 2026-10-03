@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ZodError } from 'zod'
+import { errorSummary } from '../../secrets/summary.ts'
 import {
   type IndexConfig,
   IndexDirectorySchema,
@@ -147,4 +148,29 @@ describe('normalizeIndexConfig', () => {
       keyPrefix: 's3:',
     })
   })
+
+  it.each([
+    [{ type: IndexType.REDIS, keyPrefix: 'tenant:', key_prefix: 'default:' }],
+    [{ type: IndexType.REDIS, key_prefix: 'default:', keyPrefix: 'tenant:' }],
+  ])('refuses one field named in both spellings: %j', (config) => {
+    expect(() => normalizeIndexConfig(config as IndexConfig)).toThrow(ZodError)
+    expect(() => normalizeIndexConfig(config as IndexConfig)).toThrow(/name the same field/)
+  })
+
+  it('names an unknown key before a repeated field', () => {
+    const config = { type: IndexType.REDIS, keyPrefix: 'a:', key_prefix: 'b:', urll: 'x' }
+    expect(refusal(() => normalizeIndexConfig(config as IndexConfig))).toBe(
+      'urll: unrecognized_keys',
+    )
+  })
 })
+
+function refusal(run: () => unknown): string {
+  try {
+    run()
+  } catch (err) {
+    if (err instanceof ZodError) return errorSummary(err)
+    throw err
+  }
+  throw new Error('expected a refusal')
+}

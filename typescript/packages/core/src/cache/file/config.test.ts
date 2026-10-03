@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ZodError } from 'zod'
+import { errorSummary } from '../../secrets/summary.ts'
 import { type CacheConfig, CacheType, normalizeCacheConfig } from './config.ts'
 
 describe('normalizeCacheConfig', () => {
@@ -72,4 +73,29 @@ describe('normalizeCacheConfig', () => {
   it('refuses a null cache type rather than building RAM', () => {
     expect(() => normalizeCacheConfig({ type: null } as unknown as CacheConfig)).toThrow(ZodError)
   })
+
+  it.each([[{ maxDrainBytes: 1, max_drain_bytes: 2 }], [{ max_drain_bytes: 2, maxDrainBytes: 1 }]])(
+    'refuses one field named in both spellings: %j',
+    (config) => {
+      expect(() => normalizeCacheConfig(config as CacheConfig)).toThrow(ZodError)
+      expect(() => normalizeCacheConfig(config as CacheConfig)).toThrow(/name the same field/)
+    },
+  )
+
+  it('names an unknown key before a repeated field', () => {
+    const config = { maxDrainBytes: 1, max_drain_bytes: 2, limti: '1MB' }
+    expect(refusal(() => normalizeCacheConfig(config as CacheConfig))).toBe(
+      'limti: unrecognized_keys',
+    )
+  })
 })
+
+function refusal(run: () => unknown): string {
+  try {
+    run()
+  } catch (err) {
+    if (err instanceof ZodError) return errorSummary(err)
+    throw err
+  }
+  throw new Error('expected a refusal')
+}
