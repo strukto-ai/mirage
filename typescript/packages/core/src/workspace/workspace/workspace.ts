@@ -1522,7 +1522,10 @@ export class Workspace {
       parser: () => this.getShellParser(),
       meta: this.meta,
       drift: this.drift,
-      statFn: (p) => this.dispatchInternal('stat', p, [], { index: new RAMIndexCacheStore() }),
+      statFn: (p) =>
+        this.dispatchInternal('stat', p, [], {
+          index: new RAMIndexCacheStore({ scratch: true }),
+        }),
       namespace: this.namespace,
       sessions: this.sessionManager,
       registry: this.registry,
