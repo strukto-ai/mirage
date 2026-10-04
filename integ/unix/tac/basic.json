@@ -101,6 +101,40 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "tac_reads_stdin_without_an_operand",
+      "seq": 16100005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\nc\\n' | tac; printf 'a\\nb' | tac; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "c\nb\na\nba\n\n",
+        "stderr": ""
+      }
     }
   ]
 }

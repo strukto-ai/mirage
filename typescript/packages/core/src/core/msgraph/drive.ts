@@ -25,7 +25,7 @@ import {
 } from '../../observe/context.ts'
 import type { FindOptions } from '../../vfs/base.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { enoent, listingError } from '../../utils/errors.ts'
+import { eexist, enoent, enotdir, listingError } from '../../utils/errors.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { windowFor } from '../../utils/ranges.ts'
@@ -254,10 +254,41 @@ export async function renameReplace(
   }
 }
 
+async function urlItem(
+  config: MsGraphConfigResolved,
+  url: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return await graphGet(config, url)
+  } catch (error) {
+    if (error instanceof GraphError && error.status === 404) return null
+    throw error
+  }
+}
+
+// Where a folder create stands: its own item URL, its parent's, and the
+// path a refusal names.
+export interface FolderTarget {
+  item: string
+  parent: string
+  virtual: string
+}
+
+/**
+ * Create one folder, naming a refusal the way mkdir(2) does.
+ *
+ * mkdir is idempotent on object-store-style backends (matches the s3 core)
+ * and "replace" is unreliable for folders on real Graph, so the create uses
+ * "fail" and a folder already holding the name is success; a file holding it
+ * is EEXIST. Graph answers a create under a missing parent and under a file
+ * alike with 404, so the parent is looked up to tell ENOENT from ENOTDIR.
+ * Both lookups run on a refusal only. Mirrors Python's `create_child_folder`.
+ */
 export async function createChildFolder(
   config: MsGraphConfigResolved,
   parentUrl: string,
   name: string,
+  target: FolderTarget,
 ): Promise<void> {
   try {
     await graphPost(config, parentUrl, {
@@ -266,12 +297,16 @@ export async function createChildFolder(
       '@microsoft.graph.conflictBehavior': 'fail',
     })
   } catch (error) {
-    if (
-      !(error instanceof GraphError) ||
-      (error.status !== 409 && error.code !== 'nameAlreadyExists')
-    ) {
-      throw error
+    if (!(error instanceof GraphError)) throw error
+    if (error.status === 409 || error.code === 'nameAlreadyExists') {
+      const taken = await urlItem(config, target.item)
+      if (taken === null || 'folder' in taken) return
+      throw eexist(target.virtual)
     }
+    if (error.status !== 404) throw error
+    const found = await urlItem(config, target.parent)
+    if (found !== null && !('folder' in found)) throw enotdir(target.virtual)
+    throw enoent(target.virtual)
   }
 }
 

@@ -109,6 +109,37 @@ describe('box write ops', () => {
     expect(vi.mocked(api.createFolder)).toHaveBeenCalledWith(STUB_TM, '100', 'x')
   })
 
+  it.each([
+    ['/data/a.txt/x', 'ENOTDIR'],
+    ['/data/a.txt/x/y', 'ENOTDIR'],
+    ['/data/missing/x', 'ENOENT'],
+  ])('mkdir %s refuses a parent that is not a folder', async (virtual, code) => {
+    vi.mocked(api.createFolder).mockClear()
+    await expect(mkdir(makeAccessor(), spec(virtual))).rejects.toMatchObject({ code })
+    expect(vi.mocked(api.createFolder)).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['/data/a.txt/x/y', 'ENOTDIR'],
+    ['/data/a.txt', 'EEXIST'],
+  ])('mkdir -p %s names the file it stops at', async (virtual, code) => {
+    vi.mocked(api.createFolder).mockClear()
+    await expect(mkdir(makeAccessor(), spec(virtual), true)).rejects.toMatchObject({
+      code,
+      virtualPath: '/data/a.txt',
+    })
+    expect(vi.mocked(api.createFolder)).not.toHaveBeenCalled()
+  })
+
+  it('mkdir of a taken name is EEXIST', async () => {
+    vi.mocked(api.createFolder).mockRejectedValueOnce(
+      new BoxApiError('Box POST /folders -> 409', 409),
+    )
+    await expect(mkdir(makeAccessor(), spec('/data/a.txt'))).rejects.toMatchObject({
+      code: 'EEXIST',
+    })
+  })
+
   it('unlink deletes a file by id', async () => {
     await unlink(makeAccessor(), spec('/data/a.txt'))
     expect(vi.mocked(api.deleteFile)).toHaveBeenCalledWith(STUB_TM, '200')

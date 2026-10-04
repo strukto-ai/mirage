@@ -491,6 +491,38 @@
         "r",
         "b"
       ]
+    },
+    {
+      "id": "cp_rb_backs_up_each_merged_file",
+      "seq": 16100001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r10rb/src /data/r10rb/d/src && printf 'SRC\\n' > /data/r10rb/src/f.txt && printf 'DST\\n' > /data/r10rb/d/src/f.txt && cp -rbv /data/r10rb/src /data/r10rb/d; echo rc=$?; cat /data/r10rb/d/src/f.txt /data/r10rb/d/src/f.txt~; ls -1 /data/r10rb/d/src; rm -r /data/r10rb",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/r10rb/src/f.txt' -> '/data/r10rb/d/src/f.txt' (backup: '/data/r10rb/d/src/f.txt~')\nrc=0\nSRC\nDST\nf.txt\nf.txt~\n",
+        "stderr": ""
+      }
     }
   ]
 }

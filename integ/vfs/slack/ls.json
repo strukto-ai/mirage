@@ -103,6 +103,32 @@
         "stdout": "",
         "stderr": "ls: cannot access '/slack/channels/product-reply__C6/': No such file or directory\n"
       }
+    },
+    {
+      "id": "slack_ls_bare_after_cd_lists_the_channel",
+      "seq": 520030,
+      "targets": [
+        "slack"
+      ],
+      "command": "(cd /slack/channels/general__C1 && ls | head -1)",
+      "expect": {
+        "exit": 0,
+        "stdout": "2025-12-14\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_realpath_normalizes_separators_and_dots",
+      "seq": 520031,
+      "targets": [
+        "slack"
+      ],
+      "command": "realpath /slack//channels///general__C1/ /slack/channels/./general__C1/../general__C1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/general__C1\n/slack/channels/general__C1\n",
+        "stderr": ""
+      }
     }
   ]
 }

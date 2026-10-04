@@ -810,30 +810,37 @@ function transferLine(src: PathSpec, target: PathSpec, backup: PathSpec | null):
 // destination, and an entirely empty tree would copy to nothing. A backend
 // exposing no mkdir (directories are implied by keys) is a no-op. Parents
 // sort before children so a nested tree lands in order.
-// GNU -v lines for a natively copied tree, parents first. GNU `cp -rv`
-// reports directories as well as files, including the source root itself.
-// Deliberate divergence: GNU's sibling order follows readdir, which no backend
-// can reproduce, so entries are sorted lexicographically instead. That keeps
-// every parent ahead of its children (GNU's only load-bearing ordering
-// guarantee) and is stable across backends.
+// GNU -v lines for a tree about to be copied natively, parents first. GNU
+// `cp -rv` reports every file and every directory it creates, including the
+// source root itself; a directory already at the destination is merged into
+// without a line. Read before the copy, so the destination still shows which
+// directories exist. Deliberate divergence: GNU's sibling order follows
+// readdir, which no backend can reproduce, so entries are sorted
+// lexicographically instead. That keeps every parent ahead of its children
+// (GNU's only load-bearing ordering guarantee) and is stable across backends.
 async function treeLines(
   strategy: NativeCopy,
+  stat: StatFn,
   src: PathSpec,
   target: PathSpec,
   srcBase: string,
   dstBase: string,
+  index?: IndexCacheStore,
 ): Promise<string[]> {
-  const dirs = await strategy.find(src, { type: 'd' })
+  const dirs = new Set([srcBase, ...(await strategy.find(src, { type: 'd' }))])
   const files = await strategy.find(src, { type: 'f' })
-  const unique = [...new Set([srcBase, ...dirs, ...files])].sort(compareCodePoints)
-  return unique.map((entryMount) => {
+  const unique = [...new Set([...dirs, ...files])].sort(compareCodePoints)
+  const lines: string[] = []
+  for (const entryMount of unique) {
     const entry = spelledFrom(mountedPath(src, entryMount), src)
     const entryDst = spelledFrom(
       mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
       target,
     )
-    return `'${entry.rawPath}' -> '${entryDst.rawPath}'`
-  })
+    if (dirs.has(entryMount) && (await isDirectory(stat, entryDst, index))) continue
+    lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+  }
+  return lines
 }
 
 // A failed mkdir stops the whole source, mirroring copyEntries and GNU: the
@@ -875,10 +882,6 @@ async function mirrorDirs(
       mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
       target,
     )
-    if (lines !== undefined) {
-      const entry = spelledFrom(mountedPath(src, entryMount), src)
-      lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
-    }
     if (await isDirectory(stat, entryDst, index)) continue
     try {
       await strategy.mkdir(entryDst)
@@ -888,6 +891,10 @@ async function mirrorDirs(
       return false
     }
     writes[entryDst.mountPath] = new Uint8Array()
+    if (lines !== undefined) {
+      const entry = spelledFrom(mountedPath(src, entryMount), src)
+      lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+    }
   }
   return true
 }
@@ -1299,13 +1306,13 @@ export async function cpGeneric(
         continue
       }
       if (strategy.dirCopy !== undefined && !perEntryNative && !intoItself) {
+        if (flags.verbose) {
+          lines.push(...(await treeLines(strategy, stat, src, target, srcBase, dstBase, index)))
+        }
         await strategy.dirCopy(src, target)
         for (const entryMount of await strategy.find(src, { type: 'f' })) {
           const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
           writes[entryDst.mountPath] = new Uint8Array()
-        }
-        if (flags.verbose) {
-          lines.push(...(await treeLines(strategy, src, target, srcBase, dstBase)))
         }
         if (copies !== undefined) {
           await copyTreeLinks(

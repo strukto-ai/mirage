@@ -51,10 +51,10 @@ async function runIconv(
 }
 
 describe('iconv', () => {
-  it('utf-8 to latin-1', async () => {
+  it('utf-8 to latin1', async () => {
     const vfs = new RAMVFS()
     const input = ENC.encode('caf\u00e9\n')
-    const r = await runIconv(vfs, [], { f: 'utf-8', t: 'latin-1' }, input)
+    const r = await runIconv(vfs, [], { f: 'utf-8', t: 'latin1' }, input)
     expect(r.exitCode).toBe(0)
     const expected = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a])
     expect(Array.from(r.out)).toEqual(Array.from(expected))

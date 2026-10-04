@@ -125,6 +125,65 @@ async def test_mkdir_creates_under_parent(root_accessor):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("virtual", "error"),
+    [
+        ("/data/a.txt/x", NotADirectoryError),
+        ("/data/a.txt/x/y", NotADirectoryError),
+        ("/data/missing/x", FileNotFoundError),
+    ],
+)
+async def test_mkdir_refuses_a_parent_that_is_not_a_folder(
+    root_accessor, virtual, error
+):
+    with (
+        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch(
+            "mirage.core.box.mkdir.create_folder", new_callable=AsyncMock
+        ) as cf,
+    ):
+        with pytest.raises(error):
+            await mkdir(root_accessor, _spec(virtual))
+    cf.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("virtual", "error"),
+    [
+        ("/data/a.txt/x/y", NotADirectoryError),
+        ("/data/a.txt", FileExistsError),
+    ],
+)
+async def test_mkdir_parents_names_the_file_it_stops_at(
+    root_accessor, virtual, error
+):
+    with (
+        patch("mirage.core.box.mkdir.list_folder_items", new=_fake_list),
+        patch(
+            "mirage.core.box.mkdir.create_folder", new_callable=AsyncMock
+        ) as cf,
+    ):
+        with pytest.raises(error, match="^/data/a.txt$"):
+            await mkdir(root_accessor, _spec(virtual), parents=True)
+    cf.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mkdir_of_a_taken_name_is_eexist(root_accessor):
+    with (
+        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch(
+            "mirage.core.box.mkdir.create_folder",
+            new_callable=AsyncMock,
+            side_effect=BoxApiError("Box POST /folders -> 409", 409),
+        ),
+    ):
+        with pytest.raises(FileExistsError):
+            await mkdir(root_accessor, _spec("/data/a.txt"))
+
+
+@pytest.mark.asyncio
 async def test_mkdir_parents_creates_each_missing_level(root_accessor):
     created: list = []
 

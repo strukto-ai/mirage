@@ -153,11 +153,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mv /data/mvdirn/nosuch /data/mvdirn/other",
+      "command": "mv /data/mvdirn/nosuch /data/mvdirn/other; echo rc=$?; mv /data/mvdirn/nosuch /data/mvdirn/nosuch; echo rc=$?",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "mv: cannot stat '/data/mvdirn/nosuch': No such file or directory\n"
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "mv: cannot stat '/data/mvdirn/nosuch': No such file or directory\nmv: cannot stat '/data/mvdirn/nosuch': No such file or directory\n"
       }
     },
     {
