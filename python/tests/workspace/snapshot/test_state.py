@@ -127,7 +127,6 @@ async def test_snapshot_preserves_redis_index_with_credential_override(url):
         await ws.close()
 
 
-
 # A mount index declared in YAML rides the same per-mount snapshot key
 # as one declared in code; distinct values per mount, so a restore that
 # flattened every mount to the workspace index would show.
@@ -207,6 +206,7 @@ async def test_a_yaml_mount_index_credential_is_redacted(tmp_path):
         assert args.mount_args["/a/"].index == config
     finally:
         await ws.close()
+
 
 class FakeConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")

@@ -153,9 +153,7 @@ async def test_added_mount_is_judged_on_the_index_it_names(tmp_path):
         await ws.close()
     ws = Workspace({}, index=IndexConfig(ttl=73))
     try:
-        with pytest.raises(
-            ValueError, match="'/d'.*caches reads or listings"
-        ):
+        with pytest.raises(ValueError, match="'/d'.*caches reads or listings"):
             ws.add_mount(
                 "/d",
                 DiskVFS(root=str(tmp_path)),
@@ -208,9 +206,7 @@ async def test_added_alias_shares_the_first_mount_index():
         alias = ws.add_mount("/b", ram, index=IndexConfig(ttl=0))
         assert alias.index_store is first.index_store
         assert alias.index_config == IndexConfig(ttl=37)
-        judged = ws.add_mount(
-            "/c", ram, read=FRESH, index=IndexConfig(ttl=0)
-        )
+        judged = ws.add_mount("/c", ram, read=FRESH, index=IndexConfig(ttl=0))
         assert judged.read.policy is ReadPolicy.FRESH
     finally:
         await ws.close()

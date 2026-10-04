@@ -1380,8 +1380,7 @@ describe('shared acceptance fixture cache and index blocks', () => {
       .map((block) => block.index)
       .filter((index) => index != null)
   const cases = ACCEPTED_FIXTURES.flatMap((fixture) => fixtureCases(fixture)).filter(
-    ({ config }) =>
-      config.cache != null || config.index != null || mountIndexes(config).length > 0,
+    ({ config }) => config.cache != null || config.index != null || mountIndexes(config).length > 0,
   )
 
   it('has a redis cache case, a redis index case and a redis mount index case', () => {
@@ -1402,8 +1401,8 @@ describe('shared acceptance fixture cache and index blocks', () => {
     const { cache, index, mounts } = loadWorkspaceConfig(config)
     if (cache != null) expect(() => normalizeCacheConfig(cache)).not.toThrow()
     if (index != null) expect(() => normalizeIndexConfig(index)).not.toThrow()
-    for (const block of Object.values(mounts)) {
-      if (block.index != null) expect(() => normalizeIndexConfig(block.index!)).not.toThrow()
+    for (const { index: own } of Object.values(mounts)) {
+      if (own != null) expect(() => normalizeIndexConfig(own)).not.toThrow()
     }
   })
 })
@@ -1726,16 +1725,19 @@ describe('mount index block', () => {
   // reason the index block itself gives.
   it.each([
     ['mount index: an unknown key', /unknown mounts\.\/d\.index \(ram\) key `ttll`/],
-    ['mount index: type is the union discriminator, not optional', /`mounts\.\/d\.index` needs a `type`/],
+    [
+      'mount index: type is the union discriminator, not optional',
+      /`mounts\.\/d\.index` needs a `type`/,
+    ],
     ['mount index: camelCase keyPrefix', /unknown mounts\.\/d\.index \(redis\) key `keyPrefix`/],
     ['mount index: a redis key on a ram index', /unknown mounts\.\/d\.index \(ram\) key `url`/],
     ['mount index: a scalar, not a mapping', /`mounts\.\/d\.index` must be a mapping/],
     ['mount index: no such backend', /unknown mounts\.\/d\.index type `postgres`/],
     ['mount block: cache is workspace-only', /unknown mount `\/d` key `cache`/],
   ])('refuses %s for its own reason', (name, pattern) => {
-    const fixture = fixtureCases('rejected').find((c) => c.name === name)
+    const [fixture] = fixtureCases('rejected').filter((c) => c.name === name)
     expect(fixture).toBeDefined()
-    expect(() => loadWorkspaceConfig(fixture!.config)).toThrow(pattern)
+    expect(() => loadWorkspaceConfig(fixture?.config ?? {})).toThrow(pattern)
   })
 
   it('names a bad mount index before the read bound, as pydantic does', () => {
@@ -1826,9 +1828,9 @@ describe('mount index block', () => {
     )
     const wire = checkWorkspaceConfigFile(file)
     const first = loadWorkspaceConfig(wire)
-    expect((wire.mounts as Record<string, { index: Record<string, unknown> }>)['/d']?.index).toEqual(
-      { type: 'redis', key_prefix: 't:' },
-    )
+    expect(
+      (wire.mounts as Record<string, { index: Record<string, unknown> }>)['/d']?.index,
+    ).toEqual({ type: 'redis', key_prefix: 't:' })
     const again = loadWorkspaceConfig(wire)
     for (const cfg of [first, again]) {
       const args = await configToWorkspaceArgs(cfg)
@@ -1899,9 +1901,7 @@ describe('mount index block', () => {
     const ws = new Workspace(args.mounts, args.options)
     try {
       const state = await toStateDict(ws)
-      expect(state.mounts.find((m) => m.prefix === '/a/')?.index_config?.url).toBe(
-        REDACTED_SECRET,
-      )
+      expect(state.mounts.find((m) => m.prefix === '/a/')?.index_config?.url).toBe(REDACTED_SECRET)
       expect(() => buildMountArgs(state)).toThrow(/'\/a\/'.*fresh index credentials/)
     } finally {
       await ws.close()

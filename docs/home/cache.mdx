@@ -79,7 +79,7 @@ Both configs refuse a field they do not take, in code as in YAML: `CacheConfig(l
 
 How long a cached listing lives comes from the first of these that applies:
 
-1. **A per-mount index**, `Mount(vfs, index=IndexConfig(ttl=60))` in Python or `new Mount(vfs, { index: { ttl: 60 } })` in TypeScript. This is code-only: a YAML mount block has no `index` key. A second mount of the same VFS instance shares the first mount's index, so its own `index` is not used.
+1. **A per-mount index**: the mount block's `index:` in YAML ([a mount's own index](/home/yaml#a-mounts-own-index)), `Mount(vfs, index=IndexConfig(ttl=60))` / `ws.add_mount(prefix, vfs, index=...)` in Python, or `new Mount(vfs, { index: { ttl: 60 } })` / `ws.addMount(prefix, vfs, mode, read, vfsRef, index)` in TypeScript. It replaces the workspace index whole, so a RAM mount index under a Redis workspace index keeps that mount's listings in RAM. A second mount of the same VFS instance shares the first mount's index, through every door, so its own `index` is not used.
 2. **The workspace index**, the `index:` block in YAML or the `index` option in code. Its `ttl` applies to every mount without its own index, and is 600 seconds when left out, including on backends whose own TTL is shorter or zero.
 3. **The backend's own `index_ttl`** (`indexTtl` in TypeScript), on a RAM index, when no index is configured at all:
 
@@ -91,6 +91,8 @@ How long a cached listing lives comes from the first of these that applies:
 | 60 s | Disk, SSH |
 | 0 (listings are not cached) | RAM, Redis, Postgres, MongoDB, LanceDB |
 
+Mounts whose Redis index names the same `url` and `key_prefix` share one key space, keyed by virtual path, whether the index is the workspace's or a mount's own. Within one workspace the mount prefixes keep them apart; give each workspace its own `key_prefix`.
+
 Whichever applies, each listing write is capped by the mount's `ttl:`, which is 600 seconds unless the mount sets one. Listings already in a shared Redis index keep their stored expiry until rewritten or invalidated, so a workspace or process that starts with a lower `ttl:` can still serve them; an unmount or remount clears the mount's listings. A 24-hour backend TTL therefore takes effect only on a mount whose `ttl:` is raised to match; in YAML a mount's `ttl:` needs a `read:` beside it.
 
 ## Eviction & Limits
@@ -100,7 +102,7 @@ The two layers are bounded differently:
 | Layer | Holds | Default | Bound | Eviction |
 | --- | --- | --- | --- | --- |
 | **File cache** | object bytes per virtual path | RAM, 512 MB | `cache: {limit}` (`CacheConfig(limit=...)`); without a `cache` config, `cache_limit` (Py) / `cacheLimit` (TS) | LRU on RAM: least-recently-used bytes drop once the total exceeds the limit. On Redis nothing is evicted client-side and the server evicts (below); the limit still caps what each file's background fill buffers when `max_drain_bytes` is unset, and bounds `max_drain_bytes` |
-| **Index cache** | directory listings + `FileStat` metadata | RAM, the backend's `index_ttl` | `index: {ttl}` (`IndexConfig(ttl=...)`), else the backend's `index_ttl` ([Index TTL](#index-ttl)); capped by the mount's `ttl` (seconds) | time-based: listings expire after the TTL, then re-fetch on next access |
+| **Index cache** | directory listings + `FileStat` metadata | RAM, the backend's `index_ttl` | the mount's own `index: {ttl}`, else the workspace `index: {ttl}` (`IndexConfig(ttl=...)`), else the backend's `index_ttl` ([Index TTL](#index-ttl)); capped by the mount's `ttl` (seconds) | time-based: listings expire after the TTL, then re-fetch on next access |
 
 Raising the file limit keeps more bytes warm at the cost of memory; lengthening the index TTL reduces API walks at the cost of staleness, up to the mount's `ttl`.
 

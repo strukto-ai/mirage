@@ -1441,7 +1441,8 @@ async def test_a_mount_index_builds_the_store_its_mount_runs(tmp_path):
     """Through the file door, down to the store each mount was given:
     mount > workspace > the backend's own index_ttl."""
     redis_index = (
-        f"{{type: redis, ttl: 41, url: '{UNREACHABLE_REDIS}', key_prefix: 't:'}}"
+        f"{{type: redis, ttl: 41, url: '{UNREACHABLE_REDIS}', "
+        "key_prefix: 't:'}"
     )
     cfg_file = tmp_path / "mirage.yaml"
     cfg_file.write_text(f"""
