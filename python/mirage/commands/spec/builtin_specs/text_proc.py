@@ -138,6 +138,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(
                 short="-s",
+                long="--separator",
                 type="str",
                 description=(
                     "Use the given string as separator between numbers."
@@ -145,10 +146,12 @@ SPECS: dict[str, CommandSpec] = {
             ),
             Option(
                 short="-w",
+                long="--equal-width",
                 description="Pad numbers with zeros to equal width.",
             ),
             Option(
                 short="-f",
+                long="--format",
                 type="str",
                 description=(
                     "Format each number with a printf-style format string."
@@ -160,6 +163,11 @@ SPECS: dict[str, CommandSpec] = {
             Operand(type="str"),
             Operand(type="str"),
         ),
+        # seq's getopt string starts with `+`, so its first operand ends
+        # the options: `seq 1 -w 3` reads -w as LAST and refuses it as a
+        # number (coreutils 9.7). A negative number does the same, which
+        # NEGATIVE_NUMBER_OPERANDS covers.
+        rest=Operand(type="str", remainder=True),
     ),
     "split": CommandSpec(
         options=(

@@ -19,6 +19,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from mirage.commands.builtin.utils.strtod import STRTOD, strtod_double
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
@@ -53,15 +54,6 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 _SYNOPSIS = "timeout [OPTION] DURATION COMMAND [ARG]..."
-
-_FLOAT = re.compile(
-    r"[ \t\n\v\f\r]*([+-]?)("
-    r"0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)"
-    r"(?:[pP][+-]?[0-9]+)?"
-    r"|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
-    r"|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?"
-    r"|[nN][aA][nN](?:\([0-9A-Za-z_]*\))?)"
-)
 
 _LONG = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
 
@@ -114,24 +106,13 @@ def parse_duration(raw: str) -> float | None:
     Args:
         raw (str): duration operand as typed.
     """
-    match = _FLOAT.match(raw)
+    match = STRTOD.match(raw)
     if match is None:
         return None
-    sign, body = match.groups()
     suffix = raw[match.end() :]
     if suffix not in _UNIT_SECONDS:
         return None
-    lowered = body.lower()
-    if lowered.startswith("nan"):
-        return None
-    try:
-        value = (
-            float.fromhex(body) if lowered.startswith("0x") else float(body)
-        )
-    except OverflowError:
-        value = math.inf
-    if sign == "-":
-        value = -value
+    value = strtod_double(match)
     if not value >= 0:
         return None
     return value * _UNIT_SECONDS[suffix]

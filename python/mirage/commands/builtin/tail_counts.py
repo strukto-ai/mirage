@@ -12,34 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import math
 import re
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.size_suffix import size_suffixes
+from mirage.commands.builtin.utils.strtod import strtod_double, strtod_whole
 from mirage.commands.quote import quote_text
 
 _NUMBER_RE = re.compile(r"^[+-]?[0-9]+$")
-# C `strtod` as `xstrtod` uses it, anchored at both ends because
-# `xstrtod` refuses any leftover: optional LEADING whitespace (isspace,
-# so CR and TAB count), a sign, then a decimal number, a C99 hex number,
-# `inf`/`infinity` or `nan`, case-insensitively. Trailing whitespace is
-# NOT part of it, which is the whole reason this exists -- python's
-# `float()` and JavaScript's `Number()` both strip it, so both hosts
-# accepted `tail -s $'1\r'` where GNU answers
-# `invalid number of seconds: '1\r'` (measured, coreutils 9.4).
-_STRTOD_RE = re.compile(
-    r"""^[ \t\n\v\f\r]*[+-]?(?:
-            (?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?
-          | 0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)
-            (?:[pP][+-]?[0-9]+)?
-          | inf(?:inity)?
-          | nan(?:\([0-9A-Za-z_]*\))?
-        )$""",
-    re.VERBOSE | re.IGNORECASE,
-)
-_HEX_RE = re.compile(r"^[ \t\n\v\f\r]*[+-]?0[xX]")
-_NAN_RE = re.compile(r"^[ \t\n\v\f\r]*[+-]?nan", re.IGNORECASE)
 _BYTE_RE = re.compile(r"^([+-]?)([0-9]+)([A-Za-z]*)$")
 _BYTE_UNITS = {"": 1, **size_suffixes("bkKMGTPEZYRQ")}
 
@@ -73,19 +53,8 @@ def parse_seconds(raw: str) -> float | None:
     Returns:
         float | None: the value, or None when the grammar refuses it.
     """
-    if _STRTOD_RE.match(raw) is None:
-        return None
-    text = raw.strip(" \t\n\v\f\r")
-    if _NAN_RE.match(raw) is not None:
-        # glibc takes `nan(chars)` too, and every spelling of it is the
-        # same quiet NaN; `float()` reads only the bare word.
-        return math.nan
-    if _HEX_RE.match(raw) is not None:
-        # `float()` reads no hex float at all, and `float.fromhex` reads
-        # every spelling the regex just allowed (`0x10`, `0x10.8`,
-        # `0x.8p1`).
-        return float.fromhex(text)
-    return float(text)
+    found = strtod_whole(raw)
+    return None if found is None else strtod_double(found)
 
 
 def number_flag_error(
