@@ -697,7 +697,14 @@ export async function unzipGeneric(
       } catch (err) {
         if (!isFsError(err)) throw err
         checkdirFailed = true
-        const blocker = stat !== undefined ? await fileInChain(stat, base, chain) : null
+        let blocker: string | null = null
+        if (stat !== undefined) {
+          try {
+            blocker = await fileInChain(stat, base, chain)
+          } catch (probe) {
+            if (!isFsError(probe)) throw probe
+          }
+        }
         errors.push(
           blocker !== null
             ? checkdirFile(shown(blocker), e.name)

@@ -1,6 +1,7 @@
 import dataclasses
 import fnmatch
 import io
+import logging
 import zipfile
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, error_path, fs_strerror
+
+logger = logging.getLogger(__name__)
 
 # Info-ZIP's wording and spacing, verbatim (two spaces after the colon).
 CAUTION_PREFIX = "caution: filename not matched:  "
@@ -725,11 +728,12 @@ async def _run(
                 await _make_dirs(chain, mkdir_fn, stat, made)
         except FS_ERRORS as exc:
             checkdir_failed = True
-            blocker = (
-                await _file_in_chain(stat, base, chain)
-                if stat is not None
-                else None
-            )
+            blocker: str | None = None
+            if stat is not None:
+                try:
+                    blocker = await _file_in_chain(stat, base, chain)
+                except FS_ERRORS as probe:
+                    logger.debug("unzip: probing %s: %r", chain, probe)
             errors.append(
                 CHECKDIR_FILE.format(shown(blocker), info.filename)
                 if blocker is not None
