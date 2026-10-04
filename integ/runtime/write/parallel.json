@@ -1,0 +1,155 @@
+{
+  "cases": [
+    {
+      "id": "parallel_pwrites_all_land",
+      "note": "Each session edits every fourth byte of the same file at once, one pwrite per byte. A store that cannot write in place answers a pwrite by reading the file and writing it back whole, so without one writer at a time per path a session put back bytes another had just replaced.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "01234567890123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "parallel": [
+            {
+              "program": {
+                "python": "import os\nfd = os.open('/data/f.txt', os.O_WRONLY)\nfor offset in range(0, 20, 4):\n    os.pwrite(fd, b'A', offset)\nos.close(fd)",
+                "js": "const f = std.open('/data/f.txt', 'r+')\nfor (let offset = 0; offset < 20; offset += 4) {\n  f.seek(offset, std.SEEK_SET)\n  f.puts('A')\n}\nf.close()"
+              },
+              "expect": {
+                "exit": 0
+              }
+            },
+            {
+              "program": {
+                "python": "import os\nfd = os.open('/data/f.txt', os.O_WRONLY)\nfor offset in range(1, 20, 4):\n    os.pwrite(fd, b'B', offset)\nos.close(fd)",
+                "js": "const f = std.open('/data/f.txt', 'r+')\nfor (let offset = 1; offset < 20; offset += 4) {\n  f.seek(offset, std.SEEK_SET)\n  f.puts('B')\n}\nf.close()"
+              },
+              "expect": {
+                "exit": 0
+              }
+            },
+            {
+              "program": {
+                "python": "import os\nfd = os.open('/data/f.txt', os.O_WRONLY)\nfor offset in range(2, 20, 4):\n    os.pwrite(fd, b'C', offset)\nos.close(fd)",
+                "js": "const f = std.open('/data/f.txt', 'r+')\nfor (let offset = 2; offset < 20; offset += 4) {\n  f.seek(offset, std.SEEK_SET)\n  f.puts('C')\n}\nf.close()"
+              },
+              "expect": {
+                "exit": 0
+              }
+            },
+            {
+              "program": {
+                "python": "import os\nfd = os.open('/data/f.txt', os.O_WRONLY)\nfor offset in range(3, 20, 4):\n    os.pwrite(fd, b'D', offset)\nos.close(fd)",
+                "js": "const f = std.open('/data/f.txt', 'r+')\nfor (let offset = 3; offset < 20; offset += 4) {\n  f.seek(offset, std.SEEK_SET)\n  f.puts('D')\n}\nf.close()"
+              },
+              "expect": {
+                "exit": 0
+              }
+            }
+          ]
+        },
+        {
+          "command": "cat /data/f.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "ABCDABCDABCDABCDABCD"
+          }
+        }
+      ]
+    },
+    {
+      "id": "parallel_appends_all_land",
+      "note": "Each session appends a line to the same file at once; every line lands, in some order.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "log.txt": "start\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "parallel": [
+            {
+              "program": {
+                "python": "with open('/data/log.txt', 'a') as f:\n    f.write('0\\n')",
+                "js": "const f = std.open('/data/log.txt', 'a')\nf.puts('0\\n')\nf.close()"
+              },
+              "expect": {
+                "exit": 0
+              }
+            },
+            {
+              "program": {
+                "python": "with open('/data/log.txt', 'a') as f:\n    f.write('1\\n')",
+                "js": "const f = std.open('/data/log.txt', 'a')\nf.puts('1\\n')\nf.close()"
+              },
+              "expect": {
+                "exit": 0
+              }
+            },
+            {
+              "program": {
+                "python": "with open('/data/log.txt', 'a') as f:\n    f.write('2\\n')",
+                "js": "const f = std.open('/data/log.txt', 'a')\nf.puts('2\\n')\nf.close()"
+              },
+              "expect": {
+                "exit": 0
+              }
+            },
+            {
+              "program": {
+                "python": "with open('/data/log.txt', 'a') as f:\n    f.write('3\\n')",
+                "js": "const f = std.open('/data/log.txt', 'a')\nf.puts('3\\n')\nf.close()"
+              },
+              "expect": {
+                "exit": 0
+              }
+            }
+          ]
+        },
+        {
+          "command": "sort /data/log.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n1\n2\n3\nstart\n"
+          }
+        }
+      ]
+    }
+  ]
+}

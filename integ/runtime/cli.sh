@@ -86,15 +86,38 @@ RUNTIMES='{
 # The case once per runtime it names on this host, one JSON per line (a case
 # without `runtimes` is printed as it is), as run.py `_for_runtime` builds
 # them: a step's `program`, `script` or `command` map picks the runtime's
-# language (a step without it is left out), `expect_on` keyed by the
-# runtime, then by `runtime@host`, then by `ram` and `runtime@ram` (every
-# mount here is RAM: this is a case's ram variant), is merged over `expect`,
-# and the world runs the runtime's table entry with the case's `entry` laid
-# over it.
+# language (a step without it is left out), as does an `expect` keyed by
+# language, a parallel step keeps the branches that run there, `expect_on`
+# keyed by the runtime, then by `runtime@host`, then by `ram` and
+# `runtime@ram` (every mount here is RAM: this is a case's ram variant), is
+# merged over `expect`, and the world runs the runtime's table entry with
+# the case's `entry` laid over it.
 # INTEG_RUNTIMES (comma separated) keeps only the runtimes it names.
 runtime_variants() {
   local case_json="$1" host="$2"
   jq -c --arg h "$host" --arg only "${INTEG_RUNTIMES:-}" --argjson t "$RUNTIMES" '
+    def for_lang($lang):
+      if has("parallel") then
+        .parallel = [.parallel[] | for_lang($lang)]
+        | select(.parallel | length > 0)
+        | .guest = any(.parallel[]; .guest)
+      elif $lang == null then .
+      elif has("program") then
+        select(.program[$lang] != null)
+        | del(.program) + {command: ($t.head[$lang] + " " + (.program[$lang] | @sh)), guest: true}
+      elif (.script | type) == "object" then
+        select(.script[$lang] != null)
+        | . + {command: $t.head[$lang], script: .script[$lang], guest: true}
+      elif (.command | type) == "object" then
+        select(.command[$lang] != null)
+        | . + {command: .command[$lang], guest: true}
+      else . end
+      | if (.guest == true) and ((.expect // {}) | has("python") or has("js"))
+        then .expect = (.expect[$lang] // {}) else . end;
+    def overlay($keys):
+      .expect = ((.expect // {}) + ([$keys[] as $k | (.expect_on // {})[$k] // {}] | add // {}))
+      | if has("parallel") then .parallel |= map(overlay($keys)) else . end;
+    def unmark: del(.guest) | if has("parallel") then .parallel |= map(unmark) else . end;
     if has("runtimes") | not then . else
       . as $c
       | $c.runtimes[]
@@ -104,23 +127,8 @@ runtime_variants() {
       | $t.language[$r] as $lang
       | ($t.entry[$r] // {}) as $base
       | ($c.entry // {}) as $over
-      | [$c.steps[]
-          | if $lang == null then .
-            elif has("program") then
-              select(.program[$lang] != null)
-              | del(.program) + {command: ($t.head[$lang] + " " + (.program[$lang] | @sh)), guest: true}
-            elif (.script | type) == "object" then
-              select(.script[$lang] != null)
-              | . + {command: $t.head[$lang], script: .script[$lang], guest: true}
-            elif (.command | type) == "object" then
-              select(.command[$lang] != null)
-              | . + {command: .command[$lang], guest: true}
-            else . end
-          | .expect = ((.expect // {}) + ((.expect_on // {})[$r] // {})
-              + ((.expect_on // {})[$r + "@" + $h] // {})
-              + ((.expect_on // {}).ram // {})
-              + ((.expect_on // {})[$r + "@ram"] // {}))
-        ] as $steps
+      | [$c.steps[] | for_lang($lang) | overlay([$r, $r + "@" + $h, "ram", $r + "@ram"])]
+        as $steps
       | select($lang == null or any($steps[]; .guest))
       | (if $base == {} and $over == {} then $r
          else {name: $r} + $base + $over
@@ -130,7 +138,7 @@ runtime_variants() {
       | $c + {
           id: ($c.id + "@" + $r),
           world: (($c.world // {}) + {runtimes: [$entry, "workspace"]}),
-          steps: ($steps | map(del(.guest))),
+          steps: ($steps | map(unmark)),
           requires: (($c.requires // []) + $t.requires[$h][$r]),
           optional: ($t.optional | index($r) != null)
         }
@@ -199,6 +207,91 @@ write_world_yaml() {
       + (if .route_policy then {route_policy: .route_policy} else {} end)
       + (if .clis then {clis: .clis} else {} end)' \
     <<<"$world_json" > "$work/ws.yaml"
+}
+
+# Run one step's line through the CLI, leaving its exit code and its own
+# stdout and stderr (unwrapped from the CLI's JSON envelope) in $3.
+exec_step() {
+  local cli="$1" step="$2" dir="$3"
+  shift 3
+  local cmd script runtime
+  cmd=$(jq -r '.command' <<<"$step")
+  script=$(jq -r '.script // empty' <<<"$step")
+  if [ -n "$script" ]; then
+    cmd+=" $(jq -Rrs '@sh' "$SUITE_DIR/../fixtures/runtime/$script")"
+  fi
+  runtime=$(jq -r '.runtime // empty' <<<"$step")
+  local args=("$@" -c "$cmd")
+  [ -n "$runtime" ] && args+=(--runtime "$runtime")
+  if jq -e 'has("stdin")' >/dev/null <<<"$step"; then
+    jq -j '.stdin' <<<"$step" > "$dir/stdin.bin"
+  else
+    : > "$dir/stdin.bin"
+  fi
+  $cli "${args[@]}" < "$dir/stdin.bin" > "$dir/got.out" 2> "$dir/got.err"
+  echo $? > "$dir/exit"
+  # Both CLIs emit a JSON envelope on a non-tty stdout; unwrap the
+  # command's own streams from it (raw output stays the fallback
+  # for CLI-level errors).
+  if jq -e '.kind == "io"' "$dir/got.out" >/dev/null 2>&1; then
+    jq -j '.stdout // ""' "$dir/got.out" > "$dir/got.stdout"
+    jq -j '.stderr // ""' "$dir/got.out" > "$dir/got.stderr"
+  else
+    cp "$dir/got.out" "$dir/got.stdout"
+    cp "$dir/got.err" "$dir/got.stderr"
+  fi
+}
+
+# Check what exec_step left in $3 against an expect block, adding one
+# failure line (labelled $1) per mismatch; fails when any was added.
+check_step() {
+  local label="$1" expect="$2" dir="$3" got_exit ok=0
+  got_exit=$(cat "$dir/exit")
+  if jq -e 'has("throws_contains")' >/dev/null <<<"$expect"; then
+    local want
+    want=$(jq -r '.throws_contains' <<<"$expect")
+    if [ "$got_exit" -eq 0 ] || ! grep -qF "$want" "$dir/got.out" "$dir/got.err"; then
+      failures+=("$label: expected an error containing '$want'")
+      return 1
+    fi
+    return 0
+  fi
+  if jq -e 'has("exit")' >/dev/null <<<"$expect"; then
+    local want_exit
+    want_exit=$(jq -r '.exit' <<<"$expect")
+    if [ "$got_exit" -ne "$want_exit" ]; then
+      failures+=("$label: exit $got_exit, expected $want_exit: $(head -c 200 "$dir/got.stderr")")
+      ok=1
+    fi
+  fi
+  if jq -e 'has("stdout")' >/dev/null <<<"$expect"; then
+    jq -j '.stdout' <<<"$expect" > "$dir/want.out"
+    if ! cmp -s "$dir/want.out" "$dir/got.stdout"; then
+      failures+=("$label: stdout '$(cat "$dir/got.stdout")', expected '$(cat "$dir/want.out")'")
+      ok=1
+    fi
+  fi
+  if jq -e 'has("stdout_contains")' >/dev/null <<<"$expect"; then
+    local want_frag
+    want_frag=$(jq -r '.stdout_contains' <<<"$expect")
+    if ! grep -qF "$want_frag" "$dir/got.stdout"; then
+      failures+=("$label: stdout missing '$want_frag'")
+      ok=1
+    fi
+  fi
+  # The CLI owns its stderr framing, so exact stderr expectations
+  # degrade to containment here.
+  local want_err key
+  for key in stderr stderr_contains; do
+    if jq -e --arg k "$key" 'has($k)' >/dev/null <<<"$expect"; then
+      want_err=$(jq -r --arg k "$key" '.[$k]' <<<"$expect")
+      if [ -n "$want_err" ] && ! grep -qF "$want_err" "$dir/got.stderr"; then
+        failures+=("$label: stderr missing '$want_err': $(head -c 200 "$dir/got.stderr")")
+        ok=1
+      fi
+    fi
+  done
+  return $ok
 }
 
 run_case() {
@@ -270,83 +363,37 @@ run_case() {
                   | .key as $p | (.value.files // {}) | keys[]
                   | [$p, .] | @tsv' <<<"$case_json")
 
-  local steps step cmd script runtime expect got_exit
+  local steps step index=0 branches k sid
   steps=$(jq -c '.steps[]' <<<"$case_json")
-  local index=0
   while IFS= read -r step; do
-    cmd=$(jq -r '.command' <<<"$step")
-    script=$(jq -r '.script // empty' <<<"$step")
-    if [ -n "$script" ]; then
-      cmd+=" $(jq -Rrs '@sh' "$SUITE_DIR/../fixtures/runtime/$script")"
-    fi
-    runtime=$(jq -r '.runtime // empty' <<<"$step")
-    expect=$(jq -c '.expect // {}' <<<"$step")
-    local args=("${shell_args[@]}" -c "$cmd")
-    [ -n "$runtime" ] && args+=(--runtime "$runtime")
-    if jq -e 'has("stdin")' >/dev/null <<<"$step"; then
-      jq -j '.stdin' <<<"$step" > "$work/stdin.bin"
-    else
-      : > "$work/stdin.bin"
-    fi
-    $cli "${args[@]}" < "$work/stdin.bin" \
-      > "$work/got.out" 2> "$work/got.err"
-    got_exit=$?
-    # Both CLIs emit a JSON envelope on a non-tty stdout; unwrap the
-    # command's own streams from it (raw output stays the fallback
-    # for CLI-level errors).
-    if jq -e '.kind == "io"' "$work/got.out" >/dev/null 2>&1; then
-      jq -j '.stdout // ""' "$work/got.out" > "$work/got.stdout"
-      jq -j '.stderr // ""' "$work/got.out" > "$work/got.stderr"
-    else
-      cp "$work/got.out" "$work/got.stdout"
-      cp "$work/got.err" "$work/got.stderr"
-    fi
-
-    if jq -e 'has("throws_contains")' >/dev/null <<<"$expect"; then
-      local want
-      want=$(jq -r '.throws_contains' <<<"$expect")
-      if [ "$got_exit" -eq 0 ] || ! grep -qF "$want" "$work/got.out" "$work/got.err"; then
-        failures+=("$case_id step[$index]: expected an error containing '$want'")
-        ok=1
-      fi
-      index=$((index + 1))
-      continue
-    fi
-    if jq -e 'has("exit")' >/dev/null <<<"$expect"; then
-      local want_exit
-      want_exit=$(jq -r '.exit' <<<"$expect")
-      if [ "$got_exit" -ne "$want_exit" ]; then
-        failures+=("$case_id step[$index]: exit $got_exit, expected $want_exit: $(head -c 200 "$work/got.stderr")")
-        ok=1
-      fi
-    fi
-    if jq -e 'has("stdout")' >/dev/null <<<"$expect"; then
-      jq -j '.stdout' <<<"$expect" > "$work/want.out"
-      if ! cmp -s "$work/want.out" "$work/got.stdout"; then
-        failures+=("$case_id step[$index]: stdout '$(cat "$work/got.stdout")', expected '$(cat "$work/want.out")'")
-        ok=1
-      fi
-    fi
-    if jq -e 'has("stdout_contains")' >/dev/null <<<"$expect"; then
-      local want_frag
-      want_frag=$(jq -r '.stdout_contains' <<<"$expect")
-      if ! grep -qF "$want_frag" "$work/got.stdout"; then
-        failures+=("$case_id step[$index]: stdout missing '$want_frag'")
-        ok=1
-      fi
-    fi
-    # The CLI owns its stderr framing, so exact stderr expectations
-    # degrade to containment here.
-    local want_err
-    for key in stderr stderr_contains; do
-      if jq -e --arg k "$key" 'has($k)' >/dev/null <<<"$expect"; then
-        want_err=$(jq -r --arg k "$key" '.[$k]' <<<"$expect")
-        if [ -n "$want_err" ] && ! grep -qF "$want_err" "$work/got.stderr"; then
-          failures+=("$case_id step[$index]: stderr missing '$want_err': $(head -c 200 "$work/got.stderr")")
+    if jq -e 'has("parallel")' >/dev/null <<<"$step"; then
+      # Each branch on a session of its own, all at once, as run.py's
+      # `_run_parallel` runs them; each is checked once all have ended.
+      branches=$(jq '.parallel | length' <<<"$step")
+      local pids=()
+      for ((k = 0; k < branches; k++)); do
+        sid="parallel-$index-$k"
+        if ! $cli session create "$wsid" --id "$sid" \
+            >"$work/session.out" 2>&1 </dev/null; then
+          failures+=("$case_id step[$index]: session create failed: $(head -c 300 "$work/session.out")")
           ok=1
+          continue
         fi
-      fi
-    done
+        mkdir -p "$work/parallel-$k"
+        exec_step "$cli" "$(jq -c ".parallel[$k]" <<<"$step")" "$work/parallel-$k" \
+          shell -w "$wsid" --session "$sid" &
+        pids+=($!)
+      done
+      for k in "${pids[@]}"; do wait "$k"; done
+      for ((k = 0; k < branches; k++)); do
+        [ -f "$work/parallel-$k/exit" ] || continue
+        check_step "$case_id step[$index].parallel[$k]" \
+          "$(jq -c ".parallel[$k].expect // {}" <<<"$step")" "$work/parallel-$k" || ok=1
+      done
+    else
+      exec_step "$cli" "$step" "$work" "${shell_args[@]}"
+      check_step "$case_id step[$index]" "$(jq -c '.expect // {}' <<<"$step")" "$work" || ok=1
+    fi
     index=$((index + 1))
   done <<<"$steps"
 

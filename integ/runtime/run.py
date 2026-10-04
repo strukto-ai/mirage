@@ -783,11 +783,39 @@ def _check(
     return [f"{case_id} {label}: {p}" for p in problems]
 
 
+async def _run_parallel(
+    ws: Workspace, case_id: str, index: int, branches: list[dict[str, Any]]
+) -> list[str]:
+    """Run each branch on a session of its own, all at once.
+
+    The branches start together, so their ops reach the mounts
+    interleaved as two agents' would, and each is checked against its
+    own ``expect``. A branch's ledger slice holds every branch's ops.
+
+    Args:
+        ws (Workspace): the workspace under test.
+        case_id (str): the case, for failure lines.
+        index (int): the step's place in the case.
+        branches (list[dict[str, Any]]): the steps to run together.
+    """
+    runs = []
+    for k, branch in enumerate(branches):
+        session_id = f"parallel-{index}-{k}"
+        ws.create_session(session_id)
+        label = f"step[{index}].parallel[{k}]"
+        runs.append(_run_step(ws, case_id, label, branch, session_id))
+    results = await asyncio.gather(*runs)
+    return [problem for problems in results for problem in problems]
+
+
 async def _run_step(
-    ws: Workspace, case_id: str, index: int, step: dict[str, Any]
+    ws: Workspace,
+    case_id: str,
+    label: str,
+    step: dict[str, Any],
+    session_id: str | None = None,
 ) -> list[str]:
     expect = step.get("expect", {})
-    label = f"step[{index}]"
     # The ledger slice this step adds: ws.vfs.records is the one
     # workspace-wide account, so the step's own ops are the tail.
     ledger_before = len(ws.vfs.records)
@@ -852,6 +880,8 @@ async def _run_step(
         ).read_text()
         command += " " + shlex.quote(source)
     kwargs: dict[str, Any] = {}
+    if session_id is not None:
+        kwargs["session_id"] = session_id
     if "runtime" in step:
         kwargs["runtime"] = step["runtime"]
     if "stdin" in step:
@@ -878,16 +908,85 @@ async def _run_step(
     return problems
 
 
+def _overlay(step: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    """The step with its ``expect_on`` entries for ``keys`` laid over
+    ``expect`` in order, a parallel step's branches each the same way.
+
+    Args:
+        step (dict[str, Any]): the step as the variant holds it.
+        keys (list[str]): the ``expect_on`` keys that apply, weakest
+            first.
+    """
+    on = step.get("expect_on", {})
+    expect = dict(step.get("expect", {}))
+    for key in keys:
+        expect.update(on.get(key, {}))
+    overlaid = {**step, "expect": expect}
+    if "parallel" in step:
+        overlaid["parallel"] = [_overlay(b, keys) for b in step["parallel"]]
+    return overlaid
+
+
+def _step_for(
+    step: dict[str, Any], language: str | None
+) -> tuple[dict[str, Any] | None, bool]:
+    """One step as a runtime of ``language`` runs it, and whether it
+    holds a guest program; None when nothing in it runs there.
+
+    A ``program`` (inline source) or ``script`` (a fixture path) maps a
+    guest language to what that language runs, under ``python3 -c`` or
+    ``node -e``, and a ``command`` map gives the whole line per
+    language. An ``expect`` keyed by language, as ``program`` is, gives
+    each language its own answer. A parallel step keeps the branches
+    that run there.
+
+    Args:
+        step (dict[str, Any]): the step as the suite spells it.
+        language (str | None): the runtime's guest language; None for a
+            sandbox, which runs the plain lines.
+    """
+    if "parallel" in step:
+        mapped = [_step_for(branch, language) for branch in step["parallel"]]
+        branches = [branch for branch, _ in mapped if branch is not None]
+        if not branches:
+            return None, False
+        return {**step, "parallel": branches}, any(g for _, g in mapped)
+    key = next(
+        (
+            k
+            for k in ("program", "script", "command")
+            if isinstance(step.get(k), dict)
+        ),
+        None,
+    )
+    if key is None:
+        return step, False
+    by_language = step[key]
+    if language is None or language not in by_language:
+        return None, False
+    head = PROGRAM_HEAD[language]
+    source = by_language[language]
+    step = {k: v for k, v in step.items() if k != "program"}
+    if key == "program":
+        step["command"] = f"{head} {shlex.quote(source)}"
+    elif key == "script":
+        step.update(command=head, script=source)
+    else:
+        step["command"] = source
+    expect = step.get("expect", {})
+    if expect.keys() & PROGRAM_HEAD.keys():
+        step["expect"] = expect.get(language, {})
+    return step, True
+
+
 def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
     """The case as one runtime runs it, or None when nothing runs there.
 
-    A step's ``program`` (inline source) or ``script`` (a fixture path)
-    maps a guest language to what that language runs, under ``python3
-    -c`` or ``node -e``, and a ``command`` map gives the whole line per
-    language; a step with nothing in the runtime's language is left out,
-    and a case left with no program is not the runtime's (a sandbox runs
-    the plain lines). A step's ``expect_on`` keyed by the runtime, then
-    by ``runtime@host``, is what it answers differently, and the case's
+    Each step runs as ``_step_for`` maps it to the runtime's language;
+    a step with nothing in that language is left out, and a case left
+    with no program is not the runtime's (a sandbox runs the plain
+    lines). A step's ``expect_on`` keyed by the runtime, then by
+    ``runtime@host``, is what it answers differently, and the case's
     ``filesystem`` entry for it is the capabilities it declares. The
     world runs the runtime from its ``RUNTIME_ENTRY``, with the case's
     ``entry`` captures and config laid over it.
@@ -899,36 +998,12 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
     language = RUNTIME_LANGUAGE[runtime]
     steps: list[dict[str, Any]] = []
     programs = 0
-    for step in case["steps"]:
-        key = next(
-            (
-                k
-                for k in ("program", "script", "command")
-                if isinstance(step.get(k), dict)
-            ),
-            None,
-        )
-        if key is not None:
-            by_language = step[key]
-            if language not in by_language:
-                continue
-            programs += 1
-            head = PROGRAM_HEAD[language]
-            source = by_language[language]
-            step = {k: v for k, v in step.items() if k != "program"}
-            if key == "program":
-                step["command"] = f"{head} {shlex.quote(source)}"
-            elif key == "script":
-                step.update(command=head, script=source)
-            else:
-                step["command"] = source
-        on = step.get("expect_on", {})
-        expect = {
-            **step.get("expect", {}),
-            **on.get(runtime, {}),
-            **on.get(f"{runtime}@{HOST}", {}),
-        }
-        steps.append({**step, "expect": expect})
+    for listed in case["steps"]:
+        step, guest = _step_for(listed, language)
+        if step is None:
+            continue
+        programs += guest
+        steps.append(_overlay(step, [runtime, f"{runtime}@{HOST}"]))
     if programs == 0 and language is not None:
         return None
     world = copy.deepcopy(case.get("world", {}))
@@ -1072,19 +1147,19 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
                         f"{case_id}: {name} filesystem {operation}: "
                         f"expected {expected}, got {operation in supported}"
                     )
+        backend = case.get("backend")
+        keys = [] if backend is None else [backend]
+        if backend is not None and "runtime" in case:
+            keys.append(f"{case['runtime']}@{backend}")
         for index, step in enumerate(case["steps"]):
-            if "expect_on" in step:
-                on = step["expect_on"]
-                backend = case.get("backend")
-                step = {
-                    **step,
-                    "expect": {
-                        **step.get("expect", {}),
-                        **on.get(backend, {}),
-                        **on.get(f"{case.get('runtime')}@{backend}", {}),
-                    },
-                }
-            problems.extend(await _run_step(ws, case_id, index, step))
+            step = _overlay(step, keys)
+            if "parallel" in step:
+                problems.extend(
+                    await _run_parallel(ws, case_id, index, step["parallel"])
+                )
+            else:
+                label = f"step[{index}]"
+                problems.extend(await _run_step(ws, case_id, label, step))
     finally:
         try:
             await _remove_roots(ws)
