@@ -33,7 +33,7 @@ import { versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { errorVirtualPath, fsStrerror, isFsError } from '../../../utils/errors.ts'
-import { pathExists } from '../utils/copy.ts'
+import { isDirectory, pathExists } from '../utils/copy.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -427,11 +427,13 @@ function makePathSpec(virtual: string): PathSpec {
 }
 
 // Info-ZIP's refusals of a create: a member it cannot write (exit 50,
-// PK_DISK), a directory of the chain it cannot make, and an extraction
+// PK_DISK), a directory of the chain it cannot make or that a file already
+// holds (exit 2, and the next member still extracts), and an extraction
 // directory it cannot make (exit 2, before any member). The strerror line
 // hangs under the text after the label, as UnZip 6.00 indents it. Mirrors
 // unzip.py.
 const CREATE_EXIT = 50
+const CHECKDIR_EXIT = 2
 const DEST_EXIT = 2
 
 function createError(verb: string, name: string, strerror: string): string {
@@ -443,6 +445,30 @@ function checkdirError(dir: string, strerror: string, member: string): string {
     `checkdir error:  cannot create ${dir}\n                 ${strerror}\n` +
     `                 unable to process ${member}.\n`
   )
+}
+
+function checkdirFile(dir: string, member: string): string {
+  return (
+    `checkdir error:  ${dir} exists but is not directory\n` +
+    `                 unable to process ${member}.\n`
+  )
+}
+
+// The first level of `chain` below `base` that is not a directory, which
+// Info-ZIP names ("exists but is not directory") instead of the mkdir that
+// failed under it. Mirrors Python's `_file_in_chain`.
+async function fileInChain(stat: StatDoor, base: string, chain: string): Promise<string | null> {
+  let level = base
+  for (const part of chain
+    .slice(base.length)
+    .split('/')
+    .filter((p) => p !== '')) {
+    level = `${level}/${part}`
+    const node = makePathSpec(level)
+    if (!(await pathExists(stat, node))) return null
+    if (!(await isDirectory(stat, node))) return level
+  }
+  return null
 }
 
 function checkdirDest(dir: string, strerror: string): string {
@@ -654,6 +680,8 @@ export async function unzipGeneric(
         ]
       }
     }
+    let checkdirFailed = false
+    let createFailed = false
     for (const e of selected) {
       const entryName = lstripSlash(e.name)
       const outPath = base + '/' + rstripSlash(entryName)
@@ -662,12 +690,19 @@ export async function unzipGeneric(
       // it has to be recreated even though nothing is written inside it.
       const parentEnd = outPath.lastIndexOf('/')
       const chain = isDir ? outPath : parentEnd > 0 ? outPath.slice(0, parentEnd) : ''
-      const existed = isDir && stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
+      let existed = false
       try {
+        existed = isDir && stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
         if (chain !== '' && chain !== '/') await makeDirs(chain)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name))
+        checkdirFailed = true
+        const blocker = stat !== undefined ? await fileInChain(stat, base, chain) : null
+        errors.push(
+          blocker !== null
+            ? checkdirFile(shown(blocker), e.name)
+            : checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name),
+        )
         continue
       }
       if (isDir) {
@@ -681,6 +716,7 @@ export async function unzipGeneric(
         if (!isFsError(err)) throw err
         // -o unlinks a file already there before it writes, so a refusal of
         // that is its own verb.
+        createFailed = true
         const existed = stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
         errors.push(
           createError(existed ? 'delete old' : 'create', shown(outPath), String(fsStrerror(err))),
@@ -697,7 +733,7 @@ export async function unzipGeneric(
     return [
       listing(),
       new IOResult({
-        exitCode: errors.length > 0 ? CREATE_EXIT : exitCode,
+        exitCode: createFailed ? CREATE_EXIT : checkdirFailed ? CHECKDIR_EXIT : exitCode,
         stderr: allStderr.byteLength > 0 ? allStderr : null,
         writes,
       }),

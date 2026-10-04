@@ -986,6 +986,12 @@
     },
     "integ/unix/ls/flags.json :: ls_sort_width_counts_columns": {
       "nextcloud": "Nextcloud stores file names NFC-normalized, so the decomposed e + U+0301 name lists precomposed whenever the listing comes from the server. The row only held while mirage's index still had the name as typed, which depends on what earlier cases left cached."
+    },
+    "integ/unix/unzip/o.json :: unzip_a_file_in_the_way_skips_its_entries": {
+      "box": "Box answers a folder create where a file of that name exists with 409 item_name_in_use, which the box mkdir passes on as a backend error rather than EEXIST, so unzip stops at it instead of printing Info-ZIP's checkdir line.",
+      "nextcloud": "A WebDAV MKCOL under a file is answered with 409 'Parent node is not a collection', which the python nextcloud mkdir passes on as an opendal error rather than ENOTDIR, so unzip stops at it instead of printing Info-ZIP's checkdir line.",
+      "onedrive": "A folder create under a file is answered by Graph with 404 itemNotFound, which the msgraph mkdir passes on as a backend error rather than ENOTDIR, so unzip reports that error instead of Info-ZIP's checkdir line.",
+      "sharepoint": "A folder create under a file is answered by Graph with 404 itemNotFound, which the msgraph mkdir passes on as a backend error rather than ENOTDIR, so unzip reports that error instead of Info-ZIP's checkdir line."
     }
   }
 }
