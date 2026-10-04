@@ -1755,21 +1755,41 @@ class CannotMkdirError(GitError):
 
 
 class ConfigLockError(GitError):
-    """A re-``init`` refused the config it rewrites by a read-only mount.
+    """A re-``init`` that cannot take the config's lock: a read-only
+    mount, or a lock another writer holds.
 
-    git's lock error, then the setting it could not make.
+    git's lock error, then the setting it could not make (pinned against
+    git 2.47.3).
 
     Args:
         path (str): the config file.
+        reason (str): why the lock could not be made.
     """
 
     prefix = None
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, reason: str) -> None:
         super().__init__(
-            f"error: could not lock config file {path}: "
-            "Read-only file system\n"
+            f"error: could not lock config file {path}: {reason}\n"
             "fatal: could not set 'core.repositoryformatversion' to '0'"
+        )
+
+
+class LockExistsError(GitError):
+    """A lock another writer holds, in git's words for every lock file.
+
+    Args:
+        lock (str): the lock file.
+    """
+
+    def __init__(self, lock: str) -> None:
+        super().__init__(
+            f"Unable to create '{lock}': File exists.\n\n"
+            "Another git process seems to be running in this repository, "
+            "e.g.\nan editor opened by 'git commit'. Please make sure all "
+            "processes\nare terminated then try again. If it still fails, "
+            "a git process\nmay have crashed in this repository earlier:\n"
+            "remove the file manually to continue."
         )
 
 

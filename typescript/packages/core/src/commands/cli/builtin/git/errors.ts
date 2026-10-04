@@ -253,16 +253,31 @@ export class CannotMkdirError extends GitError {
 }
 
 /**
- * A re-`init` refused the config it rewrites by a read-only mount: git's lock
- * error, then the setting it could not make.
+ * A re-`init` that cannot take the config's lock, on a read-only mount or held
+ * by another writer: git's lock error, then the setting it could not make
+ * (pinned against git 2.47.3).
  */
 export class ConfigLockError extends GitError {
   override readonly prefix = null
 
-  constructor(path: string) {
+  constructor(path: string, reason: string) {
     super(
-      `error: could not lock config file ${path}: Read-only file system\n` +
+      `error: could not lock config file ${path}: ${reason}\n` +
         "fatal: could not set 'core.repositoryformatversion' to '0'",
+    )
+  }
+}
+
+/** A lock another writer holds, in git's words for every lock file. */
+export class LockExistsError extends GitError {
+  constructor(lock: string) {
+    super(
+      `Unable to create '${lock}': File exists.\n\n` +
+        'Another git process seems to be running in this repository, e.g.\n' +
+        "an editor opened by 'git commit'. Please make sure all processes\n" +
+        'are terminated then try again. If it still fails, a git process\n' +
+        'may have crashed in this repository earlier:\n' +
+        'remove the file manually to continue.',
     )
   }
 }

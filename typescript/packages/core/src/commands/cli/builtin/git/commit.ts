@@ -15,6 +15,7 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
+import { isEexist } from '../../../../utils/errors.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -23,6 +24,7 @@ import { headEntries } from './changes.ts'
 import {
   AllWithPathsError,
   GitError,
+  LockExistsError,
   MissingMessageError,
   NothingToCommitError,
   NoWorkspaceError,
@@ -219,7 +221,13 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
     const repo = await opened(fl, doors, true)
     // git takes the index's lock before it looks for anything to commit, so a
     // read-only repository refuses an empty commit too.
-    await takeLock(dispatch, under(repo.location.gitdir, 'index'))
+    const index = under(repo.location.gitdir, 'index')
+    try {
+      await takeLock(dispatch, index)
+    } catch (err) {
+      if (isEexist(err)) throw new LockExistsError(`${index}.lock`)
+      throw err
+    }
     const state = await readIndex(repo, dispatch)
     if (state.conflicts.size > 0) throw new UnmergedIndexError()
     const restaged = staging

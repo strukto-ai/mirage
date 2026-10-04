@@ -1,4 +1,5 @@
 import errno
+import os
 import posixpath
 
 from mirage.commands.cli.builtin.git.discover import discover
@@ -145,12 +146,17 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             if existing:
                 await take_lock(dispatch, settings)
         except OSError as exc:
+            locked = exc.filename == f"{settings}.lock"
+            if locked and exc.errno == errno.EEXIST:
+                reason = os.strerror(errno.EEXIST)
+                raise ConfigLockError(settings, reason) from exc
             if exc.errno != errno.EROFS:
                 raise
             if made:
                 raise CannotMkdirError(inv.texts[0]) from exc
-            if exc.filename == f"{settings}.lock":
-                raise ConfigLockError(settings) from exc
+            if locked:
+                reason = os.strerror(errno.EROFS)
+                raise ConfigLockError(settings, reason) from exc
             raise InitReadOnlyError(exc.filename or gitdir) from exc
         action = "Reinitialized existing" if existing else "Initialized empty"
         text = f"{action} Git repository in {gitdir}/\n"

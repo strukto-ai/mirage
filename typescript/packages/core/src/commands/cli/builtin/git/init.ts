@@ -1,6 +1,6 @@
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
-import { isErofs } from '../../../../utils/errors.ts'
+import { isEexist, isErofs } from '../../../../utils/errors.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -116,10 +116,12 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
       )
       if (existing) await takeLock(dispatch, settings)
     } catch (err) {
+      const path = (err as { virtualPath?: string }).virtualPath
+      const locked = path === `${settings}.lock`
+      if (locked && isEexist(err)) throw new ConfigLockError(settings, 'File exists')
       if (!isErofs(err)) throw err
       if (made) throw new CannotMkdirError(typed)
-      const path = (err as { virtualPath?: string }).virtualPath
-      if (path === `${settings}.lock`) throw new ConfigLockError(settings)
+      if (locked) throw new ConfigLockError(settings, 'Read-only file system')
       throw new InitReadOnlyError(path ?? gitdir)
     }
     const text = existing

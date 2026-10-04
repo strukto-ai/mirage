@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import logging
+import os
 import posixpath
 
 from mirage.commands.cli.builtin.git.constants import PERMISSION_BITS, SYMLINK
@@ -343,15 +345,20 @@ async def take_lock(dispatch: DispatchFn, path: str) -> None:
     refuses the verb there before it looks any further. Creating the
     lock and removing it is that refusal, and it leaves the file itself
     alone, so a write another session makes to it is never undone. A
-    lock already there is another writer's and stays.
+    lock already there is another writer's, which git refuses and so
+    does this, untouched. The look and the create are two ops, since the
+    door has no exclusive create.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path of the file the lock guards.
+
+    Raises:
+        FileExistsError: the lock is already there.
     """
     lock = f"{path}.lock"
     if await exists(dispatch, lock):
-        return
+        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), lock)
     await dispatch("write", PathSpec.from_str_path(lock), data=b"")
     await remove_file(dispatch, lock)
 

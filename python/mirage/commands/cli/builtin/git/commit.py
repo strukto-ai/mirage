@@ -25,6 +25,7 @@ from mirage.commands.cli.builtin.git.diff_output import commit_summary
 from mirage.commands.cli.builtin.git.errors import (
     AllWithPathsError,
     GitError,
+    LockExistsError,
     MissingMessageError,
     NothingToCommitError,
     NoWorkspaceError,
@@ -196,7 +197,10 @@ async def commit(
         repo, location = await opened(fl, doors, work_tree=True)
         # git takes the index's lock before it looks for anything to
         # commit, so a read-only repository refuses an empty commit too.
-        await take_lock(dispatch, f"{location.gitdir}/index")
+        try:
+            await take_lock(dispatch, f"{location.gitdir}/index")
+        except FileExistsError as exc:
+            raise LockExistsError(exc.filename) from exc
         state = await read_index(dispatch, location.gitdir)
         if state.conflicts:
             raise UnmergedIndexError()

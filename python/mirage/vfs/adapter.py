@@ -105,7 +105,11 @@ def append_from_read(
     A zero-byte append is an open for appending with nothing written
     after it (``cmd >> f`` opens ``f`` before ``cmd`` runs): it creates a
     missing file and leaves an existing one alone, so it costs a stat
-    rather than moving the whole object twice to add nothing.
+    rather than moving the whole object twice to add nothing. The stat
+    does not prove the store takes a write: the mount's mode and the
+    session's rules are checked at the door before it, and a refusal only
+    the store knows (credentials that read and may not write) comes from
+    the first real write, as it does for the generic emulated append.
 
     Args:
         read (ReadBytesOp): whole-file reader; only ENOENT means empty.
