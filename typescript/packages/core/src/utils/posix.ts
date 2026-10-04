@@ -63,9 +63,10 @@ export function translateBracket(pattern: string, start: number, out: string[]):
   throw new SyntaxError('Unmatched [, [^, [:, [., or [=')
 }
 
-export function classCharacters(name: string): string {
+/** Expand a class to its ordered C-locale characters for tr, or null for no such class. */
+export function classCharacters(name: string): string | null {
   const expansion = Object.hasOwn(POSIX_CLASSES, name) ? POSIX_CLASSES[name] : undefined
-  if (expansion === undefined) throw new Error(`tr: invalid character class '${name}'`)
+  if (expansion === undefined) return null
   const pattern = new RegExp('[' + expansion + ']')
   return Array.from({ length: 128 }, (_, n) => String.fromCharCode(n))
     .filter((ch) => pattern.test(ch))

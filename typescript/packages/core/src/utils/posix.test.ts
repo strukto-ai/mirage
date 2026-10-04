@@ -24,7 +24,7 @@ describe('POSIX character classes', () => {
     ['xdigit', '09aAfF', 'gG_'],
   ])('%s membership', (name, yes, no) => {
     const compiled = new RegExp(`^${bracket(`[[:${name}:]]`)}$`)
-    const expanded = classCharacters(name)
+    const expanded = classCharacters(name) ?? ''
     for (const char of yes) {
       expect(compiled.test(char)).toBe(true)
       expect(expanded.includes(char)).toBe(true)
@@ -37,6 +37,7 @@ describe('POSIX character classes', () => {
   it('orders classes for translation', () => {
     expect(classCharacters('space')).toBe('\t\n\v\f\r ')
     expect(classCharacters('lower')).toBe('abcdefghijklmnopqrstuvwxyz')
+    expect(classCharacters('bogus')).toBeNull()
   })
   it.each(['[[:bogus:]]', '[[:constructor:]]', '[[:digit:]'])('rejects %s', (pattern) => {
     expect(() => bracket(pattern)).toThrow(SyntaxError)

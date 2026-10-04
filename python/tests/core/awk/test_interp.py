@@ -174,7 +174,7 @@ async def test_records(program, expected):
         (
             'BEGIN{print length("héllo"), toupper("abc"), '
             'index("hello","ll")}',
-            "5 ABC 3\n",
+            "6 ABC 3\n",
         ),
         ('BEGIN{print match("foobar",/o+/), RSTART, RLENGTH}', "2 2 2\n"),
         (

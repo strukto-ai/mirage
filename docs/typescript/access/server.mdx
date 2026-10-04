@@ -44,6 +44,34 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 
 `@struktoai/mirage-cli` runs the same app as a daemon, `mirage-daemon`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the two daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, and exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last workspace is deleted. It listens on `MIRAGE_DAEMON_PORT`, the `port` setting, or `8765`. Its settings are on the [CLI page](/home/access/cli#config).
 
+## MCP and RPC on their own
+
+The [MCP](/home/access/mcp) and [RPC](/home/access/rpc) servers can run over a transport of your own, without the Mirage server. Both serve one session of a [workspace](/typescript/access/in-app).
+
+```ts
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
+import { createMirageMcpServer } from '@struktoai/mirage-server/mcp'
+
+const server = createMirageMcpServer(ws, { sessionId: 'agent' })
+await server.connect(new StdioServerTransport())
+```
+
+`createMirageMcpServer(ws, { sessionId?, operations?, name?, version?, staleWriteProtection? })` returns the MCP SDK's `McpServer`.
+
+```ts
+import { MirageRpcServer } from '@struktoai/mirage-server/rpc'
+
+const server = new MirageRpcServer(ws, { sessionId: 'agent' })
+const answer = await server.handle({
+  jsonrpc: '2.0',
+  id: 1,
+  method: 'glob',
+  params: { pattern: '/*' },
+})
+```
+
+`new MirageRpcServer(ws, { sessionId?, operations?, name?, version? })`. `handle(message)` answers one message, and `null` for a notification. `serve(lines, write)` answers each line of an async iterable until it ends.
+
 ## What is particular to this server
 
 The protocol is the same on both servers. These are the differences in how this one serves it:
@@ -64,5 +92,5 @@ The protocol is the same on both servers. These are the differences in how this 
 | [`packages/server/src/mcp/`](https://github.com/strukto-ai/mirage/tree/main/typescript/packages/server/src/mcp) | `createMirageMcpServer`, the `/mcp` endpoint, and the stdio relay `mirage mcp` runs. |
 | [`packages/server/src/rpc/`](https://github.com/strukto-ai/mirage/tree/main/typescript/packages/server/src/rpc) | `MirageRpcServer`, the `/rpc` endpoint, and the stdio relay `mirage rpc` runs. |
 | [`packages/server/src/ssh/`](https://github.com/strukto-ai/mirage/tree/main/typescript/packages/server/src/ssh) | The SSH server: shell, exec and SFTP. |
-| [`packages/agents/src/tool_operations.ts`](https://github.com/strukto-ai/mirage/blob/main/typescript/packages/agents/src/tool_operations.ts) | The agent tool table every interface calls. |
+| [`packages/core/src/workspace/tools/`](https://github.com/strukto-ai/mirage/tree/main/typescript/packages/core/src/workspace/tools) | The agent tool table behind `session.tools`, which every interface calls. |
 | [`packages/cli/src/`](https://github.com/strukto-ai/mirage/tree/main/typescript/packages/cli/src) | The `mirage` CLI, one module per verb. |

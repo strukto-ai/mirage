@@ -31,6 +31,7 @@ from mirage.commands.builtin.utils.types import HostRegex
 from mirage.commands.builtin.utils.wrap import call_read_bytes
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
+from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.posix import compile_posix_regex
@@ -131,7 +132,7 @@ def merge_pattern_list(
     """
     parts: list[str] = [] if pattern is None else pattern.split("\n")
     if file_data:
-        text = file_data.decode(errors="replace")
+        text = decode_text(file_data)
         if text.endswith("\n"):
             text = text[:-1]
         parts.extend(text.split("\n"))

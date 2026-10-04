@@ -33,7 +33,6 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 
-from mirage.agents.io_text import replace_text, with_refusal
 from mirage.agents.langchain.convert import (
     io_to_execute_response,
     io_to_file_infos,
@@ -42,6 +41,7 @@ from mirage.agents.langchain.convert import (
 from mirage.bridge.sync import run_async_from_sync
 from mirage.io.types import IOResult
 from mirage.ops.ops import Ops
+from mirage.workspace.tools.io_text import replace_text, with_refusal
 from mirage.workspace.workspace import Session, Workspace
 
 T = TypeVar("T")

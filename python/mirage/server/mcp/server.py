@@ -30,7 +30,7 @@ from mcp.types import (
 )
 
 from mirage import __version__
-from mirage.agents.tool_descriptions import (
+from mirage.workspace.tools.tool_descriptions import (
     EDIT_DESCRIPTION,
     EDIT_INPUT,
     GLOB_DESCRIPTION,
@@ -46,11 +46,11 @@ from mirage.agents.tool_descriptions import (
     WRITE_DESCRIPTION,
     WRITE_INPUT,
 )
-from mirage.agents.tool_operations import (
+from mirage.workspace.tools.tool_operations import (
     MirageToolOperations,
     ToolResult,
 )
-from mirage.workspace.workspace import Workspace
+from mirage.workspace.workspace import Session, Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -122,9 +122,8 @@ class MirageMcpServer:
         session_id (str | None): The session the tools act as; None is
             the workspace's default session.
         operations (MirageToolOperations | None): The tool table to
-            serve, built from the workspace and the arguments above when
-            None; the daemon passes one that runs each call through its
-            API.
+            serve; the session's own (``session.tools``) when None. The
+            daemon passes one that runs each call through its API.
     """
 
     def __init__(
@@ -136,13 +135,15 @@ class MirageMcpServer:
         session_id: str | None = None,
         operations: MirageToolOperations | None = None,
     ) -> None:
-        self._ops = (
-            operations
-            if operations is not None
-            else MirageToolOperations(
-                workspace, stale_write_protection, session_id
+        session = Session(workspace, session_id)
+        if operations is not None:
+            self._ops = operations
+        elif stale_write_protection:
+            self._ops = session.tools
+        else:
+            self._ops = MirageToolOperations(
+                session, stale_write_protection=False
             )
-        )
         self.server: Server[dict[str, Any]] = Server(
             name,
             version=version,

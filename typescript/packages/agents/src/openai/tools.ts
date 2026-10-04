@@ -29,8 +29,12 @@ import {
   SHELL_INPUT,
   WRITE_DESCRIPTION,
   WRITE_INPUT,
-} from '../tool_descriptions.ts'
-import { MirageToolOperations, type MirageToolOperationsOptions } from '../tool_operations.ts'
+} from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
+import {
+  MirageToolOperations,
+  type MirageToolOperationsOptions,
+} from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 
 /**
  * Mirage's tool table as OpenAI Agents function tools: shell, read, write,
@@ -42,7 +46,11 @@ import { MirageToolOperations, type MirageToolOperationsOptions } from '../tool_
  * alternative.
  */
 export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions = {}) {
-  const operations = new MirageToolOperations(ws, options)
+  const session = new Session(ws, options.sessionId ?? null)
+  const operations =
+    options.staleWriteProtection === false
+      ? new MirageToolOperations(session, false)
+      : session.tools
   const call = async (name: string, args: unknown): Promise<string> =>
     (await operations.call(name, args as Record<string, unknown>)).content[0]?.text ?? ''
   const mirageTool = (name: string, description: string, input: object) =>

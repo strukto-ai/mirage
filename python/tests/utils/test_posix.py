@@ -35,7 +35,7 @@ def _bracket(pattern: str) -> str:
 )
 def test_class_membership(name, yes, no):
     compiled = re.compile(_bracket(f"[[:{name}:]]"))
-    expanded = class_characters(name)
+    expanded = class_characters(name) or ""
     for char in yes:
         assert compiled.fullmatch(char)
         assert char in expanded
@@ -47,6 +47,7 @@ def test_class_membership(name, yes, no):
 def test_class_order_for_translation():
     assert class_characters("space") == "\t\n\v\f\r "
     assert class_characters("lower") == "abcdefghijklmnopqrstuvwxyz"
+    assert class_characters("bogus") is None
 
 
 @pytest.mark.parametrize(

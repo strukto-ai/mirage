@@ -17,8 +17,12 @@ import {
   DEFAULT_MAX_REQUEST_BODY_SIZE,
   type McpHttpHandler,
 } from '@modelcontextprotocol/server'
-import { ioToStr } from '@struktoai/mirage-agents/io_text'
-import { MirageToolOperations, type ToolResult } from '@struktoai/mirage-agents/tool_operations'
+import { ioToStr } from '@struktoai/mirage-core/workspace/tools/io_text'
+import {
+  MirageToolOperations,
+  type ToolResult,
+} from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
@@ -35,15 +39,26 @@ const MCP_PATH = '/v1/workspaces/:workspaceId/mcp'
  * `shell` is a job, submitted to the daemon's job table the way
  * `POST /shell` submits one, so an MCP command is listed by `/v1/jobs`,
  * can be cancelled there, and is recorded like any other. The caller's
- * `signal` (an MCP client's cancel) cancels the job too.
+ * `signal` (an MCP client's cancel) cancels the job too. The other tools
+ * run through the session's own table (`session.tools`), so a read
+ * through any door guards a write through another.
  */
 export class DaemonToolOperations extends MirageToolOperations {
   constructor(
     private readonly entry: WorkspaceEntry,
     private readonly jobs: JobTable,
-    private readonly session: string,
+    private readonly sessionId: string,
   ) {
-    super(entry.runner.ws, { sessionId: session })
+    super(new Session(entry.runner.ws, sessionId))
+  }
+
+  override async call(
+    name: string,
+    args: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<ToolResult> {
+    if (name === 'shell') return super.call(name, args, signal)
+    return new Session(this.entry.runner.ws, this.sessionId).tools.call(name, args, signal)
   }
 
   override async shell(command: string, signal?: AbortSignal): Promise<ToolResult> {
@@ -53,13 +68,13 @@ export class DaemonToolOperations extends MirageToolOperations {
       this.entry.id,
       command,
       async (signal, executionScope) => {
-        const io = await ws.shell(command, { sessionId: this.session, executionScope, signal })
+        const io = await ws.shell(command, { sessionId: this.sessionId, executionScope, signal })
         const payload = ioResultToDict(io)
         answer = { content: [{ type: 'text', text: ioToStr(io) }] }
         if (io.exitCode !== 0) answer.isError = true
         return payload
       },
-      this.session,
+      this.sessionId,
     )
     const jobId = job.id
     const cancel = (): void => void this.jobs.cancel(jobId)

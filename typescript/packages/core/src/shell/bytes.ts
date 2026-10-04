@@ -22,6 +22,7 @@ const HIGH_SURROGATE_LOW = 0xd800
 const HIGH_SURROGATE_HIGH = 0xdbff
 const ASCII_MAX = 0x80
 const BYTE_MASK = 0xff
+const VIEW_CHUNK = 8192
 
 /**
  * Stand in for one raw output byte inside a text string.
@@ -166,4 +167,42 @@ export function decodeText(raw: Uint8Array): string {
   }
   if (used > 0) parts.push(String.fromCharCode(...units.subarray(0, used)))
   return parts.join('')
+}
+
+/**
+ * The same bytes as a string of one character per byte.
+ *
+ * A command that runs in GNU's C locale (grep, sed, awk, tr, expr) counts,
+ * matches and indexes bytes, not characters: `.` matches one byte, `length`
+ * counts bytes, and a match may end inside a character. All of that follows
+ * from running on this representation and converting only at the command's
+ * edges, where a typed `é`, its `$'\xc3\xa9'` spelling and the file's own
+ * bytes all arrive as the same two characters. Mirrors Python's `byte_view`.
+ */
+export function byteView(value: string | Uint8Array): string {
+  const bytes = typeof value === 'string' ? encodeText(value) : value
+  const parts: string[] = []
+  for (let at = 0; at < bytes.length; at += VIEW_CHUNK)
+    parts.push(String.fromCharCode(...bytes.subarray(at, at + VIEW_CHUNK)))
+  return parts.join('')
+}
+
+/**
+ * The bytes a byte view stands for, the inverse of `byteView`. An invalid
+ * sequence or half a character comes back as itself, which is what GNU
+ * writes.
+ */
+export function fromByteView(view: string): Uint8Array {
+  const out = new Uint8Array(view.length)
+  for (let at = 0; at < view.length; at++) {
+    const byte = view.charCodeAt(at)
+    if (byte > BYTE_MASK) throw new RangeError('byte view contains a non-byte character')
+    out[at] = byte
+  }
+  return out
+}
+
+/** A byte view as shell text again, for a path or a nested command line. */
+export function textView(view: string): string {
+  return decodeText(fromByteView(view))
 }

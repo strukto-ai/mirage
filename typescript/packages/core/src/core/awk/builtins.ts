@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { applyPad } from '../../workspace/executor/builtins/printf/format.ts'
+import { readEscape } from './lexer.ts'
 import { AwkRuntimeError } from './errors.ts'
 import { compileEre, searchFrom, splitPattern } from './regex.ts'
 import {
@@ -32,22 +33,8 @@ const FLOAT_CONVS = 'eEfFgGaA'
 const DIGITS = '0123456789'
 const BLANK_RUN = /[ \t\n]+/
 const UINT64_MASK = (1n << 64n) - 1n
-const MAX_CODE_POINT = 0x10ffff
-const SURROGATE_MIN = 0xd800
-const SURROGATE_MAX = 0xdfff
-const SURROGATE = /[\ud800-\udfff]/
 const RAND_SCALE = 4294967296
-const ESCAPES: Readonly<Record<string, string>> = { t: '\t', n: '\n', '\\': '\\' }
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
-
-/** The string as code points, which is what awk counts and indexes. */
-export function chars(subject: string): string[] {
-  return SURROGATE.test(subject) ? Array.from(subject) : subject.split('')
-}
-
-export function charLength(subject: string): number {
-  return SURROGATE.test(subject) ? Array.from(subject).length : subject.length
-}
 
 /**
  * Take an awk substring. Positions are 1-based and truncated toward
@@ -57,18 +44,15 @@ export function charLength(subject: string): number {
  */
 export function substr(subject: string, start: number, length: number | null): string {
   const begin = Math.max(toIndex(start), 1)
-  const units = chars(subject)
-  if (length === null) return units.slice(begin - 1).join('')
+  if (length === null) return subject.slice(begin - 1)
   const span = toIndex(length)
   if (span <= 0) return ''
-  return units.slice(begin - 1, begin - 1 + span).join('')
+  return subject.slice(begin - 1, begin - 1 + span)
 }
 
-/** 1-based code point position of `needle`, 0 when absent. */
+/** 1-based position of `needle` in the byte view, 0 when absent. */
 export function indexOf(haystack: string, needle: string): number {
-  const at = haystack.indexOf(needle)
-  if (at === -1) return 0
-  return charLength(haystack.slice(0, at)) + 1
+  return haystack.indexOf(needle) + 1
 }
 
 /**
@@ -151,7 +135,7 @@ export function substitute(
 export function matchPosition(pattern: string, subject: string): [number, number] {
   const found = searchFrom(compileEre(pattern), subject, 0)
   if (found === null) return [0, -1]
-  return [charLength(subject.slice(0, found.start)) + 1, charLength(found.text)]
+  return [found.start + 1, found.end - found.start]
 }
 
 export function safeLog(value: number): number {
@@ -242,12 +226,9 @@ function readSpec(fmt: string, start: number): Spec {
  */
 function renderChar(value: Value, convfmt: string): string {
   if (value.kind === ValueKind.NUM) {
-    const code = toIndex(value.num)
-    if (code < 0 || code > MAX_CODE_POINT) return ''
-    if (code >= SURROGATE_MIN && code <= SURROGATE_MAX) return ''
-    return String.fromCodePoint(code)
+    return String.fromCharCode(toIndex(value.num) & 0xff)
   }
-  return chars(toStr(value, convfmt))[0] ?? ''
+  return toStr(value, convfmt).charAt(0)
 }
 
 /**
@@ -321,8 +302,8 @@ function renderOne(
   if (conv === 'c' || conv === 's') {
     let body = conv === 'c' ? renderChar(arg, convfmt) : toStr(arg, convfmt)
     const limit = precisionOf(precision)
-    if (conv === 's' && limit !== null) body = chars(body).slice(0, limit).join('')
-    const gap = (widthOf(width) ?? 0) - charLength(body)
+    if (conv === 's' && limit !== null) body = body.slice(0, limit)
+    const gap = (widthOf(width) ?? 0) - body.length
     if (gap <= 0) return body
     return flags.includes('-') ? body + ' '.repeat(gap) : ' '.repeat(gap) + body
   }
@@ -407,8 +388,8 @@ function splitFields(record: string, pattern: RegExp | null): string[] {
  * onetrueawk; a regex FS and split() do not.
  */
 export function splitRecord(record: string, separator: string, paragraph = false): string[] {
-  if (separator === '') return chars(record)
-  if (paragraph && charLength(separator) === 1) {
+  if (separator === '') return record.split('')
+  if (paragraph && separator.length === 1) {
     return splitFields(record.replaceAll('\n', separator), splitPattern(separator))
   }
   return splitFields(record, splitPattern(separator))
@@ -458,7 +439,7 @@ export function takeRecord(
   final: boolean,
 ): [string | null, number] {
   if (separator === '') return takeParagraph(buffer, start, final)
-  if (charLength(separator) === 1) {
+  if (separator.length === 1) {
     const end = buffer.indexOf(separator, start)
     if (end >= 0) return [buffer.slice(start, end), end + separator.length]
     return takeTail(buffer, start, final)
@@ -487,9 +468,9 @@ export function unescape(raw: string): string {
   let idx = 0
   while (idx < raw.length) {
     if (raw.charAt(idx) === '\\' && idx + 1 < raw.length) {
-      const nxt = raw.charAt(idx + 1)
-      out += ESCAPES[nxt] ?? '\\' + nxt
-      idx += 2
+      const [value, after] = readEscape(raw, idx + 1)
+      out += value
+      idx = after
       continue
     }
     out += raw.charAt(idx)

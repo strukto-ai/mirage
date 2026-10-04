@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { encodeText } from '../../shell/bytes.ts'
+import { byteView, fromByteView, textView } from '../../shell/bytes.ts'
 import { compilePosixRegex } from '../../utils/posix.ts'
 import {
   SED_STDERR,
@@ -27,10 +27,6 @@ import {
 // GNU's default `l` line length.
 export const SED_LINE_LENGTH = 70
 
-const SURROGATE_BASE = 0xdc00
-const SURROGATE_LOW = 0xdc80
-const SURROGATE_HIGH = 0xdcff
-
 const LIST_ESCAPES: Record<number, string> = {
   0x07: '\\a',
   0x08: '\\b',
@@ -39,18 +35,6 @@ const LIST_ESCAPES: Record<number, string> = {
   0x0d: '\\r',
   0x09: '\\t',
   0x0b: '\\v',
-}
-
-/**
- * The bytes one pattern-space character stands for: a raw byte carried
- * as its surrogate escape is that byte, anything else its UTF-8 form.
- */
-function charBytes(ch: string): Uint8Array {
-  const code = ch.charCodeAt(0)
-  if (ch.length === 1 && code >= SURROGATE_LOW && code <= SURROGATE_HIGH) {
-    return new Uint8Array([code - SURROGATE_BASE])
-  }
-  return encodeText(ch)
 }
 
 /**
@@ -67,7 +51,7 @@ export function listLine(text: string, width: number): string {
   let out = ''
   let col = 0
   for (const ch of text) {
-    for (const byte of charBytes(ch)) {
+    for (const byte of fromByteView(ch)) {
       let piece: string
       if (byte >= 0x20 && byte < 0x7f) piece = byte === 0x5c ? '\\\\' : String.fromCharCode(byte)
       else piece = LIST_ESCAPES[byte] ?? '\\' + byte.toString(8).padStart(3, '0')
@@ -239,7 +223,7 @@ export class SedMachine {
 
   /** What the program wrote to /dev/stderr, then the error lines. */
   stderr(): string {
-    return this.specialErr.chunks.join('') + this.stderrLines.join('')
+    return textView(this.specialErr.chunks.join('')) + this.stderrLines.join('')
   }
 
   /** The exit status GNU would end with after the runs so far. */
@@ -674,7 +658,7 @@ export class SedMachine {
             break
           case 'F':
             this.main.flushNewline()
-            this.main.raw(`${this.fileName}\n`)
+            this.main.raw(byteView(`${this.fileName}\n`))
             break
           default:
             break

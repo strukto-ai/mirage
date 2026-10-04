@@ -25,13 +25,10 @@ from mirage.commands.builtin.sed_script import (
     SedRegex,
     sed_regex_flags,
 )
+from mirage.shell.bytes import byte_view, from_byte_view, text_view
 from mirage.utils.posix import compile_posix_regex
 
 SED_LINE_LENGTH = 70
-
-_SURROGATE_BASE = 0xDC00
-_SURROGATE_LOW = 0xDC80
-_SURROGATE_HIGH = 0xDCFF
 
 _LIST_ESCAPES = {
     0x07: "\\a",
@@ -46,21 +43,6 @@ _LIST_ESCAPES = {
 _RANGE_INACTIVE = 0
 _RANGE_ACTIVE = 1
 _RANGE_CLOSED = 2
-
-
-def _char_bytes(ch: str) -> bytes:
-    """The bytes one pattern-space character stands for.
-
-    A raw byte carried as its surrogate escape is that byte, anything
-    else its UTF-8 form.
-
-    Args:
-        ch (str): one character.
-    """
-    code = ord(ch)
-    if _SURROGATE_LOW <= code <= _SURROGATE_HIGH:
-        return bytes([code - _SURROGATE_BASE])
-    return ch.encode("utf-8", "surrogatepass")
 
 
 def list_line(text: str, width: int) -> str:
@@ -81,7 +63,7 @@ def list_line(text: str, width: int) -> str:
     out: list[str] = []
     col = 0
     for ch in text:
-        for byte in _char_bytes(ch):
+        for byte in from_byte_view(ch):
             if 0x20 <= byte < 0x7F:
                 piece = "\\\\" if byte == 0x5C else chr(byte)
             else:
@@ -308,7 +290,9 @@ class SedMachine:
 
     def stderr(self) -> str:
         """What the program wrote to /dev/stderr, then the error lines."""
-        return "".join(self._special_err.chunks) + "".join(self.stderr_lines)
+        return text_view("".join(self._special_err.chunks)) + "".join(
+            self.stderr_lines
+        )
 
     def exit_code(self) -> int:
         """The exit status GNU would end with after the runs so far."""
@@ -722,7 +706,7 @@ class SedMachine:
                 self._main.raw(f"{self._line_number}\n")
             elif c == "F":
                 self._main.flush_newline()
-                self._main.raw(f"{self._file_name}\n")
+                self._main.raw(byte_view(f"{self._file_name}\n"))
             pc += 1
         if not self.no_default_output:
             self._main.line(self._pattern, self._chomped)

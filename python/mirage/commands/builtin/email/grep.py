@@ -39,6 +39,7 @@ from mirage.core.email.scope import NATIVE_KINDS, detect_scope
 from mirage.core.email.search import search_and_format
 from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import byte_view, text_view
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -159,12 +160,14 @@ async def _grep_server_side(
         return b"", IOResult(exit_code=1)
 
     # The same dialect the literal was read off: a basic expression
-    # compiled as an extended one matches a different language.
-    pat = compile_pattern(pattern, i, F, w, syntax)
+    # compiled as an extended one matches a different language. grep runs
+    # in the C locale, so the pattern and each line meet as byte views,
+    # as they do in the generic scan.
+    pat = compile_pattern(byte_view(pattern), i, F, w, syntax)
     all_results: list[str] = []
     any_match = False
     for vfs_path, msg_text in pairs:
-        lines = msg_text.splitlines()
+        lines = [byte_view(line) for line in msg_text.splitlines()]
         matched = grep_lines(
             vfs_path,
             lines,
@@ -183,7 +186,7 @@ async def _grep_server_side(
             all_results.append(vfs_path)
             continue
         for line in matched:
-            all_results.append(f"{vfs_path}:{line}")
+            all_results.append(f"{vfs_path}:{text_view(line)}")
 
     if not any_match:
         if all_results:

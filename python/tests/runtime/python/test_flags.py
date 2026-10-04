@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.runtime.python.flags import init_argv, unhonored, unhonored_notice
 
 
@@ -91,20 +93,20 @@ def test_the_notice_is_empty_when_the_line_carried_no_switch():
     assert unhonored_notice({}, "pyodide") == b""
 
 
-def test_a_known_x_name_is_reported_by_name():
-    # Populating sys._xoptions is all a warm interpreter can do for
-    # -X dev, whose real effect is read out of the read-only sys.flags.
-    assert unhonored({"X": ["dev"]}, ("X",)) == ["-X dev"]
-
-
-def test_a_known_x_name_with_a_value_is_reported_without_it():
-    assert unhonored({"X": ["tracemalloc=5"]}, ("X",)) == ["-X tracemalloc"]
-
-
-def test_an_arbitrary_x_name_stays_silent():
-    # On CPython it does nothing but land in sys._xoptions either.
-    assert unhonored({"X": ["nosuchopt"]}, ("X",)) == []
-
-
-def test_an_engine_that_acts_on_a_known_x_name_says_nothing():
-    assert unhonored({"X": ["dev"]}, ("X", "X:dev")) == []
+# Populating sys._xoptions is all a warm interpreter can do for -X dev,
+# whose real effect is read out of the read-only sys.flags, so a known
+# name is reported (without its value). An arbitrary name does nothing
+# on CPython either, and an engine that acts on the name says nothing.
+@pytest.mark.parametrize(
+    ("value", "honored", "notice"),
+    [
+        ("dev", ("X",), ["-X dev"]),
+        ("tracemalloc=5", ("X",), ["-X tracemalloc"]),
+        ("nosuchopt", ("X",), []),
+        ("dev", ("X", "X:dev"), []),
+    ],
+)
+def test_an_x_name_is_reported_only_when_known_and_unhonored(
+    value, honored, notice
+):
+    assert unhonored({"X": [value]}, honored) == notice

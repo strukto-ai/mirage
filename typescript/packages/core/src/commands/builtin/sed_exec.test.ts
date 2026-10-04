@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { encodeText } from '../../shell/bytes.ts'
+import { byteView, fromByteView } from '../../shell/bytes.ts'
 import { SedMachine, listLine, type SedFileContent, type SedInput } from './sed_exec.ts'
 import { compileScript } from './sed_script.ts'
 
@@ -46,7 +46,10 @@ function run(
     files: new Map(Object.entries(opts.files ?? {})),
     readerFiles: new Map(Object.entries(opts.files ?? {})),
   })
-  machine.process(typeof inputs === 'string' ? [{ name: '-', text: inputs }] : inputs, true)
+  machine.process(
+    typeof inputs === 'string' ? [{ name: '-', text: byteView(inputs) }] : inputs,
+    true,
+  )
   const wfiles = new Map<string, string>()
   for (const [name, out] of machine.wfiles) wfiles.set(name, out.chunks.join(''))
   return {
@@ -213,7 +216,7 @@ describe('sed a, i and c text (GNU sed 4.9)', () => {
 
   it('writes numeric escapes above ASCII as raw bytes', () => {
     const out = sed('a [\\xff][\\d200][\\o377][\\x80][\\xc3\\xa9][\\o400]', 'x\n')
-    expect([...encodeText(out)]).toEqual(
+    expect([...fromByteView(out)]).toEqual(
       latin1Bytes('x\n[\xff][\xc8][\xff][\x80][\xc3\xa9][\x00]\n'),
     )
   })
@@ -412,11 +415,11 @@ describe('sed l (GNU sed 4.9)', () => {
   })
 
   it('shows every byte of a multibyte character in octal', () => {
-    expect(listLine('café', 70)).toBe('caf\\303\\251$\n')
+    expect(listLine(byteView('café'), 70)).toBe('caf\\303\\251$\n')
   })
 
   it('shows a raw byte as itself in octal', () => {
-    expect(listLine(String.fromCharCode(0xdcff), 70)).toBe('\\377$\n')
+    expect(listLine(byteView(new Uint8Array([0xff])), 70)).toBe('\\377$\n')
   })
 
   it('folds at 69 characters and a backslash', () => {

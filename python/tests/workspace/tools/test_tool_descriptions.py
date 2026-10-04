@@ -1,4 +1,4 @@
-from mirage.agents import tool_descriptions as shared
+from mirage.workspace.tools import tool_descriptions as shared
 
 TOOLS = ["SHELL", "READ", "WRITE", "EDIT", "LS", "GREP", "GLOB"]
 

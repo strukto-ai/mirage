@@ -148,12 +148,12 @@ export async function searchEntity(
       const line = rowLine(row)
       renderedBytes += encoder.encode(line).length + 1
       if (renderedBytes > maxBytes) throw efbig(rowsPath)
-      if (matcher.test(line)) lines.push(line)
+      if (matcher(line)) lines.push(line)
     }
     return lines
   }
   const text = new TextDecoder().decode(await readRows(accessor, schema, entity, rowsPath))
-  return splitLines(text).filter((line) => matcher.test(line))
+  return splitLines(text).filter((line) => matcher(line))
 }
 
 // python's `str.splitlines()` over a rows.jsonl rendering, whose only
@@ -196,7 +196,7 @@ export async function searchEntityMetadata(
   const lines: string[] = []
   for (const [name, doc] of docs) {
     for (const line of jsonText(doc).split('\n')) {
-      if (matcher.test(line)) lines.push(`${schema}/${kind}/${entity}/${name}:${line}`)
+      if (matcher(line)) lines.push(`${schema}/${kind}/${entity}/${name}:${line}`)
     }
   }
   return lines

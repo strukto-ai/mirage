@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { byteChar, decodeText, encodeText } from './bytes.ts'
+import { byteChar, byteView, decodeText, encodeText, fromByteView, textView } from './bytes.ts'
 
 describe('byteChar / encodeText', () => {
   it('stands for an ASCII byte as itself', () => {
@@ -50,6 +50,37 @@ describe('byteChar / encodeText', () => {
       ...new TextEncoder().encode('a' + pair),
       0xff,
     ])
+  })
+
+  it('round trips every byte through text and byte views', () => {
+    const raw = Uint8Array.from({ length: 256 }, (_, i) => i)
+    expect(fromByteView(byteView(raw))).toEqual(raw)
+    expect(encodeText(decodeText(raw))).toEqual(raw)
+    expect(fromByteView(byteView(decodeText(raw)))).toEqual(raw)
+  })
+
+  it('gives literal text and byte escapes the same byte view', () => {
+    for (const literal of ['é', '€', '😀', '\ufeff', '\u{10080}']) {
+      const raw = encodeText(literal)
+      const escaped = [...raw].map(byteChar).join('')
+      expect(byteView(literal)).toBe(byteView(escaped))
+      expect(byteView(literal)).toBe(byteView(raw))
+      expect(textView(byteView(escaped))).toBe(literal)
+      expect(fromByteView(byteView(literal).slice(1))).toEqual(raw.slice(1))
+    }
+  })
+
+  it('never replaces invalid UTF-8', () => {
+    for (const bytes of [
+      [0xc0, 0xaf],
+      [0xed, 0xa0, 0x80],
+      [0xf4, 0x90, 0x80, 0x80],
+      [0xe2, 0x82],
+    ]) {
+      const raw = new Uint8Array(bytes)
+      expect(encodeText(decodeText(raw))).toEqual(raw)
+      expect(encodeText(textView(byteView(raw)))).toEqual(raw)
+    }
   })
 })
 

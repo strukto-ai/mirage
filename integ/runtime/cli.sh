@@ -15,7 +15,7 @@
 # as is a case that states why it must be in `sdk_only`. Expect semantics: exit and
 # stdout are exact, stderr is a containment check (the CLI owns its
 # stderr framing), and the SDK-side expectations (ops_contain,
-# ops_absent, value) are not checked because the op ledger has no CLI
+# ops_absent, ops_count, value) are not checked because the op ledger has no CLI
 # door.
 #
 # A yaml file is any JSON document here: YAML is a superset of JSON,

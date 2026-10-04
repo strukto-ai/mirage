@@ -16,7 +16,6 @@ import base64
 import hashlib
 
 from mirage.ops.ops import Ops
-from mirage.workspace.workspace import Session, Workspace
 
 
 class StaleMirageFileError(Exception):
@@ -55,24 +54,13 @@ class FileVersionTracker:
     this side's read tool has always rendered.
 
     Args:
-        workspace (Workspace): The workspace to read and write through.
+        vfs (Ops): The file API to read and write through, run as the
+            session whose reads are tracked.
         enabled (bool): False serves every call unchecked.
-        session_id (str | None): The session the reads and writes run
-            as; the workspace's default session when None.
     """
 
-    def __init__(
-        self,
-        workspace: Workspace,
-        enabled: bool = True,
-        session_id: str | None = None,
-    ) -> None:
-        self._ws = workspace
-        self.vfs: Ops = (
-            workspace.vfs
-            if session_id is None
-            else Session(workspace, session_id).vfs
-        )
+    def __init__(self, vfs: Ops, enabled: bool = True) -> None:
+        self.vfs = vfs
         self._enabled = enabled
         self._read_versions: dict[str, str] = {}
         self._edit_versions: dict[str, str] = {}
@@ -94,7 +82,8 @@ class FileVersionTracker:
         Returns:
             str: The path with symlink prefixes resolved.
         """
-        return self._ws.namespace.follow(path)
+        links = self.vfs.links
+        return path if links is None else links.follow(path)
 
     async def _current_version(self, path: str) -> str | None:
         if not await self.vfs.exists(path):

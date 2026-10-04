@@ -35,6 +35,12 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn, ShellFn
+from mirage.shell.bytes import (
+    byte_view,
+    decode_text,
+    from_byte_view,
+    text_view,
+)
 from mirage.shell.join import shell_join
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, WALK_ERRORS, eisdir, fs_strerror
@@ -72,7 +78,7 @@ def split_assignments(raw: Sequence[str]) -> dict[str, str]:
     for item in raw:
         if "=" in item:
             key, value = item.split("=", 1)
-            out[key] = unescape(value)
+            out[key] = unescape(byte_view(value))
     return out
 
 
@@ -179,6 +185,7 @@ class AwkStreams:
             name (str): the file name, ``-`` or ``/dev/stdin`` for stdin.
             index (int | None): the ARGV slot the name was read from.
         """
+        name = text_view(name)
         if index is not None and 0 < index <= len(self.operands):
             operand = self.operands[index - 1]
             if operand.raw_path == name:
@@ -201,10 +208,12 @@ class AwkStreams:
         """
         if self.dispatch is None:
             raise AwkRuntimeError("awk: file output requires a workspace")
-        path = typed_spec(name, self.cwd.virtual)
+        path = typed_spec(text_view(name), self.cwd.virtual)
         try:
             await self.dispatch(
-                "append" if append else "write", path, data=body.encode()
+                "append" if append else "write",
+                path,
+                data=from_byte_view(body),
             )
         except WALK_ERRORS as exc:
             raise AwkIOError(
@@ -226,7 +235,9 @@ class AwkStreams:
                 "awk: running a command requires a workspace"
             )
         source: ByteSource = self.stdin_view() if stdin is None else stdin
-        io = await self.shell(f"( {shell_join(['eval', command])} )", source)
+        io = await self.shell(
+            f"( {shell_join(['eval', text_view(command)])} )", source
+        )
         out = await materialize(io.stdout) if io.stdout is not None else b""
         err = await materialize(io.stderr) if io.stderr is not None else b""
         return CommandRun(out, err, io.exit_code)
@@ -353,7 +364,7 @@ async def awk(
                 raise UsageError(
                     f"awk: {prog.raw_path}: {fs_strerror(exc)}"
                 ) from exc
-            pieces.append(raw.decode(errors="replace"))
+            pieces.append(decode_text(raw))
         source = "\n".join(pieces)
     elif texts:
         source = texts[0]
@@ -363,7 +374,7 @@ async def awk(
     try:
         program = parse(source)
     except AwkSyntaxError as exc:
-        raise UsageError(str(exc)) from exc
+        return None, IOResult(exit_code=2, stderr=from_byte_view(f"{exc}\n"))
 
     # An empty operand names no file and mawk skips it, as it does an
     # operand ARGV no longer holds; a `var=value` operand is assigned
@@ -380,11 +391,13 @@ async def awk(
     interp = Interpreter(
         program,
         streams,
-        [p.raw_path for p in paths],
+        [byte_view(p.raw_path) for p in paths],
         split_assignments(f.assignments),
     )
     if f.field_separator is not None:
-        interp.set_var("FS", text_value(unescape(f.field_separator)))
+        interp.set_var(
+            "FS", text_value(unescape(byte_view(f.field_separator)))
+        )
 
     cache = [
         p.mount_path

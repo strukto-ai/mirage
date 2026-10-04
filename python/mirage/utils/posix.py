@@ -68,14 +68,17 @@ def translate_bracket(pattern: str, start: int, out: list[str]) -> int:
     raise re.error("Unmatched [, [^, [:, [., or [=")
 
 
-def class_characters(name: str) -> str:
+def class_characters(name: str) -> str | None:
     """Expand a class to its ordered C-locale characters for tr.
 
     Args:
         name (str): a POSIX character class name.
+
+    Returns:
+        str | None: the class's characters, or None for no such class.
     """
     if name not in POSIX_CLASSES:
-        raise ValueError(f"tr: invalid character class '{name}'")
+        return None
     pattern = re.compile("[" + POSIX_CLASSES[name] + "]")
     return "".join(chr(n) for n in range(128) if pattern.fullmatch(chr(n)))
 

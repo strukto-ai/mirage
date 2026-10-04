@@ -1,6 +1,13 @@
 import pytest
 
-from mirage.shell.bytes import byte_char, decode_text, encode_text
+from mirage.shell.bytes import (
+    byte_char,
+    byte_view,
+    decode_text,
+    encode_text,
+    from_byte_view,
+    text_view,
+)
 
 
 def test_ascii_bytes_stand_for_themselves():
@@ -71,3 +78,30 @@ def test_decode_utf8_boundaries_without_replacing_bytes(raw, expected):
 def test_decode_large_malformed_line():
     expected = ("x" * 8190 + "𐂀\udcffé") * 4
     assert decode_text(encode_text(expected)) == expected
+
+
+def test_every_byte_round_trips_through_text_and_byte_views():
+    raw = bytes(range(256))
+    assert from_byte_view(byte_view(raw)) == raw
+    assert encode_text(decode_text(raw)) == raw
+    assert from_byte_view(byte_view(decode_text(raw))) == raw
+
+
+def test_literal_text_and_byte_escapes_have_the_same_byte_view():
+    for literal in ("é", "€", "😀", "\ufeff", "\U00010080"):
+        raw = literal.encode()
+        escaped = "".join(byte_char(value) for value in raw)
+        assert byte_view(literal) == byte_view(escaped) == byte_view(raw)
+        assert text_view(byte_view(escaped)) == literal
+        assert from_byte_view(byte_view(literal)[1:]) == raw[1:]
+
+
+def test_invalid_utf8_is_never_replaced():
+    for raw in (
+        b"\xc0\xaf",
+        b"\xed\xa0\x80",
+        b"\xf4\x90\x80\x80",
+        b"\xe2\x82",
+    ):
+        assert encode_text(decode_text(raw)) == raw
+        assert encode_text(text_view(byte_view(raw))) == raw

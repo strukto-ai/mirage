@@ -3,7 +3,6 @@ import re
 from mirage.commands.builtin.grep_offsets import (
     MatchOffsets,
     line_offsets,
-    match_offset,
     prefix_of,
     rg_pieces,
     rust_matches,
@@ -32,14 +31,6 @@ def test_line_offsets_of_no_lines_is_empty():
     assert line_offsets([]) == []
 
 
-def test_match_offset_adds_the_line_start_in_bytes():
-    assert match_offset(10, "xéy abc", 4) == 15
-
-
-def test_match_offset_at_the_start_of_a_line_is_the_line_start():
-    assert match_offset(11, "abc abc", 0) == 11
-
-
 def test_prefix_of_puts_the_line_number_before_the_byte_offset():
     assert prefix_of(2, 4) == "2:4:"
 
@@ -60,11 +51,6 @@ def test_line_offsets_are_exact_over_an_invalid_byte():
     # `\xff` is one byte, so the second line starts at 2 -- GNU's answer for
     # `grep -b a` over `\xff\na\n`, where a replacing decode said 4.
     assert line_offsets([decode_text(b"\xff"), "a"]) == [0, 2]
-
-
-def test_match_offset_counts_an_invalid_byte_as_one():
-    # `grep -bo a` over `\xffa\n` is `1:a` on GNU grep 3.11.
-    assert match_offset(0, decode_text(b"\xffa"), 1) == 1
 
 
 def test_incremental_offsets_preserve_unicode_and_escaped_bytes():

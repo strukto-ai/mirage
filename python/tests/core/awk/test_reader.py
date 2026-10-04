@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from mirage.core.awk.reader import RecordReader
+from mirage.shell.bytes import byte_view
 
 
 async def pieces(*parts: bytes) -> AsyncIterator[bytes]:
@@ -25,10 +26,10 @@ async def test_records_span_chunk_boundaries():
 
 
 @pytest.mark.asyncio
-async def test_a_multibyte_character_split_across_chunks_decodes():
+async def test_multibyte_bytes_survive_chunk_boundaries():
     data = "é\n".encode()
     reader = RecordReader(pieces(data[:1], data[1:]), lambda: "\n")
-    assert await records(reader) == ["é"]
+    assert await records(reader) == [byte_view("é")]
 
 
 @pytest.mark.asyncio

@@ -112,6 +112,15 @@
             "exit": 0,
             "stdout": "new\n"
           }
+        },
+        {
+          "program": {
+            "js": "const f = std.open('/data/digits.txt', 'r')\nconst b = new ArrayBuffer(6)\nconst n = f.read(b, 1, 4)\nconsole.log(n, JSON.stringify(Array.from(new Uint8Array(b))))\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "4 [0,48,49,50,51,0]\n"
+          }
         }
       ]
     },

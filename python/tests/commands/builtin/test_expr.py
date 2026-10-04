@@ -21,12 +21,11 @@ from mirage.commands.builtin.general.expr import (
     ExprError,
     _expr_eval,
     digits_of_int,
-    from_byte_view,
     int_of_digits,
     is_null,
-    to_byte_view,
 )
 from mirage.commands.builtin.utils.bre import translate_bre
+from mirage.shell.bytes import byte_view, from_byte_view
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -568,7 +567,7 @@ QUOTED_CLAUSES = [
 def test_expr_quotes_the_word_in_every_clause(words, detail):
     texts = [w.decode("utf-8", "surrogateescape") for w in words]
     with pytest.raises(ExprError) as caught:
-        _expr_eval([to_byte_view(t) for t in texts])
+        _expr_eval([byte_view(t) for t in texts])
     assert str(caught.value) == f"expr: syntax error: {detail}"
 
 
@@ -700,7 +699,7 @@ def _eval_bytes(*words: bytes) -> tuple[bytes, int]:
     """One expr line on raw operand bytes, answering raw output bytes.
 
     The command decodes argv with `surrogateescape` and hands every word
-    to `to_byte_view`, so a test that starts from bytes travels the same
+    to `byte_view`, so a test that starts from bytes travels the same
     road and can assert the bytes GNU wrote.
 
     Args:
@@ -711,7 +710,7 @@ def _eval_bytes(*words: bytes) -> tuple[bytes, int]:
         tuple[bytes, int]: stdout without its newline, and the exit code.
     """
     texts = [w.decode("utf-8", "surrogateescape") for w in words]
-    value, code = _expr_eval([to_byte_view(t) for t in texts])
+    value, code = _expr_eval([byte_view(t) for t in texts])
     return from_byte_view(value), code
 
 

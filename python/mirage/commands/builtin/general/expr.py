@@ -20,6 +20,7 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.quote import quote_word
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import byte_view, from_byte_view
 from mirage.types import PathSpec
 
 # GNU expr's operand grammar, which is narrower than either language's
@@ -61,48 +62,6 @@ NESTING_TOO_DEEP = f"expr: expression nesting too deep (limit {MAX_NESTING})"
 
 class ExprError(Exception):
     """An operand or operation GNU expr refuses, worded as GNU words it."""
-
-
-def to_byte_view(text: str) -> str:
-    """One argv word as GNU sees it: one character per byte.
-
-    Every expr string operator counts bytes, not characters, because
-    GNU runs in the C locale: `expr length ee` with two two-byte `e`
-    acutes is 4, `substr` will split one character in half and print
-    the half (`expr substr <e-acute><e-acute> 2 2` is the bytes
-    `a9 c3`), `index` searches a set of bytes so a byte shared with
-    another character matches, and the BRE's `.` matches one byte. All
-    of that follows from one representation change rather than four
-    special cases, so the whole parser runs on a string whose every
-    character is one byte and the conversion happens only at the
-    command boundary.
-
-    Args:
-        text (str): the word as the shell handed it over, a raw byte
-            riding as its surrogate escape.
-
-    Returns:
-        str: the same bytes, one per character, every code point below
-            256.
-    """
-    return text.encode("utf-8", "surrogateescape").decode("latin-1")
-
-
-def from_byte_view(view: str) -> bytes:
-    """The bytes a byte-view string stands for.
-
-    Args:
-        view (str): a value or a diagnostic built from byte-view words
-            and this module's ASCII wording, so every code point is
-            below 256.
-
-    Returns:
-        bytes: the bytes to write. GNU writes the raw bytes of the
-            operand it was handed, so a `substr` that split a character
-            prints the invalid half rather than a replacement
-            character.
-    """
-    return view.encode("latin-1")
 
 
 # How many decimal digits to convert in one go. CPython caps a base-10
@@ -504,7 +463,7 @@ class ExprParser:
     `expr 1 '|' 1 '/' 0` is 1 rather than a division by zero.
 
     Every word in `args`, every value it produces and every word it
-    quotes in a diagnostic is a byte view (`to_byte_view`), which is
+    quotes in a diagnostic is a byte view (`byte_view`), which is
     what makes `length`, `index`, `substr` and `:` count bytes as GNU
     does and makes a string comparison the `strcmp` byte order GNU
     uses. The conversion is the command's, not the parser's.
@@ -811,7 +770,7 @@ async def expr(
             exit_code=2, stderr=from_byte_view(MISSING_OPERAND)
         )
     try:
-        result, exit_code = _expr_eval([to_byte_view(t) for t in texts])
+        result, exit_code = _expr_eval([byte_view(t) for t in texts])
     except ExprError as exc:
         # GNU writes the refusal to stderr, nothing to stdout, and exits
         # 2; exit 1 is reserved for a zero-valued success. The

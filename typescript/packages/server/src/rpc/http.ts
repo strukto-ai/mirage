@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
-import type { MirageToolOperations } from '@struktoai/mirage-agents/tool_operations'
+import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { InFlight } from '../inflight.ts'

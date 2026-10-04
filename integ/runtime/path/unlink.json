@@ -64,20 +64,6 @@
           "expect": {
             "exit": 0,
             "stdout": "IsADirectoryError\n"
-          },
-          "expect_on": {
-            "monty@ram": {
-              "stdout": "FileNotFoundError\n"
-            },
-            "monty@redis": {
-              "stdout": "FileNotFoundError\n"
-            },
-            "wasi@ram": {
-              "stdout": "FileNotFoundError\n"
-            },
-            "wasi@redis": {
-              "stdout": "FileNotFoundError\n"
-            }
           }
         },
         {

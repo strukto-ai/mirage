@@ -16,6 +16,7 @@ import math
 import re
 
 from mirage.core.awk.errors import AwkRuntimeError
+from mirage.core.awk.lexer import read_escape
 from mirage.core.awk.regex import compile_ere, split_pattern
 from mirage.core.awk.value import Value, ValueKind, to_int, to_num, to_str
 
@@ -26,11 +27,8 @@ DIGITS = "0123456789"
 BLANKS = " \t\n"
 BLANK_RUN = re.compile(r"[ \t\n]+")
 UINT64_MASK = (1 << 64) - 1
-MAX_CODE_POINT = 0x10FFFF
-SURROGATES = range(0xD800, 0xE000)
 RAND_MASK = 0xFFFFFFFF
 RAND_SCALE = 4294967296.0
-ESCAPES = {"t": "\t", "n": "\n", "\\": "\\"}
 ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -307,10 +305,7 @@ def render_char(value: Value, convfmt: str) -> str:
         convfmt (str): CONVFMT for number to string conversion.
     """
     if value.kind is ValueKind.NUM:
-        code = to_int(value.num)
-        if code < 0 or code > MAX_CODE_POINT or code in SURROGATES:
-            return ""
-        return chr(code)
+        return chr(to_int(value.num) & 0xFF)
     body = to_str(value, convfmt)
     return body[0] if body else ""
 
@@ -630,9 +625,8 @@ def unescape(raw: str) -> str:
     idx = 0
     while idx < len(raw):
         if raw[idx] == "\\" and idx + 1 < len(raw):
-            nxt = raw[idx + 1]
-            out.append(ESCAPES.get(nxt, "\\" + nxt))
-            idx += 2
+            value, idx = read_escape(raw, idx + 1)
+            out.append(value)
             continue
         out.append(raw[idx])
         idx += 1

@@ -109,11 +109,8 @@
             "monty": {
               "stdout": "OSError\n"
             },
-            "wasi": {
-              "stdout": "ENOENT\n"
-            },
             "quickjs": {
-              "stdout": "-44\n"
+              "stdout": "-75\n"
             }
           }
         },
@@ -184,11 +181,8 @@
             "monty": {
               "stdout": "OSError\n"
             },
-            "wasi": {
-              "stdout": "ENOENT\n"
-            },
             "quickjs": {
-              "stdout": "-44\n"
+              "stdout": "-75\n"
             }
           }
         },

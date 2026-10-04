@@ -15,7 +15,11 @@
 import re
 
 from mirage.core.awk.errors import AwkSyntaxError
-from mirage.utils.posix import POSIX_CLASSES, translate_bracket
+from mirage.utils.posix import (
+    POSIX_CLASSES,
+    compile_posix_regex,
+    translate_bracket,
+)
 
 WORD_BOUNDARY_ESCAPES = {"y": "\\b", "<": "\\b", ">": "\\b", "B": "\\B"}
 
@@ -77,7 +81,7 @@ def compile_ere(pattern: str) -> re.Pattern[str]:
     if cached is not None:
         return cached
     try:
-        compiled = re.compile(translate(pattern), re.DOTALL)
+        compiled = compile_posix_regex(translate(pattern), re.DOTALL)
     except re.error as exc:
         raise AwkSyntaxError(REGEX_ERROR.format(pattern=pattern)) from exc
     CACHE[pattern] = compiled

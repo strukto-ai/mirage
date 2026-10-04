@@ -1,12 +1,12 @@
 import pytest
 
-from mirage import RAMVFS, MountMode, Workspace
-from mirage.agents.tool_operations import MirageToolOperations, number_lines
+from mirage import RAMVFS, MountMode, Session, Workspace
 from mirage.context.session_context import (
     reset_current_session,
     set_current_session,
 )
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
+from mirage.workspace.tools.tool_operations import number_lines
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ def workspace():
 
 @pytest.fixture
 def ops(workspace):
-    return MirageToolOperations(workspace)
+    return workspace.tools
 
 
 @pytest.mark.asyncio
@@ -295,16 +295,14 @@ async def _guarded() -> Workspace:
 @pytest.mark.asyncio
 async def test_every_tool_acts_under_the_session_profile():
     ws = await _guarded()
-    ops = MirageToolOperations(ws, session_id="agent")
+    ops = Session(ws, "agent").tools
     try:
         read = await ops.call("read", {"path": "/vault/key.txt"})
         listed = await ops.call("ls", {"path": "/"})
         globbed = await ops.call("glob", {"pattern": "/*/*.txt"})
         found = await ops.call("grep", {"pattern": "key", "path": "/vault"})
         shown = await ops.call("read", {"path": "/ro/r.txt"})
-        default = await MirageToolOperations(ws).call(
-            "read", {"path": "/vault/key.txt"}
-        )
+        default = await ws.tools.call("read", {"path": "/vault/key.txt"})
     finally:
         await ws.close()
     assert read.text == "Error: file '/vault/key.txt' not found"
@@ -318,7 +316,7 @@ async def test_every_tool_acts_under_the_session_profile():
 @pytest.mark.asyncio
 async def test_a_refused_write_or_edit_is_a_tool_error():
     ws = await _guarded()
-    ops = MirageToolOperations(ws, session_id="agent")
+    ops = Session(ws, "agent").tools
     try:
         await ops.call("read", {"path": "/ro/r.txt"})
         written = await ops.call(
@@ -340,7 +338,7 @@ async def test_a_refused_write_or_edit_is_a_tool_error():
 @pytest.mark.asyncio
 async def test_a_bound_session_is_kept_rather_than_widened():
     ws = await _guarded()
-    wide = MirageToolOperations(ws, session_id=ws.default_session_id)
+    wide = ws.tools
     token = set_current_session(ws.get_session("agent"))
     try:
         read = await wide.call("read", {"path": "/vault/key.txt"})
@@ -364,9 +362,9 @@ async def test_a_stored_session_serves_the_first_call():
         {"/": ram}, mode=MountMode.WRITE, workspace_id="shared", store=store
     )
     try:
-        written = await MirageToolOperations(
-            attached, session_id="agent"
-        ).call("write", {"path": "/a.txt", "content": "x\n"})
+        written = await Session(attached, "agent").tools.call(
+            "write", {"path": "/a.txt", "content": "x\n"}
+        )
     finally:
         await writer.close()
         await attached.close()

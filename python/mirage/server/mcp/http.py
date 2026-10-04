@@ -35,8 +35,6 @@ from starlette.routing import Route
 from starlette.types import Message, Receive, Scope, Send
 
 from mirage import __version__
-from mirage.agents.io_text import io_to_str
-from mirage.agents.tool_operations import MirageToolOperations, ToolResult
 from mirage.server.inflight import InFlight, rpc_messages
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.jobs import JobStatus, JobTable
@@ -45,6 +43,12 @@ from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.tools.io_text import io_to_str
+from mirage.workspace.tools.tool_operations import (
+    MirageToolOperations,
+    ToolResult,
+)
+from mirage.workspace.workspace import Session
 
 MCP_PATH = "/v1/workspaces/{workspace_id}/mcp"
 
@@ -57,7 +61,9 @@ class DaemonToolOperations(MirageToolOperations):
     ``/v1/jobs``, can be cancelled there, and is recorded like any other.
     A caller cancelled while it waits (an MCP client's cancel) cancels
     the job too.
-    The other tools run on the workspace's own loop.
+    The other tools run on the workspace's own loop through the
+    session's own table (``session.tools``), so a read through any door
+    guards a write through another.
 
     Args:
         entry (WorkspaceEntry): the workspace the tools act on.
@@ -68,10 +74,10 @@ class DaemonToolOperations(MirageToolOperations):
     def __init__(
         self, entry: WorkspaceEntry, jobs: JobTable, session_id: str
     ) -> None:
-        super().__init__(entry.runner.ws, True, session_id)
+        super().__init__(Session(entry.runner.ws, session_id))
         self._entry = entry
         self._jobs = jobs
-        self._session = session_id
+        self._session_id = session_id
 
     async def shell(self, command: str) -> ToolResult:
         """Run a command line as a job of the daemon.
@@ -87,7 +93,7 @@ class DaemonToolOperations(MirageToolOperations):
 
         async def run_line(scope: ExecutionScope) -> JsonValue:
             io = await runner.ws.shell(
-                command, session_id=self._session, execution_scope=scope
+                command, session_id=self._session_id, execution_scope=scope
             )
             payload = await io_result_to_dict(io)
             answers.append(ToolResult(io_to_str(io), io.exit_code != 0))
@@ -100,7 +106,7 @@ class DaemonToolOperations(MirageToolOperations):
             workspace_id=self._entry.id,
             command=command,
             factory=run,
-            session_id=self._session,
+            session_id=self._session_id,
         )
         try:
             job = await self._jobs.wait(job.id)
@@ -128,7 +134,11 @@ class DaemonToolOperations(MirageToolOperations):
         """
         if name == "shell":
             return await super().call(name, arguments)
-        return await self._entry.runner.call(super().call(name, arguments))
+
+        async def on_loop() -> ToolResult:
+            return await self._session.tools.call(name, arguments)
+
+        return await self._entry.runner.call(on_loop())
 
 
 class McpDoor:

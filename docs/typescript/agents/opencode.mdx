@@ -62,13 +62,10 @@ bun add @struktoai/mirage-agents @struktoai/mirage-node @opencode-ai/plugin
 Create `.opencode/plugins/mirage.ts`:
 
 ```ts .opencode/plugins/mirage.ts
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { miragePlugin } from '@struktoai/mirage-agents/opencode'
 
-const ram = new RAMVFS()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
 export default miragePlugin(ws)
 ```

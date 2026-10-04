@@ -85,6 +85,7 @@ interface Expect {
   content?: string
   ops_contain?: string[]
   ops_absent?: string[]
+  ops_count?: Record<string, number>
   value?: unknown
 }
 
@@ -694,6 +695,14 @@ function checkOps(expect: Expect, seen: string[]): string[] {
   for (const entry of expect.ops_absent ?? []) {
     if (recorded.has(entry)) {
       problems.push(`ledger must not hold ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`)
+    }
+  }
+  for (const [entry, want] of Object.entries(expect.ops_count ?? {})) {
+    const got = seen.filter((s) => s === entry || s.split(' ', 1)[0] === entry).length
+    if (got !== want) {
+      problems.push(
+        `ledger holds ${JSON.stringify(entry)} ${String(got)} times, not ${String(want)}: got ${JSON.stringify(seen)}`,
+      )
     }
   }
   return problems

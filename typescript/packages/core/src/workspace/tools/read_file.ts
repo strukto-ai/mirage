@@ -1,7 +1,7 @@
-import { detectFileType } from '@struktoai/mirage-core/commands/builtin/file_sniff'
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
-import { FileStat, FileType } from '@struktoai/mirage-core/types'
-import type { ContentType } from '@struktoai/mirage-core/types'
+import { detectFileType } from '../../commands/builtin/file_sniff.ts'
+import type { Ops } from '../../ops/ops.ts'
+import { FileStat, FileType } from '../../types.ts'
+import type { ContentType } from '../../types.ts'
 import {
   MIME_FOR_EXTENSION,
   MIME_FOR_FILE_TYPE,

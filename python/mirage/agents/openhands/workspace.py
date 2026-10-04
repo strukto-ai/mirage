@@ -24,8 +24,8 @@ from openhands.sdk.workspace.local import LocalWorkspace
 from openhands.sdk.workspace.models import CommandResult, FileOperationResult
 from pydantic import Field, PrivateAttr
 
-from mirage.agents.io_text import with_refusal
 from mirage.ops.ops import Ops
+from mirage.workspace.tools.io_text import with_refusal
 from mirage.workspace.workspace import Session
 from mirage.workspace.workspace import Workspace as MirageBackingWorkspace
 

@@ -29,11 +29,9 @@ export const WASI: Record<FsCondition, number> = {
   EPERM: 63,
   ENOTEMPTY: 55,
   EXDEV: 75,
-  // Each mount is its own preopen to a WASI guest, so a rename between
-  // two of them reads as a destination that is not there. pathlib's
-  // EXDEV is the monty dialect's answer, not this wire's; the row IS
-  // that decision (finding 8).
-  CROSS_MOUNT: 44,
+  // A rename or link between two mounts is two file systems, as a
+  // host answers across two preopens on different devices.
+  CROSS_MOUNT: 75,
   ENOTSUP: 58,
   ELOOP: 32,
   EINVAL: 28,

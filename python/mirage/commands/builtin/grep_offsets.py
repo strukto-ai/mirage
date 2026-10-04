@@ -40,21 +40,6 @@ def line_offsets(lines: Sequence[str]) -> list[int]:
     return offsets
 
 
-def match_offset(line_start: int, line: str, index: int) -> int:
-    """Where a match begins in bytes, given its character index.
-
-    The pattern engine reports a character index because both hosts hold a
-    line as text; GNU reports a byte count and reports the same number
-    under C and C.utf8, so the index is converted rather than printed.
-
-    Args:
-        line_start (int): the line's own byte offset.
-        line (str): the line the index is into.
-        index (int): a character index into that line.
-    """
-    return line_start + byte_offset(line, index)
-
-
 def rust_matches(pat: re.Pattern[str], line: str) -> list[tuple[int, str]]:
     """Every match of a pattern in a line, found as ripgrep finds them.
 

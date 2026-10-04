@@ -25,7 +25,7 @@
    "runtime/python/pyodide/fs": "The Emscripten filesystem adapter for Pyodide. Python uses the shared WASI host or native filesystem integration instead.",
    "agents/openai": "Twin of the python agents/openai_agents (excused there): the npm subpath is named after @openai/agents and the python package after the openai-agents SDK.",
    "agents/pi": "Ecosystem split: pi is an npm-only coding agent.",
-   "agents/read_file": "Constants (the MIME tables) of the TypeScript-only read_file tool; see modules.agents.typescript_only.read_file."
+   "workspace/tools/read_file": "Constants (the MIME tables) of the TypeScript-only read_file tool; see modules.workspace/tools.typescript_only.read_file."
   }
  },
  "modules": {
@@ -147,7 +147,7 @@
     "similarity": "A port of dulwich's _similarity_score, which Python's rename detection calls directly (changes.py, diff_output.py); isomorphic-git has no rename scoring, and the two must agree digit for digit at the 60% threshold."
    }
   },
-  "agents": {
+  "workspace/tools": {
    "typescript_only": {
     "read_file": "The read-file tool body (sniffs a workspace file into a text, image, PDF or binary part), shared by the npm-only vercel and opencode adapters and the openai adapter's read_file tool. No Python adapter exposes a read-file tool (openai_agents attaches files through MirageRunner), so there is nothing to mirror."
    }
