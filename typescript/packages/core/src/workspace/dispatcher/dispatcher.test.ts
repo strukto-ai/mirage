@@ -1233,7 +1233,7 @@ describe('dispatch runs writers to one path one at a time', () => {
     }
   })
 
-  it('changes nothing beside the store for a call that lands after its timeout', async () => {
+  it('keeps a late call off a mount that replaced its own', async () => {
     // By the time a timed-out rename lands, its mount may be gone and
     // another store mounted at the prefix: the late call must not touch
     // the new mount's links.
@@ -1254,6 +1254,31 @@ describe('dispatch runs writers to one path one at a time', () => {
       store.release()
       await new Promise((resolve) => setTimeout(resolve, 20))
       expect(ws.namespace.isLink('/data/b')).toBe(true)
+    } finally {
+      store.release()
+      await ws.close()
+    }
+  })
+
+  it('settles a late call on the mount it ran on', async () => {
+    // A timed-out rename that lands while its mount is still there owes
+    // the node table its change: the link at the destination does not
+    // survive the move.
+    const store = new StalledRAMVFS('rename')
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/a', [ENC.encode('a')])
+      await ws.dispatch('symlink', '/data/b', [], { target: 'x' })
+      await expect(
+        ws.dispatch('rename', '/data/a', [PathSpec.fromStrPath('/data/b')]),
+      ).rejects.toThrow()
+      store.release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(ws.namespace.isLink('/data/b')).toBe(false)
     } finally {
       store.release()
       await ws.close()
