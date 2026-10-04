@@ -28,6 +28,19 @@ import { RedisVFS, type RedisVFSOptions } from '../../vfs/redis/redis.ts'
 // dist (tsup onSuccess); byte-identical to the Python add.lua.
 const ADD_LUA = readFileSync(new URL('./add.lua', import.meta.url), 'utf8')
 
+// Hash slots one SCAN call visits. A prefix drop walks the whole server,
+// so this sets both the round trips (dbsize / SCAN_COUNT) and how long
+// each call holds the server: about 1-2 ms at 1000, against the 10 ms
+// slowlog default. The client default of 10 made one drop at 1M server
+// keys take 191k round trips.
+const SCAN_COUNT = 1000
+
+// Keys one DEL names. Freeing memory is what a DEL costs, and a body has no
+// size bound: one DEL per page freed up to SCAN_COUNT bodies at once, about
+// 10 ms for 100 bodies of 512 KB and 1.5 ms for 10. A page goes out as one
+// pipeline of DELs this size, so it is still one round trip.
+export const DEL_BATCH = 10
+
 function toBuffer(data: Uint8Array): Buffer {
   return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
 }
@@ -45,6 +58,8 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
   private readonly limit: number
   private readonly dataPrefix: string
   private readonly metaPrefix: string
+  private readonly entryPattern: string
+  private readonly entryBases: readonly string[]
   private maxDrainBytesValue: number | null = null
   // Local invalidation also discards fills paused in cooperative hashing.
   private readonly invalidation = new Invalidation()
@@ -58,6 +73,8 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     this.limit = parseLimit(options.cacheLimit ?? '512MB')
     this.dataPrefix = `${this.keyPrefix}data:`
     this.metaPrefix = `${this.keyPrefix}meta:`
+    this.entryPattern = `${globEscape(this.keyPrefix)}[dm][ae]ta:`
+    this.entryBases = [this.dataPrefix, this.metaPrefix].map((p) => RedisFileCacheStore.asBytes(p))
     this.maxDrainBytes = options.maxDrainBytes ?? null
   }
 
@@ -97,17 +114,29 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     const c = await this.cacheClient()
     return (await c.exists(this.dataKey(k))) > 0
   }
-  async get(key: string): Promise<Uint8Array | null> {
+  /**
+   * The cache client with every bulk string read as raw bytes: a body is
+   * binary, and a key whose name is not UTF-8 keeps its exact bytes.
+   */
+  private async bytesView(): Promise<{
+    get: (k: string) => Promise<Buffer | null>
+    scan: (
+      cursor: string,
+      options: { MATCH: string; COUNT: number },
+    ) => Promise<{ cursor: Buffer | string; keys: Buffer[] }>
+  }> {
     const c = await this.cacheClient()
     const mod = await this.module()
-    const blob = mod.RESP_TYPES.BLOB_STRING
-    const mapping: Record<number, unknown> = { [blob]: Buffer }
     const typed = c as unknown as {
-      withTypeMapping: (m: Record<number, unknown>) => {
-        get: (k: string) => Promise<Buffer | null>
-      }
+      withTypeMapping: (
+        m: Record<number, unknown>,
+      ) => Awaited<ReturnType<RedisFileCacheStore['bytesView']>>
     }
-    const raw = await typed.withTypeMapping(mapping).get(this.dataKey(key))
+    return typed.withTypeMapping({ [mod.RESP_TYPES.BLOB_STRING]: Buffer })
+  }
+
+  async get(key: string): Promise<Uint8Array | null> {
+    const raw = await (await this.bytesView()).get(this.dataKey(key))
     if (raw === null) return null
     return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
   }
@@ -195,23 +224,70 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
   }
 
   async evictPrefix(prefix: string, excluded: readonly string[] = []): Promise<void> {
-    this.invalidation.invalidateAll()
+    this.invalidation.invalidatePrefix(prefix, excluded)
     for (const key of [...this.drainTasks.keys()]) {
       if (key.startsWith(prefix) && !excluded.some((boundary) => underPath(key, boundary)))
         this.drainTasks.delete(key)
     }
-    const escaped = globEscape(prefix)
+    await this.dropMatching(prefix, excluded)
+  }
+
+  /**
+   * Delete the data and meta keys of every entry under `prefix`.
+   *
+   * One SCAN pass covers both kinds, and each page is deleted as it
+   * arrives, in DELs of at most `DEL_BATCH` keys, so no single call holds
+   * the server for the whole subtree.
+   * Deleting keys a SCAN already returned is safe: SCAN still returns
+   * every key present for the whole iteration.
+   *
+   * Keys arrive as bytes: node-redis decodes a string reply as UTF-8, and a
+   * name with invalid bytes would come back as a different key. The loop is
+   * by hand because scanIterator compares the cursor to '0' and never ends
+   * once the cursor arrives as bytes too.
+   */
+  private async dropMatching(prefix: string, excluded: readonly string[] = []): Promise<void> {
     const c = await this.cacheClient()
-    for (const base of [this.dataPrefix, this.metaPrefix]) {
-      const batch: string[] = []
-      for await (const k of c.scanIterator({ MATCH: `${base}${escaped}*` })) {
-        for (const key of Array.isArray(k) ? k : [k]) {
-          if (!excluded.some((boundary) => underPath(key.slice(base.length), boundary)))
-            batch.push(key)
-        }
+    const bytes = await this.bytesView()
+    const match = `${this.entryPattern}${globEscape(prefix)}*`
+    const excludedBytes = excluded.map((root) => RedisFileCacheStore.asBytes(root))
+    let cursor = '0'
+    do {
+      const reply = await bytes.scan(cursor, { MATCH: match, COUNT: SCAN_COUNT })
+      cursor = reply.cursor.toString()
+      const doomed = reply.keys.filter((k) => this.owned(k, excludedBytes))
+      if (doomed.length === 0) continue
+      const pipe = c.multi()
+      for (let start = 0; start < doomed.length; start += DEL_BATCH)
+        pipe.del(doomed.slice(start, start + DEL_BATCH))
+      await pipe.execAsPipeline()
+    } while (cursor !== '0')
+  }
+
+  /**
+   * Each byte of `text` as one character, so prefix and boundary tests
+   * compare the raw bytes of a key, the way Python compares its
+   * surrogate-escaped name.
+   */
+  private static asBytes(text: string): string {
+    return Buffer.from(text, 'utf8').toString('latin1')
+  }
+
+  /**
+   * Whether a SCAN match is this cache's entry and not under an excluded
+   * root, compared byte for byte (`excluded` already in byte form). The
+   * MATCH class `[dm][ae]ta:` also admits `deta:` and `mata:`, which are
+   * not the cache's.
+   */
+  private owned(raw: Buffer, excluded: readonly string[]): boolean {
+    const name = raw.toString('latin1')
+    for (const base of this.entryBases) {
+      if (name.startsWith(base)) {
+        const key = name.slice(base.length)
+        return !excluded.some((boundary) => underPath(key, boundary))
       }
-      if (batch.length > 0) await c.del(batch)
     }
+    return false
   }
 
   evictPaths(_paths: Iterable<string>): void {
@@ -225,15 +301,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
   async clear(): Promise<void> {
     this.invalidation.invalidateAll()
     this.drainTasks.clear()
-    const c = await this.cacheClient()
-    for (const pattern of [`${this.dataPrefix}*`, `${this.metaPrefix}*`]) {
-      const batch: string[] = []
-      for await (const k of c.scanIterator({ MATCH: pattern })) {
-        if (Array.isArray(k)) batch.push(...k)
-        else batch.push(k)
-      }
-      if (batch.length > 0) await c.del(batch)
-    }
+    await this.dropMatching('')
   }
 
   async multiGet(keys: readonly string[]): Promise<(Uint8Array | null)[]> {

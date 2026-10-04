@@ -18,7 +18,7 @@ import { IOResult } from '@struktoai/mirage-core/io/types'
 import { OpRecord } from '@struktoai/mirage-core/observe/record'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RedisClientType } from 'redis'
-import { RedisFileCacheStore } from './redis.ts'
+import { DEL_BATCH, RedisFileCacheStore } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
@@ -114,6 +114,65 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
         expect(await cache.get('pending')).toBeNull()
         await cache.remove('pending')
       }
+    },
+  )
+
+  it.each(['set', 'add'] as const)(
+    '%s of an unrelated key survives a prefix eviction while it awaited the client',
+    async (method) => {
+      // The scoped twin of the case above: the writer is held inside the
+      // gated client while evictPrefix runs to completion, so a store-wide
+      // retirement would discard it even though nothing under its key went.
+      const real = cache.cacheClient.bind(cache)
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let held = false
+      cache.cacheClient = async (): Promise<RedisClientType> => {
+        if (!held) {
+          held = true
+          await gate
+        }
+        return real()
+      }
+      const data = new Uint8Array([1, 2, 3])
+      const fill = cache[method]('other', data)
+      await cache.evictPrefix('pend')
+      release()
+      cache.cacheClient = real
+      await fill
+      expect(await cache.get('other')).toEqual(data)
+      await cache.remove('other')
+    },
+  )
+
+  it.each(['set', 'add'] as const)(
+    '%s under an excluded root survives a prefix eviction while it awaited the client',
+    async (method) => {
+      // The excluded root is a nested mount: its keys are not this drop's,
+      // so its in-flight fill must survive the eviction of the folder above.
+      const real = cache.cacheClient.bind(cache)
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let held = false
+      cache.cacheClient = async (): Promise<RedisClientType> => {
+        if (!held) {
+          held = true
+          await gate
+        }
+        return real()
+      }
+      const data = new Uint8Array([1, 2, 3])
+      const fill = cache[method]('pend/nested/f', data)
+      await cache.evictPrefix('pend/', ['pend/nested'])
+      release()
+      cache.cacheClient = real
+      await fill
+      expect(await cache.get('pend/nested/f')).toEqual(data)
+      await cache.remove('pend/nested/f')
     },
   )
 
@@ -354,5 +413,252 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(cache.drainTasks.has('/slow.txt')).toBe(false)
     await task
     expect(await cache.get('/slow.txt')).toBeNull()
+  })
+})
+
+// The two prefix-wide drops, each over everything under `/t/`.
+const PREFIX_DROPS = [
+  ['evictPrefix', (c: RedisFileCacheStore) => c.evictPrefix('/t/')],
+  ['clear', (c: RedisFileCacheStore) => c.clear()],
+] as const
+
+// Counted on the store's own client, not with `INFO commandstats`: the
+// server is shared with every other Redis test running at once. The store
+// scans through a type-mapped view of the client, which is a separate
+// object, so the view's `scan` is wrapped as well as the client's own.
+function spyScan(client: RedisClientType): unknown[][] {
+  const calls: unknown[][] = []
+  interface Scanner {
+    scan: (...args: unknown[]) => Promise<unknown>
+  }
+  const wrap = (target: Scanner): void => {
+    const real = target.scan.bind(target)
+    target.scan = (...args: unknown[]) => {
+      calls.push(args)
+      return real(...args)
+    }
+  }
+  const target = client as unknown as Scanner & {
+    withTypeMapping: (mapping: unknown) => Scanner
+  }
+  wrap(target)
+  const realMapping = target.withTypeMapping.bind(client)
+  target.withTypeMapping = (mapping: unknown) => {
+    const view = realMapping(mapping)
+    wrap(view)
+    return view
+  }
+  return calls
+}
+
+// Record, per pipeline the client opens, how many keys each DEL names.
+function spyPipelines(client: RedisClientType): number[][] {
+  const pipelines: number[][] = []
+  const target = client as unknown as { multi: () => { del: (keys: string[]) => unknown } }
+  const real = target.multi.bind(client)
+  target.multi = () => {
+    const pipe = real()
+    const sizes: number[] = []
+    pipelines.push(sizes)
+    const realDel = pipe.del.bind(pipe)
+    pipe.del = (keys: string[]) => {
+      sizes.push(keys.length)
+      return realDel(keys)
+    }
+    return pipe
+  }
+  return pipelines
+}
+
+async function dropMatching(client: RedisClientType, pattern: string): Promise<void> {
+  for await (const page of client.scanIterator({ MATCH: pattern, COUNT: 1000 })) {
+    const keys = Array.isArray(page) ? page : [page]
+    if (keys.length > 0) await client.del(keys)
+  }
+}
+
+async function keysMatching(client: RedisClientType, pattern: string): Promise<string[]> {
+  const out: string[] = []
+  for await (const page of client.scanIterator({ MATCH: pattern, COUNT: 1000 })) {
+    out.push(...(Array.isArray(page) ? page : [page]))
+  }
+  return out.sort()
+}
+
+describe.skipIf(skip)('RedisFileCacheStore prefix drops', () => {
+  const url = REDIS_URL !== undefined ? { url: REDIS_URL } : {}
+  let prefix: string
+  let cache: RedisFileCacheStore
+  const x = new Uint8Array([0x78])
+
+  beforeEach(() => {
+    prefix = `mirage:cache:test:${String(Date.now())}:${Math.random().toString(36).slice(2)}:`
+    cache = new RedisFileCacheStore({ ...url, keyPrefix: prefix })
+  })
+
+  afterEach(async () => {
+    const c = await cache.cacheClient()
+    await dropMatching(c, `${prefix}*`)
+    await cache.close()
+  })
+
+  it.each(PREFIX_DROPS)('%s scans the server once in large pages', async (_name, drop) => {
+    // One pass over data and meta together, at COUNT 1000: about
+    // dbsize / 1000 SCAN calls. Two passes double it, and the client
+    // default (COUNT 10) makes it about dbsize / 5.
+    const c = await cache.cacheClient()
+    const seed = c.multi()
+    for (let i = 0; i < 5000; i++) seed.set(`${prefix}unrelated:${String(i)}`, 'x')
+    await seed.exec()
+    await cache.set('/t/a', x, { fingerprint: 'etag' })
+    const scans = spyScan(c)
+    await drop(cache)
+    const pages = Math.ceil((await c.dbSize()) / 1000)
+    // At least one: a spy that sees no SCAN would pass the bound below.
+    expect(scans.length).toBeGreaterThan(0)
+    expect(scans.length).toBeLessThanOrEqual(pages + 2)
+    expect(await cache.get('/t/a')).toBeNull()
+    expect(await c.exists(`${prefix}meta:/t/a`)).toBe(0)
+  })
+
+  it('a drop spanning pages takes data and meta and nothing else', async () => {
+    for (let i = 0; i < 2500; i++)
+      await cache.set(`/t/sub/${String(i)}`, x, { fingerprint: 'etag' })
+    await cache.set('/t/subway', x, { fingerprint: 'etag' })
+    await cache.set('/t/sub/nested/kept', x, { fingerprint: 'etag' })
+    const c = await cache.cacheClient()
+    const pipelines = spyPipelines(c)
+    await cache.evictPrefix('/t/sub/', ['/t/sub/nested'])
+    // Deleted page by page, each page in DELs of at most DEL_BATCH keys:
+    // one DEL of N keys blocks the server for all N at once, and N bodies
+    // may each be large. A page goes out as one pipeline, one round trip.
+    const sizes = pipelines.flat()
+    expect(pipelines.length).toBeGreaterThanOrEqual(3)
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(DEL_BATCH)
+    expect(pipelines.some((pipe) => pipe.length > 1)).toBe(true)
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(5000)
+    expect(await keysMatching(c, `${prefix}[dm][ae]ta:*`)).toEqual(
+      [
+        `${prefix}data:/t/sub/nested/kept`,
+        `${prefix}data:/t/subway`,
+        `${prefix}meta:/t/sub/nested/kept`,
+        `${prefix}meta:/t/subway`,
+      ].sort(),
+    )
+  })
+
+  it.each(PREFIX_DROPS)('%s leaves keys that only resemble cache keys', async (_name, drop) => {
+    // `[dm][ae]ta:` also matches `mata:` and `deta:`; only `data:` and
+    // `meta:` belong to the cache. The VFS store shares the key prefix.
+    const c = await cache.cacheClient()
+    await c.set(`${prefix}mata:/t/x`, 'x')
+    await c.set(`${prefix}file:/t/x`, 'x')
+    await cache.set('/t/x', x, { fingerprint: 'etag' })
+    await drop(cache)
+    expect(await cache.get('/t/x')).toBeNull()
+    expect(await c.exists(`${prefix}mata:/t/x`)).toBe(1)
+    expect(await c.exists(`${prefix}file:/t/x`)).toBe(1)
+  })
+
+  it.each(PREFIX_DROPS)(
+    'a key prefix with glob characters matches only itself under %s',
+    async (_name, drop) => {
+      const globbed = new RedisFileCacheStore({ ...url, keyPrefix: `${prefix}[1]:` })
+      const plain = new RedisFileCacheStore({ ...url, keyPrefix: `${prefix}1:` })
+      try {
+        await globbed.set('/t/x', new TextEncoder().encode('mine'))
+        await plain.set('/t/x', new TextEncoder().encode('other'))
+        await drop(globbed)
+        expect(await globbed.get('/t/x')).toBeNull()
+        expect(new TextDecoder().decode((await plain.get('/t/x')) ?? undefined)).toBe('other')
+      } finally {
+        await globbed.close()
+        await plain.close()
+      }
+    },
+  )
+
+  it.each(PREFIX_DROPS)(
+    '%s drops keys that are not UTF-8 and skips their lookalikes',
+    async (_name, drop) => {
+      // A shared server can hold any bytes as a key. A string-decoded name
+      // (invalid bytes read as U+FFFD) names a different key, so a binary
+      // key under the cache's own `data:` prefix would survive the drop.
+      const c = await cache.cacheClient()
+      const bad = Buffer.from([0xff, 0xfe])
+      const own = Buffer.concat([Buffer.from(`${prefix}data:/t/`), bad])
+      const lookalike = Buffer.concat([Buffer.from(`${prefix}mata:/t/`), bad])
+      await c.set(own, 'x')
+      await c.set(lookalike, 'x')
+      try {
+        await cache.set('/t/a', x, { fingerprint: 'etag' })
+        await drop(cache)
+        expect(await cache.get('/t/a')).toBeNull()
+        expect(await c.exists(own)).toBe(0)
+        expect(await c.exists(lookalike)).toBe(1)
+      } finally {
+        await c.del([own, lookalike])
+      }
+    },
+  )
+
+  it('an excluded root is compared byte for byte', async () => {
+    // Dropping the byte `\xff` would read `/t/ex\xff/y` as `/t/ex/y`, under
+    // the excluded root `/t/ex`; the exact bytes put it beside.
+    const c = await cache.cacheClient()
+    const beside = Buffer.concat([
+      Buffer.from(`${prefix}data:/t/ex`),
+      Buffer.from([0xff]),
+      Buffer.from('/y'),
+    ])
+    const under = Buffer.concat([Buffer.from(`${prefix}data:/t/ex/`), Buffer.from([0xff])])
+    await c.set(beside, 'x')
+    await c.set(under, 'x')
+    try {
+      await cache.evictPrefix('/t/', ['/t/ex'])
+      expect(await c.exists(beside)).toBe(0)
+      expect(await c.exists(under)).toBe(1)
+    } finally {
+      await c.del([beside, under])
+    }
+  })
+
+  it('an excluded root holding U+FFFD is not a stand-in for any byte', async () => {
+    // A replacing decode reads the byte `\xff` as U+FFFD, which would put
+    // `/t/\xff/x` under an excluded root spelled `/t/\ufffd`.
+    const c = await cache.cacheClient()
+    const key = Buffer.concat([
+      Buffer.from(`${prefix}data:/t/`),
+      Buffer.from([0xff]),
+      Buffer.from('/x'),
+    ])
+    await c.set(key, 'x')
+    try {
+      await cache.evictPrefix('/t/', ['/t/\ufffd'])
+      expect(await c.exists(key)).toBe(0)
+    } finally {
+      await c.del([key])
+    }
+  })
+
+  it('an excluded root with a non-ASCII name keeps what lies under it', async () => {
+    // A nested mount named in UTF-8: its keys only match the root once
+    // both sides are compared in the same form.
+    await cache.set('/t/café/f', x)
+    await cache.set('/t/other', x)
+    await cache.evictPrefix('/t/', ['/t/café'])
+    expect(await cache.get('/t/café/f')).toEqual(x)
+    expect(await cache.get('/t/other')).toBeNull()
+  })
+
+  it.each(PREFIX_DROPS)('%s drops under a non-ASCII key prefix', async (_name, drop) => {
+    const accented = new RedisFileCacheStore({ ...url, keyPrefix: `${prefix}café:` })
+    try {
+      await accented.set('/t/a', x)
+      await drop(accented)
+      expect(await accented.get('/t/a')).toBeNull()
+    } finally {
+      await accented.close()
+    }
   })
 })
