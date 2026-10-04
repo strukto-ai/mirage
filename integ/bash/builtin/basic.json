@@ -375,7 +375,7 @@
       }
     },
     {
-      "id": "blt_trap_accepted_noop",
+      "id": "blt_trap_registration_keeps_session_alive",
       "seq": 502311,
       "targets": [
         "ram",
@@ -401,7 +401,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "trap 'echo trapped' EXIT; echo body; echo $?",
+      "command": "trap 'echo trapped' EXIT; echo body; echo $?; trap - EXIT",
       "expect": {
         "exit": 0,
         "stdout": "body\n0\n",

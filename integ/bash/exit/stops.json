@@ -29,6 +29,36 @@
         "stdout": "a\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "exit_in_loop_condition_keeps_iterations",
+      "seq": 500114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "bash -c 'i=0; while eval '\"'\"'i=$((i+1)); [ \"$i\" -lt 3 ] || exit 7'\"'\"'; do echo \"$i\"; done; echo BAD'",
+      "expect": {
+        "exit": 7,
+        "stdout": "1\n2\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+from typing import Any
+
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
@@ -24,6 +27,7 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.control import BreakSignal, ContinueSignal
+from mirage.workspace.executor.traps import run_exit_trap
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -95,29 +99,46 @@ async def handle_return(
 async def handle_exit(
     args: list[str],
     session: SessionState,
+    execute_fn: Callable[..., Any] | None = None,
+    stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Exit the shell, with bash's argument checks.
+    """Exit the shell, with bash's argument checks, running its EXIT
+    action first, where ``exit`` was called: a function's locals and
+    ``$1`` are still in scope, as they are for bash's.
 
     Args:
         args (list[str]): words after the command name; at most one,
             the exit status.
         session (SessionState): session whose last exit code is the default
             status.
+        execute_fn (Callable[..., Any] | None): runs the EXIT action.
+        stdin (ByteSource | None): the shell's standard input, which
+            the action reads.
+        call_stack (CallStack | None): the frames ``exit`` was called in.
     """
     args = numeric_operands(args)
+    err = b""
     if args and not is_count_word(args[0]):
         # bash exits with 2 after the diagnostic.
-        raise ExitSignal(
-            2,
-            stderr=builtin_error(
-                "exit", f"{args[0]}: numeric argument required"
-            ),
-        )
-    if len(args) > 1:
+        code = 2
+        err = builtin_error("exit", f"{args[0]}: numeric argument required")
+    elif len(args) > 1:
         # bash abandons everything still to run, and exits nowhere.
-        raise ExitSignal(1, stderr=builtin_error("exit", "too many arguments"))
+        code = 1
+        err = builtin_error("exit", "too many arguments")
+    elif args:
+        code = status_of(args[0])
+    else:
+        bare = session._trap_status
+        code = (bare if bare is not None else session.last_exit_code) % 256
+    cleanup = await run_exit_trap(execute_fn, session, code, stdin, call_stack)
+    if cleanup is None:
+        raise ExitSignal(code, stderr=err)
     raise ExitSignal(
-        status_of(args[0]) if args else session.last_exit_code % 256
+        cleanup.exit_code,
+        stderr=err + await cleanup.materialize_stderr(),
+        stdout=await cleanup.materialize_stdout(),
     )
 
 
@@ -215,7 +236,13 @@ async def exit_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_exit(list(call.argv.args), call.session)
+    return await handle_exit(
+        list(call.argv.args),
+        call.session,
+        call.execute_fn,
+        call.stdin,
+        call.call_stack,
+    )
 
 
 async def break_builtin(call: BuiltinCall) -> Result:

@@ -58,7 +58,6 @@ import {
   handleSource,
   handleTest,
   handleTimeout,
-  handleTrap,
   handleUnset,
   handleWhoami,
   handleXargs,
@@ -1554,13 +1553,7 @@ describe('handleSet', () => {
   })
 })
 
-describe('handleTrap / handleReturn / handleLocal', () => {
-  it('handleTrap is a no-op with exit 0', () => {
-    const session = new SessionState({ sessionId: 'test' })
-    const [, io] = handleTrap(session)
-    expect(io.exitCode).toBe(0)
-  })
-
+describe('handleReturn / handleLocal', () => {
   it('handleReturn throws ReturnSignal with exit code', () => {
     const s = new SessionState({ sessionId: 'test' })
     const cs = new CallStack()

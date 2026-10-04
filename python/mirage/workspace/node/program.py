@@ -12,13 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from typing import Any
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
+from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
-from mirage.shell.console import JobConsole
+from mirage.shell.call_stack import CallStack
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.descriptors import ENCLOSING, Recorder, StreamOwner
 from mirage.shell.errors import DiscardSignal, ExitSignal
@@ -41,6 +44,8 @@ from mirage.workspace.executor.statement import (
     statement_output,
     statement_stdin,
 )
+from mirage.workspace.executor.traps import run_exit_trap
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -57,6 +62,7 @@ async def execute_program(
     decisions: Decisions | None = None,
     sink: JobConsole | None = None,
     inline: bool = False,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Execute program node (root / semicolon-separated).
 
@@ -72,9 +78,9 @@ async def execute_program(
     program runs on its caller's frames (``eval``, ``source``, an alias,
     ``$( )``), so an ``exit``, ``return``, ``break`` or ``continue`` goes
     on into the caller, after what the program wrote; any other program
-    is a shell of its own and ends there. Either resumes at its next
-    line after an error that discards one, unless it runs in a child
-    shell.
+    is a shell of its own and ends there, running its EXIT action
+    through ``execute_fn``. Either resumes at its next line after an
+    error that discards one, unless it runs in a child shell.
     """
     # Every program loop is one parse, which is the unit bash's alias
     # rule counts in: an alias defined on this parse and row is not
@@ -101,6 +107,7 @@ async def execute_program(
             sink,
             session.terminal if root else None,
             inline,
+            execute_fn,
         )
     finally:
         session._parse_current = outer_parse
@@ -122,6 +129,7 @@ async def _run_program(
     sink: JobConsole | None = None,
     own: StreamOwner | None = None,
     inline: bool = False,
+    execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     children = node.children
     all_stdout: list[Any] = []
@@ -172,8 +180,11 @@ async def _run_program(
             last = child.end_point[0]
             if session.shell_options.get("verbose") and last >= first:
                 text = "\n".join(source_lines[first : last + 1])
-                merged_io = await merged_io.merge(
-                    IOResult(stderr=text.encode() + b"\n")
+                merged_io = await land(
+                    [(Channel.STDERR, text.encode() + b"\n", False)],
+                    sink,
+                    all_stdout,
+                    merged_io,
                 )
             # Marked read either way: a line reaches the reader once, so
             # a line whose own first statement turned the option on was
@@ -229,10 +240,18 @@ async def _run_program(
             # stream goes on there.
             recorder = Recorder()
             enclosing = ENCLOSING.set(recorder)
+            # A job this shell started writes into the statement while it
+            # runs, among what the statement writes.
+            jobs = session.job_output or session.tty.jobs
+            held = jobs.recorder
             try:
-                stdout, io, last_exec = await recurse(
-                    child, session, child_stdin, call_stack, sink=recorder
-                )
+                jobs.recorder = recorder
+                try:
+                    stdout, io, last_exec = await recurse(
+                        child, session, child_stdin, call_stack, sink=recorder
+                    )
+                finally:
+                    jobs.recorder = held
             except UNWINDING as sig:
                 merged_io = await land(
                     await statement_output(
@@ -249,13 +268,20 @@ async def _run_program(
                 ):
                     # bash's DISCARD: the rest of this line goes, and the
                     # loop resumes at the next line with `$?` at 1.
-                    if sig.stdout:
-                        all_stdout.append(sig.stdout)
-                    merged_io = await merged_io.merge(
-                        IOResult(
-                            exit_code=sig.exit_code, stderr=sig.stderr or None
-                        )
+                    merged_io = await land(
+                        [
+                            (channel, data, False)
+                            for channel, data in (
+                                (Channel.STDOUT, sig.stdout or b""),
+                                (Channel.STDERR, sig.stderr),
+                            )
+                            if data
+                        ],
+                        sink,
+                        all_stdout,
+                        merged_io,
                     )
+                    merged_io.exit_code = sig.exit_code
                     record_status(session, sig.exit_code)
                     last_exec = ExecutionNode(
                         command=get_text(child),
@@ -281,9 +307,19 @@ async def _run_program(
                 merged_io = await merged_io.merge(
                     IOResult(exit_code=code, stderr=stderr or None)
                 )
-                merged_io.exit_code = code
-                record_status(session, code)
-                last_exec = ExecutionNode(command="exit", exit_code=code)
+                merged_io = await _exit_shell(
+                    execute_fn,
+                    session,
+                    code,
+                    stdin,
+                    call_stack,
+                    all_stdout,
+                    merged_io,
+                )
+                record_status(session, merged_io.exit_code)
+                last_exec = ExecutionNode(
+                    command="exit", exit_code=merged_io.exit_code
+                )
                 break
             finally:
                 ENCLOSING.reset(enclosing)
@@ -330,12 +366,53 @@ async def _run_program(
             and not session.errexit_immune
         ):
             merged_io.exit_code = io.exit_code
+            if not inline:
+                merged_io = await _exit_shell(
+                    execute_fn,
+                    session,
+                    io.exit_code,
+                    stdin,
+                    call_stack,
+                    all_stdout,
+                    merged_io,
+                )
             break
 
     if len(all_stdout) == 1:
         return all_stdout[0], merged_io, last_exec
     combined = async_chain(all_stdout) if all_stdout else None
     return combined, merged_io, last_exec
+
+
+async def _exit_shell(
+    execute_fn: Callable[..., Any] | None,
+    session: SessionState,
+    code: int,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    all_stdout: list[Any],
+    merged_io: IOResult,
+) -> IOResult:
+    """End this shell with ``code``, running its EXIT action after what
+    it wrote, and return its result with the status the shell ends with.
+
+    Args:
+        execute_fn (Callable[..., Any] | None): runs the action.
+        session (SessionState): the shell.
+        code (int): the status it ends with.
+        stdin (ByteSource | None): its standard input.
+        call_stack (CallStack | None): its frames.
+        all_stdout (list[Any]): its output so far, extended in place.
+        merged_io (IOResult): its result so far.
+    """
+    cleanup = await run_exit_trap(execute_fn, session, code, stdin, call_stack)
+    if cleanup is None:
+        merged_io.exit_code = code
+        return merged_io
+    all_stdout.append(cleanup.stdout)
+    merged_io = await merged_io.merge(IOResult(stderr=cleanup.stderr))
+    merged_io.exit_code = cleanup.exit_code
+    return merged_io
 
 
 def _next_line(node: Any, children: list[Any], i: int) -> int:

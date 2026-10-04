@@ -742,6 +742,7 @@ async def _route_argv(
             namespace,
             stdin,
             sink,
+            job_table,
         )
 
     # ── unsupported bash builtins ──────────────
@@ -782,6 +783,7 @@ async def _route_argv(
                 namespace=namespace,
                 execute_fn=execute_fn,
                 sink=sink,
+                job_table=job_table,
             )
         )
 

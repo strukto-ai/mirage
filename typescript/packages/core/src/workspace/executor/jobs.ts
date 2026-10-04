@@ -16,15 +16,21 @@ import { ExecutionScope } from '../execution.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { concat } from '../../io/cachable_iterator.ts'
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
+import { FD_BOTH, FD_CLOSE, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
-import { isBackgrounded } from '../../shell/helpers.ts'
+import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
+import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
-import { Channel, type JobConsole } from '../../shell/console/index.ts'
+import {
+  Channel,
+  type JobConsole,
+  JobOutput,
+  type OwnedStream,
+  Tee,
+} from '../../shell/console/index.ts'
 import { isProgramInvocation, runWithSession } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, mergeSignals } from '../abort.ts'
@@ -38,6 +44,7 @@ import { scanOptions } from './builtins/getopt.ts'
 import { failedRead, statementStdin } from './statement.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
+import { inheritExitTrap } from './traps.ts'
 
 /** Per-call overrides a caller can layer onto the walker's deps. */
 export interface ExecuteNodeOpts {
@@ -47,6 +54,16 @@ export interface ExecuteNodeOpts {
   signal?: AbortSignal
   /** The hand-off the subtree runs on: a background job's own. */
   handed?: HandOff
+  /**
+   * The node is the whole of a child shell (a background job), which runs
+   * its EXIT action when the node ends.
+   */
+  endsShell?: boolean
+  /**
+   * False leaves what expanding the node printed to the caller, which
+   * routes it around the node's redirects.
+   */
+  ownDiagnostics?: boolean
 }
 
 export type ExecuteNodeFn = (
@@ -112,6 +129,30 @@ export async function drained(
   return [null, io, execNode]
 }
 
+/**
+ * The streams a job started from `node` writes, as its shell hands them
+ * on: stdout, stderr and the copies the shell holds (`3>&1`), after the
+ * job's own redirects (`sleep 9 >/dev/null &`). A stream sent to a file
+ * or closed is gone.
+ */
+function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | OwnedStream> {
+  const fds = new Map<number, Channel | OwnedStream | null>([
+    [1, Channel.STDOUT],
+    [2, Channel.STDERR],
+  ])
+  for (const [fd, descriptor] of session.descriptors)
+    if (fd > 2) fds.set(fd, descriptor.stream ?? null)
+  if (nodeKind(node) === NodeKind.REDIRECT)
+    for (const r of getRedirects(node)[1]) {
+      if (r.target === FD_CLOSE) fds.delete(r.fd)
+      else if (typeof r.target === 'number') fds.set(r.fd, fds.get(r.target) ?? null)
+      else for (const fd of r.fd === FD_BOTH ? [1, 2] : [r.fd]) fds.set(fd, null)
+    }
+  const streams = new Set<Channel | OwnedStream>()
+  for (const stream of fds.values()) if (stream !== null) streams.add(stream)
+  return streams
+}
+
 export async function handleBackground(
   executeNode: ExecuteNodeFn,
   left: TSNodeLike,
@@ -134,6 +175,11 @@ export async function handleBackground(
   decisions: Decisions | null = null,
 ): Promise<JobHandlerResult> {
   const bgSession = session.fork()
+  inheritExitTrap(bgSession)
+  const output = session.jobOutput ?? session.tty.jobs
+  // A job is a shell of its own: what jobs it starts write into the
+  // statement it runs, then where it writes.
+  bgSession.jobOutput = new JobOutput(output)
   // A job is a child shell outside every loop: `{ break; } &` in a loop
   // refuses, as bash's does.
   const bgCallStack = (callStack ?? new CallStack()).fork(false)
@@ -149,7 +195,10 @@ export async function handleBackground(
   bgSession.abortSignal = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
-    const console_ = job.console
+    // What the job writes stays in its console and goes where its shell
+    // writes as it is written: the terminal, or the substitution or pipe
+    // it was started in.
+    const console_ = new Tee(job.console, output)
     const body = async (): Promise<[IOResult, ExecutionNode]> => {
       let stdout: ByteSource | null
       let io: IOResult
@@ -163,6 +212,7 @@ export async function handleBackground(
           sink: console_,
           signal: abort.signal,
           executionScope: new ExecutionScope(),
+          endsShell: true,
         }
         if (jobHanded !== null) opts.handed = jobHanded
         ;[stdout, io, execNode] = await executeNode(left, bgSession, null, bgCallStack, opts)
@@ -244,6 +294,8 @@ export async function handleBackground(
   }
   bgSession.processId = job.process?.info.pid ?? null
   session.lastBgJobId = job.pid
+  if (session.jobWaits?.reaches(output, jobStreams(left, session)) === true)
+    session.jobWaits.add(job)
 
   if (right === null) {
     const tree = new ExecutionNode({
@@ -371,26 +423,26 @@ async function waitFirst(jobTable: JobTable, jobs: Job[]): Promise<Job> {
   return await Promise.race(races)
 }
 
-/** Report one finished job's output and status, and reap it. */
-async function adopt(jobTable: JobTable, job: Job, cmdStr: string): Promise<JobHandlerResult> {
-  const stdout = await job.console.snapshot(Channel.STDOUT)
-  const stderr = await job.console.snapshot(Channel.STDERR)
+/**
+ * Report one finished job's status, and reap it. Its output already went
+ * where its shell writes as it was written.
+ */
+function reaped(jobTable: JobTable, job: Job, cmdStr: string): JobHandlerResult {
   // Reaped like GNU bash reaps a job waited on by id, so a later bare
-  // `wait` does not adopt this console a second time.
+  // `wait` does not answer for it again.
   jobTable.reap(job.id, job.sessionId)
-  const io = new IOResult({
-    exitCode: job.exitCode,
-    stderr: stderr.byteLength > 0 ? stderr : null,
-  })
-  return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: job.exitCode })]
+  return [
+    null,
+    new IOResult({ exitCode: job.exitCode }),
+    new ExecutionNode({ command: cmdStr, exitCode: job.exitCode }),
+  ]
 }
 
 /**
- * Wait for background jobs, with bash's option surface. Bare `wait`
- * joins every job and adopts each one's output in id order (a real shell
- * has nothing to adopt; mirage jobs print to their console, so the shell
- * has to surface it or it is stranded); `wait ID...` joins those and
- * answers the last one's status; `-n` joins the first of the given jobs
+ * Wait for background jobs, with bash's option surface. A job's output
+ * went where its shell writes as it was written, so `wait` prints none,
+ * as bash's does. Bare `wait` joins every job; `wait ID...` joins those
+ * and answers the last one's status; `-n` joins the first of the given jobs
  * (or of all) to finish, 127 when there is nothing to wait for; `-p VAR`
  * stores the id of the job whose status is answered, unsetting VAR when
  * none is (which is the bare form, since it reports no one job); `-f` is
@@ -487,36 +539,14 @@ export async function handleWait(
     }
     const job = await abortable(waitFirst(jobTable, candidates), signal)
     if (varName !== null && view !== null) await view.set(varName, String(job.pid))
-    const [stdout, io, node] = await adopt(jobTable, job, cmdStr)
-    if (errBytes !== null) {
-      const prior = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
-      io.stderr = concat([errBytes, prior])
-    }
+    const [stdout, io, node] = reaped(jobTable, job, cmdStr)
+    if (errBytes !== null) io.stderr = errBytes
     return [stdout, io, node]
   }
   if (specs.length === 0) {
-    // Every unreaped job, not just the ones still running: a job that
-    // finished before this line was reached has output nobody has read,
-    // and whether it finished in time is a scheduling accident. Ordered
-    // by job id, because jobs finish concurrently and completion order
-    // is not reproducible. Reaped afterwards so a second `wait` does not
-    // print the same output twice.
     await abortable(jobTable.waitAll(sid), signal)
-    const finished = jobTable.listJobs(sid).sort((a, b) => a.id - b.id)
-    const outs: Uint8Array[] = []
-    const errs: Uint8Array[] = []
-    for (const job of finished) {
-      outs.push(await job.console.snapshot(Channel.STDOUT))
-      errs.push(await job.console.snapshot(Channel.STDERR))
-    }
     jobTable.popCompleted(sid)
-    const out = concat(outs)
-    const err = concat(errs)
-    return [
-      out.byteLength > 0 ? out : null,
-      new IOResult(err.byteLength > 0 ? { stderr: err } : {}),
-      new ExecutionNode({ command: cmdStr, exitCode: 0 }),
-    ]
+    return [null, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
   if (picked.length === 0) {
     // Every spec was refused: bash answers 127 for a job it cannot find
@@ -525,15 +555,11 @@ export async function handleWait(
     const code = last.endsWith('not a pid or valid job spec') ? 1 : 127
     return jobResult(cmdStr, errText, code)
   }
-  const outs: Uint8Array[] = []
-  const errs: Uint8Array[] = errBytes !== null ? [errBytes] : []
   let lastCode = 0
   let lastJob: Job | null = null
   for (const job of picked) {
     const finished = await abortable(jobTable.wait(job.id, sid), signal)
-    const [stdout, io] = await adopt(jobTable, finished, cmdStr)
-    if (stdout instanceof Uint8Array && stdout.byteLength > 0) outs.push(stdout)
-    if (io.stderr instanceof Uint8Array && io.stderr.byteLength > 0) errs.push(io.stderr)
+    const [, io] = reaped(jobTable, finished, cmdStr)
     lastCode = io.exitCode
     lastJob = finished
   }
@@ -543,11 +569,9 @@ export async function handleWait(
   if (varName !== null && view !== null && lastJob !== null) {
     await view.set(varName, String(lastJob.pid))
   }
-  const out = concat(outs)
-  const err = concat(errs)
   return [
-    out.byteLength > 0 ? out : null,
-    new IOResult({ exitCode: lastCode, stderr: err.byteLength > 0 ? err : null }),
+    null,
+    new IOResult({ exitCode: lastCode, stderr: errBytes }),
     new ExecutionNode({ command: cmdStr, exitCode: lastCode }),
   ]
 }
@@ -614,10 +638,11 @@ export function handleDisown(
 
 /**
  * Foreground a background job: print its command line, then block on it
- * and adopt its output and exit code. With no operand it takes the newest
- * running job, which is bash's current job; when none runs, it takes the
- * newest finished one, since a job can end before `fg` runs and its output
- * is still waiting to be adopted, as `fg %N` would.
+ * and answer its exit code. Its output goes where it always went, as it
+ * is written, so the command line goes out first: to `sink`, where the
+ * statement writes, before the job's next bytes. With no operand it takes
+ * the newest running job, which is bash's current job; when none runs, it
+ * takes the newest finished one, as `fg %N` would.
  */
 export async function handleFg(
   jobTable: JobTable,
@@ -625,11 +650,12 @@ export async function handleFg(
   session: SessionState | null = null,
   _view: SessionView | null = null,
   signal?: AbortSignal,
+  sink?: JobConsole,
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
   const jobs = jobTable.listJobs(sid)
-  let jobId: number
+  let target: Job
   if (parts.length <= 1) {
     const current = jobs.filter((j) => j.status === JobStatus.RUNNING).at(-1) ?? jobs.at(-1)
     if (current === undefined) {
@@ -640,11 +666,12 @@ export async function handleFg(
         new ExecutionNode({ command: cmdStr, exitCode: 1, stderr: err }),
       ]
     }
-    jobId = current.id
+    target = current
   } else {
     const raw = (parts[1] ?? '').replace(/^%+/, '')
-    jobId = Number(raw)
-    if (!Number.isInteger(jobId) || jobNumbered(jobs, jobId) === null) {
+    const jobId = Number(raw)
+    const numbered = Number.isInteger(jobId) ? jobNumbered(jobs, jobId) : null
+    if (numbered === null) {
       const err = new TextEncoder().encode(`bash: fg: ${parts[1] ?? ''}: no such job\n`)
       return [
         null,
@@ -652,20 +679,17 @@ export async function handleFg(
         new ExecutionNode({ command: cmdStr, exitCode: 1, stderr: err }),
       ]
     }
+    target = numbered
   }
-  const job = await abortable(jobTable.wait(jobId, sid), signal)
-  const header = new TextEncoder().encode(job.command + '\n')
-  const body = await job.console.snapshot(Channel.STDOUT)
-  const stderr = await job.console.snapshot(Channel.STDERR)
-  jobTable.reap(jobId, sid)
-  const stdout = new Uint8Array(header.byteLength + body.byteLength)
-  stdout.set(header, 0)
-  stdout.set(body, header.byteLength)
-  const io = new IOResult({
-    exitCode: job.exitCode,
-    stderr: stderr.byteLength > 0 ? stderr : null,
-  })
-  return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: job.exitCode })]
+  const header = new TextEncoder().encode(target.command + '\n')
+  if (sink !== undefined) await sink.emit(Channel.STDOUT, header)
+  const job = await abortable(jobTable.wait(target.id, sid), signal)
+  jobTable.reap(target.id, sid)
+  return [
+    sink === undefined ? header : null,
+    new IOResult({ exitCode: job.exitCode }),
+    new ExecutionNode({ command: cmdStr, exitCode: job.exitCode }),
+  ]
 }
 
 const KILL_USAGE =
@@ -844,7 +868,7 @@ export function handleJobs(
       specs.push(word)
     }
   }
-  let jobs = jobTable.listJobs(sid)
+  let jobs = jobTable.listing(sid)
   if (specs.length > 0) {
     const picked: Job[] = []
     for (const spec of specs) {

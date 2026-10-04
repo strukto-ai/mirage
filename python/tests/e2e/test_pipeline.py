@@ -221,8 +221,7 @@ async def test_nested_subshell(ws):
 
 @pytest.mark.asyncio
 async def test_background_basic(ws):
-    await ws.shell("cat /data/hello.txt &")
-    io = await ws.shell("wait %1")
+    io = await ws.shell("cat /data/hello.txt & wait %1")
     assert b"hello" in io.stdout
 
 
@@ -243,8 +242,7 @@ async def test_background_isolation_cwd(ws):
 @pytest.mark.asyncio
 async def test_background_sees_parent_env(ws):
     await ws.shell("export VISIBLE=yes")
-    await ws.shell("printenv VISIBLE &")
-    io = await ws.shell("wait %1")
+    io = await ws.shell("printenv VISIBLE & wait %1")
     assert b"yes" in io.stdout
 
 
@@ -409,8 +407,7 @@ async def test_pipe_into_redirect(ws):
 
 @pytest.mark.asyncio
 async def test_background_with_pipe(ws):
-    await ws.shell("cat /data/numbers.txt | sort | uniq &")
-    io = await ws.shell("wait %1")
+    io = await ws.shell("cat /data/numbers.txt | sort | uniq & wait %1")
     lines = (await io.stdout_str()).strip().split("\n")
     assert sorted(lines) == ["1", "2", "3"]
 
@@ -686,8 +683,7 @@ async def test_rg_subshell_isolation(ws):
 
 @pytest.mark.asyncio
 async def test_grep_background_exit_code(ws):
-    await ws.shell("grep ERROR /data/log.txt &")
-    io = await ws.shell("wait %1")
+    io = await ws.shell("grep ERROR /data/log.txt & wait %1")
     assert io.exit_code == 0
     assert b"ERROR" in io.stdout
 

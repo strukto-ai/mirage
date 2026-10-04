@@ -16,7 +16,12 @@ from collections.abc import AsyncIterator
 
 from mirage.shell.console.ram import RAMConsoleStore
 from mirage.shell.console.store import ConsoleStore
-from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
+from mirage.shell.console.types import (
+    Channel,
+    ConsoleChunk,
+    OwnedStream,
+    ReadResult,
+)
 
 
 class JobConsole:
@@ -77,6 +82,16 @@ class JobConsole:
         if self._finished or self._store.closed:
             return
         await self._store.append(channel, data)
+
+    async def emit_to(self, stream: OwnedStream, data: bytes) -> None:
+        """Append output written to a stream a level owns; this console
+        keeps it on its channel.
+
+        Args:
+            stream (OwnedStream): the stream the bytes were written to.
+            data (bytes): the payload.
+        """
+        await self.emit(stream.channel, data)
 
     async def finish(self, outcome: str) -> None:
         """Record how the job ended and release every waiting reader.

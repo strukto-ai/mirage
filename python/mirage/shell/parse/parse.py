@@ -347,9 +347,10 @@ def _parse_bytes(data: bytes) -> TSNodeLike:
 def _failed_arith_openers(root: TSNodeLike) -> list[int]:
     """Byte offsets of ``((`` tokens the parser could not make sense of.
 
-    Only openers inside an ERROR subtree are reported. A genuine
-    ``((i++))`` parses as an arithmetic command and never lands in one,
-    so it cannot be picked up here.
+    Only openers inside an ERROR subtree, or opening a construct that
+    holds one (``((exit 3) & a=$!; ...)`` lexes as arithmetic up to the
+    error), are reported. A genuine ``((i++))`` parses as an arithmetic
+    command with no error in it, so it cannot be picked up here.
 
     Args:
         root (TSNodeLike): root of a tree that has an error.
@@ -359,9 +360,9 @@ def _failed_arith_openers(root: TSNodeLike) -> list[int]:
     while stack:
         node, in_error = stack.pop()
         errored = in_error or node.type == "ERROR"
-        if errored and node.type == ARITH_OPEN_TOKEN:
-            offsets.append(node.start_byte)
         for child in node.children:
+            if child.type == ARITH_OPEN_TOKEN and (errored or node.has_error):
+                offsets.append(child.start_byte)
             stack.append((child, errored))
     return offsets
 

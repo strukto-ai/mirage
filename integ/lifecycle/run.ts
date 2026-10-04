@@ -34,6 +34,7 @@ import type {
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/types'
+import { Channel, JobConsole } from '@struktoai/mirage-core/shell/console/index'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
@@ -60,7 +61,15 @@ type Step = (
   | ({ op: 'mount'; path: string; mode?: MountMode } & ResourceConfig)
   | { op: 'unmount' | 'read' | 'readdir' | 'stat' | 'cached'; path: string }
   | { op: 'write'; path: string; data: string }
-  | { op: 'exec'; command: string; session?: string; cancel_after_ms?: number }
+  | {
+      op: 'exec'
+      command: string
+      session?: string
+      cancel_after_ms?: number
+      sink_delay_ms?: number
+      env?: Record<string, string>
+      cwd?: string
+    }
   | { op: 'spawn'; argv: string[]; session?: string }
   | { op: 'set_mode'; path: string; mode: MountMode }
   | { op: 'session'; id: string; profile?: Record<string, unknown> }
@@ -121,6 +130,18 @@ const DEC = new TextDecoder()
 
 class CachedRAMVFS extends RAMVFS {
   override readonly cachesReads = true
+}
+
+/** A caller streaming a line that takes a while over each chunk. */
+class SlowSink extends JobConsole {
+  constructor(readonly delayMs: number) {
+    super()
+  }
+
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, this.delayMs))
+    await super.emit(channel, data)
+  }
 }
 
 // Register a fixture through the same factory extension point as an embedder.
@@ -257,10 +278,14 @@ async function action(
         step.cancel_after_ms === undefined
           ? undefined
           : setTimeout(() => abort.abort(), step.cancel_after_ms)
+      const sink = step.sink_delay_ms === undefined ? undefined : new SlowSink(step.sink_delay_ms)
       let result
       try {
         result = await ws.shell(step.command, {
           ...(step.session === undefined ? {} : { sessionId: step.session }),
+          ...(step.env === undefined ? {} : { env: step.env }),
+          ...(step.cwd === undefined ? {} : { cwd: step.cwd }),
+          ...(sink === undefined ? {} : { sink }),
           signal: abort.signal,
         })
       } catch (error) {
@@ -275,6 +300,9 @@ async function action(
         stdout: result.stdoutText,
         stderr: result.stderrText,
         refusal: result.refusal?.reason ?? null,
+        ...(sink === undefined
+          ? {}
+          : { streamed: DEC.decode(await sink.snapshot(Channel.STDOUT)) }),
       }
     }
     case 'concurrent':

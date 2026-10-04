@@ -28,6 +28,7 @@ import {
   Inherited,
   Recorder,
   type Descriptor,
+  type StreamOwner,
   badDescriptorLine,
   deliver,
   unreadableStdin,
@@ -53,7 +54,7 @@ import {
 import { drained, type ExecuteNodeFn, pump } from './jobs.ts'
 import { carried, isUnwinding, takeStderr, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
-import { Channel } from '../../shell/console/index.ts'
+import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -65,6 +66,101 @@ const TO_STDERR = Symbol('stderr')
 // echo does.
 const CLOSED = Symbol('closed')
 type FdDest = typeof TO_STDOUT | typeof TO_STDERR | typeof CLOSED | FileDescription | Inherited
+
+/**
+ * Where a background job started under a redirect writes.
+ *
+ * Into the redirected command's recorder while the command runs, so it
+ * goes through the descriptors with what the command writes; after that
+ * straight through them, to the file the redirect opened or the stream it
+ * pointed at, as bash's job keeps the descriptors it was started with.
+ */
+export class JobRoute extends JobOutput {
+  /** Who the level's own stdout and stderr belong to, for a copy of them (`3>&1`). */
+  readonly owner: StreamOwner
+
+  constructor(
+    recorder: Recorder,
+    readonly outputs: ReadonlyMap<number, FdDest>,
+    outer: JobConsole,
+    readonly dispatch: DispatchFn,
+    readonly session: SessionState,
+  ) {
+    super(outer)
+    this.recorder = recorder
+    this.owner = recorder.owner
+  }
+
+  /** Route what a job wrote. */
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    if (this.recorder !== null) await this.recorder.emit(channel, data)
+    else await this.write(channel, data)
+  }
+
+  /** Route what a job wrote to a stream a level owns. */
+  override async emitTo(stream: OwnedStream, data: Uint8Array): Promise<void> {
+    if (this.recorder !== null) await this.recorder.emitTo(stream, data)
+    else await this.write(stream instanceof Inherited ? stream : stream.channel, data)
+  }
+
+  /** Which of the level's own writes, or the streams above it, a job's streams reach. */
+  override passes(streams: ReadonlySet<Channel | OwnedStream>): Set<Channel | OwnedStream> {
+    const reached = new Set<Channel | OwnedStream>()
+    for (const stream of streams) {
+      const dest =
+        stream instanceof Inherited
+          ? stream
+          : typeof stream === 'string'
+            ? this.outputs.get(stream === Channel.STDOUT ? 1 : 2)
+            : undefined
+      if (dest === TO_STDOUT) reached.add(Channel.STDOUT)
+      else if (dest === TO_STDERR) reached.add(Channel.STDERR)
+      else if (dest instanceof Inherited)
+        reached.add(dest.owner === this.owner ? dest.channel : dest)
+    }
+    return reached
+  }
+
+  /**
+   * Send on, in order, what jobs wrote while the redirect wrote its
+   * command's output, then let them write straight through: the command
+   * wrote first, and its first write is the one that opens the file. A
+   * held write that fails is the job's, which has moved on, so it never
+   * stops the line that released it.
+   */
+  async release(): Promise<void> {
+    try {
+      let held = this.recorder
+      while (held instanceof Recorder && held.chunks.length > 0) {
+        this.recorder = new Recorder()
+        for (const [key, data] of held.chunks) {
+          try {
+            await this.write(key, data)
+          } catch (error) {
+            if (!isFsError(error)) throw error
+          }
+        }
+        held = this.recorder
+      }
+    } finally {
+      this.recorder = null
+    }
+  }
+
+  private async write(key: Channel | Inherited, data: Uint8Array): Promise<void> {
+    if (key instanceof Inherited) {
+      if (key.owner === this.owner) await this.target.emit(key.channel, data)
+      else await this.target.emitTo(key, data)
+      return
+    }
+    const dest = this.outputs.get(key === Channel.STDOUT ? 1 : 2)
+    if (dest === TO_STDOUT) await this.target.emit(Channel.STDOUT, data)
+    else if (dest === TO_STDERR) await this.target.emit(Channel.STDERR, data)
+    else if (dest instanceof Inherited) await this.target.emitTo(dest, data)
+    else if (dest instanceof FileDescription)
+      await writeDescription(this.dispatch, this.session, dest, data)
+  }
+}
 
 /** Ordered descriptor bindings for one command, restored after execution.
  * Output opens remain deferred until admission completes so a refused command
@@ -243,6 +339,9 @@ export async function handleRedirect(
     .map((r) => ensureScope(r.target))
   const terminalOutput = session.terminalOutput
   session.terminalOutput = terminalOutput && outputs.get(1) === TO_STDOUT
+  const jobOutput = session.jobOutput
+  const route = new JobRoute(recorder, outputs, jobOutput ?? session.tty.jobs, dispatch, session)
+  session.jobOutput = route
   try {
     const given = inputs.get(0) ?? null
     if (command === null) {
@@ -277,6 +376,10 @@ export async function handleRedirect(
       if (diagnostic.byteLength > 0) await recorder.emit(Channel.STDERR, diagnostic)
     }
   } finally {
+    // A body that raised (an abort, an error) skips the writes below: its
+    // jobs write straight through.
+    route.recorder = null
+    session.jobOutput = jobOutput
     for (const file of files) file.emit = null
     session.terminalOutput = terminalOutput
     for (const fd of claimed) {
@@ -285,83 +388,90 @@ export async function handleRedirect(
       else session.descriptors.delete(fd)
     }
   }
-  const chunks = recorder.chunks
-  if (refused) {
-    outputs.clear()
-    outputs.set(0, CLOSED)
-    outputs.set(1, TO_STDOUT)
-    outputs.set(2, TO_STDERR)
-    for (const r of redirects)
-      if (typeof r.target === 'number') outputs.set(r.fd, outputs.get(r.target) ?? CLOSED)
-  }
-  if (
-    outputs.get(1) === CLOSED &&
-    command !== null &&
-    chunks.some(([channel]) => channel === Channel.STDOUT)
-  ) {
-    chunks.push([Channel.STDERR, closedWriteLine(command)])
-    io.exitCode = 1
-  }
-  const dest = (key: Channel | Inherited): FdDest | undefined => {
-    if (!(key instanceof Inherited)) return outputs.get(key === Channel.STDOUT ? 1 : 2)
-    if (key.owner !== recorder.owner) return key
-    return key.channel === Channel.STDOUT ? TO_STDOUT : TO_STDERR
-  }
-  const routed: [Channel | Inherited, Uint8Array][] = []
-  const writeFiles = async () => {
-    const consumed = new Set<FileDescription>()
-    let failedScope: PathSpec | null = null
-    try {
-      if (!refused)
-        for (const file of files) {
-          failedScope = file.scope
-          const unique =
-            files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
-          const data = unique
-            ? concat(chunks.filter(([key]) => dest(key) === file).map(([, data]) => data))
-            : new Uint8Array()
-          await writeDescription(dispatch, session, file, data)
-          if (unique) {
-            consumed.add(file)
-            if (data.byteLength > 0) io.writes[file.scope.virtual] = data
-          }
-        }
-      for (const [key, data] of chunks) {
-        const target = dest(key)
-        if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
-        else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
-        else if (target instanceof Inherited) routed.push([target, data])
-        else if (target instanceof FileDescription && !consumed.has(target)) {
-          failedScope = target.scope
-          await writeDescription(dispatch, session, target, data)
-          io.writes[target.scope.virtual] = data
-        }
-      }
-    } catch (error) {
-      if (!isFsError(error) || failedScope === null) throw error
-      routed.push([Channel.STDERR, redirectErrorLine(failedScope, error)])
+  let stdout: Uint8Array | null = null
+  // What a job writes from here waits until the command's own output is
+  // written (`route.release()`).
+  route.recorder = new Recorder()
+  try {
+    const chunks = recorder.chunks
+    if (refused) {
+      outputs.clear()
+      outputs.set(0, CLOSED)
+      outputs.set(1, TO_STDOUT)
+      outputs.set(2, TO_STDERR)
+      for (const r of redirects)
+        if (typeof r.target === 'number') outputs.set(r.fd, outputs.get(r.target) ?? CLOSED)
+    }
+    if (
+      outputs.get(1) === CLOSED &&
+      command !== null &&
+      chunks.some(([channel]) => channel === Channel.STDOUT)
+    ) {
+      chunks.push([Channel.STDERR, closedWriteLine(command)])
       io.exitCode = 1
     }
-  }
-  if (command === null) await writeFiles()
-  else await runWithRedirectPaths(command, targets, writeFiles)
-  let stdout: Uint8Array | null = null
-  io.stderr = null
-  const kept: [Channel, Uint8Array][] = []
-  for (const [key, data] of routed) {
-    if (key instanceof Inherited) {
-      if (!(await deliver(sink ?? null, key, data))) kept.push([key.channel, data])
-    } else if (sink !== undefined) await sink.emit(key, data)
-    else kept.push([key, data])
-  }
-  if (sink !== undefined) for (const [channel, data] of kept) await sink.emit(channel, data)
-  else {
-    const joined = (channel: Channel): Uint8Array | null => {
-      const data = concat(kept.filter(([c]) => c === channel).map(([, d]) => d))
-      return data.byteLength === 0 ? null : data
+    const dest = (key: Channel | Inherited): FdDest | undefined => {
+      if (!(key instanceof Inherited)) return outputs.get(key === Channel.STDOUT ? 1 : 2)
+      if (key.owner !== recorder.owner) return key
+      return key.channel === Channel.STDOUT ? TO_STDOUT : TO_STDERR
     }
-    stdout = joined(Channel.STDOUT)
-    io.stderr = joined(Channel.STDERR)
+    const routed: [Channel | Inherited, Uint8Array][] = []
+    const writeFiles = async () => {
+      const consumed = new Set<FileDescription>()
+      let failedScope: PathSpec | null = null
+      try {
+        if (!refused)
+          for (const file of files) {
+            failedScope = file.scope
+            const unique =
+              files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
+            const data = unique
+              ? concat(chunks.filter(([key]) => dest(key) === file).map(([, data]) => data))
+              : new Uint8Array()
+            await writeDescription(dispatch, session, file, data)
+            if (unique) {
+              consumed.add(file)
+              if (data.byteLength > 0) io.writes[file.scope.virtual] = data
+            }
+          }
+        for (const [key, data] of chunks) {
+          const target = dest(key)
+          if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
+          else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
+          else if (target instanceof Inherited) routed.push([target, data])
+          else if (target instanceof FileDescription && !consumed.has(target)) {
+            failedScope = target.scope
+            await writeDescription(dispatch, session, target, data)
+            io.writes[target.scope.virtual] = data
+          }
+        }
+      } catch (error) {
+        if (!isFsError(error) || failedScope === null) throw error
+        routed.push([Channel.STDERR, redirectErrorLine(failedScope, error)])
+        io.exitCode = 1
+      }
+    }
+    if (command === null) await writeFiles()
+    else await runWithRedirectPaths(command, targets, writeFiles)
+    io.stderr = null
+    const kept: [Channel, Uint8Array][] = []
+    for (const [key, data] of routed) {
+      if (key instanceof Inherited) {
+        if (!(await deliver(sink ?? null, key, data))) kept.push([key.channel, data])
+      } else if (sink !== undefined) await sink.emit(key, data)
+      else kept.push([key, data])
+    }
+    if (sink !== undefined) for (const [channel, data] of kept) await sink.emit(channel, data)
+    else {
+      const joined = (channel: Channel): Uint8Array | null => {
+        const data = concat(kept.filter(([c]) => c === channel).map(([, d]) => d))
+        return data.byteLength === 0 ? null : data
+      }
+      stdout = joined(Channel.STDOUT)
+      io.stderr = joined(Channel.STDERR)
+    }
+  } finally {
+    await route.release()
   }
   if (unwound !== null) throw await carried(unwound, stdout, new IOResult({ stderr: io.stderr }))
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]

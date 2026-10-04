@@ -14,7 +14,7 @@
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -26,9 +26,10 @@ from mirage.observe.context import RecordingScope
 from mirage.policy import HandOff
 from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import JobConsole
+from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
 from mirage.shell.helpers import input_substitution_redirect
+from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
 from mirage.shell.parse import (
     find_syntax_error,
@@ -52,6 +53,7 @@ from mirage.workspace.executor.statement import (
     record_status,
     snapshot_status,
 )
+from mirage.workspace.executor.traps import finish_shell, inherit_exit_trap
 from mirage.workspace.node.admission import (
     admit_line,
     is_pending,
@@ -211,25 +213,69 @@ async def recurse(
     else:
         saved = session.snapshot() if substitution else None
         terminal_output = session.terminal_output
+        capture = Terminal()
+        waits = JobWaits(capture.jobs)
+        rest = session.job_output or session.tty.jobs
         if saved is not None:
             session.terminal_output = False
-        try:
-            io = await ws.shell(
-                cmd,
-                cancel=cancel,
-                record=False,
-                execution_scope=execution_scope,
-                routing_decision=routing_decision,
-                agent_id=agent_id,
-                handed=inner,
-                **opts,
+            inherit_exit_trap(session)
+            # A substitution reads its pipe until every writer has closed
+            # it, so what a job it started writes is part of its value,
+            # and it ends when its jobs do. They are its own jobs.
+            session.job_output = capture.jobs
+            session.job_waits = waits
+            caller = opts.get("job_table") or ws.job_table
+            opts["job_table"] = JobTable(
+                processes=caller.processes, parent=caller
             )
-        except UNWINDING as sig:
-            # A substitution runs on a copy of the caller's frames, and
-            # it is a child shell: whatever unwinds out of it ends it.
-            if saved is None:
-                raise
-            io = ended(sig)
+            opts["sink"] = capture
+        try:
+            try:
+                io = await ws.shell(
+                    cmd,
+                    cancel=cancel,
+                    record=False,
+                    execution_scope=execution_scope,
+                    routing_decision=routing_decision,
+                    agent_id=agent_id,
+                    handed=inner,
+                    **opts,
+                )
+            except UNWINDING as sig:
+                # A substitution runs on a copy of the caller's frames,
+                # and it is a child shell: whatever unwinds out of it
+                # ends it.
+                if saved is None:
+                    raise
+                io = ended(sig)
+            if saved is not None:
+                io = await finish_shell(
+                    partial(
+                        recurse,
+                        ws,
+                        node=node,
+                        handed=handed,
+                        cancel=cancel,
+                        routing_decision=routing_decision,
+                        agent_id=agent_id,
+                        nested=nested,
+                        execution_scope=execution_scope,
+                        job_table=opts["job_table"],
+                    ),
+                    session,
+                    io,
+                    opts.get("stdin"),
+                    opts.get("call_stack"),
+                )
+                for channel, data in (
+                    (Channel.STDOUT, await io.materialize_stdout()),
+                    (Channel.STDERR, await io.materialize_stderr()),
+                ):
+                    await capture.emit(channel, data)
+                await waits.join(rest)
+                out, err = capture.take()
+                io.stdout = out or None
+                io.stderr = err or None
         finally:
             if saved is not None:
                 session.terminal_output = terminal_output
@@ -294,6 +340,7 @@ async def execute_line(
     sink: JobConsole | None = None,
     call_stack: CallStack | None = None,
     execution_scope: ExecutionScope | None = None,
+    job_table: JobTable | None = None,
 ) -> IOResult:
     """The body of ``Workspace.shell``; see its docstring for the
     argument contract.
@@ -332,6 +379,7 @@ async def execute_line(
     # workspace's cwd, env and mount grants, so a callback reaching a
     # second workspace must resolve that workspace's session instead.
     ambient = get_current_session_for(ws._session_mgr)
+    tty = None
     if ambient is not None and session_id in (None, ambient.session_id):
         session = ambient
         session_id = ambient.session_id
@@ -339,6 +387,11 @@ async def execute_line(
         if session_id is None:
             session_id = ws._session_mgr.default_id
         session = ws._session_mgr.get(session_id)
+        # A typed line writes to its session's terminal, and so do the
+        # jobs it starts, as they write; the line answers with whatever
+        # reached the terminal while it ran, a job's output from before
+        # it first.
+        tty = session.tty
     execution_scope = execution_scope or ExecutionScope()
     await execution_scope.start()
     run_line = partial(
@@ -357,10 +410,46 @@ async def execute_line(
         handed=handed,
         frame=frame,
         argv=argv,
-        sink=sink,
+        sink=tty if tty is not None else sink,
         call_stack=call_stack,
         execution_scope=execution_scope,
+        job_table=job_table,
     )
+    if tty is None:
+        return await _run_line(ws, command, session, cwd, run_line)
+    try:
+        await tty.attach(sink)
+        io = await _run_line(ws, command, session, cwd, run_line)
+        for channel, data in (
+            (Channel.STDOUT, await io.materialize_stdout()),
+            (Channel.STDERR, await io.materialize_stderr()),
+        ):
+            await tty.emit(channel, data)
+    except BaseException:
+        tty.drop_line()
+        raise
+    out, err = tty.take()
+    io.stdout = out
+    io.stderr = err or None
+    return io
+
+
+async def _run_line(
+    ws: "Workspace",
+    command: str,
+    session: SessionState,
+    cwd: str | None,
+    run_line: Callable[[], Awaitable[IOResult]],
+) -> IOResult:
+    """Run a line as the session's process, starting one if it has none.
+
+    Args:
+        ws (Workspace): the workspace.
+        command (str): the line's text.
+        session (SessionState): the session it runs on.
+        cwd (str | None): the per-call directory, if any.
+        run_line (Callable): the line.
+    """
     if session.process_id is None:
         results: list[IOResult] = []
 
@@ -395,6 +484,23 @@ async def execute_line(
     return await run_line()
 
 
+async def _shown(io: IOResult, sink: JobConsole | None) -> IOResult:
+    """What a line showed, for its record: what waits on its terminal
+    for it to take, then what it answers with besides.
+
+    Args:
+        io (IOResult): the line's result.
+        sink (JobConsole | None): where the line wrote.
+    """
+    if not isinstance(sink, Terminal) or sink.reader is not None:
+        return io
+    out, err = sink.drain()
+    sink.put_back(out, err)
+    return IOResult(
+        stdout=out + await io.materialize_stdout(), exit_code=io.exit_code
+    )
+
+
 async def run_prepared_line(
     ws: "Workspace",
     command: str,
@@ -414,6 +520,7 @@ async def run_prepared_line(
     sink: JobConsole | None,
     call_stack: CallStack | None,
     execution_scope: ExecutionScope,
+    job_table: JobTable | None = None,
 ) -> IOResult:
     """Run a line on the session it acquired, after admission is published.
 
@@ -498,6 +605,7 @@ async def run_prepared_line(
             agent_id=agent,
             nested=nested,
             execution_scope=execution_scope,
+            job_table=job_table,
         )
         held = False
         try:
@@ -673,7 +781,7 @@ async def run_prepared_line(
                 ws.dispatch,
                 ws._registry,
                 ws._namespace,
-                ws.job_table,
+                job_table or ws.job_table,
                 exec_recursion,
                 agent or "",
                 ast,
@@ -768,7 +876,7 @@ async def run_prepared_line(
         if is_line and command.strip("\n"):
             await ws.observer.log_execution(
                 command,
-                io,
+                await _shown(io, sink),
                 scope.records,
                 agent or "",
                 session_id,

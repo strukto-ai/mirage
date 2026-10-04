@@ -34,6 +34,12 @@ beforeAll(async () => {
 })
 
 describe('findSyntaxError', () => {
+  it('reports syntax errors after deeply nested command substitutions', () => {
+    const depth = 4096
+    const root = parser.parse(`echo ${'$(echo '.repeat(depth)}x${')'.repeat(depth)} (`)
+    expect(findSyntaxError(root)).toBe('(')
+  })
+
   it.each([
     'if then fi',
     'echo (',

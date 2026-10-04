@@ -101,6 +101,108 @@
         "stdout": "hi\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cmd_run_preserves_quoted_operands",
+      "seq": 503032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'command printf \"<%s>\\n\" \"\" \"a b\" \"*.txt\" \"semi;colon\" '\"'\"'dollar$literal'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "<>\n<a b>\n<*.txt>\n<semi;colon>\n<dollar$literal>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cmd_run_nested_exit_stops_child",
+      "seq": 503033,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'command eval \"echo before; exit 7\"; echo BAD'",
+      "expect": {
+        "exit": 7,
+        "stdout": "before\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cmd_run_awaits_nested_eval",
+      "seq": 503034,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'command eval \"sleep .01; echo ready\"; echo after'",
+      "expect": {
+        "exit": 0,
+        "stdout": "ready\nafter\n",
+        "stderr": ""
+      }
     }
   ]
 }

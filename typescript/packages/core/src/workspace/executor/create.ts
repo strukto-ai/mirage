@@ -69,7 +69,10 @@ export async function createFile(
  * needs no read of the file, as a write to a write-only descriptor needs none
  * (`exec 3>f; echo a >&3`). A read-write one (`<>`) still reads it: that
  * description was opened to read, and its own reader resumes over what the
- * write left.
+ * write left. Writes through one description take turns, the first one
+ * (which opens the file) included, as the kernel orders writes to an open
+ * file: a background job writing alongside the shell neither reopens the
+ * file nor lands on an offset another write has not advanced yet.
  */
 export async function writeDescription(
   dispatch: DispatchFn,
@@ -81,6 +84,23 @@ export async function writeDescription(
     if (data.byteLength > 0) await file.emit(data)
     return
   }
+  const turn = file.writing
+  let done = (): void => undefined
+  file.writing = new Promise((resolve) => (done = resolve))
+  try {
+    await turn
+    await writeThrough(dispatch, session, file, data)
+  } finally {
+    done()
+  }
+}
+
+async function writeThrough(
+  dispatch: DispatchFn,
+  session: SessionState,
+  file: FileDescription,
+  data: Uint8Array,
+): Promise<void> {
   if (!file.opened) {
     await createFile(
       dispatch,

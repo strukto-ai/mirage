@@ -327,7 +327,10 @@ function parseProtected(parser: Parser, text: string): ShellNode {
 /**
  * Offsets of `((` tokens the parser could not make sense of.
  *
- * Only openers inside an ERROR subtree are reported.
+ * Only openers inside an ERROR subtree, or opening a construct that holds
+ * one (`((exit 3) & a=$!; ...)` lexes as arithmetic up to the error), are
+ * reported. A genuine `((i++))` parses as an arithmetic command with no
+ * error in it, so it cannot be picked up here.
  */
 function failedArithOpeners(root: ShellNode): number[] {
   const offsets: number[] = []
@@ -337,8 +340,10 @@ function failedArithOpeners(root: ShellNode): number[] {
     if (entry === undefined) break
     const [node, inError] = entry
     const errored = inError || node.type === 'ERROR'
-    if (errored && node.type === ARITH_OPEN_TOKEN) offsets.push(node.startIndex)
     for (const child of node.children) {
+      if (child.type === ARITH_OPEN_TOKEN && (errored || node.hasError)) {
+        offsets.push(child.startIndex)
+      }
       stack.push([child, errored])
     }
   }

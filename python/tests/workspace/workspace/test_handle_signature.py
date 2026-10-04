@@ -30,6 +30,7 @@ INTERNAL = (
     "sink",
     "call_stack",
     "execution_scope",
+    "job_table",
 )
 
 

@@ -15,7 +15,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { Channel } from '../../shell/console/index.ts'
+import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
@@ -75,7 +75,7 @@ describe('handleWait', () => {
     expect(decode(io.stderr as Uint8Array)).toMatch(/not a child of this shell/)
   })
 
-  it('awaits a specific job and returns its output and exit code', async () => {
+  it('awaits a specific job, answers its status and prints nothing', async () => {
     const jt = new JobTable()
     const run: JobRunner = async (job) => {
       await job.console.emit(Channel.STDOUT, new TextEncoder().encode('out'))
@@ -84,9 +84,9 @@ describe('handleWait', () => {
     }
     const j = jt.submit({ command: 'foo', run, abort: new AbortController(), cwd: '/' })
     const [resStdout, resIo] = await handleWait(jt, ['wait', j.id.toString()])
-    expect(resStdout).toEqual(new TextEncoder().encode('out'))
+    expect(resStdout).toBeNull()
     expect(resIo.exitCode).toBe(3)
-    expect(decode(resIo.stderr as Uint8Array)).toBe('done')
+    expect(resIo.stderr).toBeNull()
   })
 
   it('accepts %N job id syntax', async () => {
@@ -236,8 +236,8 @@ describe('handleWait with an invocation signal', () => {
 
 describe('handleFg without an operand', () => {
   // A background job can end before `fg` runs; it is still the current job,
-  // as `fg %N` would find it, so its output is not lost.
-  it('adopts a job that already finished', async () => {
+  // as `fg %N` would find it.
+  it('takes a job that already finished', async () => {
     const jt = new JobTable()
     const run: JobRunner = async (job) => {
       await job.console.emit(Channel.STDOUT, new TextEncoder().encode('body'))
@@ -246,7 +246,7 @@ describe('handleFg without an operand', () => {
     const job = jt.submit({ command: 'quick', run, abort: new AbortController(), cwd: '/' })
     await jt.wait(job.id)
     const [stdout, io] = await handleFg(jt, ['fg'])
-    expect(decode(stdout as Uint8Array)).toBe('quick\nbody')
+    expect(decode(stdout as Uint8Array)).toBe('quick\n')
     expect(io.exitCode).toBe(3)
   })
 
@@ -270,7 +270,30 @@ describe('handleFg without an operand', () => {
     const fg = handleFg(jt, ['fg'])
     release()
     const [stdout] = await fg
-    expect(decode(stdout as Uint8Array)).toBe('older\nlate')
+    expect(decode(stdout as Uint8Array)).toBe('older\n')
+  })
+})
+
+describe('handleFg with a sink', () => {
+  it('writes the command line before it blocks', async () => {
+    const jt = new JobTable()
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const held: JobRunner = async (job) => {
+      await gate
+      await job.console.emit(Channel.STDOUT, new TextEncoder().encode('late'))
+      return [new IOResult(), new ExecutionNode({ command: 'held' })]
+    }
+    jt.submit({ command: 'held', run: held, abort: new AbortController(), cwd: '/' })
+    const sink = new JobConsole()
+    const fg = handleFg(jt, ['fg'], null, null, undefined, sink)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(decode(await sink.snapshot(Channel.STDOUT))).toBe('held\n')
+    release()
+    const [stdout] = await fg
+    expect(stdout).toBeNull()
   })
 })
 
@@ -336,9 +359,11 @@ describe('& inside a compound body', () => {
     expect(stdoutStr(await ws.shell('jobs'))).toBe('')
   })
 
-  it('wait adopts loop-body jobs in id order, after the foreground line', async () => {
+  it('loop-body jobs write after the foreground line', async () => {
     const ws = buildWs()
-    const io = await ws.shell('for i in 1 2; do echo $i & done; echo launched; wait')
+    const io = await ws.shell(
+      'for i in 1 2; do { sleep 0.05; echo $i; } & done; echo launched; wait',
+    )
     expect(stdoutStr(io)).toBe('launched\n1\n2\n')
   })
 
@@ -375,7 +400,7 @@ describe('background conditions and function scope', () => {
     ],
     [
       'f() { { shift; sleep 0.05; printf "bg:%s:%s\\n" "$1" "$#"; } & sleep 0.1; printf "fg:%s:%s\\n" "$1" "$#"; wait; }; f first second',
-      'fg:first:2\nbg:second:1\n',
+      'bg:second:1\nfg:first:2\n',
       0,
     ],
     ['f() { return 7 & j=$!; wait "$j"; }; f', '', 7],

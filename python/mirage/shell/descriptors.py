@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from mirage.io.async_line_iterator import SharedInput
-from mirage.shell.console import Channel, JobConsole
+from mirage.shell.console import Channel, JobConsole, OwnedStream, Terminal
 from mirage.shell.constants import FD_BOTH, FD_CLOSE
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
@@ -94,6 +95,9 @@ class FileDescription:
     offset: int = 0
     source: FileInput | None = None
     emit: Callable[[bytes], Awaitable[None]] | None = None
+    writing: asyncio.Lock = field(
+        default_factory=asyncio.Lock, compare=False, repr=False
+    )
 
 
 class StreamOwner:
@@ -129,8 +133,11 @@ class Recorder(JobConsole, StreamOwner):
     async def emit(self, channel: Channel, data: bytes) -> None:
         self.chunks.append((channel, data))
 
-    async def emit_to(self, stream: Inherited, data: bytes) -> None:
-        self.chunks.append((stream, data))
+    async def emit_to(self, stream: OwnedStream, data: bytes) -> None:
+        if isinstance(stream, Inherited):
+            self.chunks.append((stream, data))
+        else:
+            await self.emit(stream.channel, data)
 
 
 # The recorder of the innermost level running a command, for a level
@@ -147,22 +154,24 @@ async def deliver(
     """Send bytes written to a stream another level owns toward it.
 
     They go up through the sink, or the enclosing level's recorder when
-    the level returns its output as a value. A console that keeps no
-    streams takes them on their channel. False when there is nowhere
-    above.
+    the level returns its output as a value or writes to a terminal of
+    its own (a line's, a substitution's), which owns no stream above
+    it. A console that keeps no streams takes them on their channel.
+    False when there is nowhere above.
 
     Args:
         sink (JobConsole | None): where the level writes.
         stream (Inherited): the stream the bytes were written to.
         data (bytes): the bytes.
     """
-    target = sink if sink is not None else ENCLOSING.get()
-    if isinstance(target, Recorder):
-        await target.emit_to(stream, data)
-    elif target is not None:
-        await target.emit(stream.channel, data)
-    else:
+    target = (
+        sink
+        if sink is not None and not isinstance(sink, Terminal)
+        else ENCLOSING.get()
+    )
+    if target is None:
         return False
+    await target.emit_to(stream, data)
     return True
 
 

@@ -24,7 +24,7 @@ from mirage.io.types import ByteSource, DeviceInput
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel, JobConsole
+from mirage.shell.console import Channel, JobConsole, JobOutput, OwnedStream
 from mirage.shell.constants import (
     FD_BOTH,
     FD_CLOSE,
@@ -39,6 +39,7 @@ from mirage.shell.descriptors import (
     FileInput,
     Inherited,
     Recorder,
+    StreamOwner,
     bad_descriptor_line,
     deliver,
     unreadable_stdin,
@@ -91,6 +92,132 @@ class _Unreadable(Enum):
     """A descriptor a read cannot use: closed, or open for writing only."""
 
     TOKEN = auto()
+
+
+class JobRoute(JobOutput):
+    """Where a background job started under a redirect writes.
+
+    Into the redirected command's recorder while the command runs, so
+    it goes through the descriptors with what the command writes; after
+    that straight through them, to the file the redirect opened or the
+    stream it pointed at, as bash's job keeps the descriptors it was
+    started with.
+
+    Args:
+        recorder (Recorder): the redirected command's recorder.
+        outputs (dict[int, _Fd | FileDescription | Inherited]): where
+            the redirect pointed stdout and stderr.
+        outer (JobConsole): where a job writes outside the redirect.
+        dispatch (DispatchFn): op door, for a file the job writes later.
+        session (SessionState): the shell, for file creation.
+    """
+
+    def __init__(
+        self,
+        recorder: Recorder,
+        outputs: dict[int, "_Fd | FileDescription | Inherited"],
+        outer: JobConsole,
+        dispatch: DispatchFn,
+        session: SessionState,
+    ) -> None:
+        super().__init__(outer)
+        self.recorder = recorder
+        self.owner: StreamOwner = recorder
+        self.outputs = outputs
+        self.dispatch = dispatch
+        self.session = session
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        """Route what a job wrote.
+
+        Args:
+            channel (Channel): stdout or stderr.
+            data (bytes): the bytes.
+        """
+        if self.recorder is not None:
+            await self.recorder.emit(channel, data)
+        else:
+            await self._write(channel, data)
+
+    async def emit_to(self, stream: OwnedStream, data: bytes) -> None:
+        """Route what a job wrote to a stream a level owns.
+
+        Args:
+            stream (OwnedStream): the stream the bytes were written to.
+            data (bytes): the bytes.
+        """
+        if self.recorder is not None:
+            await self.recorder.emit_to(stream, data)
+        elif isinstance(stream, Inherited):
+            await self._write(stream, data)
+        else:
+            await self._write(stream.channel, data)
+
+    def passes(
+        self, streams: set[Channel | OwnedStream]
+    ) -> set[Channel | OwnedStream]:
+        """Which of the level's own writes, or the streams above it, a
+        job's streams reach.
+
+        Args:
+            streams (set[Channel | OwnedStream]): what the job writes.
+        """
+        reached: set[Channel | OwnedStream] = set()
+        for stream in streams:
+            dest: _Fd | FileDescription | OwnedStream | None
+            if isinstance(stream, Channel):
+                dest = self.outputs.get(1 if stream == Channel.STDOUT else 2)
+            else:
+                dest = stream
+            if dest is _TO_STDOUT:
+                reached.add(Channel.STDOUT)
+            elif dest is _TO_STDERR:
+                reached.add(Channel.STDERR)
+            elif isinstance(dest, Inherited):
+                reached.add(dest.channel if dest.owner is self.owner else dest)
+        return reached
+
+    async def release(self) -> None:
+        """Send on, in order, what jobs wrote while the redirect wrote its
+        command's output, then let them write straight through: the
+        command wrote first, and its first write is the one that opens
+        the file. A held write that fails is the job's, which has moved
+        on, so it never stops the line that released it."""
+        try:
+            held = self.recorder
+            while isinstance(held, Recorder) and held.chunks:
+                self.recorder = Recorder()
+                for key, data in held.chunks:
+                    try:
+                        await self._write(key, data)
+                    except FS_ERRORS as exc:
+                        logger.debug("held job write failed: %s", exc)
+                held = self.recorder
+        finally:
+            self.recorder = None
+
+    async def _write(self, key: Channel | Inherited, data: bytes) -> None:
+        """Write through the redirect's descriptors.
+
+        Args:
+            key (Channel | Inherited): the channel, or a level's stream.
+            data (bytes): the bytes.
+        """
+        if isinstance(key, Inherited):
+            if key.owner is self.owner:
+                await self.target.emit(key.channel, data)
+            else:
+                await self.target.emit_to(key, data)
+            return
+        dest = self.outputs[1 if key == Channel.STDOUT else 2]
+        if dest is _TO_STDOUT:
+            await self.target.emit(Channel.STDOUT, data)
+        elif dest is _TO_STDERR:
+            await self.target.emit(Channel.STDERR, data)
+        elif isinstance(dest, Inherited):
+            await self.target.emit_to(dest, data)
+        elif isinstance(dest, FileDescription):
+            await write_description(self.dispatch, self.session, dest, data)
 
 
 def _persistently_closed(session: SessionState) -> set[int]:
@@ -322,6 +449,15 @@ async def handle_redirect(
     )
     terminal_output = session.terminal_output
     session.terminal_output = terminal_output and outputs[1] is _TO_STDOUT
+    job_output = session.job_output
+    route = JobRoute(
+        recorder,
+        outputs,
+        job_output or session.tty.jobs,
+        dispatch,
+        session,
+    )
+    session.job_output = route
     enclosing = ENCLOSING.set(recorder)
     try:
         if command is None:
@@ -356,6 +492,10 @@ async def handle_redirect(
                 await recorder.emit(Channel.STDERR, diagnostic)
     finally:
         ENCLOSING.reset(enclosing)
+        # A body that raised (a cancel, an error) skips the writes below:
+        # its jobs write straight through.
+        route.recorder = None
+        session.job_output = job_output
         for file in files:
             file.emit = None
         session.terminal_output = terminal_output
@@ -366,97 +506,111 @@ async def handle_redirect(
                 session.descriptors[fd] = saved[fd]
             else:
                 session.descriptors.pop(fd, None)
-    chunks = recorder.chunks
-    if refused:
-        outputs = {0: _CLOSED, 1: _TO_STDOUT, 2: _TO_STDERR}
-        for r in redirects:
-            if isinstance(r.target, int):
-                outputs[r.fd] = outputs.get(r.target, _CLOSED)
-    if (
-        outputs[1] is _CLOSED
-        and command is not None
-        and any(c == Channel.STDOUT for c, _ in chunks)
-    ):
-        chunks.append((Channel.STDERR, _closed_write_line(command)))
-        io.exit_code = 1
-
-    def dest(key: Channel | Inherited) -> _Fd | FileDescription | Inherited:
-        if not isinstance(key, Inherited):
-            return outputs[1 if key == Channel.STDOUT else 2]
-        if key.owner is not recorder:
-            return key
-        return _TO_STDOUT if key.channel == Channel.STDOUT else _TO_STDERR
-
-    routed: list[tuple[Channel | Inherited, bytes]] = []
-    write_token = (
-        set_redirect_paths(command.id, targets)
-        if command is not None
-        else None
-    )
-    consumed: set[int] = set()
-    failed_scope: PathSpec | None = None
-    try:
-        if not refused:
-            for file in files:
-                failed_scope = file.scope
-                unique = (
-                    sum(
-                        other.scope.virtual == file.scope.virtual
-                        for other in files
-                    )
-                    == 1
-                )
-                data = (
-                    b"".join(data for key, data in chunks if dest(key) is file)
-                    if unique
-                    else b""
-                )
-                await write_description(dispatch, session, file, data)
-                if unique:
-                    consumed.add(id(file))
-                    if data:
-                        io.writes[file.scope.virtual] = data
-        for key, data in chunks:
-            target = dest(key)
-            if target is _TO_STDOUT:
-                routed.append((Channel.STDOUT, data))
-            elif target is _TO_STDERR:
-                routed.append((Channel.STDERR, data))
-            elif isinstance(target, Inherited):
-                routed.append((target, data))
-            elif (
-                isinstance(target, FileDescription)
-                and id(target) not in consumed
-            ):
-                failed_scope = target.scope
-                await write_description(dispatch, session, target, data)
-                io.writes[target.scope.virtual] = data
-    except FS_ERRORS as exc:
-        assert failed_scope is not None
-        routed.append(
-            (Channel.STDERR, _redirect_error_line(failed_scope, exc))
-        )
-        io.exit_code = 1
-    finally:
-        if write_token is not None:
-            reset_redirect_paths(write_token)
     stdout: bytes | None = None
-    io.stderr = None
-    kept: list[tuple[Channel, bytes]] = []
-    for key, data in routed:
-        if isinstance(key, Inherited):
-            if not await deliver(sink, key, data):
-                kept.append((key.channel, data))
-        elif sink is not None:
-            await sink.emit(key, data)
+    # What a job writes from here waits until the command's own output is
+    # written (`route.release()`).
+    route.recorder = Recorder()
+    try:
+        chunks = recorder.chunks
+        if refused:
+            outputs = {0: _CLOSED, 1: _TO_STDOUT, 2: _TO_STDERR}
+            for r in redirects:
+                if isinstance(r.target, int):
+                    outputs[r.fd] = outputs.get(r.target, _CLOSED)
+        if (
+            outputs[1] is _CLOSED
+            and command is not None
+            and any(c == Channel.STDOUT for c, _ in chunks)
+        ):
+            chunks.append((Channel.STDERR, _closed_write_line(command)))
+            io.exit_code = 1
+
+        def dest(
+            key: Channel | Inherited,
+        ) -> _Fd | FileDescription | Inherited:
+            if not isinstance(key, Inherited):
+                return outputs[1 if key == Channel.STDOUT else 2]
+            if key.owner is not recorder:
+                return key
+            return _TO_STDOUT if key.channel == Channel.STDOUT else _TO_STDERR
+
+        routed: list[tuple[Channel | Inherited, bytes]] = []
+        write_token = (
+            set_redirect_paths(command.id, targets)
+            if command is not None
+            else None
+        )
+        consumed: set[int] = set()
+        failed_scope: PathSpec | None = None
+        try:
+            if not refused:
+                for file in files:
+                    failed_scope = file.scope
+                    unique = (
+                        sum(
+                            other.scope.virtual == file.scope.virtual
+                            for other in files
+                        )
+                        == 1
+                    )
+                    data = (
+                        b"".join(
+                            data for key, data in chunks if dest(key) is file
+                        )
+                        if unique
+                        else b""
+                    )
+                    await write_description(dispatch, session, file, data)
+                    if unique:
+                        consumed.add(id(file))
+                        if data:
+                            io.writes[file.scope.virtual] = data
+            for key, data in chunks:
+                target = dest(key)
+                if target is _TO_STDOUT:
+                    routed.append((Channel.STDOUT, data))
+                elif target is _TO_STDERR:
+                    routed.append((Channel.STDERR, data))
+                elif isinstance(target, Inherited):
+                    routed.append((target, data))
+                elif (
+                    isinstance(target, FileDescription)
+                    and id(target) not in consumed
+                ):
+                    failed_scope = target.scope
+                    await write_description(dispatch, session, target, data)
+                    io.writes[target.scope.virtual] = data
+        except FS_ERRORS as exc:
+            assert failed_scope is not None
+            routed.append(
+                (Channel.STDERR, _redirect_error_line(failed_scope, exc))
+            )
+            io.exit_code = 1
+        finally:
+            if write_token is not None:
+                reset_redirect_paths(write_token)
+        io.stderr = None
+        kept: list[tuple[Channel, bytes]] = []
+        for key, data in routed:
+            if isinstance(key, Inherited):
+                if not await deliver(sink, key, data):
+                    kept.append((key.channel, data))
+            elif sink is not None:
+                await sink.emit(key, data)
+            else:
+                kept.append((key, data))
+        if sink is not None:
+            for channel, data in kept:
+                await sink.emit(channel, data)
         else:
-            kept.append((key, data))
-    if sink is not None:
-        for channel, data in kept:
-            await sink.emit(channel, data)
-    else:
-        stdout = b"".join(d for c, d in kept if c == Channel.STDOUT) or None
-        io.stderr = b"".join(d for c, d in kept if c == Channel.STDERR) or None
+            stdout = (
+                b"".join(d for c, d in kept if c == Channel.STDOUT) or None
+            )
+            io.stderr = (
+                b"".join(d for c, d in kept if c == Channel.STDERR) or None
+            )
+    finally:
+        await route.release()
     if unwound is not None:
         raise await carried(unwound, stdout, IOResult(stderr=io.stderr))
     return (

@@ -10,6 +10,24 @@ Most of Mirage's behavior is identical across Python and TypeScript. The two TS 
   `python3` has its own set of WASM-runtime-level divergences from Python Mirage's subprocess model. See [Python](/typescript/python#limitations) for the full list.
 </Note>
 
+## Shell traps (Python, Node and Browser)
+
+`trap 'commands' EXIT` (or `0`) registers cleanup for the shell that ends. It runs at `exit`, in the frame that called it, so a function's locals and `$1` are still in scope. It also runs when a child shell ends (`bash -c`, a script, `( ... )`, a pipeline stage, `$( )`, a background job) or when `set -e` or a fatal expansion error ends the shell. `$?` starts at the ending status. The status stays that unless the cleanup calls `exit N` or fails under `set -e`.
+
+`trap -p` lists the registration, `trap - EXIT` removes it and `trap '' EXIT` turns cleanup off. A subshell lists its parent's registration but runs only one it registers itself. `bash` and `sh` start with none.
+
+A workspace session persists across `shell()` calls, so a call that returns does not fire `EXIT`. Register the cleanup inside `bash -c` when it has to finish before the call returns. Registrations are live shell state: session stores do not keep them.
+
+Mirage has no OS signals. Cancellation, `kill`, timeouts and closing a workspace or session stop the work without running cleanup, and they interrupt cleanup that is already running (bash runs `EXIT` on a `SIGTERM`). `trap` refuses every other event (`INT`, `TERM`, `ERR`, `DEBUG`, `RETURN`, ...) with `mirage: trap: NAME: not supported`, and `trap -l` the same way.
+
+## Background job output (Python, Node and Browser)
+
+A background job writes where the shell that started it writes, as it writes, so its lines and the foreground's come out in the order they were written, as in bash. `wait` prints none of a job's output, and `fg` prints only the job's command line.
+
+A `shell()` call answers with what reached the session's terminal while the line ran. A job that writes after the call has returned has no line to show it, so that output waits and comes first in the next call on the session; bash prints it right away. With `sink`, the output goes to the console while a line runs, and between lines it waits the same way.
+
+`$( )` and every pipeline stage but the last wait for the jobs they start, as bash reads a pipe until every writer has closed it. Inside `$( )`, `jobs` still lists the caller's jobs, but `wait` and `kill` reach only its own. `bash -c` sees only its own jobs.
+
 ## Node
 
 ### 1. `fs-monkey` only patches CJS `require('fs')`, not ESM `node:fs`

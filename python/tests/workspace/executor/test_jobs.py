@@ -14,15 +14,17 @@
 
 import asyncio
 from functools import partial
+from typing import Any
 
 import pytest
 
 from mirage.io import IOResult
-from mirage.shell.console import Channel
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.job_table import Job, JobStatus, JobTable
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.jobs import (
     handle_disown,
     handle_fg,
@@ -136,40 +138,169 @@ def test_redirected_output_goes_to_the_file_not_the_console():
     assert written == "hi\n"
 
 
-# ── bare `wait` adopts job output ───────────────────────────────────
+# ── job output reaches the session's terminal as it is written ─────
 
 
-def test_bare_wait_adopts_output_from_every_job_in_id_order():
-    """`wait` with no operand surfaces what the jobs printed.
-
-    A real shell has nothing to adopt because its jobs share the
-    terminal. Mirage jobs print to their console, so bare `wait` has to
-    surface it or the output is stranded.
-    """
+def test_job_output_reaches_the_lines_once_and_wait_prints_none():
+    """A job writes to the terminal its shell writes to, as bash's does:
+    the line running when it wrote shows it, or the next one does, and
+    `wait` has nothing left to print."""
 
     async def _do():
         ws = _workspace()
-        await ws.shell("echo a &")
-        await ws.shell("echo b &")
-        result = await ws.shell("wait")
-        return await result.stdout_str()
+        lines = [
+            await ws.shell("echo a &"),
+            await ws.shell("echo b &"),
+            await ws.shell("wait"),
+            await ws.shell("true"),
+        ]
+        return "".join([await line.stdout_str() for line in lines])
 
     assert asyncio.run(_do()) == "a\nb\n"
 
 
-def test_job_nested_in_a_backgrounded_subshell_gets_its_own_console():
-    """A nested job's output must not land on the enclosing job's console.
+def test_a_line_shows_its_jobs_in_the_order_they_wrote():
+    async def _do():
+        ws = _workspace()
+        return await (
+            await ws.shell(
+                "(sleep 0.05; echo bg) & for i in 1 2; do echo $i; "
+                "sleep 0.1; done"
+            )
+        ).stdout_str()
 
-    The parity partner of the TypeScript regression, which is where this
-    can actually break: ``sub_recurse`` is a ``partial``, so a nested
-    ``handle_background`` passing ``sink=<its own console>`` always
-    overrides the bound default, while a hand-written closure can drop
-    the argument. When it is dropped, both nested jobs write straight to
-    the outer console, bare ``wait`` adopts nothing, and the documented
-    job-id order becomes completion order (``b\\na\\n``).
+    assert asyncio.run(_do()) == "1\nbg\n2\n"
+
+
+def test_job_nested_in_a_backgrounded_subshell_writes_through_its_job():
+    """A nested job writes where the job that started it writes, its
+    stdout, so that job's console and the terminal both show the two in
+    the order they were written (bash's ``b`` then ``a``)."""
+
+    async def _do():
+        ws = _workspace()
+        await ws.shell("( (sleep 0.15; echo a) & echo b & wait ) &")
+        await ws.job_table.wait(1, ws.default_session_id)
+        job = ws.job_table.get(1, ws.default_session_id)
+        assert job is not None
+        later = await (await ws.shell("true")).stdout_str()
+        return await job.console.snapshot(Channel.STDOUT), later
+
+    console, later = asyncio.run(_do())
+    assert console == b"b\na\n"
+    assert later == "b\na\n"
+
+
+def _slow_first_writes(ws: Workspace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make each file's first write take 0.2 s, as a remote mount's can.
+
+    Args:
+        ws (Workspace): the workspace whose dispatcher to slow.
+        monkeypatch (pytest.MonkeyPatch): patches the dispatcher.
     """
-    out, _ = asyncio.run(_run_bg("( (sleep 0.15; echo a) & echo b & wait ) &"))
-    assert out == b"a\nb\n"
+    inner = ws._dispatcher.dispatch
+    seen: set[tuple[str, str]] = set()
+
+    async def slow(
+        op: str, path: PathSpec, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        if (
+            op in ("write", "append", "pwrite")
+            and (op, path.virtual) not in seen
+        ):
+            seen.add((op, path.virtual))
+            await asyncio.sleep(0.2)
+        return await inner(op, path, **kwargs)
+
+    monkeypatch.setattr(ws._dispatcher, "dispatch", slow)
+
+
+async def _slowly(line: str, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Run a line on a workspace whose first writes are slow.
+
+    Args:
+        line (str): the line.
+        monkeypatch (pytest.MonkeyPatch): patches the dispatcher.
+    """
+    ws = _workspace()
+    _slow_first_writes(ws, monkeypatch)
+    return await (await ws.shell(line)).stdout_str()
+
+
+def test_a_job_writing_while_its_redirect_opens_the_file_keeps_both(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    line = (
+        "{ echo first; (sleep .05; echo second) & } > /m/out; wait; cat /m/out"
+    )
+    assert asyncio.run(_slowly(line, monkeypatch)) == "first\nsecond\n"
+
+
+def test_jobs_writing_one_file_at_once_keep_every_line(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    line = (
+        "{ echo a; (sleep .3; echo b) & (sleep .3; echo c) & } > /m/out; "
+        "wait; sort /m/out"
+    )
+    assert asyncio.run(_slowly(line, monkeypatch)) == "a\nb\nc\n"
+
+
+def test_a_job_writes_after_what_its_redirect_held_in_every_file(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    line = (
+        "{ echo a; echo b >&2; (sleep .05; echo c >&2) & } > /m/out "
+        "2> /m/err; wait; cat /m/err"
+    )
+    assert asyncio.run(_slowly(line, monkeypatch)) == "b\nc\n"
+
+
+def _failing_slow_writes(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Make every write fail after 0.2 s, as a remote mount's can.
+
+    Args:
+        ws (Workspace): the workspace whose dispatcher to break.
+        monkeypatch (pytest.MonkeyPatch): patches the dispatcher.
+    """
+    inner = ws._dispatcher.dispatch
+
+    async def failing(
+        op: str, path: PathSpec, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        if op in ("write", "append", "pwrite"):
+            await asyncio.sleep(0.2)
+            raise PermissionError(path.virtual)
+        return await inner(op, path, **kwargs)
+
+    monkeypatch.setattr(ws._dispatcher, "dispatch", failing)
+
+
+@pytest.mark.asyncio
+async def test_a_held_job_write_that_fails_leaves_the_line_running(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ws = _workspace()
+    _failing_slow_writes(ws, monkeypatch)
+    result = await ws.shell(
+        "{ echo first; (sleep .05; echo job) & } > /m/out; echo next=$?; wait"
+    )
+    assert await result.stdout_str() == "next=1\n"
+
+
+@pytest.mark.asyncio
+async def test_a_job_writes_the_file_after_its_redirect_is_canceled():
+    ws = _workspace()
+    cancel = asyncio.Event()
+    asyncio.get_running_loop().call_later(0.05, cancel.set)
+    with pytest.raises(MirageAbortError):
+        await ws.shell(
+            "{ { sleep .1; echo late; } & sleep 5; } > /m/out", cancel=cancel
+        )
+    result = await ws.shell("sleep .3; cat /m/out")
+    assert await result.stdout_str() == "late\n"
 
 
 def test_bare_wait_with_no_jobs_returns_nothing():
@@ -283,13 +414,13 @@ async def test_wait_rejects_an_unknown_job_id():
 
 
 @pytest.mark.asyncio
-async def test_wait_adopts_the_awaited_jobs_output_and_exit_code():
+async def test_wait_answers_the_awaited_jobs_status_and_prints_nothing():
     table = JobTable()
     job = _submit_settled(table, stdout=b"out", stderr=b"done", exit_code=3)
     stdout, io, _ = await handle_wait(table, ["wait", str(job.id)])
-    assert stdout == b"out"
+    assert stdout is None
     assert io.exit_code == 3
-    assert io.stderr == b"done"
+    assert io.stderr is None
 
 
 @pytest.mark.asyncio
@@ -438,14 +569,14 @@ async def test_fg_without_an_operand_reports_when_there_is_no_job():
 
 
 @pytest.mark.asyncio
-async def test_fg_without_an_operand_adopts_a_job_that_already_finished():
+async def test_fg_without_an_operand_takes_a_job_that_already_finished():
     # A background job can end before `fg` runs; it is still the current
-    # job, as `fg %N` would find it, so its output is not lost.
+    # job, as `fg %N` would find it.
     table = JobTable()
     job = _submit_settled(table, command="quick", stdout=b"body", exit_code=3)
     await table.wait(job.id)
     stdout, io, _ = await handle_fg(table, ["fg"])
-    assert stdout == b"quick\nbody"
+    assert stdout == b"quick\n"
     assert io.exit_code == 3
 
 
@@ -463,7 +594,7 @@ async def test_fg_without_an_operand_prefers_a_running_job_to_a_finished_one():
     await asyncio.sleep(0)
     gate.set()
     stdout, _, _ = await fg
-    assert stdout == b"older\nlate"
+    assert stdout == b"older\n"
 
 
 @pytest.mark.asyncio
@@ -474,12 +605,26 @@ async def test_fg_rejects_an_unknown_job_id_with_the_operand_as_typed():
 
 
 @pytest.mark.asyncio
-async def test_fg_echoes_the_command_line_then_adopts_the_jobs_result():
+async def test_fg_echoes_the_command_line_then_answers_the_jobs_status():
     table = JobTable()
     job = _submit_settled(table, command="slow", stdout=b"body", exit_code=7)
     stdout, io, _ = await handle_fg(table, ["fg", str(job.id)])
-    assert stdout == b"slow\nbody"
+    assert stdout == b"slow\n"
     assert io.exit_code == 7
+
+
+@pytest.mark.asyncio
+async def test_fg_writes_the_command_line_before_it_blocks():
+    table = JobTable()
+    gate = asyncio.Event()
+    table.submit("held", partial(_emit_after, gate=gate), cwd="/")
+    sink = JobConsole()
+    fg = asyncio.create_task(handle_fg(table, ["fg"], sink=sink))
+    await asyncio.sleep(0)
+    assert await sink.snapshot(Channel.STDOUT) == b"held\n"
+    gate.set()
+    stdout, _, _ = await fg
+    assert stdout is None
 
 
 @pytest.mark.asyncio
@@ -593,10 +738,10 @@ async def test_loop_body_jobs_are_still_running_when_the_loop_ends():
 
 
 @pytest.mark.asyncio
-async def test_wait_adopts_loop_body_jobs_in_id_order_after_the_foreground():
+async def test_loop_body_jobs_write_after_the_foreground_line():
     ws = _workspace()
     res = await ws.shell(
-        "for i in 1 2; do echo $i & done; echo launched; wait"
+        "for i in 1 2; do { sleep 0.05; echo $i; } & done; echo launched; wait"
     )
     assert res.stdout == b"launched\n1\n2\n"
 
@@ -649,7 +794,7 @@ async def test_errexit_does_not_trip_on_a_body_launch():
             'f() { { shift; sleep 0.05; printf "bg:%s:%s\\n" "$1" "$#"; } &'
             ' sleep 0.1; printf "fg:%s:%s\\n" "$1" "$#"; wait; }'
             "; f first second",
-            "fg:first:2\nbg:second:1\n",
+            "bg:second:1\nfg:first:2\n",
             0,
         ),
         ('f() { return 7 & j=$!; wait "$j"; }; f', "", 7),

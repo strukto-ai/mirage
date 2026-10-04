@@ -216,6 +216,68 @@
         "stdout": "ok\n",
         "stderr": "+ echo ok\n"
       }
+    },
+    {
+      "id": "exec_path_script_waits_only_for_its_own_jobs",
+      "seq": 962337,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'wait %%1 2>/dev/null; echo st=$?\\n' > /data/jw.sh; (sleep 0.2) & /data/jw.sh; wait; rm /data/jw.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=127\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exec_path_script_jobs_stay_out_of_the_callers_table",
+      "seq": 962338,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '(sleep 0.2) &\\n' > /data/jb.sh; /data/jb.sh; jobs; echo done; rm /data/jb.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "done\n",
+        "stderr": ""
+      }
     }
   ]
 }

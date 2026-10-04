@@ -203,6 +203,176 @@
         "stdout": "V=[UNSET]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "job_wait_n_reaps_only_the_winner",
+      "seq": 513040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "((exit 3) & a=$!; (exit 5) & b=$!; wait -n -p winner \"$a\" \"$b\"; first=$?; if [ \"$winner\" = \"$a\" ]; then wait \"$b\"; else wait \"$a\"; fi; second=$?; echo sum=$((first+second)); wait)",
+      "expect": {
+        "exit": 0,
+        "stdout": "sum=8\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "job_wait_p_requires_argument",
+      "seq": 513041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wait -p",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "bash: wait: -p: option requires an argument\nwait: usage: wait [-fn] [-p var] [id ...]\n"
+      }
+    },
+    {
+      "id": "job_wait_p_invalid_identifier",
+      "seq": 513042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wait -p 'bad-name'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: wait: `bad-name': not a valid identifier\n"
+      }
+    },
+    {
+      "id": "job_wait_p_readonly",
+      "seq": 513043,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(readonly locked=1; wait -p locked)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: wait: locked: cannot unset: readonly variable\n"
+      }
+    },
+    {
+      "id": "job_wait_n_unknown_spec",
+      "seq": 513044,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wait -n %999",
+      "expect": {
+        "exit": 127,
+        "stdout": "",
+        "stderr": "bash: wait: %999: no such job\n"
+      }
     }
   ]
 }

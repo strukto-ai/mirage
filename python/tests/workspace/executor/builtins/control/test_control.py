@@ -1,5 +1,6 @@
 import pytest
 
+from mirage.io import IOResult
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.workspace.executor.builtins.control import (
@@ -112,6 +113,37 @@ async def test_exit_too_many_arguments_abandons_the_line():
         await handle_exit(["1", "2"], make_session())
     assert exc.value.exit_code == 1
     assert exc.value.stderr == b"bash: exit: too many arguments\n"
+
+
+@pytest.mark.asyncio
+async def test_exit_runs_the_exit_action_in_its_frames():
+    session = make_session()
+    session.exit_trap = "echo cleanup:$1"
+    frames = make_function_stack()
+    seen: list[tuple[str, CallStack | None, int]] = []
+
+    async def execute_fn(line: str, **kwargs) -> IOResult:
+        seen.append((line, kwargs["call_stack"], session.last_exit_code))
+        return IOResult(stdout=b"cleanup\n", stderr=b"warn\n")
+
+    with pytest.raises(ExitSignal) as exc:
+        await handle_exit(["abc"], session, execute_fn, None, frames)
+    assert seen == [("echo cleanup:$1", frames, 2)]
+    assert exc.value.exit_code == 2
+    assert exc.value.stdout == b"cleanup\n"
+    assert exc.value.stderr == (
+        b"bash: exit: abc: numeric argument required\nwarn\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_bare_exit_in_the_action_keeps_the_ending_status():
+    session = make_session()
+    session.last_exit_code = 0
+    session._trap_status = 5
+    with pytest.raises(ExitSignal) as exc:
+        await handle_exit([], session)
+    assert exc.value.exit_code == 5
 
 
 @pytest.mark.asyncio

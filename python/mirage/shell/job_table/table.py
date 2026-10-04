@@ -153,6 +153,7 @@ class JobTable:
         self,
         console_factory: ConsoleFactory | None = None,
         processes: ProcessSupervisor | None = None,
+        parent: "JobTable | None" = None,
     ) -> None:
         """Create a table, optionally choosing where consoles live.
 
@@ -170,7 +171,12 @@ class JobTable:
                 client per job) is invisible to the embedder; a console
                 still outlives its table entry, so ``reap`` never closes
                 one.
+            processes (ProcessSupervisor | None): where the jobs run.
+            parent (JobTable | None): the table of the shell a ``$( )``
+                is part of, whose jobs ``jobs`` still lists there, as
+                bash's does; its ``wait`` and ``kill`` reach none of them.
         """
+        self.parent = parent
         self.processes = processes or ProcessSupervisor()
         self._jobs: dict[str, dict[int, Job]] = {}
         self._next_ids: dict[str, int] = {}
@@ -274,6 +280,17 @@ class JobTable:
 
     def list_jobs(self, session_id: str = "") -> list[Job]:
         return list(self._jobs.get(session_id, {}).values())
+
+    def listing(self, session_id: str = "") -> list[Job]:
+        """The jobs ``jobs`` shows: a ``$( )``'s caller's, then its own.
+
+        Args:
+            session_id (str): the session whose jobs to list.
+        """
+        inherited = (
+            self.parent.listing(session_id) if self.parent is not None else []
+        )
+        return inherited + self.list_jobs(session_id)
 
     def running_jobs(self, session_id: str = "") -> list[Job]:
         return [
@@ -445,10 +462,10 @@ class JobTable:
     def reap(self, job_id: int, session_id: str = "") -> None:
         """Remove one job from its session's list.
 
-        What a targeted ``wait``/``fg`` does after adopting the job's
-        output, matching GNU bash, where a job waited on by id is
-        deleted from the job list. Leaving it would let a later bare
-        ``wait`` snapshot the same console and print the output twice.
+        What a targeted ``wait``/``fg`` does once the job has ended,
+        matching GNU bash, where a job waited on by id is deleted from
+        the job list, so a later ``jobs`` or ``wait %N`` no longer finds
+        it.
 
         Args:
             job_id (int): the job to remove.

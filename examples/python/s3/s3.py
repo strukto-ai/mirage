@@ -446,10 +446,10 @@ async def main():
     # ── background jobs: & operator ──
     print("\n=== BACKGROUND JOBS ===\n")
 
-    print("--- launch two background greps ---")
+    print("--- launch two background greps (-q: a status, no output) ---")
     r = await ws.shell(
-        "grep mirage /s3/data/example.jsonl &"
-        " grep queue-operation /s3/data/example.jsonl &",
+        "grep -q mirage /s3/data/example.jsonl &"
+        " grep -q queue-operation /s3/data/example.jsonl &",
         agent_id="demo-agent",
     )
     print(f"  Output: {(await r.stdout_str()).strip()}")
@@ -462,41 +462,30 @@ async def main():
     r = await ws.shell("jobs")
     print(f"  {(await r.stdout_str()).strip()}")
 
-    print("\n--- wait %1: get first grep result ---")
+    print("\n--- wait %1: the first grep's exit status ---")
     r = await ws.shell("wait %1")
-    lines = (
-        (await r.stdout_str()).strip().splitlines()
-        if (await r.stdout_str()).strip()
-        else []
-    )
-    print(f"  Matches: {len(lines)}, exit_code: {r.exit_code}")
-    if lines:
-        print(f"  First: {lines[0][:80]}...")
+    print(f"  exit_code: {r.exit_code}")
 
-    print("\n--- wait %2: get second grep result ---")
+    print("\n--- wait %2: the second grep's exit status ---")
     r = await ws.shell("wait %2")
-    lines = (
-        (await r.stdout_str()).strip().splitlines()
-        if (await r.stdout_str()).strip()
-        else []
-    )
-    print(f"  Matches: {len(lines)}, exit_code: {r.exit_code}")
+    print(f"  exit_code: {r.exit_code}")
 
-    print("\n--- background pipe: grep | head & ---")
-    await ws.shell("grep queue-operation /s3/data/example.jsonl | head -n 3 &")
-    r = await ws.shell("wait %3")
+    print("\n--- background pipe: its output reaches the line that waits ---")
+    r = await ws.shell(
+        "grep queue-operation /s3/data/example.jsonl | head -n 3 & wait $!"
+    )
     print(f"  Output:\n    {(await r.stdout_str()).strip()}")
 
     print("\n--- kill demo ---")
-    await ws.shell("grep mirage /s3/data/example.jsonl &")
-    await ws.shell("kill %4")
-    r = await ws.shell("wait %4")
+    r = await ws.shell("grep mirage /s3/data/example.jsonl & kill $!; wait $!")
     print(f"  Exit code after kill: {r.exit_code}")
 
     print("\n--- wait || fallback pattern ---")
-    await ws.shell("grep NONEXISTENT /s3/data/example.jsonl &")
-    await ws.shell("grep mirage /s3/data/example.jsonl &")
-    r = await ws.shell("wait %5 || wait %6")
+    r = await ws.shell(
+        "grep NONEXISTENT /s3/data/example.jsonl & miss=$!;"
+        " grep mirage /s3/data/example.jsonl & hit=$!;"
+        " wait $miss || wait $hit"
+    )
     lines = (
         (await r.stdout_str()).strip().splitlines()
         if (await r.stdout_str()).strip()

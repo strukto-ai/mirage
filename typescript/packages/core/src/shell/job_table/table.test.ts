@@ -609,3 +609,22 @@ it('factory failure never enters the job runner', async () => {
   expect(table.processes.live()).toEqual([])
   expect(entered).toEqual([1])
 })
+
+it("a substitution lists its caller's jobs before its own", () => {
+  const caller = new JobTable()
+  const outer = caller.submit({
+    command: 'outer',
+    run: quiet,
+    abort: new AbortController(),
+    cwd: '/',
+  })
+  const innerTable = new JobTable(null, caller.processes, caller)
+  const inner = innerTable.submit({
+    command: 'inner',
+    run: quiet,
+    abort: new AbortController(),
+    cwd: '/',
+  })
+  expect(innerTable.listing()).toEqual([outer, inner])
+  expect(innerTable.listJobs()).toEqual([inner])
+})

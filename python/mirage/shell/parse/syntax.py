@@ -235,9 +235,12 @@ def _stray_reserved_words(
 
 
 def _walk_named(node: TSNodeLike) -> Iterator[TSNodeLike]:
-    yield node
-    for child in node.named_children:
-        yield from _walk_named(child)
+    # Malformed input can still contain deeply nested valid subtrees.
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(reversed(current.named_children))
 
 
 def _is_recovered_quoted_heredoc_end(
@@ -387,23 +390,27 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
     Args:
         node (TSNodeLike): the parsed command being refused.
     """
-    if node.is_missing and node.type in ("'", '"'):
-        return node.type
-    if node.type == "ansi_c_string":
-        source = (node.text or b"").decode()
-        before = source[:-1]
-        if (len(before) - len(before.rstrip("\\"))) % 2:
-            return "'"
-        return None
-    for child in node.children:
-        quote = find_unterminated_quote(child)
-        if quote is not None:
-            return quote
-    if node.type == "ERROR":
-        if not node.children and (node.text or b"").startswith(b"'"):
-            return "'"
-        if sum(child.type == '"' for child in node.children) % 2:
-            return '"'
+    stack = [(node, False)]
+    while stack:
+        current, visited = stack.pop()
+        if visited:
+            # Diagnose an ERROR span only after its children, as before.
+            if not current.children and (current.text or b"").startswith(b"'"):
+                return "'"
+            if sum(child.type == '"' for child in current.children) % 2:
+                return '"'
+            continue
+        if current.is_missing and current.type in ("'", '"'):
+            return current.type
+        if current.type == "ansi_c_string":
+            source = (current.text or b"").decode()
+            before = source[:-1]
+            if (len(before) - len(before.rstrip("\\"))) % 2:
+                return "'"
+            continue
+        if current.type == "ERROR":
+            stack.append((current, True))
+        stack.extend((child, False) for child in reversed(current.children))
     return None
 
 

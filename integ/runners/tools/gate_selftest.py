@@ -1194,12 +1194,13 @@ def selftest_plan_run() -> None:
 # has no skip arm. The seam is probed directly because no committed case/target
 # pair lacks a shadow any more, which is exactly when a regression would hide.
 NO_SHADOW_PROBE = (
-    "import('./runners/typescript/harness.ts').then(async (m) => {\n"
+    "Promise.all([import('./runners/typescript/harness.ts'),\n"
+    "  import('./runners/typescript/execution.ts')]).then(async ([m, e]) => {\n"
     "  const c = { id: 'probe', targets: ['t'], read: 'fresh', scenario: [],\n"
     "    expect: { exit: 0, stdout: '', stderr: '' } }\n"
     "  const t = { id: 't', hosts: [], mounts: [{ path: '/', vfs: 'ram' }] }\n"
     "  const run = await m.runConsistencyCase(async () => null, c, t)\n"
-    "  const diffs = m.compare(c, run.exitCode, run.out, run.stderr, 0)\n"
+    "  const diffs = e.compare(c, run.exitCode, run.out, run.stderr, 0)\n"
     "  console.log(`${String(diffs.length > 0)}|${run.stderr.trim()}`)\n"
     "})\n"
 )

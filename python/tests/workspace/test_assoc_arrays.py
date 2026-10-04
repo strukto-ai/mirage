@@ -822,7 +822,7 @@ FUNC_JOB_CASES = [
     (
         "jobs_r_running_only",
         "sleep 5 & echo hi & sleep 0.3; jobs -r",
-        "[1] running sleep 5\n",
+        "hi\n[1] running sleep 5\n",
         "",
         0,
     ),
@@ -845,7 +845,7 @@ FUNC_JOB_CASES = [
     (
         "jobs_n_changed_then_none",
         "sleep 5 & echo hi & sleep 0.3; jobs -n; echo ---; jobs -n",
-        "[2] completed echo hi\n---\n",
+        "hi\n[2] completed echo hi\n---\n",
         "",
         0,
     ),

@@ -29,16 +29,29 @@ from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessView
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel, JobConsole
+from mirage.shell.console import (
+    Channel,
+    JobConsole,
+    JobOutput,
+    OwnedStream,
+    Tee,
+)
 from mirage.shell.console.pipe import PipeConsole
-from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
+from mirage.shell.constants import (
+    FD_BOTH,
+    FD_CLOSE,
+    FORK_FAILED,
+    FORK_FAILED_STATUS,
+)
 from mirage.shell.errors import ExitSignal, ReturnSignal
-from mirage.shell.helpers import get_text, is_backgrounded
+from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
+from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.statement import failed_read, statement_stdin
+from mirage.workspace.executor.traps import inherit_exit_trap
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import (
     SessionState,
@@ -113,6 +126,37 @@ async def drained(
     return None, io, exec_node
 
 
+def _job_streams(
+    node: TSNodeLike, session: SessionState
+) -> set[Channel | OwnedStream]:
+    """The streams a job started from ``node`` writes, as its shell hands
+    them on: stdout, stderr and the copies the shell holds (``3>&1``),
+    after the job's own redirects (``sleep 9 >/dev/null &``). A stream
+    sent to a file or closed is gone.
+
+    Args:
+        node (TSNodeLike): the backgrounded command.
+        session (SessionState): the shell that starts it.
+    """
+    fds: dict[int, Channel | OwnedStream | None] = {
+        1: Channel.STDOUT,
+        2: Channel.STDERR,
+    }
+    for fd, descriptor in session.descriptors.items():
+        if fd > 2:
+            fds[fd] = descriptor.stream
+    if node_kind(node) == NodeKind.REDIRECT:
+        for r in get_redirects(node)[1]:
+            if r.target == FD_CLOSE:
+                fds.pop(r.fd, None)
+            elif isinstance(r.target, int):
+                fds[r.fd] = fds.get(r.target)
+            else:
+                for fd in (1, 2) if r.fd == FD_BOTH else (r.fd,):
+                    fds[fd] = None
+    return {stream for stream in fds.values() if stream is not None}
+
+
 async def handle_background(
     execute_node,
     left: TSNodeLike,
@@ -140,6 +184,11 @@ async def handle_background(
     still holds.
     """
     bg_session = session.fork()
+    inherit_exit_trap(bg_session)
+    output = session.job_output or session.tty.jobs
+    # A job is a shell of its own: what jobs it starts write into the
+    # statement it runs, then where it writes.
+    bg_session.job_output = JobOutput(output)
     # A job is a child shell outside every loop: `{ break; } &` in a
     # loop refuses, as bash's does.
     bg_call_stack = (call_stack or CallStack()).fork(loops=False)
@@ -155,7 +204,10 @@ async def handle_background(
         # Background jobs don't receive stdin, matching real shell
         # behavior where bg processes get /dev/null. This prevents
         # race conditions when stdin is an async iterator.
-        console = job.console
+        # What the job writes stays in its console and goes where its
+        # shell writes as it is written: the terminal, or the
+        # substitution or pipe it was started in.
+        console = Tee(job.console, output)
         cmd_str_inner = get_text(left) if hasattr(left, "text") else str(left)
         # The task's context snapshot still points at the OUTER session
         # (create_task copies the context before the fork can be bound),
@@ -184,6 +236,7 @@ async def handle_background(
                     handed=job_handed,
                     cancel=None,
                     execution_scope=ExecutionScope(),
+                    ends_shell=True,
                 )
             except CommandTimeoutError as exc:
                 msg = (str(exc) + "\n").encode()
@@ -254,6 +307,11 @@ async def handle_background(
         job.process.info.pid if job.process is not None else None
     )
     session.last_bg_job_id = job.pid
+    waits = session.job_waits
+    if waits is not None and waits.reaches(
+        output, _job_streams(left, session)
+    ):
+        waits.add(job)
 
     if right is None:
         return (
@@ -439,27 +497,24 @@ async def _wait_first(job_table: JobTable, jobs: list[Job]) -> Job:
     return tasks[first]
 
 
-async def _adopt(
+def _reaped(
     job_table: JobTable, job: Job, cmd_str: str
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Report one finished job's output and status, and reap it.
+    """Report one finished job's status, and reap it.
+
+    Its output already went where its shell writes as it was written.
 
     Args:
         job_table (JobTable): the session's jobs.
         job (Job): the job, already finished.
         cmd_str (str): the command line, for the node.
     """
-    stdout = await job.console.snapshot(Channel.STDOUT)
-    stderr = await job.console.snapshot(Channel.STDERR)
     # Reaped like GNU bash reaps a job waited on by id, so a later bare
-    # `wait` does not adopt this console a second time.
+    # `wait` does not answer for it again.
     job_table.reap(job.id, job.session_id)
     return (
-        stdout,
-        IOResult(
-            exit_code=job.exit_code,
-            stderr=stderr or None,
-        ),
+        None,
+        IOResult(exit_code=job.exit_code),
         ExecutionNode(command=cmd_str, exit_code=job.exit_code),
     )
 
@@ -472,9 +527,8 @@ async def handle_wait(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Wait for background jobs, with bash's option surface.
 
-    Bare `wait` joins every job and adopts each one's output in id
-    order (a real shell has nothing to adopt; mirage jobs print to
-    their console, so the shell has to surface it or it is stranded);
+    A job's output went where its shell writes as it was written, so
+    `wait` prints none, as bash's does. Bare `wait` joins every job;
     `wait ID...` joins those and answers the last one's status; `-n`
     joins the first of the given jobs (or of all) to finish and answers
     its status, 127 when there is nothing to wait for; `-p VAR` stores
@@ -574,30 +628,14 @@ async def handle_wait(
         job = await _wait_first(job_table, candidates)
         if var is not None and view is not None:
             await view.set(var, str(job.pid))
-        stdout, io, node = await _adopt(job_table, job, cmd_str)
+        stdout, io, node = _reaped(job_table, job, cmd_str)
         if err_text:
-            prior = io.stderr if isinstance(io.stderr, bytes) else b""
-            io.stderr = err_text.encode() + prior
+            io.stderr = err_text.encode()
         return stdout, io, node
     if not specs:
-        # Every unreaped job, not just the ones still running: a job
-        # that finished before this line was reached has output nobody
-        # has read, and whether it finished in time is a scheduling
-        # accident. Ordered by job id, because jobs finish concurrently
-        # and completion order is not reproducible. Reaped afterwards so
-        # a second `wait` does not print the same output twice.
         await job_table.wait_all(sid)
-        out = b""
-        err = b""
-        for finished in sorted(job_table.list_jobs(sid), key=lambda j: j.id):
-            out += await finished.console.snapshot(Channel.STDOUT)
-            err += await finished.console.snapshot(Channel.STDERR)
         job_table.pop_completed(sid)
-        return (
-            out or None,
-            IOResult(stderr=err or None),
-            ExecutionNode(command=cmd_str, exit_code=0),
-        )
+        return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
     if not picked:
         # Every spec was refused: bash answers 127 for a job it cannot
         # find and 1 for a word that is not a spec at all, the last
@@ -605,17 +643,11 @@ async def handle_wait(
         last = errors[-1]
         code = 1 if last.endswith("not a pid or valid job spec") else 127
         return _job_result(cmd_str, err_text, code)
-    outs: list[bytes] = []
-    errs: list[bytes] = [err_text.encode()] if err_text else []
     last_code = 0
     last_job: Job | None = None
     for job in picked:
         finished = await job_table.wait(job.id, sid)
-        stdout, io, _ = await _adopt(job_table, finished, cmd_str)
-        if stdout:
-            outs.append(stdout if isinstance(stdout, bytes) else b"")
-        if io.stderr:
-            errs.append(io.stderr if isinstance(io.stderr, bytes) else b"")
+        _, io, _ = _reaped(job_table, finished, cmd_str)
         last_code = io.exit_code
         last_job = finished
     # `wait id1 id2` answers with the last id's status, so `-p` names
@@ -624,8 +656,8 @@ async def handle_wait(
     if var is not None and view is not None and last_job is not None:
         await view.set(var, str(last_job.pid))
     return (
-        b"".join(outs) or None,
-        IOResult(exit_code=last_code, stderr=b"".join(errs) or None),
+        None,
+        IOResult(exit_code=last_code, stderr=err_text.encode() or None),
         ExecutionNode(command=cmd_str, exit_code=last_code),
     )
 
@@ -703,14 +735,15 @@ async def handle_fg(
     parts: list[str],
     session: SessionState | None = None,
     view: SessionView | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Foreground a background job: print its command line, then block
-    on it and adopt its output and exit code.
+    on it and answer its exit code. Its output goes where it always
+    went, as it is written, so the command line goes out first.
 
     With no operand it takes the newest running job, which is bash's
-    current job; when none runs, it takes the newest finished one, since
-    a job can end before ``fg`` runs and its output is still waiting to
-    be adopted, as ``fg %N`` would.
+    current job; when none runs, it takes the newest finished one, as
+    ``fg %N`` would.
 
     Args:
         job_table (JobTable): the session's job table.
@@ -719,6 +752,9 @@ async def handle_fg(
         session (SessionState | None): the shell session, whose profile
             decides which jobs are visible and whether the command line
             is printed.
+        view (SessionView | None): the session plane's gated door.
+        sink (JobConsole | None): where the statement writes, so the
+            command line is there before the job's next bytes.
     """
     cmd_str = " ".join(parts)
     sid = _session_of(session)
@@ -732,7 +768,7 @@ async def handle_fg(
                 ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
             )
         running = [j for j in jobs if j.status == JobStatus.RUNNING]
-        job_id = (running or jobs)[-1].id
+        target = (running or jobs)[-1]
     else:
         raw = parts[1].lstrip("%")
         try:
@@ -744,24 +780,23 @@ async def handle_fg(
                 IOResult(exit_code=1, stderr=err),
                 ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
             )
-        if _job_numbered(jobs, job_id) is None:
+        numbered = _job_numbered(jobs, job_id)
+        if numbered is None:
             err = f"bash: fg: {parts[1]}: no such job\n".encode()
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
                 ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
             )
-    job = await job_table.wait(job_id, sid)
-    header = (job.command + "\n").encode()
-    stdout = header + await job.console.snapshot(Channel.STDOUT)
-    stderr = await job.console.snapshot(Channel.STDERR)
-    job_table.reap(job_id, sid)
+        target = numbered
+    header = (target.command + "\n").encode()
+    if sink is not None:
+        await sink.emit(Channel.STDOUT, header)
+    job = await job_table.wait(target.id, sid)
+    job_table.reap(target.id, sid)
     return (
-        stdout,
-        IOResult(
-            exit_code=job.exit_code,
-            stderr=stderr or None,
-        ),
+        header if sink is None else None,
+        IOResult(exit_code=job.exit_code),
         ExecutionNode(command=cmd_str, exit_code=job.exit_code),
     )
 
@@ -969,7 +1004,7 @@ async def handle_jobs(
             flags.update(word[1:])
         else:
             specs.append(word)
-    jobs = job_table.list_jobs(sid)
+    jobs = job_table.listing(sid)
     if specs:
         picked: list[Job] = []
         for spec in specs:

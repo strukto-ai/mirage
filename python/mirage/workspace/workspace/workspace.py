@@ -1785,6 +1785,7 @@ class Workspace:
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
         execution_scope: ExecutionScope | None = None,
+        job_table: JobTable | None = None,
     ) -> IOResult:
         """Execute a shell command in the workspace.
 
@@ -1841,6 +1842,10 @@ class Workspace:
             execution_scope: Internal. Scheduling and admission shared by
                 nested foreground evaluations. Background jobs start a
                 separate scope.
+            job_table: Internal. The jobs of a child shell (``$( )``,
+                ``bash -c``) that the line starts its own in, where its
+                caller's ``jobs`` and ``wait`` never see them; None for
+                the session's.
         """
         # The one cancellation seam: the whole line is one task, so a
         # cancel set while a store is still loading, a secret is still
@@ -1871,6 +1876,7 @@ class Workspace:
                         sink=sink,
                         call_stack=call_stack,
                         execution_scope=execution_scope,
+                        job_table=job_table,
                     ),
                 ),
                 cancel,

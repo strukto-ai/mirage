@@ -227,11 +227,12 @@ async def handle_command(
         text_parts = [
             p.virtual if isinstance(p, PathSpec) else p for p in parts
         ]
+        view = session_view(session, registry.policies)
+        if cmd_name == "fg":
+            # The one job builtin that writes before it blocks.
+            return await handle_fg(job_table, text_parts, session, view, sink)
         return await JOB_HANDLERS[cmd_name](
-            job_table,
-            text_parts,
-            session,
-            session_view(session, registry.policies),
+            job_table, text_parts, session, view
         )
 
     # Shell functions

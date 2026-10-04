@@ -17,7 +17,8 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel } from '../../shell/console/index.ts'
 import { JobStatus } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
+import { eacces } from '../../utils/errors.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
@@ -111,16 +112,25 @@ describe('capture sites: a sink must never leak into a captured value', () => {
   })
 })
 
-describe('bare wait adopts job output', () => {
-  // A real shell has nothing to adopt because its jobs share the
-  // terminal. Mirage jobs print to their console, so bare `wait` has to
-  // surface it or the output is stranded.
-  it('surfaces every job in id order', async () => {
+describe('job output reaches the session terminal as it is written', () => {
+  // A job writes to the terminal its shell writes to, as bash's does: the
+  // line running when it wrote shows it, or the next one does, and `wait`
+  // has nothing left to print.
+  it('reaches the lines once, and wait prints none', async () => {
     const ws = buildWs()
-    await ws.shell('echo a &')
-    await ws.shell('echo b &')
-    const res = await ws.shell('wait')
-    expect(res.stdoutText).toBe('a\nb\n')
+    const lines = [
+      await ws.shell('echo a &'),
+      await ws.shell('echo b &'),
+      await ws.shell('wait'),
+      await ws.shell('true'),
+    ]
+    expect(lines.map((line) => line.stdoutText).join('')).toBe('a\nb\n')
+  })
+
+  it('shows a line its jobs in the order they wrote', async () => {
+    const ws = buildWs()
+    const res = await ws.shell('(sleep 0.05; echo bg) & for i in 1 2; do echo $i; sleep 0.1; done')
+    expect(res.stdoutText).toBe('1\nbg\n2\n')
   })
 
   it('returns nothing and exit 0 when there are no jobs', async () => {
@@ -130,19 +140,98 @@ describe('bare wait adopts job output', () => {
     expect(res.exitCode).toBe(0)
   })
 
-  // A job started inside a backgrounded subshell has to reach its own
-  // console, not the enclosing job's. The subshell's executor closure is
-  // the only one built by hand, so it is the only one that can drop the
-  // per-call opts carrying that console; when it does, both nested jobs
-  // write straight to the outer console and bare `wait` adopts nothing,
-  // which turns the documented job-id order into completion order.
-  it('gives a job nested in a backgrounded subshell its own console', async () => {
+  // A nested job writes where the job that started it writes, its stdout,
+  // so that job's console and the terminal both show the two in the order
+  // they were written (bash's `b` then `a`).
+  it('writes a job nested in a backgrounded subshell through its job', async () => {
     const ws = buildWs()
     await ws.shell('( (sleep 0.15; echo a) & echo b & wait ) &')
     await ws.jobTable.wait(1, ws.sessionManager.defaultId)
     const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
-    expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).toBe('a\nb\n')
+    expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).toBe('b\na\n')
+    expect((await ws.shell('true')).stdoutText).toBe('b\na\n')
+  })
+})
+
+/** Make each file's first write take 0.2 s, as a remote mount's can. */
+function slowFirstWrites(ws: Workspace): void {
+  type Dispatch = (op: string, path: PathSpec, ...rest: unknown[]) => Promise<unknown>
+  const dispatcher = (ws as unknown as { dispatcher: { dispatch: Dispatch } }).dispatcher
+  const inner = dispatcher.dispatch.bind(dispatcher)
+  const seen = new Set<string>()
+  dispatcher.dispatch = async (op, path, ...rest) => {
+    const key = `${op} ${path.virtual}`
+    if (['write', 'append', 'pwrite'].includes(op) && !seen.has(key)) {
+      seen.add(key)
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    return inner(op, path, ...rest)
+  }
+}
+
+async function slowly(line: string): Promise<string> {
+  const ws = buildWs()
+  slowFirstWrites(ws)
+  return (await ws.shell(line)).stdoutText
+}
+
+/** Make every write fail after 0.2 s, as a remote mount's can. */
+function failingSlowWrites(ws: Workspace): void {
+  type Dispatch = (op: string, path: PathSpec, ...rest: unknown[]) => Promise<unknown>
+  const dispatcher = (ws as unknown as { dispatcher: { dispatch: Dispatch } }).dispatcher
+  const inner = dispatcher.dispatch.bind(dispatcher)
+  dispatcher.dispatch = async (op, path, ...rest) => {
+    if (['write', 'append', 'pwrite'].includes(op)) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      throw eacces(path)
+    }
+    return inner(op, path, ...rest)
+  }
+}
+
+describe('a job writing through its redirect', () => {
+  it('keeps both when it writes while the redirect opens the file', async () => {
+    expect(
+      await slowly('{ echo first; (sleep .05; echo second) & } > /m/out; wait; cat /m/out'),
+    ).toBe('first\nsecond\n')
+  })
+
+  it('keeps every line when jobs write one file at once', async () => {
+    expect(
+      await slowly(
+        '{ echo a; (sleep .3; echo b) & (sleep .3; echo c) & } > /m/out; wait; sort /m/out',
+      ),
+    ).toBe('a\nb\nc\n')
+  })
+
+  it('writes after what the redirect held, in every file', async () => {
+    expect(
+      await slowly(
+        '{ echo a; echo b >&2; (sleep .05; echo c >&2) & } > /m/out 2> /m/err; wait; cat /m/err',
+      ),
+    ).toBe('b\nc\n')
+  })
+
+  it('leaves the line running when a held write fails', async () => {
+    const ws = buildWs()
+    failingSlowWrites(ws)
+    const result = await ws.shell(
+      '{ echo first; (sleep .05; echo job) & } > /m/out; echo next=$?; wait',
+    )
+    expect(result.stdoutText).toBe('next=1\n')
+  })
+
+  it('writes the file after its redirect is aborted', async () => {
+    const ws = buildWs()
+    const abort = new AbortController()
+    setTimeout(() => {
+      abort.abort()
+    }, 50)
+    await expect(
+      ws.shell('{ { sleep .1; echo late; } & sleep 5; } > /m/out', { signal: abort.signal }),
+    ).rejects.toThrow()
+    expect((await ws.shell('sleep .3; cat /m/out')).stdoutText).toBe('late\n')
   })
 })
 

@@ -33,6 +33,12 @@ def test_partial_quoted_heredoc_end_is_not_syntax_error():
     assert find_syntax_error(root) is None
 
 
+def test_syntax_error_after_deep_command_substitution():
+    depth = 4096
+    root = parse("echo " + "$(echo " * depth + "x" + ")" * depth + " (")
+    assert find_syntax_error(root) == "("
+
+
 @pytest.mark.parametrize(
     "command",
     [

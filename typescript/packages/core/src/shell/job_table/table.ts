@@ -114,6 +114,9 @@ export class JobTable {
   constructor(
     consoleFactory: ConsoleFactory | null = null,
     readonly processes = new ProcessSupervisor(),
+    // The table of the shell a `$( )` is part of, whose jobs `jobs` still
+    // lists there, as bash's does; its `wait` and `kill` reach none of them.
+    readonly parent: JobTable | null = null,
   ) {
     this.consoleFactory = consoleFactory
   }
@@ -217,6 +220,11 @@ export class JobTable {
 
   listJobs(sessionId = ''): Job[] {
     return [...(this.jobs.get(sessionId)?.values() ?? [])]
+  }
+
+  /** The jobs `jobs` shows: a `$( )`'s caller's, then its own. */
+  listing(sessionId = ''): Job[] {
+    return [...(this.parent?.listing(sessionId) ?? []), ...this.listJobs(sessionId)]
   }
 
   runningJobs(sessionId = ''): Job[] {
@@ -378,10 +386,9 @@ export class JobTable {
   /**
    * Remove one job from its session's list.
    *
-   * What a targeted `wait`/`fg` does after adopting the job's output,
-   * matching GNU bash, where a job waited on by id is deleted from the
-   * job list. Leaving it would let a later bare `wait` snapshot the
-   * same console and print the output twice.
+   * What a targeted `wait`/`fg` does once the job has ended, matching
+   * GNU bash, where a job waited on by id is deleted from the job list,
+   * so a later `jobs` or `wait %N` no longer finds it.
    */
   reap(jobId: number, sessionId = ''): void {
     this.jobs.get(sessionId)?.delete(jobId)

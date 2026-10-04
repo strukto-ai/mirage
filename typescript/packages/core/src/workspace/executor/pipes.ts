@@ -29,22 +29,25 @@ import {
   recordStatus,
   statementOutput,
   statementStdin,
+  type Written,
 } from './statement.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { carried, ended, isUnwinding } from './control.ts'
 import { ERREXIT_EXEMPT_TYPES, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT } from '../../shell/types.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
+import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import type { SessionState } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { type ExecuteNodeFn, handleBackground, pump } from './jobs.ts'
+import { endShell, inheritExitTrap, runExitTrap } from './traps.ts'
+import type { ExecuteFn } from '../expand/node.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 
 import { PipeConsole } from '../../shell/console/pipe.ts'
-import type { JobConsole } from '../../shell/console/index.ts'
+import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
 import { ENCLOSING, Recorder } from '../../shell/descriptors.ts'
 import { Channel } from '../../shell/console/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
@@ -63,6 +66,9 @@ export async function handlePipe(
   callStack: CallStack | null = null,
   signal?: AbortSignal,
   processes?: ProcessSupervisor,
+  // Each stage is a child shell, which runs its own EXIT action through
+  // this when it ends.
+  executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
   // Reassociated pipelines can enter here without executeNode resetting
   // the parent. An exemption belongs to the preceding statement only;
@@ -86,6 +92,7 @@ export async function handlePipe(
   const tasks: Promise<void>[] = []
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
     const child = session.fork()
+    inheritExitTrap(child)
     child.terminalOutput = session.terminalOutput && i === commands.length - 1
     child.abortSignal = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
     const output = pipes[i]
@@ -95,18 +102,36 @@ export async function handlePipe(
     const run = async (): Promise<void> => {
       let io = new IOResult()
       let childExec = new ExecutionNode({ command: cmd.text })
+      const stageStack = (callStack ?? new CallStack()).fork()
+      // A job a stage before the last starts writes into the pipe, and
+      // the reader sees end of input only once the job has closed it.
+      const waits =
+        i < commands.length - 1
+          ? new JobWaits(
+              new JobOutput(output),
+              new Set(
+                stderrFlags[i] === true ? [Channel.STDOUT, Channel.STDERR] : [Channel.STDOUT],
+              ),
+            )
+          : null
+      if (waits !== null) {
+        child.jobOutput = waits.output
+        child.jobWaits = waits
+      }
+      const rest = session.jobOutput ?? session.tty.jobs
       try {
-        const [stdout, result, execution] = await executeNode(
-          cmd,
+        const [stdout, result, execution] = await endShell(
+          executeFn,
           child,
           input,
-          (callStack ?? new CallStack()).fork(),
-          { sink: output, signal: abort.signal },
+          stageStack,
+          executeNode(cmd, child, input, stageStack, { sink: output, signal: abort.signal }),
         )
         io = result
         childExec = execution
         await pump(output, Channel.STDOUT, stdout)
         await pump(output, Channel.STDERR, io.stderr)
+        await waits?.join(rest)
       } catch (error) {
         if (error instanceof PipeClosed) {
           io.exitCode = 141
@@ -116,6 +141,7 @@ export async function handlePipe(
           io.exitCode = unwound.exitCode
           await pump(output, Channel.STDOUT, unwound.stdout)
           await pump(output, Channel.STDERR, unwound.stderr)
+          await waits?.join(rest)
         } else {
           output.end(error)
           throw error
@@ -318,8 +344,12 @@ export async function handleSubshell(
   // of its own, which routes what it wrote to its terminal through a copy,
   // so a program nested in it (`$( )`, `eval`) leaves that to it.
   sink: JobConsole | null = null,
+  // Runs the subshell's own EXIT action as it ends.
+  executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
   const saved = session.snapshot()
+  inheritExitTrap(session)
+  session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.lineOpen = true
   // A child shell: `shift` or `set --` in it leaves the caller's
   // parameters alone, and it runs in none of the caller's loops.
@@ -386,11 +416,18 @@ export async function handleSubshell(
       let io: IOResult
       let childExec: ExecutionNode
       const recorder = new Recorder()
+      const jobs = session.jobOutput
+      const held = jobs.recorder
       try {
         const childStdin = statementStdin(session, stdin, bound)
-        ;[stdout, io, childExec] = await ENCLOSING.run(recorder, () =>
-          executeNode(child, session, childStdin, callStack, { sink: recorder }),
-        )
+        jobs.recorder = recorder
+        try {
+          ;[stdout, io, childExec] = await ENCLOSING.run(recorder, () =>
+            executeNode(child, session, childStdin, callStack, { sink: recorder }),
+          )
+        } finally {
+          jobs.recorder = held
+        }
       } catch (err) {
         if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
         // A subshell is its own shell: exit (or ${var:?}) ends the
@@ -430,6 +467,28 @@ export async function handleSubshell(
         mergedIo.exitCode = io.exitCode
         break
       }
+    }
+    // The EXIT action is the subshell's: its `wait` and `jobs` see the
+    // subshell's jobs, not the caller's.
+    const cleanup = await runExitTrap(
+      executeFn === null
+        ? null
+        : (action, opts) =>
+            executeFn(action, { ...opts, ...(jobTable === null ? {} : { jobTable }) }),
+      session,
+      mergedIo.exitCode,
+      stdin,
+      callStack,
+    )
+    if (cleanup !== null) {
+      const written: Written[] = []
+      const out = await cleanup.materializeStdout()
+      const err = await cleanup.materializeStderr()
+      if (out.byteLength > 0) written.push([Channel.STDOUT, out, false])
+      if (err.byteLength > 0) written.push([Channel.STDERR, err, false])
+      mergedIo = await land(written, sink, allStdout, mergedIo)
+      mergedIo.exitCode = cleanup.exitCode
+      lastExec = new ExecutionNode({ command: '()', exitCode: cleanup.exitCode })
     }
     const parts = allStdout.filter((part): part is ByteSource => part !== null)
     if (parts.length === 1 && parts[0] !== undefined) {

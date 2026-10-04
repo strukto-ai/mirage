@@ -21,6 +21,16 @@ export const Channel = Object.freeze({
 export type Channel = (typeof Channel)[keyof typeof Channel]
 
 /**
+ * A stream a level owns, written by name rather than by channel: a copy
+ * of a level's stdout or stderr (`3>&1`) keeps naming it after the level
+ * rebinds its own. A console that keeps no streams writes it on its
+ * channel.
+ */
+export interface OwnedStream {
+  readonly channel: Channel
+}
+
+/**
  * One piece of a job's output, at a fixed position in its console.
  *
  * Chunks never change once appended, so a reader holding one keeps a

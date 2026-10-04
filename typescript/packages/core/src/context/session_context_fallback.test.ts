@@ -708,10 +708,14 @@ describe('overlapping shell calls beside xargs', () => {
       }
       const [childResult, otherResult] = await Promise.all([child, other])
       expect(new TextDecoder().decode(await childResult.console.snapshot())).toBe('child\n')
-      expect(otherResult.stdoutText).toBe('outer:kept\n')
+      // The job's output reaches the terminal as it is written: the line
+      // running then shows it, or else the next one does.
+      expect(otherResult.stdoutText).toBe(childFirst ? 'child\nouter:kept\n' : 'outer:kept\n')
       expect(childResult.exitCode).toBe(0)
       expect(otherResult.exitCode).toBe(0)
-      expect((await ws.shell('echo "$X:$Y"')).stdoutText).toBe('outer:kept\n')
+      expect((await ws.shell('echo "$X:$Y"')).stdoutText).toBe(
+        childFirst ? 'outer:kept\n' : 'child\nouter:kept\n',
+      )
     } finally {
       releaseChild()
       releaseOther()

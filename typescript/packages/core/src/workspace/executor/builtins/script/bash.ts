@@ -15,8 +15,9 @@
 import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import type { JobConsole } from '../../../../shell/console/index.ts'
+import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
 import { IFS_DEFAULT } from '../../../../shell/constants.ts'
+import { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { seedVar } from '../../../session/state.ts'
@@ -26,6 +27,7 @@ import { BASH_LONG_OPTIONS, BASH_START_FLAGS } from './constants.ts'
 import { readScriptFile, scriptError } from './script.ts'
 import type { BashArgs } from './types.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
+import { clearExitTrap, finishShell } from '../../traps.ts'
 
 function bashArgs(partial: Partial<BashArgs>): BashArgs {
   return {
@@ -120,6 +122,7 @@ export async function handleBash(
   stdin: ByteSource | null = null,
   name = 'bash',
   sink?: JobConsole,
+  jobTable?: JobTable,
 ): Promise<Result> {
   const parsed = parseBashArgs(args)
   if (parsed.invalid !== null) {
@@ -153,6 +156,8 @@ export async function handleBash(
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
   const saved = session.snapshot()
+  clearExitTrap(session)
+  session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
   session.scriptName = scriptName
   // bash starts every shell with the default IFS and never reads one from
@@ -162,16 +167,26 @@ export async function handleBash(
   // inside: it runs on a call stack of its own, and `FUNCNAME` is empty.
   session.functionNames = []
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
+  // A nested shell is its own process, with its own jobs: its `jobs` and
+  // `wait` see only them, its EXIT action's included, and they are not its
+  // caller's.
+  const jobs = jobTable === undefined ? {} : { jobTable: new JobTable(null, jobTable.processes) }
   let io
   // A nested shell is a program of its own: the builtins it runs are its
   // builtins again, whatever `find -exec` marked the outer line.
   try {
-    io = await runAsShell(() =>
-      executeFn(script, {
-        sessionId: session.sessionId,
+    io = await runAsShell(async () =>
+      finishShell(
+        (action, opts) => executeFn(action, { ...opts, ...jobs }),
+        session,
+        await executeFn(script, {
+          sessionId: session.sessionId,
+          stdin,
+          ...(sink === undefined ? {} : { sink }),
+          ...jobs,
+        }),
         stdin,
-        ...(sink === undefined ? {} : { sink }),
-      }),
+      ),
     )
   } finally {
     session.restore(saved)
@@ -190,5 +205,6 @@ export async function bashBuiltin(call: BuiltinCall): Promise<Result> {
     call.stdin,
     call.argv.name,
     call.sink,
+    call.jobTable,
   )
 }

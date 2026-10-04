@@ -16,6 +16,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from mirage.io.types import ByteSource
+from mirage.shell.call_stack import CallStack
 from mirage.shell.join import shell_join
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
@@ -93,6 +94,7 @@ async def handle_command_builtin(
     session: SessionState,
     registry: MountRegistry,
     stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
 ) -> Result:
     """Run the ``command`` builtin (``command [-pVv] name [arg ...]``).
 
@@ -101,7 +103,9 @@ async def handle_command_builtin(
     session function table for the inner run so a shadowing function is
     skipped while builtins and mount commands still resolve. Already
     expanded operands are re-joined with ``shlex`` so they survive
-    re-parsing as one token each. ``-p`` is accepted but inert (the
+    re-parsing as one token each. The target runs in the caller's
+    frames, as a builtin does in bash: an ``exit`` in it ends the shell
+    and a ``return`` the function. ``-p`` is accepted but inert (the
     default PATH is the one PATH there is) and the last of ``-v``/``-V``
     wins.
 
@@ -111,6 +115,8 @@ async def handle_command_builtin(
         session (SessionState): shell session state.
         registry (MountRegistry): mount registry for name resolution.
         stdin (ByteSource | None): piped input for the inner run.
+        call_stack (CallStack | None): the caller's frames; None runs
+            the target as a line of its own.
     """
     scan = scan_options(args, _OPTIONS)
     if scan.bad is not None:
@@ -137,7 +143,10 @@ async def handle_command_builtin(
     saved_alias = session.aliases.pop(inner_name, None)
     try:
         io = await execute_fn(
-            inner, session_id=session.session_id, stdin=stdin
+            inner,
+            session_id=session.session_id,
+            stdin=stdin,
+            call_stack=call_stack,
         )
     finally:
         if saved_fn is not None:
@@ -163,4 +172,5 @@ async def command_builtin(call: BuiltinCall) -> Result:
         call.session,
         call.registry,
         call.stdin,
+        call.call_stack,
     )

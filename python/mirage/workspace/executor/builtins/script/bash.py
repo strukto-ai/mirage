@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from mirage.context import clear_program_invocation, reset_program_invocation
@@ -20,8 +21,9 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.shell.console import JobConsole
+from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import IFS_DEFAULT
+from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
@@ -33,6 +35,7 @@ from mirage.workspace.executor.builtins.script.script import (
 )
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.executor.traps import clear_exit_trap, finish_shell
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var
 from mirage.workspace.types import ExecutionNode
@@ -102,6 +105,7 @@ async def handle_bash(
     stdin: ByteSource | None = None,
     name: str = "bash",
     sink: JobConsole | None = None,
+    job_table: JobTable | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a nested shell: inline text from ``-c``, or a script file.
 
@@ -124,6 +128,8 @@ async def handle_bash(
             the caller used.
         sink (JobConsole | None): where the program's statements write
             as they finish, None to return them.
+        job_table (JobTable | None): the caller's jobs, which the nested
+            shell starts a table of its own beside.
     """
     parsed = parse_bash_args(args)
     if parsed.invalid is not None:
@@ -156,6 +162,8 @@ async def handle_bash(
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
     saved = session.snapshot()
+    clear_exit_trap(session)
+    session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session.positional_args = positional
     session.script_name = script_name
     # bash starts every shell with the default IFS and never reads one
@@ -169,10 +177,21 @@ async def handle_bash(
     # A nested shell is a program of its own: the builtins it runs are
     # its builtins again, whatever `find -exec` marked the outer line.
     token = clear_program_invocation()
+    # A nested shell is its own process, with its own jobs: its `jobs` and
+    # `wait` see only them, its EXIT action's included, and they are not
+    # its caller's.
+    if job_table is not None:
+        execute_fn = partial(
+            execute_fn, job_table=JobTable(processes=job_table.processes)
+        )
     try:
         io = await execute_fn(
-            script, session_id=session.session_id, stdin=stdin, sink=sink
+            script,
+            session_id=session.session_id,
+            stdin=stdin,
+            sink=sink,
         )
+        io = await finish_shell(execute_fn, session, io, stdin)
     finally:
         reset_program_invocation(token)
         session.restore(saved)
@@ -195,4 +214,5 @@ async def bash_builtin(call: BuiltinCall) -> Result:
         call.stdin,
         str(call.argv.name),
         call.sink,
+        call.job_table,
     )

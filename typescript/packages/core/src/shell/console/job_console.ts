@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Channel, type ConsoleChunk, type ReadResult } from './types.ts'
+import { Channel, type ConsoleChunk, type OwnedStream, type ReadResult } from './types.ts'
 import { RAMConsoleStore } from './ram.ts'
 import type { ConsoleStore } from './store.ts'
 
@@ -78,6 +78,11 @@ export class JobConsole {
   async emit(channel: Channel, data: Uint8Array): Promise<void> {
     if (this.finishedFlag || this.backing.closed) return
     await this.backing.append(channel, data)
+  }
+
+  /** Append output written to a stream a level owns; this console keeps it on its channel. */
+  async emitTo(stream: OwnedStream, data: Uint8Array): Promise<void> {
+    await this.emit(stream.channel, data)
   }
 
   /**

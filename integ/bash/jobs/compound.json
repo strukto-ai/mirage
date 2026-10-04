@@ -341,7 +341,7 @@
       }
     },
     {
-      "id": "job_bg_wait_by_id_adopts_loop_output",
+      "id": "job_bg_wait_by_id_after_loop_output",
       "seq": 502802,
       "targets": [
         "ram",
@@ -409,7 +409,7 @@
       }
     },
     {
-      "id": "job_bg_fg_adopts_loop_output",
+      "id": "job_bg_fg_shows_loop_output",
       "seq": 502804,
       "targets": [
         "ram",
@@ -435,15 +435,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(for i in 1 2; do echo $i; done & fg) 2>/dev/null",
+      "command": "(for i in 1 2; do sleep 0.02; echo $i; done & fg) 2>/dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "for i in 1 2; do echo $i; done\n1\n2\n",
+        "stdout": "for i in 1 2; do sleep 0.02; echo $i; done\n1\n2\n",
         "stderr": ""
       }
     },
     {
-      "id": "job_bg_fg_adopts_a_finished_job",
+      "id": "job_bg_fg_takes_a_finished_job",
       "seq": 502832,
       "targets": [
         "ram",
@@ -472,7 +472,7 @@
       "command": "(echo hi & sleep 0.2; fg) 2>/dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "echo hi\nhi\n",
+        "stdout": "hi\necho hi\n",
         "stderr": ""
       }
     },
@@ -579,7 +579,7 @@
       }
     },
     {
-      "id": "job_bg_bare_wait_adopts_every_job_by_id",
+      "id": "job_bg_bare_wait_joins_every_job",
       "seq": 502808,
       "targets": [
         "ram",
@@ -644,6 +644,40 @@
         "exit": 0,
         "stdout": "rc=0\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "job_pipeline_keeps_both_channels",
+      "seq": 513010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "({ echo out; echo err >&2; } | cat) & wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "out\n",
+        "stderr": "err\n"
       }
     }
   ]

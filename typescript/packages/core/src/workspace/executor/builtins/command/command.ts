@@ -14,6 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import type { CallStack } from '../../../../shell/call_stack.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
@@ -94,6 +95,10 @@ export async function handleCommandBuiltin(
   session: SessionState,
   registry: MountRegistry,
   stdin: ByteSource | null = null,
+  // The caller's frames: the target runs in them, as a builtin does in
+  // bash, so an `exit` in it ends the shell and a `return` the function.
+  // Null runs the target as a line of its own.
+  callStack: CallStack | null = null,
 ): Promise<Result> {
   const scan = scanOptions(args, 'pvV')
   if (scan.bad !== null) {
@@ -125,7 +130,11 @@ export async function handleCommandBuiltin(
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.aliases[innerName]
   try {
-    const io = await executeFn(inner, { sessionId: session.sessionId, stdin })
+    const io = await executeFn(inner, {
+      sessionId: session.sessionId,
+      stdin,
+      ...(callStack !== null ? { callStack } : {}),
+    })
     return [io.stdout, io, new ExecutionNode({ command: 'command', exitCode: io.exitCode })]
   } finally {
     if (savedFn !== undefined) session.functions[innerName] = savedFn
@@ -141,5 +150,6 @@ export async function commandBuiltin(call: BuiltinCall): Promise<Result> {
     call.session,
     call.registry,
     call.stdin,
+    call.callStack,
   )
 }

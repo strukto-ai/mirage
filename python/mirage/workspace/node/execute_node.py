@@ -95,6 +95,7 @@ from mirage.workspace.executor.statement import (
     finish_statement,
     record_status,
 )
+from mirage.workspace.executor.traps import end_shell
 from mirage.workspace.expand import (
     expand_and_classify,
     expand_node,
@@ -472,6 +473,7 @@ async def _run_pipeline(
         stdin,
         call_stack,
         processes,
+        execute_fn,
     )
     if stages.negated:
         io = IOResult(
@@ -681,17 +683,34 @@ async def _run_redirected(
             dispatch, session, expanded_redirects, stdin
         )
     # A heredoc's operator line reads the routed stdout, so then it is
-    # returned rather than written.
-    stdout, io, exec_node = await handle_redirect(
-        recurse,
-        dispatch,
-        command,
-        expanded_redirects,
-        session,
-        stdin,
-        call_stack,
-        sink=sink if pipe_node is None else None,
-    )
+    # returned rather than written. A simple command expands its words
+    # before its redirects apply, so what that printed (a substitution's
+    # stderr) goes around them; a compound body expands inside them.
+    simple = command is not None and command.type == NT.COMMAND
+    outer = session._diagnostics
+    if simple:
+        session._diagnostics = []
+    try:
+        stdout, io, exec_node = await handle_redirect(
+            partial(recurse, own_diagnostics=False) if simple else recurse,
+            dispatch,
+            command,
+            expanded_redirects,
+            session,
+            stdin,
+            call_stack,
+            sink=sink if pipe_node is None else None,
+        )
+        if simple and session._diagnostics:
+            err = _diagnostic_stderr(command, session)
+            io.stderr = err + await io.materialize_stderr()
+            exec_node.stderr = err + (exec_node.stderr or b"")
+    except ExitSignal as exc:
+        if simple:
+            exc.stderr = _diagnostic_stderr(command, session) + exc.stderr
+        raise
+    finally:
+        session._diagnostics = outer
     if pipe_node is not None and stdout is not None:
         stdout, io2, exec_node2 = await recurse(
             pipe_node, session, stdout, call_stack
@@ -853,9 +872,64 @@ async def execute_node(
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,
+    ends_shell: bool = False,
+    own_diagnostics: bool = True,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     execution_scope = execution_scope or ExecutionScope()
+    # The node is the whole of a child shell (a background job), which
+    # runs its EXIT action when the node ends, its evaluator bound the
+    # way `_execute_node` binds it for the node's own lines.
+    if ends_shell:
+        return await end_shell(
+            partial(
+                execute_fn,
+                handed=handed,
+                cancel=cancel,
+                execution_scope=execution_scope,
+            ),
+            session,
+            stdin,
+            call_stack,
+            execute_node(
+                dispatch,
+                registry,
+                namespace,
+                job_table,
+                execute_fn,
+                agent_id,
+                node,
+                session,
+                stdin,
+                call_stack,
+                cancel,
+                routing_decision,
+                sink,
+                handed,
+                execution_scope,
+            ),
+        )
     await execution_scope.checkpoint(cancel)
+    # What expanding the node printed (a substitution's stderr) goes out
+    # with the node's own stderr, unless its caller collects it: a simple
+    # command's words expand before its redirects apply.
+    if not own_diagnostics:
+        return await _execute_node(
+            dispatch,
+            registry,
+            namespace,
+            job_table,
+            execute_fn,
+            agent_id,
+            node,
+            session,
+            stdin,
+            call_stack,
+            cancel,
+            routing_decision,
+            sink,
+            handed,
+            execution_scope,
+        )
     outer = session._diagnostics
     session._diagnostics = []
     try:
@@ -1060,6 +1134,7 @@ async def _execute_node(
             registry.decisions,
             sink=sink,
             inline=call_stack is not None,
+            execute_fn=execute_fn,
         )
 
     # ── command ─────────────────────────────────
@@ -1180,6 +1255,7 @@ async def _execute_node(
                     handed,
                     registry.decisions,
                     sink=sink,
+                    execute_fn=execute_fn,
                 )
                 results.append(result)
                 return result[1].exit_code

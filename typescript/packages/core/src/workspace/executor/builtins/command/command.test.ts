@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { CallStack } from '../../../../shell/call_stack.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { CLIRegistry } from '../../../cli/registry.ts'
@@ -226,6 +227,23 @@ describe('handleCommandBuiltin run mode', () => {
     const piped = new TextEncoder().encode('piped\n')
     await handleCommandBuiltin(shell, ['cat'], makeSession(), makeRegistry(), piped)
     expect(shell).toHaveBeenCalledWith('cat', expect.objectContaining({ stdin: piped }))
+  })
+
+  it("runs the target in the caller's frames", async () => {
+    const shell = vi.fn(() => Promise.resolve(new IOResult()))
+    const frames = new CallStack()
+    await handleCommandBuiltin(
+      shell,
+      ['eval', 'exit 7'],
+      makeSession(),
+      makeRegistry(),
+      null,
+      frames,
+    )
+    expect(shell).toHaveBeenCalledWith(
+      "eval 'exit 7'",
+      expect.objectContaining({ callStack: frames }),
+    )
   })
 
   it('masks a shadowing function for the inner run and restores it', async () => {

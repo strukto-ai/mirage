@@ -97,6 +97,7 @@ const JOB_HANDLERS: Record<
     session: SessionState | null,
     view: SessionView | null,
     signal?: AbortSignal,
+    sink?: JobConsole,
   ) => JobHandlerResult | Promise<JobHandlerResult>
 > = {
   wait: handleWait,
@@ -201,6 +202,8 @@ export async function handleCommand(
         session,
         sessionView(session, registry.policies),
         mergeSignals(signal, session.abortSignal),
+        // `fg` is the one job builtin that writes before it blocks.
+        sink,
       )
     }
   }

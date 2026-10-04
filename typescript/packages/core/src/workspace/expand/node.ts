@@ -15,6 +15,7 @@
 import type { SessionView } from '../../ops/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
 import { quotedParts } from '../../shell/helpers.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
@@ -62,6 +63,7 @@ export type ExecuteFn = (
     substitution?: boolean
     sink?: JobConsole
     callStack?: CallStack
+    jobTable?: JobTable
   },
 ) => Promise<IOResult>
 
