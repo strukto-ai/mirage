@@ -15,7 +15,7 @@
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { isEnoent } from '../../utils/errors.ts'
+import { enotdir, isEexist, isEnoent } from '../../utils/errors.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'
@@ -81,7 +81,15 @@ export async function mkdir(
     const parts = key.split('/')
     for (let index = 1; index <= parts.length; index++) {
       const level = parts.slice(0, index).join('/')
-      await createDir(accessor, level, `${prefix}/${level}`)
+      const virtual = `${prefix}/${level}`
+      try {
+        await createDir(accessor, level, virtual)
+      } catch (error) {
+        // `mkdir -p` passes only a directory at the operand and names the
+        // file it stops at above it, as GNU does.
+        if (!isEexist(error) || index === parts.length) throw error
+        throw enotdir(virtual)
+      }
     }
   } else {
     await createDir(accessor, key, path.virtual)

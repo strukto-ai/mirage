@@ -80,6 +80,26 @@ async def test_mkdir_under_a_file_is_not_a_directory():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("rel", "error", "named"),
+    [
+        ("f/x/y", NotADirectoryError, "/sp/Engineering/Documents/f"),
+        ("f", FileExistsError, "/sp/Engineering/Documents/f"),
+    ],
+)
+async def test_mkdir_parents_names_the_file_it_stops_at(rel, error, named):
+    with aioresponses() as m:
+        m.post(
+            _DRIVE + "/root/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_DRIVE + "/root:/f", payload={"id": "1", "file": {}})
+        with pytest.raises(error, match=f"^{named}$"):
+            await mkdir(_accessor(), _spec(rel), parents=True)
+
+
+@pytest.mark.asyncio
 async def test_mkdir_raises_on_other_errors():
     with aioresponses() as m:
         m.post(

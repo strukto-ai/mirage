@@ -100,6 +100,17 @@ describe('OneDrive mkdir names a refusal', () => {
     else await expect(made).rejects.toMatchObject({ code })
   })
 
+  it.each([
+    ['/od/f/x/y', 'f/x/y', 'ENOTDIR'],
+    ['/od/f', 'f', 'EEXIST'],
+  ])('mkdir -p %s names the file it stops at', async (virtual, key, code) => {
+    folderFetch({ [`${BASE}/root/children`]: [409] }, { [`${BASE}/root:/f`]: { file: {} } })
+    await expect(mkdir(plain(), PathSpec.fromStrPath(virtual, key), true)).rejects.toMatchObject({
+      code,
+      virtualPath: '/od/f',
+    })
+  })
+
   it('a create under a file is ENOTDIR', async () => {
     folderFetch({ [`${BASE}/root:/f:/children`]: [404] }, { [`${BASE}/root:/f`]: { file: {} } })
     await expect(mkdir(plain(), PathSpec.fromStrPath('/od/f/new', 'f/new'))).rejects.toMatchObject({

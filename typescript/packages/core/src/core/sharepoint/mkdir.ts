@@ -15,7 +15,8 @@
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { isEnoent } from '../../utils/errors.ts'
+import { enotdir, isEexist, isEnoent } from '../../utils/errors.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'
 import { itemUrl } from './client.ts'
 import { resolveItem } from './resolve.ts'
@@ -42,17 +43,28 @@ async function createDir(
  *   accessor: the mount's accessor.
  *   driveId: the drive the path lives in.
  *   itemPath: the drive-relative path, keyPrefix included.
- *   virtual: the path a refusal names.
+ *   virtual: the operand's virtual path.
+ *   parents: name a file in the way rather than the operand.
  */
 async function createChain(
   accessor: SharePointAccessor,
   driveId: string,
   itemPath: string,
   virtual: string,
+  parents: boolean,
 ): Promise<void> {
   const parts = itemPath.split('/')
   for (let index = 1; index <= parts.length; index++) {
-    await createDir(accessor, driveId, parts.slice(0, index).join('/'), virtual)
+    try {
+      await createDir(accessor, driveId, parts.slice(0, index).join('/'), virtual)
+    } catch (error) {
+      const above = parts.length - index
+      if (!isEexist(error) || above === 0) throw error
+      // `mkdir -p` names the file it stops at, as GNU does; mkdir(2) blames
+      // the operand.
+      const level = rstripSlash(virtual).split('/').slice(0, -above).join('/') || '/'
+      throw enotdir(parents ? level : virtual)
+    }
   }
 }
 
@@ -82,7 +94,7 @@ export async function mkdir(
   const driveId = resolved.driveId ?? ''
   const itemPath = resolved.itemPath ?? ''
   if (parents) {
-    await createChain(accessor, driveId, itemPath, path.virtual)
+    await createChain(accessor, driveId, itemPath, path.virtual, true)
   } else {
     try {
       await createDir(accessor, driveId, itemPath, path.virtual)
@@ -90,7 +102,7 @@ export async function mkdir(
       const prefix = scopedPrefix(accessor)
       const missingRoot = isEnoent(error) && prefix !== '' && parentPath(itemPath) === prefix
       if (!missingRoot) throw error
-      await createChain(accessor, driveId, itemPath, path.virtual)
+      await createChain(accessor, driveId, itemPath, path.virtual, false)
     }
   }
   await invalidateAfterWrite(path)

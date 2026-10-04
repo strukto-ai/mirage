@@ -7,6 +7,7 @@ from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.types import PathSpec
 from mirage.utils.errors import eexist, enotdir
+from mirage.utils.key_prefix import mounted_path
 
 
 async def _file_level(op: AsyncOperator, key: str) -> str | None:
@@ -33,7 +34,7 @@ async def mkdir(
 ) -> None:
     """Create a collection; opendal creates missing parents either way.
 
-    ``parents`` is accepted for the op signature and ignored, because
+    ``parents`` only picks the path a refusal names, because
     ``create_dir`` is MKCOL over every missing level whatever it says.
     That is also why the ancestor invalidation is unconditional: a bare
     ``mkdir a/b/c`` materializes a whole chain here, and gating the walk
@@ -44,7 +45,8 @@ async def mkdir(
     Args:
         accessor (NextcloudAccessor): Nextcloud accessor.
         path (PathSpec): collection to create.
-        parents (bool): ignored; opendal always creates parents.
+        parents (bool): opendal always creates parents; with it, a file
+            in the way is named rather than the operand.
     """
     key = nextcloud_key(path).rstrip("/")
     op = accessor.operator()
@@ -57,12 +59,18 @@ async def mkdir(
         level = await _file_level(op, key)
         if level is None:
             raise
-        raise (eexist(path) if level == key else enotdir(path)) from exc
+        if level == key:
+            raise eexist(path) from exc
+        # mkdir(2) blames the operand; the walk `-p` makes stops at the
+        # file and names it.
+        raise enotdir(
+            mounted_path(path, "/" + level) if parents else path
+        ) from exc
+    await invalidate_after_write(path)
+    await invalidate_ancestors(path)
     try:
         md = await op.stat(key)
     except NotFound:
         md = None
     if md is not None and md.mode != EntryMode.Dir:
         raise eexist(path)
-    await invalidate_after_write(path)
-    await invalidate_ancestors(path)

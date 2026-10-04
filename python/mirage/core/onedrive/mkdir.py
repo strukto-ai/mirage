@@ -19,6 +19,7 @@ from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.msgraph.drive import FolderTarget, create_child_folder
 from mirage.core.onedrive.client import full_item_url, item_url
 from mirage.types import PathSpec
+from mirage.utils.errors import enotdir
 from mirage.utils.key_prefix import mount_prefix_of
 
 
@@ -89,7 +90,15 @@ async def mkdir(
         parts = key.split("/")
         for i in range(len(parts)):
             level = "/".join(parts[: i + 1])
-            await _create_dir(accessor, level, f"{prefix}/{level}")
+            virtual = f"{prefix}/{level}"
+            try:
+                await _create_dir(accessor, level, virtual)
+            except FileExistsError as exc:
+                # `mkdir -p` passes only a directory at the operand and
+                # names the file it stops at above it, as GNU does.
+                if i == len(parts) - 1:
+                    raise
+                raise enotdir(virtual) from exc
     else:
         await _create_dir(accessor, key, path.virtual)
     await invalidate_after_write(path)

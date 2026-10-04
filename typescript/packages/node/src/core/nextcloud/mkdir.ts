@@ -2,6 +2,7 @@ import type { Operator } from 'opendal'
 import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eexist, enotdir } from '@struktoai/mirage-core/utils/errors'
+import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { isNotFound, nextcloudKey } from './util.ts'
@@ -25,8 +26,8 @@ async function fileLevel(op: Operator, key: string): Promise<string | null> {
 /**
  * Create a collection; opendal creates missing parents either way.
  *
- * `parents` is accepted for the op signature and ignored, because
- * `createDir` is MKCOL over every missing level whatever it says. That is
+ * `parents` only picks the path a refusal names, because `createDir` is
+ * MKCOL over every missing level whatever it says. That is
  * also why the ancestor invalidation is unconditional: a bare `mkdir a/b/c`
  * materializes a whole chain here, and gating the walk on `parents` (as the
  * backends whose mkdir really does create one level correctly do) left every
@@ -36,7 +37,7 @@ async function fileLevel(op: Operator, key: string): Promise<string | null> {
 export async function mkdir(
   accessor: NextcloudAccessor,
   path: PathSpec,
-  _parents = false,
+  parents = false,
 ): Promise<void> {
   const key = rstripSlash(nextcloudKey(path))
   const op = await accessor.operator()
@@ -48,8 +49,13 @@ export async function mkdir(
   } catch (error) {
     const level = await fileLevel(op, key)
     if (level === null) throw error
-    throw level === key ? eexist(path) : enotdir(path)
+    if (level === key) throw eexist(path)
+    // mkdir(2) blames the operand; the walk `-p` makes stops at the file and
+    // names it.
+    throw enotdir(parents ? mountedPath(path, `/${level}`) : path)
   }
+  await invalidateAfterWrite(path)
+  await invalidateAncestors(path)
   let taken = false
   try {
     taken = !(await op.stat(key)).isDirectory()
@@ -57,6 +63,4 @@ export async function mkdir(
     if (!isNotFound(error)) throw error
   }
   if (taken) throw eexist(path)
-  await invalidateAfterWrite(path)
-  await invalidateAncestors(path)
 }

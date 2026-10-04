@@ -101,6 +101,21 @@ describe('SharePoint mkdir names a refusal', () => {
     else await expect(made).rejects.toMatchObject({ code })
   })
 
+  it.each([
+    ['f/x/y', 'ENOTDIR'],
+    ['f', 'EEXIST'],
+  ])('mkdir -p %s names the file it stops at', async (rel, code) => {
+    folderFetch({ [`${DRIVE}/root/children`]: [409] }, { [`${DRIVE}/root:/f`]: { file: {} } })
+    const path = PathSpec.fromStrPath(
+      `/sp/Engineering/Documents/${rel}`,
+      `Engineering/Documents/${rel}`,
+    )
+    await expect(mkdir(plain(), path, true)).rejects.toMatchObject({
+      code,
+      virtualPath: '/sp/Engineering/Documents/f',
+    })
+  })
+
   it('a create under a file is ENOTDIR', async () => {
     folderFetch({ [`${DRIVE}/root:/f:/children`]: [404] }, { [`${DRIVE}/root:/f`]: { file: {} } })
     await expect(

@@ -20,6 +20,7 @@ from mirage.core.msgraph.drive import FolderTarget, create_child_folder
 from mirage.core.sharepoint.client import item_url
 from mirage.core.sharepoint.resolve import resolve_item
 from mirage.types import PathSpec
+from mirage.utils.errors import enotdir
 
 
 async def _create_dir(
@@ -41,7 +42,11 @@ async def _create_dir(
 
 
 async def _create_chain(
-    accessor: SharePointAccessor, drive_id: str, item_path: str, virtual: str
+    accessor: SharePointAccessor,
+    drive_id: str,
+    item_path: str,
+    virtual: str,
+    parents: bool,
 ) -> None:
     """Create every level of a drive path, from the drive root down.
 
@@ -49,13 +54,23 @@ async def _create_chain(
         accessor (SharePointAccessor): the mount's accessor.
         drive_id (str): the drive the path lives in.
         item_path (str): the drive-relative path, key_prefix included.
-        virtual (str): the path a refusal names.
+        virtual (str): the operand's virtual path.
+        parents (bool): name a file in the way rather than the operand.
     """
     parts = item_path.split("/")
     for i in range(len(parts)):
-        await _create_dir(
-            accessor, drive_id, "/".join(parts[: i + 1]), virtual
-        )
+        try:
+            await _create_dir(
+                accessor, drive_id, "/".join(parts[: i + 1]), virtual
+            )
+        except FileExistsError as exc:
+            above = len(parts) - 1 - i
+            if not above:
+                raise
+            # `mkdir -p` names the file it stops at, as GNU does; mkdir(2)
+            # blames the operand.
+            level = virtual.rstrip("/").rsplit("/", above)[0] or "/"
+            raise enotdir(level if parents else virtual) from exc
 
 
 def _scoped_prefix(accessor: SharePointAccessor) -> str:
@@ -84,7 +99,9 @@ async def mkdir(
     drive_id = resolved.drive_id or ""
     item_path = resolved.item_path or ""
     if parents:
-        await _create_chain(accessor, drive_id, item_path, path.virtual)
+        await _create_chain(
+            accessor, drive_id, item_path, path.virtual, parents=True
+        )
     else:
         try:
             await _create_dir(accessor, drive_id, item_path, path.virtual)
@@ -92,7 +109,9 @@ async def mkdir(
             prefix = _scoped_prefix(accessor)
             if not prefix or posixpath.dirname(item_path) != prefix:
                 raise
-            await _create_chain(accessor, drive_id, item_path, path.virtual)
+            await _create_chain(
+                accessor, drive_id, item_path, path.virtual, parents=False
+            )
     await invalidate_after_write(path)
     if parents:
         await invalidate_ancestors(path)
