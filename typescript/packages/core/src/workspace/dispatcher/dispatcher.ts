@@ -190,6 +190,16 @@ function memoryAnswered(report: OpReport | undefined, moved: number | null = nul
   report?.served(VFSName.RAM, moved)
 }
 
+/**
+ * Stamp the caller's report: the owning mount answered. A report memory
+ * already stamped (a namespace answer for a missing path) keeps that.
+ * Mirrors Python's `_served`.
+ */
+function served(report: OpReport | undefined, result: unknown): void {
+  if (report?.completed === true) return
+  report?.served(null, result instanceof Uint8Array ? result.byteLength : null)
+}
+
 /** The door's link follow of one path, the final name too (`last`) or
  * only the names above it, with a loop thrown as ELOOP rather than the
  * namespace's CycleError. */
@@ -611,9 +621,7 @@ export class Dispatcher {
               const answer = await run(fullKwargs, (started) => {
                 call = started
               })
-              if (!report?.completed) {
-                report?.served(null, answer instanceof Uint8Array ? answer.byteLength : null)
-              }
+              served(report, answer)
               await this.settleWrite(opName, p, renameDst)
               return answer
             })()
@@ -648,9 +656,7 @@ export class Dispatcher {
     // The op ran, whatever invalidation, the post gate, or an output
     // cap do next: stamped here so a failure in any of them cannot
     // erase a transfer the backend already made.
-    if (!report?.completed) {
-      report?.served(null, result instanceof Uint8Array ? result.byteLength : null)
-    }
+    served(report, result)
     if (opName === 'readdir' && Array.isArray(result)) {
       result = visibleEntries(
         mergeReaddir(result, this.namespace.mountPrefixes(), this.namespace, p.virtual),
