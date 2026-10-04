@@ -19,7 +19,13 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
-import { normalizeIndexConfig } from '@struktoai/mirage-core/cache/index/config'
+import {
+  normalizeIndexConfig,
+  type RedisIndexConfig,
+} from '@struktoai/mirage-core/cache/index/config'
+import { RedisIndexCacheStore } from '@struktoai/mirage-core/cache/index/redis'
+import { REDACTED_SECRET } from '@struktoai/mirage-core/vfs/secrets'
+import { buildMountArgs, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
 import { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
 import { DiskNamespaceStore } from './workspace/mount/namespace/disk.ts'
@@ -29,11 +35,11 @@ import { RedisWorkspaceStateStore } from './workspace/store/redis.ts'
 import { RedisConsoleStore } from './shell/console/redis/index.ts'
 import { RedisFileCacheStore } from './cache/file/redis.ts'
 import { Workspace } from './workspace.ts'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   absolutizeScripts,
   checkWorkspaceConfigFile,
@@ -1369,23 +1375,36 @@ describe('shared acceptance fixture cache and index blocks', () => {
   // The same keys are held a second time, camelCase, by the code door
   // in core; a key accepted here and refused there would load a config
   // the workspace then refuses to build.
+  const mountIndexes = (config: Record<string, unknown>): unknown[] =>
+    Object.values((config.mounts ?? {}) as Record<string, { index?: unknown }>)
+      .map((block) => block.index)
+      .filter((index) => index != null)
   const cases = ACCEPTED_FIXTURES.flatMap((fixture) => fixtureCases(fixture)).filter(
-    ({ config }) => config.cache != null || config.index != null,
+    ({ config }) =>
+      config.cache != null || config.index != null || mountIndexes(config).length > 0,
   )
 
-  it('has a redis cache case and a redis index case', () => {
+  it('has a redis cache case, a redis index case and a redis mount index case', () => {
     const types = cases.map(({ config }) => [
       (config.cache as { type?: unknown } | undefined)?.type,
       (config.index as { type?: unknown } | undefined)?.type,
     ])
     expect(types.some(([cache]) => cache === 'redis')).toBe(true)
     expect(types.some(([, index]) => index === 'redis')).toBe(true)
+    expect(
+      cases.some(({ config }) =>
+        mountIndexes(config).some((index) => (index as { type?: unknown }).type === 'redis'),
+      ),
+    ).toBe(true)
   })
 
   it.each(cases)('builds the cache and index of $name', ({ config }) => {
-    const { cache, index } = loadWorkspaceConfig(config)
+    const { cache, index, mounts } = loadWorkspaceConfig(config)
     if (cache != null) expect(() => normalizeCacheConfig(cache)).not.toThrow()
     if (index != null) expect(() => normalizeIndexConfig(index)).not.toThrow()
+    for (const block of Object.values(mounts)) {
+      if (block.index != null) expect(() => normalizeIndexConfig(block.index!)).not.toThrow()
+    }
   })
 })
 
@@ -1631,4 +1650,289 @@ it.each([
   { profiles: { research: { command_limits: { head: { max_line: 2 } } } } },
 ])('rejects bad command limit fields', (block) => {
   expect(() => loadWorkspaceConfig({ mounts: { '/data': { vfs: 'ram' } }, ...block })).toThrow()
+})
+
+// A mount's own `index:` block. The values are distinct per source --
+// workspace 73, mount 37, disk's own indexTtl 60, the block default 600
+// -- so a test can tell which of them a mount actually took.
+describe('mount index block', () => {
+  const UNREACHABLE_REDIS = 'redis://127.0.0.1:1/0'
+  const DEC = new TextDecoder()
+  let root: string
+
+  const disk = (dir: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    vfs: 'disk',
+    config: { root: dir },
+    ...extra,
+  })
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mirage-mount-index-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('carries the block onto its mount and nowhere else', async () => {
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        index: { type: 'ram', ttl: 73 },
+        mounts: { '/a': disk(root, { index: { type: 'ram', ttl: 37 } }), '/b': disk(root) },
+      }),
+    )
+    expect(args.mounts['/a']?.options.index).toEqual({ type: 'ram', ttl: 37 })
+    expect(args.mounts['/b']?.options).not.toHaveProperty('index')
+    expect(args.options.index).toEqual({ type: 'ram', ttl: 73 })
+  })
+
+  it('keeps every key of a redis mount index, snake_case key_prefix included', async () => {
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: {
+          '/a': disk(root, {
+            index: { type: 'redis', ttl: 41, url: UNREACHABLE_REDIS, key_prefix: 't:' },
+          }),
+        },
+      }),
+    )
+    expect(args.mounts['/a']?.options.index).toEqual({
+      type: 'redis',
+      ttl: 41,
+      url: UNREACHABLE_REDIS,
+      keyPrefix: 't:',
+    })
+  })
+
+  it('replaces the workspace index whole: nothing is inherited', async () => {
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        index: { type: 'redis', ttl: 73, key_prefix: 'w:' },
+        mounts: { '/a': disk(root, { index: { type: 'ram' } }) },
+      }),
+    )
+    expect(args.mounts['/a']?.options.index).toEqual({ type: 'ram' })
+    const ws = new Workspace(args.mounts, args.options)
+    try {
+      expect(ws.mount('/a').indexStore.ttl).toBe(600)
+      expect(ws.mount('/a').indexStore).not.toBeInstanceOf(RedisIndexCacheStore)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Each is already refused by a loader with no mount `index` at all
+  // ("unknown mount `/d` key `index`"), so these patterns name the
+  // reason the index block itself gives.
+  it.each([
+    ['mount index: an unknown key', /unknown mounts\.\/d\.index \(ram\) key `ttll`/],
+    ['mount index: type is the union discriminator, not optional', /`mounts\.\/d\.index` needs a `type`/],
+    ['mount index: camelCase keyPrefix', /unknown mounts\.\/d\.index \(redis\) key `keyPrefix`/],
+    ['mount index: a redis key on a ram index', /unknown mounts\.\/d\.index \(ram\) key `url`/],
+    ['mount index: a scalar, not a mapping', /`mounts\.\/d\.index` must be a mapping/],
+    ['mount index: no such backend', /unknown mounts\.\/d\.index type `postgres`/],
+    ['mount block: cache is workspace-only', /unknown mount `\/d` key `cache`/],
+  ])('refuses %s for its own reason', (name, pattern) => {
+    const fixture = fixtureCases('rejected').find((c) => c.name === name)
+    expect(fixture).toBeDefined()
+    expect(() => loadWorkspaceConfig(fixture!.config)).toThrow(pattern)
+  })
+
+  it('names a bad mount index before the read bound, as pydantic does', () => {
+    // Two faults on one mount: `ttl:` without `read:` and an index with
+    // no `type`. Python judges the fields before the bound rule.
+    expect(() =>
+      loadWorkspaceConfig({ mounts: { '/d': { vfs: 'ram', ttl: 30, index: { ttl: 5 } } } }),
+    ).toThrow(/`mounts\.\/d\.index` needs a `type`/)
+  })
+
+  it('builds the store each mount runs: mount, then workspace, then backend', async () => {
+    const file = join(root, 'mirage.yaml')
+    writeFileSync(
+      file,
+      [
+        'index: {type: ram, ttl: 73}',
+        'mounts:',
+        `  /a: {vfs: disk, config: {root: ${root}}, index: {type: ram, ttl: 37}}`,
+        `  /b: {vfs: disk, config: {root: ${root}}}`,
+        `  /n: {vfs: disk, config: {root: ${root}}, index: null}`,
+        `  /c: {vfs: disk, config: {root: ${root}}, index: {type: ram, ttl: 0}}`,
+        `  /r: {vfs: disk, config: {root: ${root}}, index: {type: redis, ttl: 41, url: '${UNREACHABLE_REDIS}', key_prefix: 't:'}}`,
+        '',
+      ].join('\n'),
+    )
+    const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(file))
+    const ws = new Workspace(args.mounts, args.options)
+    try {
+      expect(['/a', '/b', '/n'].map((p) => ws.mount(p).indexStore.ttl)).toEqual([37, 73, 73])
+      expect(ws.mount('/c').indexStore.ttl).toBe(0)
+      const redis = ws.mount('/r')
+      expect(redis.indexStore).toBeInstanceOf(RedisIndexCacheStore)
+      expect(redis.indexStore.ttl).toBe(41)
+      expect((redis.indexConfig as RedisIndexConfig).keyPrefix).toBe('t:')
+    } finally {
+      await ws.close()
+    }
+    const bare = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: { '/a': disk(root, { index: { type: 'ram', ttl: 37 } }), '/b': disk(root) },
+      }),
+    )
+    const plain = new Workspace(bare.mounts, bare.options)
+    try {
+      expect(plain.mount('/a').indexStore.ttl).toBe(37)
+      expect(plain.mount('/b').indexStore.ttl).toBe(60)
+    } finally {
+      await plain.close()
+    }
+  })
+
+  it('judges fresh on the mount index', async () => {
+    // ram keeps no listings of its own, so only its mount index can make
+    // fresh honest; a zero mount index takes listing-only fresh away from
+    // disk under a nonzero workspace one.
+    const ok = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: { '/r': { vfs: 'ram', read: 'fresh', index: { type: 'ram', ttl: 30 } } },
+      }),
+    )
+    const ws = new Workspace(ok.mounts, ok.options)
+    try {
+      expect(ws.mount('/r').read.policy).toBe('fresh')
+    } finally {
+      await ws.close()
+    }
+    const refused = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        index: { type: 'ram', ttl: 73 },
+        mounts: { '/d': disk(root, { read: 'fresh', index: { type: 'ram', ttl: 0 } }) },
+      }),
+    )
+    expect(() => new Workspace(refused.mounts, refused.options)).toThrow(
+      /'\/d'.*caches reads or listings/,
+    )
+  })
+
+  it('posts the checked document unchanged and loads it twice', async () => {
+    // The CLI sends the snake_case document `checkWorkspaceConfigFile`
+    // returns and the daemon loads it again; a camelize done in place
+    // would hand the daemon `keyPrefix`, which it refuses.
+    const file = join(root, 'w.yaml')
+    writeFileSync(
+      file,
+      ['mounts:', '  /d:', '    vfs: ram', '    index: {type: redis, key_prefix: "t:"}', ''].join(
+        '\n',
+      ),
+    )
+    const wire = checkWorkspaceConfigFile(file)
+    const first = loadWorkspaceConfig(wire)
+    expect((wire.mounts as Record<string, { index: Record<string, unknown> }>)['/d']?.index).toEqual(
+      { type: 'redis', key_prefix: 't:' },
+    )
+    const again = loadWorkspaceConfig(wire)
+    for (const cfg of [first, again]) {
+      const args = await configToWorkspaceArgs(cfg)
+      expect((args.mounts['/d']?.options.index as RedisIndexConfig).keyPrefix).toBe('t:')
+    }
+  })
+
+  it('leaves the rest of a mount block in its own spelling', async () => {
+    // Only the index is camelized: command_limits is read snake_case and
+    // a VFS config keeps the spellings its own model declares.
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: {
+          '/d': disk(root, {
+            index: { type: 'ram', ttl: 37 },
+            command_limits: { cat: { max_bytes: 1024, on_exceed: 'error' } },
+          }),
+        },
+      }),
+    )
+    expect(args.mounts['/d']?.options.commandLimits).toEqual({
+      cat: { maxBytes: 1024, onExceed: 'error' },
+    })
+  })
+
+  it('keeps a YAML mount index through a snapshot and a copy', async () => {
+    const redis: RedisIndexConfig = {
+      type: 'redis',
+      ttl: 41,
+      url: UNREACHABLE_REDIS,
+      keyPrefix: 't:',
+    }
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        index: { type: 'ram', ttl: 73 },
+        mounts: {
+          '/a': disk(root, {
+            index: { type: 'redis', ttl: 41, url: UNREACHABLE_REDIS, key_prefix: 't:' },
+          }),
+          '/b': disk(root),
+        },
+      }),
+    )
+    const ws = new Workspace(args.mounts, args.options)
+    try {
+      const restored = buildMountArgs(await toStateDict(ws)).mountArgs
+      expect(restored['/a/']?.options.index).toEqual(redis)
+      expect(restored['/b/']?.options.index).toEqual({ type: 'ram', ttl: 73 })
+      const copied = await ws.copy()
+      try {
+        const configs = Object.fromEntries(copied.mounts().map((m) => [m.prefix, m.indexConfig]))
+        expect(configs['/a/']).toEqual(redis)
+        expect(configs['/b/']).toEqual({ type: 'ram', ttl: 73 })
+      } finally {
+        await copied.close()
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('redacts a YAML mount index credential in a snapshot', async () => {
+    const url = 'redis://user:secret@127.0.0.1:1/0'
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: { '/a': disk(root, { index: { type: 'redis', ttl: 41, url, key_prefix: 't:' } }) },
+      }),
+    )
+    const ws = new Workspace(args.mounts, args.options)
+    try {
+      const state = await toStateDict(ws)
+      expect(state.mounts.find((m) => m.prefix === '/a/')?.index_config?.url).toBe(
+        REDACTED_SECRET,
+      )
+      expect(() => buildMountArgs(state)).toThrow(/'\/a\/'.*fresh index credentials/)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('re-lists an outside delete only on the mount whose own index is zero', async () => {
+    const a = join(root, 'a')
+    const b = join(root, 'b')
+    for (const dir of [a, b]) {
+      mkdirSync(dir)
+      writeFileSync(join(dir, 'x'), 'x')
+    }
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        index: { type: 'ram', ttl: 600 },
+        mounts: { '/a': disk(a), '/b': disk(b, { index: { type: 'ram', ttl: 0 } }) },
+      }),
+    )
+    const ws = new Workspace(args.mounts, args.options)
+    try {
+      for (const prefix of ['/a', '/b']) {
+        expect(DEC.decode((await ws.shell(`ls ${prefix}`)).stdout)).toBe('x\n')
+      }
+      unlinkSync(join(a, 'x'))
+      unlinkSync(join(b, 'x'))
+      expect(DEC.decode((await ws.shell('ls /a')).stdout)).toBe('x\n')
+      expect(DEC.decode((await ws.shell('ls /b')).stdout)).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
 })

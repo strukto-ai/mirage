@@ -23,9 +23,13 @@ from mirage.cache.index import (
 )
 from mirage.cache.index.config import LookupStatus
 from mirage.config import MountBlock, RedisIndexBlock, WorkspaceConfig
-from mirage.types import MountMode
+from mirage.types import MountMode, ReadPolicy, ReadSpec
+from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.mount import registry as mount_registry
 from mirage.workspace.mount.spec import Mount
+
+FRESH = ReadSpec(policy=ReadPolicy.FRESH)
 
 
 def test_redis_index_config_default_key_prefix():
@@ -119,3 +123,94 @@ async def test_added_mount_keeps_index_coherent_across_aliases_and_duplicates():
     finally:
         await ws.close()
         await rejected.close()
+
+
+@pytest.mark.asyncio
+async def test_added_mount_runs_the_index_it_names(tmp_path):
+    ws = Workspace({}, index=IndexConfig(ttl=73))
+    try:
+        entry = ws.add_mount(
+            "/b", DiskVFS(root=str(tmp_path)), index=IndexConfig(ttl=37)
+        )
+        assert entry.index_store.ttl == 37
+        assert entry.index_config == IndexConfig(ttl=37)
+    finally:
+        await ws.close()
+
+
+# RAM keeps no listings of its own (index_ttl 0), so fresh on it is
+# accepted only because of the index the call names; disk's listing
+# cache is taken away by a zero index under a nonzero workspace one.
+@pytest.mark.asyncio
+async def test_added_mount_is_judged_on_the_index_it_names(tmp_path):
+    ws = Workspace({})
+    try:
+        entry = ws.add_mount(
+            "/r", RAMVFS(), read=FRESH, index=IndexConfig(ttl=30)
+        )
+        assert entry.read.policy is ReadPolicy.FRESH
+    finally:
+        await ws.close()
+    ws = Workspace({}, index=IndexConfig(ttl=73))
+    try:
+        with pytest.raises(
+            ValueError, match="'/d'.*caches reads or listings"
+        ):
+            ws.add_mount(
+                "/d",
+                DiskVFS(root=str(tmp_path)),
+                read=FRESH,
+                index=IndexConfig(ttl=0),
+            )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_added_mount_builds_no_index_store(
+    tmp_path, monkeypatch
+):
+    ws = Workspace({})
+    built: list[IndexConfig | None] = []
+    real = mount_registry.build_index
+
+    def recording(config: IndexConfig | None, ttl: float):
+        built.append(config)
+        return real(config, ttl)
+
+    monkeypatch.setattr(mount_registry, "build_index", recording)
+    try:
+        with pytest.raises(ValueError, match="caches reads or listings"):
+            ws.add_mount(
+                "/d",
+                DiskVFS(root=str(tmp_path)),
+                read=FRESH,
+                index=RedisIndexConfig(url="redis://127.0.0.1:1/0", ttl=0),
+            )
+        # The verdict runs before the registry builds a store, so a
+        # refused call leaves no Redis client behind and no mount.
+        assert built == []
+        assert ws._registry.try_mount_for_prefix("/d/") is None
+    finally:
+        await ws.close()
+
+
+# Two mounts of one instance run one store, the first one's: the same
+# rule the constructor applies, so an alias's own index goes unused and
+# fresh is judged on the store it shares. RAM (index_ttl 0, no
+# workspace index) makes the shared 37 the only answer that accepts.
+@pytest.mark.asyncio
+async def test_added_alias_shares_the_first_mount_index():
+    ram = RAMVFS()
+    ws = Workspace({"/a": Mount(ram, index=IndexConfig(ttl=37))})
+    try:
+        first = ws.mount("/a/")
+        alias = ws.add_mount("/b", ram, index=IndexConfig(ttl=0))
+        assert alias.index_store is first.index_store
+        assert alias.index_config == IndexConfig(ttl=37)
+        judged = ws.add_mount(
+            "/c", ram, read=FRESH, index=IndexConfig(ttl=0)
+        )
+        assert judged.read.policy is ReadPolicy.FRESH
+    finally:
+        await ws.close()

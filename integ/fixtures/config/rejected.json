@@ -231,6 +231,99 @@
       }
     },
     {
+      "name": "mount index: an unknown key",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "type": "ram",
+              "ttll": 5
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mount index: type is the union discriminator, not optional",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "ttl": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mount index: camelCase keyPrefix",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "type": "redis",
+              "keyPrefix": "t:"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mount index: a redis key on a ram index",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "type": "ram",
+              "url": "redis://localhost:6379/0"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mount index: a scalar, not a mapping",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "mount index: no such backend",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "type": "postgres"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: cache is workspace-only",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "cache": {
+              "type": "ram",
+              "limit": "1MB"
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "cache block: no such backend",
       "config": {
         "mounts": {

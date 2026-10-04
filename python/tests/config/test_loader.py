@@ -19,6 +19,11 @@ import pytest
 
 from mirage import MountBackend, MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
+from mirage.cache.index import (
+    IndexConfig,
+    RedisIndexCacheStore,
+    RedisIndexConfig,
+)
 from mirage.config import (
     DiskStoreBlock,
     RamCacheBlock,
@@ -1319,3 +1324,228 @@ async def test_global_and_profile_command_limits_from_config():
 def test_bad_command_limit_fields_fail_at_config_door(block):
     with pytest.raises(ValueError):
         load_config({"mounts": {"/data": {"vfs": "ram"}}, **block})
+
+
+# A mount's own `index:` block. The values are distinct per source --
+# workspace 73, mount 37, disk's own index_ttl 60, the block default
+# 600 -- so a test can tell which of them a mount actually took.
+UNREACHABLE_REDIS = "redis://127.0.0.1:1/0"
+
+
+def _disk(root: Path, **extra) -> dict:
+    return {"vfs": "disk", "config": {"root": str(root)}, **extra}
+
+
+def test_a_mount_index_block_reaches_its_mount(tmp_path):
+    """Asserted on the kwargs: the `Mount` carries the block, the
+    workspace keeps its own, and a mount without one carries nothing."""
+    cfg = load_config(
+        {
+            "index": {"type": "ram", "ttl": 73},
+            "mounts": {
+                "/a": _disk(tmp_path, index={"type": "ram", "ttl": 37}),
+                "/b": _disk(tmp_path),
+            },
+        }
+    )
+    kwargs = cfg.to_workspace_kwargs()
+    assert kwargs["mounts"]["/a"].index == IndexConfig(ttl=37)
+    assert kwargs["mounts"]["/b"].index is None
+    assert kwargs["index"] == IndexConfig(ttl=73)
+
+
+def test_a_redis_mount_index_keeps_every_key(tmp_path):
+    cfg = load_config(
+        {
+            "mounts": {
+                "/a": _disk(
+                    tmp_path,
+                    index={
+                        "type": "redis",
+                        "ttl": 41,
+                        "url": UNREACHABLE_REDIS,
+                        "key_prefix": "t:",
+                    },
+                )
+            }
+        }
+    )
+    index = cfg.to_workspace_kwargs()["mounts"]["/a"].index
+    assert index == RedisIndexConfig(
+        ttl=41, url=UNREACHABLE_REDIS, key_prefix="t:"
+    )
+
+
+def test_a_mount_index_replaces_the_workspace_index_whole(tmp_path):
+    """Nothing is inherited: a mount naming `type: ram` under a Redis
+    workspace index runs RAM, at the block's own 600, not at 73."""
+    cfg = load_config(
+        {
+            "index": {"type": "redis", "ttl": 73, "key_prefix": "w:"},
+            "mounts": {"/a": _disk(tmp_path, index={"type": "ram"})},
+        }
+    )
+    index = cfg.to_workspace_kwargs()["mounts"]["/a"].index
+    assert type(index) is IndexConfig
+    assert index == IndexConfig(ttl=600)
+
+
+# Each refusal is already a refusal on a loader that has no mount
+# `index` at all ("Extra inputs are not permitted" at mounts./d.index),
+# so these patterns name the reason the index block itself gives.
+MOUNT_INDEX_REFUSALS = {
+    "mount index: an unknown key": r"mounts\./d\.index\.ram\.ttll\n",
+    "mount index: type is the union discriminator, not optional": (
+        r"mounts\./d\.index\n.*discriminator 'type'"
+    ),
+    "mount index: camelCase keyPrefix": (
+        r"mounts\./d\.index\.redis\.keyPrefix\n"
+    ),
+    "mount index: a redis key on a ram index": r"mounts\./d\.index\.ram\.url\n",
+    "mount index: a scalar, not a mapping": (
+        r"mounts\./d\.index\n.*(dictionary|object)"
+    ),
+    "mount index: no such backend": (
+        r"mounts\./d\.index\n.*tag 'postgres' found using 'type'"
+    ),
+    "mount block: cache is workspace-only": (
+        r"mounts\./d\.cache\n.*Extra inputs are not permitted"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(MOUNT_INDEX_REFUSALS))
+def test_a_bad_mount_index_is_refused_for_its_own_reason(name: str):
+    case = next(
+        c for c in _shared_fixture_cases("rejected") if c["name"] == name
+    )
+    with pytest.raises(ValueError, match=MOUNT_INDEX_REFUSALS[name]):
+        load_config(case["config"])
+
+
+def test_a_bad_mount_index_is_named_before_the_read_bound():
+    """Two faults on one mount: `ttl:` without `read:` and an index with
+    no `type`. pydantic judges the fields before the bound rule, so the
+    index is what this host names; TypeScript must name it too."""
+    with pytest.raises(ValueError) as caught:
+        load_config(
+            {"mounts": {"/d": {"vfs": "ram", "ttl": 30, "index": {"ttl": 5}}}}
+        )
+    assert "mounts./d.index" in str(caught.value)
+    assert "discriminator 'type'" in str(caught.value)
+    assert "ttl pins the read bound" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_a_mount_index_builds_the_store_its_mount_runs(tmp_path):
+    """Through the file door, down to the store each mount was given:
+    mount > workspace > the backend's own index_ttl."""
+    redis_index = (
+        f"{{type: redis, ttl: 41, url: '{UNREACHABLE_REDIS}', key_prefix: 't:'}}"
+    )
+    cfg_file = tmp_path / "mirage.yaml"
+    cfg_file.write_text(f"""
+index: {{type: ram, ttl: 73}}
+mounts:
+  /a: {{vfs: disk, config: {{root: {tmp_path}}}, index: {{type: ram, ttl: 37}}}}
+  /b: {{vfs: disk, config: {{root: {tmp_path}}}}}
+  /n: {{vfs: disk, config: {{root: {tmp_path}}}, index: null}}
+  /c: {{vfs: disk, config: {{root: {tmp_path}}}, index: {{type: ram, ttl: 0}}}}
+  /r: {{vfs: disk, config: {{root: {tmp_path}}}, index: {redis_index}}}
+""")
+    ws = Workspace(**load_config(cfg_file).to_workspace_kwargs())
+    try:
+        ttls = {p: ws.mount(p).index_store.ttl for p in ("/a/", "/b/", "/n/")}
+        assert ttls == {"/a/": 37, "/b/": 73, "/n/": 73}
+        assert ws.mount("/c/").index_store.ttl == 0
+        redis = ws.mount("/r/")
+        assert isinstance(redis.index_store, RedisIndexCacheStore)
+        assert redis.index_store.ttl == 41
+        assert redis.index_config == RedisIndexConfig(
+            ttl=41, url=UNREACHABLE_REDIS, key_prefix="t:"
+        )
+    finally:
+        await ws.close()
+    bare = Workspace(
+        **load_config(
+            {
+                "mounts": {
+                    "/a": _disk(tmp_path, index={"type": "ram", "ttl": 37}),
+                    "/b": _disk(tmp_path),
+                }
+            }
+        ).to_workspace_kwargs()
+    )
+    try:
+        assert bare.mount("/a/").index_store.ttl == 37
+        assert bare.mount("/b/").index_store.ttl == 60
+    finally:
+        await bare.close()
+
+
+@pytest.mark.asyncio
+async def test_fresh_is_judged_on_the_mount_index(tmp_path):
+    """ram caches no bytes and keeps no listings of its own, so only
+    its mount index can make `fresh` honest; a zero mount index takes
+    listing-only fresh away from disk under a nonzero workspace one."""
+    ws = Workspace(
+        **load_config(
+            {
+                "mounts": {
+                    "/r": {
+                        "vfs": "ram",
+                        "read": "fresh",
+                        "index": {"type": "ram", "ttl": 30},
+                    }
+                }
+            }
+        ).to_workspace_kwargs()
+    )
+    try:
+        assert ws.mount("/r/").read.policy is ReadPolicy.FRESH
+    finally:
+        await ws.close()
+    cfg = load_config(
+        {
+            "index": {"type": "ram", "ttl": 73},
+            "mounts": {
+                "/d": _disk(
+                    tmp_path, read="fresh", index={"type": "ram", "ttl": 0}
+                )
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="'/d'.*caches reads or listings"):
+        Workspace(**cfg.to_workspace_kwargs())
+
+
+@pytest.mark.asyncio
+async def test_a_zero_mount_index_lists_an_outside_delete(tmp_path):
+    """Through the dispatcher: under one workspace index, the mount
+    with its own zero index re-lists and the other serves its cache."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    for root in (a, b):
+        root.mkdir()
+        (root / "x").write_bytes(b"x")
+    cfg = load_config(
+        {
+            "index": {"type": "ram", "ttl": 600},
+            "mounts": {
+                "/a": _disk(a),
+                "/b": _disk(b, index={"type": "ram", "ttl": 0}),
+            },
+        }
+    )
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    try:
+        for prefix in ("/a", "/b"):
+            listed = await ws.shell(f"ls {prefix}")
+            assert await listed.materialize_stdout() == b"x\n"
+        (a / "x").unlink()
+        (b / "x").unlink()
+        cached = await ws.shell("ls /a")
+        assert await cached.materialize_stdout() == b"x\n"
+        relisted = await ws.shell("ls /b")
+        assert await relisted.materialize_stdout() == b""
+    finally:
+        await ws.close()

@@ -35,6 +35,7 @@ from mirage import (
 )
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
+from mirage.config import load_config
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
 from mirage.secrets import registry
@@ -125,6 +126,87 @@ async def test_snapshot_preserves_redis_index_with_credential_override(url):
     finally:
         await ws.close()
 
+
+
+# A mount index declared in YAML rides the same per-mount snapshot key
+# as one declared in code; distinct values per mount, so a restore that
+# flattened every mount to the workspace index would show.
+@pytest.mark.asyncio
+async def test_snapshot_and_copy_keep_a_yaml_mount_index(tmp_path):
+    redis = RedisIndexConfig(
+        url="redis://127.0.0.1:1/0", key_prefix="t:", ttl=41
+    )
+    disk = {"vfs": "disk", "config": {"root": str(tmp_path)}}
+    cfg = load_config(
+        {
+            "index": {"type": "ram", "ttl": 73},
+            "mounts": {
+                "/a": {
+                    **disk,
+                    "index": {
+                        "type": "redis",
+                        "ttl": 41,
+                        "url": "redis://127.0.0.1:1/0",
+                        "key_prefix": "t:",
+                    },
+                },
+                "/b": disk,
+            },
+        }
+    )
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    try:
+        restored = await Workspace._from_state(await to_state_dict(ws))
+        copied = await ws.copy()
+        try:
+            for other in (restored, copied):
+                configs = {
+                    m.prefix: m.index_config
+                    for m in other.mounts()
+                    if m.prefix in ("/a/", "/b/")
+                }
+                assert configs == {"/a/": redis, "/b/": IndexConfig(ttl=73)}
+        finally:
+            await restored.close()
+            await copied.close()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_yaml_mount_index_credential_is_redacted(tmp_path):
+    url = "redis://user:secret@127.0.0.1:1/0"
+    config = RedisIndexConfig(url=url, key_prefix="t:", ttl=41)
+    cfg = load_config(
+        {
+            "mounts": {
+                "/a": {
+                    "vfs": "disk",
+                    "config": {"root": str(tmp_path)},
+                    "index": {
+                        "type": "redis",
+                        "ttl": 41,
+                        "url": url,
+                        "key_prefix": "t:",
+                    },
+                }
+            }
+        }
+    )
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    try:
+        state = await to_state_dict(ws)
+        saved = next(
+            m for m in state[StateKey.MOUNTS] if m[MountKey.PREFIX] == "/a/"
+        )
+        assert saved[MountKey.INDEX_CONFIG]["url"] == REDACTED_SECRET
+        with pytest.raises(ValueError, match="'/a/'.*fresh index credentials"):
+            build_mount_args(state)
+        override = Mount(DiskVFS(root=str(tmp_path)), index=config)
+        args = build_mount_args(state, {"/a": override})
+        assert args.mount_args["/a/"].index == config
+    finally:
+        await ws.close()
 
 class FakeConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
