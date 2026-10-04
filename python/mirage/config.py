@@ -354,16 +354,11 @@ class MountBlock(BaseModel):
     backend: MountBackend = MountBackend.WORKSPACE
     mountpoint: str | None = None
     # How cached bytes for this mount are revalidated, and the bound
-    # that goes with `bounded`. The bound has no workspace-level
-    # spelling: there it would sit beside `index: {ttl:}` and mean a
-    # different thing. Here the two are told apart by nesting -- `ttl:`
-    # bounds this mount's bytes and listings, `index: {ttl:}` is how long
-    # its own listing store keeps them, capped by that bound.
+    # that goes with `bounded`. The bound lives only in a mount block:
+    # at workspace level it would sit beside `index: {ttl:}`.
     read: ReadPolicy | None = None
     ttl: int | None = None
-    # This mount's listing store, replacing the workspace `index:` whole:
-    # nothing is inherited from it, so `type` is required and a missing
-    # `ttl` is the block's own default.
+    # Replaces the workspace `index:` whole; nothing is inherited.
     index: IndexBlock | None = None
 
     @field_validator("mode", mode="before")
@@ -692,9 +687,8 @@ class WorkspaceConfig(BaseModel):
     profile: str | None = None
     mode: MountMode = MountMode.WRITE
     # The read policy a mount inherits when it declares none. There is
-    # deliberately no workspace-level bound: a bare `ttl:` exists only
-    # inside a mount block, where it cannot be confused with this
-    # block's `index: {ttl:}`.
+    # deliberately no workspace-level bound: `ttl:` exists only inside a
+    # mount block, where it cannot be confused with `index: {ttl:}`.
     read: ReadPolicy | None = None
     default_session_id: str | None = None
     default_agent_id: str | None = None

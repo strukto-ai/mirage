@@ -657,19 +657,12 @@ export interface MountBlock {
   mountpoint?: string
   /**
    * How cached bytes for this mount are revalidated, and the bound that
-   * goes with `bounded`. The bound has no workspace-level spelling: there
-   * it would sit beside `index: {ttl:}` and mean a different thing. Here
-   * the two are told apart by nesting -- `ttl:` bounds this mount's bytes
-   * and listings, `index: {ttl:}` is how long its own listing store keeps
-   * them, capped by that bound.
+   * goes with `bounded`. The bound lives only in a mount block: at
+   * workspace level it would sit beside `index: {ttl:}`.
    */
   read?: string
   ttl?: number
-  /**
-   * This mount's listing store, replacing the workspace `index:` whole:
-   * nothing is inherited from it, so `type` is required and a missing
-   * `ttl` is the store's own default.
-   */
+  /** Replaces the workspace `index:` whole; nothing is inherited. */
   index?: RedisIndexBlock | (RamIndexBlock & { type: 'ram' }) | null
 }
 
