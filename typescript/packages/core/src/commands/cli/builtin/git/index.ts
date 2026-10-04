@@ -21,7 +21,7 @@ import { Operand, Option } from '../../../spec/types.ts'
 import { CLISpec } from '../../types.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { add } from './add.ts'
-import { init, initReadOnly } from './init.ts'
+import { init } from './init.ts'
 import { fsck } from './fsck.ts'
 import { stashList, stashShow } from './stash.ts'
 import { nodeHelp, findNode } from '../../walk.ts'
@@ -46,6 +46,8 @@ import { show, diffTree } from './show.ts'
 import { status } from './status.ts'
 import { switchBranch, switchReadOnly } from './switch.ts'
 import { tag, tagReadOnly } from './tag.ts'
+import { GitError } from './errors.ts'
+import { checkSwitches, fatal } from './util.ts'
 
 // `-C` is git's own before-anything-else option, so it sits on the root and
 // every verb inherits it. The "." default is load-bearing: a PATH default lands
@@ -553,6 +555,12 @@ const BRANCH_OPTIONS = [
  * in a browser works exactly as one mounted over disk.
  */
 function helpCmd(inv: CLIInvocation): CommandFnResult {
+  try {
+    checkSwitches(inv, inv.texts)
+  } catch (err) {
+    if (err instanceof GitError) return fatal(err)
+    throw err
+  }
   const found = findNode(GIT, inv.texts)
   if (found === null)
     return [
@@ -677,7 +685,7 @@ export const GIT = new CLISpec({
     }),
     new CLISpec({
       name: 'init',
-      fn: verb(init, initReadOnly),
+      fn: verb(init),
       description: 'Create an empty Git repository or reinitialize an existing one',
       write: true,
       options: [
@@ -741,6 +749,8 @@ export const GIT = new CLISpec({
       fn: verb(showRef),
       rest: REVISION,
     }),
+    // symbolic-ref has every option git's has, so its rows carry git's own
+    // help and its usage block reads exactly as git's.
     new CLISpec({
       name: 'symbolic-ref',
       description: 'Read, change or delete a symbolic ref',
@@ -749,22 +759,24 @@ export const GIT = new CLISpec({
         new Option({
           short: '-q',
           long: '--quiet',
-          description: 'Exit 1 without a message for a ref that is not symbolic',
+          description: 'suppress error message for non-symbolic (detached) refs',
         }),
         new Option({ long: '--no-quiet', description: 'Refuse a ref that is not symbolic aloud' }),
-        new Option({ short: '-d', long: '--delete', description: 'Delete the symbolic ref' }),
+        new Option({ short: '-d', long: '--delete', description: 'delete symbolic ref' }),
         new Option({ long: '--no-delete', description: 'Read or change the ref instead' }),
-        new Option({ long: '--short', description: 'Shorten the name the ref points at' }),
+        new Option({ long: '--short', description: 'shorten ref output' }),
         new Option({ long: '--no-short', description: 'Print the full name it points at' }),
-        new Option({
-          long: '--recurse',
-          description: 'Follow symbolic refs to the end of the chain (the default)',
-        }),
+        new Option({ long: '--recurse', description: 'recursively dereference (default)' }),
         new Option({
           long: '--no-recurse',
           description: 'Print only the ref this one points at directly',
         }),
-        new Option({ short: '-m', type: 'str', description: 'Reason recorded in the reflog' }),
+        new Option({
+          short: '-m',
+          type: 'str',
+          metavar: 'reason',
+          description: 'reason of the update',
+        }),
       ],
       rest: new Operand({ type: 'str' }),
       write: true,

@@ -30,9 +30,6 @@ export const POSIX: Record<FsCondition, PosixErrno> = {
   EPERM: { errno: 1, phrase: 'Operation not permitted' },
   ENOTEMPTY: { errno: 39, phrase: 'Directory not empty' },
   EXDEV: { errno: 18, phrase: 'Invalid cross-device link' },
-  // A cross-mount rename is EXDEV to every POSIX consumer: the kernel
-  // reads it as "not one filesystem" and mv falls back to copy+unlink.
-  CROSS_MOUNT: { errno: 18, phrase: 'Invalid cross-device link' },
   ENOTSUP: { errno: 95, phrase: 'Operation not supported' },
   ELOOP: { errno: 40, phrase: 'Too many levels of symbolic links' },
   EINVAL: { errno: 22, phrase: 'Invalid argument' },

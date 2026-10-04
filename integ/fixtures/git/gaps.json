@@ -109,5 +109,14 @@
   "rev-parse :nosuch",
   "rev-parse :1:README.md",
   "rev-parse HEAD nosuch",
-  "symbolic-ref --bogus"
+  "symbolic-ref --bogus",
+  "symbolic-ref -h",
+  "symbolic-ref --sho HEAD",
+  "symbolic-ref --no-rec HEAD",
+  "status --short=x",
+  "for-each-ref --format",
+  "commit -m",
+  "reflog --bogus",
+  "rev-parse --abbrev-ref dup v1 dup",
+  "rev-parse -q --abbrev-ref dup v1 dup"
 ]

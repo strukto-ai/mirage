@@ -26,11 +26,9 @@
  * already carries throughout the TypeScript tree (python's enum uses
  * the same member names with lowercase values).
  *
- * Two members are mirage's own conditions rather than POSIX spellings:
- * `CROSS_MOUNT` is a rename whose ends live on different mounts (posix
- * says EXDEV, the WASI wire deliberately says ENOENT), and `NO_XATTR`
- * is "attribute not set", which POSIX names ENOATTR on macOS and
- * ENODATA on Linux.
+ * One member is mirage's own condition rather than a POSIX spelling:
+ * `NO_XATTR` is "attribute not set", which POSIX names ENOATTR on macOS
+ * and ENODATA on Linux.
  */
 export type FsCondition =
   | 'ENOENT'
@@ -41,7 +39,6 @@ export type FsCondition =
   | 'EPERM'
   | 'ENOTEMPTY'
   | 'EXDEV'
-  | 'CROSS_MOUNT'
   | 'ENOTSUP'
   | 'ELOOP'
   | 'EINVAL'
@@ -59,7 +56,6 @@ export const FS_CONDITIONS: readonly FsCondition[] = [
   'EPERM',
   'ENOTEMPTY',
   'EXDEV',
-  'CROSS_MOUNT',
   'ENOTSUP',
   'ELOOP',
   'EINVAL',

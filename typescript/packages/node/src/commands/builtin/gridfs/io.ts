@@ -45,7 +45,7 @@ export const IO: CommandIO<GridFSAccessor> = new VFSAdapter<GridFSAccessor>({
     du: { size: gridfsDu, entries: gridfsDuAll },
   },
   writes: {
-    append: appendFromRead(gridfsRead, gridfsWrite),
+    append: appendFromRead(gridfsRead, gridfsWrite, gridfsStat),
     write: gridfsWrite,
     mkdir: gridfsMkdir,
     unlink: gridfsUnlink,

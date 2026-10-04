@@ -79,8 +79,12 @@ const GENERIC_OUT: [string, string][] = [
   ['write', '/m/m/cs01'],
 ]
 
+// A redirect opens k.txt before echo runs and writes it after: `>` is two
+// writes, and `>>` on a backend with a native append is two appends.
 const SHELL_LEDGER: [string, string][] = [
   ['write', K],
+  ['write', K],
+  ['append', K],
   ['append', K],
   ['append', K],
   ['write', NEW],

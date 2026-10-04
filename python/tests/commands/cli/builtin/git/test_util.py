@@ -22,15 +22,14 @@ from mirage.commands.cli.builtin.git.errors import (
     FATAL_EXIT,
     BadConfigValueError,
     NotARepositoryError,
-    UnknownSwitchError,
 )
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
     config_section,
     escaped,
     fatal,
     git_bool,
     maybe_bool,
+    offending,
     split_marked,
     start_point,
     switches,
@@ -93,15 +92,6 @@ async def test_an_unsupported_show_flag_is_refused(git_ws):
 
 
 @pytest.mark.asyncio
-async def test_diff_keeps_gits_own_wording_and_exit_for_a_bad_option(git_ws):
-    # git words this one differently from log and show, and exits 129
-    # rather than 128. Pinned against git 2.50.1.
-    result = await git_ws.shell("git -C /repo diff --zzz HEAD")
-    assert result.exit_code == 129
-    assert result.stderr == b"error: invalid option: --zzz\n"
-
-
-@pytest.mark.asyncio
 async def test_a_refused_flag_costs_no_object_reads(git_ws):
     # The check runs before the repository is opened, so a bad flag is
     # answered without touching the backend.
@@ -122,29 +112,6 @@ async def test_an_unknown_revision_keeps_gits_ambiguous_wording(git_ws):
     result = await git_ws.shell("git -C /repo log nosuchref")
     assert result.exit_code == 128
     assert result.stderr.startswith(b"fatal: ambiguous argument 'nosuchref'")
-
-
-@pytest.mark.asyncio
-async def test_status_refuses_an_unknown_option_in_gits_own_words(git_ws):
-    # Pinned against git 2.50.1: no program name, the option named
-    # without its dashes, backquote-apostrophe quoting, exit 129.
-    result = await git_ws.shell("git -C /repo status --nosuch")
-    assert result.exit_code == 129
-    assert result.stderr == b"error: unknown option `nosuch'\n"
-
-
-@pytest.mark.asyncio
-async def test_a_short_unknown_option_is_a_switch_not_an_option(git_ws):
-    result = await git_ws.shell("git -C /repo status -Z")
-    assert result.exit_code == 129
-    assert result.stderr == b"error: unknown switch `Z'\n"
-
-
-@pytest.mark.asyncio
-async def test_branch_speaks_the_same_dialect(git_ws):
-    result = await git_ws.shell("git -C /repo branch -Z")
-    assert result.exit_code == 129
-    assert result.stderr == b"error: unknown switch `Z'\n"
 
 
 def test_no_marker_escapes_nothing():
@@ -176,54 +143,28 @@ def test_the_marker_splits_revisions_from_pathspecs(texts, argv, expected):
     assert split_marked(texts, argv) == expected
 
 
-def test_an_escaped_operand_is_not_a_switch():
-    check_operands(("-draft",), UnknownSwitchError, frozenset({"-draft"}))
-
-
-def test_an_unescaped_dashed_operand_is_still_refused():
-    with pytest.raises(UnknownSwitchError):
-        check_operands(("-draft",), UnknownSwitchError, frozenset({"-other"}))
-
-
 # git's parse-options consumes the letters it knows and names the first
-# it does not (`git mv -nx` says `x', `git mv -draft` says `d'), so the
-# refusal takes the verb's own switches; without them the whole word is
-# named, which is how log, show and diff word theirs.
-def test_a_cluster_is_refused_at_its_first_unknown_letter():
-    with pytest.raises(UnknownSwitchError) as caught:
-        check_operands(
-            ("-nx",), UnknownSwitchError, frozenset(), frozenset({"n"})
-        )
-    assert str(caught.value) == "unknown switch `x'"
-    with pytest.raises(UnknownSwitchError) as caught:
-        check_operands(
-            ("-draft",),
-            UnknownSwitchError,
-            frozenset(),
-            frozenset({"f", "k", "n", "v"}),
-        )
-    assert str(caught.value) == "unknown switch `d'"
-
-
-def test_a_verb_with_no_switches_still_names_the_first_letter():
-    # reset declares none, and git still says `Z' for `git reset -Zq`.
-    with pytest.raises(UnknownSwitchError) as caught:
-        check_operands(("-Zq",), UnknownSwitchError, frozenset(), frozenset())
-    assert str(caught.value) == "unknown switch `Z'"
-
-
-def test_a_long_option_is_refused_whole():
-    with pytest.raises(UnknownSwitchError) as caught:
-        check_operands(
-            ("--bogus",), UnknownSwitchError, frozenset(), frozenset({"n"})
-        )
-    assert str(caught.value) == "unknown option `bogus'"
-
-
-def test_without_known_switches_the_whole_word_is_named():
-    with pytest.raises(UnknownSwitchError) as caught:
-        check_operands(("-nx",), UnknownSwitchError)
-    assert str(caught.value) == "unknown switch `nx'"
+# it does not (`git mv -nx` says `x', `git mv -draft` says `d', and reset,
+# which declares none, says `Z' for `-Zq`), so the refusal takes the
+# verb's own switches; without them the whole word is named, which is how
+# log, show and diff word theirs. A word a `--` escaped is no option.
+@pytest.mark.parametrize(
+    ("texts", "marked", "known", "word"),
+    [
+        (("-draft",), {"-draft"}, None, None),
+        (("-draft",), {"-other"}, None, "-draft"),
+        (("-nx",), set(), {"n"}, "-x"),
+        (("-draft",), set(), {"f", "k", "n", "v"}, "-d"),
+        (("-Zq",), set(), set(), "-Z"),
+        (("--bogus",), set(), {"n"}, "--bogus"),
+        (("-nx",), set(), None, "-nx"),
+    ],
+)
+def test_offending_names_the_word_parse_options_would(
+    texts, marked, known, word
+):
+    known_set = None if known is None else frozenset(known)
+    assert offending(texts, frozenset(marked), known_set) == word
 
 
 async def _verb(inv: CLIInvocation) -> None:

@@ -28,9 +28,7 @@ class FsCondition(StrEnum):
     Every table stays total over this enum, and each table's own test
     fails a half-added member.
 
-    Two members are mirage's own conditions rather than POSIX spellings:
-    ``CROSS_MOUNT`` is a rename whose ends live on different mounts
-    (posix says EXDEV, the WASI wire deliberately says ENOENT), and
+    One member is mirage's own condition rather than a POSIX spelling:
     ``NO_XATTR`` is "attribute not set", which POSIX names ENOATTR on
     macOS and ENODATA on Linux.
     """
@@ -43,7 +41,6 @@ class FsCondition(StrEnum):
     EPERM = "eperm"
     ENOTEMPTY = "enotempty"
     EXDEV = "exdev"
-    CROSS_MOUNT = "cross_mount"
     ENOTSUP = "enotsup"
     ELOOP = "eloop"
     EINVAL = "einval"

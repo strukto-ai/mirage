@@ -1424,6 +1424,70 @@
         "stdout": "0\n",
         "stderr": "NOPEDIR/g: No such file or directory\n"
       }
+    },
+    {
+      "id": "redirect_target_is_emptied_before_the_command",
+      "seq": 501160,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r6 && cd /data/r6 && echo hi > f && cat f > f && wc -c < f && wc -c f > f && cat f && ls > out && cat out && cat > f < f && wc -c < f && ls >> app && cat app; cd / && rm -r /data/r6",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0 f\nf\nout\n0\napp\nf\nout\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_compound_targets_are_emptied_first",
+      "seq": 501161,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r7 && cd /data/r7 && echo hi > f && { cat f; } > f && wc -c < f && echo hi > g && for i in 1; do cat g; done > g && wc -c < g && echo hi > h && cat < h > h && wc -c < h; cd / && rm -r /data/r7",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n0\n",
+        "stderr": ""
+      }
     }
   ]
 }

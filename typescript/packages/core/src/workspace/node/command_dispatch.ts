@@ -16,6 +16,8 @@ import { sessionEntry, setSessionEntry } from '../session/session.ts'
 import { seedVar, setAttr } from '../session/state.ts'
 import { TempEnv, VarAttr } from '../../shell/variable.ts'
 import {
+  type RedirectOpener,
+  redirectOpenerFor,
   redirectPathsFor,
   runWithAdmission,
   runWithOpPolicies,
@@ -492,6 +494,7 @@ async function runCommandBody(
         redirectPathsFor(node),
         claimant,
         sink,
+        redirectOpenerFor(node),
       ),
       timeout,
       argv.name !== '' ? argv.name : '?',
@@ -571,6 +574,8 @@ async function runArgv(
   // The line's hand-off, which its gate claims on and runs on.
   claimant: Claimant | null = null,
   sink?: JobConsole,
+  // Opens the redirect targets once the line is admitted.
+  opener: RedirectOpener | null = null,
 ): Promise<Result> {
   const name = argv.name
 
@@ -640,6 +645,12 @@ async function runArgv(
       ]
     }
     admitted = verdict
+  }
+  // bash opens a command's write targets before it runs, so `cat f > f`
+  // reads an emptied file; here that waits for the admission above,
+  // because a command the gate refuses must leave its targets alone.
+  if (opener !== null && !(await opener())) {
+    return [null, new IOResult({ exitCode: 1 }), new ExecutionNode({ exitCode: 1 })]
   }
 
   // The admitted command's gate is bound for its run and handed back

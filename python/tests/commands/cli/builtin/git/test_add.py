@@ -271,13 +271,6 @@ async def test_staging_twice_is_not_an_error(git_rw, repo_path: Path):
     assert (await run(git_rw, "add -A")) == (0, b"", b"")
 
 
-@pytest.mark.asyncio
-async def test_an_unknown_switch_is_refused_before_anything_is_read(git_rw):
-    code, _out, err = await run(git_rw, "add -Z")
-    assert code == 129
-    assert err == b"error: unknown switch `Z'\n"
-
-
 def link_stat(target: str) -> FileStat:
     """What the name plane reports about a symlink.
 

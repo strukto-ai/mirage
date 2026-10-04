@@ -52,7 +52,7 @@ from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import split_revisions
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import Decoration
-from mirage.commands.cli.builtin.git.util import check_operands, escaped, fatal
+from mirage.commands.cli.builtin.git.util import check_operands, fatal
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
@@ -299,7 +299,7 @@ async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts, marked=escaped(inv.argv))
+        check_operands(inv, texts)
         parsed = parse_flags(fl, inv.env)
         repo, location = await opened(fl, doors)
         parsed = replace(

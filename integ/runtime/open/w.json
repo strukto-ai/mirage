@@ -33,16 +33,21 @@
             "js": "const f = std.open('/data/sub', 'w')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "IsADirectoryError\n",
-            "ops_absent": [
-              "create /data/sub",
-              "truncate /data/sub"
-            ]
-          },
-          "expect_on": {
-            "quickjs": {
-              "stdout": "refused\n"
+            "python": {
+              "exit": 0,
+              "stdout": "IsADirectoryError\n",
+              "ops_absent": [
+                "create /data/sub",
+                "truncate /data/sub"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /data/sub",
+                "truncate /data/sub"
+              ]
             }
           }
         }

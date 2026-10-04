@@ -78,13 +78,16 @@
             "js": "const [st, e] = os.stat('/')\nconsole.log('os', e, (st.mode & os.S_IFMT).toString(8))\nconsole.log('nlink', st.nlink)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "os 0o40000\npathlib 0o40000\nnlink 2\n"
+            "python": {
+              "exit": 0,
+              "stdout": "os 0o40000\npathlib 0o40000\nnlink 2\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "os 0 40000\nnlink 2\n"
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "os 0 40000\nnlink 2\n"
-            },
             "pyodide": {
               "stdout": "os 0o40000\npathlib 0o40000\nnlink 1\n"
             }
