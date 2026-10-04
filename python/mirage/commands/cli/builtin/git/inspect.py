@@ -20,6 +20,8 @@ from mirage.commands.cli.builtin.git.errors import (
     NotAWorkTreeError,
     NoWorkspaceError,
     SingleRevisionError,
+    UnknownSubcommandError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.history import (
     LogFlags,
@@ -41,11 +43,17 @@ from mirage.commands.cli.builtin.git.revparse import (
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
+    STDERR,
+    STDOUT,
     check_operands,
+    check_switches,
     escaped,
     fatal,
+    option_operand,
     start_point,
+    verb_usage,
 )
+from mirage.commands.cli.refusal import HELP_SWITCH
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -78,7 +86,9 @@ async def remote(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     try:
-        check_operands(inv.texts, marked=escaped(inv.argv))
+        check_operands(inv, inv.texts)
+        if inv.texts:
+            raise UnknownSubcommandError(inv.texts[0], verb_usage(inv))
         cfg = await repo_config(inv, fl)
         lines = []
         for section in sorted(cfg.sections()):
@@ -224,6 +234,7 @@ async def show_ref(
     inv: CLIInvocation[None],
 ) -> tuple[ByteSource | None, IOResult]:
     try:
+        check_switches(inv, inv.texts)
         repo, _ = await opened(FlagView(inv.flags), inv.doors or CLIDoors())
         out = await asyncio.to_thread(_show_refs, repo, tuple(inv.texts))
         return out, IOResult(exit_code=0 if out else 1)
@@ -245,14 +256,13 @@ async def rev_list(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     try:
-        check_operands(inv.texts, marked=escaped(inv.argv))
+        sole = inv.argv[-2:] == ("rev-list", HELP_SWITCH)
+        if option_operand(inv, inv.texts, STDOUT if sole else STDERR):
+            raise UsageError("", verb_usage(inv))
         repo, _ = await opened(fl, inv.doors or CLIDoors())
         flags = parse_flags(fl)
         if not inv.texts and not flags.all_refs:
-            return None, IOResult(
-                exit_code=129,
-                stderr=b"usage: git rev-list [<options>] <commit>...\n",
-            )
+            raise UsageError("", verb_usage(inv))
         commits = await asyncio.to_thread(
             _revisions, repo, tuple(inv.texts), flags
         )
@@ -418,6 +428,7 @@ async def rev_parse(
         inv (CLIInvocation[None]): the parsed invocation.
     """
     fl = FlagView(inv.flags)
+    quiet = fl.as_bool("quiet")
     repo: BaseRepo | None = None
     try:
         marked = escaped(inv.argv)
@@ -426,7 +437,7 @@ async def rev_parse(
             for text in inv.texts
             if text != GIT_DIR_OPTION or text in marked
         )
-        check_operands(revisions, marked=marked)
+        check_operands(inv, revisions)
         verb = inv.argv.index("rev-parse") if "rev-parse" in inv.argv else -1
         words = inv.argv[verb + 1 :]
         end = words.index("--") if "--" in words else -1
@@ -484,8 +495,14 @@ async def rev_parse(
                 doors.dispatch, location.gitdir, table, revision, strict, warn
             )
             shown.append(line)
-            if error:
+            # git prints each name's error right after its warning, so the
+            # error joins the warnings' list; -q keeps it while it drops them.
+            if not error:
+                continue
+            if quiet or not isinstance(repo, Repo) or repo.ambiguous is None:
                 errors.append(error)
+            else:
+                repo.ambiguous.append(error.decode())
         if verify and len(shown) != 1:
             raise SingleRevisionError()
         rows: list[bytes] = []
@@ -510,11 +527,11 @@ async def rev_parse(
             return b"".join(rows), refused
         return b"".join(rows), IOResult(stderr=b"".join(errors) or None)
     except SingleRevisionError as exc:
-        if fl.as_bool("quiet"):
+        if quiet:
             return None, IOResult(exit_code=1)
         return fatal(exc)
     except GitError as exc:
         return fatal(exc)
     finally:
-        if fl.as_bool("quiet") and isinstance(repo, Repo) and repo.ambiguous:
+        if quiet and isinstance(repo, Repo) and repo.ambiguous:
             repo.ambiguous.clear()

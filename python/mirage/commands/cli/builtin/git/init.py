@@ -1,7 +1,11 @@
+import errno
+import os
 import posixpath
 
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.errors import (
+    CannotMkdirError,
+    ConfigLockError,
     GitError,
     InitReadOnlyError,
     NoWorkingDirectoryError,
@@ -10,10 +14,10 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.io import (
     ensure_dir,
     read_optional,
+    take_lock,
     write_once,
 )
 from mirage.commands.cli.builtin.git.refs import valid_ref_name
-from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import fatal, start_point
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -71,23 +75,16 @@ def named_gitdir(fl: FlagView, texts: tuple[str, ...]) -> str:
     return target if fl.as_bool("bare") else posixpath.join(target, ".git")
 
 
-def init_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
-) -> GitError:
-    """init's refusal by a read-only mount, at the first directory git
-    makes.
-
-    Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-        location (RepoLocation | None): the repository it opened.
-    """
-    return InitReadOnlyError(named_gitdir(FlagView(inv.flags), inv.texts))
-
-
 async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Initialize through the dispatcher, preserving an existing repository.
 
     No host templates, hooks or default-branch advisory are installed.
+    Reinitializing takes the config's lock as git does, so a read-only
+    mount refuses a re-init too, in git's words for where it stopped: the
+    directory an operand names, the config's lock, or the first other
+    directory it had to make (pinned against git 2.47.3). With no
+    templates, a bare repository in an existing directory stops at
+    ``objects`` where git stops at its first template directory.
 
     Args:
         inv (CLIInvocation[None]): location and initialization flags.
@@ -138,11 +135,29 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             )
             gitdir = location.commondir
         existing = await read_optional(dispatch, f"{gitdir}/HEAD") is not None
+        made = bool(inv.texts) and await doors.stat_path(target) is None
         config = (
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
             f"\tbare = {'true' if bare else 'false'}\n"
         )
-        await lay_out(dispatch, gitdir, branch, config)
+        settings = f"{gitdir}/config"
+        try:
+            await lay_out(dispatch, gitdir, branch, config)
+            if existing:
+                await take_lock(dispatch, settings)
+        except OSError as exc:
+            locked = exc.filename == f"{settings}.lock"
+            if locked and exc.errno == errno.EEXIST:
+                reason = os.strerror(errno.EEXIST)
+                raise ConfigLockError(settings, reason) from exc
+            if exc.errno != errno.EROFS:
+                raise
+            if made:
+                raise CannotMkdirError(inv.texts[0]) from exc
+            if locked:
+                reason = os.strerror(errno.EROFS)
+                raise ConfigLockError(settings, reason) from exc
+            raise InitReadOnlyError(exc.filename or gitdir) from exc
         action = "Reinitialized existing" if existing else "Initialized empty"
         text = f"{action} Git repository in {gitdir}/\n"
         warning = ""

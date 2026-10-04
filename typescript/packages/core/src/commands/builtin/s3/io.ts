@@ -44,7 +44,7 @@ export const IO: CommandIO<S3Accessor> = new VFSAdapter<S3Accessor>({
     du: { size: s3Du, entries: s3DuAll },
   },
   writes: {
-    append: appendFromRead(s3Read, s3Write),
+    append: appendFromRead(s3Read, s3Write, s3Stat),
     write: s3Write,
     mkdir: s3Mkdir,
     unlink: s3Unlink,

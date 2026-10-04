@@ -24,7 +24,7 @@ import { pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
 import { quotePath, relativePath } from './render.ts'
 import { configBool } from './repo.ts'
 import { opened } from './session.ts'
-import { fatal, startPoint } from './util.ts'
+import { checkSwitches, fatal, startPoint } from './util.ts'
 
 /**
  * List index paths, including conflict stages when requested.
@@ -37,6 +37,7 @@ import { fatal, startPoint } from './util.ts'
 export async function lsFiles(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
+    checkSwitches(inv, inv.texts)
     const repo = await opened(fl, inv.doors ?? {})
     const fully = await configBool(repo, 'core.quotepath', true)
     const state = await readIndex(repo, repo.dispatch)

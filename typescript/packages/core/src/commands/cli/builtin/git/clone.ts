@@ -19,7 +19,7 @@ import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIDoors, CLIInvocation } from '../../types.ts'
 import { DETACHED_ADVICE, switchTo } from './checkout.ts'
-import { CloneReadOnlyError, GitError, NoWorkspaceError } from './errors.ts'
+import { CloneReadOnlyError, GitError, NoWorkspaceError, UsageError } from './errors.ts'
 import { configuredHeaders, fetchObjects, HEADS, ignoreFunny, TAGS } from './fetch.ts'
 import { layOut } from './init.ts'
 import { readNames, removeTree, under, writeFile } from './io.ts'
@@ -29,11 +29,10 @@ import { openRepo } from './repo.ts'
 import { commitEntries } from './tree.ts'
 import { isLocal, openTransport, type Advertisement, type Transport } from './transport.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
-import { configSection, fatal, startPoint } from './util.ts'
+import { checkSwitches, configSection, fatal, startPoint, verbUsage } from './util.ts'
 
 const ENC = new TextEncoder()
 const DEFAULT_BRANCH = 'master'
-const USAGE = 'usage: git clone [<options>] [--] <repo> [<dir>]\n'
 
 /** The directory git names a clone after, as `guess_dir_name` does. */
 export function defaultDirectory(url: string): string {
@@ -93,14 +92,18 @@ export async function clone(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const doors = inv.doors ?? {}
   const [url, named] = inv.texts
-  if (url === undefined)
-    return [
-      null,
-      new IOResult({
-        exitCode: 129,
-        stderr: ENC.encode(`fatal: You must specify a repository to clone.\n\n${USAGE}\n`),
-      }),
-    ]
+  try {
+    checkSwitches(inv, inv.texts)
+    if (url === undefined) {
+      throw new UsageError(
+        '',
+        `fatal: You must specify a repository to clone.\n\n${verbUsage(inv)}`,
+      )
+    }
+  } catch (err) {
+    if (err instanceof GitError) return fatal(err)
+    throw err
+  }
   const name = named ?? defaultDirectory(url)
   const quiet = fl.asBool('quiet')
   let target: string

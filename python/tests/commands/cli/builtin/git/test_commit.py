@@ -166,13 +166,6 @@ async def test_a_commit_is_recorded_in_the_reflog(git_rw, repo_path: Path):
     assert (repo_path / ".git" / "logs" / "refs" / "heads" / "main").exists()
 
 
-@pytest.mark.asyncio
-async def test_an_unknown_switch_is_refused(git_rw):
-    code, _out, err = await run(git_rw, "commit -Z")
-    assert code == 129
-    assert err == b"error: unknown switch `Z'\n"
-
-
 def test_the_author_flag_still_wins_over_the_environment():
     view = env_view({"GIT_AUTHOR_NAME": "Env", "GIT_AUTHOR_EMAIL": "e@x"})
     fl = FlagView({"author": "Flag <f@x>"})

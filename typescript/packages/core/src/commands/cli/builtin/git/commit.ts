@@ -15,6 +15,7 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
+import { isEexist } from '../../../../utils/errors.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -23,16 +24,17 @@ import { headEntries } from './changes.ts'
 import {
   AllWithPathsError,
   GitError,
+  LockExistsError,
   MissingMessageError,
   NothingToCommitError,
   NoWorkspaceError,
   PartialCommitError,
-  UnknownSwitchError,
   UnmergedIndexError,
 } from './errors.ts'
 import { stageTracked } from './add.ts'
 import { commitSummary } from './diff_output.ts'
 import { readIndex, updateIndex } from './index_file.ts'
+import { takeLock, under } from './io.ts'
 import { record } from './reflog.ts'
 import { detachHead, readHead, writeRef } from './refs.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
@@ -41,7 +43,7 @@ import { renderReport } from './status.ts'
 import { report } from './summary.ts'
 import type { TreeEntry } from './tree.ts'
 import type { IndexState } from './types.ts'
-import { checkOperands, escaped, fatal, startPoint, switches } from './util.ts'
+import { checkSwitches, fatal, startPoint } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
@@ -209,7 +211,7 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
       throw new NoWorkspaceError()
     }
     const texts = [...inv.texts]
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const staging = fl.asBool('all')
     const named = texts[0]
     if (named !== undefined)
@@ -217,6 +219,15 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
     const message = fl.asStr('message')
     if (message === undefined || message === '') throw new MissingMessageError()
     const repo = await opened(fl, doors, true)
+    // git takes the index's lock before it looks for anything to commit, so a
+    // read-only repository refuses an empty commit too.
+    const index = under(repo.location.gitdir, 'index')
+    try {
+      await takeLock(dispatch, index)
+    } catch (err) {
+      if (isEexist(err)) throw new LockExistsError(`${index}.lock`)
+      throw err
+    }
     const state = await readIndex(repo, dispatch)
     if (state.conflicts.size > 0) throw new UnmergedIndexError()
     const restaged = staging

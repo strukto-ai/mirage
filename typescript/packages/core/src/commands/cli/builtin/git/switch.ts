@@ -33,7 +33,6 @@ import {
   OneReferenceError,
   RefLockError,
   RefReadOnlyError,
-  UnknownSwitchError,
 } from './errors.ts'
 import { short } from './format.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
@@ -51,7 +50,7 @@ import {
 import { repoArgs } from './repo.ts'
 import { indexLocked, opened } from './session.ts'
 import { noteAmbiguity, resolveCommit } from './revparse.ts'
-import { checkOperands, escaped, fatal, switches } from './util.ts'
+import { checkSwitches, fatal } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -107,7 +106,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const flags = parseFlags(fl)
     let creating = flags.create !== undefined
     if (creating && flags.detach) throw new DetachWithCreateError()

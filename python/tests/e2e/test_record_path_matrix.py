@@ -80,9 +80,13 @@ _GENERIC_OUT = [
 
 # Op sequences were measured by running SCRIPT on each backend; every path is
 # predicted as the operand's virtual path, never copied from the measurement.
+# A redirect opens k.txt before echo runs and writes it after: `>` is two
+# writes, and `>>` on a backend with a native append is two appends.
 # ram, disk and redis record nothing for same-mount cp/mv/rm/rmdir/rm -r.
 _NATIVE_APPEND = [
     ("write", K),
+    ("write", K),
+    ("append", K),
     ("append", K),
     ("append", K),
     ("write", NEW),
@@ -98,6 +102,7 @@ _NATIVE_APPEND = [
 # s3 has no native append (read + write), serves cat and the cp source from
 # cache, and records its own copy, rename, unlink, rmdir and rm_r.
 _S3 = [
+    ("write", K),
     ("write", K),
     ("read", K),
     ("write", K),
@@ -122,6 +127,8 @@ _S3 = [
 # split's streamed read.
 _SSH = [
     ("write", K),
+    ("write", K),
+    ("append", K),
     ("append", K),
     ("append", K),
     ("write", NEW),

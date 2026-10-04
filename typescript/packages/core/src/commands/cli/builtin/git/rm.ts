@@ -25,7 +25,6 @@ import {
   PathspecError,
   RemovalRefusedError,
   RemovePathError,
-  UnknownSwitchError,
 } from './errors.ts'
 import { readIndex, updateIndex } from './index_file.ts'
 import { removeEmptyParents, removeFile, under } from './io.ts'
@@ -34,7 +33,7 @@ import type { Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { TreeEntry } from './tree.ts'
 import type { Dispatch, IndexEntry, RepoLocation, WorkTree } from './types.ts'
-import { checkOperands, escaped, fatal, startPoint, switches } from './util.ts'
+import { checkSwitches, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType } from '../../../../types.ts'
@@ -254,7 +253,7 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     flags = parseFlags(fl)
     if (texts.length === 0) throw new NoPathspecRemoveError()
     const repo = await opened(fl, doors, !flags.cached)

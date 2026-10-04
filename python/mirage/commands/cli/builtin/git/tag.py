@@ -38,11 +38,10 @@ from mirage.commands.cli.builtin.git.errors import (
     RefUpdateConflictError,
     TagExistsError,
     TagNotFoundError,
-    TagUsageError,
     TagWriteReadOnlyError,
     TooManyArgumentsError,
-    UnknownSwitchError,
     UnresolvedRefError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
@@ -76,10 +75,9 @@ from mirage.commands.cli.builtin.git.revparse import resolve_object
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
-    switches,
+    verb_usage,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -230,9 +228,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         flags = parse_flags(fl)
         if flags.listing and flags.delete:
             raise IncompatibleOptionsError("-l", "-d")
@@ -250,7 +246,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             or not texts
         )
         if creating and reading:
-            raise TagUsageError()
+            raise UsageError("", verb_usage(inv))
         # After the two usage refusals above, which git reaches first:
         # ``-l -d -n1`` is the incompatible pair and ``-d -f -n1`` the
         # usage, both exiting 129, where ``-d -n1`` alone dies here.

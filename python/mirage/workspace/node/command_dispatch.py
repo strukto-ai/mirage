@@ -21,6 +21,8 @@ from typing import Any, TypeVar
 
 from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
 from mirage.context import (
+    RedirectOpener,
+    redirect_opener_for,
     redirect_paths_for,
     reset_admission,
     reset_op_policies,
@@ -468,6 +470,7 @@ async def _dispatch_command_body(
             row=node.start_point[0],
             agent_id=agent_id,
             redirects=redirect_paths_for(node.id),
+            opener=redirect_opener_for(node.id),
             claimant=claimant,
             sink=sink,
         )
@@ -536,6 +539,7 @@ async def _run_argv(
     row: int = 0,
     agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
+    opener: RedirectOpener | None = None,
     claimant: Claimant | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -547,7 +551,8 @@ async def _run_argv(
     ``agent_id`` is the agent the line is attributed to, which an
     approval request names. ``redirects`` are the statement's expanded
     redirect targets, judged with the line because their I/O runs on
-    the shell's own fds outside the admitted command's gate window.
+    the shell's own fds outside the admitted command's gate window, and
+    ``opener`` opens them once the line is admitted.
     """
     name = argv.name
 
@@ -622,6 +627,11 @@ async def _run_argv(
                 ),
             )
         admitted = verdict
+    # bash opens a command's write targets before it runs, so `cat f > f`
+    # reads an emptied file; here that waits for the admission above,
+    # because a command the gate refuses must leave its targets alone.
+    if opener is not None and not await opener():
+        return None, IOResult(exit_code=1), ExecutionNode(exit_code=1)
 
     # ── run ────────────────────────────────────
     # The admitted command's gate is bound for its run and reset after,

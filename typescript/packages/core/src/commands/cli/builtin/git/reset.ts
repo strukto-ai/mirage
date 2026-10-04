@@ -24,7 +24,6 @@ import {
   GitError,
   NoWorkspaceError,
   RevisionResetError,
-  UnknownSwitchError,
 } from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import { matched, repoRelative } from './pathspec.ts'
@@ -32,7 +31,7 @@ import type { Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit } from './revparse.ts'
 import type { TreeEntry } from './tree.ts'
-import { checkOperands, escaped, fatal, startPoint, switches } from './util.ts'
+import { checkSwitches, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -90,7 +89,7 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const repo = await opened(fl, doors)
     const named = fl.asStr('work_tree') !== undefined
     if (!named && (await isBare(dispatch, repo.location))) throw new BareResetError()

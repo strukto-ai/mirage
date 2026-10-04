@@ -17,6 +17,8 @@ import {
   NoWorkspaceError,
   NotAWorkTreeError,
   SingleRevisionError,
+  UnknownSubcommandError,
+  UsageError,
 } from './errors.ts'
 import { parseFlags, refCommits, select } from './history.ts'
 import { uniqueAbbreviations } from './ref_list.ts'
@@ -25,7 +27,18 @@ import { opened } from './session.ts'
 import { configLines } from './fs.ts'
 import { readFile, readOptional } from './io.ts'
 import { refsNamed, splitRevisions, resolveObject } from './revparse.ts'
-import { checkOperands, escaped, fatal, startPoint } from './util.ts'
+import {
+  checkOperands,
+  checkSwitches,
+  escaped,
+  fatal,
+  optionOperand,
+  startPoint,
+  STDERR,
+  STDOUT,
+  verbUsage,
+} from './util.ts'
+import { HELP_SWITCH } from '../../refusal.ts'
 import { isBare } from './discover.ts'
 import { under } from './io.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
@@ -42,7 +55,9 @@ const HEX_LENGTH = 40
 export async function remote(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands([...inv.texts], undefined, escaped(inv.argv))
+    checkOperands(inv, inv.texts)
+    const [word] = inv.texts
+    if (word !== undefined) throw new UnknownSubcommandError(word, verbUsage(inv))
     const repo = await opened(fl, inv.doors ?? {})
     const rows = (await git.listRemotes(repoArgs(repo))).sort((a, b) =>
       compareCodePoints(a.remote, b.remote),
@@ -163,6 +178,7 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
 export async function showRef(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
+    checkSwitches(inv, inv.texts)
     const repo = await opened(fl, inv.doors ?? {})
     const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
     const lines: string[] = []
@@ -190,17 +206,13 @@ export async function showRef(inv: CLIInvocation): Promise<CommandFnResult> {
 export async function revList(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands([...inv.texts], undefined, escaped(inv.argv))
+    const sole = inv.argv.slice(-2).join(' ') === `rev-list ${HELP_SWITCH}`
+    if (optionOperand(inv, inv.texts, sole ? STDOUT : STDERR) !== null) {
+      throw new UsageError('', verbUsage(inv))
+    }
     const repo = await opened(fl, inv.doors ?? {})
     const flags = parseFlags(fl)
-    if (!inv.texts.length && !flags.allRefs)
-      return [
-        null,
-        new IOResult({
-          exitCode: 129,
-          stderr: ENC.encode('usage: git rev-list [<options>] <commit>...\n'),
-        }),
-      ]
+    if (!inv.texts.length && !flags.allRefs) throw new UsageError('', verbUsage(inv))
     const [shown, hidden] = await splitRevisions(repo, inv.texts)
     const starts = flags.allRefs ? [...(await refCommits(repo)), ...shown] : shown
     const commits = await select(repo, starts, flags, hidden)
@@ -327,11 +339,12 @@ function abbrevStrict(mode: FlagValue, warn: boolean): boolean {
  */
 export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
+  const quiet = fl.asBool('quiet')
   let repo: Repo | undefined
   try {
     const marked = escaped(inv.argv)
     const revisions = inv.texts.filter((text) => text !== GIT_DIR_OPTION || marked.has(text))
-    checkOperands(revisions, undefined, marked)
+    checkOperands(inv, revisions)
     const verb = inv.argv.indexOf('rev-parse')
     const words = inv.argv.slice(verb + 1)
     const end = words.indexOf('--')
@@ -386,7 +399,11 @@ export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
         warn,
       )
       shown.push(line)
-      if (error !== '') errors.push(error)
+      // git prints each name's error right after its warning, so the error
+      // joins the warnings' list; -q keeps it while it drops them.
+      if (error === '') continue
+      if (quiet || repo.ambiguous === null) errors.push(error)
+      else repo.ambiguous.push(error)
     }
     if (verify && shown.length !== 1) throw new SingleRevisionError()
     const rows: string[] = []
@@ -407,11 +424,10 @@ export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
     const stderr = errors.length > 0 ? ENC.encode(errors.join('')) : null
     return [ENC.encode(rows.join('')), new IOResult({ stderr })]
   } catch (err) {
-    if (err instanceof SingleRevisionError && fl.asBool('quiet'))
-      return [null, new IOResult({ exitCode: 1 })]
+    if (err instanceof SingleRevisionError && quiet) return [null, new IOResult({ exitCode: 1 })]
     if (err instanceof GitError) return fatal(err)
     throw err
   } finally {
-    if (fl.asBool('quiet')) repo?.ambiguous?.splice(0)
+    if (quiet) repo?.ambiguous?.splice(0)
   }
 }

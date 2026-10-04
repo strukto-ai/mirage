@@ -17,10 +17,13 @@ import { HEAD } from './constants.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { GitError } from './errors.ts'
-import type { CLIInvocation } from '../../types.ts'
-import { BadConfigValueError, UnrecognizedArgumentError } from './errors.ts'
+import { CLISpec, type CLIInvocation } from '../../types.ts'
+import { BadConfigValueError, UnrecognizedArgumentError, UsageError } from './errors.ts'
+import { HELP_SWITCH, gitOptionRefusal, gitUsage } from '../../refusal.ts'
 
 const ROOT = '/'
+export const STDOUT = 'stdout'
+export const STDERR = 'stderr'
 // The end-of-options marker, which the parser consumes.
 const MARKER = '--'
 const TRUE_WORDS = ['true', 'yes', 'on']
@@ -114,13 +117,13 @@ export function splitMarked(
 }
 
 /**
- * Refuse an operand that is really an option this build lacks.
+ * The first operand that is really an option this build lacks.
  *
  * A verb taking a revision accepts free text, so every flag mirage does not
  * declare reaches it as one. Resolving it as a revision is the wrong answer
  * twice over: it fails, and it fails saying the repository has no such commit,
- * when what happened is that mirage has no such flag. Refused here, before any
- * object is read, so the message names the real problem.
+ * when what happened is that mirage has no such flag. Found here, before any
+ * object is read, so the refusal names the real problem.
  *
  * Unless the caller said otherwise. A word after `--` is an operand by the
  * caller's own instruction whatever it starts with, so it is never read as an
@@ -134,24 +137,89 @@ export function splitMarked(
  * is deliberate, because limiting by nothing would print every commit and look
  * like an answer.
  *
- * Which refusal to raise is the caller's, because git words this differently per
- * verb and means each one: see UnknownSwitchError for the three.
- *
  * @param texts positional text operands, as typed
- * @param error the refusal this verb words it with
  * @param marked operands a `--` on the line escaped
  * @param known the verb's one-letter switches, which narrow a refused cluster to
- *   its first unknown letter the way parse-options does; absent refuses the
- *   whole word
+ *   its first unknown letter the way parse-options does; absent names the whole
+ *   word
  */
-export function checkOperands(
+export function offending(
   texts: readonly string[],
-  error: new (argument: string) => GitError = UnrecognizedArgumentError,
   marked: ReadonlySet<string> = new Set(),
   known?: ReadonlySet<string>,
-): void {
+): string | null {
   for (const text of texts) {
-    if (text.startsWith('-') && !marked.has(text)) throw new error(offendingSwitch(text, known))
+    if (text.startsWith('-') && !marked.has(text)) return offendingSwitch(text, known)
+  }
+  return null
+}
+
+/**
+ * The first operand that is really an option, once `-h` is out.
+ *
+ * `-h` asks for the verb's usage block, which git prints on stdout for most
+ * verbs and on stderr for a few (`diff`); every other word is the caller's to
+ * refuse in the verb's own words. See `offending` for which words count.
+ *
+ * @param inv the invocation, carrying its leaf
+ * @param texts positional text operands, as typed
+ * @param helpStream where `-h` puts the usage block
+ * @throws UsageError the line asked for the usage block
+ */
+export function optionOperand(
+  inv: CLIInvocation,
+  texts: readonly string[],
+  helpStream: typeof STDOUT | typeof STDERR = STDOUT,
+): string | null {
+  const word = offending(texts, escaped(inv.argv))
+  if (word === HELP_SWITCH) {
+    const usage = verbUsage(inv)
+    if (helpStream === STDOUT) throw new UsageError(usage, '')
+    throw new UsageError('', usage)
+  }
+  return word
+}
+
+/**
+ * Refuse an operand that is really an option, as an unrecognized argument.
+ *
+ * For the verbs git words without a usage block (`log`, `show`, `reflog`),
+ * whose refusal names the whole word (git 2.50.1).
+ *
+ * @param inv the invocation, carrying its leaf
+ * @param texts positional text operands, as typed
+ */
+export function checkOperands(inv: CLIInvocation, texts: readonly string[]): void {
+  const word = optionOperand(inv, texts)
+  if (word !== null) throw new UnrecognizedArgumentError(word)
+}
+
+/**
+ * The verb's usage block, as parse-options prints it.
+ *
+ * @param inv the invocation, carrying its leaf
+ */
+export function verbUsage(inv: CLIInvocation): string {
+  const spec = inv.spec ?? new CLISpec({ name: '' })
+  return gitUsage(spec.name, spec)
+}
+
+/**
+ * Refuse an operand that is really an option, as parse-options does.
+ *
+ * The verbs built on parse-options (`status`, `add`, `branch`, `commit` and
+ * most others) name an unknown option or switch and follow it with the usage
+ * block, refuse a boolean handed a value on one line, and print the usage block
+ * on stdout for `-h`; see `gitOptionRefusal`. Measured on git 2.50.1.
+ *
+ * @param inv the invocation, carrying its leaf
+ * @param texts positional text operands, as typed
+ */
+export function checkSwitches(inv: CLIInvocation, texts: readonly string[]): void {
+  const word = offending(texts, escaped(inv.argv), switches(inv))
+  if (word !== null) {
+    const spec = inv.spec ?? new CLISpec({ name: '' })
+    throw new UsageError(...gitOptionRefusal(word, spec.name, spec))
   }
 }
 
