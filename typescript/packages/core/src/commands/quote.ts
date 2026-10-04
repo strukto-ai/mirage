@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { encodeText } from '../shell/bytes.ts'
+import { byteView } from '../shell/bytes.ts'
 
 // The seven C escapes gnulib spells by name, plus the two printable
 // characters it still escapes because they would otherwise close or
@@ -80,15 +80,10 @@ export function quoteWord(view: string): string {
 // view expr's parser runs on.
 //
 // The commands that refuse a flag value hold it as a plain string, so they
-// need the encode first: the rule counts bytes, and `é` must render as two
-// octal escapes rather than one. `encodeText` rather than `TextEncoder`,
-// because a raw byte reaches a command as its U+DCxx sentinel and
-// `TextEncoder` would write that as U+FFFD.
+// need the byte view first: the rule counts bytes, and `é` must render as
+// two octal escapes rather than one.
 //
 // `quote_text` in quote.py is the twin.
 export function quoteText(text: string): string {
-  const raw = encodeText(text)
-  let view = ''
-  for (const byte of raw) view += String.fromCharCode(byte)
-  return quoteWord(view)
+  return quoteWord(byteView(text))
 }

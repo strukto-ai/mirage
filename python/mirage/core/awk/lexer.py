@@ -138,6 +138,32 @@ class Token:
     value: str = ""
 
 
+def read_escape(src: str, pos: int) -> tuple[str, int]:
+    """Read one awk string escape after its backslash.
+
+    Args:
+        src (str): byte-view string or assigned value.
+        pos (int): index immediately after the backslash.
+    """
+    esc = src[pos]
+    if esc in OCTAL_DIGITS:
+        end = pos
+        while end < len(src) and end - pos < 3 and src[end] in OCTAL_DIGITS:
+            end += 1
+        return chr(int(src[pos:end], 8) & 0xFF), end
+    if esc == "x":
+        end = pos + 1
+        while (
+            end < len(src)
+            and end - pos <= 2
+            and src[end] in "0123456789abcdefABCDEF"
+        ):
+            end += 1
+        if end > pos + 1:
+            return chr(int(src[pos + 1 : end], 16)), end
+    return STRING_ESCAPES.get(esc, "\\" + esc), pos + 1
+
+
 class Lexer:
     def __init__(self, src: str) -> None:
         self.src = src
@@ -191,20 +217,8 @@ class Lexer:
             self.pos += 1
             if self.pos >= len(self.src):
                 raise self.error("unterminated string")
-            esc = self.src[self.pos]
-            if esc in OCTAL_DIGITS:
-                digits = ""
-                while (
-                    len(digits) < 3
-                    and self.pos < len(self.src)
-                    and self.src[self.pos] in OCTAL_DIGITS
-                ):
-                    digits += self.src[self.pos]
-                    self.pos += 1
-                out.append(chr(int(digits, 8)))
-                continue
-            out.append(STRING_ESCAPES.get(esc, "\\" + esc))
-            self.pos += 1
+            value, self.pos = read_escape(self.src, self.pos)
+            out.append(value)
         raise self.error("unterminated string")
 
     def read_ere(self) -> Token:

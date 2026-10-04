@@ -39,7 +39,12 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import (
+    byte_view,
+    decode_text,
+    encode_text,
+    from_byte_view,
+)
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line, fs_strerror
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -157,9 +162,7 @@ async def _read_script_files(
     files: dict[str, SedFileContent] = {}
     for name in names:
         try:
-            files[name] = SedFileText(
-                (await doors.read(name)).decode(errors="replace")
-            )
+            files[name] = SedFileText(byte_view(await doors.read(name)))
         except IsADirectoryError:
             files[name] = SedFileError(
                 f"sed: read error on {name}: Is a directory\n"
@@ -187,7 +190,7 @@ async def _flush_write_files(
         if not out.chunks or doors.spec(name).virtual in edited:
             continue
         try:
-            await doors.write(name, encode_text("".join(out.chunks)))
+            await doors.write(name, from_byte_view("".join(out.chunks)))
         except FS_ERRORS as exc:
             err += _open_failure(name, exc)
     return err
@@ -269,7 +272,7 @@ async def sed(
     read_ok: list[PathSpec] = []
     if not paths:
         raw = await read_stdin_async(stdin) or b""
-        inputs.append(SedInput("-", raw.decode(errors="replace")))
+        inputs.append(SedInput("-", byte_view(raw)))
     # sed owns its exit code rather than letting the executor's
     # chokepoint pick it, because GNU sed splits a failed operand two
     # ways (GNU sed 4.9). An OPEN error (a missing file) is exit 2,
@@ -301,12 +304,12 @@ async def sed(
                 )
             )
             continue
-        inputs.append(SedInput(p.raw_path, data.decode(errors="replace")))
+        inputs.append(SedInput(p.raw_path, byte_view(data)))
         read_ok.append(p)
     machine.process(inputs, True)
     write_err = await _flush_write_files(machine, doors)
     stderr = machine.stderr() + write_err
-    return encode_text("".join(machine.stdout.chunks)), IOResult(
+    return from_byte_view("".join(machine.stdout.chunks)), IOResult(
         cache=[p.mount_path for p in read_ok if not is_stdin(p)],
         exit_code=machine.exit_code() if not write_err else 4,
         stderr=encode_text(stderr) if stderr else None,
@@ -362,12 +365,10 @@ async def _run_in_place(
             # An `r` file edited by an earlier file of this command reads
             # with its new content.
             machine.set_files(await _read_script_files(program.rfiles, doors))
-        out = machine.process(
-            [SedInput(p.raw_path, data.decode(errors="replace"))], False
-        )
+        out = machine.process([SedInput(p.raw_path, byte_view(data))], False)
         if machine.panic_code is not None:
             break
-        new_data = encode_text(out)
+        new_data = from_byte_view(out)
         await write_bytes(p, new_data)
         writes[p.mount_path] = new_data
         edited.append(p)
@@ -382,7 +383,7 @@ async def _run_in_place(
     else:
         exit_code = code or machine.exit_code()
     stdout = "".join(machine.stdout.chunks)
-    return encode_text(stdout) if stdout else None, IOResult(
+    return from_byte_view(stdout) if stdout else None, IOResult(
         writes=writes,
         cache=[p.mount_path for p in edited],
         exit_code=exit_code,
@@ -546,9 +547,7 @@ async def sed_generic(
             data = await read_bytes(part)
         except FS_ERRORS as exc:
             return _failed(_open_failure(name, exc), 4)
-        pieces.append(
-            SedScriptPiece("file", data.decode(errors="replace"), name)
-        )
+        pieces.append(SedScriptPiece("file", decode_text(data), name))
     flag_script = bool(parsed.scripts)
     if not flag_script and texts:
         pieces.append(SedScriptPiece("expr", texts[0]))

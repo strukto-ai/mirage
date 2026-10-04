@@ -37,17 +37,6 @@ export function lineOffsets(lines: readonly string[]): number[] {
 }
 
 /**
- * Where a match begins in bytes, given its character index.
- *
- * The pattern engine reports a code-unit index because both hosts hold a line
- * as text; GNU reports a byte count and reports the same number under C and
- * C.utf8, so the index is converted rather than printed.
- */
-export function matchOffset(lineStart: number, line: string, index: number): number {
-  return lineStart + byteOffset(line, index)
-}
-
-/**
  * Every match of a pattern in a line, found as ripgrep finds them.
  *
  * ripgrep iterates matches the way Rust's regex crate does: after an empty

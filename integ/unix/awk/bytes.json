@@ -1,0 +1,148 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "awk_bytes_stderr",
+      "seq": 14470200,
+      "command": "( export LC_ALL=C; printf '\\303\\251\\377\\n' | awk '{print > \"/dev/stderr\";print > \"/dev/stderr\"}' 2>&1 | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c3 a9 ff 0a c3 a9 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_operands",
+      "seq": 14470201,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\377\\n' > /data/é.txt; awk '{print FILENAME,$0}' /data/é.txt | od -An -tx1; awk 'BEGIN{printf \"é\\377\\n\" | \"cat\";close(\"cat\")}' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 2f 64 61 74 61 2f c3 a9 2e 74 78 74 20 41 c2 a0\n 42 ff 0a\n c3 a9 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_spellings",
+      "seq": 14470202,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\302\\240C\\n' > /data/bytes.txt; awk '{gsub(/\\xc2\\xa0/, \" \")}1' /data/bytes.txt; awk '{gsub(/\\302\\240/, \" \")}1' /data/bytes.txt; awk '{gsub(/ /, \" \")}1' /data/bytes.txt )",
+      "expect": {
+        "exit": 0,
+        "stdout": "A B C\nA B C\nA B C\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_widths",
+      "seq": 14470203,
+      "command": "( export LC_ALL=C; printf 'A\\303\\251B\\342\\202\\254C\\360\\237\\230\\200D\\n' | awk '{gsub(/\\xc3\\xa9/,\"1\");gsub(/\\xe2\\x82\\xac/,\"2\");gsub(/\\xf0\\x9f\\x98\\x80/,\"3\");print}' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "A1B2C3D\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_partial",
+      "seq": 14470204,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\377\\n' | awk '{gsub(/\\xa0/,\"X\");print}' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c2 58 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_assignments",
+      "seq": 14470205,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\n' | awk -v p='\\xc2\\xa0' '{print length(p);gsub(p,\" \");print}'; printf 'A\\302\\240B\\n' | awk -F '\\302\\240' '{print NF,$1,$2}' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\nA B\n2 A B\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_string_escape",
+      "seq": 14470206,
+      "command": "( export LC_ALL=C; awk 'BEGIN{p=\"\\xc2\\xa0\";q=\"\\302\\240\";print length(p),p==q,p==\" \";printf \"%s\",p}' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 32 20 31 20 31 0a c2 a0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_positions",
+      "seq": 14470207,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\377\\n' | awk '{print length($0),match($0,/\\xa0/),RSTART,RLENGTH;printf \"%s\",substr($0,3,1)}' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 35 20 33 20 33 20 31 0a a0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_redirect_path",
+      "seq": 14470208,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\377\\n' | awk '{gsub(/\\xc2\\xa0/,\" \");print > \"/data/é.txt\"}'; od -An -tx1 /data/é.txt; awk 'BEGIN{getline x < \"/data/é.txt\";print x}' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 41 20 42 ff 0a\n 41 20 42 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_roundtrip_printf",
+      "seq": 14470209,
+      "command": "( export LC_ALL=C; printf '\\303\\251\\377\\n' | awk '{print}' | od -An -tx1; awk 'BEGIN{printf \"%c %c %c\\n\",256,-1,8364}' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c3 a9 ff 0a\n 00 20 ff 20 ac 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_escape_classes",
+      "seq": 14470210,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\377\\n' | awk '{gsub(/\\s/,\"_\"); print; print ($0 ~ /\\w$/)}' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 41 c2 a0 42 ff 0a 30 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_bytes_program_file",
+      "seq": 14470211,
+      "command": "( export LC_ALL=C; printf '{sub(/\\351/, \"E\")} 1\\nEND{print \"\\351\"}\\n' > /data/bytes.awk; printf 'caf\\351\\n' | awk -f /data/bytes.awk | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 63 61 66 45 0a e9 0a\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

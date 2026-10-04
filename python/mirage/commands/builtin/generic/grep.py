@@ -51,6 +51,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.usage import usage_hint
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.shell.bytes import byte_view
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import WALK_ERRORS, fs_strerror, walk_refusal
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -232,7 +233,11 @@ async def grep_generic(
         re.compile(NEVER_MATCH)
         if never_match
         else compile_pattern(
-            pattern, f.ignore_case, f.fixed_string, f.whole_word, f.syntax
+            byte_view(pattern),
+            f.ignore_case,
+            f.fixed_string,
+            f.whole_word,
+            f.syntax,
         )
     )
     warning = (

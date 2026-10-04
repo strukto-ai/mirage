@@ -9,7 +9,7 @@ from mirage.commands.builtin.sed_exec import (
     list_line,
 )
 from mirage.commands.builtin.sed_script import SedScriptPiece, compile_script
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import byte_view, from_byte_view
 
 
 def _run(
@@ -37,7 +37,10 @@ def _run(
         ),
     )
     machine.process(
-        [SedInput("-", inputs)] if isinstance(inputs, str) else inputs, True
+        [SedInput("-", byte_view(inputs))]
+        if isinstance(inputs, str)
+        else inputs,
+        True,
     )
     wfiles = {
         name: "".join(out.chunks) for name, out in machine.wfiles.items()
@@ -102,7 +105,7 @@ def test_text_decodes_numeric_and_control_escapes():
 
 def test_text_numeric_escapes_above_ascii_are_raw_bytes():
     out = _sed("a [\\xff][\\d200][\\o377][\\x80][\\xc3\\xa9][\\o400]", "x\n")
-    assert encode_text(out) == (
+    assert from_byte_view(out) == (
         b"x\n[\xff][\xc8][\xff][\x80][\xc3\xa9][\x00]\n"
     )
 
@@ -192,8 +195,8 @@ def test_l_escapes_and_octal():
         list_line("x\x7f\x1b\r\f\v\b\x07", 70)
         == "x\\177\\033\\r\\f\\v\\b\\a$\n"
     )
-    assert list_line("caf\u00e9", 70) == "caf\\303\\251$\n"
-    assert list_line("\udcff", 70) == "\\377$\n"
+    assert list_line(byte_view("caf\u00e9"), 70) == "caf\\303\\251$\n"
+    assert list_line(byte_view(b"\xff"), 70) == "\\377$\n"
 
 
 def test_l_folds_at_69_and_a_backslash():

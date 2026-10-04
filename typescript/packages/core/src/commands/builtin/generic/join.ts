@@ -22,7 +22,7 @@ import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { CommandName, type ParsedFlagValue } from '../../spec/types.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { byteView, fromByteView } from '../../../shell/bytes.ts'
 import { stdinStream } from '../utils/stream.ts'
 
 const IDX_MAX = (1n << 63n) - 1n
@@ -32,7 +32,6 @@ const FIELD_RUN = /[^ \t\n]+/g
 const INTEGER = /^[ \t\n\v\f\r]*([+-]?[0-9]+)$/
 const OUTLIST_SEPARATOR = /[, \t]/
 const ASCII_LOWER = /[a-z]+/g
-const VIEW_CHUNK = 8192
 const OPTIONS = [
   'a',
   'v',
@@ -93,24 +92,6 @@ interface Filed {
   readonly index: number
   readonly word: string
   readonly status: Status
-}
-
-function toView(bytes: Uint8Array): string {
-  let view = ''
-  for (let at = 0; at < bytes.length; at += VIEW_CHUNK) {
-    view += String.fromCharCode(...bytes.subarray(at, at + VIEW_CHUNK))
-  }
-  return view
-}
-
-function fromView(view: string): Uint8Array {
-  const bytes = new Uint8Array(view.length)
-  for (let i = 0; i < view.length; i += 1) bytes[i] = view.charCodeAt(i)
-  return bytes
-}
-
-function rawView(text: string): string {
-  return toView(encodeText(text))
 }
 
 // `xstrtoimax` with no valid suffix: the value, or null if invalid.
@@ -195,7 +176,7 @@ class Options {
   joptionCount: [number, number] = [0, 0]
 
   setTab(text: string): void {
-    const raw = rawView(text)
+    const raw = byteView(text)
     let tab = raw === '' ? WHOLE_LINE : raw
     if (raw.length > 1) {
       if (raw !== '\\0') {
@@ -225,7 +206,7 @@ class Options {
       if (name === 'v') this.pairables = false
       this.unpairables[fileNumber(text) - 1] = true
     } else if (name === 'e') {
-      const raw = rawView(text)
+      const raw = byteView(text)
       if (this.emptyFiller !== null && this.emptyFiller !== raw) {
         throw new UsageError('join: conflicting empty-field replacement strings', 1)
       }
@@ -569,9 +550,9 @@ class Merge {
       stderr += 'join: input is not in sorted order\n'
     }
     return [
-      fromView(this.out.join('')),
+      fromByteView(this.out.join('')),
       new IOResult({
-        stderr: stderr === '' ? null : fromView(stderr),
+        stderr: stderr === '' ? null : fromByteView(stderr),
         exitCode: stderr === '' ? 0 : 1,
       }),
     ]
@@ -605,11 +586,11 @@ export async function join(paths: PathSpec[], io: JoinIO): Promise<[ByteSource |
     ]
   }
   const stream = stdinStream(io.read, io.stdin)
-  const data1 = toView(await materialize(stream(p1)))
-  const data2 = toView(await materialize(stream(p2)))
+  const data1 = byteView(await materialize(stream(p1)))
+  const data2 = byteView(await materialize(stream(p2)))
   const merge = new Merge(
     io.flags,
-    [rawView(p1.rawPath), rawView(p2.rawPath)],
+    [byteView(p1.rawPath), byteView(p2.rawPath)],
     [splitRecords(data1, io.flags.eol), splitRecords(data2, io.flags.eol)],
   )
   merge.run()

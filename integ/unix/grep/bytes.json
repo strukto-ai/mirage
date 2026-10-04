@@ -1,0 +1,118 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "grep_bytes_spellings",
+      "seq": 14470000,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\302\\240C\\n' > /data/bytes.txt; for p in $'\\xc2\\xa0' $'\\302\\240' ' '; do grep -c \"$p\" /data/bytes.txt; grep -Fc \"$p\" /data/bytes.txt; done )",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n1\n1\n1\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bytes_widths",
+      "seq": 14470001,
+      "command": "( export LC_ALL=C; printf 'A\\303\\251B\\342\\202\\254C\\360\\237\\230\\200D\\n' > /data/bytes.txt; for p in $'\\xc3\\xa9' $'\\xe2\\x82\\xac' $'\\xf0\\x9f\\x98\\x80'; do grep -abo \"$p\" /data/bytes.txt; done )",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:é\n4:€\n8:😀\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bytes_partial_pcre",
+      "seq": 14470002,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\302\\240\\n' | grep -aboP '\\xa0' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 32 3a a0 0a 35 3a a0 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bytes_pcre_quantifier",
+      "seq": 14470003,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\240X\\n' | grep -aoP '\\xc2\\xa0+' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c2 a0 a0 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bytes_pattern_file",
+      "seq": 14470004,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\n' > /data/pattern.txt; printf 'A\\302\\240B\\n' | grep -of /data/pattern.txt | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c2 a0 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bytes_invalid_pattern_file",
+      "seq": 14470005,
+      "command": "( export LC_ALL=C; printf '\\377\\n' > /data/pattern.txt; printf 'A\\377B\\n' | grep -abof /data/pattern.txt | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 31 3a ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bytes_concatenated",
+      "seq": 14470006,
+      "command": "( export LC_ALL=C; p=$'\\xc2'; p=$p$'\\xa0'; printf 'A\\302\\240B\\n' | grep -c \"$p\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bytes_classes",
+      "seq": 14470007,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\377\\n' | grep -aoP '[\\x80-\\xff]' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c2 0a a0 0a ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bytes_dot",
+      "seq": 14470008,
+      "command": "( export LC_ALL=C; printf '\\303\\251\\377\\n' | grep -ao . | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c3 0a a9 0a ff 0a\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -32,6 +32,10 @@ describe('awk regex', () => {
     ['\\<the\\>', 'in the end', true],
     ['\\<he\\>', 'in the end', false],
     ['\\$', 'cost $5', true],
+    ['\\w', '\xff', false],
+    ['\\s', '\xa0', false],
+    ['\\S', '\xa0', true],
+    ['\\<x', '\xe9x', true],
   ])('matches(%j, %j) is %j', (pattern, subject, expected) => {
     expect(matches(pattern, subject)).toBe(expected)
   })
