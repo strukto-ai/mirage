@@ -174,14 +174,41 @@ describe('RAMFileCacheStore: a writer waiting on the lock', () => {
   it.each(['set', 'add'] as const)(
     '%s parked when a covering prefix is evicted is discarded',
     async (operation) => {
-      // evictPrefix bumps the same store-wide epoch clear does, but through
-      // its own path; the redis suite used to be the only place this was
-      // exercised in TypeScript.
+      // The fill has no entry yet, so only its registration in
+      // `invalidation.enter` lets evictPrefix name it; the redis suite used
+      // to be the only place this was exercised in TypeScript.
       const cache = new RAMFileCacheStore()
       const pending = cache[operation]('/large', new Uint8Array([0x78]))
       await cache.evictPrefix('/lar')
       await pending
       expect(await cache.get('/large')).toBeNull()
+    },
+  )
+
+  it.each(['set', 'add'] as const)(
+    '%s of an unrelated key survives a prefix eviction elsewhere',
+    async (operation) => {
+      // `rm -r /a` or `mv /a ...` must not throw away a fill of another
+      // key that is waiting its turn.
+      const cache = new RAMFileCacheStore()
+      const data = new Uint8Array([0x78])
+      const fill = cache[operation]('/b', data)
+      await cache.evictPrefix('/a/')
+      await fill
+      expect(await cache.get('/b')).toEqual(data)
+    },
+  )
+
+  it.each(['set', 'add'] as const)(
+    '%s under an excluded root survives a prefix eviction',
+    async (operation) => {
+      // The excluded root is a nested mount: its keys are not this drop's.
+      const cache = new RAMFileCacheStore()
+      const data = new Uint8Array([0x78])
+      const fill = cache[operation]('/a/nested/f', data)
+      await cache.evictPrefix('/a/', ['/a/nested'])
+      await fill
+      expect(await cache.get('/a/nested/f')).toEqual(data)
     },
   )
 

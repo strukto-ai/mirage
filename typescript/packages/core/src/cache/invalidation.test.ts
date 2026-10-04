@@ -61,4 +61,45 @@ describe('Invalidation', () => {
     expect(inv.enter('/a')).toEqual(first)
     inv.leave('/a')
   })
+
+  it('a prefix invalidation reaches the writers under it', () => {
+    const inv = new Invalidation()
+    const under = inv.enter('/a/x')
+    const deeper = inv.enter('/a/b/c')
+    const spared = ['/b', '/a', '/ab/x'].map((key) => [key, inv.enter(key)] as const)
+    inv.invalidatePrefix('/a/')
+    expect(inv.stale('/a/x', under)).toBe(true)
+    expect(inv.stale('/a/b/c', deeper)).toBe(true)
+    for (const [key, stamp] of spared) expect(inv.stale(key, stamp)).toBe(false)
+    for (const key of ['/a/x', '/a/b/c', '/b', '/a', '/ab/x']) inv.leave(key)
+    // The counters went with the last writer out: a new stamp is fresh.
+    const again = inv.enter('/a/x')
+    expect(inv.stale('/a/x', again)).toBe(false)
+    expect(again).toEqual(inv.enter('/zz'))
+    inv.leave('/a/x')
+    inv.leave('/zz')
+  })
+
+  it('a prefix invalidation spares an excluded root', () => {
+    const inv = new Invalidation()
+    const nested = inv.enter('/a/nested/f')
+    const root = inv.enter('/a/nested')
+    const sibling = inv.enter('/a/nested2')
+    inv.invalidatePrefix('/a/', ['/a/nested'])
+    expect(inv.stale('/a/nested/f', nested)).toBe(false)
+    expect(inv.stale('/a/nested', root)).toBe(false)
+    expect(inv.stale('/a/nested2', sibling)).toBe(true)
+    for (const key of ['/a/nested/f', '/a/nested', '/a/nested2']) inv.leave(key)
+  })
+
+  it('a prefix invalidation with no writer leaves nothing behind', () => {
+    const inv = new Invalidation()
+    const before = inv.enter('/zz')
+    inv.leave('/zz')
+    inv.invalidatePrefix('/a/')
+    for (const key of ['/a/', '/a/x']) {
+      expect(inv.enter(key)).toEqual(before)
+      inv.leave(key)
+    }
+  })
 })

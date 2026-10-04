@@ -202,8 +202,8 @@ async def test_evict_prefix_while_a_writer_is_parked_discards_its_write(
 async def test_a_writer_queued_behind_a_removal_of_its_key_is_discarded(
     operation,
 ):
-    # The per-key counter, which the clear/evict_prefix cases above cannot
-    # reach: they bump the store-wide epoch instead. The second writer holds
+    # The per-key counter as `remove` advances it, under the key's lock:
+    # the clear case above bumps the store-wide epoch instead. The second writer holds
     # bytes read before the removal, so it must not repopulate the key that
     # was just dropped.
     #
@@ -243,6 +243,41 @@ async def test_a_parked_fill_survives_the_removal_of_another_key(operation):
         lock.release()
     await fill
     assert await cache.get("/large") == data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["set", "add"])
+async def test_a_parked_fill_survives_a_prefix_eviction_elsewhere(operation):
+    # Prefix scoping: `rm -r /a` or `mv /a ...` must not throw away a fill
+    # of an unrelated key that is waiting its turn.
+    cache = RAMFileCacheStore()
+    lock = cache._lock_for("/b")
+    await lock.acquire()
+    fill = asyncio.create_task(getattr(cache, operation)("/b", b"x"))
+    try:
+        await asyncio.sleep(0.01)
+        await cache.evict_prefix("/a/")
+    finally:
+        lock.release()
+    await fill
+    assert await cache.get("/b") == b"x"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["set", "add"])
+async def test_a_parked_fill_under_an_excluded_root_survives(operation):
+    # The excluded root is a nested mount: its keys are not this drop's.
+    cache = RAMFileCacheStore()
+    lock = cache._lock_for("/a/nested/f")
+    await lock.acquire()
+    fill = asyncio.create_task(getattr(cache, operation)("/a/nested/f", b"x"))
+    try:
+        await asyncio.sleep(0.01)
+        await cache.evict_prefix("/a/", excluded=("/a/nested",))
+    finally:
+        lock.release()
+    await fill
+    assert await cache.get("/a/nested/f") == b"x"
 
 
 @pytest.mark.asyncio
