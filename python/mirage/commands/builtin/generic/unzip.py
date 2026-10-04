@@ -1,6 +1,7 @@
 import dataclasses
 import fnmatch
 import io
+import logging
 import zipfile
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from mirage.commands.builtin.generic.archive.zipinfo import (
     render_verbose,
     zipinfo_layout,
 )
-from mirage.commands.builtin.utils.copy import path_exists
+from mirage.commands.builtin.utils.copy import is_directory, path_exists
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -29,6 +30,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, error_path, fs_strerror
+
+logger = logging.getLogger(__name__)
 
 # Info-ZIP's wording and spacing, verbatim (two spaces after the colon).
 CAUTION_PREFIX = "caution: filename not matched:  "
@@ -67,18 +70,25 @@ CORRUPT_CDIR = (
 NO_ARCHIVE_EXIT = 9
 CORRUPT_EXIT = 3
 # Info-ZIP's refusals of a create: a member it cannot write (exit 50,
-# PK_DISK), a directory of the chain it cannot make, and an extraction
-# directory it cannot make (exit 2, before any member). The strerror
-# line hangs under the text after the label, as UnZip 6.00 indents it.
+# PK_DISK), a directory of the chain it cannot make or that a file
+# already holds (exit 2, and the next member still extracts), and an
+# extraction directory it cannot make (exit 2, before any member). The
+# strerror line hangs under the text after the label, as UnZip 6.00
+# indents it.
 CREATE_ERROR = "error:  cannot {0} {1}\n        {2}\n"
 CHECKDIR_ERROR = (
     "checkdir error:  cannot create {0}\n                 {1}\n"
     "                 unable to process {2}.\n"
 )
+CHECKDIR_FILE = (
+    "checkdir error:  {0} exists but is not directory\n"
+    "                 unable to process {1}.\n"
+)
 CHECKDIR_DEST = (
     "checkdir:  cannot create extraction directory: {0}\n           {1}\n"
 )
 CREATE_EXIT = 50
+CHECKDIR_EXIT = 2
 DEST_EXIT = 2
 # The end record says where the central directory should start; bytes
 # before the archive (a self-extractor stub) push it later, and Info-ZIP
@@ -354,6 +364,28 @@ def _zipinfo(
     return listing, IOResult(exit_code=exit_code, stderr=stderr)
 
 
+async def _file_in_chain(stat: StatFn, base: str, chain: str) -> str | None:
+    """The first level of ``chain`` below ``base`` that is not a directory.
+
+    Info-ZIP names that level ("exists but is not directory") instead of
+    the mkdir that failed under it.
+
+    Args:
+        stat (StatFn): stat door in the destination's path space.
+        base (str): the extraction directory, which exists.
+        chain (str): the directory an entry needs.
+    """
+    level = base
+    for part in chain[len(base) :].strip("/").split("/"):
+        level = f"{level}/{part}"
+        node = PathSpec.from_str_path(level)
+        if not await path_exists(stat, node):
+            return None
+        if not await is_directory(stat, node):
+            return level
+    return None
+
+
 async def _make_dirs(
     dir_path: str,
     mkdir_fn: Callable[..., Awaitable[None]],
@@ -377,6 +409,21 @@ async def _make_dirs(
         await mkdir_fn(PathSpec.from_str_path(dir_path), parents=True)
         return
     await ensure_dir(dir_path, mkdir_fn, stat, made)
+
+
+def _extracted_line(info: zipfile.ZipInfo, shown: str) -> str:
+    """Info-ZIP's line for one extracted file, ``%8sing: %-22s  %s``.
+
+    The verb names the method: a stored entry is ``extracting``, a
+    compressed one ``inflating``. The name is padded to 22 columns and
+    followed by two blanks, the room Info-ZIP keeps for a ``-a`` note.
+
+    Args:
+        info (zipfile.ZipInfo): the entry.
+        shown (str): its path as the listing spells it.
+    """
+    verb = "extract" if info.compress_type == zipfile.ZIP_STORED else "inflat"
+    return f"{verb:>8}ing: {shown:<22}  "
 
 
 async def unzip(
@@ -663,6 +710,8 @@ async def _run(
                     typed_dest, fs_strerror(exc)
                 ).encode(),
             )
+    checkdir_failed = False
+    create_failed = False
     for info in selected:
         entry_name = info.filename.lstrip("/")
         out_path = base + "/" + entry_name.rstrip("/")
@@ -670,17 +719,31 @@ async def _run(
         # so it has to be recreated even though nothing is written in it.
         chain = out_path if info.is_dir() else out_path.rsplit("/", 1)[0]
         try:
+            existed = (
+                info.is_dir()
+                and stat is not None
+                and await path_exists(stat, PathSpec.from_str_path(out_path))
+            )
             if chain and chain != "/":
                 await _make_dirs(chain, mkdir_fn, stat, made)
         except FS_ERRORS as exc:
+            checkdir_failed = True
+            blocker: str | None = None
+            if stat is not None:
+                try:
+                    blocker = await _file_in_chain(stat, base, chain)
+                except FS_ERRORS as probe:
+                    logger.debug("unzip: probing %s failed: %s", chain, probe)
             errors.append(
-                CHECKDIR_ERROR.format(
+                CHECKDIR_FILE.format(shown(blocker), info.filename)
+                if blocker is not None
+                else CHECKDIR_ERROR.format(
                     shown(error_path(exc)), fs_strerror(exc), info.filename
                 )
             )
             continue
         if info.is_dir():
-            if not q:
+            if not q and not existed:
                 output_lines.append(f"   creating: {shown(out_path)}/")
             continue
         content = zf.read(info)
@@ -692,6 +755,7 @@ async def _run(
             existed = stat is not None and await path_exists(
                 stat, PathSpec.from_str_path(out_path)
             )
+            create_failed = True
             errors.append(
                 CREATE_ERROR.format(
                     "delete old" if existed else "create",
@@ -706,13 +770,17 @@ async def _run(
             # have the runner prefix them onto this mount.
             writes[out_path] = content
         if not q:
-            output_lines.append(f"  inflating: {shown(out_path)}")
+            output_lines.append(_extracted_line(info, shown(out_path)))
     output = (
         ("\n".join(output_lines) + "\n").encode() if output_lines else None
     )
     stderr = (cautions + "".join(errors)).encode()
+    if create_failed:
+        exit_code = CREATE_EXIT
+    elif checkdir_failed:
+        exit_code = CHECKDIR_EXIT
     return output, IOResult(
-        exit_code=CREATE_EXIT if errors else exit_code,
+        exit_code=exit_code,
         stderr=stderr or None,
         writes=writes,
     )

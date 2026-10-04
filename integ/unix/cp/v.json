@@ -66,6 +66,38 @@
         "stdout": "'a.txt' -> 'r10cpv.txt'\n'r10cps' -> 'r10cpvd'\n'r10cps/d' -> 'r10cpvd/d'\n'r10cps/d/f' -> 'r10cpvd/d/f'\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cp_rv_merge_names_only_new_directories",
+      "seq": 16100002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "(cd /data && mkdir -p r10rv/s/n r10rv/d/s && echo a > r10rv/s/n/f && cp -rv r10rv/s r10rv/d; echo rc=$?; find r10rv/d | sort; rm -r r10rv)",
+      "expect": {
+        "exit": 0,
+        "stdout": "'r10rv/s/n' -> 'r10rv/d/s/n'\n'r10rv/s/n/f' -> 'r10rv/d/s/n/f'\nrc=0\nr10rv/d\nr10rv/d/s\nr10rv/d/s/n\nr10rv/d/s/n/f\n",
+        "stderr": ""
+      }
     }
   ]
 }

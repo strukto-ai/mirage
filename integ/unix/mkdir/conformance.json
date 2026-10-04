@@ -243,7 +243,12 @@
         "s3-prefix",
         "gridfs-prefix",
         "hf",
-        "hf-prefix"
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/mkuf && touch /data/mkuf/f.txt && mkdir /data/mkuf/f.txt/sub; echo rc=$?; mkdir -p /data/mkuf/f.txt/x/y; echo rc=$?; ls /data/mkuf",
       "expect": {

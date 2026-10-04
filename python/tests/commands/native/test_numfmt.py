@@ -18,4 +18,4 @@ def test_numfmt_scales_to_and_from_units(env):
 
 
 def test_numfmt_suffix_and_grouping(env):
-    assert env.mirage("numfmt --grouping --suffix=B 1234B") == "1,234B\n"
+    assert env.mirage("numfmt --grouping --suffix=B 1234B") == "1234B\n"

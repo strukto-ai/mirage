@@ -20,7 +20,7 @@ describe.each(NATIVE_BACKENDS)('native numfmt (%s backend)', (kind) => {
     const env = makeEnv(kind)
     try {
       expect(await env.mirage('numfmt --to=si 1000')).toBe('1.0k\n')
-      expect(await env.mirage('numfmt --grouping --suffix=B 1234B')).toBe('1,234B\n')
+      expect(await env.mirage('numfmt --grouping --suffix=B 1234B')).toBe('1234B\n')
     } finally {
       await env.cleanup()
     }

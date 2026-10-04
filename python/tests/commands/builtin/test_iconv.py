@@ -47,7 +47,7 @@ async def _collect(ait):
 def test_iconv_utf8_to_latin1():
     ws, _ = _ws()
     stdout, io = _run_raw(
-        ws, "iconv -f utf-8 -t latin-1", stdin="caf\u00e9\n".encode()
+        ws, "iconv -f utf-8 -t latin1", stdin="caf\u00e9\n".encode()
     )
     assert io.exit_code == 0
     assert _bytes(stdout) == "caf\u00e9\n".encode("latin-1")

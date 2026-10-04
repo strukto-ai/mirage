@@ -16,26 +16,37 @@ import posixpath
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
-from mirage.core.msgraph.client import GraphError
-from mirage.core.msgraph.drive import create_child_folder
+from mirage.core.msgraph.drive import FolderTarget, create_child_folder
 from mirage.core.sharepoint.client import item_url
 from mirage.core.sharepoint.resolve import resolve_item
 from mirage.types import PathSpec
+from mirage.utils.errors import enotdir
 
 
 async def _create_dir(
-    accessor: SharePointAccessor, drive_id: str, path: str
+    accessor: SharePointAccessor, drive_id: str, path: str, virtual: str
 ) -> None:
-    url = item_url(
-        accessor.config, drive_id, posixpath.dirname(path), action="/children"
-    )
+    config = accessor.config
+    parent = posixpath.dirname(path)
     await create_child_folder(
-        accessor.config, url, posixpath.basename(path), session=accessor.pool
+        config,
+        item_url(config, drive_id, parent, action="/children"),
+        posixpath.basename(path),
+        FolderTarget(
+            item=item_url(config, drive_id, path),
+            parent=item_url(config, drive_id, parent),
+            virtual=virtual,
+        ),
+        session=accessor.pool,
     )
 
 
 async def _create_chain(
-    accessor: SharePointAccessor, drive_id: str, item_path: str
+    accessor: SharePointAccessor,
+    drive_id: str,
+    item_path: str,
+    path: PathSpec,
+    parents: bool,
 ) -> None:
     """Create every level of a drive path, from the drive root down.
 
@@ -43,10 +54,26 @@ async def _create_chain(
         accessor (SharePointAccessor): the mount's accessor.
         drive_id (str): the drive the path lives in.
         item_path (str): the drive-relative path, key_prefix included.
+        path (PathSpec): the operand.
+        parents (bool): name a file in the way rather than the operand.
     """
     parts = item_path.split("/")
+    shown = path.virtual.rstrip("/")
+    depth = len([p for p in path.vfs_path.split("/") if p])
     for i in range(len(parts)):
-        await _create_dir(accessor, drive_id, "/".join(parts[: i + 1]))
+        try:
+            await _create_dir(
+                accessor, drive_id, "/".join(parts[: i + 1]), path.virtual
+            )
+        except FileExistsError as exc:
+            above = len(parts) - 1 - i
+            if not above:
+                raise
+            # `mkdir -p` names the file it stops at, as GNU does, and a file
+            # in the hidden key_prefix as the mount root it blocks; mkdir(2)
+            # blames the operand.
+            level = shown.rsplit("/", min(above, depth))[0] or "/"
+            raise enotdir(level if parents else path) from exc
 
 
 def _scoped_prefix(accessor: SharePointAccessor) -> str:
@@ -75,20 +102,17 @@ async def mkdir(
     drive_id = resolved.drive_id or ""
     item_path = resolved.item_path or ""
     if parents:
-        await _create_chain(accessor, drive_id, item_path)
+        await _create_chain(accessor, drive_id, item_path, path, parents=True)
     else:
         try:
-            await _create_dir(accessor, drive_id, item_path)
-        except GraphError as exc:
+            await _create_dir(accessor, drive_id, item_path, path.virtual)
+        except FileNotFoundError:
             prefix = _scoped_prefix(accessor)
-            missing_root = (
-                exc.status == 404
-                and prefix
-                and posixpath.dirname(item_path) == prefix
-            )
-            if not missing_root:
+            if not prefix or posixpath.dirname(item_path) != prefix:
                 raise
-            await _create_chain(accessor, drive_id, item_path)
+            await _create_chain(
+                accessor, drive_id, item_path, path, parents=False
+            )
     await invalidate_after_write(path)
     if parents:
         await invalidate_ancestors(path)

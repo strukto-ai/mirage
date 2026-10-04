@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf, mountedPath } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
-import { enoent, enotdir } from '../../utils/errors.ts'
+import { eexist, enoent, enotdir } from '../../utils/errors.ts'
 import { createFolder, listFolderItems } from './api.ts'
-import { pathParts, resolveParentId } from './resolve.ts'
+import { BoxApiError } from './client.ts'
+import { pathParts, resolveChain } from './resolve.ts'
 
 async function invalidateLevels(path: PathSpec, count: number): Promise<void> {
   // `mkdir -p a/b/c` creates several levels; invalidate each one's parent
@@ -46,11 +47,16 @@ export async function mkdir(accessor: BoxAccessor, path: PathSpec, parents = fal
   const tm = accessor.tokenManager
   if (parents) {
     let curId = accessor.rootFolderId
-    for (const name of parts) {
+    for (const [i, name] of parts.entries()) {
       const children = await listFolderItems(tm, curId)
       const match = children.find((c) => c.name === name)
       if (match !== undefined) {
-        if (match.type !== 'folder') throw enotdir(path.virtual)
+        if (match.type !== 'folder') {
+          // `mkdir -p` passes only a directory at the operand and names the
+          // file it stops at above it, as GNU does.
+          if (i === parts.length - 1) throw eexist(path)
+          throw enotdir(mountedPath(path, `/${parts.slice(0, i + 1).join('/')}`))
+        }
         curId = match.id
       } else {
         const created = await createFolder(tm, curId, name)
@@ -59,9 +65,22 @@ export async function mkdir(accessor: BoxAccessor, path: PathSpec, parents = fal
     }
     await invalidateLevels(path, parts.length)
   } else {
-    const parentId = await resolveParentId(accessor, parts)
-    if (parentId === null) throw enoent(path.virtual)
-    await createFolder(tm, parentId, parts[parts.length - 1] ?? '')
+    const chain = await resolveChain(accessor, parts.slice(0, -1))
+    // A level that resolved but is a file is ENOTDIR, the parent itself
+    // included; one that is not there at all is ENOENT, as mkdir(2) tells
+    // them apart.
+    const last = chain[chain.length - 1]
+    if (last !== undefined && last.type !== 'folder') throw enotdir(path.virtual)
+    if (chain.length < parts.length - 1) throw enoent(path.virtual)
+    const parentId = last?.id ?? accessor.rootFolderId
+    // Box 409s a name already taken, by a file or a folder: EEXIST, named
+    // here because BoxApiError carries no errno.
+    try {
+      await createFolder(tm, parentId, parts[parts.length - 1] ?? '')
+    } catch (error) {
+      if (error instanceof BoxApiError && error.status === 409) throw eexist(path)
+      throw error
+    }
     await invalidateAfterWrite(path)
   }
 }
