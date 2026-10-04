@@ -1204,6 +1204,31 @@ describe('dispatch runs writers to one path one at a time', () => {
     }
   })
 
+  it('lets an unmount go ahead once a stalled write has timed out', async () => {
+    // The hold outlives the timeout, the mount's activity does not: a store
+    // call that never answers must not keep the store from being removed.
+    const store = new StalledRAMVFS()
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      {
+        '/data': [store, MountMode.WRITE, { pwrite: new Limit({ timeoutSeconds: 0.01 }) }],
+        '/other': new RAMVFS(),
+      },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
+      await expect(
+        ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
+      ).rejects.toThrow()
+      await ws.unmount('/data')
+      expect(store.calls).toBe(1)
+    } finally {
+      store.release()
+      await ws.close()
+    }
+  })
+
   it('lets go of a name when a rename gives up waiting for the other', async () => {
     // The rename holds /data/f and waits for /data/g, which a stalled
     // pwrite keeps; once the rename times out, /data/f is free again.

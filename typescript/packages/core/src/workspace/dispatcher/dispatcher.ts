@@ -579,21 +579,19 @@ export class Dispatcher {
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
     try {
-      const run = (opKwargs: OpKwargs, timeout = opTimeout) =>
+      const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
         mount.use(async () => {
           const answer = await runWithMountContext(
             () =>
-              runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
-                runWithTimeout(
-                  Promise.resolve(
-                    opName === 'setattr'
-                      ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                      : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
-                  ),
-                  timeout,
-                  opName,
-                ),
-              ),
+              runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () => {
+                const call = Promise.resolve(
+                  opName === 'setattr'
+                    ? this.applySetattr(mount, vfs, scope, p, opKwargs)
+                    : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
+                )
+                onCall?.(call)
+                return runWithTimeout(call, opTimeout, opName)
+              }),
             mount.mountId,
           )
           return wrapOpStream(answer, mount.mountId, mount.activity)
@@ -614,64 +612,17 @@ export class Dispatcher {
         const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
           .map((name) => `${String(this.storeId(vfs))}:${mountKey(name, prefix)}`)
           .sort(compareCodePoints)
-        // The caller's timeout covers its wait for the hold and the store's
-        // call, not the bookkeeping after it, which it then waits for. A
-        // writer that gives up while queued lets go of any name it already
-        // holds and never runs. One that gives up after its call started
-        // keeps the hold until the store answers, since the timeout cannot
-        // stop the call and a timed-out pwrite still writes back what it
-        // read; a failure nobody waits for any more is reported.
-        const turn = { entered: false, abandoned: false, late: false, answered: false }
-        let giveUp = (): void => undefined
-        const gaveUp = new Promise<void>((resolve) => {
-          giveUp = resolve
-        })
-        let answer: Promise<unknown> = Promise.resolve()
-        let settled: Promise<void> = Promise.resolve()
-        const entered = new Promise<void>((enter) => {
-          const held = async (): Promise<void> => {
-            if (turn.abandoned) return
-            turn.entered = true
-            answer = run(fullKwargs, null)
-            answer.then(
-              () => {
-                turn.answered = true
-              },
-              () => {
-                turn.answered = true
-              },
-            )
-            settled = answer.then(async (value) => {
-              if (!turn.late) served(report, value)
-              await this.settleWrite(opName, p, renameDst)
-            })
-            enter()
-            await settled.catch((err: unknown) => {
-              if (turn.late) {
-                console.warn(`${opName} ${p.virtual} failed after its timeout: ${String(err)}`)
-              }
-            })
-          }
-          void keys.reduceRight<() => Promise<void>>(
-            (inner, key) => () => this.writers.withLock(key, () => Promise.race([inner(), gaveUp])),
-            held,
-          )()
-        })
-        try {
-          result = await runWithTimeout(
-            entered.then(() => answer),
-            opTimeout,
-            opName,
-          )
-        } catch (err) {
-          if (!turn.answered) turn.late = true
-          if (!turn.entered) {
-            turn.abandoned = true
-            giveUp()
-          }
-          throw err
-        }
-        await settled
+        result = await this.holdWrite(
+          keys,
+          opTimeout,
+          opName,
+          `${opName} ${p.virtual}`,
+          (onCall) => run(fullKwargs, onCall),
+          async (value, late) => {
+            if (!late) served(report, value)
+            await this.settleWrite(opName, p, renameDst)
+          },
+        )
       } else {
         result = await run(fullKwargs)
       }
@@ -715,6 +666,95 @@ export class Dispatcher {
       result = await applyOpLimit(result, bound)
     }
     return [result, new IOResult()]
+  }
+
+  /**
+   * Run one write with its names held, one writer at a time per name.
+   *
+   * The caller's timeout covers its wait for the hold and the store's
+   * call, not `after` (the bookkeeping), which it then waits for. A writer
+   * that gives up while queued lets go of any name it already holds and
+   * never runs. One that gives up after its call started keeps the hold
+   * until the store's own call settles, since a timeout cannot stop the
+   * call and a timed-out pwrite still writes back what it read; the
+   * mount's activity ends at the timeout as for any op, so an unmount
+   * does not wait on it. `after` runs once the store answers, late or
+   * not, and a failure nobody waits for any more is reported.
+   *
+   * Args:
+   *   keys: the names to hold, in the one order every writer takes them.
+   *   timeout: the op's timeout in seconds, or null for none.
+   *   opName: the op, for the timeout's error.
+   *   label: the op and path, for a late failure's report.
+   *   call: runs the op, handing over the store's own call once it starts.
+   *   after: the bookkeeping, told whether the caller already gave up.
+   */
+  private async holdWrite(
+    keys: readonly string[],
+    timeout: number | null,
+    opName: string,
+    label: string,
+    call: (onCall: (storeCall: Promise<unknown>) => void) => Promise<unknown>,
+    after: (value: unknown, late: boolean) => Promise<void>,
+  ): Promise<unknown> {
+    const turn = { entered: false, abandoned: false, late: false, started: false, settled: false }
+    let giveUp = (): void => undefined
+    const gaveUp = new Promise<void>((resolve) => {
+      giveUp = resolve
+    })
+    let answer: Promise<unknown> = Promise.resolve()
+    let finished: Promise<void> = Promise.resolve()
+    const entered = new Promise<void>((enter) => {
+      const held = async (): Promise<void> => {
+        if (turn.abandoned) return
+        turn.entered = true
+        const started: { call?: Promise<unknown> } = {}
+        answer = call((storeCall) => {
+          started.call = storeCall
+          turn.started = true
+          storeCall.then(
+            () => {
+              turn.settled = true
+            },
+            () => {
+              turn.settled = true
+            },
+          )
+        })
+        // The store's own call once it started, else the run's answer: a
+        // timeout answers the caller, not the store.
+        const stored = answer.then(
+          () => started.call ?? answer,
+          () => started.call ?? answer,
+        )
+        finished = stored.then((value) => after(value, turn.late))
+        enter()
+        await finished.catch((err: unknown) => {
+          if (turn.late) console.warn(`${label} failed after its timeout: ${String(err)}`)
+        })
+      }
+      void keys.reduceRight<() => Promise<void>>(
+        (inner, key) => () => this.writers.withLock(key, () => Promise.race([inner(), gaveUp])),
+        held,
+      )()
+    })
+    let value: unknown
+    try {
+      value = await runWithTimeout(
+        entered.then(() => answer),
+        timeout,
+        opName,
+      )
+    } catch (err) {
+      if (turn.started && !turn.settled) turn.late = true
+      if (!turn.entered) {
+        turn.abandoned = true
+        giveUp()
+      }
+      throw err
+    }
+    await finished
+    return value
   }
 
   /**
