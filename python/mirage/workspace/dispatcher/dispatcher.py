@@ -18,11 +18,13 @@ import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
@@ -77,6 +79,7 @@ from mirage.workspace.dispatcher.constants import (
     LINK_ENTRY_OPS,
     NAMESPACE_TABLE_OPS,
     POLICY_WRITE_OPS,
+    SERIAL_WRITE_OPS,
     SETATTR_KEYS,
     XATTR_OPS,
 )
@@ -108,6 +111,21 @@ def _memory_answered(
     """
     if report is not None:
         report.served(VFSName.RAM.value, moved)
+
+
+def _served(report: OpReport | None, result: Any) -> None:
+    """Stamp the caller's report: the owning mount answered.
+
+    Args:
+        report (OpReport | None): the caller's report, None when the
+            caller does not observe ops.
+        result (Any): the op's answer; bytes are the measure moved.
+    """
+    if report is not None:
+        report.served(
+            None,
+            len(result) if isinstance(result, (bytes, bytearray)) else None,
+        )
 
 
 def _no_xattr(path: PathSpec) -> OSError:
@@ -274,6 +292,7 @@ class Dispatcher:
         self._cache = cache
         self._reconciler = Reconciler(cache, namespace)
         self._drift = drift
+        self._writers = KeyLock()
 
     @property
     def reconciler(self) -> Reconciler:
@@ -599,6 +618,31 @@ class Dispatcher:
                     ),
                 )
                 result = kept if whole else slice_window(kept, offset, size)
+            elif op in SERIAL_WRITE_OPS:
+                # Held by the store's own object, so one store mounted
+                # twice is one file, and a rename holds both of its
+                # names, taken in one order so two renames between the
+                # same pair cannot deadlock. What the write changes beside
+                # the store (caches, the node table's links and attributes)
+                # changes under the same hold: a chain of renames finishing
+                # out of order would move one name's attributes onto
+                # another.
+                names = {path.virtual}
+                if isinstance(kwargs.get("dst"), PathSpec):
+                    names.add(kwargs["dst"].virtual)
+                prefix = mount.prefix.rstrip("/")
+                keys = {
+                    f"{id(mount.vfs)}:{mount_key(name, prefix)}"
+                    for name in names
+                }
+                async with AsyncExitStack() as held:
+                    for key in sorted(keys):
+                        await held.enter_async_context(
+                            self._writers.with_lock(key)
+                        )
+                    result = await mount.execute_op(op, path.virtual, **kwargs)
+                    _served(report, result)
+                    await self._settle_write(mount, op, path, kwargs)
             else:
                 result = await mount.execute_op(op, path.virtual, **kwargs)
         except (FileNotFoundError, NotADirectoryError):
@@ -621,13 +665,7 @@ class Dispatcher:
             # The op ran, whatever invalidation, the post gate, or an
             # output cap do next: stamped here so a failure in any of
             # them cannot erase a transfer the backend already made.
-            if report is not None:
-                report.served(
-                    None,
-                    len(result)
-                    if isinstance(result, (bytes, bytearray))
-                    else None,
-                )
+            _served(report, result)
         if op == "readdir":
             result = _visible_entries(
                 merge_readdir(
@@ -642,62 +680,8 @@ class Dispatcher:
             result = merge_overlay_stat(
                 self._namespace.meta_for(path.virtual), result
             )
-        if op in DISPATCH_WRITE_OPS:
-            observed = time.time() if op in STAMP_WRITE_OPS else None
-            await self.invalidate_after_write(mount, path, observed=observed)
-            if op in ("unlink", "rmdir"):
-                # The name no longer holds that file, so what was set on
-                # it (overlay mode and owner, extended attributes) goes
-                # with it, as the shell's rm already drops it: a file
-                # created there next starts bare on every surface.
-                await self._namespace.drop_overlay(path.virtual)
-                if op == "rmdir":
-                    # The link check ran before the backend was asked, so
-                    # a visible link below now was created since: it is
-                    # younger than this rmdir, lands after it in the
-                    # serial order (a link synthesizes its parents), and
-                    # the purge taking the directory's hidden nodes must
-                    # not take it too.
-                    arrived = frozenset(
-                        link
-                        for link, _ in self._namespace.link_stats_below(
-                            path.virtual
-                        )
-                        if path_allowed(link)
-                    )
-                    await self._namespace.purge_under(
-                        path.virtual, keep=arrived
-                    )
-            if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-                await self.invalidate_after_rename(mount, path, kwargs["dst"])
-                # rename(2) replaces the destination, so a node the
-                # table holds at that name does not survive the move.
-                # A link left there shadowed the file that had just
-                # landed: the listing showed the new file, every read
-                # followed the old link, and the moved content was
-                # reachable under no name at all.
-                await self._namespace.unlink(kwargs["dst"].virtual)
-                # The subtree moves with it, and only the node table can
-                # move the part of it no backend holds: a link or an
-                # attr overlay below the source is addressed by absolute
-                # path, so it would otherwise stay behind at a name the
-                # rename has emptied. The destination's own subtree is
-                # replaced first, as rename(2) replaces what it lands on.
-                await self._namespace.purge_under(kwargs["dst"].virtual)
-                # The node at the source itself is not part of the
-                # subtree below it, so re-anchoring that subtree leaves
-                # it behind: the mode or ownership a chmod recorded
-                # stayed at the emptied name, never reached the
-                # landing, and was inherited by whatever was created at
-                # the old name next. Shell mv compensates for this in
-                # its own prepare step; a verb reaching the dispatcher
-                # directly, as git mv does, had nothing to.
-                await self._namespace.rename(
-                    path.virtual, kwargs["dst"].virtual
-                )
-                await self._namespace.rename_under(
-                    path.virtual, kwargs["dst"].virtual
-                )
+        if op in DISPATCH_WRITE_OPS and op not in SERIAL_WRITE_OPS:
+            await self._settle_write(mount, op, path, kwargs)
         bound = await post_ops_gate(
             policies, op, path, write, mount.prefix, result
         )
@@ -707,6 +691,75 @@ class Dispatcher:
             # report above already carries the moved count.
             result = await apply_op_limit(result, bound)
         return result, IOResult()
+
+    async def _settle_write(
+        self,
+        mount: MountEntry,
+        op: str,
+        path: PathSpec,
+        kwargs: dict[str, Any],
+    ) -> None:
+        """What a write changes beside the store: the caches above the
+        path, and the node table's links and attributes at its names.
+
+        Args:
+            mount (MountEntry): the mount the write ran on.
+            op (str): the write op that ran.
+            path (PathSpec): the path it wrote, after any follow.
+            kwargs (dict[str, Any]): the op's kwargs; a rename's ``dst``
+                is the moved name.
+        """
+        observed = time.time() if op in STAMP_WRITE_OPS else None
+        await self.invalidate_after_write(mount, path, observed=observed)
+        if op in ("unlink", "rmdir"):
+            # The name no longer holds that file, so what was set on
+            # it (overlay mode and owner, extended attributes) goes
+            # with it, as the shell's rm already drops it: a file
+            # created there next starts bare on every surface.
+            await self._namespace.drop_overlay(path.virtual)
+            if op == "rmdir":
+                # The link check ran before the backend was asked, so
+                # a visible link below now was created since: it is
+                # younger than this rmdir, lands after it in the
+                # serial order (a link synthesizes its parents), and
+                # the purge taking the directory's hidden nodes must
+                # not take it too.
+                arrived = frozenset(
+                    link
+                    for link, _ in self._namespace.link_stats_below(
+                        path.virtual
+                    )
+                    if path_allowed(link)
+                )
+                await self._namespace.purge_under(path.virtual, keep=arrived)
+        if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
+            await self.invalidate_after_rename(mount, path, kwargs["dst"])
+            # rename(2) replaces the destination, so a node the
+            # table holds at that name does not survive the move.
+            # A link left there shadowed the file that had just
+            # landed: the listing showed the new file, every read
+            # followed the old link, and the moved content was
+            # reachable under no name at all.
+            await self._namespace.unlink(kwargs["dst"].virtual)
+            # The subtree moves with it, and only the node table can
+            # move the part of it no backend holds: a link or an
+            # attr overlay below the source is addressed by absolute
+            # path, so it would otherwise stay behind at a name the
+            # rename has emptied. The destination's own subtree is
+            # replaced first, as rename(2) replaces what it lands on.
+            await self._namespace.purge_under(kwargs["dst"].virtual)
+            # The node at the source itself is not part of the
+            # subtree below it, so re-anchoring that subtree leaves
+            # it behind: the mode or ownership a chmod recorded
+            # stayed at the emptied name, never reached the
+            # landing, and was inherited by whatever was created at
+            # the old name next. Shell mv compensates for this in
+            # its own prepare step; a verb reaching the dispatcher
+            # directly, as git mv does, had nothing to.
+            await self._namespace.rename(path.virtual, kwargs["dst"].virtual)
+            await self._namespace.rename_under(
+                path.virtual, kwargs["dst"].virtual
+            )
 
     async def _moved_source_is_dir(self, path: PathSpec) -> bool:
         """Whether a rename's source stats as a directory.

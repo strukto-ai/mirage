@@ -41,7 +41,6 @@ from mirage.commands.cli.builtin.git.errors import (
     OneReferenceError,
     RefLockError,
     RefReadOnlyError,
-    UnknownSwitchError,
 )
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index_file import (
@@ -64,12 +63,10 @@ from mirage.commands.cli.builtin.git.revparse import (
 from mirage.commands.cli.builtin.git.session import index_locked, opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
     links_of,
     mounts_of,
-    switches,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -148,9 +145,7 @@ async def switch(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         flags = parse_flags(fl)
         creating = flags.create is not None
         if creating and flags.detach:

@@ -188,6 +188,8 @@ describe('Workspace observer wiring', () => {
       .map((e) => [e.op, e.path])
     expect(ops).toEqual([
       ['write', '/s3/report.json'],
+      ['write', '/s3/report.json'],
+      ['write', '/db/report.json'],
       ['write', '/db/report.json'],
       ['read', '/s3/report.json'],
       ['read', '/db/report.json'],

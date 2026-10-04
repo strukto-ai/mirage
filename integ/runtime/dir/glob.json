@@ -47,17 +47,20 @@
             "js": "dir/js/glob.js"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "seed.txt\nsub/inner.txt\n"
+            "python": {
+              "exit": 0,
+              "stdout": "seed.txt\nsub/inner.txt\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "unsupported\n"
+            }
           },
           "expect_on": {
             "monty": {
               "exit": 1,
               "stdout": "",
               "stderr_contains": "No module named 'glob'"
-            },
-            "quickjs": {
-              "stdout": "unsupported\n"
             }
           }
         }

@@ -79,11 +79,12 @@
             "js": "console.log(JSON.stringify(os.readdir('/data/nope')))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "[[],44]\n"
             }
           }
@@ -121,17 +122,20 @@
             "js": "const [names, err] = os.readdir('/api/items')\nconsole.log(err, names.filter((n) => n.endsWith('.json')).sort().join(','))\nconst [good] = os.stat('/api/items/1.json')\nconst [bad, badErr] = os.stat('/api/items/2.json')\nconsole.log(good.size, bad, badErr === 0 ? 'served' : 'failed', std.open('/api/items/2.json', 'r'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "['0.json', '1.json', '2.json', '3.json']\n10\nOSError I/O error\nOSError I/O error\n"
+            "python": {
+              "exit": 0,
+              "stdout": "['0.json', '1.json', '2.json', '3.json']\n10\nOSError I/O error\nOSError I/O error\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 0.json,1.json,2.json,3.json\n10 null failed null\n"
+            }
           },
           "expect_on": {
             "monty": {
               "exit": 1,
               "stdout": "['0.json', '1.json', '2.json', '3.json']\n10\n",
               "stderr_contains": "'OSError' object has no attribute 'strerror'"
-            },
-            "quickjs": {
-              "stdout": "0 0.json,1.json,2.json,3.json\n10 null failed null\n"
             }
           }
         }
@@ -168,11 +172,12 @@
             "js": "const [names] = os.readdir('/data')\nconsole.log(JSON.stringify(names.filter((n) => n[0] !== '.').sort()))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "['inner', 'top.txt']\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "['inner', 'top.txt']\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "[\"inner\",\"top.txt\"]\n"
             }
           }
@@ -215,11 +220,12 @@
             "js": "const [names] = os.readdir('/data')\nconsole.log(JSON.stringify(names.filter((n) => n[0] !== '.').sort()))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "['inner', 'lnk', 'top.txt']\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "['inner', 'lnk', 'top.txt']\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "[\"inner\",\"lnk\",\"top.txt\"]\n"
             }
           }
@@ -276,11 +282,12 @@
             "js": "console.log((os.stat('/data/inner')[0].mode & os.S_IFMT) === os.S_IFDIR)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "True\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "True\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "true\n"
             }
           }
@@ -334,11 +341,12 @@
             "js": "const [st, e] = os.stat('/parent')\nconst [names] = os.readdir('/parent')\nconsole.log(e, (st.mode & os.S_IFMT).toString(8), JSON.stringify(names.filter((n) => n[0] !== '.').sort()))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "True True 0o40000 ['child']\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "True True 0o40000 ['child']\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "0 40000 [\"child\"]\n"
             }
           }
@@ -349,16 +357,22 @@
             "js": "console.log(std.open('/parent/new.txt', 'w') === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n",
-            "ops_absent": [
-              "create /parent/new.txt"
-            ]
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n",
+              "ops_absent": [
+                "create /parent/new.txt"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /parent/new.txt"
+              ]
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "refused\n"
-            },
             "pyodide": {
               "stdout": "opened\n"
             }
@@ -376,13 +390,16 @@
             "js": "const [st, e] = os.stat('/alias')\nconst [names] = os.readdir('/')\nconsole.log(e, (st.mode & os.S_IFMT) === os.S_IFREG, JSON.stringify(names.filter((n) => n === 'alias' || n === 'parent').sort()), std.open('/alias', 'r').readAsString())"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "True ['alias', 'parent'] a\n"
+            "python": {
+              "exit": 0,
+              "stdout": "True ['alias', 'parent'] a\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 true [\"alias\",\"parent\"] a\n\n"
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "0 true [\"alias\",\"parent\"] a\n\n"
-            },
             "pyodide": {
               "exit": 1,
               "stdout": "",

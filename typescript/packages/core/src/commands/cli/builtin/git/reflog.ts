@@ -19,7 +19,7 @@ import type { CLIInvocation } from '../../types.ts'
 import { GitError } from './errors.ts'
 import { resolveCommit } from './revparse.ts'
 import { opened } from './session.ts'
-import { fatal, maybeBool } from './util.ts'
+import { checkOperands, fatal, maybeBool } from './util.ts'
 import { readOptional, under, writeFile } from './io.ts'
 import { HEAD } from './constants.ts'
 import { isBare } from './discover.ts'
@@ -186,8 +186,9 @@ async function namedLog(
 export async function reflog(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
-    const repo = await opened(fl, inv.doors ?? {})
     const texts = inv.texts[0] === 'show' ? inv.texts.slice(1) : inv.texts
+    checkOperands(inv, texts)
+    const repo = await opened(fl, inv.doors ?? {})
     const revision = texts[0] ?? HEAD
     await resolveCommit(repo, revision)
     const [name, data] = await namedLog(repo.dispatch, repo.location, revision)

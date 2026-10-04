@@ -15,6 +15,7 @@
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
+import { KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { applyOpLimit, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { dispatchStat, dotRefusal, walkSpelling } from '../../commands/builtin/utils/paths.ts'
@@ -81,6 +82,7 @@ import {
   LINK_ENTRY_OPS,
   NAMESPACE_TABLE_OPS,
   POLICY_WRITE_OPS,
+  SERIAL_WRITE_OPS,
   SETATTR_KEYS,
   XATTR_OPS,
 } from './constants.ts'
@@ -188,6 +190,16 @@ function memoryAnswered(report: OpReport | undefined, moved: number | null = nul
   report?.served(VFSName.RAM, moved)
 }
 
+/**
+ * Stamp the caller's report: the owning mount answered. A report memory
+ * already stamped (a namespace answer for a missing path) keeps that.
+ * Mirrors Python's `_served`.
+ */
+function served(report: OpReport | undefined, result: unknown): void {
+  if (report?.completed === true) return
+  report?.served(null, result instanceof Uint8Array ? result.byteLength : null)
+}
+
 /** The door's link follow of one path, the final name too (`last`) or
  * only the names above it, with a loop thrown as ELOOP rather than the
  * namespace's CycleError. */
@@ -215,6 +227,9 @@ export class Dispatcher {
   // op can touch a mount, and FUSE and the op facade reach here
   // without passing Workspace.dispatch.
   private readonly drift: DriftQueue | null
+  private readonly writers = new KeyLock()
+  private readonly stores = new WeakMap<BaseVFS, number>()
+  private storeCount = 0
   readonly reconciler: Reconciler
 
   constructor(
@@ -564,31 +579,52 @@ export class Dispatcher {
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
     try {
-      const run = (opKwargs: OpKwargs) =>
+      const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
         mount.use(async () => {
           const answer = await runWithMountContext(
             () =>
-              runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
-                runWithTimeout(
-                  Promise.resolve(
-                    opName === 'setattr'
-                      ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                      : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
-                  ),
-                  opTimeout,
-                  opName,
-                ),
-              ),
+              runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () => {
+                const call = Promise.resolve(
+                  opName === 'setattr'
+                    ? this.applySetattr(mount, vfs, scope, p, opKwargs)
+                    : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
+                )
+                onCall?.(call)
+                return runWithTimeout(call, opTimeout, opName)
+              }),
             mount.mountId,
           )
           return wrapOpStream(answer, mount.mountId, mount.activity)
         })
-      if (filler === null) {
-        result = await run(fullKwargs)
-      } else {
+      if (filler !== null) {
         const kept = await filler.fill(p, () => run(wholeRead(fullKwargs)))
         result =
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)
+      } else if (SERIAL_WRITE_OPS.has(opName)) {
+        // Held by the store's own object, so one store mounted twice is one
+        // file, and a rename holds both of its names, taken in one order so
+        // two renames between the same pair cannot deadlock. What the write
+        // changes beside the store (caches, the node table's links and
+        // attributes) changes under the same hold: a chain of renames
+        // finishing out of order would move one name's attributes onto
+        // another.
+        const prefix = rstripSlash(mountPrefix)
+        const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
+          .map((name) => `${String(this.storeId(vfs))}:${mountKey(name, prefix)}`)
+          .sort(compareCodePoints)
+        result = await this.holdWrite(
+          keys,
+          opTimeout,
+          opName,
+          `${opName} ${p.virtual}`,
+          (onCall) => run(fullKwargs, onCall),
+          async (value) => {
+            served(report, value)
+            await this.settleWrite(opName, p, renameDst)
+          },
+        )
+      } else {
+        result = await run(fullKwargs)
       }
     } catch (err) {
       const code = (err as { code?: string }).code
@@ -609,60 +645,15 @@ export class Dispatcher {
     // The op ran, whatever invalidation, the post gate, or an output
     // cap do next: stamped here so a failure in any of them cannot
     // erase a transfer the backend already made.
-    if (!report?.completed) {
-      report?.served(null, result instanceof Uint8Array ? result.byteLength : null)
-    }
+    served(report, result)
     if (opName === 'readdir' && Array.isArray(result)) {
       result = visibleEntries(
         mergeReaddir(result, this.namespace.mountPrefixes(), this.namespace, p.virtual),
         p.virtual,
       )
     }
-    if (DISPATCH_WRITE_OPS.has(opName)) {
-      const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
-      await this.invalidateAfterWriteByPath(p.virtual, observed)
-      if (opName === 'unlink' || opName === 'rmdir') {
-        // The name no longer holds that file, so what was set on it
-        // (overlay mode and owner, extended attributes) goes with it, as
-        // the shell's rm already drops it: a file created there next
-        // starts bare on every surface.
-        await this.namespace.dropOverlay(p.virtual)
-        if (opName === 'rmdir') {
-          // The link check ran before the backend was asked, so a visible
-          // link below now was created since: it is younger than this
-          // rmdir, lands after it in the serial order (a link synthesizes
-          // its parents), and the purge taking the directory's hidden nodes
-          // must not take it too.
-          const arrived = new Set<string>()
-          for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
-            if (pathAllowed(link)) arrived.add(link)
-          }
-          await this.namespace.purgeUnder(p.virtual, arrived)
-        }
-      }
-      if (renameDst !== null) {
-        await this.invalidateAfterRenameByPath(p.virtual, renameDst.virtual)
-        // rename(2) replaces the destination, so a node the table holds
-        // at that name does not survive the move. A link left there
-        // shadowed the file that had just landed: the listing showed the
-        // new file, every read followed the old link, and the moved
-        // content was reachable under no name at all.
-        await this.namespace.unlink(renameDst.virtual)
-        // The subtree moves with it, and only the node table can move the
-        // part of it no backend holds: a link or an attr overlay below the
-        // source is addressed by absolute path, so it would otherwise stay
-        // behind at a name the rename has emptied. The destination's own
-        // subtree is replaced first, as rename(2) replaces what it lands on.
-        await this.namespace.purgeUnder(renameDst.virtual)
-        // The node at the source itself is not part of the subtree below it,
-        // so re-anchoring that subtree leaves it behind: the mode or ownership
-        // a chmod recorded stayed at the emptied name, never reached the
-        // landing, and was inherited by whatever was created at the old name
-        // next. Shell mv compensates for this in its own prepare step; a verb
-        // reaching the dispatcher directly, as git mv does, had nothing to.
-        await this.namespace.rename(p.virtual, renameDst.virtual)
-        await this.namespace.renameUnder(p.virtual, renameDst.virtual)
-      }
+    if (DISPATCH_WRITE_OPS.has(opName) && !SERIAL_WRITE_OPS.has(opName)) {
+      await this.settleWrite(opName, p, renameDst)
     }
     if (opName === 'stat' && result instanceof FileStat) {
       result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
@@ -675,6 +666,164 @@ export class Dispatcher {
       result = await applyOpLimit(result, bound)
     }
     return [result, new IOResult()]
+  }
+
+  /**
+   * Run one write with its names held, one writer at a time per name.
+   *
+   * The caller's timeout covers its wait for the hold and the store's
+   * call, not `after` (the bookkeeping), which it then waits for. A writer
+   * that gives up while queued lets go of any name it already holds and
+   * never runs. One that gives up after its call started keeps the hold
+   * until the store's own call settles, since a timeout cannot stop the
+   * call and a timed-out pwrite still writes back what it read; the
+   * mount's activity ends at the timeout as for any op, so an unmount
+   * does not wait on it. `after` runs only for a caller still waiting: a
+   * call that lands after its timeout changes nothing beside the store, as
+   * every timed-out op, since by then the names it touched may belong to
+   * other mounts; a failure nobody waits for any more is reported.
+   *
+   * Args:
+   *   keys: the names to hold, in the one order every writer takes them.
+   *   timeout: the op's timeout in seconds, or null for none.
+   *   opName: the op, for the timeout's error.
+   *   label: the op and path, for a late failure's report.
+   *   call: runs the op, handing over the store's own call once it starts.
+   *   after: the bookkeeping, run while the caller still waits.
+   */
+  private async holdWrite(
+    keys: readonly string[],
+    timeout: number | null,
+    opName: string,
+    label: string,
+    call: (onCall: (storeCall: Promise<unknown>) => void) => Promise<unknown>,
+    after: (value: unknown) => Promise<void>,
+  ): Promise<unknown> {
+    const turn = { entered: false, abandoned: false, late: false, started: false, settled: false }
+    let giveUp = (): void => undefined
+    const gaveUp = new Promise<void>((resolve) => {
+      giveUp = resolve
+    })
+    let answer: Promise<unknown> = Promise.resolve()
+    let finished: Promise<void> = Promise.resolve()
+    const entered = new Promise<void>((enter) => {
+      const held = async (): Promise<void> => {
+        if (turn.abandoned) return
+        turn.entered = true
+        const started: { call?: Promise<unknown> } = {}
+        answer = call((storeCall) => {
+          started.call = storeCall
+          turn.started = true
+          storeCall.then(
+            () => {
+              turn.settled = true
+            },
+            () => {
+              turn.settled = true
+            },
+          )
+        })
+        // The store's own call once it started, else the run's answer: a
+        // timeout answers the caller, not the store.
+        const stored = answer.then(
+          () => started.call ?? answer,
+          () => started.call ?? answer,
+        )
+        finished = stored.then(async (value) => {
+          if (!turn.late) await after(value)
+        })
+        enter()
+        await finished.catch((err: unknown) => {
+          if (turn.late) console.warn(`${label} failed after its timeout: ${String(err)}`)
+        })
+      }
+      void keys.reduceRight<() => Promise<void>>(
+        (inner, key) => () => this.writers.withLock(key, () => Promise.race([inner(), gaveUp])),
+        held,
+      )()
+    })
+    let value: unknown
+    try {
+      value = await runWithTimeout(
+        entered.then(() => answer),
+        timeout,
+        opName,
+      )
+    } catch (err) {
+      if (turn.started && !turn.settled) turn.late = true
+      if (!turn.entered) {
+        turn.abandoned = true
+        giveUp()
+      }
+      throw err
+    }
+    await finished
+    return value
+  }
+
+  /**
+   * What a write changes beside the store: the caches above the path, and
+   * the node table's links and attributes at its names. Mirrors Python's
+   * Dispatcher._settle_write.
+   */
+  private async settleWrite(
+    opName: string,
+    p: PathSpec,
+    renameDst: PathSpec | null,
+  ): Promise<void> {
+    const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
+    await this.invalidateAfterWriteByPath(p.virtual, observed)
+    if (opName === 'unlink' || opName === 'rmdir') {
+      // The name no longer holds that file, so what was set on it
+      // (overlay mode and owner, extended attributes) goes with it, as
+      // the shell's rm already drops it: a file created there next
+      // starts bare on every surface.
+      await this.namespace.dropOverlay(p.virtual)
+      if (opName === 'rmdir') {
+        // The link check ran before the backend was asked, so a visible
+        // link below now was created since: it is younger than this
+        // rmdir, lands after it in the serial order (a link synthesizes
+        // its parents), and the purge taking the directory's hidden nodes
+        // must not take it too.
+        const arrived = new Set<string>()
+        for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
+          if (pathAllowed(link)) arrived.add(link)
+        }
+        await this.namespace.purgeUnder(p.virtual, arrived)
+      }
+    }
+    if (renameDst !== null) {
+      await this.invalidateAfterRenameByPath(p.virtual, renameDst.virtual)
+      // rename(2) replaces the destination, so a node the table holds
+      // at that name does not survive the move. A link left there
+      // shadowed the file that had just landed: the listing showed the
+      // new file, every read followed the old link, and the moved
+      // content was reachable under no name at all.
+      await this.namespace.unlink(renameDst.virtual)
+      // The subtree moves with it, and only the node table can move the
+      // part of it no backend holds: a link or an attr overlay below the
+      // source is addressed by absolute path, so it would otherwise stay
+      // behind at a name the rename has emptied. The destination's own
+      // subtree is replaced first, as rename(2) replaces what it lands on.
+      await this.namespace.purgeUnder(renameDst.virtual)
+      // The node at the source itself is not part of the subtree below it,
+      // so re-anchoring that subtree leaves it behind: the mode or ownership
+      // a chmod recorded stayed at the emptied name, never reached the
+      // landing, and was inherited by whatever was created at the old name
+      // next. Shell mv compensates for this in its own prepare step; a verb
+      // reaching the dispatcher directly, as git mv does, had nothing to.
+      await this.namespace.rename(p.virtual, renameDst.virtual)
+      await this.namespace.renameUnder(p.virtual, renameDst.virtual)
+    }
+  }
+
+  /** A number naming one store object, the same for every mount of it. */
+  private storeId(vfs: BaseVFS): number {
+    const known = this.stores.get(vfs)
+    if (known !== undefined) return known
+    this.storeCount += 1
+    this.stores.set(vfs, this.storeCount)
+    return this.storeCount
   }
 
   /**

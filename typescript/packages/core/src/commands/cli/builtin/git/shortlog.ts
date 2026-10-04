@@ -4,18 +4,19 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { GitError } from './errors.ts'
+import { GitError, ShortlogOptionError } from './errors.ts'
 import { subject } from './format.ts'
 import { parseFlags, refCommits, select } from './history.ts'
 import { opened } from './session.ts'
 import { splitRevisions } from './revparse.ts'
-import { checkOperands, escaped, fatal } from './util.ts'
+import { fatal, optionOperand, verbUsage } from './util.ts'
 
 /** Summarize repository history by author. */
 export async function shortlog(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands(inv.texts, undefined, escaped(inv.argv))
+    const word = optionOperand(inv, inv.texts)
+    if (word !== null) throw new ShortlogOptionError(word, verbUsage(inv))
     const repo = await opened(fl, inv.doors ?? {})
     const mailmap = await loadMailmap(repo.dispatch, repo.location)
     const flags = parseFlags(fl)

@@ -386,9 +386,12 @@ async def handle_cli(
 
     refusal = option_error(prog, parsed)
     msg: bytes | None = None
+    shown: bytes | None = None
     code = 0
     if refusal is not None:
-        msg, code = leaf_refusal(style, refusal[0], parsed)
+        msg, code, shown = leaf_refusal(
+            style, refusal[0], parsed, " ".join(result.path), leaf
+        )
     elif parsed.missing_required_operands and style is UsageStyle.CLAP:
         # Only clap names the empty slots. Under every other style a
         # required operand stays the leaf's own business, worded by the
@@ -402,11 +405,11 @@ async def handle_cli(
         )
         code = CLAP_EXIT
     if msg is not None:
-        refusal_io = IOResult(exit_code=code, stderr=msg)
+        refusal_io = IOResult(exit_code=code, stderr=msg or None)
         refusal_node = ExecutionNode(
             command=cmd_str, exit_code=code, stderr=msg
         )
-        return None, refusal_io, refusal_node
+        return shown, refusal_io, refusal_node
 
     # Group flags merge into the one bag: ancestor/descendant collisions
     # are a build-time CLISpec error, so a group flag can never shadow a

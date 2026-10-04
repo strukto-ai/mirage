@@ -21,7 +21,8 @@ import { resolvePath } from '../../utils/path.ts'
 import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
-import { CLAP_EXIT, USAGE_EXIT } from './constants.ts'
+import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
+import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
 
 const ENC = new TextEncoder()
 
@@ -281,16 +282,18 @@ function listedNode(node: CLISpec): CommandSpec {
 }
 
 /**
- * Group-level option refusal, in the dialect the CLI declares. git answers
- * with the message and the whole usage listing and exits 129. clap answers
+ * Group-level option refusal, in the dialect the CLI declares. git answers an
+ * unknown option in parse-options' words and its usage block (on stdout for
+ * `-h`), and the bare `git` with its one synopsis; both exit 129. The bare
+ * `git -h` prints the help. clap answers
  * with the message, the one usage line and a footer pointing at --help, and
  * exits 2, at every level of the tree; the exit code is the group's just as
  * much as the leaf's, so reading the style here is what keeps `ntn --bogus`
  * and `ntn pages get --bogus` from disagreeing.
  *
  * `token` is the offending token when the refusal is an unrecognized option,
- * which clap words its own way; it is absent for the refusals whose wording
- * both dialects share.
+ * which clap and git word their own way; it is absent for the refusals whose
+ * wording the dialects share.
  */
 function usageError(
   name: string,
@@ -305,6 +308,28 @@ function usageError(
       output: ENC.encode(clapGroupRefusal(name, listedNode(node), rowsOf(node), first)),
       stream: 'stderr',
       exitCode: CLAP_EXIT,
+    })
+  }
+  if (style === UsageStyle.GIT && token !== undefined) {
+    const space = name.indexOf(' ')
+    const path = space === -1 ? '' : name.slice(space + 1)
+    // `git -h` is git's own help, as `git --help` is, and exits 0.
+    if (path === '' && token === HELP_SWITCH) {
+      return new WalkResult({ output: ENC.encode(nodeHelp(name, node, style)) })
+    }
+    if (path === '') {
+      const synopsis = GIT_SYNOPSES.get('')?.[0] ?? ''
+      return new WalkResult({
+        output: ENC.encode(`unknown option: ${token}\nusage: ${synopsis}\n`),
+        stream: 'stderr',
+        exitCode: USAGE_EXIT,
+      })
+    }
+    const [shown, refused] = gitOptionRefusal(token, path, node)
+    return new WalkResult({
+      output: ENC.encode(shown !== '' ? shown : refused),
+      stream: shown !== '' ? 'stdout' : 'stderr',
+      exitCode: USAGE_EXIT,
     })
   }
   return new WalkResult({
@@ -571,7 +596,7 @@ export function walk(
       }
       if (!optionsEnded && token === '--') {
         if (style === UsageStyle.GIT && path.length === 0)
-          return usageError(name, node, 'unknown option: --', style)
+          return usageError(name, node, 'unknown option: --', style, token)
         optionsEnded = true
         i += 1
         continue
@@ -627,7 +652,13 @@ export function walk(
           }
           return new WalkResult({ output: ENC.encode(nodeHelp(name, node, style)) })
         } else {
-          return usageError(name, node, `unknown option: ${spelling}`, style, spelling)
+          return usageError(
+            name,
+            node,
+            `unknown option: ${spelling}`,
+            style,
+            style === UsageStyle.GIT ? token : spelling,
+          )
         }
         i += 1
         continue

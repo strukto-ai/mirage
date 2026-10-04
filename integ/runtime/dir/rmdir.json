@@ -48,11 +48,12 @@
             "js": "console.log(os.remove('/data/d') !== 0)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "OSError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "OSError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "true\n"
             }
           }
@@ -70,11 +71,12 @@
             "js": "console.log(os.remove('/data/d/a.txt'), os.remove('/data/d'), os.stat('/data/d')[1])"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "False\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "False\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "0 0 44\n"
             }
           }
@@ -85,22 +87,30 @@
             "js": "console.log(os.remove('/data/gone'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "-44\n"
             }
           }
         },
         {
           "program": {
-            "python": "import os, shutil\nshutil.rmtree('/data/e')\nprint(os.path.exists('/data/e'))"
+            "python": "import os, shutil\nshutil.rmtree('/data/e')\nprint(os.path.exists('/data/e'))",
+            "js": "for (const name of os.readdir('/data/e')[0]) {\n  if (name !== '.' && name !== '..') os.remove('/data/e/' + name)\n}\nconsole.log(os.remove('/data/e'), os.stat('/data/e')[1])"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "False\n"
+            "python": {
+              "exit": 0,
+              "stdout": "False\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 44\n"
+            }
           },
           "expect_on": {
             "monty": {
@@ -118,9 +128,6 @@
           },
           "expect_on": {
             "monty": {
-              "stdout": "e\n"
-            },
-            "quickjs": {
               "stdout": "e\n"
             }
           }

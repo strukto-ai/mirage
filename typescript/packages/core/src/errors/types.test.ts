@@ -37,7 +37,6 @@ describe('the condition vocabulary', () => {
         'EPERM',
         'ENOTEMPTY',
         'EXDEV',
-        'CROSS_MOUNT',
         'ENOTSUP',
         'ELOOP',
         'EINVAL',

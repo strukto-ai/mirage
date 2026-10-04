@@ -47,6 +47,7 @@ from mirage.shell.descriptors import (
 )
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
@@ -60,7 +61,7 @@ from mirage.workspace.executor.builtins.exec.constants import (
     TO_STDOUT,
 )
 from mirage.workspace.executor.control import UNWINDING, carried, take_stderr
-from mirage.workspace.executor.create import write_description
+from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.jobs import drained, pump
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -277,9 +278,18 @@ async def handle_redirect(
     """Apply ordered descriptor bindings for one command and restore them.
 
     Descriptors alias shared file descriptions, including read/write offsets.
-    Output opens remain deferred until admission completes: a refused command
-    must not truncate its redirect targets. Consequently an ordinary output
-    open can still fail after the command runs, unlike Bash's open-before-exec.
+    A target opened for writing is emptied before the command runs, as
+    bash's open-before-exec does, so ``cat f > f`` reads an empty file and
+    ``ls > out`` lists ``out``; a target that cannot be opened stops the
+    command before it runs. A ``>>`` target is opened then too, created
+    when it is missing, so ``ls >> out`` lists ``out``. A simple command
+    opens its targets only once dispatch admits it, so a command the gate
+    refuses leaves them as they were. Two opens stay out of bash's order:
+    an input that cannot be opened stops the line before any target is
+    opened, where bash has emptied the ones written before it, because
+    the gate has not judged the line yet; and an input that reaches a
+    ``>`` target only through a symlink is read before the target is
+    emptied, since the paths are compared as typed.
 
     Args:
         execute_node (Callable): executor for the redirected command.
@@ -338,7 +348,17 @@ async def handle_redirect(
         if descriptor.identity == CLOSED:
             closed.add(fd)
     files: list[FileDescription] = []
-    for r in redirects:
+    # bash empties a write target as it opens it, so the command finds
+    # nothing to read in the same file through an input redirect.
+    truncated: dict[str, int] = {}
+    for at, r in enumerate(redirects):
+        if (
+            r.kind in (RedirectKind.STDOUT, RedirectKind.STDERR)
+            and not r.append
+            and not isinstance(r.target, int)
+        ):
+            truncated.setdefault(_ensure_scope(r.target).virtual, at)
+    for at, r in enumerate(redirects):
         if r.kind == RedirectKind.AMBIGUOUS:
             return _shell_failure(
                 encode_text(f"{_redirect_word(r)}: ambiguous redirect\n")
@@ -381,6 +401,13 @@ async def handle_redirect(
             continue
         scope = _ensure_scope(r.target)
         if r.kind in (RedirectKind.STDIN, RedirectKind.READWRITE):
+            # Opened after the target was emptied there is nothing to
+            # read; opened before, the file must still be there.
+            emptied_at = (
+                truncated.get(scope.virtual)
+                if r.kind == RedirectKind.STDIN
+                else None
+            )
             try:
                 if (
                     scope.virtual == "/dev/stdin"
@@ -388,14 +415,21 @@ async def handle_redirect(
                 ):
                     inputs[r.fd] = stdin
                     continue
-                data, _ = await dispatch("read", scope)
+                if emptied_at is not None and emptied_at < at:
+                    data = b""
+                else:
+                    data, _ = await dispatch("read", scope)
             except FileNotFoundError as exc:
                 if r.kind != RedirectKind.READWRITE:
                     return _redirect_failure(scope, exc)
                 data = b""
             except FS_ERRORS as exc:
                 return _redirect_failure(scope, exc)
-            data = await materialize(data) or b""
+            data = (
+                b""
+                if emptied_at is not None
+                else await materialize(data) or b""
+            )
             if r.kind == RedirectKind.READWRITE:
                 file = FileDescription(scope, append=True)
                 file.source = FileInput(file, data)
@@ -417,6 +451,27 @@ async def handle_redirect(
     refusal = await _open_refusal(dispatch, session, redirects)
     if refusal is not None:
         return refusal
+    opening = [file for file in files if file.source is None]
+    opened: set[int] = set()
+    failure: list[tuple[PathSpec, OSError]] = []
+
+    async def open_targets() -> bool:
+        """Open the statement's write targets, as bash's opens do before
+        the command runs: a ``>`` one emptied, a ``>>`` one created when
+        it is missing; False, the failure kept, when one cannot be
+        opened."""
+        while opening:
+            file = opening.pop(0)
+            try:
+                await create_file(
+                    dispatch, session, file.scope, b"", append=file.append
+                )
+            except FS_ERRORS as exc:
+                failure.append((file.scope, exc))
+                return False
+            opened.add(id(file))
+        return True
+
     recorder = Recorder()
     for file in files:
         if file.source is None:
@@ -442,8 +497,14 @@ async def handle_redirect(
         if not isinstance(r.target, int)
         and r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING)
     )
+    # A simple command opens its targets once dispatch has admitted it
+    # (see set_redirect_paths); a compound one has no gate of its own and
+    # opens them here, before its body runs.
+    simple = command is not None and command.type == NT.COMMAND
     token = (
-        set_redirect_paths(command.id, targets)
+        set_redirect_paths(
+            command.id, targets, open_targets if simple else None
+        )
         if command is not None
         else None
     )
@@ -463,6 +524,8 @@ async def handle_redirect(
         if command is None:
             if capture_input and not isinstance(inputs[0], _Unreadable):
                 await pump(recorder, Channel.STDOUT, inputs[0])
+            io = IOResult()
+        elif not simple and not await open_targets():
             io = IOResult()
         else:
             _, io, exec_node = await drained(
@@ -511,6 +574,8 @@ async def handle_redirect(
     # written (`route.release()`).
     route.recorder = Recorder()
     try:
+        if failure:
+            return _redirect_failure(*failure[0])
         chunks = recorder.chunks
         if refused:
             outputs = {0: _CLOSED, 1: _TO_STDOUT, 2: _TO_STDERR}
@@ -560,7 +625,10 @@ async def handle_redirect(
                         if unique
                         else b""
                     )
-                    await write_description(dispatch, session, file, data)
+                    if data or id(file) not in opened:
+                        await write_description(dispatch, session, file, data)
+                    else:
+                        file.opened = True
                     if unique:
                         consumed.add(id(file))
                         if data:

@@ -33,15 +33,19 @@
             "js": "const f = std.open('/data/nope.txt', 'r')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n",
-            "ops_absent": [
-              "create /data/nope.txt"
-            ]
-          },
-          "expect_on": {
-            "quickjs": {
-              "stdout": "refused\n"
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n",
+              "ops_absent": [
+                "create /data/nope.txt"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /data/nope.txt"
+              ]
             }
           }
         }
