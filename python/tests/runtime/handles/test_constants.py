@@ -20,11 +20,10 @@ def test_every_base_spelling_draws_from_the_mode_alphabet():
         assert base <= MODE_CHARS
 
 
-def test_the_bases_are_cpythons_four_plus_c_fopens_wx():
+def test_the_bases_are_cpythons_four():
     assert set(MODE_BASES) == {
         frozenset("r"),
         frozenset("w"),
         frozenset("a"),
         frozenset("x"),
-        frozenset("wx"),
     }

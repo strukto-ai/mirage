@@ -13,6 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { WorkspaceBinding } from '../../binding.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { MountMode } from '../../../types.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { describe, expect, it } from 'vitest'
 import { QuickJsRuntime } from './runtime.ts'
 import { PrefixResolver } from '../../resolver.ts'
@@ -84,5 +88,37 @@ describe('quickjs std.open reads stat failures', () => {
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('opened\n')
     expect(bridge.ops).toContain('create')
+  }, 120_000)
+})
+
+describe('quickjs gives the event loop a turn', () => {
+  it('lets a timer run while a guest loops over files on a RAM mount', async () => {
+    // A RAM mount answers every call in microtasks alone, so without a
+    // turn a guest looping over files held the loop until it ended, and
+    // another session's I/O and timers waited the whole run.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.shell('echo hi > /data/f.txt')
+      let last = performance.now()
+      let longest = 0
+      const timer = setInterval(() => {
+        const now = performance.now()
+        longest = Math.max(longest, now - last)
+        last = now
+      }, 0)
+      const result = await ws.shell(
+        "node -e \"const end = Date.now() + 400; while (Date.now() < end) std.open('/data/f.txt', 'r').close()\"",
+      )
+      clearInterval(timer)
+      longest = Math.max(longest, performance.now() - last)
+      expect(result.exitCode).toBe(0)
+      expect(longest).toBeLessThan(200)
+    } finally {
+      await ws.close()
+    }
   }, 120_000)
 })

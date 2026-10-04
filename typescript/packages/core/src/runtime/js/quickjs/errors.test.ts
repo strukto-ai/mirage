@@ -37,7 +37,6 @@ describe('the preview1 wire table', () => {
       EPERM: 63,
       ENOTEMPTY: 55,
       EXDEV: 75,
-      CROSS_MOUNT: 75,
       ENOTSUP: 58,
       ELOOP: 32,
       EINVAL: 28,

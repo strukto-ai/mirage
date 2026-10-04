@@ -29,9 +29,6 @@ WASI: dict[FsCondition, int] = {
     FsCondition.EPERM: 63,
     FsCondition.ENOTEMPTY: 55,
     FsCondition.EXDEV: 75,
-    # A rename or link between two mounts is two file systems, as a
-    # host answers across two preopens on different devices.
-    FsCondition.CROSS_MOUNT: 75,
     FsCondition.ENOTSUP: 58,
     FsCondition.ELOOP: 32,
     FsCondition.EINVAL: 28,

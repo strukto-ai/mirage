@@ -46,6 +46,7 @@ describe('errnoError', () => {
     expect((errnoError(HOST, CODES, 'EPERM') as FakeErrnoError).errno).toBe(63)
     expect((errnoError(HOST, CODES, 'EINVAL') as FakeErrnoError).errno).toBe(28)
     expect((errnoError(HOST, CODES, 'EIO') as FakeErrnoError).errno).toBe(29)
+    expect((errnoError(HOST, CODES, 'EXDEV') as FakeErrnoError).errno).toBe(75)
   })
 
   it('builds the constructor the kernel recognizes, not a bare Error', () => {
@@ -55,9 +56,10 @@ describe('errnoError', () => {
 
 describe('the shared vocabulary', () => {
   it('keys the lookup on the condition, aliases included', () => {
-    // CROSS_MOUNT has no Emscripten name of its own: the interpreter
-    // knows the condition as EXDEV, and the alias row says so.
-    expect((errnoError(HOST, CODES, 'CROSS_MOUNT') as FakeErrnoError).errno).toBe(75)
+    // NO_XATTR has no Emscripten name of its own: the interpreter knows
+    // the condition as ENODATA, and the alias row says so.
+    const codes = { ...CODES, ENODATA: 61 }
+    expect((errnoError(HOST, codes, 'NO_XATTR') as FakeErrnoError).errno).toBe(61)
   })
 
   it('falls back to EIO for a key this interpreter does not define', () => {

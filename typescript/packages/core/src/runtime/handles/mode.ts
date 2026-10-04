@@ -20,9 +20,9 @@ const INVALID_CHAR = new RegExp(`[^${MODE_CHARS}]`)
 /**
  * What an fopen-style mode string says about a handle.
  *
- * One vocabulary for every dialect that opens by mode: quickjs's
- * `std.open` passes these strings verbatim, and Python's preview1
- * oflags/rights/fdflags translate onto the same facts.
+ * One vocabulary for every dialect that opens by mode: monty's open
+ * passes a CPython mode string, and quickjs's `std.open` and Python's
+ * preview1 oflags/rights/fdflags translate onto the same facts.
  */
 export interface OpenMode {
   /** The handle may read (r, +). */
@@ -44,17 +44,13 @@ export interface OpenMode {
 /**
  * Read an fopen-style mode string into its facts, validating it.
  *
- * The rule is CPython's, the stricter of the two parsers this
- * replaced — one base, at most one each of `+`, `b`, `t`, and never
- * `b` together with `t` — widened by one C-dialect spelling: `wx`,
- * fopen's exclusive create, which CPython spells as a bare `x`. Both
- * dialects open by mode through this one parser, so it accepts the
- * union. A guest engine that tolerates looser spellings still (C
- * fopen reads `rr` as `r`) renders this refusal in its own dialect at
- * its own boundary.
+ * The rule is CPython's: one base, at most one each of `+`, `b`, `t`,
+ * and never `b` together with `t`. A guest that opens in C's dialect
+ * (QuickJS's std.open: fopen reads `rr` as `r` and spells exclusive
+ * creation `wx`) reads its own mode and builds these facts itself.
  *
  * Args:
- *   mode: the mode as the caller spelled it (`r`, `w+b`, `a`, `wx`, ...).
+ *   mode: the mode as the caller spelled it (`r`, `w+b`, `a`, `x`, ...).
  *
  * Throws:
  *   Error: the mode does not parse, in CPython's own wording.

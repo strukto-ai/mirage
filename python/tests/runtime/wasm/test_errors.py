@@ -92,7 +92,6 @@ def test_preview1_numbering_is_the_wasi_libc_table():
         FsCondition.EPERM: 63,
         FsCondition.ENOTEMPTY: 55,
         FsCondition.EXDEV: 75,
-        FsCondition.CROSS_MOUNT: 75,
         FsCondition.ENOTSUP: 58,
         FsCondition.ELOOP: 32,
         FsCondition.EINVAL: 28,

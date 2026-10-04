@@ -19,7 +19,8 @@ import { WASI, errnoFor } from './errors.ts'
 import { readdir } from './list.ts'
 import { stat } from './stat.ts'
 import { epochToIso } from '../../../utils/dates.ts'
-import { FileHandle, FileTable, parseMode, type OpenMode } from '../../handles/index.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
+import { FileHandle, FileTable, type OpenMode } from '../../handles/index.ts'
 import { applyOpen } from '../../open.ts'
 import type { RuntimeVFS, VFSStat } from '../../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
@@ -101,11 +102,20 @@ export function installQuickJsFs(
     return path === '' ? '' : resolvePath(path, cwd.virtual)
   }
 
+  // The guest runs on the host's event loop, and a call a RAM mount
+  // answers settles without ever leaving the microtask queue, so a guest
+  // looping over files would hold the loop until it ended: another
+  // session's I/O and timers wait. Every async call gives the loop a turn
+  // once its time slice is spent.
+  const budget = new YieldBudget()
   const defineAsync = (
     name: string,
     fn: (...args: QuickJSHandle[]) => Promise<QuickJSHandle>,
   ): void => {
-    const handle = ctx.newAsyncifiedFunction(name, fn)
+    const handle = ctx.newAsyncifiedFunction(name, async (...args) => {
+      await budget.run()
+      return fn(...args)
+    })
     ctx.setProp(ctx.global, name, handle)
     handle.dispose()
   }
@@ -136,18 +146,27 @@ export function installQuickJsFs(
 
   defineAsync('__mirage_open', async (pathH, modeH) => {
     const path = absolute(pathH)
-    // The engine validates the mode before touching the filesystem
-    // (qjs-libc throws TypeError before any open); null tells the
-    // bootstrap to raise that refusal, since a host throw would not
-    // arrive typed. Any other refusal answers -errno, which the
-    // bootstrap hands to the guest's errorObj. The shared parser is stricter than qjs-libc's
-    // character scan ('rr' passes strspn but not CPython's one-base
-    // rule); the strict answer is the one both guests can agree on.
-    let mode: OpenMode
-    try {
-      mode = parseMode(ctx.getString(modeH))
-    } catch {
-      return ctx.null
+    // The mode as the real engine reads it: qjs-libc throws TypeError for
+    // a letter outside `rwa+bx` before any open (null tells the bootstrap
+    // to raise it, since a host throw would not arrive typed), and musl's
+    // fopen then reads only the first letter and whether `+` and `x`
+    // appear, so `rr` opens like `r`. Any other refusal answers -errno,
+    // which the bootstrap hands to the guest's errorObj.
+    const spelled = ctx.getString(modeH)
+    if (!/^[rwa+bx]*$/.test(spelled)) return ctx.null
+    // An empty mode passes musl's first-letter check (strchr finds the
+    // string's terminator) and opens for writing, creating the file.
+    const first = spelled.charAt(0)
+    if (first !== '' && !'rwa'.includes(first)) return ctx.newNumber(-WASI.EINVAL)
+    const plus = spelled.includes('+')
+    const mode: OpenMode = {
+      readable: plus || first === 'r',
+      writable: plus || first !== 'r',
+      truncate: first === 'w',
+      append: first === 'a',
+      create: first !== 'r',
+      exclusive: first !== 'r' && spelled.includes('x'),
+      binary: spelled.includes('b'),
     }
     if (vfs?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     // The open's effect lands through the mount at open, by the rule
@@ -336,8 +355,8 @@ export function installQuickJsFs(
     const src = absolute(srcH)
     const dst = absolute(dstH)
     if (vfs?.serves(src) !== true || !vfs.serves(dst)) return ctx.newNumber(-ENOENT)
-    // The door refuses a pair on different mounts (CROSS_MOUNT), which
-    // this engine numbers -75 (EXDEV), as the real engine does.
+    // The door refuses a pair on different mounts with EXDEV, which this
+    // engine numbers -75, as the real engine does.
     try {
       await vfs.rename(src, dst)
       return ctx.newNumber(0)

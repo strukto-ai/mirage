@@ -28,7 +28,7 @@ from mirage.utils.path import CycleError
 # base, FileNotFoundError before the errno lookup).
 CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
     (CycleError, FsCondition.ELOOP),
-    (CrossMountError, FsCondition.CROSS_MOUNT),
+    (CrossMountError, FsCondition.EXDEV),
     (OperationNotSupportedError, FsCondition.ENOTSUP),
     (NotImplementedError, FsCondition.ENOTSUP),
     (NotADirectoryError, FsCondition.ENOTDIR),
