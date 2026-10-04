@@ -618,21 +618,9 @@ export class Dispatcher {
           opName,
           `${opName} ${p.virtual}`,
           (onCall) => run(fullKwargs, onCall),
-          async (value, late) => {
-            // A call that lands after its timeout still owes the caches and
-            // the node table its change, but by then its mount may no longer
-            // own a name it touched (it was replaced, or another mount sits
-            // over a rename's destination): the node table changes only at
-            // the names it still owns.
-            const owned = (name: PathSpec | null): boolean =>
-              name === null || this.namespace.tryMountFor(name.virtual) === mount
-            if (!late) served(report, value)
-            await this.settleWrite(
-              opName,
-              p,
-              renameDst,
-              late ? { source: owned(p), target: owned(renameDst) } : undefined,
-            )
+          async (value) => {
+            served(report, value)
+            await this.settleWrite(opName, p, renameDst)
           },
         )
       } else {
@@ -690,9 +678,10 @@ export class Dispatcher {
    * until the store's own call settles, since a timeout cannot stop the
    * call and a timed-out pwrite still writes back what it read; the
    * mount's activity ends at the timeout as for any op, so an unmount
-   * does not wait on it. `after` runs once the store answers, told
-   * whether the caller already gave up, and a failure nobody waits for any
-   * more is reported.
+   * does not wait on it. `after` runs only for a caller still waiting: a
+   * call that lands after its timeout changes nothing beside the store, as
+   * every timed-out op, since by then the names it touched may belong to
+   * other mounts; a failure nobody waits for any more is reported.
    *
    * Args:
    *   keys: the names to hold, in the one order every writer takes them.
@@ -700,7 +689,7 @@ export class Dispatcher {
    *   opName: the op, for the timeout's error.
    *   label: the op and path, for a late failure's report.
    *   call: runs the op, handing over the store's own call once it starts.
-   *   after: the bookkeeping, told whether the caller already gave up.
+   *   after: the bookkeeping, run while the caller still waits.
    */
   private async holdWrite(
     keys: readonly string[],
@@ -708,7 +697,7 @@ export class Dispatcher {
     opName: string,
     label: string,
     call: (onCall: (storeCall: Promise<unknown>) => void) => Promise<unknown>,
-    after: (value: unknown, late: boolean) => Promise<void>,
+    after: (value: unknown) => Promise<void>,
   ): Promise<unknown> {
     const turn = { entered: false, abandoned: false, late: false, started: false, settled: false }
     let giveUp = (): void => undefined
@@ -740,7 +729,9 @@ export class Dispatcher {
           () => started.call ?? answer,
           () => started.call ?? answer,
         )
-        finished = stored.then((value) => after(value, turn.late))
+        finished = stored.then(async (value) => {
+          if (!turn.late) await after(value)
+        })
         enter()
         await finished.catch((err: unknown) => {
           if (turn.late) console.warn(`${label} failed after its timeout: ${String(err)}`)
@@ -774,22 +765,15 @@ export class Dispatcher {
    * What a write changes beside the store: the caches above the path, and
    * the node table's links and attributes at its names. Mirrors Python's
    * Dispatcher._settle_write.
-   *
-   * `owns` says which names the write's mount still owns, for a call that
-   * landed after its timeout: the caches are cleared for both names
-   * whatever owns them now, and the node table changes only at the names
-   * the mount still owns. Nodes a rename would move to a name another
-   * mount owns now go with the name the rename emptied.
    */
   private async settleWrite(
     opName: string,
     p: PathSpec,
     renameDst: PathSpec | null,
-    owns: { source: boolean; target: boolean } = { source: true, target: true },
   ): Promise<void> {
     const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
     await this.invalidateAfterWriteByPath(p.virtual, observed)
-    if (owns.source && (opName === 'unlink' || opName === 'rmdir')) {
+    if (opName === 'unlink' || opName === 'rmdir') {
       // The name no longer holds that file, so what was set on it
       // (overlay mode and owner, extended attributes) goes with it, as
       // the shell's rm already drops it: a file created there next
@@ -810,35 +794,26 @@ export class Dispatcher {
     }
     if (renameDst !== null) {
       await this.invalidateAfterRenameByPath(p.virtual, renameDst.virtual)
-      if (owns.target) {
-        // rename(2) replaces the destination, so a node the table holds
-        // at that name does not survive the move. A link left there
-        // shadowed the file that had just landed: the listing showed the
-        // new file, every read followed the old link, and the moved
-        // content was reachable under no name at all.
-        await this.namespace.unlink(renameDst.virtual)
-        // The subtree moves with it, and only the node table can move the
-        // part of it no backend holds: a link or an attr overlay below the
-        // source is addressed by absolute path, so it would otherwise stay
-        // behind at a name the rename has emptied. The destination's own
-        // subtree is replaced first, as rename(2) replaces what it lands
-        // on.
-        await this.namespace.purgeUnder(renameDst.virtual)
-      }
-      if (owns.source && owns.target) {
-        // The node at the source itself is not part of the subtree below
-        // it, so re-anchoring that subtree leaves it behind: the mode or
-        // ownership a chmod recorded stayed at the emptied name, never
-        // reached the landing, and was inherited by whatever was created at
-        // the old name next. Shell mv compensates for this in its own
-        // prepare step; a verb reaching the dispatcher directly, as git mv
-        // does, had nothing to.
-        await this.namespace.rename(p.virtual, renameDst.virtual)
-        await this.namespace.renameUnder(p.virtual, renameDst.virtual)
-      } else if (owns.source) {
-        await this.namespace.dropOverlay(p.virtual)
-        await this.namespace.purgeUnder(p.virtual)
-      }
+      // rename(2) replaces the destination, so a node the table holds
+      // at that name does not survive the move. A link left there
+      // shadowed the file that had just landed: the listing showed the
+      // new file, every read followed the old link, and the moved
+      // content was reachable under no name at all.
+      await this.namespace.unlink(renameDst.virtual)
+      // The subtree moves with it, and only the node table can move the
+      // part of it no backend holds: a link or an attr overlay below the
+      // source is addressed by absolute path, so it would otherwise stay
+      // behind at a name the rename has emptied. The destination's own
+      // subtree is replaced first, as rename(2) replaces what it lands on.
+      await this.namespace.purgeUnder(renameDst.virtual)
+      // The node at the source itself is not part of the subtree below it,
+      // so re-anchoring that subtree leaves it behind: the mode or ownership
+      // a chmod recorded stayed at the emptied name, never reached the
+      // landing, and was inherited by whatever was created at the old name
+      // next. Shell mv compensates for this in its own prepare step; a verb
+      // reaching the dispatcher directly, as git mv does, had nothing to.
+      await this.namespace.rename(p.virtual, renameDst.virtual)
+      await this.namespace.renameUnder(p.virtual, renameDst.virtual)
     }
   }
 
