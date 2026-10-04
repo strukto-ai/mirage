@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Mirrors python/tests/commands/builtin/generic/test_unzip.py.
-
 import { expect, it } from 'vitest'
 import { eacces, enoent } from '../../../utils/errors.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
