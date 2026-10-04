@@ -28,7 +28,7 @@ from mirage.utils.path import CycleError
     "exc,expected",
     [
         (CycleError("/a"), FsCondition.ELOOP),
-        (CrossMountError("/a/x", "/b/x"), FsCondition.CROSS_MOUNT),
+        (CrossMountError("/a/x", "/b/x"), FsCondition.EXDEV),
         (FileNotFoundError("/x"), FsCondition.ENOENT),
         (NotADirectoryError("/x"), FsCondition.ENOTDIR),
         (IsADirectoryError("/x"), FsCondition.EISDIR),

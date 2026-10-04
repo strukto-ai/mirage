@@ -2,7 +2,7 @@ std.SEEK_SET = 0
 std.SEEK_CUR = 1
 std.SEEK_END = 2
 std.open = (path, mode, errorObj) => {
-  const fd = __mirage_open(String(path), String(mode === undefined ? 'r' : mode))
+  const fd = __mirage_open(String(path), String(mode))
   if (fd === null) throw new TypeError('invalid file mode')
   if (errorObj !== undefined) errorObj.errno = fd < 0 ? -fd : 0
   if (fd < 0) return null

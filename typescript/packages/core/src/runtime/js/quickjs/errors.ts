@@ -29,9 +29,6 @@ export const WASI: Record<FsCondition, number> = {
   EPERM: 63,
   ENOTEMPTY: 55,
   EXDEV: 75,
-  // A rename or link between two mounts is two file systems, as a
-  // host answers across two preopens on different devices.
-  CROSS_MOUNT: 75,
   ENOTSUP: 58,
   ELOOP: 32,
   EINVAL: 28,

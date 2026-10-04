@@ -32,11 +32,12 @@
             "js": "console.log(os.mkdir('/data/d'), (os.stat('/data/d')[0].mode & os.S_IFMT) === os.S_IFDIR)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "True\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "True\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "0 true\n"
             }
           }
@@ -47,11 +48,12 @@
             "js": "console.log(os.mkdir('/data/d'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileExistsError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "-20\n"
             }
           }
@@ -62,11 +64,12 @@
             "js": "const r = os.mkdir('/data/x/y')\nconsole.log(r === 0 ? 'created' : r)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "-44\n"
             }
           }

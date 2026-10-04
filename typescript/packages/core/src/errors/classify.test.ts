@@ -51,7 +51,7 @@ describe('classify', () => {
 
   it('names a cross-mount rename its own condition', () => {
     // The per-boundary number is each dialect table's decision.
-    expect(classify(new CrossMountError('/a/x', '/b/x'))).toBe('CROSS_MOUNT')
+    expect(classify(new CrossMountError('/a/x', '/b/x'))).toBe('EXDEV')
   })
 
   it('reads the constructors built by utils/errors', () => {

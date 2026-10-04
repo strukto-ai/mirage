@@ -104,7 +104,7 @@ describe('the shared vocabulary', () => {
 
   it('maps a cross-mount rename to EXDEV', () => {
     const cross = Object.assign(new Error('cross-mount rename: /a/x -> /b/x'), {
-      code: 'CROSS_MOUNT',
+      code: 'EXDEV',
     })
     expect(classifyErrno(cross)).toBe(EXDEV)
   })
