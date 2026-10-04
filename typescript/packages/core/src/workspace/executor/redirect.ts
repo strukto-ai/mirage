@@ -168,9 +168,14 @@ export class JobRoute extends JobOutput {
  * A target opened for writing is emptied before the command runs, as bash's
  * open-before-exec does, so `cat f > f` reads an empty file and `ls > out`
  * lists `out`; a target that cannot be opened stops the command before it
- * runs. A simple command opens its targets only once dispatch admits it, so a
- * command the gate refuses leaves them as they were. An append target is still
- * created by the command's first write. */
+ * runs. A `>>` target is opened then too, created when it is missing, so
+ * `ls >> out` lists `out`. A simple command opens its targets only once
+ * dispatch admits it, so a command the gate refuses leaves them as they were.
+ * Two opens stay out of bash's order: an input that cannot be opened stops the
+ * line before any target is opened, where bash has emptied the ones written
+ * before it, because the gate has not judged the line yet; and an input that
+ * reaches a `>` target only through a symlink is read before the target is
+ * emptied, since the paths are compared as typed. */
 const UNREADABLE: unique symbol = Symbol('unreadable')
 type Input = ByteSource | null | typeof UNREADABLE
 
@@ -327,21 +332,22 @@ export async function handleRedirect(
   }
   const refusal = await openRefusal(dispatch, session, redirects)
   if (refusal !== null) return refusal
-  const emptying = files.filter((file) => file.source === null && !file.append)
-  const emptied = new Set<FileDescription>()
+  const opening = files.filter((file) => file.source === null)
+  const opened = new Set<FileDescription>()
   const failure: [PathSpec, unknown][] = []
-  // Empty the statement's write targets, as bash's opens do before the
-  // command runs; false, the failure kept, when one cannot be opened.
+  // Open the statement's write targets, as bash's opens do before the command
+  // runs: a `>` one emptied, a `>>` one created when it is missing; false, the
+  // failure kept, when one cannot be opened.
   const openTargets = async (): Promise<boolean> => {
-    for (let file = emptying.shift(); file !== undefined; file = emptying.shift()) {
+    for (let file = opening.shift(); file !== undefined; file = opening.shift()) {
       try {
-        await createFile(dispatch, session, file.scope, new Uint8Array())
+        await createFile(dispatch, session, file.scope, new Uint8Array(), file.append)
       } catch (error) {
         if (!isFsError(error)) throw error
         failure.push([file.scope, error])
         return false
       }
-      emptied.add(file)
+      opened.add(file)
     }
     return true
   }
@@ -481,7 +487,7 @@ export async function handleRedirect(
             const data = unique
               ? concat(chunks.filter(([key]) => dest(key) === file).map(([, data]) => data))
               : new Uint8Array()
-            if (data.byteLength > 0 || !emptied.has(file))
+            if (data.byteLength > 0 || !opened.has(file))
               await writeDescription(dispatch, session, file, data)
             else file.opened = true
             if (unique) {

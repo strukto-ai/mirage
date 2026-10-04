@@ -1,7 +1,8 @@
 import type { Accessor } from '../accessor/base.ts'
 import type { CommandIO } from '../commands/builtin/generic_bind/adapter.ts'
 import { streamFromBytes } from '../commands/builtin/utils/wrap.ts'
-import { isEnoent, isEnotdir } from '../utils/errors.ts'
+import { eisdir, isEnoent, isEnotdir } from '../utils/errors.ts'
+import { type FileStat, FileType } from '../types.ts'
 import type {
   ContentSearchOps,
   NativeReadOps,
@@ -9,6 +10,7 @@ import type {
   WriteOps,
   SearchOps,
   ReadBytesOp,
+  StatOp,
   WriteOp,
 } from './types.ts'
 
@@ -52,12 +54,32 @@ export class VFSAdapter<A extends Accessor = Accessor> {
   }
 }
 
-/** Explicit non-atomic read/modify/write append for byte stores. */
+/**
+ * Explicit non-atomic read/modify/write append for byte stores.
+ *
+ * A zero-byte append is an open for appending with nothing written after it
+ * (`cmd >> f` opens `f` before `cmd` runs): it creates a missing file and leaves
+ * an existing one alone, so it costs a stat rather than moving the whole object
+ * twice to add nothing.
+ */
 export function appendFromRead<A extends Accessor>(
   read: ReadBytesOp<A>,
   write: WriteOp<A>,
+  stat: StatOp<A>,
 ): WriteOp<A> {
   return async (accessor, path, data) => {
+    if (data.length === 0) {
+      let found: FileStat
+      try {
+        found = await stat(accessor, path)
+      } catch (error) {
+        if (!isEnoent(error)) throw error
+        await write(accessor, path, data)
+        return
+      }
+      if (found.type === FileType.DIRECTORY) throw eisdir(path)
+      return
+    }
     let previous: Uint8Array
     try {
       previous = await read(accessor, path)

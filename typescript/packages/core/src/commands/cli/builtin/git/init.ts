@@ -14,7 +14,7 @@ import {
   NoWorkspaceError,
   NoWorkingDirectoryError,
 } from './errors.ts'
-import { ensureDir, readOptional, rewrite, under, writeFile } from './io.ts'
+import { ensureDir, readOptional, takeLock, under, writeFile } from './io.ts'
 import { validRefName } from './refs.ts'
 import type { Dispatch } from './types.ts'
 import { fatal, startPoint } from './util.ts'
@@ -55,8 +55,8 @@ function namedGitdir(fl: FlagView, texts: readonly string[]): string {
 /**
  * Initialize through the dispatcher; no host templates, hooks or branch advisory.
  *
- * Reinitializing rewrites the config as git does, so a read-only mount refuses
- * a re-init too, in git's words for where it stopped: the directory an operand
+ * Reinitializing takes the config's lock as git does, so a read-only mount
+ * refuses a re-init too, in git's words for where it stopped: the directory an operand
  * names, the config's lock, or the first other directory it had to make
  * (pinned against git 2.47.3). With no templates, a bare repository in an
  * existing directory stops at `objects` where git stops at its first template
@@ -114,12 +114,12 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
         branch,
         `[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = ${bare ? 'true' : 'false'}\n`,
       )
-      if (existing) await rewrite(dispatch, settings)
+      if (existing) await takeLock(dispatch, settings)
     } catch (err) {
       if (!isErofs(err)) throw err
       if (made) throw new CannotMkdirError(typed)
       const path = (err as { virtualPath?: string }).virtualPath
-      if (path === settings) throw new ConfigLockError(settings)
+      if (path === `${settings}.lock`) throw new ConfigLockError(settings)
       throw new InitReadOnlyError(path ?? gitdir)
     }
     const text = existing

@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 
 from mirage.commands.cli.constants import CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT
-from mirage.commands.cli.refusal import git_option_refusal
+from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
 from mirage.commands.cli.types import CLISpec, WalkFlagBag, WalkResult
 from mirage.commands.spec.compile import (
     CompiledSpec,
@@ -355,12 +355,11 @@ def _usage_error(
 
     git answers an unknown option in parse-options' words and its usage
     block (on stdout for ``-h``), and the bare ``git`` with its one
-    synopsis; both exit 129. clap answers with the message, the one
-    usage line and a footer pointing at --help, and exits 2, at every
-    level of the tree; the
-    exit code is the group's just as much as the leaf's, so reading the
-    style here is what keeps `ntn --bogus` and `ntn pages get --bogus`
-    from disagreeing.
+    synopsis; both exit 129. The bare ``git -h`` prints the help. clap
+    answers with the message, the one usage line and a footer pointing at
+    --help, and exits 2, at every level of the tree; the exit code is the
+    group's just as much as the leaf's, so reading the style here is what
+    keeps `ntn --bogus` and `ntn pages get --bogus` from disagreeing.
 
     Args:
         name (str): display path walked so far, e.g. "gws gmail".
@@ -383,6 +382,9 @@ def _usage_error(
         )
     if style is UsageStyle.GIT and token is not None:
         path = name.partition(" ")[2]
+        # `git -h` is git's own help, as `git --help` is, and exits 0.
+        if not path and token == HELP_SWITCH:
+            return WalkResult(output=node_help(name, node, style).encode())
         if not path:
             text = f"unknown option: {token}\nusage: {GIT_SYNOPSES[''][0]}\n"
             return WalkResult(

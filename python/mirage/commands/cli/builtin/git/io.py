@@ -335,21 +335,25 @@ async def write_file(dispatch: DispatchFn, path: str, data: bytes) -> None:
     await dispatch("write", PathSpec.from_str_path(path), data=data)
 
 
-async def rewrite(dispatch: DispatchFn, path: str) -> None:
-    """Write a file back as it is, if it is there.
+async def take_lock(dispatch: DispatchFn, path: str) -> None:
+    """Take a file's lock and let it go, as git does before rewriting it.
 
-    git rewrites the index and the config under a lock even when nothing
-    in them changes, so a read-only repository refuses the verb before
-    it looks any further. Writing the same bytes back is that write: a
-    no-op where writes go through, and the refusal where they do not.
+    git creates ``<path>.lock`` before it rewrites the index or the
+    config, even when nothing in them changes, so a read-only repository
+    refuses the verb there before it looks any further. Creating the
+    lock and removing it is that refusal, and it leaves the file itself
+    alone, so a write another session makes to it is never undone. A
+    lock already there is another writer's and stays.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        path (str): absolute virtual path.
+        path (str): absolute virtual path of the file the lock guards.
     """
-    kept = await read_optional(dispatch, path)
-    if kept is not None:
-        await dispatch("write", PathSpec.from_str_path(path), data=kept)
+    lock = f"{path}.lock"
+    if await exists(dispatch, lock):
+        return
+    await dispatch("write", PathSpec.from_str_path(lock), data=b"")
+    await remove_file(dispatch, lock)
 
 
 async def write_once(dispatch: DispatchFn, path: str, data: bytes) -> None:

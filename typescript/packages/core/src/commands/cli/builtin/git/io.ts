@@ -291,16 +291,19 @@ export async function exists(dispatch: Dispatch, path: string): Promise<boolean>
 }
 
 /**
- * Write a file back as it is, if it is there.
+ * Take a file's lock and let it go, as git does before rewriting it.
  *
- * git rewrites the index and the config under a lock even when nothing in them
- * changes, so a read-only repository refuses the verb before it looks any
- * further. Writing the same bytes back is that write: a no-op where writes go
- * through, and the refusal where they do not.
+ * git creates `<path>.lock` before it rewrites the index or the config, even
+ * when nothing in them changes, so a read-only repository refuses the verb there
+ * before it looks any further. Creating the lock and removing it is that
+ * refusal, and it leaves the file itself alone, so a write another session makes
+ * to it is never undone. A lock already there is another writer's and stays.
  */
-export async function rewrite(dispatch: Dispatch, path: string): Promise<void> {
-  const kept = await readOptional(dispatch, path)
-  if (kept !== null) await dispatch('write', PathSpec.fromStrPath(path), [kept])
+export async function takeLock(dispatch: Dispatch, path: string): Promise<void> {
+  const lock = `${path}.lock`
+  if (await exists(dispatch, lock)) return
+  await dispatch('write', PathSpec.fromStrPath(lock), [new Uint8Array()])
+  await removeFile(dispatch, lock)
 }
 
 /** Write one virtual path, creating the directories above it. */

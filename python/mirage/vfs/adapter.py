@@ -1,3 +1,5 @@
+import errno
+import os
 from dataclasses import dataclass, field
 from functools import partial
 
@@ -5,7 +7,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.types import (
     ContentSearchOps,
@@ -95,15 +97,34 @@ class VFSAdapter:
         )
 
 
-def append_from_read(read: ReadBytesOp, write: WriteOp) -> WriteOp:
+def append_from_read(
+    read: ReadBytesOp, write: WriteOp, stat: StatOp
+) -> WriteOp:
     """Explicitly opt a byte store into non-atomic read/modify/write append.
+
+    A zero-byte append is an open for appending with nothing written
+    after it (``cmd >> f`` opens ``f`` before ``cmd`` runs): it creates a
+    missing file and leaves an existing one alone, so it costs a stat
+    rather than moving the whole object twice to add nothing.
 
     Args:
         read (ReadBytesOp): whole-file reader; only ENOENT means empty.
         write (WriteOp): whole-file replacement.
+        stat (StatOp): point lookup, for a zero-byte append.
     """
 
     async def append(accessor: Accessor, path: PathSpec, data: bytes) -> None:
+        if not data:
+            try:
+                found = await stat(accessor, path)
+            except FileNotFoundError:
+                await write(accessor, path, data)
+                return
+            if found.type == FileType.DIRECTORY:
+                raise IsADirectoryError(
+                    errno.EISDIR, os.strerror(errno.EISDIR), path.virtual
+                )
+            return
         try:
             previous = await read(accessor, path)
         except FileNotFoundError:

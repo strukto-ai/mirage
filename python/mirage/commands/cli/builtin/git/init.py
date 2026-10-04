@@ -13,7 +13,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.io import (
     ensure_dir,
     read_optional,
-    rewrite,
+    take_lock,
     write_once,
 )
 from mirage.commands.cli.builtin.git.refs import valid_ref_name
@@ -78,8 +78,8 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Initialize through the dispatcher, preserving an existing repository.
 
     No host templates, hooks or default-branch advisory are installed.
-    Reinitializing rewrites the config as git does, so a read-only mount
-    refuses a re-init too, in git's words for where it stopped: the
+    Reinitializing takes the config's lock as git does, so a read-only
+    mount refuses a re-init too, in git's words for where it stopped: the
     directory an operand names, the config's lock, or the first other
     directory it had to make (pinned against git 2.47.3). With no
     templates, a bare repository in an existing directory stops at
@@ -143,13 +143,13 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         try:
             await lay_out(dispatch, gitdir, branch, config)
             if existing:
-                await rewrite(dispatch, settings)
+                await take_lock(dispatch, settings)
         except OSError as exc:
             if exc.errno != errno.EROFS:
                 raise
             if made:
                 raise CannotMkdirError(inv.texts[0]) from exc
-            if exc.filename == settings:
+            if exc.filename == f"{settings}.lock":
                 raise ConfigLockError(settings) from exc
             raise InitReadOnlyError(exc.filename or gitdir) from exc
         action = "Reinitialized existing" if existing else "Initialized empty"

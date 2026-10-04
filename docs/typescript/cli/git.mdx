@@ -79,7 +79,7 @@ GIT_DIR=/repo/.git git log --oneline -1
 through the mount dispatcher. Reinitializing preserves existing objects,
 configuration and HEAD. The default initial branch is `master`; use `-b`
 to choose another. Host templates, hooks and the default-branch advisory
-are omitted. Reinitializing rewrites the config, as git does, so a
+are omitted. Reinitializing takes the config's lock, as git does, so a
 read-only mount refuses it.
 
 `git help [<command>]` renders the same declared grammar as `--help`.

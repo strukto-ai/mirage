@@ -281,9 +281,15 @@ async def handle_redirect(
     A target opened for writing is emptied before the command runs, as
     bash's open-before-exec does, so ``cat f > f`` reads an empty file and
     ``ls > out`` lists ``out``; a target that cannot be opened stops the
-    command before it runs. A simple command opens its targets only once
-    dispatch admits it, so a command the gate refuses leaves them as they
-    were. An append target is still created by the command's first write.
+    command before it runs. A ``>>`` target is opened then too, created
+    when it is missing, so ``ls >> out`` lists ``out``. A simple command
+    opens its targets only once dispatch admits it, so a command the gate
+    refuses leaves them as they were. Two opens stay out of bash's order:
+    an input that cannot be opened stops the line before any target is
+    opened, where bash has emptied the ones written before it, because
+    the gate has not judged the line yet; and an input that reaches a
+    ``>`` target only through a symlink is read before the target is
+    emptied, since the paths are compared as typed.
 
     Args:
         execute_node (Callable): executor for the redirected command.
@@ -445,24 +451,25 @@ async def handle_redirect(
     refusal = await _open_refusal(dispatch, session, redirects)
     if refusal is not None:
         return refusal
-    emptying = [
-        file for file in files if file.source is None and not file.append
-    ]
-    emptied: set[int] = set()
+    opening = [file for file in files if file.source is None]
+    opened: set[int] = set()
     failure: list[tuple[PathSpec, OSError]] = []
 
     async def open_targets() -> bool:
-        """Empty the statement's write targets, as bash's opens do
-        before the command runs; False, the failure kept, when one
-        cannot be opened."""
-        while emptying:
-            file = emptying.pop(0)
+        """Open the statement's write targets, as bash's opens do before
+        the command runs: a ``>`` one emptied, a ``>>`` one created when
+        it is missing; False, the failure kept, when one cannot be
+        opened."""
+        while opening:
+            file = opening.pop(0)
             try:
-                await create_file(dispatch, session, file.scope, b"")
+                await create_file(
+                    dispatch, session, file.scope, b"", append=file.append
+                )
             except FS_ERRORS as exc:
                 failure.append((file.scope, exc))
                 return False
-            emptied.add(id(file))
+            opened.add(id(file))
         return True
 
     recorder = Recorder()
@@ -618,7 +625,7 @@ async def handle_redirect(
                         if unique
                         else b""
                     )
-                    if data or id(file) not in emptied:
+                    if data or id(file) not in opened:
                         await write_description(dispatch, session, file, data)
                     else:
                         file.opened = True

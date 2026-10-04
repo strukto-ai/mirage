@@ -32,7 +32,7 @@ from mirage.commands.cli.builtin.git.errors import (
     UnmergedIndexError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
-from mirage.commands.cli.builtin.git.io import rewrite
+from mirage.commands.cli.builtin.git.io import take_lock
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.reflog import record
 from mirage.commands.cli.builtin.git.refs import (
@@ -194,9 +194,9 @@ async def commit(
         if not message:
             raise MissingMessageError()
         repo, location = await opened(fl, doors, work_tree=True)
-        # git locks and rewrites the index before it looks for anything to
+        # git takes the index's lock before it looks for anything to
         # commit, so a read-only repository refuses an empty commit too.
-        await rewrite(dispatch, f"{location.gitdir}/index")
+        await take_lock(dispatch, f"{location.gitdir}/index")
         state = await read_index(dispatch, location.gitdir)
         if state.conflicts:
             raise UnmergedIndexError()

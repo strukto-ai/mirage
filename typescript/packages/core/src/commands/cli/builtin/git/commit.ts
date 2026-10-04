@@ -32,7 +32,7 @@ import {
 import { stageTracked } from './add.ts'
 import { commitSummary } from './diff_output.ts'
 import { readIndex, updateIndex } from './index_file.ts'
-import { rewrite, under } from './io.ts'
+import { takeLock, under } from './io.ts'
 import { record } from './reflog.ts'
 import { detachHead, readHead, writeRef } from './refs.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
@@ -217,9 +217,9 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
     const message = fl.asStr('message')
     if (message === undefined || message === '') throw new MissingMessageError()
     const repo = await opened(fl, doors, true)
-    // git locks and rewrites the index before it looks for anything to commit,
-    // so a read-only repository refuses an empty commit too.
-    await rewrite(dispatch, under(repo.location.gitdir, 'index'))
+    // git takes the index's lock before it looks for anything to commit, so a
+    // read-only repository refuses an empty commit too.
+    await takeLock(dispatch, under(repo.location.gitdir, 'index'))
     const state = await readIndex(repo, dispatch)
     if (state.conflicts.size > 0) throw new UnmergedIndexError()
     const restaged = staging

@@ -1149,6 +1149,34 @@
         "stdout": "error: unknown switch `Z'\nerror: unknown switch `Z'\nerror: unknown switch `Z'\nerror: unknown option `nosuch'\nerror: unknown switch `Z'\nerror: invalid option: --zzz\nusage: git diff [<options>] [<commit>] [--] [<path>...]\nusage: git diff [<options>] [<commit>] [--] [<path>...]\n129\n129\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_root_dash_h_prints_the_help",
+      "seq": 567837,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -h > /dev/null; echo $?; git -h | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\ngit: Content tracker\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_and_reinit_leave_no_lock_behind",
+      "seq": 567838,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo commit -m nothing > /dev/null; echo $?; git init -q /repo; echo $?; find /repo/.git -maxdepth 1 -name '*.lock' | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n0\n0\n",
+        "stderr": ""
+      }
     }
   ]
 }

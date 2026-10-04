@@ -22,7 +22,7 @@ import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
-import { gitOptionRefusal } from './refusal.ts'
+import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
 
 const ENC = new TextEncoder()
 
@@ -284,7 +284,8 @@ function listedNode(node: CLISpec): CommandSpec {
 /**
  * Group-level option refusal, in the dialect the CLI declares. git answers an
  * unknown option in parse-options' words and its usage block (on stdout for
- * `-h`), and the bare `git` with its one synopsis; both exit 129. clap answers
+ * `-h`), and the bare `git` with its one synopsis; both exit 129. The bare
+ * `git -h` prints the help. clap answers
  * with the message, the one usage line and a footer pointing at --help, and
  * exits 2, at every level of the tree; the exit code is the group's just as
  * much as the leaf's, so reading the style here is what keeps `ntn --bogus`
@@ -312,6 +313,10 @@ function usageError(
   if (style === UsageStyle.GIT && token !== undefined) {
     const space = name.indexOf(' ')
     const path = space === -1 ? '' : name.slice(space + 1)
+    // `git -h` is git's own help, as `git --help` is, and exits 0.
+    if (path === '' && token === HELP_SWITCH) {
+      return new WalkResult({ output: ENC.encode(nodeHelp(name, node, style)) })
+    }
     if (path === '') {
       const synopsis = GIT_SYNOPSES.get('')?.[0] ?? ''
       return new WalkResult({

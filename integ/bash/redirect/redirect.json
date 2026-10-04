@@ -1450,10 +1450,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r6 && cd /data/r6 && echo hi > f && cat f > f && wc -c < f && wc -c f > f && cat f && ls > out && cat out && cat > f < f && wc -c < f; cd / && rm -r /data/r6",
+      "command": "mkdir -p /data/r6 && cd /data/r6 && echo hi > f && cat f > f && wc -c < f && wc -c f > f && cat f && ls > out && cat out && cat > f < f && wc -c < f && ls >> app && cat app; cd / && rm -r /data/r6",
       "expect": {
         "exit": 0,
-        "stdout": "0\n0 f\nf\nout\n0\n",
+        "stdout": "0\n0 f\nf\nout\n0\napp\nf\nout\n",
         "stderr": ""
       }
     },

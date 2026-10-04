@@ -111,10 +111,12 @@ async function ledger(vfs: BaseVFS, setup: string | null): Promise<[string, stri
   }
 }
 
-// The `>` redirect opens k.txt before echo runs and writes it after: two writes.
+// A redirect opens k.txt before echo runs and writes it after: `>` is two
+// writes, and `>>` on a backend with a native append is two appends.
 const NATIVE_APPEND: [string, string][] = [
   ['write', K],
   ['write', K],
+  ['append', K],
   ['append', K],
   ['append', K],
   ['write', NEW],
@@ -201,6 +203,7 @@ describe('record paths name the virtual path (node backends)', () => {
     expect(await ledger(vfs, null)).toEqual([
       ['write', K],
       ['write', K],
+      ['append', K],
       ['append', K],
       ['append', K],
       ['write', NEW],
