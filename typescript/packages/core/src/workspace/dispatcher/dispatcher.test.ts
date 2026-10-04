@@ -1287,6 +1287,33 @@ describe('dispatch runs writers to one path one at a time', () => {
     }
   })
 
+  it('clears a late rename source its mount still owns', async () => {
+    // A mount over the destination owns that name now, but the source is
+    // still the rename's: what was below it (a link) does not stay
+    // visible at the name the rename emptied.
+    const store = new StalledRAMVFS('rename')
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('mkdir', '/data/d')
+      await ws.dispatch('symlink', '/data/d/l', [], { target: 'x' })
+      await ws.dispatch('mkdir', '/data/sub')
+      await expect(
+        ws.dispatch('rename', '/data/d', [PathSpec.fromStrPath('/data/sub/e')]),
+      ).rejects.toThrow()
+      ws.addMount('/data/sub', new RAMVFS(), MountMode.WRITE)
+      store.release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(ws.namespace.isLink('/data/d/l')).toBe(false)
+    } finally {
+      store.release()
+      await ws.close()
+    }
+  })
+
   it('settles a late call on the mount it ran on', async () => {
     // A timed-out rename that lands while its mount is still there owes
     // the node table its change: the link at the destination does not
