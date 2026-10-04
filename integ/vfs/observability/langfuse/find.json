@@ -90,6 +90,19 @@
         "stdout": "/lf/prompts\n|-- greeting\n|   |-- 1.json\n|   `-- 2.json\n`-- qa-template\n    `-- 1.json\n\n3 directories, 3 files\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "lf_find_size_counts_a_directory_as_dir_size",
+      "seq": 600086,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "find /lf -maxdepth 1 -size +0c; echo --; find /lf -maxdepth 1 -size -1k",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf\n/lf/datasets\n/lf/prompts\n/lf/sessions\n/lf/traces\n--\n",
+        "stderr": ""
+      }
     }
   ]
 }

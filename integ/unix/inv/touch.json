@@ -27,10 +27,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "touch /data/sub/inv_late.txt",
+      "command": "touch /data/sub/inv_late.txt && cp /data/sub/nested.txt /data/sub/inv_cp.txt && ls -1 /data/sub && rm /data/sub/inv_cp.txt",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "deep\ninv_cp.txt\ninv_late.txt\nnested.txt\n",
         "stderr": ""
       }
     }

@@ -643,6 +643,32 @@
         "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json:{\"id\":\"msg0001\",\"thread_id\":\"msg0001\",\"from\":{\"name\":\"\",\"email\":\"lila@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Q2 Budget Review\",\"date\":\"Mon, 05 Jan 2026 09:30:00 +0000\",\"body_text\":\"please find the budget attached\\nfinal numbers due friday\",\"snippet\":\"please find the budget attached final numbers due friday\",\"labels\":[\"INBOX\",\"UNREAD\"],\"attachments\":[{\"id\":\"att0001\",\"filename\":\"budget.csv\",\"path\":\"attachments/att0001_budget.csv\",\"mime_type\":\"text/plain\",\"size\":36},{\"id\":\"att0002\",\"filename\":\"notes.txt\",\"path\":\"attachments/att0002_notes.txt\",\"mime_type\":\"text/plain\",\"size\":37}]}\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json:{\"id\":\"msg0002\",\"thread_id\":\"msg0002\",\"from\":{\"name\":\"\",\"email\":\"marcus@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Standup notes\",\"date\":\"Mon, 05 Jan 2026 14:00:00 +0000\",\"body_text\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"snippet\":\"yesterday shipped the parser today reviewing the budget forecast\",\"labels\":[\"INBOX\"],\"attachments\":[]}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gm_find_type_f_and_d_in_a_day",
+      "seq": 530207,
+      "targets": [
+        "gmail"
+      ],
+      "command": "find /mail/INBOX/2026-01-05 -type f | sort; echo --; find /mail/INBOX/2026-01-05 -type d | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/budget.csv\n/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/notes.txt\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json\n--\n/mail/INBOX/2026-01-05\n/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gm_grep_rg_without_w_scan_the_label",
+      "seq": 530208,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -r 'worker-3' /mail/INBOX | sort; rg forecast /mail/INBOX",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__msg0003.gmail.json:{\"id\":\"msg0003\",\"thread_id\":\"msg0003\",\"from\":{\"name\":\"\",\"email\":\"ops@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[{\"name\":\"\",\"email\":\"marcus@example.com\"}],\"subject\":\"Server alert: worker-3\",\"date\":\"Wed, 07 Jan 2026 03:15:00 +0000\",\"body_text\":\"disk usage at 91 percent on worker-3\",\"snippet\":\"disk usage at 91 percent on worker-3\",\"labels\":[\"INBOX\",\"UNREAD\"],\"attachments\":[]}\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json:{\"id\":\"msg0002\",\"thread_id\":\"msg0002\",\"from\":{\"name\":\"\",\"email\":\"marcus@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Standup notes\",\"date\":\"Mon, 05 Jan 2026 14:00:00 +0000\",\"body_text\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"snippet\":\"yesterday shipped the parser today reviewing the budget forecast\",\"labels\":[\"INBOX\"],\"attachments\":[]}\n",
+        "stderr": ""
+      }
     }
   ]
 }

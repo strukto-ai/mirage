@@ -51,6 +51,19 @@
         "stdout": "welcome Liam to the team, say hi\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_window_glob_resolves_an_upload",
+      "seq": 520404,
+      "targets": [
+        "slack"
+      ],
+      "command": "ls /slack/channels/leadership__C5/2026-01-07/files/*.pdf",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/leadership__C5/2026-01-07/files/pivot_rationale__F11.pdf\n",
+        "stderr": ""
+      }
     }
   ]
 }

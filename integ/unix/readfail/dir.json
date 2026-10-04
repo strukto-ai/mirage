@@ -537,7 +537,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "iconv: /data/rfdir: Is a directory\n"
+        "stderr": "iconv: error while reading the input: Is a directory\n"
       }
     },
     {
@@ -552,7 +552,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "iconv: /data/rfnope.txt: No such file or directory\n"
+        "stderr": "iconv: cannot open input file `/data/rfnope.txt': No such file or directory\n"
       }
     },
     {

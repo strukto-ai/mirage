@@ -363,6 +363,19 @@
         "stdout": "/discord/Mirage HQ__100000000000000001/members/alice__300000000000000001.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "dc_jq_tail_wc_read_a_day_file",
+      "seq": 690028,
+      "targets": [
+        "discord"
+      ],
+      "command": "jq -r .content '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl'; tail -n 1 '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl' | jq -r .content; wc -l '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl'",
+      "expect": {
+        "exit": 0,
+        "stdout": "deploy is green\nthanks alice, shipping the release notes\nbudget spreadsheet attached\nbudget spreadsheet attached\n3 /discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl\n",
+        "stderr": ""
+      }
     }
   ]
 }

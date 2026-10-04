@@ -180,7 +180,7 @@ async def test_extract_writes_only_the_selected_members(
     out, res, got = await _run(members)
     assert got == written
     assert out.decode() == "Archive:  /a.zip\n" + "".join(
-        f"  inflating: {path[1:]}\n" for path in written
+        f"  inflating: {path[1:]:<22}  \n" for path in written
     )
     assert (res.exit_code, _stderr_text(res)) == (code, stderr)
 

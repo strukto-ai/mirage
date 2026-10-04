@@ -392,6 +392,15 @@ export function readZipEntries(data: Uint8Array): {
   return { entries, count, slack: shift, comment }
 }
 
+// Info-ZIP's line for one extracted file, `%8sing: %-22s  %s`: a stored entry
+// is `extracting`, a compressed one `inflating`, and the name is padded to 22
+// columns and followed by two blanks, the room Info-ZIP keeps for a -a note.
+// Mirrors Python's `_extracted_line`.
+function extractedLine(method: number, shown: string): string {
+  const verb = method === 0 ? 'extract' : 'inflat'
+  return `${verb.padStart(8)}ing: ${shown.padEnd(22)}  `
+}
+
 async function entryContent(
   data: Uint8Array,
   localOffset: number,
@@ -653,6 +662,7 @@ export async function unzipGeneric(
       // it has to be recreated even though nothing is written inside it.
       const parentEnd = outPath.lastIndexOf('/')
       const chain = isDir ? outPath : parentEnd > 0 ? outPath.slice(0, parentEnd) : ''
+      const existed = isDir && stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
       try {
         if (chain !== '' && chain !== '/') await makeDirs(chain)
       } catch (err) {
@@ -661,7 +671,7 @@ export async function unzipGeneric(
         continue
       }
       if (isDir) {
-        if (!quiet) outputLines.push(`   creating: ${shown(outPath)}/`)
+        if (!quiet && !existed) outputLines.push(`   creating: ${shown(outPath)}/`)
         continue
       }
       const content = await e.content()
@@ -681,7 +691,7 @@ export async function unzipGeneric(
       // invalidate through the dispatcher; keying them here would have
       // the runner prefix them onto this mount.
       if (!relay) writes[outPath] = content
-      if (!quiet) outputLines.push(`  inflating: ${shown(outPath)}`)
+      if (!quiet) outputLines.push(extractedLine(e.method, shown(outPath)))
     }
     const allStderr = ENC.encode(cautions + errors.join(''))
     return [

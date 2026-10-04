@@ -379,6 +379,21 @@ async def _make_dirs(
     await ensure_dir(dir_path, mkdir_fn, stat, made)
 
 
+def _extracted_line(info: zipfile.ZipInfo, shown: str) -> str:
+    """Info-ZIP's line for one extracted file, ``%8sing: %-22s  %s``.
+
+    The verb names the method: a stored entry is ``extracting``, a
+    compressed one ``inflating``. The name is padded to 22 columns and
+    followed by two blanks, the room Info-ZIP keeps for a ``-a`` note.
+
+    Args:
+        info (zipfile.ZipInfo): the entry.
+        shown (str): its path as the listing spells it.
+    """
+    verb = "extract" if info.compress_type == zipfile.ZIP_STORED else "inflat"
+    return f"{verb:>8}ing: {shown:<22}  "
+
+
 async def unzip(
     paths: list[PathSpec],
     *,
@@ -669,6 +684,11 @@ async def _run(
         # A directory entry is the only record an empty directory leaves,
         # so it has to be recreated even though nothing is written in it.
         chain = out_path if info.is_dir() else out_path.rsplit("/", 1)[0]
+        existed = (
+            info.is_dir()
+            and stat is not None
+            and await path_exists(stat, PathSpec.from_str_path(out_path))
+        )
         try:
             if chain and chain != "/":
                 await _make_dirs(chain, mkdir_fn, stat, made)
@@ -680,7 +700,7 @@ async def _run(
             )
             continue
         if info.is_dir():
-            if not q:
+            if not q and not existed:
                 output_lines.append(f"   creating: {shown(out_path)}/")
             continue
         content = zf.read(info)
@@ -706,7 +726,7 @@ async def _run(
             # have the runner prefix them onto this mount.
             writes[out_path] = content
         if not q:
-            output_lines.append(f"  inflating: {shown(out_path)}")
+            output_lines.append(_extracted_line(info, shown(out_path)))
     output = (
         ("\n".join(output_lines) + "\n").encode() if output_lines else None
     )

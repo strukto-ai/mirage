@@ -37,6 +37,176 @@
         "f",
         "t"
       ]
+    },
+    {
+      "id": "iconv_c_drops_what_it_cannot_convert_and_exits_1",
+      "seq": 16100008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'caf\\303\\251\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'caf\\351\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'a\\342\\202\\254b\\n' | iconv -c -f utf-8 -t latin1 | od -An -tx1; printf 'a\\200b\\n' | iconv -c -f ascii -t utf-8; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "caf\nrc=1\ncaf\nrc=1\n 61 62 0a\nab\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "iconv_stops_at_the_first_sequence_it_cannot_convert",
+      "seq": 16100009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'caf\\303\\251 na\\303\\257ve\\n' | iconv -f utf-8 -t ascii; echo; echo rc=$?; printf 'ok\\nx\\303\\251y\\n' | iconv -f utf-8 -t ascii > /dev/null; printf 'caf\\351\\n' | iconv -f utf-8 -t ascii; echo; printf 'a\\342\\202\\254b\\n' | iconv -f utf-8 -t latin1; echo; printf '\\303\\251\\303' | iconv -f utf-8 -t latin1 | od -An -tx1; printf 'a\\303' | iconv -c -f utf-8 -t latin1 > /dev/null; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "caf\nrc=0\ncaf\na\n e9\nrc=1\n",
+        "stderr": "iconv: illegal input sequence at position 3\niconv: illegal input sequence at position 4\niconv: illegal input sequence at position 3\niconv: illegal input sequence at position 1\niconv: incomplete character or shift sequence at end of buffer\niconv: incomplete character or shift sequence at end of buffer\n"
+      }
+    },
+    {
+      "id": "iconv_names_an_unsupported_charset",
+      "seq": 16100010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | iconv -f bogus -t ascii; echo rc=$?; printf 'x\\n' | iconv -f utf-8 -t bogus; echo rc=$?; printf 'x\\n' | iconv -f bogus -t nope; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\n",
+        "stderr": "iconv: conversion from `bogus' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `bogus' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversions from `bogus' and to `nope' are not supported\nTry `iconv --help' or `iconv --usage' for more information.\n"
+      }
+    },
+    {
+      "id": "iconv_utf16_byte_orders_and_charset_names",
+      "seq": 16100011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\303\\251\\n' | iconv -f utf-8 -t utf-16le | od -An -tx1; printf 'a\\303\\251\\n' | iconv -f utf-8 -t utf-16 | od -An -tx1; printf '\\360\\237\\230\\200\\n' | iconv -f utf-8 -t utf-16be | od -An -tx1; printf '\\376\\377\\000a\\377\\376a\\000' | iconv -f utf-16 -t utf-8 | od -An -tx1; printf '\\000a' | iconv -f utf-16 -t utf-8 | od -An -tx1; printf 'caf\\351\\n' | iconv -f LATIN1 -t UTF8 | od -An -tx1; printf 'A\\n' | iconv -f US-ASCII -t ISO8859-1; printf 'A\\n' | iconv -f ANSI_X3.4-1968 -t utf-8; printf '' | iconv -t utf-16 | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 00 e9 00 0a 00\n ff fe 61 00 e9 00 0a 00\n d8 3d de 00 00 0a\n 61 ef bf be e6 84 80\n e6 84 80\n 63 61 66 c3 a9 0a\nA\nA\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "iconv_reads_every_operand_in_order",
+      "seq": 16100012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\303\\251\\n' > /data/r10i1; printf 'y\\n' > /data/r10i2; iconv -f utf-8 -t ascii /data/r10i1 /data/r10i2; echo rc=$?; iconv -c -f utf-8 -t ascii /data/r10i1 /data/r10i2; echo rc=$?; iconv -f utf-8 -t latin1 /data/r10i2 /data/r10i1 | od -An -tx1; iconv -f utf-8 -t ascii /data/r10i2 /data/r10nope /data/r10i2; echo rc=$?; mkdir -p /data/r10id && echo z > /data/r10id/z && iconv -f utf-8 -t ascii /data/r10i2 /data/r10id /data/r10i2; echo rc=$?; rm -r /data/r10i1 /data/r10i2 /data/r10id",
+      "expect": {
+        "exit": 0,
+        "stdout": "xrc=1\nx\ny\nrc=1\n 79 0a 78 e9 0a\ny\ny\nrc=1\ny\nrc=1\n",
+        "stderr": "iconv: illegal input sequence at position 1\niconv: cannot open input file `/data/r10nope': No such file or directory\niconv: error while reading the input: Is a directory\n"
+      }
     }
   ]
 }
