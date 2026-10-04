@@ -78,6 +78,19 @@ describe('SharePoint mkdir under a mount root the drive does not have yet', () =
     ])
   })
 
+  it.each([
+    [true, '/sp'],
+    [false, '/sp/lt'],
+  ])('names a file in the hidden prefix as the root (parents=%s)', async (parents, named) => {
+    folderFetch(
+      { [`${DRIVE}/root:/team/root:/children`]: [404], [`${DRIVE}/root/children`]: [409] },
+      { [`${DRIVE}/root:/team`]: { file: {} } },
+    )
+    await expect(
+      mkdir(scoped(), PathSpec.fromStrPath('/sp/lt', 'lt'), parents),
+    ).rejects.toMatchObject({ code: 'ENOTDIR', virtualPath: named })
+  })
+
   it('does not retry a 404 below the mount root', async () => {
     const posts = folderFetch({ [`${DRIVE}/root:/team/root/a:/children`]: [404] })
     await expect(mkdir(scoped(), PathSpec.fromStrPath('/sp/a/b', 'a/b'))).rejects.toThrow()

@@ -198,3 +198,29 @@ async def test_mkdir_does_not_retry_a_404_below_the_mount_root():
         with pytest.raises(FileNotFoundError):
             await mkdir(_scoped_accessor(), _scoped_spec("a/b"))
     assert posts == ["404 " + _DRIVE + "/root:/team/root/a:/children"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("parents", "named"), [(True, "/sp"), (False, "/sp/lt")]
+)
+async def test_mkdir_names_a_file_in_the_hidden_prefix_as_the_root(
+    parents, named
+):
+    with aioresponses() as m:
+        m.post(
+            _DRIVE + "/root:/team/root:/children",
+            status=404,
+            payload=_NOT_FOUND,
+        )
+        m.get(_DRIVE + "/root:/team/root", status=404, payload=_NOT_FOUND)
+        m.post(
+            _DRIVE + "/root/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_DRIVE + "/root:/team", payload={"id": "1", "file": {}})
+        with pytest.raises(NotADirectoryError, match=f"^{named}$"):
+            await mkdir(
+                _scoped_accessor(), _scoped_spec("lt"), parents=parents
+            )

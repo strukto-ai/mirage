@@ -70,6 +70,19 @@ describe('OneDrive mkdir under a mount root the drive does not have yet', () => 
   })
 
   it.each([
+    [true, '/od'],
+    [false, '/od/lt'],
+  ])('names a file in the hidden prefix as the root (parents=%s)', async (parents, named) => {
+    folderFetch(
+      { [`${BASE}/root:/team/root:/children`]: [404], [`${BASE}/root/children`]: [409] },
+      { [`${BASE}/root:/team`]: { file: {} } },
+    )
+    await expect(
+      mkdir(scoped(), PathSpec.fromStrPath('/od/lt', 'lt'), parents),
+    ).rejects.toMatchObject({ code: 'ENOTDIR', virtualPath: named })
+  })
+
+  it.each([
     ['below the mount root', scoped, 'a/b', `${BASE}/root:/team/root/a:/children`],
     [
       'without a key prefix',

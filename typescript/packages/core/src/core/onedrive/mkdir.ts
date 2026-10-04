@@ -27,30 +27,42 @@ import { fullItemUrl, itemUrl } from './client.ts'
  * The mount root exists from the agent's side because it is mounted, but on
  * the drive it is a folder chain nothing has created until the first write.
  * A file upload creates its parents; a folder create does not, so mkdir has
- * to.
+ * to. The prefix is hidden, so a file in it is named as `root`: the mount
+ * root is then not a directory.
  *
  * Args:
  *   accessor: the mount's accessor.
+ *   root: the path a refusal in the prefix names.
  */
-async function createRoot(accessor: OneDriveAccessor): Promise<void> {
+async function createRoot(accessor: OneDriveAccessor, root: string): Promise<void> {
   let parent = ''
   for (const name of accessor.config.keyPrefix.split('/')) {
     const level = parent === '' ? name : `${parent}/${name}`
-    await createChildFolder(
-      accessor.config,
-      fullItemUrl(accessor.config, parent, '/children'),
-      name,
-      {
-        item: fullItemUrl(accessor.config, level),
-        parent: fullItemUrl(accessor.config, parent),
-        virtual: level,
-      },
-    )
+    try {
+      await createChildFolder(
+        accessor.config,
+        fullItemUrl(accessor.config, parent, '/children'),
+        name,
+        {
+          item: fullItemUrl(accessor.config, level),
+          parent: fullItemUrl(accessor.config, parent),
+          virtual: root,
+        },
+      )
+    } catch (error) {
+      if (isEexist(error)) throw enotdir(root)
+      throw error
+    }
     parent = level
   }
 }
 
-async function createDir(accessor: OneDriveAccessor, path: string, virtual: string): Promise<void> {
+async function createDir(
+  accessor: OneDriveAccessor,
+  path: string,
+  virtual: string,
+  root: string,
+): Promise<void> {
   const config = accessor.config
   const parent = parentPath(path)
   const create = (): Promise<void> =>
@@ -64,7 +76,7 @@ async function createDir(accessor: OneDriveAccessor, path: string, virtual: stri
   } catch (error) {
     const missingRoot = isEnoent(error) && parent === '' && config.keyPrefix !== ''
     if (!missingRoot) throw error
-    await createRoot(accessor)
+    await createRoot(accessor, root)
     await create()
   }
 }
@@ -83,7 +95,7 @@ export async function mkdir(
       const level = parts.slice(0, index).join('/')
       const virtual = `${prefix}/${level}`
       try {
-        await createDir(accessor, level, virtual)
+        await createDir(accessor, level, virtual, prefix === '' ? '/' : prefix)
       } catch (error) {
         // `mkdir -p` passes only a directory at the operand and names the
         // file it stops at above it, as GNU does.
@@ -92,7 +104,7 @@ export async function mkdir(
       }
     }
   } else {
-    await createDir(accessor, key, path.virtual)
+    await createDir(accessor, key, path.virtual, path.virtual)
   }
   await invalidateAfterWrite(path)
   if (parents) await invalidateAncestors(path)

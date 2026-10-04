@@ -43,27 +43,30 @@ async function createDir(
  *   accessor: the mount's accessor.
  *   driveId: the drive the path lives in.
  *   itemPath: the drive-relative path, keyPrefix included.
- *   virtual: the operand's virtual path.
+ *   path: the operand.
  *   parents: name a file in the way rather than the operand.
  */
 async function createChain(
   accessor: SharePointAccessor,
   driveId: string,
   itemPath: string,
-  virtual: string,
+  path: PathSpec,
   parents: boolean,
 ): Promise<void> {
   const parts = itemPath.split('/')
+  const shown = rstripSlash(path.virtual).split('/')
+  const depth = path.vfsPath.split('/').filter((part) => part !== '').length
   for (let index = 1; index <= parts.length; index++) {
     try {
-      await createDir(accessor, driveId, parts.slice(0, index).join('/'), virtual)
+      await createDir(accessor, driveId, parts.slice(0, index).join('/'), path.virtual)
     } catch (error) {
       const above = parts.length - index
       if (!isEexist(error) || above === 0) throw error
-      // `mkdir -p` names the file it stops at, as GNU does; mkdir(2) blames
-      // the operand.
-      const level = rstripSlash(virtual).split('/').slice(0, -above).join('/') || '/'
-      throw enotdir(parents ? level : virtual)
+      // `mkdir -p` names the file it stops at, as GNU does, and a file in the
+      // hidden keyPrefix as the mount root it blocks; mkdir(2) blames the
+      // operand.
+      const level = shown.slice(0, -Math.min(above, depth)).join('/') || '/'
+      throw enotdir(parents ? level : path)
     }
   }
 }
@@ -94,7 +97,7 @@ export async function mkdir(
   const driveId = resolved.driveId ?? ''
   const itemPath = resolved.itemPath ?? ''
   if (parents) {
-    await createChain(accessor, driveId, itemPath, path.virtual, true)
+    await createChain(accessor, driveId, itemPath, path, true)
   } else {
     try {
       await createDir(accessor, driveId, itemPath, path.virtual)
@@ -102,7 +105,7 @@ export async function mkdir(
       const prefix = scopedPrefix(accessor)
       const missingRoot = isEnoent(error) && prefix !== '' && parentPath(itemPath) === prefix
       if (!missingRoot) throw error
-      await createChain(accessor, driveId, itemPath, path.virtual, false)
+      await createChain(accessor, driveId, itemPath, path, false)
     }
   }
   await invalidateAfterWrite(path)

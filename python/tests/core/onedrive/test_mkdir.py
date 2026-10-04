@@ -189,3 +189,31 @@ async def test_mkdir_does_not_retry_a_404_without_a_key_prefix():
         with pytest.raises(FileNotFoundError):
             await mkdir(_accessor(), PathSpec.from_str_path("/new"))
     assert posts == ["404 " + _BASE + "/root/children"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("parents", "named"), [(True, "/od"), (False, "/od/lt")]
+)
+async def test_mkdir_names_a_file_in_the_hidden_prefix_as_the_root(
+    parents, named
+):
+    with aioresponses() as m:
+        m.post(
+            _BASE + "/root:/team/root:/children",
+            status=404,
+            payload=_NOT_FOUND,
+        )
+        m.get(_BASE + "/root:/team/root", status=404, payload=_NOT_FOUND)
+        m.post(
+            _BASE + "/root/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_BASE + "/root:/team", payload={"id": "1", "file": {}})
+        with pytest.raises(NotADirectoryError, match=f"^{named}$"):
+            await mkdir(
+                _accessor(key_prefix="team/root"),
+                PathSpec.from_str_path("/od/lt", "lt"),
+                parents=parents,
+            )
