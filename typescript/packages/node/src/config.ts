@@ -320,8 +320,8 @@ function validateTypedBlock(
 }
 
 // Python's index block models refuse a ttl that is not a number
-// (StrictFloat) and a non-string url or key_prefix at load; checked here
-// in the models' field order, since this stops at the first.
+// (StrictFloat) and a non-string url or key_prefix at load. This stops at
+// the first bad value, so it checks them in the models' field order.
 function validateIndexValues(value: unknown, what: string): void {
   if (!isPlainObject(value)) return
   if (value.ttl !== undefined && typeof value.ttl !== 'number') {
