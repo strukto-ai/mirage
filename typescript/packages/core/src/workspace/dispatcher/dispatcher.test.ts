@@ -1154,10 +1154,104 @@ describe('dispatch runs writers to one path one at a time', () => {
     }
   })
 
+  it('times out a writer queued behind a call that never answers', async () => {
+    // The stalled call keeps the path, since it may still write; a writer
+    // queued behind it times out on its own budget and then never runs.
+    let calls = 0
+    let release = (): void => undefined
+    class StalledRAMVFS extends RAMVFS {
+      override ops(): readonly RegisteredOp[] {
+        return super.ops().map((op) =>
+          op.name === 'pwrite'
+            ? {
+                ...op,
+                fn: () => {
+                  calls += 1
+                  return new Promise<void>((resolve) => {
+                    release = resolve
+                  })
+                },
+              }
+            : op,
+        )
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      {
+        '/data': [
+          new StalledRAMVFS(),
+          MountMode.WRITE,
+          { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
+        ],
+      },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
+      await expect(
+        ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
+      ).rejects.toThrow()
+      await expect(
+        ws.dispatch('pwrite', '/data/f', [ENC.encode('B')], { offset: 3 }),
+      ).rejects.toThrow()
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(calls).toBe(1)
+    } finally {
+      release()
+      await ws.close()
+    }
+  })
+
+  it('reports a call that fails after its timeout', async () => {
+    // The caller already has its timeout, so the store's own failure
+    // reaches no one else: it is reported, not dropped.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    class LateFailingRAMVFS extends RAMVFS {
+      override ops(): readonly RegisteredOp[] {
+        return super.ops().map((op) =>
+          op.name === 'pwrite'
+            ? {
+                ...op,
+                fn: async () => {
+                  await new Promise((resolve) => setTimeout(resolve, 50))
+                  throw new Error('store went away')
+                },
+              }
+            : op,
+        )
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      {
+        '/data': [
+          new LateFailingRAMVFS(),
+          MountMode.WRITE,
+          { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
+        ],
+      },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
+      await expect(
+        ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
+      ).rejects.toThrow()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]?.[0])).toContain('store went away')
+    } finally {
+      warn.mockRestore()
+      await ws.close()
+    }
+  })
+
   it('holds the path past a timeout until the store has answered', async () => {
     // A timeout rejects the caller but cannot stop the call: the timed-out
-    // pwrite still writes back what it read, so the next writer must not
-    // read before that lands.
+    // pwrite still writes back what it read, so the next writer (a whole
+    // write, which has no timeout) must land after it, not under it.
     const parser = await getTestParser()
     const ws = new Workspace(
       {
@@ -1174,11 +1268,9 @@ describe('dispatch runs writers to one path one at a time', () => {
       await expect(
         ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
       ).rejects.toThrow()
-      await expect(
-        ws.dispatch('pwrite', '/data/f', [ENC.encode('B')], { offset: 3 }),
-      ).rejects.toThrow()
-      await new Promise((resolve) => setTimeout(resolve, 200))
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('A12B456789')
+      await ws.dispatch('write', '/data/f', [ENC.encode('XXXXXXXXXX')])
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('XXXXXXXXXX')
     } finally {
       await ws.close()
     }

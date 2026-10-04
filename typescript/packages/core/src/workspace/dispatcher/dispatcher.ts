@@ -614,18 +614,33 @@ export class Dispatcher {
         const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
           .map((name) => `${String(this.storeId(vfs))}:${mountKey(name, prefix)}`)
           .sort(compareCodePoints)
-        result = await new Promise<unknown>((settle) => {
+        // A writer's timeout counts its wait for the hold too: a call that
+        // never answers keeps the path, and a writer queued behind it times
+        // out on its own budget and then never runs.
+        const turn = { entered: false, abandoned: false, answered: false }
+        const queued = new Promise<unknown>((settle) => {
           const held = async (): Promise<void> => {
+            if (turn.abandoned) return
+            turn.entered = true
             let call: Promise<unknown> = Promise.resolve()
             const answered = (async () => {
               const answer = await run(fullKwargs, (started) => {
                 call = started
+                // A failure after the caller has its answer (its timeout)
+                // reaches no one else, so it is reported here.
+                started.catch((err: unknown) => {
+                  if (turn.answered) {
+                    console.warn(`${opName} ${p.virtual} failed after its timeout: ${String(err)}`)
+                  }
+                })
               })
               served(report, answer)
               await this.settleWrite(opName, p, renameDst)
               return answer
             })()
             settle(answered)
+            // Waited on, not dropped: the caller receives this answer, and
+            // the call's own failure is reported above.
             await answered.catch(() => undefined)
             await call.catch(() => undefined)
           }
@@ -634,6 +649,14 @@ export class Dispatcher {
             held,
           )()
         })
+        try {
+          result = await runWithTimeout(queued, opTimeout, opName)
+        } catch (err) {
+          if (!turn.entered) turn.abandoned = true
+          throw err
+        } finally {
+          turn.answered = true
+        }
       } else {
         result = await run(fullKwargs)
       }
