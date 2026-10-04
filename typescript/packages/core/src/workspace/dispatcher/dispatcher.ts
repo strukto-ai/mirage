@@ -618,8 +618,8 @@ export class Dispatcher {
           opName,
           `${opName} ${p.virtual}`,
           (onCall) => run(fullKwargs, onCall),
-          async (value, late) => {
-            if (!late) served(report, value)
+          async (value) => {
+            served(report, value)
             await this.settleWrite(opName, p, renameDst)
           },
         )
@@ -678,8 +678,10 @@ export class Dispatcher {
    * until the store's own call settles, since a timeout cannot stop the
    * call and a timed-out pwrite still writes back what it read; the
    * mount's activity ends at the timeout as for any op, so an unmount
-   * does not wait on it. `after` runs once the store answers, late or
-   * not, and a failure nobody waits for any more is reported.
+   * does not wait on it. `after` runs only for a caller still waiting: a
+   * call that lands after its timeout changes nothing beside the store,
+   * as any timed-out op, since its mount may be gone by then, and a
+   * failure nobody waits for any more is reported.
    *
    * Args:
    *   keys: the names to hold, in the one order every writer takes them.
@@ -687,7 +689,7 @@ export class Dispatcher {
    *   opName: the op, for the timeout's error.
    *   label: the op and path, for a late failure's report.
    *   call: runs the op, handing over the store's own call once it starts.
-   *   after: the bookkeeping, told whether the caller already gave up.
+   *   after: the bookkeeping, run while the caller still waits.
    */
   private async holdWrite(
     keys: readonly string[],
@@ -695,7 +697,7 @@ export class Dispatcher {
     opName: string,
     label: string,
     call: (onCall: (storeCall: Promise<unknown>) => void) => Promise<unknown>,
-    after: (value: unknown, late: boolean) => Promise<void>,
+    after: (value: unknown) => Promise<void>,
   ): Promise<unknown> {
     const turn = { entered: false, abandoned: false, late: false, started: false, settled: false }
     let giveUp = (): void => undefined
@@ -727,7 +729,9 @@ export class Dispatcher {
           () => started.call ?? answer,
           () => started.call ?? answer,
         )
-        finished = stored.then((value) => after(value, turn.late))
+        finished = stored.then(async (value) => {
+          if (!turn.late) await after(value)
+        })
         enter()
         await finished.catch((err: unknown) => {
           if (turn.late) console.warn(`${label} failed after its timeout: ${String(err)}`)

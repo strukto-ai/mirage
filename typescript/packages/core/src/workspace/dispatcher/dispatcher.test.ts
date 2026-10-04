@@ -1093,14 +1093,18 @@ class SplicingRAMVFS extends RAMVFS {
   }
 }
 
-/** A RAM mount whose pwrite never answers until the test releases it. */
+/** A RAM mount whose one op never answers until the test releases it. */
 class StalledRAMVFS extends RAMVFS {
   calls = 0
   release = (): void => undefined
 
+  constructor(private readonly stalled = 'pwrite') {
+    super()
+  }
+
   override ops(): readonly RegisteredOp[] {
     return super.ops().map((op) =>
-      op.name === 'pwrite'
+      op.name === this.stalled
         ? {
             ...op,
             fn: () => {
@@ -1223,6 +1227,33 @@ describe('dispatch runs writers to one path one at a time', () => {
       ).rejects.toThrow()
       await ws.unmount('/data')
       expect(store.calls).toBe(1)
+    } finally {
+      store.release()
+      await ws.close()
+    }
+  })
+
+  it('changes nothing beside the store for a call that lands after its timeout', async () => {
+    // By the time a timed-out rename lands, its mount may be gone and
+    // another store mounted at the prefix: the late call must not touch
+    // the new mount's links.
+    const store = new StalledRAMVFS('rename')
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/a', [ENC.encode('a')])
+      await expect(
+        ws.dispatch('rename', '/data/a', [PathSpec.fromStrPath('/data/b')]),
+      ).rejects.toThrow()
+      await ws.unmount('/data')
+      ws.addMount('/data', new RAMVFS(), MountMode.WRITE)
+      await ws.dispatch('symlink', '/data/b', [], { target: 'x' })
+      store.release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(ws.namespace.isLink('/data/b')).toBe(true)
     } finally {
       store.release()
       await ws.close()
