@@ -24,6 +24,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictFloat,
     field_validator,
     model_validator,
 )
@@ -166,14 +167,15 @@ class RamIndexBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["ram"] = "ram"
-    ttl: float = 600
+    # Strict: a quoted or boolean ttl is refused, as TypeScript refuses it.
+    ttl: StrictFloat = 600
 
 
 class RedisIndexBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["redis"]
-    ttl: float = 600
+    ttl: StrictFloat = 600
     url: str = "redis://localhost:6379/0"
     key_prefix: str = "mirage:index:"
 

@@ -319,6 +319,21 @@ function validateTypedBlock(
   rejectUnknownKeys(value, table[type] ?? [], `${what} (${type})`)
 }
 
+// Key names alone are not enough for an index block either: Python's
+// model refuses a non-string url or key_prefix and a ttl that is not a
+// number (StrictFloat, so a quoted or boolean ttl too) at load.
+function validateIndexValues(value: unknown, what: string): void {
+  if (!isPlainObject(value)) return
+  for (const key of ['url', 'key_prefix']) {
+    if (value[key] !== undefined && typeof value[key] !== 'string') {
+      throw new Error(`config \`${what}.${key}\` must be a string`)
+    }
+  }
+  if (value.ttl !== undefined && typeof value.ttl !== 'number') {
+    throw new Error(`config \`${what}.ttl\` must be a number`)
+  }
+}
+
 // Key names alone are not enough here: Python's Pydantic model rejects
 // `url: 123` at load, so the TS loader must refuse the same file at the
 // same boundary instead of deferring it to Redis client creation.
@@ -423,6 +438,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
       // ahead of the model validator carrying them: a mount with both a
       // bad index and `ttl:` without `read:` names the index on both.
       validateTypedBlock(block.index, INDEX_KEYS, `mounts.${prefix}.index`)
+      validateIndexValues(block.index, `mounts.${prefix}.index`)
       validateReadBlock(prefix, block)
       parseCommandLimits(block.command_limits)
     }
@@ -460,6 +476,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   }
   validateTypedBlock(raw.cache, CACHE_KEYS, 'cache')
   validateTypedBlock(raw.index, INDEX_KEYS, 'index')
+  validateIndexValues(raw.index, 'index')
   validateTypedBlock(raw.console, CONSOLE_KEYS, 'console')
   validateConsoleValues(raw.console)
   validateStoreBlock(raw.store)

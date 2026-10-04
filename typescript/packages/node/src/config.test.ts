@@ -1935,3 +1935,23 @@ describe('mount index block', () => {
     }
   })
 })
+
+describe('index block values', () => {
+  // Judged the same on both hosts: `url` and `key_prefix` are strings,
+  // `ttl` a number -- a quoted or boolean ttl is refused, as a mount's
+  // read bound already is.
+  it.each([
+    ['index block: url is a string', /config `index\.url` must be a string/],
+    ['index block: a quoted ttl', /config `index\.ttl` must be a number/],
+    ['index block: a boolean ttl', /config `index\.ttl` must be a number/],
+    [
+      'mount index: key_prefix is a string',
+      /config `mounts\.\/d\.index\.key_prefix` must be a string/,
+    ],
+    ['mount index: a quoted ttl', /config `mounts\.\/d\.index\.ttl` must be a number/],
+  ])('refuses %s', (name, pattern) => {
+    const [fixture] = fixtureCases('rejected').filter((c) => c.name === name)
+    expect(fixture).toBeDefined()
+    expect(() => loadWorkspaceConfig(fixture?.config ?? {})).toThrow(pattern)
+  })
+})

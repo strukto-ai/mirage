@@ -324,6 +324,76 @@
       }
     },
     {
+      "name": "index block: url is a string",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "index": {
+          "type": "redis",
+          "url": 123
+        }
+      }
+    },
+    {
+      "name": "index block: a quoted ttl",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": "30"
+        }
+      }
+    },
+    {
+      "name": "index block: a boolean ttl",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": true
+        }
+      }
+    },
+    {
+      "name": "mount index: key_prefix is a string",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "type": "redis",
+              "key_prefix": 5
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "mount index: a quoted ttl",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "type": "redis",
+              "ttl": "30"
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "cache block: no such backend",
       "config": {
         "mounts": {

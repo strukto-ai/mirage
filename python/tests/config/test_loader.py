@@ -1550,3 +1550,29 @@ async def test_a_zero_mount_index_lists_an_outside_delete(tmp_path):
         assert await relisted.materialize_stdout() == b""
     finally:
         await ws.close()
+
+
+# An index block's values are judged the same on both hosts: `url` and
+# `key_prefix` are strings, `ttl` a number -- a quoted or boolean ttl
+# (which pydantic's lax float turned into 30 and 1) is refused, as a
+# mount's read bound already is.
+INDEX_VALUE_REFUSALS = {
+    "index block: url is a string": r"index\.redis\.url\n.*valid string",
+    "index block: a quoted ttl": r"index\.ram\.ttl\n.*valid number",
+    "index block: a boolean ttl": r"index\.ram\.ttl\n.*valid number",
+    "mount index: key_prefix is a string": (
+        r"mounts\./d\.index\.redis\.key_prefix\n.*valid string"
+    ),
+    "mount index: a quoted ttl": (
+        r"mounts\./d\.index\.redis\.ttl\n.*valid number"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(INDEX_VALUE_REFUSALS))
+def test_an_index_block_value_of_the_wrong_type_is_refused(name: str):
+    case = next(
+        c for c in _shared_fixture_cases("rejected") if c["name"] == name
+    )
+    with pytest.raises(ValueError, match=INDEX_VALUE_REFUSALS[name]):
+        load_config(case["config"])
