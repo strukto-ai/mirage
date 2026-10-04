@@ -18,11 +18,13 @@ import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
@@ -77,6 +79,7 @@ from mirage.workspace.dispatcher.constants import (
     LINK_ENTRY_OPS,
     NAMESPACE_TABLE_OPS,
     POLICY_WRITE_OPS,
+    SERIAL_WRITE_OPS,
     SETATTR_KEYS,
     XATTR_OPS,
 )
@@ -274,6 +277,7 @@ class Dispatcher:
         self._cache = cache
         self._reconciler = Reconciler(cache, namespace)
         self._drift = drift
+        self._writers = KeyLock()
 
     @property
     def reconciler(self) -> Reconciler:
@@ -599,6 +603,18 @@ class Dispatcher:
                     ),
                 )
                 result = kept if whole else slice_window(kept, offset, size)
+            elif op in SERIAL_WRITE_OPS:
+                # A rename holds both of its names, taken in one order
+                # so two renames between the same pair cannot deadlock.
+                names = {path.virtual}
+                if isinstance(kwargs.get("dst"), PathSpec):
+                    names.add(kwargs["dst"].virtual)
+                async with AsyncExitStack() as held:
+                    for name in sorted(names):
+                        await held.enter_async_context(
+                            self._writers.with_lock(name)
+                        )
+                    result = await mount.execute_op(op, path.virtual, **kwargs)
             else:
                 result = await mount.execute_op(op, path.virtual, **kwargs)
         except (FileNotFoundError, NotADirectoryError):

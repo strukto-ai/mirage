@@ -19,7 +19,7 @@ import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
+import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
@@ -1064,6 +1064,58 @@ describe('a marked op is judged on the paths the door reaches', () => {
       expect(new TextDecoder().decode(read as Uint8Array)).toBe('s\n')
     } finally {
       spy.mockRestore()
+      await ws.close()
+    }
+  })
+})
+
+/**
+ * A RAM mount that answers pwrite the way S3 and redis do: read the file,
+ * give the loop a turn, and write the whole file back.
+ */
+class SplicingRAMVFS extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    const found = new Map(super.ops().map((op) => [op.name, op.fn]))
+    const read = found.get('read')
+    const write = found.get('write')
+    if (read === undefined || write === undefined) throw new Error('RAM lacks read or write')
+    const pwrite: RegisteredOp['fn'] = async (accessor, path, args, kwargs) => {
+      const whole = (await read(accessor, path, [], {})) as Uint8Array
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const data = args[0] as Uint8Array
+      await write(accessor, path, [spliceWindow(whole, kwargs.offset as number, data)], {})
+    }
+    return super.ops().map((op) => (op.name === 'pwrite' ? { ...op, fn: pwrite } : op))
+  }
+}
+
+describe('dispatch runs writers to one path one at a time', () => {
+  it('lands every offset write on a store that splices', async () => {
+    // Four sessions' edits at once: each pwrite reads the file before any
+    // writes it back, so without one writer at a time per path every
+    // write puts back three bytes the others had just replaced. Mirrors
+    // python's test_offset_writes_to_one_path_all_land_on_a_splicing_store.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': new SplicingRAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
+      await Promise.all(
+        (
+          [
+            ['A', 0],
+            ['B', 3],
+            ['C', 6],
+            ['D', 9],
+          ] as const
+        ).map(([letter, offset]) =>
+          ws.dispatch('pwrite', '/data/f', [ENC.encode(letter)], { offset }),
+        ),
+      )
+      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('A12B45C78D')
+    } finally {
       await ws.close()
     }
   })

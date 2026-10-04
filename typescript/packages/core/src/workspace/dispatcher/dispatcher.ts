@@ -15,6 +15,7 @@
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
+import { KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { applyOpLimit, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { dispatchStat, dotRefusal, walkSpelling } from '../../commands/builtin/utils/paths.ts'
@@ -81,6 +82,7 @@ import {
   LINK_ENTRY_OPS,
   NAMESPACE_TABLE_OPS,
   POLICY_WRITE_OPS,
+  SERIAL_WRITE_OPS,
   SETATTR_KEYS,
   XATTR_OPS,
 } from './constants.ts'
@@ -215,6 +217,7 @@ export class Dispatcher {
   // op can touch a mount, and FUSE and the op facade reach here
   // without passing Workspace.dispatch.
   private readonly drift: DriftQueue | null
+  private readonly writers = new KeyLock()
   readonly reconciler: Reconciler
 
   constructor(
@@ -583,12 +586,22 @@ export class Dispatcher {
           )
           return wrapOpStream(answer, mount.mountId, mount.activity)
         })
-      if (filler === null) {
-        result = await run(fullKwargs)
-      } else {
+      if (filler !== null) {
         const kept = await filler.fill(p, () => run(wholeRead(fullKwargs)))
         result =
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)
+      } else if (SERIAL_WRITE_OPS.has(opName)) {
+        // A rename holds both of its names, taken in one order so two
+        // renames between the same pair cannot deadlock.
+        const [first, second] = [
+          ...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])]),
+        ].sort(compareCodePoints)
+        const op = () => run(fullKwargs)
+        result = await this.writers.withLock(first ?? p.virtual, () =>
+          second === undefined ? op() : this.writers.withLock(second, op),
+        )
+      } else {
+        result = await run(fullKwargs)
       }
     } catch (err) {
       const code = (err as { code?: string }).code

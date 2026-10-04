@@ -62,6 +62,25 @@ NAMESPACE_TABLE_OPS = frozenset({"symlink", "readlink"})
 # spells lstat; a following stat arrives already resolved to its target.
 LINK_ENTRY_OPS = frozenset({"unlink", "rename", "stat"})
 
+# Ops that change a file's bytes or its name. A store that cannot write
+# in place (S3, redis) answers pwrite, append and truncate by reading
+# the file and writing it back whole, so two of these on one path at
+# once could each put back bytes the other had just replaced; the
+# dispatcher runs them one at a time per path, as a kernel's inode lock
+# orders writers to one file.
+SERIAL_WRITE_OPS = frozenset(
+    {
+        "write",
+        "write_bytes",
+        "append",
+        "pwrite",
+        "truncate",
+        "create",
+        "unlink",
+        "rename",
+    }
+)
+
 # Ops that open the regular file they name with O_CREAT, which answers
 # a slash-terminated name (`x/`, only ever a directory) with EISDIR.
 FILE_CREATE_OPS = frozenset(
