@@ -19,10 +19,18 @@ from mirage.cache.context import invalidate_after_unlink
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.types import PathSpec
+from mirage.utils.errors import eisdir
 
 
 async def unlink(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     p = await resolve_inside(accessor.root, path_spec)
-    with disk_errors(path_spec.virtual):
-        await aiofiles.os.remove(p)
+    try:
+        with disk_errors(path_spec.virtual):
+            await aiofiles.os.remove(p)
+    except PermissionError as exc:
+        # macOS answers unlink(2) on a directory with EPERM; Linux, whose
+        # answer every other backend gives, with EISDIR.
+        if await aiofiles.os.path.isdir(p):
+            raise eisdir(path_spec) from exc
+        raise
     await invalidate_after_unlink(path_spec)

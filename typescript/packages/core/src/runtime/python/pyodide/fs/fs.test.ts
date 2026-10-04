@@ -143,6 +143,19 @@ describe('PyodideFs', () => {
         next.set(bytes, base.length)
         store.set(path, next)
       }
+      if (op === 'truncate') {
+        const next = new Uint8Array(fields?.length ?? 0)
+        next.set((store.get(path) ?? new Uint8Array()).subarray(0, next.length))
+        store.set(path, next)
+      }
+      if (op === 'pwrite' && bytes !== undefined) {
+        const offset = fields?.offset ?? 0
+        const base = store.get(path) ?? new Uint8Array()
+        const next = new Uint8Array(Math.max(base.length, offset + bytes.length))
+        next.set(base)
+        next.set(bytes, offset)
+        store.set(path, next)
+      }
       if (op === 'unlink') store.delete(path)
       if (op === 'rename' && dst !== undefined) {
         const moved = store.get(path)

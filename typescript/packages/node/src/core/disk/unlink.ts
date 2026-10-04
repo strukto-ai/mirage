@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { unlink as fsUnlink } from 'node:fs/promises'
+import { stat as fsStat, unlink as fsUnlink } from 'node:fs/promises'
 import { invalidateAfterUnlink } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import { eisdir } from '@struktoai/mirage-core/utils/errors'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
@@ -24,7 +25,15 @@ export async function unlink(accessor: DiskAccessor, path: PathSpec): Promise<vo
   try {
     await fsUnlink(full)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+    // macOS answers unlink(2) on a directory with EPERM; Linux, whose
+    // answer every other backend gives, with EISDIR.
+    if ((err as NodeJS.ErrnoException).code === 'EPERM') {
+      const isDir = await fsStat(full).then(
+        (st) => st.isDirectory(),
+        () => false,
+      )
+      if (isDir) throw eisdir(path)
+    }
     throw diskError(err, path)
   }
   await invalidateAfterUnlink(path)

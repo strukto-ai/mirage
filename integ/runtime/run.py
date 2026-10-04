@@ -26,6 +26,7 @@ import logging  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 import shlex  # noqa: E402
+import tempfile  # noqa: E402
 import uuid  # noqa: E402
 from collections.abc import Awaitable, Callable  # noqa: E402
 from dataclasses import replace  # noqa: E402
@@ -70,6 +71,8 @@ BUCKET = "mirage-integ-runtime"
 # What a case's `backends` entry needs on this host before it can run.
 BACKEND_REQUIRES: dict[str, list[str]] = {
     "ram": [],
+    "disk": [],
+    "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
     "redis": ["env:REDIS_URL"],
     "s3": ["s3"],
 }
@@ -521,6 +524,29 @@ async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
                 }
             )
         return vfs
+    if kind == "disk":
+        from mirage.vfs.disk import DiskVFS
+
+        return DiskVFS(
+            tempfile.mkdtemp(prefix=f"mirage-integ-runtime-{run_id}-")
+        )
+    if kind == "ssh":
+        from mirage.vfs.ssh import SSHVFS, SSHConfig
+
+        # The ssh runtime's box: a fresh directory per mount, made before
+        # the mount is, since a root that does not exist serves nothing.
+        vfs = SSHVFS(
+            SSHConfig(
+                host=os.environ["MIRAGE_INTEG_SSH_HOST"],
+                port=2222,
+                username=os.environ.get("MIRAGE_INTEG_SSH_USERNAME"),
+                identity_file=os.environ.get("MIRAGE_INTEG_SSH_KEY"),
+                root=f"/tmp/mirage-integ-runtime-{run_id}",
+            )
+        )
+        sftp = await vfs.accessor.sftp()
+        await sftp.mkdir(vfs.config.root)
+        return vfs
     if kind == "redis":
         from mirage.vfs.redis import RedisVFS
 
@@ -671,12 +697,17 @@ async def _run_facade(
         expect (dict[str, Any]): ``value`` (JSON-comparable result) or
             ``throws_contains``.
         spec (dict[str, Any]): ``method`` (the python facade spelling,
-            e.g. ``is_dir``), ``path``, and ``data`` for ``append``.
+            e.g. ``is_dir``), ``path``, ``data`` for a write, ``offset``
+            for ``pwrite`` and ``length`` for ``truncate``.
     """
     method = getattr(ws.vfs, spec["method"])
     args: list[Any] = [spec["path"]]
     if "data" in spec:
         args.append(spec["data"].encode())
+    if "offset" in spec:
+        args.append(spec["offset"])
+    if "length" in spec:
+        args.append(spec["length"])
     if "errno" in expect:
         # The cross-language error assertion. `throws_contains` reads the
         # message, which the two languages word differently for the same

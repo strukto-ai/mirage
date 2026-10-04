@@ -33,8 +33,11 @@ afterEach(() => {
 })
 
 describe('mkdirOp', () => {
-  it('creates a directory recursively (parents=true default in op)', async () => {
-    await mkdirOp.fn(res.accessor, spec('/a/b/c'), [], {})
+  it('refuses a missing parent unless parents is asked for', async () => {
+    await expect(mkdirOp.fn(res.accessor, spec('/a/b/c'), [], {})).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await mkdirOp.fn(res.accessor, spec('/a/b/c'), [], { parents: true })
     expect(await existsCore(res.accessor, spec('/a/b/c'))).toBe(true)
   })
 })

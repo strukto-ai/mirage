@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -41,6 +43,7 @@ export async function read(
   const start = options?.offset ?? 0
   const size = options?.size ?? null
   const sftp = await accessor.sftp()
+  const timer = startOp()
   const virtual = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   // ssh2's readFile stats the file and issues a single READ for the whole
@@ -68,5 +71,6 @@ export async function read(
     out.set(c, at)
     at += c.byteLength
   }
+  record('read', p.virtual, VFSName.SSH, total, timer)
   return out
 }

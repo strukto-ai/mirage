@@ -18,13 +18,21 @@ from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.core.ssh.utils import join_root
 from mirage.types import PathSpec
+from mirage.utils.errors import eisdir
 
 
 async def unlink(accessor: SSHAccessor, path: PathSpec) -> None:
     config = accessor.config
     sftp = await accessor.sftp()
+    remote = join_root(config.root, path.mount_path)
     try:
-        await sftp.remove(join_root(config.root, path.mount_path))
+        await sftp.remove(remote)
     except asyncssh.SFTPNoSuchFile:
         raise FileNotFoundError(path)
+    except asyncssh.SFTPFailure as exc:
+        # OpenSSH answers a directory with SFTP 3's one generic refusal;
+        # Linux's unlink(2) says EISDIR.
+        if await sftp.isdir(remote):
+            raise eisdir(path) from exc
+        raise
     await invalidate_after_unlink(path)

@@ -74,6 +74,11 @@
    "python_only": {
     "ZeroTail": "Python reads archives through tarfile, which refuses a stream that ends inside a member's data; ZeroTail feeds it zeros past the cut. TypeScript parses the blocks itself and sees the short member directly."
    }
+  },
+  "runtime/handles/file_handle": {
+   "typescript_only": {
+    "LINE_SCAN": "QuickJS on TypeScript reads a line through the handle itself, a window at a time; a Python guest reads lines through CPython's io layer over the handle, so Python has no window."
+   }
   }
  }
 }

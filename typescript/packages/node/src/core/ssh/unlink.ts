@@ -14,23 +14,34 @@
 
 import { invalidateAfterUnlink } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { eisdir, enoent } from '@struktoai/mirage-core/utils/errors'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
+import { isDirectoryAttrs, isFailure, isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
 
 export async function unlink(accessor: SSHAccessor, p: PathSpec): Promise<void> {
   const sftp = await accessor.sftp()
   const virtual = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
-  await new Promise<void>((resolveFn, rejectFn) => {
-    sftp.unlink(remote, (err) => {
-      if (!err) {
-        resolveFn()
-        return
-      }
-      if (isNoSuchFile(err)) rejectFn(enoent(p))
-      else rejectFn(err)
+  try {
+    await new Promise<void>((resolveFn, rejectFn) => {
+      sftp.unlink(remote, (err) => {
+        if (err) rejectFn(err)
+        else resolveFn()
+      })
     })
-  })
+  } catch (err) {
+    if (isNoSuchFile(err)) throw enoent(p)
+    // OpenSSH answers a directory with SFTP 3's one generic refusal;
+    // Linux's unlink(2) says EISDIR.
+    if (isFailure(err)) {
+      const isDir = await new Promise<boolean>((resolveFn) => {
+        sftp.stat(remote, (statErr, attrs) => {
+          resolveFn(statErr ? false : isDirectoryAttrs(attrs))
+        })
+      })
+      if (isDir) throw eisdir(p)
+    }
+    throw err
+  }
   await invalidateAfterUnlink(p)
 }

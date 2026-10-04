@@ -14,11 +14,11 @@
 
 import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { eexist, enoent } from '@struktoai/mirage-core/utils/errors'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
+import { isFailure, isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
 
 async function statRemote(sftp: SFTPWrapper, remote: string): Promise<Stats | null> {
   return new Promise<Stats | null>((resolveFn) => {
@@ -46,7 +46,7 @@ async function mkdirOne(sftp: SFTPWrapper, remote: string, ignoreExisting: boole
   })
 }
 
-export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive: boolean): Promise<void> {
+export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = false): Promise<void> {
   const sftp = await accessor.sftp()
   const virtual = stripPrefix(p)
   const root = accessor.config.root ?? '/'
@@ -56,6 +56,9 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive: boole
       await mkdirOne(sftp, remote, false)
     } catch (err) {
       if (isNoSuchFile(err)) throw enoent(p)
+      // OpenSSH answers an existing target with SFTP 3's one generic
+      // refusal; only a stat can tell it was EEXIST.
+      if (isFailure(err) && (await statRemote(sftp, remote)) !== null) throw eexist(p)
       throw err
     }
     await invalidateAfterWrite(p)

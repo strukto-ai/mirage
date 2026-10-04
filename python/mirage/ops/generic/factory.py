@@ -222,6 +222,17 @@ def _make_emulated_pwrite(
         try:
             existing = await read_bytes(accessor, path, index)
         except FileNotFoundError:
+            # A key store answers a read of a directory's name as a
+            # missing key; writing there would put an object beside the
+            # directory.
+            try:
+                found = await stat(accessor, path, index)
+            except FileNotFoundError:
+                found = None
+            if found is not None and found.type == FileType.DIRECTORY:
+                raise IsADirectoryError(
+                    errno.EISDIR, os.strerror(errno.EISDIR), path.virtual
+                )
             existing = b""
         await write_bytes(
             accessor, path, splice_window(existing, offset, data)
@@ -388,7 +399,7 @@ def make_generic_ops(
             partial write (dropbox is the only one; the rest grew a
             real ``truncate`` in their table, which wins outright).
         mkdir_parents (bool): forward ``parents=True`` to the core
-            mkdir (disk).
+            mkdir (databricks_volume).
         overrides (set[str] | None): op names to skip because the
             backend registers its own irregular wrapper.
     """

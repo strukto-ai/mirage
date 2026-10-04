@@ -44,7 +44,9 @@ class _FakeSFTP:
         self.opens: list[tuple[str, int, str | None]] = []
         self.writes: list[tuple[str, bytes, int | None]] = []
 
-    def open(self, path: str, pflags: int, encoding: str | None) -> _FakeFile:
+    async def open(
+        self, path: str, pflags: int, encoding: str | None
+    ) -> _FakeFile:
         self.opens.append((path, pflags, encoding))
         return _FakeFile(self, path)
 

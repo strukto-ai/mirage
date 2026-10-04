@@ -12,21 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.context import invalidate_after_write
-from mirage.core.ssh.utils import join_root, open_for_write
-from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Literal
+
+FlushKind = Literal["write", "append", "pwrite", "truncate"]
+
+FileFetch = Callable[[int, int | None], bytes]
 
 
-async def pwrite(
-    accessor: SSHAccessor, path: PathSpec, data: bytes, offset: int
-) -> None:
-    config = accessor.config
-    timer = start_op()
-    sftp = await accessor.sftp()
-    remote = join_root(config.root, path.mount_path)
-    async with await open_for_write(sftp, remote, path) as f:
-        await f.write(data, offset)
-    record("pwrite", path.virtual, "ssh", len(data), timer)
-    await invalidate_after_write(path)
+@dataclass(frozen=True, slots=True)
+class FlushStep:
+    """One op a closing handle owes the mount.
+
+    Args:
+        kind (FlushKind): the op to dispatch.
+        data (bytes): the payload of a write, append or pwrite.
+        offset (int): where a pwrite lands.
+        length (int): the length a truncate leaves.
+    """
+
+    kind: FlushKind
+    data: bytes = b""
+    offset: int = 0
+    length: int = 0

@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncssh
+
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.ssh.utils import join_root
 from mirage.types import PathSpec
+from mirage.utils.errors import eexist, enoent
 
 
 async def mkdir(
@@ -28,7 +31,17 @@ async def mkdir(
             join_root(config.root, path.mount_path), exist_ok=True
         )
     else:
-        await sftp.mkdir(join_root(config.root, path.mount_path))
+        remote = join_root(config.root, path.mount_path)
+        try:
+            await sftp.mkdir(remote)
+        except asyncssh.SFTPNoSuchFile as exc:
+            raise enoent(path) from exc
+        except asyncssh.SFTPFailure as exc:
+            # OpenSSH answers an existing target with SFTP 3's one
+            # generic refusal; only a stat can tell it was EEXIST.
+            if await sftp.exists(remote):
+                raise eexist(path) from exc
+            raise
     await invalidate_after_write(path)
     if parents:
         await invalidate_ancestors(path)

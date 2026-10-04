@@ -17,8 +17,7 @@ import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { FXF_CREAT, FXF_WRITE } from './constants.ts'
-import { joinRoot, stripPrefix } from './utils.ts'
+import { joinRoot, openForWrite, stripPrefix } from './utils.ts'
 
 export async function pwrite(
   accessor: SSHAccessor,
@@ -29,12 +28,7 @@ export async function pwrite(
   const timer = startOp()
   const sftp = await accessor.sftp()
   const remote = joinRoot(accessor.config.root ?? '/', stripPrefix(p))
-  const handle = await new Promise<Buffer>((resolveFn, rejectFn) => {
-    sftp.open(remote, FXF_WRITE | FXF_CREAT, (err, opened) => {
-      if (err) rejectFn(err)
-      else resolveFn(opened)
-    })
-  })
+  const handle = await openForWrite(sftp, remote, p)
   try {
     await new Promise<void>((resolveFn, rejectFn) => {
       sftp.write(handle, Buffer.from(data), 0, data.byteLength, offset, (err) => {

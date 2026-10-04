@@ -86,6 +86,13 @@
     },
     {
       "id": "append_lands_on_the_one_ledger",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
       "world": {
         "mounts": {
           "/data": {
@@ -114,6 +121,57 @@
           "expect": {
             "exit": 0,
             "stdout": "seed\nmore\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "append_creates_a_missing_file",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/new.txt",
+            "data": "one\n"
+          },
+          "expect": {
+            "ops_contain": [
+              "append /data/new.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/new.txt",
+            "data": "two\n"
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/new.txt"
+          },
+          "expect": {
+            "value": "one\ntwo\n"
           }
         }
       ]

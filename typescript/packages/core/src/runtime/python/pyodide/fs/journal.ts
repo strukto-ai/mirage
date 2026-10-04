@@ -26,6 +26,13 @@ import { concat } from '../../../../io/cachable_iterator.ts'
 export type MirageMutation =
   | { readonly kind: 'write'; readonly path: string; readonly bytes: Uint8Array }
   | { readonly kind: 'append'; readonly path: string; readonly bytes: Uint8Array }
+  | {
+      readonly kind: 'pwrite'
+      readonly path: string
+      readonly offset: number
+      readonly bytes: Uint8Array
+    }
+  | { readonly kind: 'truncate'; readonly path: string; readonly length: number }
   | { readonly kind: 'mkdir'; readonly path: string }
   | { readonly kind: 'unlink'; readonly path: string }
   | { readonly kind: 'rmdir'; readonly path: string }
@@ -52,6 +59,19 @@ export interface MutationJournal {
    */
   markWrite(path: string, bytes: Uint8Array): void
   markAppend(path: string, bytes: Uint8Array): void
+  /**
+   * Args:
+   *   path: mount-prefixed path the mutation names.
+   *   offset: where the bytes land inside the file.
+   *   bytes: the bytes written there.
+   */
+  markPwrite(path: string, offset: number, bytes: Uint8Array): void
+  /**
+   * Args:
+   *   path: mount-prefixed path the mutation names.
+   *   length: the length the file is left at.
+   */
+  markTruncate(path: string, length: number): void
   markMkdir(path: string): void
   markUnlink(path: string): void
   markRmdir(path: string): void
@@ -74,8 +94,17 @@ export interface MutationJournal {
   takeMutations(): MirageMutation[]
 }
 
+// A write, append or pwrite holds its bytes as parts until the drain, so a
+// loop of small writes costs one copy per write rather than one per byte
+// written so far.
+type Pending =
+  | Exclude<MirageMutation, { kind: 'write' | 'append' | 'pwrite' }>
+  | { kind: 'write'; path: string; parts: Uint8Array[] }
+  | { kind: 'append'; path: string; parts: Uint8Array[] }
+  | { kind: 'pwrite'; path: string; offset: number; parts: Uint8Array[]; length: number }
+
 export function createJournal(): MutationJournal {
-  const journal: MirageMutation[] = []
+  const journal: Pending[] = []
   return {
     markWrite(path, bytes) {
       // A guest buffer handed over by pyodide can be a view into WASM
@@ -83,24 +112,35 @@ export function createJournal(): MutationJournal {
       // the journal owns bytes that stay valid until the drain.
       const owned = new Uint8Array(bytes)
       const last = journal[journal.length - 1]
-      if (last?.kind === 'write' && last.path === path) {
-        journal[journal.length - 1] = { kind: 'write', path, bytes: owned }
+      // A whole write replaces what the file held, so a write or a truncate
+      // just before it on the same path says nothing the mount still needs.
+      if ((last?.kind === 'write' || last?.kind === 'truncate') && last.path === path) {
+        journal[journal.length - 1] = { kind: 'write', path, parts: [owned] }
         return
       }
-      journal.push({ kind: 'write', path, bytes: owned })
+      journal.push({ kind: 'write', path, parts: [owned] })
     },
     markAppend(path, bytes) {
       const owned = new Uint8Array(bytes)
       const last = journal[journal.length - 1]
       if ((last?.kind === 'append' || last?.kind === 'write') && last.path === path) {
-        journal[journal.length - 1] = {
-          kind: last.kind,
-          path,
-          bytes: concat([last.bytes, owned]),
-        }
+        last.parts.push(owned)
         return
       }
-      journal.push({ kind: 'append', path, bytes: owned })
+      journal.push({ kind: 'append', path, parts: [owned] })
+    },
+    markPwrite(path, offset, bytes) {
+      const owned = new Uint8Array(bytes)
+      const last = journal[journal.length - 1]
+      if (last?.kind === 'pwrite' && last.path === path && last.offset + last.length === offset) {
+        last.parts.push(owned)
+        last.length += owned.length
+        return
+      }
+      journal.push({ kind: 'pwrite', path, offset, parts: [owned], length: owned.length })
+    },
+    markTruncate(path, length) {
+      journal.push({ kind: 'truncate', path, length })
     },
     markMkdir(path) {
       journal.push({ kind: 'mkdir', path })
@@ -121,7 +161,23 @@ export function createJournal(): MutationJournal {
       journal.push({ kind: 'setattr', path, attrs })
     },
     takeMutations() {
-      return journal.splice(0, journal.length)
+      return journal.splice(0, journal.length).map((entry): MirageMutation => {
+        if (entry.kind === 'write') {
+          return { kind: 'write', path: entry.path, bytes: concat(entry.parts) }
+        }
+        if (entry.kind === 'append') {
+          return { kind: 'append', path: entry.path, bytes: concat(entry.parts) }
+        }
+        if (entry.kind === 'pwrite') {
+          return {
+            kind: 'pwrite',
+            path: entry.path,
+            offset: entry.offset,
+            bytes: concat(entry.parts),
+          }
+        }
+        return entry
+      })
     },
   }
 }
@@ -142,6 +198,10 @@ export async function applyMutation(vfs: RuntimeVFS, mutation: MirageMutation): 
     // mount has no append op.
     case 'append':
       return vfs.append(mutation.path, mutation.bytes)
+    case 'pwrite':
+      return vfs.pwrite(mutation.path, mutation.offset, mutation.bytes)
+    case 'truncate':
+      return vfs.truncate(mutation.path, mutation.length)
     case 'mkdir':
       return vfs.mkdir(mutation.path)
     case 'unlink':

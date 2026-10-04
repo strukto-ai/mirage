@@ -205,6 +205,12 @@ class WasmExecution:
             exit_code = 1
             msg = f"{self._trap_prefix}: wasm trap: {exc.message}\n"
             trap_message = msg.encode()
+        lost = wasi_fs.close_all()
+        if lost:
+            trap_message += "".join(
+                f"{self._trap_prefix}: {line}\n" for line in lost
+            ).encode()
+            exit_code = exit_code or 1
         stdout = bytes(wasi_fs.stdout)
         stderr = bytes(wasi_fs.stderr) + trap_message
         return stdout, stderr or None, exit_code

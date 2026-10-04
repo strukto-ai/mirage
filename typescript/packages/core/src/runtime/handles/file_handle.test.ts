@@ -13,130 +13,146 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { READ_CHUNK } from './constants.ts'
 import { FileHandle, writeRuns } from './file_handle.ts'
-import { NO_WRITE } from './flush.ts'
+import type { FileFetch } from './types.ts'
 
 const enc = new TextEncoder()
+const dec = new TextDecoder()
+
+function over(text: string | Uint8Array, calls?: [number, number | null][]): FileFetch {
+  const data = typeof text === 'string' ? enc.encode(text) : text
+  return (offset, size) => {
+    calls?.push([offset, size])
+    return Promise.resolve(size === null ? data.slice(offset) : data.slice(offset, offset + size))
+  }
+}
+
+function handle(text: string, mode: { writable?: boolean; append?: boolean } = {}): FileHandle {
+  return FileHandle.opened('/f', over(text), {
+    size: enc.encode(text).length,
+    writable: mode.writable ?? true,
+    append: mode.append ?? false,
+  })
+}
+
+/** What a synchronous guest does: fill until nothing lacks, then read. */
+async function read(h: FileHandle, size: number): Promise<string> {
+  while (h.lacks(size)) await h.fill(size)
+  return dec.decode(h.read(size))
+}
 
 describe('FileHandle', () => {
-  it('positions by append and seeds the flush facts', () => {
-    const h = FileHandle.opened('/f', enc.encode('abc'), { writable: true, append: true })
-    expect([h.pos, h.baseLen, h.lowWrite, h.dirty]).toEqual([3, 3, NO_WRITE, false])
-    const fresh = FileHandle.opened('/f', enc.encode('abc'), { writable: false, append: false })
-    expect(fresh.pos).toBe(0)
-    expect(fresh.writable).toBe(false)
+  it('reads nothing at open and fetches a small file whole', async () => {
+    const calls: [number, number | null][] = []
+    const h = FileHandle.opened('/f', over('hello', calls), {
+      size: 5,
+      writable: false,
+      append: false,
+    })
+    expect(calls).toEqual([])
+    expect(await read(h, 2)).toBe('he')
+    expect(await read(h, -1)).toBe('llo')
+    expect(calls).toEqual([[0, null]])
   })
 
-  it('reads forward and never moves the position backward', () => {
-    const h = FileHandle.opened('/f', enc.encode('hello'), { writable: false, append: false })
-    expect(h.read(2)).toEqual(enc.encode('he'))
-    expect(h.read(null)).toEqual(enc.encode('llo'))
-    h.pos = 99
-    expect(h.read(4)).toEqual(new Uint8Array())
-    expect(h.pos).toBe(99)
+  it('fetches a large file a chunk at a time', async () => {
+    const calls: [number, number | null][] = []
+    const data = new Uint8Array(READ_CHUNK + 10).fill(120)
+    const h = FileHandle.opened('/f', over(data, calls), {
+      size: data.length,
+      writable: false,
+      append: false,
+    })
+    h.seek(READ_CHUNK + 5, 0)
+    expect(await read(h, 3)).toBe('xxx')
+    expect(calls).toEqual([[READ_CHUNK + 5, READ_CHUNK]])
   })
 
-  it('preads without moving the position', () => {
-    const h = FileHandle.opened('/f', enc.encode('hello'), { writable: false, append: false })
-    expect(h.pread(1, 3)).toEqual(enc.encode('ell'))
-    expect(h.pos).toBe(0)
-  })
-
-  it('writes extend, zero-fill, and track the flush facts', () => {
-    const h = FileHandle.opened('/f', enc.encode('abc'), { writable: true, append: true })
+  it('writes at the end every time in append mode', async () => {
+    const h = handle('abc', { append: true })
+    expect(h.pos).toBe(3)
+    h.seek(0, 0)
     h.write(enc.encode('XY'))
-    expect(h.buf).toEqual(enc.encode('abcXY'))
-    expect(h.dirty).toBe(true)
-    h.pwrite(7, enc.encode('Z'))
-    expect(h.buf).toEqual(new Uint8Array([...enc.encode('abcXY'), 0, 0, ...enc.encode('Z')]))
-    expect(h.lowWrite).toBe(3)
-    expect(h.flushPlan()).toEqual([
-      'append',
-      new Uint8Array([...enc.encode('XY'), 0, 0, ...enc.encode('Z')]),
-    ])
-    h.pwrite(0, enc.encode('q'))
-    expect(h.flushPlan()[0]).toBe('write')
+    h.seek(0, 0)
+    expect(await read(h, 9)).toBe('abcXY')
+    expect(h.flushPlan()).toEqual([{ kind: 'append', data: enc.encode('XY') }])
   })
 
-  it('seek answers null for a bad whence or a negative target', () => {
-    const h = FileHandle.opened('/f', enc.encode('hello'), { writable: false, append: false })
+  it('owes only the range an edit wrote', async () => {
+    const h = handle('0123456789')
+    h.seek(5, 0)
+    h.write(enc.encode('BB'))
+    h.seek(0, 0)
+    expect(await read(h, 10)).toBe('01234BB789')
+    expect(h.flushPlan()).toEqual([{ kind: 'pwrite', data: enc.encode('BB'), offset: 5 }])
+  })
+
+  it('joins the ranges a write touches, a later write winning', () => {
+    const h = handle('0123456789')
+    h.pwrite(6, enc.encode('x'))
+    h.pwrite(1, enc.encode('ab'))
+    h.pwrite(2, enc.encode('CDEF'))
+    expect(h.flushPlan()).toEqual([{ kind: 'pwrite', data: enc.encode('aCDEFx'), offset: 1 }])
+  })
+
+  it('reads the gap a write past the end leaves as zeros', async () => {
+    const h = handle('ab')
+    h.pwrite(4, enc.encode('Z'))
+    expect(h.size).toBe(5)
+    await h.fill(-1)
+    expect(h.pread(0, 9)).toEqual(enc.encode('ab\0\0Z'))
+  })
+
+  it('sends a created file whole', () => {
+    const h = FileHandle.opened('/f', null, { size: 0, writable: true, append: false })
+    h.write(enc.encode('new'))
+    h.pwrite(5, enc.encode('!'))
+    expect(h.flushPlan()).toEqual([{ kind: 'write', data: enc.encode('new\0\0!') }])
+  })
+
+  it('cuts, then writes ranges, then grows', async () => {
+    const h = handle('0123456789')
+    h.pwrite(8, enc.encode('xy'))
+    h.truncate(4)
+    h.pwrite(6, enc.encode('Q'))
+    h.truncate(9)
+    await h.fill(-1)
+    expect(h.pread(0, 10)).toEqual(enc.encode('0123\0\0Q\0\0'))
+    expect(h.flushPlan()).toEqual([
+      { kind: 'truncate', length: 4 },
+      { kind: 'pwrite', data: enc.encode('Q'), offset: 6 },
+      { kind: 'truncate', length: 9 },
+    ])
+  })
+
+  it('reads lines across what it wrote and what was stored', async () => {
+    const h = handle('one\ntwo\nthree')
+    h.pwrite(4, enc.encode('TWO'))
+    const lines: string[] = []
+    for (;;) {
+      while (h.lacksLine()) await h.fill(0)
+      const line = h.readLine()
+      if (line === null) break
+      lines.push(dec.decode(line))
+    }
+    expect(lines).toEqual(['one', 'TWO', 'three'])
+    expect(h.eof).toBe(true)
+  })
+
+  it('owes nothing when it only read', async () => {
+    const h = handle('abc')
+    await read(h, -1)
+    expect(h.dirty).toBe(false)
+    expect(h.flushPlan()).toEqual([])
+  })
+
+  it('answers null for a bad whence or a negative target', () => {
+    const h = handle('hello', { writable: false })
     expect(h.seek(-2, 2)).toBe(3)
     expect(h.seek(-9, 0)).toBeNull()
     expect(h.seek(0, 7)).toBeNull()
     expect(h.pos).toBe(3)
-  })
-
-  it('truncate rewrites history in both directions', () => {
-    const h = FileHandle.opened('/f', enc.encode('hello'), { writable: true, append: true })
-    h.truncate(2)
-    expect(h.buf).toEqual(enc.encode('he'))
-    expect(h.lowWrite).toBe(0)
-    h.truncate(4)
-    expect(h.buf).toEqual(new Uint8Array([...enc.encode('he'), 0, 0]))
-    expect(h.flushPlan()[0]).toBe('write')
-  })
-
-  it('eof tracks the position', () => {
-    const h = FileHandle.opened('/f', enc.encode('ab'), { writable: false, append: false })
-    expect(h.eof).toBe(false)
-    h.read(null)
-    expect(h.eof).toBe(true)
-  })
-
-  it('appending many small writes stays linear and preserves content', () => {
-    const h = FileHandle.opened('/f', new Uint8Array(), { writable: true, append: true })
-    const parts: Uint8Array[] = []
-    for (let i = 0; i < 5000; i++) {
-      const chunk = enc.encode(`chunk${String(i)};`)
-      parts.push(chunk)
-      h.write(chunk)
-    }
-    const expected = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
-    let at = 0
-    for (const p of parts) {
-      expected.set(p, at)
-      at += p.length
-    }
-    expect(h.buf).toEqual(expected)
-    expect(h.size).toBe(expected.length)
-    expect(h.eof).toBe(true)
-    expect(h._growCount).toBeLessThanOrEqual(Math.ceil(Math.log2(h.size)) + 1)
-    const [kind, tail] = h.flushPlan()
-    expect(kind).toBe('write')
-    expect(tail).toEqual(expected)
-  })
-
-  it('pwrite after truncate zero-fills the gap', () => {
-    const h = FileHandle.opened('/f', enc.encode('hello'), { writable: true, append: false })
-    h.truncate(2)
-    h.pwrite(3, enc.encode('X'))
-    expect(h.buf).toEqual(new Uint8Array([...enc.encode('he'), 0, ...enc.encode('X')]))
-    expect(h.size).toBe(4)
-  })
-
-  it('pread never reads past the logical end', () => {
-    const h = FileHandle.opened('/f', enc.encode('abc'), { writable: true, append: false })
-    h.pwrite(5, enc.encode('X'))
-    expect(h.size).toBe(6)
-    expect(h.pread(4, 10)).toEqual(new Uint8Array([0, ...enc.encode('X')]))
-  })
-
-  it('a gap write keeps a payload that views the dropped tail', () => {
-    const h = FileHandle.opened('/f', enc.encode('hello'), { writable: true, append: false })
-    const saved = h.buf
-    h.truncate(1)
-    h.pwrite(3, saved.subarray(1, 3))
-    expect(h.buf).toEqual(new Uint8Array([...enc.encode('h'), 0, 0, ...enc.encode('el')]))
-  })
-
-  it('never writes into the array it opened over', () => {
-    const stored = enc.encode('hello world')
-    const h = FileHandle.opened('/f', stored, { writable: true, append: false })
-    h.write(enc.encode('XY'))
-    h.truncate(0)
-    h.pwrite(0, enc.encode('Z'))
-    expect(new TextDecoder().decode(stored)).toBe('hello world')
-    expect(new TextDecoder().decode(h.buf)).toBe('Z')
   })
 })
 
@@ -149,25 +165,10 @@ describe('writeRuns', () => {
         [4, enc.encode('e')],
       ]),
     ).toEqual([[0, enc.encode('abcde')]])
-    expect(
-      writeRuns([
-        [0, enc.encode('new')],
-        [1, enc.encode('O')],
-      ]),
-    ).toEqual([[0, enc.encode('nOw')]])
     expect(writeRuns([])).toEqual([])
   })
 
   it('keeps scattered writes apart and in order', () => {
-    expect(
-      writeRuns([
-        [0, enc.encode('a')],
-        [10, enc.encode('b')],
-      ]),
-    ).toEqual([
-      [0, enc.encode('a')],
-      [10, enc.encode('b')],
-    ])
     expect(
       writeRuns([
         [4, enc.encode('xy')],

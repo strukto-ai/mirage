@@ -1,0 +1,318 @@
+{
+  "cases": [
+    {
+      "id": "pwrite_keeps_the_bytes_around_it",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/digits.txt",
+            "data": "XY",
+            "offset": 3
+          },
+          "expect": {
+            "ops_contain": [
+              "pwrite /data/digits.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "012XY56789"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pwrite_past_the_end_leaves_zeros",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/digits.txt",
+            "data": "Z",
+            "offset": 12
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "0123456789\u0000\u0000Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pwrite_creates_a_missing_file",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/new.txt",
+            "data": "ab",
+            "offset": 2
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/new.txt"
+          },
+          "expect": {
+            "value": "\u0000\u0000ab"
+          }
+        }
+      ]
+    },
+    {
+      "id": "empty_pwrite_reads_and_writes_nothing",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/digits.txt",
+            "data": "",
+            "offset": 3
+          },
+          "expect": {
+            "ops_absent": [
+              "read /data/digits.txt",
+              "write /data/digits.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "0123456789"
+          }
+        }
+      ]
+    },
+    {
+      "id": "empty_pwrite_creates_an_empty_file",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/new.txt",
+            "data": "",
+            "offset": 0
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/data/new.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/new.txt"
+          },
+          "expect": {
+            "value": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "pwrite_on_a_directory_is_eisdir",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/sub",
+            "data": "",
+            "offset": 0
+          },
+          "expect": {
+            "errno": "EISDIR"
+          }
+        },
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/sub",
+            "data": "x",
+            "offset": 0
+          },
+          "expect": {
+            "errno": "EISDIR"
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/sub/inner.txt"
+          },
+          "expect": {
+            "value": "in\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "negative_offset_is_einval",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/digits.txt",
+            "data": "x",
+            "offset": -1
+          },
+          "expect": {
+            "errno": "EINVAL"
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "0123456789"
+          }
+        }
+      ]
+    }
+  ]
+}

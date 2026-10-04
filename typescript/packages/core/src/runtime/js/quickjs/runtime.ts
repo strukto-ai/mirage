@@ -110,7 +110,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     try {
       this.installGlobals(ctx, args, out, err, exit)
       const vfs = context !== undefined ? RuntimeVFS.of(context) : null
-      installQuickJsFs(ctx, vfs)
+      const closeAll = installQuickJsFs(ctx, vfs)
 
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
@@ -134,6 +134,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       if (result.error) {
         if (timedOut.value && args.timeoutSeconds !== undefined) {
           result.error.dispose()
+          await closeAll()
           throw new CommandTimeoutError(this.name, args.timeoutSeconds)
         }
         if (exit.called) {
@@ -148,6 +149,11 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
         const drained = this.drainJobs(runtime, ctx, err)
         if (drained !== null) exitCode = exit.called ? exit.code : drained
       }
+      // Files the guest left open still owe the mount their writes, however
+      // the program ended.
+      const lost = await closeAll()
+      for (const line of lost) err.push(`${this.name}: ${line}\n`)
+      if (lost.length > 0 && exitCode === 0) exitCode = 1
       return {
         stdout: ENC.encode(out.join('')),
         stderr: err.length > 0 ? ENC.encode(err.join('')) : null,

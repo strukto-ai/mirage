@@ -36,8 +36,8 @@ describe('core/disk/unlink', () => {
     await unlink(accessor, spec('/x'))
     await expect(access(join(root, 'x'))).rejects.toThrow()
   })
-  it('is a no-op on missing file', async () => {
-    await expect(unlink(accessor, spec('/missing'))).resolves.toBeUndefined()
+  it('is ENOENT on a missing file', async () => {
+    await expect(unlink(accessor, spec('/missing'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 

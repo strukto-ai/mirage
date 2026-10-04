@@ -483,22 +483,7 @@ describe('RuntimeVFS append', () => {
     expect(dispatch.mock.calls.map((c) => c[0])).toEqual(['append'])
   })
 
-  it('writes the whole file the caller supplied when the mount has no append', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
-      if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
-      return Promise.resolve(undefined)
-    })
-    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
-      '/a/x',
-      enc.encode('tail'),
-      enc.encode('headtail'),
-    )
-    const write = dispatch.mock.calls.find((c) => c[0] === 'write')
-    if (write?.[2] === undefined) throw new Error('unreachable')
-    expect(new TextDecoder().decode(write[2])).toBe('headtail')
-  })
-
-  it('reads the base itself when no whole file was supplied', async () => {
+  it('reads the base fresh when the mount has no append', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
       if (op === 'read') return Promise.resolve(enc.encode('head'))
@@ -563,11 +548,12 @@ describe('RuntimeVFS append', () => {
   it('remembers a mount that declined, so it costs one failed dispatch', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (op === 'append') return Promise.reject(enotsup('s3', 'append', '/a/x'))
+      if (op === 'read') return Promise.resolve(new Uint8Array())
       return Promise.resolve(undefined)
     })
     const vfs = new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a']))
-    await vfs.append('/a/x', enc.encode('1'), enc.encode('1'))
-    await vfs.append('/a/y', enc.encode('2'), enc.encode('2'))
+    await vfs.append('/a/x', enc.encode('1'))
+    await vfs.append('/a/y', enc.encode('2'))
     expect(dispatch.mock.calls.filter((c) => c[0] === 'append')).toHaveLength(1)
   })
 
@@ -577,42 +563,26 @@ describe('RuntimeVFS append', () => {
       return Promise.resolve(undefined)
     })
     await expect(
-      new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
-        '/a/x',
-        enc.encode('t'),
-        enc.encode('t'),
-      ),
+      new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append('/a/x', enc.encode('t')),
     ).rejects.toThrow(/read-only/)
     expect(dispatch.mock.calls.some((c) => c[0] === 'write')).toBe(false)
   })
 })
 
 describe('RuntimeVFS flush', () => {
-  it('sends a pure extension as an append', async () => {
+  it('sends each step of a plan in order', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).flush(
-      '/a/x',
-      3,
-      3,
-      enc.encode('abcXYZ'),
-    )
-    const call = dispatch.mock.calls[0]
-    if (call?.[2] === undefined) throw new Error('unreachable')
-    expect(call[0]).toBe('append')
-    expect(new TextDecoder().decode(call[2])).toBe('XYZ')
-  })
-
-  it('sends a rewrite as a whole-file write', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).flush(
-      '/a/x',
-      3,
-      0,
-      enc.encode('ZZZdef'),
-    )
-    const call = dispatch.mock.calls[0]
-    if (call?.[2] === undefined) throw new Error('unreachable')
-    expect(call[0]).toBe('write')
-    expect(new TextDecoder().decode(call[2])).toBe('ZZZdef')
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).flush('/a/x', [
+      { kind: 'truncate', length: 2 },
+      { kind: 'pwrite', data: enc.encode('z'), offset: 4 },
+      { kind: 'append', data: enc.encode('!') },
+      { kind: 'write', data: enc.encode('w') },
+    ])
+    expect(dispatch.mock.calls).toEqual([
+      ['truncate', '/a/x', undefined, undefined, { length: 2 }],
+      ['pwrite', '/a/x', enc.encode('z'), undefined, { offset: 4 }],
+      ['append', '/a/x', enc.encode('!')],
+      ['write', '/a/x', enc.encode('w')],
+    ])
   })
 })

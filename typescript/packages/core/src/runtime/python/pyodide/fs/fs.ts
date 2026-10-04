@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { planFlush } from '../../../handles/index.ts'
 import { epochToIso } from '../../../../utils/dates.ts'
 import type { SetAttrFields } from '../../../../types.ts'
-import { BLKSIZE, LINK_MODE, SEEK_CUR, SEEK_END } from './constants.ts'
+import { BLKSIZE, GROW_FLOOR, LINK_MODE, SEEK_CUR, SEEK_END } from './constants.ts'
 import { errnoError } from './errors.ts'
 import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
@@ -295,10 +294,10 @@ export class PyodideFs {
     node.contents = next
     node.usedBytes = attr.size
     node.loaded = true
-    // A resize rewrites history, so it can only ship whole. Recording here
-    // rather than at close is what makes a bare `os.truncate(path, n)`,
-    // which opens no handle at all, reach the mount.
-    this.journal.markWrite(this.nodes.pathOf(node), next)
+    // A resize goes as a truncate to the new length. Recording here rather
+    // than at close is what makes a bare `os.truncate(path, n)`, which
+    // opens no handle at all, reach the mount.
+    this.journal.markTruncate(this.nodes.pathOf(node), attr.size)
   }
 
   private lookup(parent: FSNode, name: string): FSNode {
@@ -543,22 +542,29 @@ export class PyodideFs {
     if (length === 0) return 0
     const node = stream.node
     if (isCharDevice(node.mode)) return length
-    const baseLen = node.usedBytes ?? 0
+    const used = node.usedBytes ?? 0
     const need = position + length
     let contents = node.contents ?? new Uint8Array(0)
+    // Capacity doubles past what the file uses, so a loop of small writes
+    // copies the file a logarithmic number of times, not once per write.
     if (contents.length < need) {
-      const grown = new Uint8Array(need)
-      grown.set(contents)
+      const grown = new Uint8Array(Math.max(need, contents.length * 2, GROW_FLOOR))
+      grown.set(contents.subarray(0, used))
       contents = grown
       node.contents = grown
     }
-    contents.set(buffer.subarray(offset, offset + length), position)
-    node.usedBytes = Math.max(node.usedBytes ?? 0, need)
+    if (position > used) contents.fill(0, used, position)
+    const written = buffer.subarray(offset, offset + length)
+    contents.set(written, position)
+    node.usedBytes = Math.max(used, need)
     node.mtime = node.ctime = Date.now()
-    const [kind, bytes] = planFlush(baseLen, position, contents.subarray(0, node.usedBytes))
+    // A write past the end goes as an append of the new tail (a whole write
+    // when the file was empty); one inside it goes as the bytes it changed,
+    // so another writer's bytes elsewhere in the file survive.
     const path = this.nodes.pathOf(node)
-    if (kind === 'append') this.journal.markAppend(path, bytes)
-    else this.journal.markWrite(path, bytes)
+    if (position < used) this.journal.markPwrite(path, position, written)
+    else if (used === 0) this.journal.markWrite(path, contents.subarray(0, need))
+    else this.journal.markAppend(path, contents.subarray(used, need))
     return length
   }
 

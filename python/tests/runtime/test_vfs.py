@@ -20,6 +20,7 @@ import pytest
 
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.handles import FlushStep
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.vfs import RuntimeVFS
@@ -84,7 +85,7 @@ class RecordingVFS(RuntimeVFS):
         self.calls.append((op, path, kwargs))
         if op == "append" and self.mount_of(path) in self._declines:
             raise OperationNotSupportedError("append")
-        return None
+        return b"" if op == "read" else None
 
 
 class WorldVFS(RuntimeVFS):
@@ -531,22 +532,33 @@ def test_an_append_keeps_a_write_made_since_the_last_one():
     assert vfs.writes == [("/s3/a", b"head-1"), ("/s3/a", b"other-2")]
 
 
-def test_flush_ships_only_the_delta():
+def test_flush_sends_each_step_in_order():
     vfs = RecordingVFS(prefixes=["/data/"])
-    vfs.flush("/data/log.txt", 3, 3, b"abcXYZ")
-    assert [(op, kwargs.get("data")) for op, _, kwargs in vfs.calls] == [
-        ("append", b"XYZ")
+    vfs.flush(
+        "/data/f",
+        [
+            FlushStep("truncate", length=2),
+            FlushStep("pwrite", data=b"z", offset=4),
+            FlushStep("append", data=b"!"),
+            FlushStep("write", data=b"w"),
+        ],
+    )
+    assert vfs.calls == [
+        ("truncate", "/data/f", {"length": 2}),
+        ("pwrite", "/data/f", {"data": b"z", "offset": 4}),
+        ("append", "/data/f", {"data": b"!"}),
+        ("write", "/data/f", {"data": b"w"}),
     ]
 
 
 def test_flush_falls_back_to_a_whole_write_and_remembers_the_mount():
     vfs = RecordingVFS(prefixes=["/data/"], no_append=["/data"])
-    vfs.flush("/data/log.txt", 3, 3, b"abcXYZ")
-    vfs.flush("/data/log.txt", 6, 6, b"abcXYZ123")
+    vfs.flush("/data/log.txt", [FlushStep("append", data=b"XYZ")])
+    vfs.flush("/data/log.txt", [FlushStep("append", data=b"123")])
     ops = [op for op, _, _ in vfs.calls]
     # One failed probe for the mount, not one per call: the second flush
-    # goes straight to write.
-    assert ops == ["append", "write", "write"]
+    # reads the base fresh and writes, with no append tried.
+    assert ops == ["append", "read", "write", "read", "write"]
 
 
 def test_symlink_sends_the_target_verbatim():

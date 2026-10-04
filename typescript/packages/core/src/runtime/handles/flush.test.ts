@@ -17,20 +17,68 @@ import { planFlush } from './flush.ts'
 
 const enc = new TextEncoder()
 
+function plan(over: Partial<Parameters<typeof planFlush>[0]>): ReturnType<typeof planFlush> {
+  return planFlush({
+    fresh: false,
+    baseLen: 3,
+    runs: [],
+    cut: null,
+    size: 3,
+    appending: false,
+    ...over,
+  })
+}
+
 describe('planFlush', () => {
-  it('ships a tail when the handle only extended the file', () => {
-    expect(planFlush(3, 3, enc.encode('abcXYZ'))).toEqual(['append', enc.encode('XYZ')])
+  it('sends a created file whole with its gaps', () => {
+    expect(
+      plan({
+        fresh: true,
+        baseLen: 0,
+        runs: [
+          [0, enc.encode('ab')],
+          [3, enc.encode('c')],
+        ],
+        size: 4,
+      }),
+    ).toEqual([{ kind: 'write', data: enc.encode('ab\0c') }])
   })
 
-  it('ships the whole file when history was rewritten', () => {
-    expect(planFlush(3, 0, enc.encode('ZZZdef'))).toEqual(['write', enc.encode('ZZZdef')])
+  it('sends a range at the end as an append', () => {
+    expect(plan({ runs: [[3, enc.encode('XYZ')]], size: 6 })).toEqual([
+      { kind: 'append', data: enc.encode('XYZ') },
+    ])
   })
 
-  it('ships the whole file for a new one', () => {
-    expect(planFlush(0, 0, enc.encode('fresh'))).toEqual(['write', enc.encode('fresh')])
+  it('appends for an append-mode handle even to an empty file', () => {
+    expect(plan({ baseLen: 0, runs: [[0, enc.encode('x')]], size: 1, appending: true })).toEqual([
+      { kind: 'append', data: enc.encode('x') },
+    ])
   })
 
-  it('ships the whole file when the buffer shrank', () => {
-    expect(planFlush(6, 6, enc.encode('abc'))).toEqual(['write', enc.encode('abc')])
+  it('sends edits as pwrites in order', () => {
+    expect(
+      plan({
+        runs: [
+          [0, enc.encode('a')],
+          [2, enc.encode('c')],
+        ],
+      }),
+    ).toEqual([
+      { kind: 'pwrite', data: enc.encode('a'), offset: 0 },
+      { kind: 'pwrite', data: enc.encode('c'), offset: 2 },
+    ])
+  })
+
+  it('cuts first and grows last', () => {
+    expect(plan({ baseLen: 6, cut: 2, runs: [[4, enc.encode('z')]], size: 8 })).toEqual([
+      { kind: 'truncate', length: 2 },
+      { kind: 'pwrite', data: enc.encode('z'), offset: 4 },
+      { kind: 'truncate', length: 8 },
+    ])
+  })
+
+  it('grows alone with one truncate', () => {
+    expect(plan({ size: 5 })).toEqual([{ kind: 'truncate', length: 5 }])
   })
 })

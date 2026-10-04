@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CreateBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
@@ -21,6 +22,7 @@ import { MongoClient } from 'mongodb'
 import {
   buildRuntime,
   CLISpec,
+  DiskVFS,
   Limit,
   MongoDBVFS,
   MountMode,
@@ -33,6 +35,7 @@ import {
   Runtime,
   S3VFS,
   ScriptSource,
+  SSHVFS,
   snakeToCamel,
   Workspace,
   type Action,
@@ -88,6 +91,8 @@ interface FacadeSpec {
   method: string
   path: string
   data?: string
+  offset?: number
+  length?: number
 }
 
 interface Step {
@@ -504,6 +509,31 @@ async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
     }
     return vfs
   }
+  if (spec.vfs === 'disk') {
+    return new DiskVFS({ root: mkdtempSync(join(tmpdir(), `mirage-integ-runtime-ts-${runId}-`)) })
+  }
+  if (spec.vfs === 'ssh') {
+    // The ssh runtime's box: a fresh directory per mount, made before the
+    // mount is, since a root that does not exist serves nothing.
+    const root = `/tmp/mirage-integ-runtime-ts-${runId}`
+    const username = process.env.MIRAGE_INTEG_SSH_USERNAME
+    const identityFile = process.env.MIRAGE_INTEG_SSH_KEY
+    const vfs = new SSHVFS({
+      host: process.env.MIRAGE_INTEG_SSH_HOST ?? '',
+      port: 2222,
+      ...(username === undefined ? {} : { username }),
+      ...(identityFile === undefined ? {} : { identityFile }),
+      root,
+    })
+    const sftp = await vfs.accessor.sftp()
+    await new Promise<void>((resolve, reject) => {
+      sftp.mkdir(root, (err) => {
+        if (err) reject(err)
+        else resolve()
+      })
+    })
+    return vfs
+  }
   if (spec.vfs === 'redis') {
     return new RedisVFS({
       url: process.env.REDIS_URL ?? '',
@@ -677,6 +707,8 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
   if (method === undefined) return [`facade has no method ${spec.method}`]
   const args: unknown[] = [spec.path]
   if (spec.data !== undefined) args.push(ENC.encode(spec.data))
+  if (spec.offset !== undefined) args.push(spec.offset)
+  if (spec.length !== undefined) args.push(spec.length)
   if (expect.errno !== undefined) {
     // The cross-language error assertion. `throws_contains` reads the
     // message, which the two languages word differently for the same
@@ -809,6 +841,8 @@ async function runStep(
 // What a case's `backends` entry needs on this host before it can run.
 const BACKEND_REQUIRES: Record<string, string[]> = {
   ram: [],
+  disk: [],
+  ssh: ['env:MIRAGE_INTEG_SSH_HOST'],
   redis: ['env:REDIS_URL'],
   s3: ['s3'],
 }

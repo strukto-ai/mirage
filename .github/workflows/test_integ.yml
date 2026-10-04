@@ -1553,8 +1553,8 @@ jobs:
       MIRAGE_QUICKJS_HOME: /tmp/quickjs
       MIRAGE_WASI_HOME: /tmp/cpython-wasi
       MIRAGE_INTEG_DOCKER_CONTAINER: mirage-integ-runtime-box
-      # The ssh suite's sshd container publishes port 2222 (the suite
-      # json pins the port; env placeholders expand as strings only).
+      # The ssh box publishes port 2222, which the ssh runtime's entry and
+      # the ssh backend both pin (env placeholders expand as strings only).
       MIRAGE_INTEG_SSH_HOST: 127.0.0.1
       MIRAGE_INTEG_SSH_USERNAME: root
       MIRAGE_INTEG_SSH_KEY: /tmp/mirage-integ-ssh-key
@@ -1590,6 +1590,7 @@ jobs:
           minio_suites=()
           wasi_suites=()
           box_suites=()
+          ssh_suites=()
           while IFS= read -r f; do
             n="${f#integ/runtime/}"
             n="${n%.json}"
@@ -1617,6 +1618,10 @@ jobs:
             }
             if named wasi; then wasi_suites+=("$n"); fi
             if named docker || named ssh; then box_suites+=("$n"); fi
+            # The ssh backend mounts the ssh runtime's box over SFTP.
+            if jq -e 'any(.cases[]?; any((.backends // [])[]; . == "ssh"))' "$f" >/dev/null; then
+              ssh_suites+=("$n")
+            fi
           done < <(find integ/runtime -name '*.json' | sort)
           all=$(printf '%s\n' "${names[@]}" | sort -u)
           folders=$(printf '%s\n' "${names[@]}" | cut -d/ -f1 | sort -u)
@@ -1654,6 +1659,15 @@ jobs:
             if in_leg "$s"; then
               {
                 echo "NEEDS_DOCKER=1"
+                echo "NEEDS_SSH=1"
+                echo "NEEDS_SANDBOX_IMAGE=1"
+              } >> "$GITHUB_ENV"
+              break
+            fi
+          done
+          for s in "${ssh_suites[@]}"; do
+            if in_leg "$s"; then
+              {
                 echo "NEEDS_SSH=1"
                 echo "NEEDS_SANDBOX_IMAGE=1"
               } >> "$GITHUB_ENV"

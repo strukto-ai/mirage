@@ -21,8 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.handles import ChunkedHandle, FileHandle, FileTable
-from mirage.runtime.handles.constants import READ_CHUNK
+from mirage.runtime.handles import FileHandle, FileTable
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.open import apply_open
 from mirage.runtime.types import VFSStat
@@ -166,8 +165,8 @@ class FdEntry:
 
     Args:
         kind (FdKind): which of the five fd shapes this is.
-        handle (FileHandle | None): the shared buffered handle; set for
-            files and for stdin (a read-only buffer), None otherwise.
+        handle (FileHandle | None): the shared file handle; set for
+            files and for stdin (read-only bytes), None otherwise.
         path (str): guest path, for dirs and files.
         preopen (bool): the preopened root dir, which close refuses.
         dirents (list[tuple[str, int]] | None): a dir fd's cached
@@ -176,7 +175,7 @@ class FdEntry:
     """
 
     kind: FdKind
-    handle: FileHandle | ChunkedHandle | None = None
+    handle: FileHandle | None = None
     path: str = ""
     preopen: bool = False
     dirents: list[tuple[str, int]] | None = None
@@ -187,11 +186,11 @@ class WasiFs:
     """Preview1 filesystem host functions over a WasmView router.
 
     One instance per run: owns the guest fd table (stdin/stdout/stderr
-    plus one preopen at "/"), buffers whole files between open and
-    close, and translates the preview1 ABI (iovecs, filestats, dirents)
-    for the router. Installed over the linker's native WASI so only
-    filesystem imports are shadowed; clocks, args, env, and randomness
-    stay native.
+    plus one preopen at "/"), keeps each open file's writes until its
+    close (or the guest's exit), and translates the preview1 ABI
+    (iovecs, filestats, dirents) for the router. Installed over the
+    linker's native WASI so only filesystem imports are shadowed;
+    clocks, args, env, and randomness stay native.
     """
 
     def __init__(self, fs: WasmView, stdin: bytes) -> None:
@@ -202,9 +201,7 @@ class WasiFs:
         self._fds: FileTable[FdEntry] = FileTable(first_id=4)
         self._fds.set(
             0,
-            FdEntry(
-                kind="stdin", handle=FileHandle(path="", buf=bytearray(stdin))
-            ),
+            FdEntry(kind="stdin", handle=FileHandle.of_bytes("", stdin)),
         )
         self._fds.set(1, FdEntry(kind="stdout"))
         self._fds.set(2, FdEntry(kind="stderr"))
@@ -249,7 +246,7 @@ class WasiFs:
 
     # -- fd lookups -------------------------------------------------------
 
-    def _handle(self, fd: int) -> FileHandle | ChunkedHandle | None:
+    def _handle(self, fd: int) -> FileHandle | None:
         """The buffered handle under `fd`: a file's, or stdin's.
 
         Args:
@@ -258,7 +255,7 @@ class WasiFs:
         entry = self._fds.get(fd)
         return entry.handle if entry is not None else None
 
-    def _file_handle(self, fd: int) -> FileHandle | ChunkedHandle | None:
+    def _file_handle(self, fd: int) -> FileHandle | None:
         """The handle under `fd` only when it is a regular file.
 
         Args:
@@ -323,24 +320,20 @@ class WasiFs:
             if mode.writable:
                 raise
             return self._open_dir(caller, path, out)
-        handle: FileHandle | ChunkedHandle
-        if row is not None and not mode.writable and row.size > READ_CHUNK:
-            handle = ChunkedHandle(
-                path=path,
-                size=row.size,
-                fetch=lambda offset, size: self._fs.read(
-                    path, offset=offset, size=size
-                ),
-            )
-        else:
-            # A handle that writes starts from the stored bytes: its
-            # close stores what it holds.
-            data = (
-                b"" if row is None else self._fs.read(path, raw=mode.writable)
-            )
-            handle = FileHandle.opened(
-                path, data, writable=mode.writable, append=mode.append
-            )
+        # Nothing is read at open: the handle fetches what a read lands
+        # in. A handle that writes reads the stored bytes, since its
+        # writes land on them; a read-only one sees the rendering.
+        handle = FileHandle.opened(
+            path,
+            None
+            if row is None
+            else lambda offset, size: self._fs.read(
+                path, offset=offset, size=size, raw=mode.writable
+            ),
+            size=0 if row is None else row.size,
+            writable=mode.writable,
+            append=mode.append,
+        )
         # A file the open created or emptied has no row from before it,
         # so fd_filestat_get answers from the row the open left behind.
         if row is None:
@@ -362,9 +355,30 @@ class WasiFs:
             return EBADF
         self._fds.pop(fd)
         h = entry.handle
-        if entry.kind == "file" and isinstance(h, FileHandle) and h.dirty:
-            self._fs.flush(h.path, h.base_len, h.low_write, h.buf)
+        if entry.kind == "file" and h is not None and h.dirty:
+            self._fs.flush(h.path, h.flush_plan())
         return OK
+
+    def close_all(self) -> list[str]:
+        """Send what every file the guest left open still owes the mount.
+
+        A process's writes are in its files whether or not it closed
+        them, so the guest's exit flushes each open file the way a
+        close would. One that fails does not stop the rest.
+
+        Returns:
+            list[str]: one line per file whose writes could not land.
+        """
+        failures: list[str] = []
+        for entry in list(self._fds.values()):
+            h = entry.handle
+            if entry.kind != "file" or h is None or not h.dirty:
+                continue
+            try:
+                self._fs.flush(h.path, h.flush_plan())
+            except OSError as exc:
+                failures.append(f"{h.path}: {exc}")
+        return failures
 
     def fd_renumber(self, caller: "wasmtime.Caller", fd: int, to: int) -> int:
         entry = self._fds.get(fd)
@@ -442,10 +456,7 @@ class WasiFs:
             elif entry.kind == "stderr":
                 self.stderr += data
             elif entry.kind == "file" and entry.handle is not None:
-                if (
-                    not isinstance(entry.handle, FileHandle)
-                    or not entry.handle.writable
-                ):
+                if not entry.handle.writable:
                     return EBADF
                 entry.handle.write(data)
             else:
@@ -464,7 +475,7 @@ class WasiFs:
         nwritten: int,
     ) -> int:
         h = self._file_handle(fd)
-        if not isinstance(h, FileHandle) or not h.writable:
+        if h is None or not h.writable:
             return EBADF
         total, pos = 0, offset
         for bptr, blen in self._iovs(caller, iovs, count):
@@ -560,7 +571,7 @@ class WasiFs:
         self, caller: "wasmtime.Caller", fd: int, size: int
     ) -> int:
         h = self._file_handle(fd)
-        if not isinstance(h, FileHandle) or not h.writable:
+        if h is None or not h.writable:
             return EBADF
         h.truncate(size)
         return OK

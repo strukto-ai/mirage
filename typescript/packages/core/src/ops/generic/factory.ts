@@ -253,6 +253,15 @@ export function makeGenericOps<A extends Accessor>(
           existing = await table.readBytes(asA(accessor), path, kwargs.index)
         } catch (error) {
           if (!isMissingPath(error)) throw error
+          // A key store answers a read of a directory's name as a missing
+          // key; writing there would put an object beside the directory.
+          let found: unknown = null
+          try {
+            found = await table.stat(asA(accessor), path, kwargs.index)
+          } catch (statError) {
+            if (!isMissingPath(statError)) throw statError
+          }
+          if (found instanceof FileStat && found.type === FileType.DIRECTORY) throw eisdir(path)
           existing = new Uint8Array()
         }
         return write(asA(accessor), path, spliceWindow(existing, offset, data))
@@ -267,7 +276,7 @@ export function makeGenericOps<A extends Accessor>(
     // A per-call `parents: true` kwarg (pathlib's mkdir(parents=True)
     // through a runtime bridge) forwards like python's registry, which
     // hands dispatch kwargs to the op; `mkdirParents` still forces it
-    // for backends whose core requires the flag (disk).
+    // for backends whose core requires the flag (databricks_volume).
     emit(
       'mkdir',
       (accessor, path, _args, kwargs) =>

@@ -20,7 +20,7 @@ from typing import Any, TypeVar
 from mirage.concurrency.limiter import ConcurrencyLimiter
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.handles import plan_flush
+from mirage.runtime.handles import FlushStep
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, RuntimeContext, VFSEntry, VFSStat
 from mirage.types import FileStat, PathSpec
@@ -273,6 +273,17 @@ class RuntimeVFS:
 
     def write(self, path: str, data: bytes) -> None:
         self.call("write", path, data=data)
+
+    def pwrite(self, path: str, offset: int, data: bytes) -> None:
+        """Write bytes at an offset, leaving the rest of the file as it is.
+
+        Args:
+            path (str): guest-absolute virtual path.
+            offset (int): byte offset to write at; past the end, the gap
+                reads as zeros.
+            data (bytes): the payload.
+        """
+        self.call("pwrite", path, data=data, offset=offset)
 
     def stat(self, path: str, *, nofollow: bool = False) -> VFSStat:
         """One path's metadata, projected for a guest encoder.
@@ -563,35 +574,29 @@ class RuntimeVFS:
             nofollow=nofollow,
         )
 
-    def append(
-        self, path: str, data: bytes, whole: bytes | None = None
-    ) -> None:
+    def append(self, path: str, data: bytes) -> None:
         """Extend `path` by `data`, falling back to a whole-file write.
 
         `append` is optional per backend (S3 registers `write` and
         `rename` without it), so a mount that declines is remembered:
         the fallback then costs one failed dispatch per mount rather
-        than one per call. The fallback writes `whole` when the caller
-        holds it, and otherwise reads the base fresh, a missing file
-        starting empty. Fresh every time, never a copy from an earlier
-        append: a mount without the op can only emulate one by reading
-        and rewriting, and an append lands after whatever the file
-        holds now, so a write another action made between two appends
-        is kept, as O_APPEND keeps it.
+        than one per call. The fallback reads the base fresh, a missing
+        file starting empty, never a copy from an earlier append: a
+        mount without the op can only emulate one by reading and
+        rewriting, and an append lands after whatever the file holds
+        now, so a write another action made between two appends is
+        kept, as O_APPEND keeps it.
 
         Args:
             path (str): guest-absolute virtual path.
             data (bytes): only the newly appended bytes.
-            whole (bytes | None): the file's full content, when the
-                caller already has it.
         """
         if self._append_delta(path, data):
             return
-        if whole is None:
-            try:
-                whole = self.read(path) + data
-            except FileNotFoundError:
-                whole = data
+        try:
+            whole = self.read(path, raw=True) + data
+        except FileNotFoundError:
+            whole = data
         self.write(path, whole)
 
     def _append_delta(self, path: str, data: bytes) -> bool:
@@ -605,19 +610,19 @@ class RuntimeVFS:
             return False
         return True
 
-    def flush(
-        self, path: str, base_len: int, low_write: int, buf: bytes | bytearray
-    ) -> None:
-        """Send a closing handle's buffer as a delta when it can be one.
+    def flush(self, path: str, steps: list[FlushStep]) -> None:
+        """Send what a closing handle owes the mount, in order.
 
         Args:
             path (str): guest-absolute virtual path.
-            base_len (int): length the file had when the handle opened.
-            low_write (int): lowest offset this handle wrote at.
-            buf (bytes | bytearray): the handle's whole buffer.
+            steps (list[FlushStep]): the handle's ``flush_plan()``.
         """
-        kind, payload = plan_flush(base_len, low_write, buf)
-        if kind == "write":
-            self.write(path, payload)
-            return
-        self.append(path, payload, bytes(buf))
+        for step in steps:
+            if step.kind == "write":
+                self.write(path, step.data)
+            elif step.kind == "append":
+                self.append(path, step.data)
+            elif step.kind == "pwrite":
+                self.pwrite(path, step.offset, step.data)
+            else:
+                self.truncate(path, step.length)

@@ -10,6 +10,8 @@
       ],
       "backends": [
         "ram",
+        "disk",
+        "ssh",
         "s3",
         "redis"
       ],
@@ -56,6 +58,8 @@
       ],
       "backends": [
         "ram",
+        "disk",
+        "ssh",
         "s3",
         "redis"
       ],
@@ -115,6 +119,8 @@
       ],
       "backends": [
         "ram",
+        "disk",
+        "ssh",
         "s3",
         "redis"
       ],
@@ -144,13 +150,6 @@
             "ops_absent": [
               "create /data/seed.txt"
             ]
-          },
-          "expect_on": {
-            "pyodide": {
-              "ops_contain": [
-                "write /data/seed.txt"
-              ]
-            }
           }
         },
         {
@@ -172,6 +171,8 @@
       ],
       "backends": [
         "ram",
+        "disk",
+        "ssh",
         "s3",
         "redis"
       ],

@@ -15,15 +15,16 @@
 from mirage.runtime.handles.chunked import ChunkedHandle
 from mirage.runtime.handles.file_handle import FileHandle, write_runs
 from mirage.runtime.handles.file_table import FileTable
-from mirage.runtime.handles.flush import NO_WRITE, FlushKind, plan_flush
+from mirage.runtime.handles.flush import plan_flush
 from mirage.runtime.handles.mode import parse_mode
+from mirage.runtime.handles.types import FlushKind, FlushStep
 
 __all__ = [
-    "NO_WRITE",
     "ChunkedHandle",
     "FileHandle",
     "FileTable",
     "FlushKind",
+    "FlushStep",
     "parse_mode",
     "plan_flush",
     "write_runs",

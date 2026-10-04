@@ -10,6 +10,8 @@
       ],
       "backends": [
         "ram",
+        "disk",
+        "ssh",
         "s3",
         "redis"
       ],
@@ -64,14 +66,17 @@
             "stdout": "IsADirectoryError\n"
           },
           "expect_on": {
-            "monty": {
+            "monty@ram": {
               "stdout": "FileNotFoundError\n"
             },
-            "wasi": {
+            "monty@redis": {
               "stdout": "FileNotFoundError\n"
             },
-            "s3": {
-              "stdout": "IsADirectoryError\n"
+            "wasi@ram": {
+              "stdout": "FileNotFoundError\n"
+            },
+            "wasi@redis": {
+              "stdout": "FileNotFoundError\n"
             }
           }
         },

@@ -2,7 +2,7 @@
 
 Calls on one path: its metadata, its name and its links. Runs on monty and quickjs on both hosts, wasi on the python host and pyodide on the typescript host. Link
 calls run on wasi and pyodide only: QuickJS builds without them and Monty
-has none.
+has none. A case with a `backends` list also runs over RAM, disk, ssh, S3 and redis.
 
 | File           | Pins                                                                                                                                               | Differs                                                                                                                                                                                               |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

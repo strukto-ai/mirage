@@ -91,9 +91,11 @@ export type BridgeOpAttrs = SetAttrFields & {
   parents?: boolean
   create?: boolean
   replace?: boolean
-  /** A ranged read: where it starts and how long it is. */
+  /** A ranged read, or where a pwrite lands: where it starts and how long it is. */
   offset?: number
   size?: number
+  /** The length a truncate leaves. */
+  length?: number
   /** A read of the stored bytes rather than a rendering. */
   raw?: boolean
 }
@@ -113,6 +115,7 @@ export type BridgeDispatchFn = (
     | 'read'
     | 'write'
     | 'append'
+    | 'pwrite'
     | 'readdir'
     | 'stat'
     | 'create'

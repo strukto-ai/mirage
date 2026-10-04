@@ -36,8 +36,8 @@ describe('core/disk/rmdir', () => {
     await rmdir(accessor, spec('/d'))
     await expect(access(join(root, 'd'))).rejects.toThrow()
   })
-  it('is a no-op on missing dir', async () => {
-    await expect(rmdir(accessor, spec('/missing'))).resolves.toBeUndefined()
+  it('is ENOENT on a missing dir', async () => {
+    await expect(rmdir(accessor, spec('/missing'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 

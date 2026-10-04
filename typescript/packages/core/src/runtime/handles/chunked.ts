@@ -93,6 +93,13 @@ export class ChunkedHandle {
     return line
   }
 
+  /** The kept bytes from `offset`, at most `size` of them; empty when none are kept there. */
+  peek(offset: number, size: number): Uint8Array {
+    const keptEnd = this.start + this.kept.length
+    if (size <= 0 || offset < this.start || offset >= keptEnd) return new Uint8Array()
+    return this.slice(offset, Math.min(size, keptEnd - offset))
+  }
+
   /** True once the position sits at or past where the file is known to end. */
   get eof(): boolean {
     return this.atEnd(this.pos)

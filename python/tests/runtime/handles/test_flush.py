@@ -13,21 +13,53 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.runtime.handles.flush import plan_flush
+from mirage.runtime.handles.types import FlushStep
 
 
-def test_plan_flush_sends_a_tail_when_the_handle_only_extended():
-    assert plan_flush(3, 3, b"abcXYZ") == ("append", b"XYZ")
+def _plan(**over):
+    facts = {
+        "fresh": False,
+        "base_len": 3,
+        "runs": [],
+        "cut": None,
+        "size": 3,
+        "appending": False,
+    }
+    return plan_flush(**{**facts, **over})
 
 
-def test_plan_flush_sends_the_whole_file_when_history_was_rewritten():
-    assert plan_flush(3, 0, b"ZZZdef") == ("write", b"ZZZdef")
+def test_a_created_file_goes_whole_with_its_gaps():
+    assert _plan(
+        fresh=True, base_len=0, runs=[(0, b"ab"), (3, b"c")], size=4
+    ) == [FlushStep("write", data=b"ab\0c")]
 
 
-def test_plan_flush_sends_the_whole_file_for_a_new_one():
-    # base_len 0 means create or truncate: there is nothing to extend,
-    # and the mount may not have the file at all yet.
-    assert plan_flush(0, 0, b"fresh") == ("write", b"fresh")
+def test_a_range_at_the_end_goes_as_an_append():
+    assert _plan(runs=[(3, b"XYZ")], size=6) == [
+        FlushStep("append", data=b"XYZ")
+    ]
 
 
-def test_plan_flush_sends_the_whole_file_when_the_buffer_shrank():
-    assert plan_flush(6, 6, b"abc") == ("write", b"abc")
+def test_an_append_mode_handle_appends_even_to_an_empty_file():
+    assert _plan(base_len=0, runs=[(0, b"x")], size=1, appending=True) == [
+        FlushStep("append", data=b"x")
+    ]
+
+
+def test_edits_go_as_pwrites_in_order():
+    assert _plan(runs=[(0, b"a"), (2, b"c")]) == [
+        FlushStep("pwrite", data=b"a", offset=0),
+        FlushStep("pwrite", data=b"c", offset=2),
+    ]
+
+
+def test_a_cut_comes_first_and_growth_last():
+    assert _plan(base_len=6, cut=2, runs=[(4, b"z")], size=8) == [
+        FlushStep("truncate", length=2),
+        FlushStep("pwrite", data=b"z", offset=4),
+        FlushStep("truncate", length=8),
+    ]
+
+
+def test_growth_alone_is_one_truncate():
+    assert _plan(size=5) == [FlushStep("truncate", length=5)]

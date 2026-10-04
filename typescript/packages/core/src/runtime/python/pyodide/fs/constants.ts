@@ -27,3 +27,7 @@ export const BLKSIZE = 4096
 // llseek's whence, which Emscripten passes through as the raw number.
 export const SEEK_CUR = 1
 export const SEEK_END = 2
+
+// The smallest buffer a written file grows to; past it, each growth
+// doubles the capacity.
+export const GROW_FLOOR = 4096

@@ -40,7 +40,9 @@ describe('rmdirOp', () => {
     expect(await existsCore(res.accessor, spec('/d'))).toBe(false)
   })
 
-  it('is a no-op on missing directory', async () => {
-    await expect(rmdirOp.fn(res.accessor, spec('/missing'), [], {})).resolves.toBeUndefined()
+  it('is ENOENT on a missing directory', async () => {
+    await expect(rmdirOp.fn(res.accessor, spec('/missing'), [], {})).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

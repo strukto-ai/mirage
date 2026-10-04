@@ -1,0 +1,168 @@
+{
+  "cases": [
+    {
+      "id": "truncate_cuts_a_file",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "truncate",
+            "path": "/data/digits.txt",
+            "length": 4
+          },
+          "expect": {
+            "ops_contain": [
+              "truncate /data/digits.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "0123"
+          }
+        }
+      ]
+    },
+    {
+      "id": "truncate_grows_a_file_with_zeros",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "truncate",
+            "path": "/data/digits.txt",
+            "length": 12
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "0123456789\u0000\u0000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "truncate_to_zero_empties_a_file",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "truncate",
+            "path": "/data/digits.txt",
+            "length": 0
+          },
+          "expect": {}
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "truncate_creates_a_missing_file",
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "truncate",
+            "path": "/data/new.txt",
+            "length": 3
+          },
+          "expect": {
+            "ops_contain": [
+              "truncate /data/new.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/new.txt"
+          },
+          "expect": {
+            "value": "\u0000\u0000\u0000"
+          }
+        }
+      ]
+    }
+  ]
+}

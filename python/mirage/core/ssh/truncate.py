@@ -14,7 +14,7 @@
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.ssh.utils import join_root
+from mirage.core.ssh.utils import join_root, open_for_write
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enotsup
@@ -31,6 +31,8 @@ async def truncate(
     config = accessor.config
     timer = start_op()
     sftp = await accessor.sftp()
-    await sftp.truncate(join_root(config.root, path.mount_path), length)
+    remote = join_root(config.root, path.mount_path)
+    async with await open_for_write(sftp, remote, path) as f:
+        await f.truncate(length)
     record("truncate", path.virtual, "ssh", 0, timer)
     await invalidate_after_write(path)

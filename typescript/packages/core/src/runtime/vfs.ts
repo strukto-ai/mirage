@@ -28,7 +28,7 @@ import {
 import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
-import { planFlush } from './handles/index.ts'
+import type { FlushStep } from './handles/index.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn, RuntimeContext } from './types.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
@@ -243,6 +243,14 @@ export class RuntimeVFS {
   }
 
   /**
+   * Write bytes at an offset, leaving the rest of the file as it is; past
+   * the end, the gap reads as zeros.
+   */
+  async pwrite(path: string, offset: number, bytes: Uint8Array): Promise<void> {
+    await this.dispatch('pwrite', path, bytes, undefined, { offset })
+  }
+
+  /**
    * One path's metadata, projected for a guest encoder.
    *
    * @param path guest-absolute virtual path.
@@ -411,13 +419,9 @@ export class RuntimeVFS {
     await this.dispatch('create', path)
   }
 
-  /**
-   * Discard `path`'s content. Only ever a truncate-to-zero: the guest
-   * surfaces that reach this are fopen-style opens, and a guest
-   * ftruncate to a length operates on its open handle's buffer.
-   */
-  async truncate(path: string): Promise<void> {
-    await this.dispatch('truncate', path)
+  /** Set `path`'s length: a shrink drops bytes, growth reads zeros. */
+  async truncate(path: string, length = 0): Promise<void> {
+    await this.dispatch('truncate', path, undefined, undefined, { length })
   }
 
   async unlink(path: string): Promise<void> {
@@ -514,32 +518,25 @@ export class RuntimeVFS {
    * fallback then costs one failed dispatch per mount rather than one
    * per call.
    *
-   * The fallback needs the whole file. An encoder that already holds
-   * it (a closing file handle) passes it; one that does not (monty's
-   * appends, pyodide's mutation replay, which recorded only the tail)
-   * omits it, and the fallback reads the base fresh. Fresh every time,
-   * never a copy from an earlier append: an append lands after whatever
-   * the file holds now, so a write another action made between two
-   * appends is kept, as O_APPEND keeps it.
-   * Only a confirmed absence starts from an empty base, since an append may
-   * create the file — every other read failure propagates, because
-   * writing the tail alone over a file that exists but is momentarily
-   * unreadable would replace content this run never saw.
+   * The fallback reads the base fresh every time, never a copy from an
+   * earlier append: an append lands after whatever the file holds now,
+   * so a write another action made between two appends is kept, as
+   * O_APPEND keeps it. It reads the stored bytes, not a rendering, since
+   * it writes them back. Only a confirmed absence starts from an empty
+   * base, since an append may create the file; every other read failure
+   * propagates, because writing the tail alone over a file that exists
+   * but is momentarily unreadable would replace content this run never
+   * saw.
    *
    * Args:
    *   path: guest-absolute virtual path.
    *   tail: only the newly appended bytes.
-   *   whole: the file's full content, when the caller has it.
    */
-  async append(path: string, tail: Uint8Array, whole?: Uint8Array): Promise<void> {
+  async append(path: string, tail: Uint8Array): Promise<void> {
     if (await this.appendDelta(path, tail)) return
-    if (whole !== undefined) {
-      await this.write(path, whole)
-      return
-    }
     let base: Uint8Array = new Uint8Array()
     try {
-      base = await this.read(path)
+      base = await this.read(path, { raw: true })
     } catch (err) {
       if (!isMissingPath(err)) throw err
     }
@@ -568,12 +565,14 @@ export class RuntimeVFS {
    *   lowWrite: lowest offset this handle wrote at.
    *   buf: the handle's whole buffer.
    */
-  async flush(path: string, baseLen: number, lowWrite: number, buf: Uint8Array): Promise<void> {
-    const [kind, payload] = planFlush(baseLen, lowWrite, buf)
-    if (kind === 'write') {
-      await this.write(path, payload)
-      return
+  /** Send what a closing handle owes the mount, in order (its `flushPlan()`). */
+  async flush(path: string, steps: readonly FlushStep[]): Promise<void> {
+    for (const step of steps) {
+      const data = step.data ?? new Uint8Array()
+      if (step.kind === 'write') await this.write(path, data)
+      else if (step.kind === 'append') await this.append(path, data)
+      else if (step.kind === 'pwrite') await this.pwrite(path, step.offset ?? 0, data)
+      else await this.truncate(path, step.length ?? 0)
     }
-    await this.append(path, payload, buf)
   }
 }

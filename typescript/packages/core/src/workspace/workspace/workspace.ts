@@ -733,6 +733,11 @@ export class Workspace {
           await dispatch('append', path, [buf])
           return undefined
         }
+        case 'pwrite': {
+          if (bytes === undefined) throw new Error('pwrite op requires bytes')
+          await dispatch('pwrite', path, [bytes, attrs?.offset ?? 0])
+          return undefined
+        }
         case 'stat':
           // The mount's own row, nothing projected: the runtime door
           // builds the one VFSStat both languages read, so the two
@@ -749,7 +754,7 @@ export class Workspace {
           await dispatch('create', path)
           return undefined
         case 'truncate':
-          await dispatch('truncate', path, [0])
+          await dispatch('truncate', path, [attrs?.length ?? 0])
           return undefined
         case 'unlink':
           await dispatch('unlink', path)

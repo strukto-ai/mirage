@@ -12,19 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DiskAccessor } from '../../accessor/disk.ts'
-import { rmdir as fsRmdir } from 'node:fs/promises'
-import { invalidateAfterUnlink } from '@struktoai/mirage-core/cache/context'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { diskError } from './errors.ts'
-import { resolveInside } from './utils.ts'
+export type FlushKind = 'write' | 'append' | 'pwrite' | 'truncate'
 
-export async function rmdir(accessor: DiskAccessor, path: PathSpec): Promise<void> {
-  const full = await resolveInside(accessor.root, path)
-  try {
-    await fsRmdir(full)
-  } catch (err) {
-    throw diskError(err, path)
-  }
-  await invalidateAfterUnlink(path)
+/**
+ * One op a closing handle owes the mount. Mirrors Python's `FlushStep`.
+ *
+ * `data` is the payload of a write, append or pwrite, `offset` where a
+ * pwrite lands, and `length` the length a truncate leaves.
+ */
+export interface FlushStep {
+  readonly kind: FlushKind
+  readonly data?: Uint8Array
+  readonly offset?: number
+  readonly length?: number
 }
+
+/** The door's read of `(offset, size)`; a null size reads to the end. */
+export type FileFetch = (offset: number, size: number | null) => Promise<Uint8Array>

@@ -1,0 +1,58 @@
+{
+  "cases": [
+    {
+      "id": "w_plus_reads_back_what_it_wrote",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/seed.txt', 'w+')\nf.write('fresh')\nf.seek(0)\nprint(f.read())\nf.close()",
+            "js": "const f = std.open('/data/seed.txt', 'w+')\nf.puts('fresh')\nf.seek(0, 0)\nconsole.log(f.readAsString())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "fresh\n",
+            "ops_contain": [
+              "truncate /data/seed.txt"
+            ]
+          },
+          "expect_on": {
+            "pyodide": {
+              "ops_contain": [
+                "write /data/seed.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "fresh"
+          }
+        }
+      ]
+    }
+  ]
+}

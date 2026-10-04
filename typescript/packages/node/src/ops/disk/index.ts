@@ -17,6 +17,4 @@ import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { IO } from '../../commands/builtin/disk/io.ts'
 
-export const DISK_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.DISK, IO, {
-  mkdirParents: true,
-})
+export const DISK_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.DISK, IO)

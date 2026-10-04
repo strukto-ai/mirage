@@ -10,6 +10,8 @@
       ],
       "backends": [
         "ram",
+        "disk",
+        "ssh",
         "s3",
         "redis"
       ],
@@ -46,6 +48,113 @@
               "stdout": "",
               "stderr_contains": "update modes ('+') are not yet supported"
             }
+          }
+        }
+      ]
+    },
+    {
+      "id": "r_plus_edits_in_place",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/digits.txt', 'r+')\nf.seek(5)\nf.write('BB')\nf.seek(0)\nprint(f.read())\nf.close()",
+            "js": "const f = std.open('/data/digits.txt', 'r+')\nf.seek(5, 0)\nf.puts('BB')\nf.seek(0, 0)\nconsole.log(f.readAsString())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "01234BB789\n",
+            "ops_contain": [
+              "pwrite /data/digits.txt"
+            ],
+            "ops_absent": [
+              "write /data/digits.txt"
+            ]
+          },
+          "expect_on": {
+            "s3": {
+              "ops_contain": [
+                "write /data/digits.txt"
+              ],
+              "ops_absent": []
+            },
+            "redis": {
+              "ops_contain": [
+                "write /data/digits.txt"
+              ],
+              "ops_absent": []
+            }
+          }
+        },
+        {
+          "command": "cat /data/digits.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "01234BB789"
+          }
+        }
+      ]
+    },
+    {
+      "id": "two_handles_keep_both_edits",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "digits.txt": "0123456789"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "a = open('/data/digits.txt', 'r+')\nb = open('/data/digits.txt', 'r+')\na.write('AA')\nb.seek(5)\nb.write('BB')\na.close()\nb.close()",
+            "js": "const a = std.open('/data/digits.txt', 'r+')\nconst b = std.open('/data/digits.txt', 'r+')\na.puts('AA')\nb.seek(5, 0)\nb.puts('BB')\na.close()\nb.close()"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat /data/digits.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "AA234BB789"
           }
         }
       ]

@@ -15,6 +15,7 @@
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.ssh.utils import join_root
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -22,7 +23,9 @@ async def append_bytes(
     accessor: SSHAccessor, path: PathSpec, data: bytes
 ) -> None:
     config = accessor.config
+    timer = start_op()
     sftp = await accessor.sftp()
     async with sftp.open(join_root(config.root, path.mount_path), "ab") as f:
         await f.write(data)
+    record("append", path.virtual, "ssh", len(data), timer)
     await invalidate_after_write(path)
