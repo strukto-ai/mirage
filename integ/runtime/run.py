@@ -673,7 +673,8 @@ def _check_ops(expect: dict[str, Any], seen: list[str]) -> list[str]:
 
     Args:
         expect (dict[str, Any]): the step's expect block; ``ops_contain``
-            and ``ops_absent`` hold an op name or ``"<op> <path>"``.
+            and ``ops_absent`` hold an op name or ``"<op> <path>"``, and
+            ``ops_count`` maps one of those to how many records match it.
         seen (list[str]): the records the step appended, one
             ``"<op> <path>"`` string per record, in arrival order.
     """
@@ -685,6 +686,12 @@ def _check_ops(expect: dict[str, Any], seen: list[str]) -> list[str]:
     for entry in expect.get("ops_absent", []):
         if entry in recorded:
             problems.append(f"ledger must not hold {entry!r}: got {seen!r}")
+    for entry, want in expect.get("ops_count", {}).items():
+        got = sum(1 for s in seen if entry in (s, s.partition(" ")[0]))
+        if got != want:
+            problems.append(
+                f"ledger holds {entry!r} {got} times, not {want}: got {seen!r}"
+            )
     return problems
 
 

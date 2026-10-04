@@ -166,6 +166,29 @@
           "expect": {
             "value": "0123456789"
           }
+        },
+        {
+          "facade": {
+            "method": "pwrite",
+            "path": "/data/digits.txt",
+            "data": "",
+            "offset": 20
+          },
+          "expect": {
+            "ops_absent": [
+              "read /data/digits.txt",
+              "write /data/digits.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/digits.txt"
+          },
+          "expect": {
+            "value": "0123456789"
+          }
         }
       ]
     },

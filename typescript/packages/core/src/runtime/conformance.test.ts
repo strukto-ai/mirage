@@ -122,37 +122,23 @@ function runArgs(code: string): RunArgs {
 // runtime still produces the right final content, so the file alone
 // cannot tell one append from a full rewrite per close.
 describe('append ships only the deltas', () => {
-  it('monty', async () => {
-    const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
-    const rt = new MontyRuntime()
-    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
-    const result = await rt.run(runArgs(APPEND_LOOP_PY))
-    await rt.close()
-    expect(result.exitCode).toBe(0)
-    expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
-  }, 120_000)
-
-  it('pyodide', async () => {
-    const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
-    const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
-    const result = await rt.run(runArgs(APPEND_LOOP_PY))
-    await rt.close()
-    expect(result.exitCode).toBe(0)
-    const dec = new TextDecoder()
-    expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
-    expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
-  }, 120_000)
-
-  it('quickjs', async () => {
-    const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
-    const rt = new QuickJsRuntime()
-    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
-    const result = await rt.run(runArgs(APPEND_LOOP_JS))
-    await rt.close()
-    expect(result.exitCode).toBe(0)
-    const dec = new TextDecoder()
-    expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
-    expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
-  }, 120_000)
+  it.each<[string, () => MontyRuntime | PyodideRuntime | QuickJsRuntime, string]>([
+    ['monty', () => new MontyRuntime(), APPEND_LOOP_PY],
+    ['pyodide', () => new PyodideRuntime(), APPEND_LOOP_PY],
+    ['quickjs', () => new QuickJsRuntime(), APPEND_LOOP_JS],
+  ])(
+    '%s',
+    async (_name, make, program) => {
+      const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
+      const rt = make()
+      rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
+      const result = await rt.run(runArgs(program))
+      await rt.close()
+      expect(result.exitCode).toBe(0)
+      const dec = new TextDecoder()
+      expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
+      expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
+    },
+    120_000,
+  )
 })

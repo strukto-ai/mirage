@@ -23,7 +23,7 @@ except ImportError as exc:
     ) from exc
 
 from mirage import __version__
-from mirage.agents.tool_descriptions import (
+from mirage.workspace.tools.tool_descriptions import (
     EDIT_DESCRIPTION,
     EDIT_INPUT,
     GLOB_DESCRIPTION,
@@ -39,11 +39,11 @@ from mirage.agents.tool_descriptions import (
     WRITE_DESCRIPTION,
     WRITE_INPUT,
 )
-from mirage.agents.tool_operations import (
+from mirage.workspace.tools.tool_operations import (
     MirageToolOperations,
     ToolResult,
 )
-from mirage.workspace.workspace import Workspace
+from mirage.workspace.workspace import Session, Workspace
 
 
 def _to_sdk(result: ToolResult) -> dict[str, Any]:
@@ -72,8 +72,11 @@ class _MirageTools:
         stale_write_protection: bool = True,
         session_id: str | None = None,
     ) -> None:
-        self._ops = MirageToolOperations(
-            workspace, stale_write_protection, session_id
+        session = Session(workspace, session_id)
+        self._ops = (
+            session.tools
+            if stale_write_protection
+            else MirageToolOperations(session, stale_write_protection=False)
         )
 
     async def shell(self, args: dict[str, Any]) -> dict[str, Any]:

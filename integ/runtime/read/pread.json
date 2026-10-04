@@ -56,9 +56,6 @@
           "expect_on": {
             "quickjs": {
               "stdout": "789 10\n"
-            },
-            "quickjs@typescript": {
-              "stdout": "0123456789 10\n"
             }
           }
         },

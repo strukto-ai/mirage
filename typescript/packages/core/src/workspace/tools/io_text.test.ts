@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { Refusal } from '@struktoai/mirage-core/types'
-import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { Refusal } from '../../types.ts'
+import { ExecuteResult } from '../workspace/workspace.ts'
 import { decode, ioToStr, replaceText, withRefusal } from './io_text.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)

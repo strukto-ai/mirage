@@ -20,7 +20,7 @@ from mirage.errors.classify import classify
 from mirage.errors.posix import POSIX
 from mirage.errors.types import FsCondition
 from mirage.runtime.errors import CrossMountError
-from mirage.utils.errors import enotsup, no_mount
+from mirage.utils.errors import ReadOnlyError, enotsup, no_mount
 from mirage.utils.path import CycleError
 
 
@@ -65,6 +65,14 @@ def test_xattr_miss_is_one_condition_whatever_the_platform_calls_it():
     # the posix row so the reverse arm matches the running host.
     number = POSIX[FsCondition.NO_XATTR].errno
     assert classify(OSError(number, "x")) is FsCondition.NO_XATTR
+
+
+def test_a_read_only_refusal_is_erofs_not_eacces():
+    # ReadOnlyError is a PermissionError so every refused-write catch
+    # takes it, but its errno is the condition: a guest and a kernel
+    # adapter see EROFS, as TypeScript's stamped code says.
+    refusal = ReadOnlyError(errno.EROFS, "Read-only file system", "/ro/x")
+    assert classify(refusal) is FsCondition.EROFS
 
 
 def test_a_subclass_wins_over_its_stamped_errno():

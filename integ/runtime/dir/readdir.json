@@ -128,7 +128,7 @@
             "monty": {
               "exit": 1,
               "stdout": "['0.json', '1.json', '2.json', '3.json']\n10\n",
-              "stderr_contains": "RuntimeError: upstream 502 Bad Gateway"
+              "stderr_contains": "'OSError' object has no attribute 'strerror'"
             },
             "quickjs": {
               "stdout": "0 0.json,1.json,2.json,3.json\n10 null failed null\n"

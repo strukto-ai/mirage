@@ -22,14 +22,11 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-node @earendil-works/pi-codi
 Pass the Mirage extension to Pi's regular entry point. Pi continues to own its CLI/TUI, model selection, sessions, themes, commands, and authentication.
 
 ```ts
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { main } from '@earendil-works/pi-coding-agent'
 import { mirageExtension } from '@struktoai/mirage-agents/pi'
 
-const ram = new RAMVFS()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
 await main(process.argv.slice(2), {
   extensionFactories: [mirageExtension(ws)],
@@ -52,8 +49,6 @@ After asking Pi to create a file, you can verify that the native UI is using Mir
 ```
 
 Omit `--no-context-files` when you intentionally want Pi to combine host-project instructions with the mounted Mirage workspace.
-
-The one-shot examples use Pi's lower-level session API and accept `PI_PROVIDER`, `PI_MODEL`, `PI_BASE_URL`, and `PI_API_KEY`. This lets a built-in Pi provider and model run through a compatible gateway without writing credentials to Pi's configuration files.
 
 ## Stale-write protection
 

@@ -30,12 +30,13 @@ import {
   SHELL_INPUT,
   WRITE_DESCRIPTION,
   WRITE_INPUT,
-} from '../tool_descriptions.ts'
+} from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
 import {
   MirageToolOperations,
   type MirageToolOperationsOptions,
   type ToolResult,
-} from '../tool_operations.ts'
+} from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 
 interface Answer {
   text: string
@@ -58,7 +59,11 @@ function answer(result: ToolResult): Answer {
  * carry and the text answer cannot.
  */
 export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions = {}): ToolSet {
-  const operations = new MirageToolOperations(ws, options)
+  const session = new Session(ws, options.sessionId ?? null)
+  const operations =
+    options.staleWriteProtection === false
+      ? new MirageToolOperations(session, false)
+      : session.tools
   const mirageTool = (name: string, description: string, input: object) =>
     tool({
       description,

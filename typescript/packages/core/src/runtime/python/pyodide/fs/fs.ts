@@ -14,7 +14,7 @@
 
 import { epochToIso } from '../../../../utils/dates.ts'
 import type { SetAttrFields } from '../../../../types.ts'
-import { BLKSIZE, GROW_FLOOR, LINK_MODE, SEEK_CUR, SEEK_END } from './constants.ts'
+import { BLKSIZE, GROW_FLOOR, LINK_MODE, O_APPEND, SEEK_CUR, SEEK_END } from './constants.ts'
 import { errnoError } from './errors.ts'
 import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
@@ -249,7 +249,7 @@ export class PyodideFs {
       dev: 1,
       ino: node.id,
       mode: node.mode,
-      nlink: 1,
+      nlink: this.host.isDir(node.mode) ? 2 : 1,
       uid: 0,
       gid: 0,
       rdev: node.rdev,
@@ -341,10 +341,9 @@ export class PyodideFs {
     const path = this.nodes.pathOf(node)
     if (this.host.isDir(mode)) this.journal.markMkdir(path)
     else {
-      // An empty write is what carries a file that is created and never
-      // written (`Path.touch()`, `open(p,'w').close()`) through to the
-      // mount. A later write for the same path coalesces over it.
-      this.journal.markWrite(path, new Uint8Array(0))
+      // The create is what carries a file that is made and never written
+      // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
+      this.journal.markCreate(path)
       // FS.open finalizes a new file with a chmod of its own, right
       // here and on this node. Only a file is marked: a directory gets
       // no such call, so a marker left on one would swallow the guest's
@@ -558,13 +557,14 @@ export class PyodideFs {
     contents.set(written, position)
     node.usedBytes = Math.max(used, need)
     node.mtime = node.ctime = Date.now()
-    // A write past the end goes as an append of the new tail (a whole write
-    // when the file was empty); one inside it goes as the bytes it changed,
-    // so another writer's bytes elsewhere in the file survive.
+    // The rule the shared flush plan keeps: a write that starts where the
+    // file ended goes as an append when the file had bytes or the stream
+    // appends, and any other write as the bytes it changed, so another
+    // writer's bytes elsewhere in the file survive.
     const path = this.nodes.pathOf(node)
-    if (position < used) this.journal.markPwrite(path, position, written)
-    else if (used === 0) this.journal.markWrite(path, contents.subarray(0, need))
-    else this.journal.markAppend(path, contents.subarray(used, need))
+    const appending = (stream.flags & O_APPEND) !== 0
+    if (position === used && (used > 0 || appending)) this.journal.markAppend(path, used, written)
+    else this.journal.markPwrite(path, position, written)
     return length
   }
 

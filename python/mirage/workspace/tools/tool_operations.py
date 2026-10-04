@@ -16,14 +16,19 @@ import posixpath
 import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from mirage.agents.file_version import FileVersionTracker, StaleMirageFileError
-from mirage.agents.io_text import decode, io_to_str, replace_text
 from mirage.io.types import IOResult
 from mirage.ops.ops import Ops
 from mirage.utils.path import gnu_dirname
-from mirage.workspace.workspace import Workspace
+from mirage.workspace.tools.file_version import (
+    FileVersionTracker,
+    StaleMirageFileError,
+)
+from mirage.workspace.tools.io_text import decode, io_to_str, replace_text
+
+if TYPE_CHECKING:
+    from mirage.workspace.workspace.handle import Session
 
 DEFAULT_READ_LIMIT = 2000
 
@@ -99,28 +104,39 @@ async def ensure_parents(vfs: Ops, path: str) -> None:
 
 
 class MirageToolOperations:
-    """The agent tools, independent of any agent framework.
+    """The agent tools for one session, independent of any agent
+    framework.
+
+    ``session.tools`` is the session's own table. Every guarded table of
+    a session shares the session's read history, so a read through one
+    guards a write through another. Build one directly only to turn the
+    guard off.
 
     Args:
-        workspace (Workspace): The workspace the tools act on.
+        session (Session): The session the tools act as, with its cwd,
+            environment and mount grants.
         stale_write_protection (bool): False lets an agent overwrite a
             file that changed since it read it.
-        session_id (str | None): The session the tools act as, with its
-            cwd, environment and mount grants; None is the workspace's
-            default session.
     """
 
     def __init__(
-        self,
-        workspace: Workspace,
-        stale_write_protection: bool = True,
-        session_id: str | None = None,
+        self, session: "Session", stale_write_protection: bool = True
     ) -> None:
-        self._ws = workspace
-        self._session_id = session_id
-        self._versions = FileVersionTracker(
-            workspace, stale_write_protection, session_id
+        self._session = session
+        self._own = (
+            None
+            if stale_write_protection
+            else FileVersionTracker(session.vfs, False)
         )
+
+    async def _versions(self) -> FileVersionTracker:
+        """The read history this call uses: the session's, which every
+        guarded table of the session shares, or this table's own when
+        the guard is off. A call keeps the one it started with, so a
+        restore during the call cannot mix two histories."""
+        if self._own is not None:
+            return self._own
+        return await self._session._reads()
 
     async def shell(self, command: str) -> ToolResult:
         """Run a command line in the session's shell.
@@ -131,9 +147,7 @@ class MirageToolOperations:
         Returns:
             ToolResult: The command's rendered output.
         """
-        return _io_result(
-            await self._ws.shell(command, session_id=self._session_id)
-        )
+        return _io_result(await self._session.shell(command))
 
     async def read(
         self, path: str, offset: int = 0, limit: int = DEFAULT_READ_LIMIT
@@ -148,16 +162,17 @@ class MirageToolOperations:
         Returns:
             ToolResult: The numbered lines, or the failure.
         """
+        versions = await self._versions()
         try:
-            data = await self._versions.read(path)
+            data = await versions.read(path)
         except (OSError, ValueError) as exc:
-            if not await self._versions.vfs.exists(path):
+            if not await versions.vfs.exists(path):
                 return ToolResult(f"Error: file '{path}' not found", True)
             return ToolResult(f"Error: {exc}", True)
         text = decode(data)
         lines = text.count("\n") + (1 if text and text[-1] != "\n" else 0)
         if offset <= 0 and offset + limit >= lines:
-            self._versions.mark_seen(path)
+            versions.mark_seen(path)
         return ToolResult(number_lines(text, offset, limit))
 
     async def write(self, path: str, content: str) -> ToolResult:
@@ -175,17 +190,16 @@ class MirageToolOperations:
         Returns:
             ToolResult: The confirmation, or the failure.
         """
-        if await self._versions.vfs.exists(
-            path
-        ) and not self._versions.has_read(path):
+        versions = await self._versions()
+        if await versions.vfs.exists(path) and not versions.has_read(path):
             return ToolResult(
                 f"Error: file '{path}' exists; read all of it before "
                 "overwriting it",
                 True,
             )
         try:
-            await ensure_parents(self._versions.vfs, path)
-            await self._versions.write(path, content)
+            await ensure_parents(versions.vfs, path)
+            await versions.write(path, content)
         except (StaleMirageFileError, OSError, ValueError) as exc:
             return ToolResult(f"Error: {exc}", True)
         return ToolResult(f"Written: {path}")
@@ -208,12 +222,13 @@ class MirageToolOperations:
         Returns:
             ToolResult: The confirmation, or the failure.
         """
+        versions = await self._versions()
         try:
-            content = decode(await self._versions.read_for_edit(path))
+            content = decode(await versions.read_for_edit(path))
         except StaleMirageFileError as exc:
             return ToolResult(f"Error: {exc}", True)
         except (OSError, ValueError) as exc:
-            if not await self._versions.vfs.exists(path):
+            if not await versions.vfs.exists(path):
                 return ToolResult(f"Error: file '{path}' not found", True)
             return ToolResult(f"Error: {exc}", True)
         new_content, count = replace_text(
@@ -229,7 +244,7 @@ class MirageToolOperations:
                 True,
             )
         try:
-            await self._versions.write_edit(path, new_content)
+            await versions.write_edit(path, new_content)
         except (StaleMirageFileError, OSError, ValueError) as exc:
             return ToolResult(f"Error: {exc}", True)
         occurrences = count if replace_all else 1
@@ -244,11 +259,7 @@ class MirageToolOperations:
         Returns:
             ToolResult: The listing, or the failure.
         """
-        return _io_result(
-            await self._ws.shell(
-                f"ls {shlex.quote(path)}", session_id=self._session_id
-            )
-        )
+        return _io_result(await self._session.shell(f"ls {shlex.quote(path)}"))
 
     async def grep(
         self,
@@ -302,13 +313,13 @@ class MirageToolOperations:
         if include is not None:
             words.append(shlex.quote(f"--include={include}"))
         words += ["-e", shlex.quote(pattern), shlex.quote(path)]
-        io = await self._ws.shell(" ".join(words), session_id=self._session_id)
+        io = await self._session.shell(" ".join(words))
         return ToolResult(io_to_str(io), io.exit_code > 1)
 
     async def glob(self, pattern: str, path: str = "/") -> ToolResult:
         """Find files, not directories, whose path matches a pattern.
 
-        The pattern is expanded by ``Workspace.glob``, the shell's own
+        The pattern is expanded by ``Session.glob``, the shell's own
         resolver: ``**`` matches any number of directories, and a
         relative pattern is matched under ``path``. A symlink to a file
         counts; a dangling one does not.
@@ -320,13 +331,11 @@ class MirageToolOperations:
         Returns:
             ToolResult: One path per line, sorted.
         """
-        matches = await self._ws.glob(
-            posixpath.join(path, pattern), session_id=self._session_id
-        )
+        matches = await self._session.glob(posixpath.join(path, pattern))
         files = [
             match
             for match in matches
-            if await self._ws.vfs.is_file(match, session_id=self._session_id)
+            if await self._session.vfs.is_file(match)
         ]
         return ToolResult("".join(f"{match}\n" for match in files))
 

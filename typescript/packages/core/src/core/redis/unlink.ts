@@ -16,11 +16,13 @@ import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { lookupError } from './dest.ts'
+import { eisdir } from '../../utils/errors.ts'
 import { norm } from '../../utils/path.ts'
 
 export async function unlink(accessor: RedisAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.mountPath)
   const store = accessor.store
+  if (await store.hasDir(p)) throw eisdir(path)
   if (!(await store.hasFile(p))) throw await lookupError(store, path, p)
   await store.delFile(p)
   await store.delModified(p)

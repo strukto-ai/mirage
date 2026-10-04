@@ -104,11 +104,6 @@
               "exit": 1,
               "ops_contain": [],
               "stderr_contains": "exclusive creation mode is not supported"
-            },
-            "pyodide": {
-              "ops_contain": [
-                "write /data/fresh.txt"
-              ]
             }
           }
         },
@@ -184,7 +179,10 @@
               "stderr_contains": "exclusive creation mode is not supported"
             },
             "pyodide": {
-              "stdout": "opened\n"
+              "stdout": "opened\n",
+              "ops_absent": [
+                "create /data/lnk"
+              ]
             }
           }
         }

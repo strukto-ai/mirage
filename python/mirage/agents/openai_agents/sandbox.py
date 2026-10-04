@@ -38,7 +38,6 @@ from agents.sandbox.session.sandbox_session_state import SandboxSessionState
 from agents.sandbox.snapshot import NoopSnapshot, SnapshotBase, SnapshotSpec
 from agents.sandbox.types import ExecResult, User
 
-from mirage.agents.io_text import with_refusal_bytes
 from mirage.agents.openai_agents.constants import (
     DEFAULT_EXEC_YIELD_MS,
     DEFAULT_WRITE_YIELD_MS,
@@ -47,6 +46,7 @@ from mirage.agents.openai_agents.constants import (
     NO_STDIN,
 )
 from mirage.workspace.snapshot import apply_state_dict, read_tar
+from mirage.workspace.tools.io_text import with_refusal_bytes
 from mirage.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)

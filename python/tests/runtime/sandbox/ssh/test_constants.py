@@ -12,21 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.runtime.sandbox.ssh.constants import wrap_line
 
 
-def test_wrap_line_dresses_cwd_env_and_line():
-    assert (
-        wrap_line("echo hi", {"A": "1"}, "/w")
-        == "cd '/w' && env 'A=1' sh -c 'echo hi'"
-    )
-
-
-def test_wrap_line_quotes_hostile_values():
-    assert wrap_line("echo 'hi'", {"M": "two words"}, "/a b") == (
-        "cd '/a b' && env 'M=two words' sh -c 'echo '\\''hi'\\'''"
-    )
-
-
-def test_wrap_line_with_no_env_still_runs_env():
-    assert wrap_line("pwd", {}, "/") == "cd '/' && env sh -c 'pwd'"
+@pytest.mark.parametrize(
+    ("line", "env", "cwd", "wrapped"),
+    [
+        ("echo hi", {"A": "1"}, "/w", "cd '/w' && env 'A=1' sh -c 'echo hi'"),
+        (
+            "echo 'hi'",
+            {"M": "two words"},
+            "/a b",
+            "cd '/a b' && env 'M=two words' sh -c 'echo '\\''hi'\\'''",
+        ),
+        ("pwd", {}, "/", "cd '/' && env sh -c 'pwd'"),
+    ],
+    ids=["cwd-env-line", "hostile-values", "no-env"],
+)
+def test_wrap_line_dresses_cwd_env_and_line(line, env, cwd, wrapped):
+    assert wrap_line(line, env, cwd) == wrapped

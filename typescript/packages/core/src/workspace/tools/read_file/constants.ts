@@ -1,4 +1,4 @@
-import { ContentType } from '@struktoai/mirage-core/types'
+import { ContentType } from '../../../types.ts'
 
 export const READ_FILE_MIME = Object.freeze({
   BINARY: 'application/octet-stream',

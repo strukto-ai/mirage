@@ -108,6 +108,7 @@ export interface FSNode {
 export interface FSStream {
   node: FSNode
   position: number
+  flags: number
 }
 
 export interface FSAttr {

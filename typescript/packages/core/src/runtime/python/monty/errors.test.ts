@@ -69,34 +69,54 @@ describe('guestError', () => {
 })
 
 describe('asGuestError', () => {
-  it('converts every named condition, not a private six', () => {
-    // ENOTEMPTY had no row in the old table, so a non-empty rmdir
-    // reached guest code as a raw JS error it could not `except`.
-    const raw = Object.assign(new Error('directory not empty: /d'), {
-      code: 'ENOTEMPTY',
-    })
-    const guest = asGuestError(raw, '/d') as Error
+  // Every named condition converts, not a private six: ENOTEMPTY had no
+  // row in the old table, so a non-empty rmdir reached guest code as a
+  // raw JS error it could not `except`. A cross-mount rename speaks
+  // pathlib, and an error the vocabulary does not name is EIO.
+  it.each<[string, Error, string, string]>([
+    [
+      'a non-empty directory',
+      Object.assign(new Error('directory not empty: /d'), { code: 'ENOTEMPTY' }),
+      '/d',
+      "[Errno 39] Directory not empty: '/d'",
+    ],
+    [
+      'a symlink loop',
+      Object.assign(new Error('too many levels of symbolic links: /a'), { code: 'ELOOP' }),
+      '/a',
+      "[Errno 40] Too many levels of symbolic links: '/a'",
+    ],
+    [
+      'a cross-mount rename',
+      new CrossMountError('/a/x', '/b/x'),
+      '/a/x',
+      "[Errno 18] Invalid cross-device link: '/a/x'",
+    ],
+    [
+      'an unnamed error',
+      new Error('transport exploded'),
+      '/x',
+      "[Errno 5] Input/output error: '/x'",
+    ],
+    [
+      'a backend error that only shares a CPython name',
+      Object.assign(new Error('gone'), { name: 'OSError' }),
+      '/x',
+      "[Errno 5] Input/output error: '/x'",
+    ],
+  ])('converts %s to an OSError', (_name, raw, path, message) => {
+    const guest = asGuestError(raw, path) as Error
     expect(guest.name).toBe('OSError')
-    expect(guest.message).toBe("[Errno 39] Directory not empty: '/d'")
+    expect(guest.message).toBe(message)
   })
 
-  it('converts a symlink loop to ELOOP', () => {
-    const raw = Object.assign(new Error('too many levels of symbolic links: /a'), {
-      code: 'ELOOP',
-    })
-    const guest = asGuestError(raw, '/a') as Error
-    expect(guest.name).toBe('OSError')
-    expect(guest.message).toBe("[Errno 40] Too many levels of symbolic links: '/a'")
+  it('keeps a guest error this door already built', () => {
+    const built = guestError('ENOENT', '/x')
+    expect(asGuestError(built, '/y')).toBe(built)
   })
 
-  it('speaks pathlib for a cross-mount rename', () => {
-    const guest = asGuestError(new CrossMountError('/a/x', '/b/x'), '/a/x') as Error
-    expect(guest.name).toBe('OSError')
-    expect(guest.message).toBe("[Errno 18] Invalid cross-device link: '/a/x'")
-  })
-
-  it('passes an unnamed error through untouched', () => {
-    const raw = new Error('transport exploded')
-    expect(asGuestError(raw, '/x')).toBe(raw)
+  it('classifies a backend error by its code, whatever its name', () => {
+    const raw = Object.assign(new Error('gone'), { name: 'OSError', code: 'ENOENT' })
+    expect((asGuestError(raw, '/x') as Error).name).toBe('FileNotFoundError')
   })
 })

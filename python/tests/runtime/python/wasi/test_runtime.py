@@ -56,60 +56,88 @@ def test_dir_without_stdlib_raises_hint(tmp_path):
         WasiRuntime(config={"home": str(tmp_path)})
 
 
+# A program's whole answer: what it prints, its exit code, and a phrase
+# its stderr carries (None: nothing on stderr). The host's files and
+# network stay invisible, a run with no dispatch sees no mounts, and the
+# interpreter's build directory refuses writes.
 @live
-def test_wasi_runs_full_cpython():
-    rt = WasiRuntime()
-    code = "class A:\n    x = 41\nprint(A.x + 1)"
-    result = asyncio.run(rt.run(RunArgs(code=code)))
-    assert result.exit_code == 0
-    assert result.stdout == b"42\n"
-    assert result.stderr is None
-
-
-@live
-def test_wasi_argv_stdin_env():
-    rt = WasiRuntime()
-    code = (
-        "import os, sys\n"
-        "print(sys.argv[1:])\n"
-        "print(sys.stdin.read().strip().upper())\n"
-        "print(os.environ['GREETING'])"
-    )
-    result = asyncio.run(
-        rt.run(
+@pytest.mark.parametrize(
+    ("args", "exit_code", "stdout", "stderr"),
+    [
+        pytest.param(
+            RunArgs(code="class A:\n    x = 41\nprint(A.x + 1)"),
+            0,
+            b"42\n",
+            None,
+            id="full-cpython",
+        ),
+        pytest.param(
             RunArgs(
-                code=code,
+                code="import os, sys\n"
+                "print(sys.argv[1:])\n"
+                "print(sys.stdin.read().strip().upper())\n"
+                "print(os.environ['GREETING'])",
                 args=["a1", "a2"],
                 env={"GREETING": "hi-wasi"},
                 stdin=b"piped\n",
-            )
-        )
-    )
-    assert result.exit_code == 0
-    assert result.stdout == b"['a1', 'a2']\nPIPED\nhi-wasi\n"
-
-
-@live
-def test_wasi_exit_code_and_traceback():
-    rt = WasiRuntime()
-    result = asyncio.run(rt.run(RunArgs(code="import sys; sys.exit(7)")))
-    assert result.exit_code == 7
-    result = asyncio.run(rt.run(RunArgs(code="1 / 0")))
-    assert result.exit_code == 1
-    assert b"ZeroDivisionError" in (result.stderr or b"")
-
-
-@live
-def test_wasi_host_fs_and_network_invisible():
-    rt = WasiRuntime()
-    result = asyncio.run(rt.run(RunArgs(code="open('/etc/passwd')")))
-    assert result.exit_code == 1
-    assert b"FileNotFoundError" in (result.stderr or b"")
-    result = asyncio.run(
-        rt.run(RunArgs(code="import socket; socket.socket()"))
-    )
-    assert result.exit_code == 1
-    assert b"OSError" in (result.stderr or b"")
+            ),
+            0,
+            b"['a1', 'a2']\nPIPED\nhi-wasi\n",
+            None,
+            id="argv-stdin-env",
+        ),
+        pytest.param(
+            RunArgs(code="import sys; sys.exit(7)"),
+            7,
+            b"",
+            None,
+            id="exit-code",
+        ),
+        pytest.param(
+            RunArgs(code="1 / 0"), 1, b"", b"ZeroDivisionError", id="traceback"
+        ),
+        pytest.param(
+            RunArgs(code="open('/etc/passwd')"),
+            1,
+            b"",
+            b"FileNotFoundError",
+            id="host-files-invisible",
+        ),
+        pytest.param(
+            RunArgs(code="import socket; socket.socket()"),
+            1,
+            b"",
+            b"OSError",
+            id="network-invisible",
+        ),
+        pytest.param(
+            RunArgs(code="import os; print(os.path.exists('/data'))"),
+            0,
+            b"False\n",
+            None,
+            id="no-mounts-without-dispatch",
+        ),
+        pytest.param(
+            RunArgs(
+                code="\ntry:\n"
+                "    open('/python.wasm', 'w')\n"
+                "except PermissionError:\n"
+                "    print('denied')\n"
+            ),
+            0,
+            b"denied\n",
+            None,
+            id="build-directory-read-only",
+        ),
+    ],
+)
+def test_wasi_runs_a_program(args, exit_code, stdout, stderr):
+    result = asyncio.run(WasiRuntime().run(args))
+    assert (result.exit_code, result.stdout) == (exit_code, stdout)
+    if stderr is None:
+        assert result.stderr is None
+    else:
+        assert stderr in result.stderr
 
 
 @live
@@ -158,29 +186,6 @@ def test_wasi_reuses_compiled_module():
 
 
 @live
-def test_wasi_without_dispatch_sees_no_mounts():
-    rt = WasiRuntime()
-    code = "import os; print(os.path.exists('/data'))"
-    result = asyncio.run(rt.run(RunArgs(code=code)))
-    assert result.exit_code == 0
-    assert result.stdout == b"False\n"
-
-
-@live
-def test_wasi_build_directory_is_read_only():
-    rt = WasiRuntime()
-    code = (
-        "\ntry:\n"
-        "    open('/python.wasm', 'w')\n"
-        "except PermissionError:\n"
-        "    print('denied')\n"
-    )
-    result = asyncio.run(rt.run(RunArgs(code=code)))
-    assert result.exit_code == 0
-    assert result.stdout == b"denied\n"
-
-
-@live
 @pytest.mark.asyncio
 async def test_wasi_session_narrowing_reaches_the_guest():
     # A session narrowed to read on the mount denies guest writes at
@@ -189,14 +194,14 @@ async def test_wasi_session_narrowing_reaches_the_guest():
     await ws.shell("echo seeded > /data/f0.txt")
     ws.create_session("narrow", {"/data": "read"})
     code = (
-        "\ntry:\n"
+        "import errno\ntry:\n"
         "    open('/data/f.txt', 'w')\n"
-        "except PermissionError:\n"
-        "    print('denied')\n"
+        "except OSError as e:\n"
+        "    print('denied', errno.errorcode[e.errno])\n"
     )
     r = await ws.shell(f'python3 -c "{code}"', session_id="narrow")
     assert r.exit_code == 0
-    assert (await r.stdout_str()) == "denied\n"
+    assert (await r.stdout_str()) == "denied EROFS\n"
     r = await ws.shell(
         "python3 -c \"print(open('/data/f0.txt').read().strip())\"",
         session_id="narrow",

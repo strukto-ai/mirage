@@ -134,11 +134,6 @@
           "expect": {
             "exit": 0,
             "stdout": "null 44\n"
-          },
-          "expect_on": {
-            "quickjs@typescript": {
-              "stdout": "null undefined\n"
-            }
           }
         }
       ]

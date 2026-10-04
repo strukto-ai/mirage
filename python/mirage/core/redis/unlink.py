@@ -16,6 +16,7 @@ from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.core.redis.dest import lookup_error
 from mirage.types import PathSpec
+from mirage.utils.errors import eisdir
 from mirage.utils.path import norm
 
 
@@ -23,6 +24,8 @@ async def unlink(accessor: RedisAccessor, path_spec: PathSpec) -> None:
     path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
+    if await store.has_dir(p):
+        raise eisdir(path_spec)
     if not await store.has_file(p):
         raise await lookup_error(store, path_spec, p)
     await store.del_file(p)

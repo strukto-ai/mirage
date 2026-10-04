@@ -24,6 +24,9 @@ export { LINK_MODE } from '../../../../utils/stat_view.ts'
 
 export const BLKSIZE = 4096
 
+// The open flag that puts every write at the end, as Emscripten numbers it.
+export const O_APPEND = 1024
+
 // llseek's whence, which Emscripten passes through as the raw number.
 export const SEEK_CUR = 1
 export const SEEK_END = 2

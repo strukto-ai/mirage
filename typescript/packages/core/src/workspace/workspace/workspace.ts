@@ -129,6 +129,8 @@ import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
 import { Router } from './routing.ts'
 import { Runtimes } from './runtimes.ts'
 import { Session } from './handle.ts'
+import { FileVersionTracker } from '../tools/file_version.ts'
+import { MirageToolOperations } from '../tools/tool_operations.ts'
 import type { ExecuteOptions, ExecuteResult, MountSpec, WorkspaceOptions } from './types.ts'
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
@@ -164,6 +166,8 @@ export class Workspace {
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
   readonly vfs: Ops
+  private readonly toolTables = new Map<string | null, MirageToolOperations>()
+  private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
   private readonly lineLock = new KeyLock()
   private readonly closers: (() => Promise<void>)[] = []
@@ -850,6 +854,51 @@ export class Workspace {
     return this.registry.decisions
   }
 
+  /** The agent tools as the default session; `Session.tools` for another. */
+  get tools(): MirageToolOperations {
+    return this.sessionTools(null)
+  }
+
+  /**
+   * The one tool table a session has, made on first use. Every caller in
+   * the process shares it, so a file the agent read through one is
+   * guarded when it writes through another. Closing the session drops it.
+   * Null is the default session as it is when each call runs, so its
+   * table keeps working when a snapshot load or an attach re-keys the
+   * default; an id stays that session.
+   *
+   * @internal `Session.tools` is the door.
+   */
+  sessionTools(sessionId: string | null): MirageToolOperations {
+    let tools = this.toolTables.get(sessionId)
+    if (tools === undefined) {
+      tools = new MirageToolOperations(new Session(this, sessionId))
+      this.toolTables.set(sessionId, tools)
+    }
+    return tools
+  }
+
+  /**
+   * The read history the agent tools keep for one session. Every guarded
+   * table of the session shares it, the one following the default
+   * included, so a read through `ws.tools` guards a write through
+   * `new Session(ws, id).tools`. Sessions load first, so the default's id
+   * is final before it is looked up. Closing the session drops it, and a
+   * snapshot restore drops them all; null is the default as it is now.
+   *
+   * @internal `Session.tools` is the door.
+   */
+  async sessionReads(sessionId: string | null): Promise<FileVersionTracker> {
+    await this.ensureSessionsLoaded()
+    const id = sessionId ?? this.defaultSessionId
+    let reads = this.reads.get(id)
+    if (reads === undefined) {
+      reads = new FileVersionTracker(this.vfs.forSession(id))
+      this.reads.set(id, reads)
+    }
+    return reads
+  }
+
   get cwd(): string {
     return this.sessionManager.cwd
   }
@@ -1008,6 +1057,8 @@ export class Workspace {
     // the id inherits nothing.
     await this.sessionManager.close(sessionId)
     await this.jobTable.closeSession(sessionId)
+    this.toolTables.delete(sessionId)
+    this.reads.delete(sessionId)
   }
 
   async closeAllSessions(): Promise<void> {
@@ -1015,7 +1066,11 @@ export class Workspace {
       .map((s) => s.sessionId)
       .filter((id) => id !== this.defaultSessionId)
     await this.sessionManager.closeAll()
-    for (const id of closed) await this.jobTable.closeSession(id)
+    for (const id of closed) {
+      await this.jobTable.closeSession(id)
+      this.toolTables.delete(id)
+      this.reads.delete(id)
+    }
   }
 
   /**
@@ -1077,6 +1132,16 @@ export class Workspace {
    */
   async adoptDefaultSession(sessionId: string): Promise<void> {
     await this.meta.adoptDefault(sessionId)
+  }
+
+  /**
+   * Snapshot restore: every session the snapshot restores is a new one
+   * to the agent tools, so none keeps what was read before.
+   *
+   * @internal
+   */
+  forgetReads(): void {
+    this.reads.clear()
   }
 
   /** This workspace's metadata record (discovery surface). */

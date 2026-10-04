@@ -1,175 +1,315 @@
 ---
 title: In-app
-description: The core every interface reaches. A Workspace, Session handles that run lines and move bytes, the agent tool table, and the MCP and RPC servers to embed.
+description: The TypeScript classes your app calls to run a workspace, each with an example.
 icon: cube
 ---
 
-The in-app API is what every other interface is built on: [HTTP](/home/access/http), [MCP](/home/access/mcp), [RPC](/home/access/rpc), [SSH](/home/access/ssh) and the [CLI](/home/access/cli) all end in the calls on this page. Use it directly when your agent runs in the same process as the workspace.
+Call these when your agent runs in the same process as the workspace. Every other way in ends in the same calls.
 
-## Workspace and Session
+## Workspace
 
-A `Session` is one session's handle: `shell` runs a line as it, `glob` matches as it, and `vfs` is the file API run as it, so every call answers under the session's [profile](/home/permissions), with its working directory, environment, mount modes and hides.
+```ts
+import { Workspace } from '@struktoai/mirage-node'
+```
+
+```ts
+class Workspace {
+  constructor(
+    mounts: Record<string, VFS>,
+    options?: WorkspaceOptions,
+  )
+}
+```
+
+One terminal over the backends mounted at each prefix.
+
+<ResponseField name="mounts" type="Record<string, VFS>" required>
+  The backend at each prefix, such as `{ '/': new RAMVFS(), '/s3': new S3VFS(config) }`.
+</ResponseField>
+<ResponseField name="options.mode" type="MountMode" default="MountMode.READ">
+  The mode a mount gets when it sets none: `READ`, `WRITE` or `EXEC`.
+</ResponseField>
+<ResponseField name="options.profiles" type="Record<string, SessionProfile>">
+  Named [profiles](/home/permissions) a session can be created under.
+</ResponseField>
+<ResponseField name="options.profile" type="string">
+  The profile a session gets when it names none.
+</ResponseField>
+<ResponseField name="options.policies" type="Policy[]">
+  [Policies](/home/policy-engine) every line passes through.
+</ResponseField>
+<ResponseField name="options.onAsk" type="AskHandler">
+  Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
+</ResponseField>
+
+The other options (`cache`, `index`, `store`, `runtimes`, `clis`, `env`, `secrets`, `commandLimits`, ...) are the [top-level YAML keys](/home/yaml#top-level), in camelCase.
 
 ```ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-const session = await ws.session('agent')
-
-const result = await session.shell('echo hello > /notes.txt && wc -c /notes.txt')
-console.log(result.exitCode, result.stdoutText)
-
-console.log(await session.glob('/**/*.txt'))
-console.log(new TextDecoder().decode(await session.vfs.read('/notes.txt')))
-
-await ws.close()
+const ws = new Workspace(
+  { '/': new RAMVFS() },
+  { mode: MountMode.WRITE },
+)
 ```
 
-`ws.session(id)` creates the session when the id is new and adopts it when it exists. Pass `{ profile }` to create it under one of the workspace's [profiles](/home/permissions), or `{ mounts }` to narrow its mount modes. A profile, mounts or permissions for an existing session throw, since a profile is set once, when the session is created. `ws.shell(line, { sessionId })` and `ws.glob(pattern, sessionId)` are the same calls without the handle; without a session id they act as the workspace's default session.
+### ws.session
+
+```ts
+ws.session(sessionId, { profile?, mounts? }): Promise<Session>
+```
+
+The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile` and `mounts` apply only on create, and throw for an existing session. `ws.createSession` is the same call without the handle.
+
+```ts
+const session = await ws.session('agent')
+```
+
+### ws.listSessions, ws.closeSession
+
+```ts
+ws.listSessions(): SessionState[]
+ws.closeSession(sessionId): Promise<void>
+```
+
+List the sessions, or close one and end its jobs. The default session cannot be closed.
+
+<Expandable title="SessionState">
+  <ResponseField name="sessionId" type="string" />
+  <ResponseField name="cwd" type="string">The working directory.</ResponseField>
+  <ResponseField name="env" type="Readonly<Record<string, string>>">The exported variables.</ResponseField>
+  <ResponseField name="profile" type="string | null">The profile it was created under.</ResponseField>
+  <ResponseField name="mountModes" type="ReadonlyMap<string, MountMode> | null">Its mount modes, when narrower than the workspace's.</ResponseField>
+  <ResponseField name="lastExitCode" type="number">`$?`.</ResponseField>
+  <ResponseField name="createdAt" type="number">Unix time, in seconds.</ResponseField>
+</Expandable>
+
+```ts
+console.log(ws.listSessions().map((s) => s.sessionId))
+await ws.closeSession('agent')
+```
+
+### ws.snapshot, Workspace.load
+
+```ts
+ws.snapshot(): Promise<Uint8Array>
+ws.snapshot(target, { s3? }): Promise<number>
+Workspace.load(source, { s3?, ... }): Promise<Workspace>
+```
+
+Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. See [Snapshots](/home/snapshot) for what a tar holds.
+
+```ts
+const tar = await ws.snapshot()
+const restored = await Workspace.load(tar)
+```
+
+### ws.copy
+
+```ts
+ws.copy(): Promise<Workspace>
+```
+
+A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history and profiles come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policies are not copied.
+
+```ts
+const fork = await ws.copy()
+```
+
+### ws.decisions
+
+```ts
+ws.decisions.pending(sessionId?): Decision[]
+ws.decisions.answer(
+  decisionId, outcome, scope?, note?
+): Promise<void>
+```
+
+The [asks](/home/permissions#asks) waiting for a host. Each one belongs to the session that ran the line: `pending()` lists every session's, `pending('agent')` one session's, and an answer never reaches another session. `outcome` is `Outcome.ALLOW` or `Outcome.DENY`. `Scope.ONCE`, the default, answers the one line, so its retry runs or is refused; `Scope.SESSION` allows every line the rule covers for the rest of that session.
+
+<Expandable title="Decision">
+  <ResponseField name="id" type="string">The id to answer it by.</ResponseField>
+  <ResponseField name="sessionId" type="string">The session that ran the line.</ResponseField>
+  <ResponseField name="agentId" type="string" />
+  <ResponseField name="command" type="string">The command name.</ResponseField>
+  <ResponseField name="argv" type="readonly string[]">The words after the name, expanded.</ResponseField>
+  <ResponseField name="cwd" type="string" />
+  <ResponseField name="paths" type="readonly string[]">The paths the line names.</ResponseField>
+  <ResponseField name="reason" type="string">The rule's reason.</ResponseField>
+  <ResponseField name="outcome" type="Outcome | null">The answer; `null` while it waits.</ResponseField>
+  <ResponseField name="scope" type="Scope" />
+  <ResponseField name="note" type="string">What the host said when answering.</ResponseField>
+</Expandable>
+
+```ts
+import { Outcome } from '@struktoai/mirage-node'
+
+for (const ask of ws.decisions.pending()) {
+  await ws.decisions.answer(ask.id, Outcome.ALLOW)
+}
+```
+
+### ws.close
+
+```ts
+ws.close(): Promise<void>
+```
+
+Stops its jobs and closes its mounts. Sessions and history stay in the workspace's store.
+
+## Session
+
+```ts
+import { Session } from '@struktoai/mirage-node'
+```
+
+```ts
+class Session {
+  constructor(workspace: Workspace, sessionId: string)
+}
+```
+
+One session's handle, from [`ws.session`](#ws-session). Every call on it answers under the session's [profile](/home/permissions), working directory and environment. `ws.shell`, `ws.glob`, `ws.vfs` and `ws.tools` are the same calls as the workspace's default session.
+
+<ResponseField name="sessionId" type="string" />
+<ResponseField name="state" type="SessionState">The session's record, as [`ws.listSessions`](#ws-listsessions-ws-closesession) answers it.</ResponseField>
+<ResponseField name="vfs" type="Ops">The file API, below.</ResponseField>
+<ResponseField name="tools" type="MirageToolOperations">The agent tools, below.</ResponseField>
 
 ### session.shell
 
 ```ts
-const result = await session.shell('grep -c ERROR /data/app.log', {
-  stdin: undefined,
-  cwd: undefined,
-  env: undefined,
-  signal: undefined,
-})
+session.shell(
+  command, { stdin?, cwd?, env?, signal?, record? },
+): Promise<ExecuteResult>
 ```
 
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `stdin` | | The line's stdin: a `Uint8Array`, or an async iterable of `Uint8Array` chunks to stream it. |
-| `cwd` | | A working directory for this line only. The line runs in a copy of the session, so a `cd` in it does not leak. |
-| `env` | | Variables for this line only, in the same copy. |
-| `signal` | | An `AbortSignal`; aborting it aborts the line. |
-| `agentId` | | Who ran it, for history and observability. |
-| `record` | `true` | `false` keeps the line out of history. |
-| `runtime` | | A workspace runtime entry to run the line's captured stages on. |
+Runs a shell line as the session. A non-zero exit is a result, not an exception.
 
-It answers a result with `exitCode`, `stdoutText` and `stderrText` (`stdout` and `stderr` are the bytes). A non-zero exit is a result, not an exception.
+<ResponseField name="stdin" type="Uint8Array | AsyncIterable<Uint8Array>">
+  The line's stdin. An async iterable streams it.
+</ResponseField>
+<ResponseField name="cwd" type="string">
+  A working directory for this line only. A `cd` in the line does not leak.
+</ResponseField>
+<ResponseField name="env" type="Record<string, string>">
+  Variables for this line only.
+</ResponseField>
+<ResponseField name="signal" type="AbortSignal">
+  Aborting it stops the line, which throws an `AbortError`.
+</ResponseField>
+<ResponseField name="record" type="boolean" default="true">
+  `false` keeps the line out of history.
+</ResponseField>
 
-### Cancel a line
-
-Abort the signal. The line stops at its next await, `$?` goes back to what it was before the line ran, and the call throws a `DOMException` named `AbortError`:
+<Expandable title="ExecuteResult">
+  <ResponseField name="exitCode" type="number" />
+  <ResponseField name="stdoutText" type="string">The output as text. `stdout` is the bytes.</ResponseField>
+  <ResponseField name="stderrText" type="string">The error output as text. `stderr` is the bytes.</ResponseField>
+  <ResponseField name="refusal" type="Refusal | null">
+    Why the line did not run, or `null`.
+    <Expandable title="Refusal">
+      <ResponseField name="kind" type="string">`deny` for a refusal, `pending` for an ask nobody answered, `failed` for a policy that raised.</ResponseField>
+      <ResponseField name="reason" type="string">The rule's or the policy's words.</ResponseField>
+      <ResponseField name="policy" type="string">The policy class that refused; empty for an ask.</ResponseField>
+      <ResponseField name="scope" type="string">`command` or `operand`.</ResponseField>
+      <ResponseField name="askId" type="string | null">The ask's id, for `pending`.</ResponseField>
+    </Expandable>
+  </ResponseField>
+</Expandable>
 
 ```ts
-const stop = new AbortController()
-const line = session.shell('sleep 30', { signal: stop.signal })
-setTimeout(() => stop.abort(), 1000)
-try {
-  await line
-} catch (err) {
-  if ((err as Error).name === 'AbortError') console.log('cancelled')
-}
+const stdin = new TextEncoder().encode('a\nb\n')
+const result = await session.shell('wc -l', { stdin })
+console.log(result.exitCode, result.stdoutText)
 ```
 
-A long synchronous step, such as one large read, finishes before the abort lands. A command that runs past its [limit](/home/yaml#command-limits) is not a cancel: it exits `124`.
+### session.glob
+
+```ts
+session.glob(pattern): Promise<string[]>
+```
+
+The paths a pattern matches, as the session sees them.
+
+```ts
+const paths = await session.glob('/src/**/*.ts')
+```
 
 ### session.vfs
 
-The file API, run as the session. Paths are absolute workspace paths, and bytes are `Uint8Array`.
+The file API, run as the session. Paths are absolute, bytes are `Uint8Array`. A failure throws an `Error` whose `code` is the POSIX name, as Node's `fs` does: `ENOENT`, `EACCES`, `EROFS`.
 
 | Call | Answers |
 | --- | --- |
-| `await vfs.read(path, { offset, size })` | The bytes, whole or a range. |
-| `await vfs.write(path, data)` / `await vfs.append(path, data)` | Nothing. |
-| `await vfs.stat(path, undefined, { nofollow })` | A `FileStat`: `name`, `type`, `size`, `modified`, `mode`, ... |
-| `await vfs.readdir(path)` | The full path of each entry. |
-| `await vfs.exists(path)` | `true` or `false`. |
-| `await vfs.mkdir(path)`, `rmdir`, `unlink` | Nothing. |
-| `await vfs.rename(src, dst)` | Nothing. |
-| `await vfs.truncate(path, length)` | Nothing. |
+| `read(path, { offset, size })` | The bytes, whole or a range. |
+| `write(path, data)`, `append(path, data)` | Nothing. |
+| `stat(path, undefined, { nofollow })` | A `FileStat`. |
+| `readdir(path)` | The full path of each entry. |
+| `exists(path)` | `true` or `false`. |
+| `mkdir(path)`, `rmdir(path)`, `unlink(path)` | Nothing. |
+| `rename(src, dst)` | Nothing. |
+| `truncate(path, length)` | Nothing. |
 
-A failure throws an `Error` whose `code` is the POSIX name, as Node's `fs` does: `ENOENT` for a missing path, `EROFS` or `EACCES` for a refused one.
-
-## The agent tool table
-
-`MirageToolOperations` is the seven agent tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`) as a class, answered for one session. MCP, RPC's `tools/call`, the HTTP tool routes and the CLI's tool verbs all call it, so an agent loop of your own gets the same answers:
+<Expandable title="FileStat">
+  <ResponseField name="name" type="string" />
+  <ResponseField name="type" type="FileType">`FILE`, `DIRECTORY`, `SYMLINK` or `CHAR_DEVICE`.</ResponseField>
+  <ResponseField name="size" type="number | null">The bytes a read answers; `null` when unknown.</ResponseField>
+  <ResponseField name="modified" type="string | null">ISO 8601.</ResponseField>
+  <ResponseField name="content" type="ContentType | null">A file's content shape, such as `text`.</ResponseField>
+  <ResponseField name="mode" type="number | null">The permission bits.</ResponseField>
+  <ResponseField name="uid, gid" type="number | string | null" />
+  <ResponseField name="atime, ctime, birthtime" type="string | null" />
+  <ResponseField name="fingerprint, revision" type="string | null">The backend's ETag and version, when it has them.</ResponseField>
+  <ResponseField name="extra" type="Record<string, unknown>">Backend-specific fields.</ResponseField>
+</Expandable>
 
 ```ts
-import { MirageToolOperations } from '@struktoai/mirage-agents/tool_operations'
+const data = new TextEncoder().encode('hello\n')
+await session.vfs.write('/notes.txt', data)
+const bytes = await session.vfs.read('/notes.txt')
+console.log(new TextDecoder().decode(bytes))
+```
 
-const tools = new MirageToolOperations(ws, { sessionId: 'agent' })
-const result = await tools.call('read', { path: '/data/report.csv' })
+### session.tools
+
+```ts
+session.tools.shell(command, signal?): Promise<ToolResult>
+session.tools.read(path, offset?, limit?): Promise<ToolResult>
+session.tools.write(path, content): Promise<ToolResult>
+session.tools.edit(
+  path, oldString, newString, replaceAll?,
+): Promise<ToolResult>
+session.tools.ls(path, signal?): Promise<ToolResult>
+session.tools.grep(pattern, path, { ignoreCase?, ... }, signal?)
+session.tools.glob(pattern, path?): Promise<ToolResult>
+session.tools.call(name, args, signal?): Promise<ToolResult>
+```
+
+The seven agent tools, for a model rather than a program: every answer is text, and a failure is `isError`, never a throw. `call` takes a tool's name and its JSON input, the form an agent loop gets from the model. The session has one table, shared by every caller, so `write` and `edit` refuse a file the agent has not read in full, or one that changed since it read it.
+
+| Tool | Answers |
+| --- | --- |
+| `shell` | The line's stdout, stderr and exit status as one text. |
+| `read` | Numbered lines, `limit` of them from `offset`. |
+| `write` | Writes a new file; an existing one only after a full `read`. |
+| `edit` | Replaces `old_string` once, or everywhere with `replace_all`. |
+| `ls`, `grep` | `ls` and `grep -rn`, as text. |
+| `glob` | The files a pattern matches, one per line. |
+
+<Expandable title="ToolResult">
+  <ResponseField name="content" type="{ type: 'text', text: string }[]">The text handed back to the agent.</ResponseField>
+  <ResponseField name="isError" type="boolean | undefined">`true` when the call failed.</ResponseField>
+</Expandable>
+
+`readMedia(path)` answers an image or a PDF as media instead of numbered text, for adapters that hand media to the model. `@struktoai/mirage-core/workspace/tools/tool_descriptions` has each tool's description and JSON schema to hand the model, and the [agent adapters](/typescript/agents/index) wire the tools into each framework. `new MirageToolOperations(session, false)`, from `@struktoai/mirage-core/workspace/tools/tool_operations`, is a table without the read guard.
+
+```ts
+await session.tools.call('read', { path: '/notes.txt' })
+const result = await session.tools.call('edit', {
+  path: '/notes.txt',
+  old_string: 'hello',
+  new_string: 'hi',
+})
 console.log(result.content[0]?.text, result.isError === true)
 ```
-
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `staleWriteProtection` | `true` | `false` lets `write` and `edit` overwrite a file that changed since it was read. |
-| `sessionId` | the default session | The session the tools act as. |
-
-Each tool is also a method: `await tools.read('/data/report.csv', 0, 20)`, `await tools.grep('todo', '/src', { ignoreCase: true })`. `call` takes the arguments as the schema reads them, is what every interface uses, and throws for a name no tool has. `readMedia(path)` answers an image or a PDF as media instead of numbered text, for adapters that hand media to the model. `@struktoai/mirage-agents/tool_descriptions` exports each tool's description and JSON schema (`READ_DESCRIPTION`, `READ_INPUT`, ...) to hand your model, and the [agent adapters](/typescript/agents/index) wrap the table for each framework.
-
-## Embed the MCP server
-
-The MCP server the Mirage server runs is a factory you can call yourself, over any MCP transport, without the Mirage server:
-
-```ts
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
-import { createMirageMcpServer } from '@struktoai/mirage-server/mcp'
-
-const server = createMirageMcpServer(ws, { sessionId: 'agent' })
-await server.connect(new StdioServerTransport())
-```
-
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `name` | `"mirage"` | The server name advertised to the client. |
-| `version` | the package version | The server version advertised to the client. |
-| `staleWriteProtection` | `true` | `false` lets `write` and `edit` overwrite a file that changed since it was read. |
-| `sessionId` | the default session | The session the tools act as. |
-| `operations` | | A [`MirageToolOperations`](#the-agent-tool-table) to serve instead of building one. |
-
-It returns the SDK's `McpServer`. To serve it over streamable HTTP from your own route, hand the factory to the SDK's `createMcpHandler(() => createMirageMcpServer(ws, { operations }))`, sharing one `operations` across requests so stale-write stamps carry from one request to the next, which is what the Mirage server does.
-
-## Embed the RPC server
-
-`MirageRpcServer` serves one session over [JSON-RPC](/home/access/rpc), with the same methods the Mirage server answers. `handle` answers one message, for a route of your own; `serve` answers a stream of lines until it ends, running each request on its own so `$/cancelRequest` reaches a running one:
-
-```ts
-import { createInterface } from 'node:readline'
-import { MirageRpcServer } from '@struktoai/mirage-server/rpc'
-
-const server = new MirageRpcServer(ws, { sessionId: 'agent' })
-await server.serve(createInterface({ input: process.stdin }), (text) => process.stdout.write(text))
-```
-
-```ts
-const answer = await server.handle({
-  jsonrpc: '2.0',
-  id: 1,
-  method: 'glob',
-  params: { pattern: '/*' },
-})
-```
-
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `sessionId` | the default session | The session the methods act as. |
-| `operations` | | The tool table `tools/call` serves; one is built for the session when absent. |
-| `name`, `version` | `"mirage"`, the package version | What `initialize` reports. |
-
-In-app, `shell` runs the line directly on the session; the Mirage server runs it as a job instead.
-
-## Reach a server from code
-
-When the workspace lives in a [server](/typescript/access/server), `fetch` reaches it. The token is in `~/.mirage/auth_token` in the default local mode:
-
-```ts
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-
-const token = readFileSync(join(homedir(), '.mirage', 'auth_token'), 'utf8').trim()
-const response = await fetch('http://127.0.0.1:8765/v1/workspaces/demo/rpc', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'vfs/read', params: { path: '/notes.txt' } }),
-})
-const answer = await response.json()
-```
-
-`POST /rpc` carries the whole Session API in one route; the [HTTP](/home/access/http) page lists the rest, and the [RPC](/home/access/rpc) page shows a `mirage rpc` client over stdio.

@@ -68,12 +68,6 @@
           "expect_on": {
             "quickjs": {
               "stdout": "-44\n"
-            },
-            "s3": {
-              "stdout": "created\n"
-            },
-            "pyodide@s3": {
-              "stdout": "FileNotFoundError\n"
             }
           }
         },

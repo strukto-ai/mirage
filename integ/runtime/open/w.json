@@ -90,14 +90,6 @@
               "write /data/new.txt",
               "append /data/new.txt"
             ]
-          },
-          "expect_on": {
-            "pyodide": {
-              "ops_contain": [
-                "write /data/new.txt"
-              ],
-              "ops_absent": []
-            }
           }
         },
         {

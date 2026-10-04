@@ -1,11 +1,11 @@
-from mirage.agents.io_text import (
+from mirage.io.types import IOResult
+from mirage.types import Refusal
+from mirage.workspace.tools.io_text import (
     decode,
     io_to_str,
     replace_text,
     with_refusal_bytes,
 )
-from mirage.io.types import IOResult
-from mirage.types import Refusal
 
 
 def test_decode_none_returns_empty():

@@ -156,6 +156,7 @@ describe('PyodideFs', () => {
         next.set(bytes, offset)
         store.set(path, next)
       }
+      if (op === 'create') store.set(path, new Uint8Array())
       if (op === 'unlink') store.delete(path)
       if (op === 'rename' && dst !== undefined) {
         const moved = store.get(path)
@@ -288,44 +289,55 @@ with open('${p}log.txt', 'a') as f:
     expect(dec.decode(only.bytes)).toBe('+more')
   })
 
-  // The shim this replaced patched builtins.open but never os.open, so a
-  // low-level write applied to the guest's memory and was dropped on the
-  // floor: exit 0, mount unchanged.
-  it('records a low-level os.open write', async () => {
+  // What a program leaves on the mount once the journal drains: each
+  // name's text, or null for a name that must be gone. A low-level
+  // os.open write counts (the shim this replaced patched builtins.open
+  // only, so such a write was dropped), and so does a bare os.truncate,
+  // which opens no handle at all.
+  it.each<[string, Record<string, string>, (p: string) => string, Record<string, string | null>]>([
+    [
+      'a low-level os.open write',
+      {},
+      (p) =>
+        `import os\nfd = os.open('${p}low.txt', os.O_WRONLY | os.O_CREAT)\nos.write(fd, b'LOWLEVEL')\nos.close(fd)`,
+      { 'low.txt': 'LOWLEVEL' },
+    ],
+    [
+      'a bare os.truncate',
+      { 't.txt': '12345678' },
+      (p) => `import os\nos.truncate('${p}t.txt', 3)`,
+      { 't.txt': '123' },
+    ],
+    [
+      'a file created and never written',
+      {},
+      (p) => `from pathlib import Path\nPath('${p}empty.txt').touch()`,
+      { 'empty.txt': '' },
+    ],
+    [
+      'the write-temp-then-rename idiom, in order',
+      {},
+      (p) =>
+        `import os\nwith open('${p}tmp.part', 'w') as f:\n    f.write('ATOMIC')\nos.rename('${p}tmp.part', '${p}final.txt')`,
+      { 'final.txt': 'ATOMIC', 'tmp.part': null },
+    ],
+    [
+      'a relative path, against the guest cwd',
+      {},
+      (p) =>
+        `import os\nos.chdir('${p}')\nwith open('rel.txt', 'w') as f:\n    f.write('RELATIVE')`,
+      { 'rel.txt': 'RELATIVE' },
+    ],
+  ])('carries %s to the mount', async (_name, seed, program, expected) => {
     const p = prefix()
+    for (const [name, text] of Object.entries(seed)) store.set(`${p}${name}`, enc.encode(text))
     await mountPrefix(p)
-    await py.runPythonAsync(`
-import os
-fd = os.open('${p}low.txt', os.O_WRONLY | os.O_CREAT)
-os.write(fd, b'LOWLEVEL')
-os.close(fd)
-`)
+    await py.runPythonAsync(program(p))
     await drain()
-    expect(dec.decode(store.get(`${p}low.txt`) ?? new Uint8Array())).toBe('LOWLEVEL')
-  })
-
-  it('records a bare os.truncate, which opens no handle at all', async () => {
-    const p = prefix()
-    store.set(`${p}t.txt`, enc.encode('12345678'))
-    await mountPrefix(p)
-    await py.runPythonAsync(`
-import os
-os.truncate('${p}t.txt', 3)
-`)
-    await drain()
-    expect(dec.decode(store.get(`${p}t.txt`) ?? new Uint8Array())).toBe('123')
-  })
-
-  it('carries a file that is created and never written', async () => {
-    const p = prefix()
-    await mountPrefix(p)
-    await py.runPythonAsync(`
-from pathlib import Path
-Path('${p}empty.txt').touch()
-`)
-    await drain()
-    expect(store.has(`${p}empty.txt`)).toBe(true)
-    expect(store.get(`${p}empty.txt`)?.length).toBe(0)
+    for (const [name, text] of Object.entries(expected)) {
+      const held = store.get(`${p}${name}`)
+      expect(held === undefined ? null : dec.decode(held)).toBe(text)
+    }
   })
 
   it('records a shutil.rmtree in post order, through its fd-relative walk', async () => {
@@ -344,20 +356,6 @@ shutil.rmtree('${p}tree')
       'rmdir tree/b',
       'rmdir tree',
     ])
-  })
-
-  it('keeps the write-temp-then-rename idiom in order', async () => {
-    const p = prefix()
-    await mountPrefix(p)
-    await py.runPythonAsync(`
-import os
-with open('${p}tmp.part', 'w') as f:
-    f.write('ATOMIC')
-os.rename('${p}tmp.part', '${p}final.txt')
-`)
-    await drain()
-    expect(dec.decode(store.get(`${p}final.txt`) ?? new Uint8Array())).toBe('ATOMIC')
-    expect(store.has(`${p}tmp.part`)).toBe(false)
   })
 
   it('refuses a cross-mount rename with a real EXDEV the guest can match', async () => {
@@ -405,19 +403,6 @@ except OSError as e:
     // The refused source is still readable in place.
     await py.runPythonAsync(`_kept = open('${p}x.txt').read()`)
     expect(py.globals.get('_kept')).toBe('X')
-  })
-
-  it('resolves a relative path against the guest cwd', async () => {
-    const p = prefix()
-    await mountPrefix(p)
-    await py.runPythonAsync(`
-import os
-os.chdir('${p}')
-with open('rel.txt', 'w') as f:
-    f.write('RELATIVE')
-`)
-    await drain()
-    expect(dec.decode(store.get(`${p}rel.txt`) ?? new Uint8Array())).toBe('RELATIVE')
   })
 
   it('stops serving a prefix once it is unmounted', async () => {

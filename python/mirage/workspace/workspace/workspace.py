@@ -146,6 +146,8 @@ from mirage.workspace.snapshot.state import (
     reusable_mounts,
 )
 from mirage.workspace.store import WorkspaceStateStore
+from mirage.workspace.tools.file_version import FileVersionTracker
+from mirage.workspace.tools.tool_operations import MirageToolOperations
 from mirage.workspace.workspace.build import (
     resolve_control_stores,
     wire_runtime_world,
@@ -314,6 +316,8 @@ class Workspace:
         self._session_mgr = SessionManager(
             session_id, store=stores.sessions, seed_vars=seed_vars
         )
+        self._tools: dict[str | None, MirageToolOperations] = {}
+        self._reads: dict[str, FileVersionTracker] = {}
         # Admission policies, consulted in registration order after the
         # built-ins the registry seeds: the profile's admission rules
         # (PermissionsPolicy, reading each session's compiled rules
@@ -579,6 +583,54 @@ class Workspace:
         the op vocabulary the dispatcher speaks, not a filesystem.
         """
         return self._ops
+
+    @property
+    def tools(self) -> MirageToolOperations:
+        """The agent tools as the default session; ``Session.tools``
+        for another."""
+        return self._session_tools(None)
+
+    def _session_tools(self, session_id: str | None) -> MirageToolOperations:
+        """The one tool table a session has, made on first use.
+
+        Every caller in the process shares it, so a file the agent read
+        through one is guarded when it writes through another. Closing
+        the session drops it. None is the default session as it is when
+        each call runs, so its table keeps working when a snapshot load
+        or an attach re-keys the default; an id stays that session.
+
+        Args:
+            session_id (str | None): the session, or None for the
+                default.
+        """
+        tools = self._tools.get(session_id)
+        if tools is None:
+            tools = MirageToolOperations(Session(self, session_id))
+            self._tools[session_id] = tools
+        return tools
+
+    async def _session_reads(
+        self, session_id: str | None
+    ) -> FileVersionTracker:
+        """The read history the agent tools keep for one session.
+
+        Every guarded table of the session shares it, the one following
+        the default included, so a read through ``ws.tools`` guards a
+        write through ``Session(ws, id).tools``. Sessions load first, so
+        the default's id is final before it is looked up. Closing the
+        session drops it, and a snapshot restore drops them all.
+
+        Args:
+            session_id (str | None): the session, or None for the
+                default as it is now.
+        """
+        await self.ensure_sessions_loaded()
+        sid = self.default_session_id if session_id is None else session_id
+        reads = self._reads.get(sid)
+        if reads is None:
+            reads = FileVersionTracker(self.vfs._for_session(sid))
+            self._reads[sid] = reads
+        return reads
 
     @property
     def namespace(self) -> Namespace:
@@ -1613,6 +1665,8 @@ class Workspace:
         # session reusing the id inherits nothing.
         await self._session_mgr.close(session_id)
         await self.job_table.close_session(session_id)
+        self._tools.pop(session_id, None)
+        self._reads.pop(session_id, None)
 
     async def close_all_sessions(self) -> None:
         closed = [
@@ -1623,6 +1677,8 @@ class Workspace:
         await self._session_mgr.close_all()
         for session_id in closed:
             await self.job_table.close_session(session_id)
+            self._tools.pop(session_id, None)
+            self._reads.pop(session_id, None)
 
     # ── mount management ────────────────────────────────────────────────────
 

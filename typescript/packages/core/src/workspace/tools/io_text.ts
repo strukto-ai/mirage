@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describeRefusal, saysWhy } from '@struktoai/mirage-core/policy/index'
-import type { Refusal } from '@struktoai/mirage-core/types'
-import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { describeRefusal, saysWhy } from '../../policy/index.ts'
+import type { Refusal } from '../../types.ts'
+import type { ExecuteResult } from '../workspace/workspace.ts'
 
 export function decode(value: Uint8Array | null | undefined): string {
   if (value === null || value === undefined) return ''

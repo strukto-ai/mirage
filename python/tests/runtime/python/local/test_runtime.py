@@ -60,48 +60,51 @@ async def test_filesystem_operations(tmp_path, program, expected):
         await runtime.close()
 
 
-def test_local_runs_on_host_interpreter():
-    runtime = LocalRuntime()
-    result = asyncio.run(runtime.run(RunArgs(code="print(21 * 2)")))
-    assert result.exit_code == 0
-    assert result.stdout == b"42\n"
-    assert result.stderr is None
-
-
-def test_local_passes_argv():
-    runtime = LocalRuntime()
-    result = asyncio.run(
-        runtime.run(
-            RunArgs(code="import sys; print(sys.argv[1:])", args=["a", "b"])
-        )
-    )
-    assert result.stdout == b"['a', 'b']\n"
-
-
-def test_local_env_overlays_host():
-    runtime = LocalRuntime()
-    result = asyncio.run(
-        runtime.run(
+@pytest.mark.parametrize(
+    ("args", "exit_code", "stdout", "stderr"),
+    [
+        pytest.param(
+            RunArgs(code="print(21 * 2)"), 0, b"42\n", None, id="print"
+        ),
+        pytest.param(
+            RunArgs(code="import sys; print(sys.argv[1:])", args=["a", "b"]),
+            0,
+            b"['a', 'b']\n",
+            None,
+            id="argv",
+        ),
+        pytest.param(
             RunArgs(
                 code="import os; print(os.environ['MY_VAR'])",
                 env={"MY_VAR": "v1"},
-            )
-        )
-    )
-    assert result.stdout == b"v1\n"
-
-
-def test_local_stdin():
-    runtime = LocalRuntime()
-    result = asyncio.run(
-        runtime.run(
+            ),
+            0,
+            b"v1\n",
+            None,
+            id="env-overlays-host",
+        ),
+        pytest.param(
             RunArgs(
                 code="import sys; print(sys.stdin.read().upper())",
                 stdin=b"hello",
-            )
-        )
-    )
-    assert result.stdout == b"HELLO\n"
+            ),
+            0,
+            b"HELLO\n",
+            None,
+            id="stdin",
+        ),
+        pytest.param(
+            RunArgs(code="1/0"), 1, b"", b"ZeroDivisionError", id="traceback"
+        ),
+    ],
+)
+def test_local_runs_on_the_host_interpreter(args, exit_code, stdout, stderr):
+    result = asyncio.run(LocalRuntime().run(args))
+    assert (result.exit_code, result.stdout) == (exit_code, stdout)
+    if stderr is None:
+        assert result.stderr is None
+    else:
+        assert stderr in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -132,13 +135,6 @@ def test_script_cli_stdin_is_not_embedded_in_process_argv(stdin):
             f"['pager', 'one']\n{stdin is None} {len(stdin or b'')} True\n"
         ).encode()
     )
-
-
-def test_local_exit_code_and_stderr():
-    runtime = LocalRuntime()
-    result = asyncio.run(runtime.run(RunArgs(code="1/0")))
-    assert result.exit_code == 1
-    assert b"ZeroDivisionError" in result.stderr
 
 
 def test_local_name():
