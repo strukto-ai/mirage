@@ -23,12 +23,24 @@ const NOT_FOUND = { error: { code: 'itemNotFound', message: 'x' } }
 
 // Records every folder create and answers each URL from a queue, so the
 // first create of a URL can 404 and its retry succeed.
-function folderFetch(answers: Record<string, number[]>): string[] {
+// Records every folder create and answers each URL from a queue; a GET
+// answers from `items` and 404s anything else.
+function folderFetch(
+  answers: Record<string, number[]>,
+  items: Record<string, unknown> = {},
+): string[] {
   const posts: string[] = []
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: unknown) => {
+    vi.fn((input: unknown, init?: RequestInit) => {
       const url = (String(input).split('?')[0] ?? '').replace(/\/$/, '')
+      if ((init?.method ?? 'GET') === 'GET') {
+        const found = items[url]
+        if (found === undefined) {
+          return Promise.resolve(new Response(JSON.stringify(NOT_FOUND), { status: 404 }))
+        }
+        return Promise.resolve(new Response(JSON.stringify(found)))
+      }
       const status = answers[url]?.shift() ?? 201
       posts.push(`${String(status)} ${url}`)
       const body = status < 400 ? { id: '1' } : NOT_FOUND
@@ -69,5 +81,29 @@ describe('OneDrive mkdir under a mount root the drive does not have yet', () => 
     const posts = folderFetch({ [url]: [404] })
     await expect(mkdir(accessor(), PathSpec.fromStrPath(`/od/${key}`, key))).rejects.toThrow()
     expect(posts).toEqual([`404 ${url}`])
+  })
+})
+
+describe('OneDrive mkdir names a refusal', () => {
+  const plain = (): OneDriveAccessor => new OneDriveAccessor({ accessToken: 'token' })
+
+  it.each([
+    [{ folder: {} }, null],
+    [{ file: {} }, 'EEXIST'],
+  ])('a 409 on %j is %s', async (taken, code) => {
+    folderFetch(
+      { [`${BASE}/root:/parent:/children`]: [409] },
+      { [`${BASE}/root:/parent/new`]: taken },
+    )
+    const made = mkdir(plain(), PathSpec.fromStrPath('/od/parent/new', 'parent/new'))
+    if (code === null) await expect(made).resolves.toBeUndefined()
+    else await expect(made).rejects.toMatchObject({ code })
+  })
+
+  it('a create under a file is ENOTDIR', async () => {
+    folderFetch({ [`${BASE}/root:/f:/children`]: [404] }, { [`${BASE}/root:/f`]: { file: {} } })
+    await expect(mkdir(plain(), PathSpec.fromStrPath('/od/f/new', 'f/new'))).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
   })
 })

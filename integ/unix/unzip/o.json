@@ -83,9 +83,13 @@
         "hf-prefix",
         "dropbox",
         "dropbox-root",
+        "onedrive",
+        "sharepoint",
         "ssh",
+        "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
       "command": "(cd /data && mkdir -p r10ub/o && printf '%s' 'UEsDBAoAAAAAAIAYIlwAAAAAAAAAAAAAAAAGAAAAYmxvY2svUEsDBAoAAAAAAIAYIlwAAAAAAAAAAAAAAAAMAAAAYmxvY2svY2hpbGQvUEsDBAoAAAAAAIAYIlwAAAAAAAAAAAAAAAAGAAAAbGF0ZXIvUEsDBAoAAAAAAIAYIlydatx0AgAAAAIAAAALAAAAbGF0ZXIvei50eHR6ClBLAQIeAwoAAAAAAIAYIlwAAAAAAAAAAAAAAAAGAAAAAAAAAAAAEADtQQAAAABibG9jay9QSwECHgMKAAAAAACAGCJcAAAAAAAAAAAAAAAADAAAAAAAAAAAABAA7UEkAAAAYmxvY2svY2hpbGQvUEsBAh4DCgAAAAAAgBgiXAAAAAAAAAAAAAAAAAYAAAAAAAAAAAAQAO1BTgAAAGxhdGVyL1BLAQIeAwoAAAAAAIAYIlydatx0AgAAAAIAAAALAAAAAAAAAAEAAACkgXIAAABsYXRlci96LnR4dFBLBQYAAAAABAAEANsAAACdAAAAAAA=' | base64 -d > r10ub/z.zip && printf x > r10ub/o/block && unzip -o r10ub/z.zip -d r10ub/o; echo rc=$?; ls -R r10ub/o; printf '%s' 'UEsDBAoAAAAAAIAYIlzAN6uSAgAAAAIAAAALAAAAYmxvY2svZi50eHRmClBLAwQKAAAAAACAGCJcjUkFJwIAAAACAAAACAAAAG9rL2sudHh0awpQSwECHgMKAAAAAACAGCJcwDerkgIAAAACAAAACwAAAAAAAAABAAAApIEAAAAAYmxvY2svZi50eHRQSwECHgMKAAAAAACAGCJcjUkFJwIAAAACAAAACAAAAAAAAAABAAAApIErAAAAb2svay50eHRQSwUGAAAAAAIAAgBvAAAAUwAAAAAA' | base64 -d > r10ub/z2.zip && unzip -o r10ub/z2.zip -d r10ub/o; echo rc=$?; rm -r r10ub)",
       "expect": {

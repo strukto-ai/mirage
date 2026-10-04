@@ -15,7 +15,9 @@
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { GraphError } from '../msgraph/client.ts'
+import { isEnoent } from '../../utils/errors.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'
 import { fullItemUrl, itemUrl } from './client.ts'
 
@@ -33,29 +35,37 @@ import { fullItemUrl, itemUrl } from './client.ts'
 async function createRoot(accessor: OneDriveAccessor): Promise<void> {
   let parent = ''
   for (const name of accessor.config.keyPrefix.split('/')) {
+    const level = parent === '' ? name : `${parent}/${name}`
     await createChildFolder(
       accessor.config,
       fullItemUrl(accessor.config, parent, '/children'),
       name,
+      {
+        item: fullItemUrl(accessor.config, level),
+        parent: fullItemUrl(accessor.config, parent),
+        virtual: level,
+      },
     )
-    parent = parent === '' ? name : `${parent}/${name}`
+    parent = level
   }
 }
 
-async function createDir(accessor: OneDriveAccessor, path: string): Promise<void> {
+async function createDir(accessor: OneDriveAccessor, path: string, virtual: string): Promise<void> {
+  const config = accessor.config
   const parent = parentPath(path)
-  const url = itemUrl(accessor.config, parent, '/children')
+  const create = (): Promise<void> =>
+    createChildFolder(config, itemUrl(config, parent, '/children'), baseName(path), {
+      item: itemUrl(config, path),
+      parent: itemUrl(config, parent),
+      virtual,
+    })
   try {
-    await createChildFolder(accessor.config, url, baseName(path))
+    await create()
   } catch (error) {
-    const missingRoot =
-      error instanceof GraphError &&
-      error.status === 404 &&
-      parent === '' &&
-      accessor.config.keyPrefix !== ''
+    const missingRoot = isEnoent(error) && parent === '' && config.keyPrefix !== ''
     if (!missingRoot) throw error
     await createRoot(accessor)
-    await createChildFolder(accessor.config, url, baseName(path))
+    await create()
   }
 }
 
@@ -67,12 +77,14 @@ export async function mkdir(
   const key = path.vfsPath
   if (key === '') return
   if (parents) {
+    const prefix = rstripSlash(mountPrefixOf(path.virtual, path.vfsPath))
     const parts = key.split('/')
     for (let index = 1; index <= parts.length; index++) {
-      await createDir(accessor, parts.slice(0, index).join('/'))
+      const level = parts.slice(0, index).join('/')
+      await createDir(accessor, level, `${prefix}/${level}`)
     }
   } else {
-    await createDir(accessor, key)
+    await createDir(accessor, key, path.virtual)
   }
   await invalidateAfterWrite(path)
   if (parents) await invalidateAncestors(path)

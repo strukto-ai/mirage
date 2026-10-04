@@ -15,7 +15,7 @@
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { GraphError } from '../msgraph/client.ts'
+import { isEnoent } from '../../utils/errors.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'
 import { itemUrl } from './client.ts'
 import { resolveItem } from './resolve.ts'
@@ -24,9 +24,15 @@ async function createDir(
   accessor: SharePointAccessor,
   driveId: string,
   path: string,
+  virtual: string,
 ): Promise<void> {
-  const url = itemUrl(accessor.config, driveId, parentPath(path), '/children')
-  await createChildFolder(accessor.config, url, baseName(path))
+  const config = accessor.config
+  const parent = parentPath(path)
+  await createChildFolder(config, itemUrl(config, driveId, parent, '/children'), baseName(path), {
+    item: itemUrl(config, driveId, path),
+    parent: itemUrl(config, driveId, parent),
+    virtual,
+  })
 }
 
 /**
@@ -36,15 +42,17 @@ async function createDir(
  *   accessor: the mount's accessor.
  *   driveId: the drive the path lives in.
  *   itemPath: the drive-relative path, keyPrefix included.
+ *   virtual: the path a refusal names.
  */
 async function createChain(
   accessor: SharePointAccessor,
   driveId: string,
   itemPath: string,
+  virtual: string,
 ): Promise<void> {
   const parts = itemPath.split('/')
   for (let index = 1; index <= parts.length; index++) {
-    await createDir(accessor, driveId, parts.slice(0, index).join('/'))
+    await createDir(accessor, driveId, parts.slice(0, index).join('/'), virtual)
   }
 }
 
@@ -74,19 +82,15 @@ export async function mkdir(
   const driveId = resolved.driveId ?? ''
   const itemPath = resolved.itemPath ?? ''
   if (parents) {
-    await createChain(accessor, driveId, itemPath)
+    await createChain(accessor, driveId, itemPath, path.virtual)
   } else {
     try {
-      await createDir(accessor, driveId, itemPath)
+      await createDir(accessor, driveId, itemPath, path.virtual)
     } catch (error) {
       const prefix = scopedPrefix(accessor)
-      const missingRoot =
-        error instanceof GraphError &&
-        error.status === 404 &&
-        prefix !== '' &&
-        parentPath(itemPath) === prefix
+      const missingRoot = isEnoent(error) && prefix !== '' && parentPath(itemPath) === prefix
       if (!missingRoot) throw error
-      await createChain(accessor, driveId, itemPath)
+      await createChain(accessor, driveId, itemPath, path.virtual)
     }
   }
   await invalidateAfterWrite(path)

@@ -1,7 +1,31 @@
+from opendal import AsyncOperator
+from opendal.exceptions import NotFound, Unexpected
+from opendal.types import EntryMode
+
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.types import PathSpec
+from mirage.utils.errors import eexist, enotdir
+
+
+async def _file_level(op: AsyncOperator, key: str) -> str | None:
+    """The first level of ``key`` that is a file, None when none is.
+
+    Args:
+        op (AsyncOperator): the mount's operator.
+        key (str): the collection's key, without a trailing slash.
+    """
+    level = ""
+    for part in key.split("/"):
+        level = f"{level}/{part}" if level else part
+        try:
+            md = await op.stat(level)
+        except NotFound:
+            return None
+        if md.mode != EntryMode.Dir:
+            return level
+    return None
 
 
 async def mkdir(
@@ -22,8 +46,23 @@ async def mkdir(
         path (PathSpec): collection to create.
         parents (bool): ignored; opendal always creates parents.
     """
-    key = nextcloud_key(path).rstrip("/") + "/"
+    key = nextcloud_key(path).rstrip("/")
     op = accessor.operator()
-    await op.create_dir(key)
+    # MKCOL under a file is a 409 opendal leaves unnamed, and opendal reads
+    # MKCOL's 405 on a taken name as done, a file holding the name
+    # included: look the levels up to tell ENOTDIR from EEXIST.
+    try:
+        await op.create_dir(key + "/")
+    except Unexpected as exc:
+        level = await _file_level(op, key)
+        if level is None:
+            raise
+        raise (eexist(path) if level == key else enotdir(path)) from exc
+    try:
+        md = await op.stat(key)
+    except NotFound:
+        md = None
+    if md is not None and md.mode != EntryMode.Dir:
+        raise eexist(path)
     await invalidate_after_write(path)
     await invalidate_ancestors(path)

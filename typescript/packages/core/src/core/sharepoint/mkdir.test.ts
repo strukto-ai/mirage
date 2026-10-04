@@ -27,15 +27,23 @@ const GETS: Record<string, unknown> = {
 }
 
 // Records every folder create and answers each URL from a queue, so the
-// first create of a URL can 404 and its retry succeed.
-function folderFetch(answers: Record<string, number[]>): string[] {
+// first create of a URL can 404 and its retry succeed. A GET answers the
+// site and drive lookups, then `items`, and 404s anything else.
+function folderFetch(
+  answers: Record<string, number[]>,
+  items: Record<string, unknown> = {},
+): string[] {
   const posts: string[] = []
   vi.stubGlobal(
     'fetch',
     vi.fn((input: unknown, init?: RequestInit) => {
       const url = (String(input).split('?')[0] ?? '').replace(/\/$/, '')
       if ((init?.method ?? 'GET') === 'GET') {
-        return Promise.resolve(new Response(JSON.stringify(GETS[url] ?? { value: [] })))
+        const found = GETS[url] ?? items[url]
+        if (found === undefined) {
+          return Promise.resolve(new Response(JSON.stringify(NOT_FOUND), { status: 404 }))
+        }
+        return Promise.resolve(new Response(JSON.stringify(found)))
       }
       const status = answers[url]?.shift() ?? 201
       posts.push(`${String(status)} ${url}`)
@@ -74,5 +82,32 @@ describe('SharePoint mkdir under a mount root the drive does not have yet', () =
     const posts = folderFetch({ [`${DRIVE}/root:/team/root/a:/children`]: [404] })
     await expect(mkdir(scoped(), PathSpec.fromStrPath('/sp/a/b', 'a/b'))).rejects.toThrow()
     expect(posts).toEqual([`404 ${DRIVE}/root:/team/root/a:/children`])
+  })
+})
+
+describe('SharePoint mkdir names a refusal', () => {
+  const plain = (): SharePointAccessor => new SharePointAccessor({ accessToken: 'token' })
+
+  it.each([
+    [{ folder: {} }, null],
+    [{ file: {} }, 'EEXIST'],
+  ])('a 409 on %j is %s', async (taken, code) => {
+    folderFetch({ [`${DRIVE}/root/children`]: [409] }, { [`${DRIVE}/root:/new`]: taken })
+    const made = mkdir(
+      plain(),
+      PathSpec.fromStrPath('/sp/Engineering/Documents/new', 'Engineering/Documents/new'),
+    )
+    if (code === null) await expect(made).resolves.toBeUndefined()
+    else await expect(made).rejects.toMatchObject({ code })
+  })
+
+  it('a create under a file is ENOTDIR', async () => {
+    folderFetch({ [`${DRIVE}/root:/f:/children`]: [404] }, { [`${DRIVE}/root:/f`]: { file: {} } })
+    await expect(
+      mkdir(
+        plain(),
+        PathSpec.fromStrPath('/sp/Engineering/Documents/f/new', 'Engineering/Documents/f/new'),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 })

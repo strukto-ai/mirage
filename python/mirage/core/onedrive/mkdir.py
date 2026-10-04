@@ -16,10 +16,10 @@ import posixpath
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
-from mirage.core.msgraph.client import GraphError
-from mirage.core.msgraph.drive import create_child_folder
+from mirage.core.msgraph.drive import FolderTarget, create_child_folder
 from mirage.core.onedrive.client import full_item_url, item_url
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def _create_root(accessor: OneDriveAccessor) -> None:
@@ -35,35 +35,47 @@ async def _create_root(accessor: OneDriveAccessor) -> None:
     """
     parent = ""
     for name in (accessor.config.key_prefix or "").strip("/").split("/"):
+        level = f"{parent}/{name}" if parent else name
         await create_child_folder(
             accessor.config,
             full_item_url(accessor.config, parent, action="/children"),
             name,
+            FolderTarget(
+                item=full_item_url(accessor.config, level),
+                parent=full_item_url(accessor.config, parent),
+                virtual=level,
+            ),
             session=accessor.pool,
         )
-        parent = f"{parent}/{name}" if parent else name
+        parent = level
 
 
-async def _create_dir(accessor: OneDriveAccessor, path: str) -> None:
+async def _create_dir(
+    accessor: OneDriveAccessor, path: str, virtual: str
+) -> None:
+    config = accessor.config
     parent = posixpath.dirname(path)
-    url = item_url(accessor.config, parent, action="/children")
-    name = posixpath.basename(path)
-    try:
+
+    async def create() -> None:
         await create_child_folder(
-            accessor.config, url, name, session=accessor.pool
+            config,
+            item_url(config, parent, action="/children"),
+            posixpath.basename(path),
+            FolderTarget(
+                item=item_url(config, path),
+                parent=item_url(config, parent),
+                virtual=virtual,
+            ),
+            session=accessor.pool,
         )
-    except GraphError as exc:
-        missing_root = (
-            exc.status == 404
-            and not parent
-            and (accessor.config.key_prefix or "").strip("/")
-        )
-        if not missing_root:
+
+    try:
+        await create()
+    except FileNotFoundError:
+        if parent or not (config.key_prefix or "").strip("/"):
             raise
         await _create_root(accessor)
-        await create_child_folder(
-            accessor.config, url, name, session=accessor.pool
-        )
+        await create()
 
 
 async def mkdir(
@@ -73,11 +85,13 @@ async def mkdir(
     if not key:
         return
     if parents:
+        prefix = mount_prefix_of(path.virtual, path.vfs_path).rstrip("/")
         parts = key.split("/")
         for i in range(len(parts)):
-            await _create_dir(accessor, "/".join(parts[: i + 1]))
+            level = "/".join(parts[: i + 1])
+            await _create_dir(accessor, level, f"{prefix}/{level}")
     else:
-        await _create_dir(accessor, key)
+        await _create_dir(accessor, key, path.virtual)
     await invalidate_after_write(path)
     if parents:
         await invalidate_ancestors(path)
