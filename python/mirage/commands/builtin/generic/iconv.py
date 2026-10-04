@@ -175,8 +175,7 @@ async def iconv(
                 raw = await read(path)
             except READ_FAILURES as exc:
                 errors.append(
-                    "iconv: error while reading the input: "
-                    f"{fs_strerror(exc)}"
+                    f"iconv: error while reading the input: {fs_strerror(exc)}"
                 )
                 failed = True
                 break
