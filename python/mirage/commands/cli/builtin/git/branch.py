@@ -32,7 +32,6 @@ from mirage.commands.cli.builtin.git.errors import (
     BranchExistsError,
     BranchNameRequiredError,
     BranchPointError,
-    BranchUsageError,
     CheckedOutBranchError,
     GitError,
     InvalidBranchNameError,
@@ -42,8 +41,8 @@ from mirage.commands.cli.builtin.git.errors import (
     RefDeleteReadOnlyError,
     RefLockError,
     RefReadOnlyError,
-    UnknownSwitchError,
     UnmergedBranchError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
@@ -100,13 +99,12 @@ from mirage.commands.cli.builtin.git.types import (
     Upstream,
 )
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
+    check_switches,
     config_section,
-    escaped,
     fatal,
     git_bool,
     multivar,
-    switches,
+    verb_usage,
     without_section,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
@@ -722,9 +720,7 @@ async def branch(
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         repo, location = await opened(fl, doors)
         mode = await track_mode(dispatch, location)
         filt = await asyncio.to_thread(ref_filter, repo, words)
@@ -736,7 +732,7 @@ async def branch(
         force = fl.as_bool("D")
         if fl.as_bool("delete") or force:
             if listing:
-                raise BranchUsageError()
+                raise UsageError("", verb_usage(inv))
             if not texts:
                 raise BranchNameRequiredError()
             deleted = b"".join(

@@ -33,7 +33,7 @@ export const IO: CommandIO<NextcloudAccessor> = new VFSAdapter<NextcloudAccessor
     du: { size: nextcloudDuSize, entries: nextcloudDuEntries },
   },
   writes: {
-    append: appendFromRead(read, write),
+    append: appendFromRead(read, write, stat),
     write,
     mkdir,
     unlink,

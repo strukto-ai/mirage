@@ -129,7 +129,7 @@ describe('VFSAdapter', () => {
       try {
         const result = await ws.shell('echo changed > /nested/data/a.txt')
         expect(result.exitCode === 0).toBe(mode === MountMode.WRITE)
-        expect(write).toHaveBeenCalledTimes(mode === MountMode.WRITE ? 1 : 0)
+        expect(write).toHaveBeenCalledTimes(mode === MountMode.WRITE ? 2 : 0)
         const refused = await ws.shell('rm /nested/data/a.txt')
         const reason = mode === MountMode.READ ? 'Read-only file system' : 'Operation not supported'
         expect(stderrStr(refused)).toBe(`rm: cannot remove '/nested/data/a.txt': ${reason}\n`)

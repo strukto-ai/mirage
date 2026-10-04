@@ -273,9 +273,10 @@ export async function handleCli(
 
   const refusal = optionError(prog, parsed)
   let msg: Uint8Array | null = null
+  let shown: Uint8Array | null = null
   let code = 0
   if (refusal !== null) {
-    ;[msg, code] = leafRefusal(style, refusal[0], parsed)
+    ;[msg, code, shown] = leafRefusal(style, refusal[0], parsed, result.path.join(' '), leaf)
   } else if (parsed.missingRequiredOperands.length > 0 && style === UsageStyle.CLAP) {
     // Only clap names the empty slots. Under every other style a required
     // operand stays the leaf's own business, worded by the command, which is
@@ -291,8 +292,8 @@ export async function handleCli(
   }
   if (msg !== null) {
     return [
-      null,
-      new IOResult({ exitCode: code, stderr: msg }),
+      shown,
+      new IOResult({ exitCode: code, stderr: msg.length > 0 ? msg : null }),
       new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
     ]
   }

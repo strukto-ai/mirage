@@ -15,7 +15,14 @@
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from mirage.commands.cli.constants import CLAP_EXIT, USAGE_EXIT
+from mirage.commands.cli.constants import (
+    CLAP_EXIT,
+    GIT_LONG_OPTIONS,
+    GIT_SYNOPSES,
+    GIT_USAGE_GAP,
+    GIT_USAGE_WIDTH,
+    USAGE_EXIT,
+)
 from mirage.commands.spec.help import operand_slot, option_metavar
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 
@@ -24,23 +31,116 @@ if TYPE_CHECKING:
 
 ARGPARSE_EXIT = 2
 LONG_PREFIX = "--"
+NEGATION = "--no-"
+HELP_SWITCH = "-h"
 
 
-def git_unknown_option(token: str) -> bytes:
-    """git's refusal for an option it does not know.
+def git_usage(path: str, spec: CommandSpec) -> str:
+    """git's usage block for one verb, as parse-options prints it.
 
-    Two nouns and no program name, pinned against git 2.50.1: a long
-    option is an "option" and a short one is a "switch", both named
-    without their dashes and quoted with a backquote-apostrophe pair.
-    git follows this with the verb's usage block, which is omitted the
-    same way GNU's is elsewhere in the spec machinery.
+    The synopsis lines come first, the first after ``usage: `` and each
+    next one after ``   or: ``, then a blank line, one row per option and
+    a closing blank line. The lines are git's own (``GIT_SYNOPSES``); the
+    rows are the leaf's spec in git's layout, so the block lists exactly
+    the options mirage takes: four spaces, the short and long spellings,
+    ``--[no-]`` where the spec declares a long's negation beside it, the
+    value's name, then the description from column 26, or under that
+    column on a line of its own when the spellings run past it. Pinned
+    against git 2.47.3.
 
     Args:
-        token (str): the offending token ('--nosuch') or cluster
-            character ('Z'), as the flat parser reports it.
+        path (str): the verb's path under git ("branch", "stash list").
+        spec (CommandSpec): the leaf's grammar.
     """
-    noun = "option" if token.startswith(LONG_PREFIX) else "switch"
-    return f"error: unknown {noun} `{token.lstrip('-')}'\n".encode()
+    lines = GIT_SYNOPSES.get(path, (f"git {path}",))
+    text = f"usage: {lines[0]}\n" + "".join(
+        f"   or: {line}\n" for line in lines[1:]
+    )
+    rows = _git_rows(path, spec)
+    if rows:
+        text += "\n" + "".join(rows)
+    return text + "\n"
+
+
+def _git_rows(path: str, spec: CommandSpec) -> list[str]:
+    """One usage row per option, a negation folded where git folds it.
+
+    git spells a long ``--[no-]name`` where its own table does
+    (``GIT_LONG_OPTIONS``), and the row then stands for the plain
+    boolean ``--no-name`` mirage declares beside it too. A ``--no-``
+    option git lists apart (``--no-merges`` filters rather than
+    negates) keeps a row of its own.
+
+    Args:
+        path (str): the verb's path under git, for its table.
+        spec (CommandSpec): the leaf's grammar.
+    """
+    table = GIT_LONG_OPTIONS.get(path, ())
+    negations = {
+        opt.long
+        for opt in spec.options
+        if opt.long is not None
+        and opt.long.startswith(NEGATION)
+        and opt.short is None
+        and opt.type == "bool"
+        and f"[no-]{opt.long[len(NEGATION) :]}" in table
+    }
+    rows: list[str] = []
+    for opt in spec.options:
+        long = opt.long
+        if long in negations:
+            continue
+        if long is not None and f"{NEGATION}{long[2:]}" in negations:
+            long = f"--[no-]{long[2:]}"
+        spelled = ", ".join(name for name in (opt.short, long) if name)
+        if opt.type != "bool":
+            named = opt.long[2:] if opt.long else (opt.short or "-")[1:]
+            value = f"<{opt.metavar or named}>"
+            if not opt.value_optional:
+                spelled += f" {value}"
+            else:
+                spelled += f"[={value}]" if opt.long else f"[{value}]"
+        left = f"    {spelled}"
+        gap = (
+            " " * (GIT_USAGE_WIDTH + GIT_USAGE_GAP - len(left))
+            if len(left) <= GIT_USAGE_WIDTH + 1
+            else "\n" + " " * (GIT_USAGE_WIDTH + GIT_USAGE_GAP)
+        )
+        rows.append(f"{left}{gap}{opt.description or ''}\n")
+    return rows
+
+
+def git_option_refusal(
+    word: str, path: str, spec: CommandSpec
+) -> tuple[str, str]:
+    """parse-options' answer to a word the verb does not take.
+
+    ``-h`` asks for the usage block, which goes to stdout. A boolean
+    long handed a value is refused on one line. Anything else is an
+    option the verb does not have: a long one is an "option" and a
+    short one a "switch", both named without their dashes and quoted
+    with a backquote-apostrophe pair, and the usage block follows on
+    stderr. Pinned against git 2.50.1.
+
+    Args:
+        word (str): the offending word with its dashes ('--nosuch',
+            '-Z', '--quiet=1').
+        path (str): the verb's path under git, for its synopsis.
+        spec (CommandSpec): the leaf's grammar, for its rows.
+
+    Returns:
+        The refusal's stdout and its stderr; it exits 129.
+    """
+    usage = git_usage(path, spec)
+    if word == HELP_SWITCH:
+        return usage, ""
+    name, eq, _ = word.partition("=")
+    if eq and any(
+        opt.long == name and opt.type == "bool" for opt in spec.options
+    ):
+        return "", f"error: option `{name[2:]}' takes no value\n"
+    noun = "option" if word.startswith(LONG_PREFIX) else "switch"
+    return "", f"error: unknown {noun} `{word.lstrip('-')}'\n{usage}"
 
 
 def clap_supplied(
@@ -124,8 +224,12 @@ def clap_missing_operands(
 
 
 def leaf_refusal(
-    style: UsageStyle, argparse_message: bytes, parsed: "ParsedCommand"
-) -> tuple[bytes, int]:
+    style: UsageStyle,
+    argparse_message: bytes,
+    parsed: "ParsedCommand",
+    path: str,
+    spec: CommandSpec,
+) -> tuple[bytes, int, bytes | None]:
     """The message and exit code a leaf answers a bad option with.
 
     A leaf usage error exits 2 under argparse's style regardless of the
@@ -134,6 +238,12 @@ def leaf_refusal(
     which is neither that nor its own 128 for a fatal. clap exits 2,
     agreeing with argparse by coincidence rather than by lineage.
 
+    git answers in parse-options' words, and some of them print the
+    verb's usage block: after an unknown option on stderr, on stdout
+    for ``-h`` and after an ambiguous abbreviation. A missing value is
+    one line, a long named an "option" and a short one a "switch"
+    (pinned against git 2.50.1).
+
     Args:
         style (UsageStyle): the dialect the CLI's root declares.
         argparse_message (bytes): the message the spec machinery built,
@@ -141,20 +251,39 @@ def leaf_refusal(
             the same.
         parsed (ParsedCommand): parse result, read for the offending
             token when the style rewrites the message.
+        path (str): the leaf's path under its head word, for git's
+            synopsis.
+        spec (CommandSpec): the leaf's grammar, for git's option rows.
+
+    Returns:
+        The stderr, the exit code and the stdout, None when the refusal
+        writes nothing there.
     """
     if style is UsageStyle.CLAP:
-        return argparse_message, CLAP_EXIT
+        return argparse_message, CLAP_EXIT, None
     if style is not UsageStyle.GIT:
-        return argparse_message, ARGPARSE_EXIT
+        return argparse_message, ARGPARSE_EXIT, None
     kinds = parsed.option_error_kinds
-    if kinds and kinds[0] == "ambiguous" and parsed.ambiguous_options:
+    kind = kinds[0] if kinds else None
+    if kind == "ambiguous" and parsed.ambiguous_options:
         token, candidates = parsed.ambiguous_options[0]
         first, second = (list(candidates) + ["", ""])[:2]
         line = (
             f"error: ambiguous option: {token[2:]} "
             f"(could be {first} or {second})\n"
         )
-        return line.encode(), USAGE_EXIT
-    if parsed.invalid_options:
-        return git_unknown_option(parsed.invalid_options[0]), USAGE_EXIT
-    return argparse_message, USAGE_EXIT
+        return line.encode(), USAGE_EXIT, git_usage(path, spec).encode()
+    if kind == "needs_value" and parsed.needs_value_options:
+        needy = parsed.needs_value_options[0]
+        named = (
+            f"option `{needy[2:]}'"
+            if needy.startswith(LONG_PREFIX)
+            else f"switch `{needy.lstrip('-')}'"
+        )
+        return f"error: {named} requires a value\n".encode(), USAGE_EXIT, None
+    if kind in ("invalid", "unexpected_value") and parsed.invalid_options:
+        token = parsed.invalid_options[0]
+        word = token if token.startswith("-") else f"-{token}"
+        shown, refused = git_option_refusal(word, path, spec)
+        return refused.encode(), USAGE_EXIT, shown.encode() or None
+    return argparse_message, USAGE_EXIT, None

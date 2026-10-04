@@ -17,13 +17,13 @@ import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { dateClock } from './dates.ts'
-import { FormatUsageError, GitError, UnknownSwitchError } from './errors.ts'
+import { FormatUsageError, GitError } from './errors.ts'
 import { filterWords, refFilter, withoutFilterValues } from './ref_filter.ts'
 import { formatRefs, parseFormat, usedFields } from './ref_format.ts'
 import { isRootRef, listingResult, matchAsPath, refListing, sortKeys } from './ref_list.ts'
 import { opened } from './session.ts'
 import { QuoteStyle, RefKind } from './types.ts'
-import { checkOperands, escaped, fatal, switches } from './util.ts'
+import { checkSwitches, fatal } from './util.ts'
 
 const DEFAULT_FORMAT = '%(objectname) %(objecttype)\t%(refname)'
 const QUOTE_OPTIONS: readonly (readonly [string, QuoteStyle])[] = [
@@ -55,7 +55,7 @@ export async function forEachRef(inv: CLIInvocation): Promise<CommandFnResult> {
   const words = filterWords(inv)
   const texts = withoutFilterValues(inv.texts, words)
   try {
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const repo = await opened(fl, inv.doors ?? {})
     const filter = await refFilter(repo, words)
     const count = fl.asInt('count') ?? 0

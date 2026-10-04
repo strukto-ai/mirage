@@ -22,8 +22,14 @@ from mirage.commands.cli.builtin.git.errors import (
     BadConfigValueError,
     GitError,
     UnrecognizedArgumentError,
+    UsageError,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.refusal import (
+    HELP_SWITCH,
+    git_option_refusal,
+    git_usage,
+)
+from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -31,6 +37,7 @@ from mirage.ops.types import LinkView, MountView
 
 ROOT = "/"
 STDOUT = "stdout"
+STDERR = "stderr"
 # The end-of-options marker, which the parser consumes.
 MARKER = "--"
 TRUE_WORDS = (b"true", b"yes", b"on")
@@ -197,20 +204,19 @@ def offending_switch(text: str, known: frozenset[str] | None) -> str:
     return text
 
 
-def check_operands(
+def offending(
     texts: tuple[str, ...],
-    error: type[GitError] = UnrecognizedArgumentError,
     marked: frozenset[str] = frozenset(),
     known: frozenset[str] | None = None,
-) -> None:
-    """Refuse an operand that is really an option this build lacks.
+) -> str | None:
+    """The first operand that is really an option this build lacks.
 
     A verb taking a revision accepts free text, so every flag mirage
     does not declare reaches it as one. Resolving it as a revision is
     the wrong answer twice over: it fails, and it fails saying the
     repository has no such commit, when what happened is that mirage
-    has no such flag. Refused here, before any object is read, so the
-    message names the real problem.
+    has no such flag. Found here, before any object is read, so the
+    refusal names the real problem.
 
     Unless the caller said otherwise. A word after ``--`` is an operand
     by the caller's own instruction whatever it starts with, so it is
@@ -226,21 +232,91 @@ def check_operands(
     because limiting by nothing would print every commit and look like
     an answer.
 
-    Which refusal to raise is the caller's, because git words this
-    differently per verb and means each one: see ``UnknownSwitchError``
-    for the three.
-
     Args:
         texts (tuple[str, ...]): positional text operands, as typed.
-        error (type[GitError]): the refusal this verb words it with.
         marked (frozenset[str]): operands a ``--`` on the line escaped.
         known (frozenset[str] | None): the verb's one-letter switches,
             which narrow a refused cluster to its first unknown letter
-            the way parse-options does; None refuses the whole word.
+            the way parse-options does; None names the whole word.
     """
     for text in texts:
         if text.startswith("-") and text not in marked:
-            raise error(offending_switch(text, known))
+            return offending_switch(text, known)
+    return None
+
+
+def option_operand(
+    inv: CLIInvocation[None],
+    texts: tuple[str, ...],
+    help_stream: str = STDOUT,
+) -> str | None:
+    """The first operand that is really an option, once ``-h`` is out.
+
+    ``-h`` asks for the verb's usage block, which git prints on stdout
+    for most verbs and on stderr for a few (``diff``); every other word
+    is the caller's to refuse in the verb's own words. See
+    ``offending`` for which words count.
+
+    Args:
+        inv (CLIInvocation): the invocation, carrying its leaf.
+        texts (tuple[str, ...]): positional text operands, as typed.
+        help_stream (str): where ``-h`` puts the usage block.
+
+    Raises:
+        UsageError: the line asked for the usage block.
+    """
+    word = offending(texts, escaped(inv.argv))
+    if word == HELP_SWITCH:
+        usage = verb_usage(inv)
+        if help_stream == STDOUT:
+            raise UsageError(usage, "")
+        raise UsageError("", usage)
+    return word
+
+
+def check_operands(inv: CLIInvocation[None], texts: tuple[str, ...]) -> None:
+    """Refuse an operand that is really an option, as an unrecognized
+    argument.
+
+    For the verbs git words without a usage block (``log``, ``show``,
+    ``reflog``), whose refusal names the whole word (git 2.50.1).
+
+    Args:
+        inv (CLIInvocation): the invocation, carrying its leaf.
+        texts (tuple[str, ...]): positional text operands, as typed.
+    """
+    word = option_operand(inv, texts)
+    if word is not None:
+        raise UnrecognizedArgumentError(word)
+
+
+def verb_usage(inv: CLIInvocation[None]) -> str:
+    """The verb's usage block, as parse-options prints it.
+
+    Args:
+        inv (CLIInvocation): the invocation, carrying its leaf.
+    """
+    spec = inv.spec or CLISpec(name="")
+    return git_usage(spec.name, spec)
+
+
+def check_switches(inv: CLIInvocation[None], texts: tuple[str, ...]) -> None:
+    """Refuse an operand that is really an option, as parse-options does.
+
+    The verbs built on parse-options (``status``, ``add``, ``branch``,
+    ``commit`` and most others) name an unknown option or switch and
+    follow it with the usage block, refuse a boolean handed a value on
+    one line, and print the usage block on stdout for ``-h``; see
+    ``git_option_refusal``. Measured on git 2.50.1.
+
+    Args:
+        inv (CLIInvocation): the invocation, carrying its leaf.
+        texts (tuple[str, ...]): positional text operands, as typed.
+    """
+    word = offending(texts, escaped(inv.argv), switches(inv))
+    if word is not None:
+        spec = inv.spec or CLISpec(name="")
+        raise UsageError(*git_option_refusal(word, spec.name, spec))
 
 
 def fatal(exc: GitError) -> tuple[ByteSource | None, IOResult]:

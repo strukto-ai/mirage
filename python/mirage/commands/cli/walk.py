@@ -15,7 +15,8 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 
-from mirage.commands.cli.constants import CLAP_EXIT, USAGE_EXIT
+from mirage.commands.cli.constants import CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT
+from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
 from mirage.commands.cli.types import CLISpec, WalkFlagBag, WalkResult
 from mirage.commands.spec.compile import (
     CompiledSpec,
@@ -352,12 +353,13 @@ def _usage_error(
 ) -> WalkResult:
     """Group-level option refusal, in the dialect the CLI declares.
 
-    git answers with the message and the whole usage listing and exits
-    129. clap answers with the message, the one usage line and a footer
-    pointing at --help, and exits 2, at every level of the tree; the
-    exit code is the group's just as much as the leaf's, so reading the
-    style here is what keeps `ntn --bogus` and `ntn pages get --bogus`
-    from disagreeing.
+    git answers an unknown option in parse-options' words and its usage
+    block (on stdout for ``-h``), and the bare ``git`` with its one
+    synopsis; both exit 129. The bare ``git -h`` prints the help. clap
+    answers with the message, the one usage line and a footer pointing at
+    --help, and exits 2, at every level of the tree; the exit code is the
+    group's just as much as the leaf's, so reading the style here is what
+    keeps `ntn --bogus` and `ntn pages get --bogus` from disagreeing.
 
     Args:
         name (str): display path walked so far, e.g. "gws gmail".
@@ -366,8 +368,8 @@ def _usage_error(
             dialect; clap rewords the cases it words differently.
         style (UsageStyle): the root's dialect.
         token (str | None): the offending token when the refusal is an
-            unrecognized option, which clap words its own way. None for
-            the refusals whose wording both dialects share.
+            unrecognized option, which clap and git word their own way.
+            None for the refusals whose wording the dialects share.
     """
     if style is UsageStyle.CLAP:
         first = (
@@ -377,6 +379,22 @@ def _usage_error(
             output=clap_group_refusal(name, _listed(node), _rows(node), first),
             stream="stderr",
             exit_code=CLAP_EXIT,
+        )
+    if style is UsageStyle.GIT and token is not None:
+        path = name.partition(" ")[2]
+        # `git -h` is git's own help, as `git --help` is, and exits 0.
+        if not path and token == HELP_SWITCH:
+            return WalkResult(output=node_help(name, node, style).encode())
+        if not path:
+            text = f"unknown option: {token}\nusage: {GIT_SYNOPSES[''][0]}\n"
+            return WalkResult(
+                output=text.encode(), stream="stderr", exit_code=USAGE_EXIT
+            )
+        shown, refused = git_option_refusal(token, path, node)
+        return WalkResult(
+            output=(shown or refused).encode(),
+            stream="stdout" if shown else "stderr",
+            exit_code=USAGE_EXIT,
         )
     text = f"{message}\n\n{node_help(name, node, style)}"
     return WalkResult(
@@ -717,7 +735,7 @@ def walk(
             if not options_ended and token == "--":
                 if style is UsageStyle.GIT and not path:
                     return _usage_error(
-                        name, node, "unknown option: --", style
+                        name, node, "unknown option: --", style, token
                     )
                 options_ended = True
                 i += 1
@@ -787,7 +805,7 @@ def walk(
                         node,
                         f"unknown option: {spelling}",
                         style,
-                        token=spelling,
+                        token=token if style is UsageStyle.GIT else spelling,
                     )
                 i += 1
                 continue

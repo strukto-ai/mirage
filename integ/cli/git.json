@@ -599,7 +599,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "error: unknown switch `Z'\n"
+        "stderr": "error: unknown switch `Z'\nusage: git add [<options>] [--] <pathspec>...\n\n    -A, --all             Stage every change\n    -u, --update          Stage changes to tracked files only\n    -f, --force           Stage paths an ignore rule covers\n    -v, --verbose         Name each path as it is added or removed\n\n"
       }
     },
     {
@@ -1593,7 +1593,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "usage: git mv [-v] [-f] [-n] [-k] <source> <destination>\n   or: git mv [-v] [-f] [-n] [-k] <source>... <destination-directory>\n"
+        "stderr": "usage: git mv [<options>] <source>... <destination>\n\n    -f, --force           Force move/rename even if target exists\n    -k                    Skip move/rename errors\n    -n, --dry-run         Dry run\n    -v, --verbose         Be verbose\n\n"
       }
     },
     {
@@ -2153,7 +2153,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "usage: git tag [-a] [-f] [-m <msg>] <tagname> [<commit> | <object>]\n   or: git tag -d <tagname>...\n   or: git tag [-n[<num>]] -l [<pattern>...]\n"
+        "stderr": "usage: git tag [-a] [-f] [-m <msg>] <tagname> [<commit> | <object>]\n   or: git tag -d <tagname>...\n   or: git tag [-n[<num>]] -l [--contains <commit>] [--no-contains <commit>]\n                [--points-at <object>] [--sort=<key>] [--format=<format>]\n                [--merged <commit>] [--no-merged <commit>] [<pattern>...]\n\n    -l, --list            List tag names\n    -n[<n>]               Print <n> lines of each tag message\n    -d, --delete          Delete tags\n    -a, --annotate        Annotated tag, needs a message\n    -m, --message <message>\n                          Tag message (repeatable, one paragraph each)\n    -f, --force           Replace the tag if exists\n    --contains[=<commit>] List only refs that contain the commit (HEAD if omitted)\n    --no-contains[=<commit>]\n                          List only refs that don't contain the commit (HEAD if omitted)\n    --merged[=<commit>]   List only refs reachable from the commit (HEAD if omitted)\n    --no-merged[=<commit>]\n                          List only refs not reachable from the commit (HEAD if omitted)\n    --points-at <object>  List only refs that point at the object\n    --[no-]sort <key>     Sort on a field, - reversing it and version: comparing as versions\n    --format <format>     Format each ref: %(fieldname) placeholders, as git for-each-ref\n    --omit-empty          Print nothing, not even a newline, for an empty row\n    -i, --ignore-case     Sort and match patterns case-insensitively\n\n"
       }
     },
     {
@@ -2209,7 +2209,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "error: unknown switch `d'\n"
+        "stderr": "error: unknown switch `d'\nusage: git rm [-f | --force] [-r] [--cached] [--ignore-unmatch]\n              [--quiet] [--] [<pathspec>...]\n\n    -r                    Allow recursive removal\n    --cached              Only remove from the index, keeping the file\n    -f, --force           Override the up-to-date check\n    -q, --quiet           Do not list removed files\n    --ignore-unmatch      Exit with a zero status even if nothing matched\n\n"
       }
     },
     {
@@ -2853,7 +2853,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "error: unknown switch `x'\n"
+        "stderr": "error: unknown switch `x'\nusage: git mv [<options>] <source>... <destination>\n\n    -f, --force           Force move/rename even if target exists\n    -k                    Skip move/rename errors\n    -n, --dry-run         Dry run\n    -v, --verbose         Be verbose\n\n"
       }
     },
     {
@@ -2867,7 +2867,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "error: unknown switch `d'\n"
+        "stderr": "error: unknown switch `d'\nusage: git add [<options>] [--] <pathspec>...\n\n    -A, --all             Stage every change\n    -u, --update          Stage changes to tracked files only\n    -f, --force           Stage paths an ignore rule covers\n    -v, --verbose         Name each path as it is added or removed\n\n"
       }
     },
     {
@@ -2881,7 +2881,7 @@
       "expect": {
         "exit": 129,
         "stdout": "",
-        "stderr": "error: unknown switch `Z'\n"
+        "stderr": "error: unknown switch `Z'\nusage: git reset [-q] [<commit>]\n   or: git reset [-q] [<tree-ish>] [--] <pathspec>...\n\n    -q, --quiet           Only report errors\n\n"
       }
     },
     {
@@ -3818,7 +3818,7 @@
       "command": "git -C /repo branch --no-m 98b4ffe",
       "expect": {
         "exit": 129,
-        "stdout": "",
+        "stdout": "usage: git branch [<options>] [-r | -a] [--merged] [--no-merged]\n   or: git branch [<options>] <branch-name> [<start-point>]\n   or: git branch [<options>] [-l] [<pattern>...]\n   or: git branch [<options>] [-r] (-d | -D) <branch-name>...\n   or: git branch [<options>] [-r | -a] [--points-at]\n   or: git branch [<options>] [-r | -a] [--format]\n\n    --show-current        Show the current branch name\n    -q, --quiet           Suppress feedback messages\n    -v, --verbose         Show commit and upstream details\n    -a                    List local and remote-tracking branches\n    -r                    List remote-tracking branches\n    -d, --delete          Delete a fully merged branch\n    -D                    Delete a branch even if not merged\n    -l, --list            List branches matching the patterns\n    --contains[=<commit>] List only refs that contain the commit (HEAD if omitted)\n    --no-contains[=<commit>]\n                          List only refs that don't contain the commit (HEAD if omitted)\n    --merged[=<commit>]   List only refs reachable from the commit (HEAD if omitted)\n    --no-merged[=<commit>]\n                          List only refs not reachable from the commit (HEAD if omitted)\n    --points-at <object>  List only refs that point at the object\n    --[no-]sort <key>     Sort on a field, - reversing it and version: comparing as versions\n    --format <format>     Format each ref: %(fieldname) placeholders, as git for-each-ref\n    --omit-empty          Print nothing, not even a newline, for an empty row\n    -i, --ignore-case     Sort and match patterns case-insensitively\n\n",
         "stderr": "error: ambiguous option: no-m (could be --no-move or --no-merged)\n"
       }
     },

@@ -12,32 +12,121 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { USAGE_EXIT } from './constants.ts'
-import { CLAP_EXIT } from './constants.ts'
+import {
+  CLAP_EXIT,
+  GIT_LONG_OPTIONS,
+  GIT_SYNOPSES,
+  GIT_USAGE_GAP,
+  GIT_USAGE_WIDTH,
+  USAGE_EXIT,
+} from './constants.ts'
 import { operandSlot, optionMetavar } from '../spec/help.ts'
 import { type CommandSpec, UsageStyle } from '../spec/types.ts'
 import type { ParsedCommand } from '../../workspace/executor/command/types.ts'
 
 export const ARGPARSE_EXIT = 2
 const LONG_PREFIX = '--'
+const NEGATION = '--no-'
+export const HELP_SWITCH = '-h'
 
 const ENC = new TextEncoder()
 
 /**
- * git's refusal for an option it does not know.
+ * git's usage block for one verb, as parse-options prints it.
  *
- * Two nouns and no program name, pinned against git 2.50.1: a long option is an
- * "option" and a short one is a "switch", both named without their dashes and
- * quoted with a backquote-apostrophe pair. git follows this with the verb's
- * usage block, which is omitted the same way GNU's is elsewhere in the spec
- * machinery.
+ * The synopsis lines come first, the first after `usage: ` and each next one
+ * after `   or: `, then a blank line, one row per option and a closing blank
+ * line. The lines are git's own (`GIT_SYNOPSES`); the rows are the leaf's spec
+ * in git's layout, so the block lists exactly the options mirage takes: four
+ * spaces, the short and long spellings, `--[no-]` where the spec declares a
+ * long's negation beside it, the value's name, then the description from
+ * column 26, or under that column on a line of its own when the spellings run
+ * past it. Pinned against git 2.47.3.
  *
- * @param token the offending token ('--nosuch') or cluster character ('Z'), as
- *   the flat parser reports it
+ * @param path the verb's path under git ('branch', 'stash list')
+ * @param spec the leaf's grammar
  */
-export function gitUnknownOption(token: string): Uint8Array {
-  const noun = token.startsWith(LONG_PREFIX) ? 'option' : 'switch'
-  return ENC.encode(`error: unknown ${noun} \`${token.replace(/^-+/, '')}'\n`)
+export function gitUsage(path: string, spec: CommandSpec): string {
+  const [first, ...rest] = GIT_SYNOPSES.get(path) ?? [`git ${path}`]
+  let text = `usage: ${first ?? ''}\n` + rest.map((line) => `   or: ${line}\n`).join('')
+  const rows = gitRows(path, spec)
+  if (rows.length > 0) text += '\n' + rows.join('')
+  return text + '\n'
+}
+
+/**
+ * One usage row per option, a negation folded where git folds it.
+ *
+ * git spells a long `--[no-]name` where its own table does
+ * (`GIT_LONG_OPTIONS`), and the row then stands for the plain boolean
+ * `--no-name` mirage declares beside it too. A `--no-` option git lists apart
+ * (`--no-merges` filters rather than negates) keeps a row of its own.
+ *
+ * @param path the verb's path under git, for its table
+ * @param spec the leaf's grammar
+ */
+function gitRows(path: string, spec: CommandSpec): string[] {
+  const table = GIT_LONG_OPTIONS.get(path) ?? []
+  const negations = new Set(
+    spec.options
+      .filter(
+        (opt) =>
+          opt.long?.startsWith(NEGATION) === true &&
+          opt.short === null &&
+          opt.type === 'bool' &&
+          table.includes(`[no-]${opt.long.slice(NEGATION.length)}`),
+      )
+      .map((opt) => opt.long),
+  )
+  const rows: string[] = []
+  for (const opt of spec.options) {
+    let long = opt.long
+    if (long !== null && negations.has(long)) continue
+    if (long !== null && negations.has(`${NEGATION}${long.slice(2)}`)) {
+      long = `--[no-]${long.slice(2)}`
+    }
+    let spelled = [opt.short, long].filter((name) => name !== null).join(', ')
+    if (opt.type !== 'bool') {
+      const named = opt.long !== null ? opt.long.slice(2) : (opt.short ?? '-').slice(1)
+      const value = `<${opt.metavar ?? named}>`
+      if (!opt.valueOptional) spelled += ` ${value}`
+      else spelled += opt.long !== null ? `[=${value}]` : `[${value}]`
+    }
+    const left = `    ${spelled}`
+    const gap =
+      left.length <= GIT_USAGE_WIDTH + 1
+        ? ' '.repeat(GIT_USAGE_WIDTH + GIT_USAGE_GAP - left.length)
+        : '\n' + ' '.repeat(GIT_USAGE_WIDTH + GIT_USAGE_GAP)
+    rows.push(`${left}${gap}${opt.description ?? ''}\n`)
+  }
+  return rows
+}
+
+/**
+ * parse-options' answer to a word the verb does not take.
+ *
+ * `-h` asks for the usage block, which goes to stdout. A boolean long handed a
+ * value is refused on one line. Anything else is an option the verb does not
+ * have: a long one is an "option" and a short one a "switch", both named
+ * without their dashes and quoted with a backquote-apostrophe pair, and the
+ * usage block follows on stderr. Pinned against git 2.50.1.
+ *
+ * @param word the offending word with its dashes ('--nosuch', '-Z',
+ *   '--quiet=1')
+ * @param path the verb's path under git, for its synopsis
+ * @param spec the leaf's grammar, for its rows
+ * @returns the refusal's stdout and its stderr; it exits 129
+ */
+export function gitOptionRefusal(word: string, path: string, spec: CommandSpec): [string, string] {
+  const usage = gitUsage(path, spec)
+  if (word === HELP_SWITCH) return [usage, '']
+  const eq = word.indexOf('=')
+  const name = eq === -1 ? word : word.slice(0, eq)
+  if (eq !== -1 && spec.options.some((opt) => opt.long === name && opt.type === 'bool')) {
+    return ['', `error: option \`${name.slice(2)}' takes no value\n`]
+  }
+  const noun = word.startsWith(LONG_PREFIX) ? 'option' : 'switch'
+  return ['', `error: unknown ${noun} \`${word.replace(/^-+/, '')}'\n${usage}`]
 }
 
 /**
@@ -119,30 +208,52 @@ export function clapMissingOperands(
  * nor its own 128 for a fatal. clap exits 2, agreeing with argparse by
  * coincidence rather than by lineage.
  *
- * git words the first refusal on the line its own way: an unknown option as
- * `unknown option`, and an abbreviation that could be two options as parse-
- * options does, naming the two it found (pinned against git 2.50.1).
+ * git answers in parse-options' words, and some of them print the verb's
+ * usage block: after an unknown option on stderr, on stdout for `-h` and after
+ * an ambiguous abbreviation. A missing value is one line, a long named an
+ * "option" and a short one a "switch" (pinned against git 2.50.1).
  *
  * @param style the dialect the CLI's root declares
  * @param argparseMessage the message the spec machinery built, used as-is for
- *   argparse and for anything git words the same
+ *   argparse and for anything another style words the same
  * @param parsed the parse, read for the offending tokens when the style
  *   rewrites the message
+ * @param path the leaf's path under its head word, for git's synopsis
+ * @param spec the leaf's grammar, for git's option rows
+ * @returns the stderr, the exit code and the stdout, null when the refusal
+ *   writes nothing there
  */
 export function leafRefusal(
   style: UsageStyle,
   argparseMessage: Uint8Array,
-  parsed: Pick<ParsedCommand, 'invalidOptions' | 'ambiguousOptions' | 'optionErrorKinds'>,
-): [Uint8Array, number] {
-  if (style === UsageStyle.CLAP) return [argparseMessage, CLAP_EXIT]
-  if (style !== UsageStyle.GIT) return [argparseMessage, ARGPARSE_EXIT]
+  parsed: Pick<
+    ParsedCommand,
+    'invalidOptions' | 'ambiguousOptions' | 'optionErrorKinds' | 'needsValueOptions'
+  >,
+  path: string,
+  spec: CommandSpec,
+): [Uint8Array, number, Uint8Array | null] {
+  if (style === UsageStyle.CLAP) return [argparseMessage, CLAP_EXIT, null]
+  if (style !== UsageStyle.GIT) return [argparseMessage, ARGPARSE_EXIT, null]
+  const kind = parsed.optionErrorKinds[0]
   const ambiguous = parsed.ambiguousOptions[0]
-  if (parsed.optionErrorKinds[0] === 'ambiguous' && ambiguous !== undefined) {
+  if (kind === 'ambiguous' && ambiguous !== undefined) {
     const [token, [first = '', second = '']] = ambiguous
     const line = `error: ambiguous option: ${token.slice(2)} (could be ${first} or ${second})\n`
-    return [ENC.encode(line), USAGE_EXIT]
+    return [ENC.encode(line), USAGE_EXIT, ENC.encode(gitUsage(path, spec))]
   }
-  const first = parsed.invalidOptions[0]
-  if (first !== undefined) return [gitUnknownOption(first), USAGE_EXIT]
-  return [argparseMessage, USAGE_EXIT]
+  const needy = parsed.needsValueOptions[0]
+  if (kind === 'needs_value' && needy !== undefined) {
+    const named = needy.startsWith(LONG_PREFIX)
+      ? `option \`${needy.slice(2)}'`
+      : `switch \`${needy.replace(/^-+/, '')}'`
+    return [ENC.encode(`error: ${named} requires a value\n`), USAGE_EXIT, null]
+  }
+  const token = parsed.invalidOptions[0]
+  if ((kind === 'invalid' || kind === 'unexpected_value') && token !== undefined) {
+    const word = token.startsWith('-') ? token : `-${token}`
+    const [shown, refused] = gitOptionRefusal(word, path, spec)
+    return [ENC.encode(refused), USAGE_EXIT, shown !== '' ? ENC.encode(shown) : null]
+  }
+  return [argparseMessage, USAGE_EXIT, null]
 }

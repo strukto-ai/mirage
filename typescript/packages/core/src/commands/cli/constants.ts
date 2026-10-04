@@ -342,6 +342,7 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
       '[no-]ignore-other-worktrees',
     ],
   ],
+  ['symbolic-ref', ['[no-]quiet', '[no-]delete', '[no-]short', '[no-]recurse']],
   [
     'tag',
     [
@@ -375,3 +376,129 @@ export const GIT_LONG_OPTIONS: ReadonlyMap<string, readonly string[]> = new Map(
   ],
   ['version', ['[no-]build-options']],
 ])
+
+// The synopsis lines git's usage block opens with, keyed like
+// GIT_LONG_OPTIONS ('' is the bare `git`). git's own lines, pinned on git
+// 2.47.3, cut down to the forms mirage implements; the option rows under
+// them are rendered from each leaf's spec, so the block never lists what
+// mirage would refuse. A line holding a newline is one git wraps itself.
+export const GIT_SYNOPSES: ReadonlyMap<string, readonly string[]> = new Map([
+  [
+    '',
+    [
+      'git [-v | --version] [--help] [-C <path>] [--git-dir=<path>]\n' +
+        '           [--work-tree=<path>] <command> [<args>]',
+    ],
+  ],
+  ['add', ['git add [<options>] [--] <pathspec>...']],
+  [
+    'branch',
+    [
+      'git branch [<options>] [-r | -a] [--merged] [--no-merged]',
+      'git branch [<options>] <branch-name> [<start-point>]',
+      'git branch [<options>] [-l] [<pattern>...]',
+      'git branch [<options>] [-r] (-d | -D) <branch-name>...',
+      'git branch [<options>] [-r | -a] [--points-at]',
+      'git branch [<options>] [-r | -a] [--format]',
+    ],
+  ],
+  [
+    'checkout',
+    ['git checkout [<options>] <branch>', 'git checkout [<options>] [<branch>] -- <file>...'],
+  ],
+  ['clone', ['git clone [<options>] [--] <repo> [<dir>]']],
+  ['commit', ['git commit [-a] [-q] [-m <msg>] [--allow-empty] [--author=<author>]']],
+  [
+    'config',
+    [
+      'git config [--global] [--show-origin] (-l | --list)',
+      'git config [--global] [--show-origin] [--get] <name>',
+      'git config [--global] [--show-origin] --get-regexp <name-regex>',
+    ],
+  ],
+  [
+    'diff',
+    [
+      'git diff [<options>] [<commit>] [--] [<path>...]',
+      'git diff [<options>] --cached [<commit>] [--] [<path>...]',
+      'git diff [<options>] <commit> <commit> [--] [<path>...]',
+      'git diff [<options>] <commit>...<commit> [--] [<path>...]',
+    ],
+  ],
+  ['diff-tree', ['git diff-tree [<options>] <tree-ish> [<path>...]']],
+  ['fetch', ['git fetch [<options>] [<repository> [<refspec>...]]']],
+  [
+    'for-each-ref',
+    [
+      'git for-each-ref [<options>] [<pattern>]',
+      'git for-each-ref [--points-at <object>]',
+      'git for-each-ref [--merged [<commit>]] [--no-merged [<commit>]]',
+      'git for-each-ref [--contains [<commit>]] [--no-contains [<commit>]]',
+    ],
+  ],
+  ['fsck', ['git fsck [--full] [--no-dangling]']],
+  ['help', ['git help [<command>]']],
+  [
+    'init',
+    [
+      'git init [-q | --quiet] [--bare]\n' +
+        '                [-b <branch-name> | --initial-branch=<branch-name>]\n' +
+        '                [<directory>]',
+    ],
+  ],
+  [
+    'log',
+    ['git log [<options>] [<revision-range>] [[--] <path>...]', 'git show [<options>] <object>...'],
+  ],
+  ['ls-files', ['git ls-files [<options>] [<file>...]']],
+  ['mv', ['git mv [<options>] <source>... <destination>']],
+  ['reflog', ['git reflog [show] [<log-options>] [<ref>]']],
+  ['remote', ['git remote [-v | --verbose]']],
+  ['reset', ['git reset [-q] [<commit>]', 'git reset [-q] [<tree-ish>] [--] <pathspec>...']],
+  ['restore', ['git restore [<options>] [--source=<branch>] <file>...']],
+  ['rev-list', ['git rev-list [<options>] <commit>... [--] [<path>...]']],
+  ['rev-parse', ['git rev-parse [<options>] [<arg>...]']],
+  [
+    'rm',
+    [
+      'git rm [-f | --force] [-r] [--cached] [--ignore-unmatch]\n' +
+        '              [--quiet] [--] [<pathspec>...]',
+    ],
+  ],
+  ['shortlog', ['git shortlog [<options>] [<revision-range>] [[--] <path>...]']],
+  [
+    'show',
+    ['git log [<options>] [<revision-range>] [[--] <path>...]', 'git show [<options>] <object>...'],
+  ],
+  ['show-ref', ['git show-ref [--] [<pattern>...]']],
+  ['stash', ['git stash list', 'git stash show [<diff-options>] [<stash>]']],
+  ['stash list', ['git stash list']],
+  ['stash show', ['git stash show [<diff-options>] [<stash>]']],
+  ['status', ['git status [<options>]']],
+  ['switch', ['git switch [<options>] [<branch>]']],
+  [
+    'symbolic-ref',
+    [
+      'git symbolic-ref [-m <reason>] <name> <ref>',
+      'git symbolic-ref [-q] [--short] [--no-recurse] <name>',
+      'git symbolic-ref --delete [-q] <name>',
+    ],
+  ],
+  [
+    'tag',
+    [
+      'git tag [-a] [-f] [-m <msg>] <tagname> [<commit> | <object>]',
+      'git tag -d <tagname>...',
+      'git tag [-n[<num>]] -l [--contains <commit>] [--no-contains <commit>]\n' +
+        '                [--points-at <object>] [--sort=<key>] [--format=<format>]\n' +
+        '                [--merged <commit>] [--no-merged <commit>] [<pattern>...]',
+    ],
+  ],
+  ['version', ['git version']],
+])
+
+// parse-options' layout for an option row: the description starts at
+// column 26, two past the 24 its spellings may fill; spellings reaching
+// column 26 or further put the description on a line of its own.
+export const GIT_USAGE_WIDTH = 24
+export const GIT_USAGE_GAP = 2

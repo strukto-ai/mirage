@@ -29,7 +29,6 @@ from mirage.commands.cli.builtin.git.errors import (
     NoRestorePathsError,
     NoWorkspaceError,
     UnknownPathspecError,
-    UnknownSwitchError,
     UnmergedPathError,
     UnreadableTreeError,
     UnresolvableSourceError,
@@ -67,13 +66,11 @@ from mirage.commands.cli.builtin.git.tree import (
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
     links_of,
     mounts_of,
     start_point,
-    switches,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -201,9 +198,7 @@ async def restore(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         if not texts:
             raise NoRestorePathsError()
         flags = parse_flags(fl)

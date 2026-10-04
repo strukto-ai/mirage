@@ -21,21 +21,6 @@ FATAL_EXIT = 128
 # for a fatal. Both appear below, which is git's own split rather than
 # ours: `git log --zzz` is 128 and `git diff --zzz` is 129.
 OPTION_EXIT = 129
-# symbolic-ref's usage and option table, every option of which this build
-# has.
-SYMBOLIC_REF_USAGE = (
-    "usage: git symbolic-ref [-m <reason>] <name> <ref>\n"
-    "   or: git symbolic-ref [-q] [--short] [--no-recurse] <name>\n"
-    "   or: git symbolic-ref --delete [-q] <name>\n"
-    "\n"
-    "    -q, --[no-]quiet      suppress error message for "
-    "non-symbolic (detached) refs\n"
-    "    -d, --[no-]delete     delete symbolic ref\n"
-    "    --[no-]short          shorten ref output\n"
-    "    --[no-]recurse        recursively dereference (default)\n"
-    "    -m <reason>           reason of the update\n"
-)
-
 # git closes each of these with a line naming the config knob that
 # turns it off. Kept verbatim so the advice reads the same whether an
 # agent hit real git or this one.
@@ -799,59 +784,77 @@ class UnmergedPathError(GitError):
         )
 
 
-class UnknownSwitchError(GitError):
-    """The wording of git's own option parser, used by most verbs.
+class UsageError(GitError):
+    """A refusal parse-options words in full, exit 129.
 
-    Three verbs word this three ways and git means all of them: ``log``
-    and ``show`` say "unrecognized argument" and exit 128, ``diff`` says
-    "invalid option" and exits 129, and everything built on
-    parse-options (``status``, ``add``, ``branch``, ``reset``,
-    ``checkout``, ``commit``) says this and exits 129. Measured on git
-    2.47, one verb at a time.
+    Already worded, the verb's usage block included where git prints
+    one: after an unknown option on stderr, or alone, on stdout when
+    ``-h`` asked for it and on stderr where it stands for the refusal
+    itself (``rev-list --nosuch``, ``symbolic-ref`` with no operand).
 
     Args:
-        argument (str): the option as the user spelled it.
+        shown (str): what goes to stdout, empty unless ``-h`` asked.
+        refused (str): what goes to stderr.
     """
 
-    prefix = "error"
+    prefix = None
     code = OPTION_EXIT
 
-    def __init__(self, argument: str) -> None:
-        noun = "option" if argument.startswith("--") else "switch"
-        super().__init__(f"unknown {noun} `{argument.lstrip('-')}'")
+    def __init__(self, shown: str, refused: str) -> None:
+        super().__init__((refused or shown).removesuffix("\n"))
+        self.stream = "stderr" if refused else "stdout"
 
 
-class SymbolicRefSwitchError(UnknownSwitchError):
-    """``symbolic-ref`` given an option it does not know.
+class UnknownSubcommandError(UsageError):
+    """``remote`` given a word where its subcommand would go.
 
-    parse-options' refusal, then the verb's usage and option table, as
-    git prints them (pinned against git 2.47.3).
+    This build lists remotes and has none of git's ``remote``
+    subcommands, so whatever the word is, it is refused the way git
+    refuses one it does not know, with the usage block after it.
+    Pinned against git 2.50.1.
 
     Args:
-        argument (str): the option as the user spelled it.
+        word (str): the word as the user spelled it.
+        usage (str): the verb's usage block.
     """
 
-    def __init__(self, argument: str) -> None:
-        super().__init__(argument)
-        self.args = (f"{self.args[0]}\n{SYMBOLIC_REF_USAGE}",)
+    def __init__(self, word: str, usage: str) -> None:
+        super().__init__("", f"error: unknown subcommand: `{word}'\n{usage}")
 
 
-class InvalidOptionError(GitError):
-    """``diff``'s wording for an option it does not know.
+class InvalidOptionError(UsageError):
+    """``diff``'s wording for an option it does not know, on a line
+    naming neither a revision nor ``--cached``.
 
     Same mistake as UnrecognizedArgumentError and a different sentence,
-    because git itself words it differently here and exits 129 rather
-    than 128. Pinned against git 2.50.1.
+    because git itself words it differently here, follows it with the
+    usage block and exits 129 rather than 128. A line that names one
+    gets the usage block alone. Pinned against git 2.50.1.
 
     Args:
         argument (str): the operand as the user spelled it.
+        usage (str): the verb's usage block.
     """
 
-    prefix = "error"
-    code = OPTION_EXIT
+    def __init__(self, argument: str, usage: str) -> None:
+        super().__init__("", f"error: invalid option: {argument}\n{usage}")
 
-    def __init__(self, argument: str) -> None:
-        super().__init__(f"invalid option: {argument}")
+
+class ShortlogOptionError(UsageError):
+    """``shortlog``'s wording for an option it does not know.
+
+    parse-options' sentence with the word quoted whole, dashes and all,
+    because shortlog hands what it does not know to the revision parser
+    and words what that parser leaves; the usage block follows. Pinned
+    against git 2.50.1.
+
+    Args:
+        argument (str): the operand as the user spelled it.
+        usage (str): the verb's usage block.
+    """
+
+    def __init__(self, argument: str, usage: str) -> None:
+        super().__init__("", f"error: unknown option `{argument}'\n{usage}")
 
 
 class NoPathspecRemoveError(GitError):
@@ -1001,28 +1004,6 @@ class MountInWayError(GitError):
         else:
             held = f"'{mount}' is a mount root"
         super().__init__(f"cannot remove '{path}': {held}")
-
-
-class MoveUsageError(GitError):
-    """``mv`` with fewer than two operands.
-
-    git prints its usage and exits 129. Only the two synopsis lines are
-    kept: the option list below them describes flags this build does
-    not all have.
-
-    Args:
-        None.
-    """
-
-    prefix = None
-    code = OPTION_EXIT
-
-    def __init__(self) -> None:
-        super().__init__(
-            "usage: git mv [-v] [-f] [-n] [-k] <source> "
-            "<destination>\n   or: git mv [-v] [-f] [-n] [-k] "
-            "<source>... <destination-directory>"
-        )
 
 
 class MoveRefusedError(GitError):
@@ -1307,23 +1288,6 @@ class SymbolicRefLockError(RefLockError):
     code = 1
 
 
-class SymbolicRefUsageError(GitError):
-    """``symbolic-ref`` with the wrong number of operands for its mode.
-
-    git's usage and its option table, exit 129. Every option the table
-    lists is one this build has. Pinned against git 2.47.3.
-
-    Args:
-        None.
-    """
-
-    prefix = None
-    code = OPTION_EXIT
-
-    def __init__(self) -> None:
-        super().__init__(SYMBOLIC_REF_USAGE)
-
-
 class NotASymbolicRefError(GitError):
     """``symbolic-ref`` naming a ref that holds an object id, or nothing.
 
@@ -1430,34 +1394,6 @@ class UnresolvedRefError(GitError):
 
     def __init__(self, revision: str) -> None:
         super().__init__(f"Failed to resolve '{revision}' as a valid ref.")
-
-
-class TagUsageError(GitError):
-    """``tag`` given a creation option with no tag name to create.
-
-    ``-a``, ``-m`` and ``-f`` are creation options, so git refuses them
-    on a line that lists or deletes instead: no operand at all lists,
-    and ``-l`` or ``-d`` says so outright. It prints its usage and
-    exits 129, where an operand-free ``git tag`` or ``git tag -d``
-    lists and exits 0. The synopsis is trimmed to the options this
-    build has, the way ``mv``'s is: git's own lines advertise ``-s``,
-    ``-u``, ``-F``, ``-e`` and ``-v``, which would be a promise
-    nothing here keeps. Pinned against git 2.50.1.
-
-    Args:
-        None.
-    """
-
-    prefix = None
-    code = OPTION_EXIT
-
-    def __init__(self) -> None:
-        super().__init__(
-            "usage: git tag [-a] [-f] [-m <msg>] <tagname> "
-            "[<commit> | <object>]\n"
-            "   or: git tag -d <tagname>...\n"
-            "   or: git tag [-n[<num>]] -l [<pattern>...]"
-        )
 
 
 class TooManyArgumentsError(GitError):
@@ -1791,18 +1727,70 @@ class FetchHeadReadOnlyError(GitError):
 
 
 class InitReadOnlyError(GitError):
-    """``init`` refused by a read-only mount, at the first directory it
-    makes.
+    """``init`` refused a directory it makes by a read-only mount.
+
+    git's ``perror`` of the directory and exit 1, with no prefix.
 
     Args:
-        gitdir (str): the git directory.
+        path (str): the directory it could not make.
     """
 
     prefix = None
     code = 1
 
-    def __init__(self, gitdir: str) -> None:
-        super().__init__(f"{gitdir}/branches/: Read-only file system")
+    def __init__(self, path: str) -> None:
+        super().__init__(f"{path}: Read-only file system")
+
+
+class CannotMkdirError(GitError):
+    """``init`` refused the directory its operand names by a read-only
+    mount.
+
+    Args:
+        path (str): the directory as typed.
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"cannot mkdir {path}: Read-only file system")
+
+
+class ConfigLockError(GitError):
+    """A re-``init`` that cannot take the config's lock: a read-only
+    mount, or a lock another writer holds.
+
+    git's lock error, then the setting it could not make (pinned against
+    git 2.47.3).
+
+    Args:
+        path (str): the config file.
+        reason (str): why the lock could not be made.
+    """
+
+    prefix = None
+
+    def __init__(self, path: str, reason: str) -> None:
+        super().__init__(
+            f"error: could not lock config file {path}: {reason}\n"
+            "fatal: could not set 'core.repositoryformatversion' to '0'"
+        )
+
+
+class LockExistsError(GitError):
+    """A lock another writer holds, in git's words for every lock file.
+
+    Args:
+        lock (str): the lock file.
+    """
+
+    def __init__(self, lock: str) -> None:
+        super().__init__(
+            f"Unable to create '{lock}': File exists.\n\n"
+            "Another git process seems to be running in this repository, "
+            "e.g.\nan editor opened by 'git commit'. Please make sure all "
+            "processes\nare terminated then try again. If it still fails, "
+            "a git process\nmay have crashed in this repository earlier:\n"
+            "remove the file manually to continue."
+        )
 
 
 class InvalidDecorateError(GitError):
@@ -1874,32 +1862,6 @@ class NotACommitError(GitError):
     def __init__(self, sha: str, kind: str, reason: str) -> None:
         super().__init__(
             f"object {sha} is a {kind}, not a commit\nerror: {reason}"
-        )
-
-
-class BranchUsageError(GitError):
-    """``branch`` asked to list and to delete on one line.
-
-    ``--contains`` and its kin imply a listing, and a listing is one
-    mode among the others, so a line that also deletes names two: git
-    prints its usage and exits 129 (pinned against git 2.50.1). The
-    lines are git's own, less the forms this build does not implement.
-
-    Args:
-        None.
-    """
-
-    prefix = None
-    code = OPTION_EXIT
-
-    def __init__(self) -> None:
-        super().__init__(
-            "usage: git branch [<options>] [-r | -a] [--merged] "
-            "[--no-merged]\n"
-            "   or: git branch [<options>] <branch-name> [<start-point>]\n"
-            "   or: git branch [<options>] [-l] [<pattern>...]\n"
-            "   or: git branch [<options>] [-r] (-d | -D) <branch-name>...\n"
-            "   or: git branch [<options>] [-r | -a] [--points-at]"
         )
 
 

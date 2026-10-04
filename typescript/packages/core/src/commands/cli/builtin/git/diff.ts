@@ -23,13 +23,19 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { GitError, InvalidOptionError, NoMergeBaseError, NoWorkspaceError } from './errors.ts'
+import {
+  GitError,
+  InvalidOptionError,
+  NoMergeBaseError,
+  NoWorkspaceError,
+  UsageError,
+} from './errors.ts'
 import { parseDiffFlags, renamesEnabled } from './diff_output.ts'
 import { pathspecPatterns } from './pathspec.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { mergeBases, rangeCommits, resolveCommit } from './revparse.ts'
-import { checkOperands, escaped, fatal, splitMarked, startPoint } from './util.ts'
+import { fatal, optionOperand, splitMarked, startPoint, STDERR, verbUsage } from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 const ENC = new TextEncoder()
@@ -93,7 +99,11 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const statPath = doors.statPath
     if (statPath === undefined || doors.dispatch === undefined) throw new NoWorkspaceError()
-    checkOperands(texts, InvalidOptionError, escaped(inv.argv))
+    const word = optionOperand(inv, texts, STDERR)
+    if (word !== null && (cached || revisions.some((text) => !text.startsWith('-')))) {
+      throw new UsageError('', verbUsage(inv))
+    }
+    if (word !== null) throw new InvalidOptionError(word, verbUsage(inv))
     const repo = await opened(fl, doors)
     const parsed = parseDiffFlags(
       fl,
