@@ -319,18 +319,19 @@ function validateTypedBlock(
   rejectUnknownKeys(value, table[type] ?? [], `${what} (${type})`)
 }
 
-// Key names alone are not enough for an index block either: Python's
-// model refuses a non-string url or key_prefix and a ttl that is not a
-// number (StrictFloat, so a quoted or boolean ttl too) at load.
+// Python's index block models refuse a ttl that is not a number
+// (StrictFloat) and a non-string url or key_prefix at load; checked here
+// in the models' field order, since this stops at the first.
 function validateIndexValues(value: unknown, what: string): void {
   if (!isPlainObject(value)) return
-  for (const key of ['url', 'key_prefix']) {
-    if (value[key] !== undefined && typeof value[key] !== 'string') {
-      throw new Error(`config \`${what}.${key}\` must be a string`)
-    }
-  }
   if (value.ttl !== undefined && typeof value.ttl !== 'number') {
     throw new Error(`config \`${what}.ttl\` must be a number`)
+  }
+  if (value.url !== undefined && typeof value.url !== 'string') {
+    throw new Error(`config \`${what}.url\` must be a string`)
+  }
+  if (value.key_prefix !== undefined && typeof value.key_prefix !== 'string') {
+    throw new Error(`config \`${what}.key_prefix\` must be a string`)
   }
 }
 

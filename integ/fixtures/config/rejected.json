@@ -394,6 +394,20 @@
       }
     },
     {
+      "name": "index block: a null ttl",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "index": {
+          "type": "ram",
+          "ttl": null
+        }
+      }
+    },
+    {
       "name": "cache block: no such backend",
       "config": {
         "mounts": {

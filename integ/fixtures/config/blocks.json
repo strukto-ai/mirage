@@ -214,6 +214,24 @@
       }
     },
     {
+      "name": "index block: a fractional redis ttl",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "index": {
+              "type": "redis",
+              "ttl": 0.5
+            }
+          }
+        },
+        "index": {
+          "type": "redis",
+          "ttl": 0.5
+        }
+      }
+    },
+    {
       "name": "mount block: an integral float bound",
       "config": {
         "mounts": {

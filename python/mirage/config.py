@@ -167,7 +167,6 @@ class RamIndexBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["ram"] = "ram"
-    # Strict: a quoted or boolean ttl is refused, as TypeScript refuses it.
     ttl: StrictFloat = 600
 
 

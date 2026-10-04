@@ -75,7 +75,7 @@ const ws = new Workspace(
 
 Both configs refuse a field they do not take, in code as in YAML: `CacheConfig(limti="1MB")` raises rather than building the defaults, and so does a Redis-only field (`url`, `key_prefix` / `keyPrefix`) on a RAM config. Python refuses when the config is built; TypeScript, whose options are plain objects, refuses when the `Workspace` is built, and at runtime takes a field under either spelling (`keyPrefix` or `key_prefix`), as its VFS configs do, but refuses a field given in both; the TypeScript interfaces declare the camelCase one.
 
-In YAML, an `index:` block's values are checked too, at the workspace level and in a mount block alike, the same on both hosts: `url` and `key_prefix` are strings, and `ttl` is a number of seconds. A quoted `ttl`, including one filled in from `${VAR}`, and a boolean are refused, as a mount's `ttl:` is.
+In YAML, an `index:` block's values are checked too, at the workspace level and in a mount block alike, the same on both hosts: `url` and `key_prefix` are strings, and `ttl` is a number of seconds, fractions included. A quoted `ttl`, including one filled in from `${VAR}`, and a boolean are refused. A config built in code (`IndexConfig`) does not check its values.
 
 ### Index TTL
 

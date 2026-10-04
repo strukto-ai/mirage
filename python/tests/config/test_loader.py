@@ -1552,14 +1552,11 @@ async def test_a_zero_mount_index_lists_an_outside_delete(tmp_path):
         await ws.close()
 
 
-# An index block's values are judged the same on both hosts: `url` and
-# `key_prefix` are strings, `ttl` a number -- a quoted or boolean ttl
-# (which pydantic's lax float turned into 30 and 1) is refused, as a
-# mount's read bound already is.
 INDEX_VALUE_REFUSALS = {
     "index block: url is a string": r"index\.redis\.url\n.*valid string",
     "index block: a quoted ttl": r"index\.ram\.ttl\n.*valid number",
     "index block: a boolean ttl": r"index\.ram\.ttl\n.*valid number",
+    "index block: a null ttl": r"index\.ram\.ttl\n.*valid number",
     "mount index: key_prefix is a string": (
         r"mounts\./d\.index\.redis\.key_prefix\n.*valid string"
     ),
@@ -1576,3 +1573,46 @@ def test_an_index_block_value_of_the_wrong_type_is_refused(name: str):
     )
     with pytest.raises(ValueError, match=INDEX_VALUE_REFUSALS[name]):
         load_config(case["config"])
+
+
+def test_a_bad_index_value_is_named_before_the_read_bound():
+    with pytest.raises(ValueError) as caught:
+        load_config(
+            {
+                "mounts": {
+                    "/d": {
+                        "vfs": "ram",
+                        "ttl": 30,
+                        "index": {"type": "ram", "ttl": "5"},
+                    }
+                }
+            }
+        )
+    assert "mounts./d.index.ram.ttl" in str(caught.value)
+    assert "ttl pins the read bound" not in str(caught.value)
+
+
+def test_a_bad_index_ttl_is_named_before_its_url():
+    """pydantic reports fields in model order; TypeScript stops at its
+    first bad value, so it checks them in the same order."""
+    with pytest.raises(ValueError) as caught:
+        load_config(
+            {
+                "mounts": {"/d": {"vfs": "ram"}},
+                "index": {"type": "redis", "url": 1, "ttl": "x"},
+            }
+        )
+    message = str(caught.value)
+    assert message.index("index.redis.ttl") < message.index("index.redis.url")
+
+
+def test_an_index_ttl_filled_in_from_the_environment_is_refused():
+    """Interpolation always yields a string, and a string is not a ttl."""
+    with pytest.raises(ValueError, match=r"index\.ram\.ttl\n.*valid number"):
+        load_config(
+            {
+                "mounts": {"/d": {"vfs": "ram"}},
+                "index": {"type": "ram", "ttl": "${INDEX_TTL}"},
+            },
+            env={"INDEX_TTL": "30"},
+        )

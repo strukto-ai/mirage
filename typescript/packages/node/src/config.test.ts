@@ -1937,13 +1937,11 @@ describe('mount index block', () => {
 })
 
 describe('index block values', () => {
-  // Judged the same on both hosts: `url` and `key_prefix` are strings,
-  // `ttl` a number -- a quoted or boolean ttl is refused, as a mount's
-  // read bound already is.
   it.each([
     ['index block: url is a string', /config `index\.url` must be a string/],
     ['index block: a quoted ttl', /config `index\.ttl` must be a number/],
     ['index block: a boolean ttl', /config `index\.ttl` must be a number/],
+    ['index block: a null ttl', /config `index\.ttl` must be a number/],
     [
       'mount index: key_prefix is a string',
       /config `mounts\.\/d\.index\.key_prefix` must be a string/,
@@ -1953,5 +1951,32 @@ describe('index block values', () => {
     const [fixture] = fixtureCases('rejected').filter((c) => c.name === name)
     expect(fixture).toBeDefined()
     expect(() => loadWorkspaceConfig(fixture?.config ?? {})).toThrow(pattern)
+  })
+
+  it('names a bad index value before the read bound, as pydantic does', () => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/d': { vfs: 'ram', ttl: 30, index: { type: 'ram', ttl: '5' } } },
+      }),
+    ).toThrow(/config `mounts\.\/d\.index\.ttl` must be a number/)
+  })
+
+  it('names a bad ttl before a bad url, in the Python model field order', () => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/d': { vfs: 'ram' } },
+        index: { type: 'redis', url: 1, ttl: 'x' },
+      }),
+    ).toThrow(/config `index\.ttl` must be a number/)
+  })
+
+  it('refuses an index ttl filled in from the environment', () => {
+    // Interpolation always yields a string, and a string is not a ttl.
+    expect(() =>
+      loadWorkspaceConfig(
+        { mounts: { '/d': { vfs: 'ram' } }, index: { type: 'ram', ttl: '${INDEX_TTL}' } },
+        { INDEX_TTL: '30' },
+      ),
+    ).toThrow(/config `index\.ttl` must be a number/)
   })
 })
