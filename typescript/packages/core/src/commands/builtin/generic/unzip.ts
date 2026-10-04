@@ -703,6 +703,7 @@ export async function unzipGeneric(
             blocker = await fileInChain(stat, base, chain)
           } catch (probe) {
             if (!isFsError(probe)) throw probe
+            console.warn(`unzip: probing ${chain} failed: ${String(probe)}`)
           }
         }
         errors.push(

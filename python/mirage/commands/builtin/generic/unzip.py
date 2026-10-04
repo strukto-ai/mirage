@@ -733,7 +733,7 @@ async def _run(
                 try:
                     blocker = await _file_in_chain(stat, base, chain)
                 except FS_ERRORS as probe:
-                    logger.debug("unzip: probing %s: %r", chain, probe)
+                    logger.debug("unzip: probing %s failed: %s", chain, probe)
             errors.append(
                 CHECKDIR_FILE.format(shown(blocker), info.filename)
                 if blocker is not None
