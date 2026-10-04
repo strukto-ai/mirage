@@ -18,6 +18,7 @@ import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
+from mirage.types import JsonValue
 from mirage.vfs.dropbox.config import DropboxConfig
 
 
@@ -42,6 +43,10 @@ class FakeDropboxRpc:
         metadata (dict | None): what ``/files/get_metadata`` answers.
         move_errors (list[DropboxApiError | None] | None): one entry per
             ``/files/move_v2`` call; a ``DropboxApiError`` is raised.
+        moved (JsonValue): the ``metadata`` a successful
+            ``/files/move_v2`` answers with, sent as given so a test can
+            fake one that is not an object; None answers an empty body,
+            which the transport reads as None.
     """
 
     def __init__(
@@ -49,10 +54,12 @@ class FakeDropboxRpc:
         entries: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
         move_errors: list[DropboxApiError | None] | None = None,
+        moved: JsonValue = None,
     ) -> None:
         self.entries = list(entries or [])
         self.metadata = metadata
         self.move_errors = list(move_errors or [])
+        self.moved = moved
         # Every `limit` a caller asked for, so a test can pin that an
         # emptiness probe is bounded, and the request count, which is the
         # half an unbounded walk gets wrong.
@@ -73,7 +80,7 @@ class FakeDropboxRpc:
 
     async def __call__(
         self, tm: DropboxTokenManager, endpoint: str, body: dict[str, Any]
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         if endpoint == "/files/list_folder":
             limit = int(body.get("limit") or 2000)
             self.list_limits.append(limit)
@@ -95,7 +102,7 @@ class FakeDropboxRpc:
             error = self.move_errors.pop(0) if self.move_errors else None
             if error is not None:
                 raise error
-            return {}
+            return None if self.moved is None else {"metadata": self.moved}
         raise AssertionError(f"unexpected endpoint {endpoint}")
 
 

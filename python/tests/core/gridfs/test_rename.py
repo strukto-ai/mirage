@@ -35,6 +35,14 @@ class _FakeManager:
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         return None
 
+    async def invalidate_after_move(
+        self, path: PathSpec, folder: bool
+    ) -> None:
+        if folder:
+            await self.invalidate_subtree(path)
+        else:
+            await self.invalidate_after_unlink(path)
+
     async def invalidate_subtree(self, path: PathSpec) -> None:
         return None
 

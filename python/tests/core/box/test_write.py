@@ -281,13 +281,80 @@ async def test_rename_moves_file(root_accessor):
             "mirage.core.box.rename.update_file", new_callable=AsyncMock
         ) as uf,
         patch(
-            "mirage.core.box.rename.invalidate_subtree", new_callable=AsyncMock
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
         ),
     ):
         await rename(root_accessor, _spec("/data/a.txt"), _spec("/data/b.txt"))
     uf.assert_awaited_once_with(
         root_accessor.token_manager, "200", name="b.txt", parent_id="100"
     )
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_file_drops_no_subtree(root_accessor):
+    src, dst = _spec("/data/a.txt"), _spec("/data/b.txt")
+    with (
+        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.rename.update_file", new_callable=AsyncMock),
+        patch(
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
+        ) as moved,
+    ):
+        await rename(root_accessor, src, dst)
+    assert [c.args for c in moved.await_args_list] == [
+        (dst, False),
+        (src, False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_folder_drops_both_subtrees(root_accessor):
+    src, dst = _spec("/data/sub"), _spec("/data/moved")
+    with (
+        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.rename.update_folder", new_callable=AsyncMock),
+        patch(
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
+        ) as moved,
+    ):
+        await rename(root_accessor, src, dst)
+    assert [c.args for c in moved.await_args_list] == [
+        (dst, True),
+        (src, True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_renaming_an_item_of_unknown_type_drops_both_subtrees(
+    root_accessor,
+):
+    # Only a positive "file" narrows: a web_link, or an item whose type
+    # Box left out, keeps the subtree drop.
+    tree = {
+        **_TREE,
+        "100": [{"id": "500", "name": "link", "type": "web_link"}],
+    }
+
+    async def listing(_tm, folder_id, limit=1000):
+        return tree.get(folder_id, [])
+
+    src, dst = _spec("/data/link"), _spec("/data/moved")
+    with (
+        patch("mirage.core.box.resolve.list_folder_items", new=listing),
+        patch("mirage.core.box.rename.update_file", new_callable=AsyncMock),
+        patch(
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
+        ) as moved,
+    ):
+        await rename(root_accessor, src, dst)
+    assert [c.args for c in moved.await_args_list] == [
+        (dst, True),
+        (src, True),
+    ]
 
 
 @pytest.mark.asyncio
@@ -301,7 +368,8 @@ async def test_rename_replaces_empty_folder_destination(root_accessor):
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
         ) as uo,
         patch(
-            "mirage.core.box.rename.invalidate_subtree", new_callable=AsyncMock
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
         ),
     ):
         await rename(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
@@ -328,7 +396,8 @@ async def test_rename_refuses_nonempty_folder_destination(root_accessor):
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
         ) as uo,
         patch(
-            "mirage.core.box.rename.invalidate_subtree", new_callable=AsyncMock
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
         ),
     ):
         with pytest.raises(OSError) as caught:
@@ -348,7 +417,8 @@ async def test_rename_unmapped_folder_error_propagates(root_accessor):
         ),
         patch("mirage.core.box.rename.update_folder", new_callable=AsyncMock),
         patch(
-            "mirage.core.box.rename.invalidate_subtree", new_callable=AsyncMock
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
         ),
     ):
         with pytest.raises(BoxApiError):
@@ -369,7 +439,8 @@ async def test_rename_file_onto_folder_raises_isdir(root_accessor):
             "mirage.core.box.rename.update_file", new_callable=AsyncMock
         ) as uf,
         patch(
-            "mirage.core.box.rename.invalidate_subtree", new_callable=AsyncMock
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
         ),
     ):
         with pytest.raises(IsADirectoryError):
@@ -391,7 +462,8 @@ async def test_rename_folder_onto_file_raises_notdir(root_accessor):
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
         ) as uo,
         patch(
-            "mirage.core.box.rename.invalidate_subtree", new_callable=AsyncMock
+            "mirage.core.box.rename.invalidate_after_move",
+            new_callable=AsyncMock,
         ),
     ):
         with pytest.raises(NotADirectoryError):

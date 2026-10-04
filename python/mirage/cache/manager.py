@@ -645,6 +645,28 @@ class CacheManager:
         await self._evict_dir(key)
         await self._invalidate_parent(key)
 
+    async def invalidate_after_move(
+        self, path: PathSpec, folder: bool
+    ) -> None:
+        """Invalidate one end of a rename.
+
+        A folder relocates everything cached under it, so it takes the
+        subtree, and so does a name where the move replaced anything but a
+        file. A file has nothing beneath it, so it takes the unlink
+        flavor: its body, its own listing and its parent's. That spares
+        every file rename a walk of both stores.
+
+        Args:
+            path (PathSpec): one end of the rename; only ``virtual`` is
+                read.
+            folder (bool): whether that end may hold a subtree; a caller
+                that cannot tell passes True.
+        """
+        if folder:
+            await self.invalidate_subtree(path)
+        else:
+            await self.invalidate_after_unlink(path)
+
     async def invalidate_ancestors(self, path: PathSpec) -> None:
         """Evict the listing of every directory above ``path``'s parent.
 

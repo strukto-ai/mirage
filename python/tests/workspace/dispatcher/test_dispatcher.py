@@ -1400,3 +1400,49 @@ async def test_offset_writes_through_two_mounts_of_one_store_all_land():
         )
         got, _ = await ws.dispatch("read", PathSpec.from_str_path("/b/f"))
         assert bytes(got) == b"A12B45C78D"
+
+
+def _caching_ram() -> RAMVFS:
+    # RAM serves reads itself and keeps no file cache by default, which
+    # would make every body assertion below hold vacuously. Its listings
+    # also expire at once; kept live, `ls` leaves a file row that a door
+    # trusting the index would read as "nothing beneath it".
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ram.index_ttl = 600
+    return ram
+
+
+@pytest.mark.asyncio
+async def test_a_rename_by_op_drops_the_subtree_of_a_name_the_index_calls_a_file():
+    # The index can say file for a name that has since become a folder
+    # outside mirage, with its parent's listing still live; a body cached
+    # under it must still go with an op-level rename, so this door never
+    # trusts the index to skip the subtree.
+    with Workspace({"/ram/": _caching_ram()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /ram/a")
+        await ws.shell("ls /ram")
+        await ws._cache.set("/ram/a/x", b"inner")
+        await ws.dispatch(
+            "rename",
+            PathSpec.from_str_path("/ram/a"),
+            dst=PathSpec.from_str_path("/ram/c"),
+        )
+        assert not await ws._cache.exists("/ram/a/x")
+
+
+@pytest.mark.asyncio
+async def test_a_rename_by_op_drops_the_subtree_at_its_destination():
+    # This door drops the subtree at both ends of every rename. At the
+    # destination that also covers a folder the backend replaced there
+    # (WebDAV MOVE does), even when a file moved onto it.
+    with Workspace({"/ram/": _caching_ram()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /ram/f")
+        await ws.shell("ls /ram")
+        await ws._cache.set("/ram/g/under", b"stale")
+        await ws.dispatch(
+            "rename",
+            PathSpec.from_str_path("/ram/f"),
+            dst=PathSpec.from_str_path("/ram/g"),
+        )
+        assert not await ws._cache.exists("/ram/g/under")

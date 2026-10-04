@@ -36,12 +36,13 @@ vi.mock('../../cache/context.ts', () => {
     invalidateAfterWrite: vi.fn(),
     invalidateAfterUnlink: vi.fn(),
     invalidateSubtree: vi.fn(),
+    invalidateAfterMove: vi.fn(),
   }
 })
 
 import { BoxAccessor } from '../../accessor/box.ts'
 import {
-  invalidateAfterUnlink,
+  invalidateAfterMove,
   invalidateAfterWrite,
   invalidateSubtree,
 } from '../../cache/context.ts'
@@ -169,19 +170,50 @@ describe('box write ops', () => {
     })
   })
 
-  it('rename evicts both identities as subtrees, so a replaced dir loses its listing', async () => {
+  function moves(): [string, boolean][] {
+    return vi
+      .mocked(invalidateAfterMove)
+      .mock.calls.map(([path, folder]) => [typeof path === 'string' ? path : path.virtual, folder])
+  }
+
+  it('renaming a file drops no subtree', async () => {
+    vi.mocked(invalidateAfterMove).mockClear()
     vi.mocked(invalidateAfterWrite).mockClear()
-    vi.mocked(invalidateAfterUnlink).mockClear()
     vi.mocked(invalidateSubtree).mockClear()
     await rename(makeAccessor(), spec('/data/a.txt'), spec('/data/b.txt'))
-    // Subtrees rather than unlinks: renaming a directory strands every
-    // listing and body cached below the old name, and below the new one.
-    const evicted = vi
-      .mocked(invalidateSubtree)
-      .mock.calls.map(([path]) => (typeof path === 'string' ? path : path.virtual))
-    expect(evicted).toEqual(['/data/b.txt', '/data/a.txt'])
-    expect(vi.mocked(invalidateAfterUnlink)).not.toHaveBeenCalled()
+    expect(moves()).toEqual([
+      ['/data/b.txt', false],
+      ['/data/a.txt', false],
+    ])
+    expect(vi.mocked(invalidateSubtree)).not.toHaveBeenCalled()
     expect(vi.mocked(invalidateAfterWrite)).not.toHaveBeenCalled()
+  })
+
+  it('renaming a folder drops both subtrees', async () => {
+    vi.mocked(invalidateAfterMove).mockClear()
+    await rename(makeAccessor(), spec('/data/sub'), spec('/data/moved'))
+    expect(moves()).toEqual([
+      ['/data/moved', true],
+      ['/data/sub', true],
+    ])
+  })
+
+  it('renaming an item of unknown type drops both subtrees', async () => {
+    // Only a positive "file" narrows: a web_link, or an item whose type Box
+    // left out, keeps the subtree drop.
+    vi.mocked(invalidateAfterMove).mockClear()
+    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
+      Promise.resolve(
+        folderId === '100'
+          ? [{ type: 'web_link', id: '500', name: 'link' }]
+          : (TREE[folderId] ?? []),
+      ),
+    )
+    await rename(makeAccessor(), spec('/data/link'), spec('/data/moved'))
+    expect(moves()).toEqual([
+      ['/data/moved', true],
+      ['/data/link', true],
+    ])
   })
 
   it('rename replaces an empty folder destination', async () => {

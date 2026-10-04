@@ -49,6 +49,7 @@ class FakeManager {
   ancestors: string[] = []
   unlinks: string[] = []
   subtrees: string[] = []
+  moves: [string, boolean][] = []
 
   invalidateAfterWrite(path: string | PathSpec): Promise<void> {
     this.writes.push(typeof path === 'string' ? path : path.mountPath)
@@ -63,6 +64,11 @@ class FakeManager {
   invalidateAncestors(path: PathSpec): Promise<void> {
     this.ancestors.push(path.virtual)
     return Promise.resolve()
+  }
+
+  invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
+    this.moves.push([typeof path === 'string' ? path : path.virtual, folder])
+    return folder ? this.invalidateSubtree(path) : this.invalidateAfterUnlink(path)
   }
 
   invalidateSubtree(path: string | PathSpec): Promise<void> {
@@ -221,6 +227,42 @@ describe('rename', () => {
       spec('/volume/gone.txt'),
     ).catch((e: unknown) => e)) as Error & { code?: string }
     expect(err.code).toBe('ENOENT')
+  })
+
+  it('renaming a file narrows only the source', async () => {
+    // The source end is a file, so it drops no subtree. The destination
+    // keeps one: the upload overwrites whatever stands at dst and nothing
+    // here checks that it is not a non-empty directory.
+    const { fetch } = routedFetch(fileRoutes)
+    vi.stubGlobal('fetch', fetch)
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, () =>
+      rename(makeAccessor(), spec('/volume/a.txt'), spec('/volume/b.txt')),
+    )
+    expect(manager.moves).toEqual([
+      ['/volume/b.txt', true],
+      ['/volume/a.txt', false],
+    ])
+  })
+
+  it('renaming a directory drops both subtrees', async () => {
+    const { fetch } = routedFetch((call) => {
+      if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()
+      if (call.method === 'HEAD') return new Response(null, { status: 200 })
+      if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
+        return jsonResponse({ contents: [] })
+      }
+      return new Response(null, { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, () =>
+      rename(makeAccessor(), spec('/volume/dir'), spec('/volume/dir2')),
+    )
+    expect(manager.moves).toEqual([
+      ['/volume/dir2', true],
+      ['/volume/dir', true],
+    ])
   })
 
   it('refuses moving a directory into its own subtree and never deletes', async () => {

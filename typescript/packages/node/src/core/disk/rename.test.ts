@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '@struktoai/mirage-core/cache/context'
@@ -46,6 +47,10 @@ class FakeManager {
 
   invalidateAncestors(_path: PathSpec): Promise<void> {
     return Promise.resolve()
+  }
+
+  invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
+    return folder ? this.invalidateSubtree(path) : this.invalidateAfterUnlink(path)
   }
 
   invalidateSubtree(path: string | PathSpec): Promise<void> {
@@ -100,5 +105,34 @@ describe('core/disk/rename', () => {
     expect(manager.subtrees).toEqual(['/src', '/dst'])
     expect(manager.writes).toEqual([])
     expect(await readFile(join(root, 'dst', 'f.txt'), 'utf-8')).toBe('x')
+  })
+  it('a file evicts no subtree', async () => {
+    // A regular file has nothing beneath it: both ends take the unlink
+    // flavor, which still drops the destination's own listing.
+    await writeFile(join(root, 'a.txt'), 'A')
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, async () => {
+      await rename(accessor, spec('/a.txt'), spec('/b.txt'))
+    })
+    expect(manager.subtrees).toEqual([])
+    expect(manager.unlinks).toEqual(['/a.txt', '/b.txt'])
+    expect(await readFile(join(root, 'b.txt'), 'utf-8')).toBe('A')
+  })
+
+  it('evicts once the rename has landed', async () => {
+    // Evicting first left a window in which a concurrent listing of the
+    // parent re-cached the pre-rename view, with nothing evicting it after.
+    await writeFile(join(root, 'a.txt'), 'A')
+    const landed: boolean[] = []
+    const manager = new FakeManager()
+    const real = manager.invalidateAfterMove.bind(manager)
+    manager.invalidateAfterMove = (path, folder) => {
+      landed.push(existsSync(join(root, 'b.txt')))
+      return real(path, folder)
+    }
+    await runWithCacheManager(manager, async () => {
+      await rename(accessor, spec('/a.txt'), spec('/b.txt'))
+    })
+    expect(landed).toEqual([true, true])
   })
 })

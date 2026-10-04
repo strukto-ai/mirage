@@ -62,6 +62,10 @@ function fakeManager(log: string[], name: string): CacheInvalidator {
       log.push(`${name}:ancestors:${path.virtual}`)
       return Promise.resolve()
     },
+    invalidateAfterMove(path, folder) {
+      log.push(`${name}:move:${String(folder)}:${typeof path === 'string' ? path : path.virtual}`)
+      return Promise.resolve()
+    },
     invalidateSubtree(path) {
       log.push(`${name}:subtree:${typeof path === 'string' ? path : path.virtual}`)
       return Promise.resolve()

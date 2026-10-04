@@ -23,6 +23,7 @@ import { PathSpec } from '../types.ts'
 import {
   activeCacheManager,
   evictAfter,
+  invalidateAfterMove,
   invalidateAfterUnlink,
   invalidateAfterWrite,
   invalidateAncestors,
@@ -64,6 +65,10 @@ class FakeManager {
     return Promise.resolve()
   }
 
+  invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
+    return folder ? this.invalidateSubtree(path) : this.invalidateAfterUnlink(path)
+  }
+
   invalidateSubtree(path: string | PathSpec): Promise<void> {
     this.subtrees.push(path as string)
     return Promise.resolve()
@@ -85,10 +90,12 @@ describe('cache context', () => {
       await invalidateAfterWrite('/a.txt')
       await invalidateAfterUnlink('/b.txt')
       await invalidateSubtree('/c')
+      await invalidateAfterMove('/d', true)
+      await invalidateAfterMove('/e', false)
     })
     expect(manager.writes).toEqual(['/a.txt'])
-    expect(manager.unlinks).toEqual(['/b.txt'])
-    expect(manager.subtrees).toEqual(['/c'])
+    expect(manager.unlinks).toEqual(['/b.txt', '/e'])
+    expect(manager.subtrees).toEqual(['/c', '/d'])
   })
 
   it('no-ops without an active manager', async () => {

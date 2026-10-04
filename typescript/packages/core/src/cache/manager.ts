@@ -534,6 +534,22 @@ export class CacheManager {
   }
 
   /**
+   * Invalidate one end of a rename.
+   *
+   * A folder relocates everything cached under it, so it takes the subtree,
+   * and so does a name where the move replaced anything but a file. A file
+   * has nothing beneath it, so it takes the unlink flavor: its body, its own
+   * listing and its parent's. That spares every file rename a walk of both
+   * stores. A caller that cannot tell passes `folder: true`.
+   *
+   * Mirrors Python `CacheManager.invalidate_after_move`.
+   */
+  async invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
+    if (folder) await this.invalidateSubtree(path)
+    else await this.invalidateAfterUnlink(path)
+  }
+
+  /**
    * Evict the listing of every directory above `path`'s parent.
    *
    * `invalidateAfterWrite` refreshes the immediate parent only. A keyed store

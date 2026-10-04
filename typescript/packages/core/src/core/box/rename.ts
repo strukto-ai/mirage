@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { invalidateSubtree } from '../../cache/context.ts'
+import { invalidateAfterMove } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent, enotdir, enotempty } from '../../utils/errors.ts'
 import { BoxApiError } from './client.ts'
@@ -61,8 +61,10 @@ export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec
   if (item.type === 'folder')
     await updateFolder(tm, item.id, { name: newName, parentId: dstParent })
   else await updateFile(tm, item.id, { name: newName, parentId: dstParent })
-  // The unlink flavor on dst: a rename destroys the destination's previous
-  // identity, so a replaced empty directory loses its cached listing too.
-  await invalidateSubtree(dst)
-  await invalidateSubtree(src)
+  // Only a folder has a subtree to drop, and only a positive "file" rules
+  // one out. clearDest refused a file onto a folder, so dst held nothing
+  // below it unless the moved item is a folder.
+  const folder = item.type !== 'file'
+  await invalidateAfterMove(dst, folder)
+  await invalidateAfterMove(src, folder)
 }

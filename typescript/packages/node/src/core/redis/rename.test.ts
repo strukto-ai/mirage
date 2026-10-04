@@ -18,6 +18,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 import { RedisStore } from '../../vfs/redis/store.ts'
 import { rename } from '@struktoai/mirage-core/core/redis/rename'
+import { runWithCacheManager } from '@struktoai/mirage-core/cache/context'
+import { FakeManager } from '@struktoai/mirage-core/core/object_store/fakes'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
@@ -71,6 +73,21 @@ describe.skipIf(skip)('core/redis rename', () => {
     expect(await store.hasDir('/d/moved')).toBe(true)
     expect(await store.hasFile('/d/moved/f')).toBe(true)
     expect(await store.hasFile('/dir/f')).toBe(false)
+  })
+
+  it('a file evicts no subtree', async () => {
+    // A file has nothing beneath it: both ends take the unlink flavor.
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, () => rename(acc, spec('/a.txt'), spec('/d/b.txt')))
+    expect(manager.subtrees).toEqual([])
+    expect(manager.unlinks).toEqual(['/a.txt', '/d/b.txt'])
+  })
+
+  it('a directory evicts both subtrees', async () => {
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, () => rename(acc, spec('/dir'), spec('/d/moved')))
+    expect(manager.subtrees).toEqual(['/dir', '/d/moved'])
+    expect(manager.unlinks).toEqual([])
   })
 
   it('a missing source is ENOENT', async () => {

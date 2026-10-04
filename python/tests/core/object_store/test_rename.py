@@ -51,7 +51,10 @@ def test_rename_moves_a_file(accessor):
         _rename_for(store)(accessor, spec("/a/src.txt"), spec("/b/dst.txt"))
     )
     assert store.objects == {"b/dst.txt": b"hi"}
-    assert manager.subtrees == ["/b/dst.txt", "/a/src.txt"]
+    # A file has nothing beneath it, so neither end walks the caches for
+    # a subtree: both take the unlink flavor.
+    assert manager.subtrees == []
+    assert manager.unlinks == ["/b/dst.txt", "/a/src.txt"]
     assert manager.writes == []
     assert manager.ancestors == ["/mnt/b/dst.txt", "/mnt/a/src.txt"]
 
@@ -60,6 +63,15 @@ def test_rename_falls_back_to_the_prefix_walk(accessor):
     store = FakeStore({"dir/f.txt": b"x", "dir/sub/g.txt": b"y"})
     _managed(_rename_for(store)(accessor, spec("/dir"), spec("/moved")))
     assert store.objects == {"moved/f.txt": b"x", "moved/sub/g.txt": b"y"}
+
+
+def test_rename_of_a_directory_evicts_both_subtrees(accessor):
+    store = FakeStore({"dir/f.txt": b"x", "dir/sub/g.txt": b"y"})
+    manager = _managed(
+        _rename_for(store)(accessor, spec("/dir"), spec("/moved"))
+    )
+    assert manager.subtrees == ["/moved", "/dir"]
+    assert manager.unlinks == []
 
 
 def test_rename_missing_source_is_enoent(accessor):
@@ -190,3 +202,25 @@ def test_rename_of_a_missing_source_records_nothing(accessor):
         )
         == []
     )
+
+
+async def _boom_file(conn, src_key: str, dst_key: str) -> bool:
+    raise RuntimeError("boom")
+
+
+def test_rename_evicts_both_subtrees_when_the_file_move_raises(accessor):
+    """A raise says nothing about what the source was, so both ends stay
+    on the subtree."""
+
+    async def run():
+        driver = replace(
+            make_driver(FakeStore({"a.txt": b"x"})), move_file=_boom_file
+        )
+        with pytest.raises(RuntimeError):
+            await make_rename(driver, _exists)(
+                accessor, spec("/a.txt"), spec("/b.txt")
+            )
+
+    manager = _managed(run())
+    assert manager.subtrees == ["/b.txt", "/a.txt"]
+    assert manager.unlinks == []

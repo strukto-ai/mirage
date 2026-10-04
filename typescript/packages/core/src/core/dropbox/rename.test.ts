@@ -21,9 +21,11 @@ vi.mock('./client.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { runWithCacheManager, type CacheInvalidator } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
+import type { DropboxEntry } from './api.ts'
 import { rename } from './rename.ts'
 import { FakeDropboxRpc, fileEntry, folderEntry } from './_test_util.ts'
 
@@ -54,5 +56,82 @@ describe('dropbox rename conflict probe', () => {
     expect(fake.listLimits).toEqual([1])
     expect(fake.listRequests).toBe(1)
     expect(fake.deleted).toEqual([])
+  })
+})
+
+function recorder(): [CacheInvalidator, string[]] {
+  const seen: string[] = []
+  const manager = {
+    invalidateAfterMove: (path: PathSpec, folder: boolean) => {
+      seen.push(`${folder ? 'subtree' : 'unlink'} ${path.virtual}`)
+      return Promise.resolve()
+    },
+    invalidateSubtree: (path: PathSpec) => {
+      seen.push(`subtree ${path.virtual}`)
+      return Promise.resolve()
+    },
+    invalidateAncestors: () => Promise.resolve(),
+  } as unknown as CacheInvalidator
+  return [manager, seen]
+}
+
+async function moved(fake: FakeDropboxRpc): Promise<string[]> {
+  vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
+  const [manager, seen] = recorder()
+  await runWithCacheManager(manager, () => rename(makeAccessor(), spec('/a'), spec('/b')))
+  return seen
+}
+
+describe('dropbox rename invalidation', () => {
+  it('a renamed file drops no subtree', async () => {
+    // move_v2 answers with the moved entry's metadata: a file tag means
+    // nothing was cached beneath either name.
+    expect(await moved(new FakeDropboxRpc({ moved: fileEntry('b') }))).toEqual([
+      'unlink /a',
+      'unlink /b',
+    ])
+  })
+
+  it.each([
+    ['a folder', folderEntry('b')],
+    ['an item with no type', { name: 'b' } as DropboxEntry],
+    ['an empty reply', null],
+  ])('%s drops both subtrees', async (_label, entry) => {
+    // Only a positive file tag narrows: a reply that names no type, or an
+    // empty body after a move that worked, leaves both ends dropping their
+    // subtrees.
+    expect(await moved(new FakeDropboxRpc({ moved: entry }))).toEqual(['subtree /a', 'subtree /b'])
+  })
+
+  it('a file replacing an empty folder drops its subtree', async () => {
+    // The rename deleted the folder at dst, so whatever is still cached
+    // under that name (children removed outside mirage, say) goes too.
+    const fake = new FakeDropboxRpc({
+      metadata: folderEntry('b'),
+      moveErrors: [new DropboxApiError('conflict', 409, 'to/conflict/folder/...')],
+      moved: fileEntry('b'),
+    })
+    expect(await moved(fake)).toEqual(['unlink /a', 'subtree /b'])
+    expect(fake.deleted).toEqual(['/b'])
+  })
+
+  it('a file replacing an entry of no known kind drops its subtree', async () => {
+    // Only a positive file tag on what was replaced keeps dst narrow.
+    const fake = new FakeDropboxRpc({
+      metadata: { name: 'b' } as DropboxEntry,
+      moveErrors: [new DropboxApiError('conflict', 409, 'to/conflict/other/...')],
+      moved: fileEntry('b'),
+    })
+    expect(await moved(fake)).toEqual(['unlink /a', 'subtree /b'])
+  })
+
+  it('a file replacing a file drops no subtree', async () => {
+    const fake = new FakeDropboxRpc({
+      metadata: fileEntry('b'),
+      moveErrors: [new DropboxApiError('conflict', 409, 'to/conflict/file/...')],
+      moved: fileEntry('b'),
+    })
+    expect(await moved(fake)).toEqual(['unlink /a', 'unlink /b'])
+    expect(fake.deleted).toEqual(['/b'])
   })
 })

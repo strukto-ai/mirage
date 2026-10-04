@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mirage.cache.context import push_cache_manager
 from mirage.core.databricks_volume.rename import rename
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -23,6 +24,53 @@ from mirage.utils.key_prefix import mount_key
 
 def _path(path: str) -> PathSpec:
     return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
+
+
+class _MoveRecorder:
+    """Records the rename's own evictions; the inner copy, unlink and
+    rm_recursive run theirs too, which this test is not about."""
+
+    def __init__(self) -> None:
+        self.moves: list[tuple[str, bool]] = []
+
+    def listing_trusted(self, _folder: str) -> bool:
+        return False
+
+    def probed_stat(self, _path: PathSpec) -> None:
+        return None
+
+    async def cached_bytes(self, _path: PathSpec) -> None:
+        return None
+
+    async def cached_size(self, _path: PathSpec) -> None:
+        return None
+
+    async def invalidate_after_write(self, _path: PathSpec) -> None:
+        pass
+
+    async def invalidate_after_unlink(self, _path: PathSpec) -> None:
+        pass
+
+    async def invalidate_subtree(self, _path: PathSpec) -> None:
+        pass
+
+    async def invalidate_ancestors(self, _path: PathSpec) -> None:
+        pass
+
+    async def invalidate_after_move(
+        self, path: PathSpec, folder: bool
+    ) -> None:
+        self.moves.append((path.virtual, folder))
+
+
+async def _recorded(accessor, src: str, dst: str, index) -> _MoveRecorder:
+    manager = _MoveRecorder()
+    prev = push_cache_manager(manager)
+    try:
+        await rename(accessor, _path(src), _path(dst), index)
+    finally:
+        push_cache_manager(prev)
+    return manager
 
 
 def _seed_directory(files, path: str) -> None:
@@ -126,3 +174,27 @@ async def test_rename_into_own_subtree_fails(
     assert files.upload_calls == []
     assert files.delete_calls == []
     assert files.delete_directory_calls == []
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_file_narrows_only_the_source(
+    accessor, files, remote_root, index
+):
+    # The source end is a file, so it drops no subtree. The destination
+    # keeps one: the upload overwrites whatever stands at dst and nothing
+    # here checks that it is not a non-empty directory.
+    _seed_directory(files, remote_root)
+    _seed_file(files, f"{remote_root}/src.txt", b"data")
+    manager = await _recorded(accessor, "/dbx/src.txt", "/dbx/dst.txt", index)
+    assert manager.moves == [("/dbx/dst.txt", True), ("/dbx/src.txt", False)]
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_directory_drops_both_subtrees(
+    accessor, files, remote_root, index
+):
+    _seed_directory(files, remote_root)
+    _seed_directory(files, f"{remote_root}/d")
+    _seed_file(files, f"{remote_root}/d/a.txt", b"aaa")
+    manager = await _recorded(accessor, "/dbx/d", "/dbx/d2", index)
+    assert manager.moves == [("/dbx/d2", True), ("/dbx/d", True)]

@@ -215,3 +215,54 @@ async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
     assert served == "v1\n", (
         "the guarded walk overwrote the entry it read past"
     )
+
+
+def _count_drops(ws: Workspace, path: str) -> list[str]:
+    """Record every prefix walk of the file cache and the mount's index.
+
+    Args:
+        ws (Workspace): the workspace whose stores to watch.
+        path (str): any path on the mount whose index to watch.
+    """
+    drops: list[str] = []
+    cache = ws._cache
+    index = ws._namespace.try_mount_for(path).index_store
+    real_evict = cache.evict_prefix
+    real_invalidate = index.invalidate_prefix
+
+    async def evict_prefix(prefix, **kwargs):
+        drops.append(f"body:{prefix}")
+        await real_evict(prefix, **kwargs)
+
+    async def invalidate_prefix(key, **kwargs):
+        drops.append(f"index:{key}")
+        await real_invalidate(key, **kwargs)
+
+    cache.evict_prefix = evict_prefix
+    index.invalidate_prefix = invalidate_prefix
+    return drops
+
+
+@pytest.mark.asyncio
+async def test_mv_of_a_file_keeps_every_other_cached_read():
+    # `mv` of a plain file has nothing beneath it, so the backend's rename
+    # walks neither store, and the warm read of another folder survives. A
+    # folder `mv` still takes its subtree under the old name.
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ws = Workspace({"/m/": ram}, mode=MountMode.WRITE)
+    await ws.shell("echo f > /m/f && mkdir /m/dir && echo x > /m/dir/x")
+    await (await ws.shell("cat /m/dir/x")).stdout_str()
+    assert await ws._cache.exists("/m/dir/x")
+    drops = _count_drops(ws, "/m/f")
+    await ws.shell("mv /m/f /m/g")
+    # The spies are what tell narrowed from not: a file has nothing cached
+    # beneath it, so the old subtree drop removed no body either. The warm
+    # read surviving guards the other way, against a drop wider than /m/f.
+    assert drops == []
+    assert await ws._cache.exists("/m/dir/x")
+    assert await (await ws.shell("cat /m/g")).stdout_str() == "f\n"
+    await ws.shell("mv /m/dir /m/dir2")
+    assert not await ws._cache.exists("/m/dir/x")
+    assert (await ws.shell("cat /m/dir/x")).exit_code != 0
+    assert await (await ws.shell("cat /m/dir2/x")).stdout_str() == "x\n"

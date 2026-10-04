@@ -18,6 +18,8 @@ import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { rename } from './rename.ts'
+import { runWithCacheManager } from '../../cache/context.ts'
+import { FakeManager } from '../object_store/fakes.ts'
 
 function mkPath(virtual: string): PathSpec {
   return new PathSpec({
@@ -122,5 +124,22 @@ describe('core/ram rename', () => {
     const acc = mkAccessor()
     await rename(acc, mkPath('/a.txt'), mkPath('/b.txt'))
     expect(acc.store.files.has('/b.txt')).toBe(true)
+  })
+
+  it('a file evicts no subtree', async () => {
+    // A file has nothing beneath it: both ends take the unlink flavor.
+    const acc = mkAccessor()
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, () => rename(acc, mkPath('/a.txt'), mkPath('/d/b.txt')))
+    expect(manager.subtrees).toEqual([])
+    expect(manager.unlinks).toEqual(['/a.txt', '/d/b.txt'])
+  })
+
+  it('a directory evicts both subtrees', async () => {
+    const acc = mkAccessor()
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, () => rename(acc, mkPath('/dir'), mkPath('/d/moved')))
+    expect(manager.subtrees).toEqual(['/dir', '/d/moved'])
+    expect(manager.unlinks).toEqual([])
   })
 })

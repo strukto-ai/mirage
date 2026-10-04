@@ -1386,3 +1386,55 @@ describe('dispatch runs writers to one path one at a time', () => {
     }
   })
 })
+
+// RAM serves reads itself and keeps no file cache by default, which would
+// make every body assertion below hold vacuously. Its listings also expire
+// at once; kept live, `ls` leaves a file row that a door trusting the index
+// would read as "nothing beneath it".
+class CachingRAMVFS extends RAMVFS {
+  override readonly cachesReads: boolean = true
+  override readonly indexTtl: number = 600
+}
+
+async function cachingWorkspace(): Promise<Workspace> {
+  const parser = await getTestParser()
+  return new Workspace(
+    { '/ram': new CachingRAMVFS() },
+    { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+  )
+}
+
+describe('Dispatcher rename invalidation', () => {
+  it('a rename by op drops the subtree of a name the index calls a file', async () => {
+    // The index can say file for a name that has since become a folder
+    // outside mirage, with its parent's listing still live; a body cached
+    // under it must still go with an op-level rename, so this door never
+    // trusts the index to skip the subtree.
+    const ws = await cachingWorkspace()
+    try {
+      await ws.shell('echo x > /ram/a')
+      await ws.shell('ls /ram')
+      await ws.cache.set('/ram/a/x', new Uint8Array([0x78]))
+      await ws.dispatch('rename', '/ram/a', [PathSpec.fromStrPath('/ram/c')])
+      expect(await ws.cache.exists('/ram/a/x')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a rename by op drops the subtree at its destination', async () => {
+    // This door drops the subtree at both ends of every rename. At the
+    // destination that also covers a folder the backend replaced there
+    // (WebDAV MOVE does), even when a file moved onto it.
+    const ws = await cachingWorkspace()
+    try {
+      await ws.shell('echo x > /ram/f')
+      await ws.shell('ls /ram')
+      await ws.cache.set('/ram/g/under', new Uint8Array([0x78]))
+      await ws.dispatch('rename', '/ram/f', [PathSpec.fromStrPath('/ram/g')])
+      expect(await ws.cache.exists('/ram/g/under')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+})

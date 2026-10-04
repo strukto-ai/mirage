@@ -166,7 +166,7 @@ describe('dropbox rename', () => {
   it('replaces an existing destination file like GNU mv', async () => {
     vi.mocked(api.movePath)
       .mockRejectedValueOnce(new DropboxApiError('conflict', 409, 'to/conflict/file/...'))
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({})
     vi.mocked(api.getMetadata).mockResolvedValue(fileEntry('/b.txt'))
     await rename(makeAccessor(), spec('/a.txt'), spec('/b.txt'))
     expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/b.txt')
@@ -176,7 +176,7 @@ describe('dropbox rename', () => {
   it('replaces an empty dir destination like rename(2)', async () => {
     vi.mocked(api.movePath)
       .mockRejectedValueOnce(new DropboxApiError('conflict', 409, 'to/conflict/folder/...'))
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({})
     vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/dst'))
     vi.mocked(api.listFolder).mockResolvedValue([])
     await rename(makeAccessor(), spec('/src'), spec('/dst'))

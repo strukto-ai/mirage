@@ -25,6 +25,7 @@ export interface CacheInvalidator {
   invalidateAfterWrite(path: string | PathSpec): Promise<void>
   invalidateAfterUnlink(path: string | PathSpec): Promise<void>
   invalidateSubtree(path: string | PathSpec): Promise<void>
+  invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void>
   invalidateAncestors(path: PathSpec): Promise<void>
   cachedBytes(path: PathSpec): Promise<Uint8Array | null>
   readThrough(path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array>
@@ -132,6 +133,21 @@ export async function invalidateAfterUnlink(path: string | PathSpec): Promise<vo
 export async function invalidateSubtree(path: string | PathSpec): Promise<void> {
   for (const manager of liveManagers()) {
     await manager.invalidateSubtree(path)
+  }
+}
+
+/**
+ * Report one end of a backend rename.
+ *
+ * A renamed folder strands everything cached beneath both of its names, so
+ * it takes {@link invalidateSubtree}. A renamed file has nothing beneath it
+ * and takes {@link invalidateAfterUnlink}, which spares the walk of every
+ * store. The caller passes `folder: true` whenever it cannot tell, and for
+ * a destination the backend may have replaced a non-empty folder at.
+ */
+export async function invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
+  for (const manager of liveManagers()) {
+    await manager.invalidateAfterMove(path, folder)
   }
 }
 

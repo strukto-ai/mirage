@@ -853,3 +853,60 @@ async def test_one_large_command_does_not_rescan_its_probes_on_every_insert(
             )
         assert len(manager._probed) == 64
     assert len(scans) <= 5
+
+
+async def _move_case(folder: bool) -> tuple[list[str], dict[str, bool]]:
+    cache, index = _stores()
+    await _seed(cache, index)
+    await cache.set("/data/arch/h.txt/under", b"x")
+    # The listing an empty folder left at this name before a file was
+    # renamed over it: only the unlink flavor, not the write one, drops it.
+    await index.set_dir("/data/arch/h.txt", [])
+    drops: list[str] = []
+    real_evict = cache.evict_prefix
+    real_invalidate = index.invalidate_prefix
+
+    async def evict_prefix(prefix, **kwargs):
+        drops.append(f"body:{prefix}")
+        await real_evict(prefix, **kwargs)
+
+    async def invalidate_prefix(path, **kwargs):
+        drops.append(f"index:{path}")
+        await real_invalidate(path, **kwargs)
+
+    cache.evict_prefix = evict_prefix
+    index.invalidate_prefix = invalidate_prefix
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.invalidate_after_move(
+        PathSpec.from_str_path("/arch/h.txt"), folder
+    )
+    entry = await index.get("/data/arch/h.txt")
+    return drops, {
+        "body": await cache.exists("/data/arch/h.txt"),
+        "under": await cache.exists("/data/arch/h.txt/under"),
+        "listing": (await index.list_dir("/data/arch")).entries is not None,
+        "own_listing": (await index.list_dir("/data/arch/h.txt")).entries
+        is not None,
+        "entry": entry.entry is not None,
+    }
+
+
+def test_a_moved_file_drops_no_subtree():
+    # The unlink flavor: the body, its own listing and its parent's go,
+    # and nothing walks the stores for what lies beneath a file.
+    drops, left = _run(_move_case(False))
+    assert drops == []
+    assert left == {
+        "body": False,
+        "under": True,
+        "listing": False,
+        "own_listing": False,
+        "entry": False,
+    }
+
+
+def test_a_moved_folder_drops_its_subtree():
+    drops, left = _run(_move_case(True))
+    assert drops == ["body:/data/arch/h.txt/", "index:/data/arch/h.txt"]
+    assert left["under"] is False
+    assert left["body"] is False

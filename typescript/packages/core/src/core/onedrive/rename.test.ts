@@ -14,40 +14,16 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { SharePointAccessor } from '../../accessor/sharepoint.ts'
+import { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { runWithCacheManager, type CacheInvalidator } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import { rename } from './rename.ts'
 
+const CONFLICT = { error: { code: 'nameAlreadyExists', message: 'x' } }
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
-
-describe('SharePoint rename', () => {
-  // Either side naming a site the tenant does not have fails before any
-  // drive request, and the error names that side.
-  it.each([
-    ['Nope/Documents/a.txt', 'Team/Documents/b.txt', '/sp/Nope/Documents/a.txt'],
-    ['Team/Documents/a.txt', 'Nope/Documents/b.txt', '/sp/Nope/Documents/b.txt'],
-  ])('%s -> %s reports ENOENT for %s', async (src, dst, named) => {
-    const fetchMock = vi.fn((input: unknown) => {
-      const value = String(input).includes('/sites?')
-        ? [{ id: 'site-id', displayName: 'Team' }]
-        : [{ id: 'drive-id', name: 'Documents' }]
-      return Promise.resolve(new Response(JSON.stringify({ value })))
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    const error: unknown = await rename(
-      new SharePointAccessor({ accessToken: 'token' }),
-      PathSpec.fromStrPath(`/sp/${src}`, src),
-      PathSpec.fromStrPath(`/sp/${dst}`, dst),
-    ).catch((e: unknown) => e)
-    expect(error).toMatchObject({ code: 'ENOENT', virtualPath: named })
-    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('/drives/'))).toBe(true)
-  })
-})
-
-const CONFLICT = { error: { code: 'nameAlreadyExists', message: 'x' } }
 
 function recorder(): [CacheInvalidator, string[]] {
   const seen: string[] = []
@@ -68,19 +44,13 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
 }
 
-// Site and drive lookups answer from the tenant listing; every drive
-// request takes the next reply queued for its method.
+// One queue per method: each request takes the next reply for its method.
 function graph(replies: Record<string, Response[]>): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: unknown, init?: RequestInit) => {
-      const url = String(input)
-      if (url.includes('/sites?'))
-        return Promise.resolve(json({ value: [{ id: 'site-id', displayName: 'Team' }] }))
-      if (url.includes('/drives?'))
-        return Promise.resolve(json({ value: [{ id: 'drive-id', name: 'Documents' }] }))
+    vi.fn((_input: unknown, init?: RequestInit) => {
       const next = replies[init?.method ?? 'GET']?.shift()
-      if (next === undefined) throw new Error(`unexpected ${init?.method ?? 'GET'} ${url}`)
+      if (next === undefined) throw new Error(`unexpected ${init?.method ?? 'GET'}`)
       return Promise.resolve(next)
     }),
   )
@@ -90,32 +60,32 @@ async function moved(dst: string): Promise<string[]> {
   const [manager, seen] = recorder()
   await runWithCacheManager(manager, () =>
     rename(
-      new SharePointAccessor({ accessToken: 'token' }),
-      PathSpec.fromStrPath('/sp/Team/Documents/a', 'Team/Documents/a'),
-      PathSpec.fromStrPath(`/sp/Team/Documents/${dst}`, `Team/Documents/${dst}`),
+      new OneDriveAccessor({ accessToken: 'token' }),
+      PathSpec.fromStrPath('/a'),
+      PathSpec.fromStrPath(dst),
     ),
   )
   return seen
 }
 
-describe('SharePoint rename invalidation', () => {
-  const at = (name: string): string => `/sp/Team/Documents/${name}`
-
+describe('OneDrive rename invalidation', () => {
   it('a renamed file drops no subtree', async () => {
     // The PATCH reply names what moved: a file facet means nothing was
     // cached beneath either name.
     graph({ PATCH: [json({ id: '1', file: {} })] })
-    expect(await moved('b')).toEqual([`unlink ${at('b')}`, `unlink ${at('a')}`])
+    expect(await moved('/b')).toEqual(['unlink /b', 'unlink /a'])
   })
 
   it.each([
     ['a folder', { id: '1', folder: { childCount: 2 } }],
     ['an unnamed item', { id: '1' }],
+    ['a null reply', null],
   ])('%s drops both subtrees', async (_label, reply) => {
-    // Only a positive file facet narrows: a reply that names no type
-    // leaves both ends dropping their subtrees.
+    // Only a positive file facet narrows: a reply that names no type, or a
+    // literal `null` body after a move that worked, leaves both ends
+    // dropping their subtrees.
     graph({ PATCH: [json(reply)] })
-    expect(await moved('b')).toEqual([`subtree ${at('b')}`, `subtree ${at('a')}`])
+    expect(await moved('/b')).toEqual(['subtree /b', 'subtree /a'])
   })
 
   it('a file replacing an empty folder drops its subtree', async () => {
@@ -126,7 +96,7 @@ describe('SharePoint rename invalidation', () => {
       GET: [json({ id: '2', name: 'dst', folder: {} }), json({ value: [] })],
       DELETE: [new Response(null, { status: 204 })],
     })
-    expect(await moved('dst')).toEqual([`subtree ${at('dst')}`, `unlink ${at('a')}`])
+    expect(await moved('/dst')).toEqual(['subtree /dst', 'unlink /a'])
   })
 
   it('a file replacing an item of no known kind drops its subtree', async () => {
@@ -136,7 +106,7 @@ describe('SharePoint rename invalidation', () => {
       GET: [json({ id: '2', name: 'dst' })],
       DELETE: [new Response(null, { status: 204 })],
     })
-    expect(await moved('dst')).toEqual([`subtree ${at('dst')}`, `unlink ${at('a')}`])
+    expect(await moved('/dst')).toEqual(['subtree /dst', 'unlink /a'])
   })
 
   it('a file replacing a file drops no subtree', async () => {
@@ -145,6 +115,6 @@ describe('SharePoint rename invalidation', () => {
       GET: [json({ id: '2', name: 'dst', file: {} })],
       DELETE: [new Response(null, { status: 204 })],
     })
-    expect(await moved('dst')).toEqual([`unlink ${at('dst')}`, `unlink ${at('a')}`])
+    expect(await moved('/dst')).toEqual(['unlink /dst', 'unlink /a'])
   })
 })

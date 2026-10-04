@@ -620,3 +620,59 @@ describe('what a probe saw this command', () => {
     })
   })
 })
+
+describe('CacheManager.invalidateAfterMove', () => {
+  async function moveCase(
+    folder: boolean,
+  ): Promise<{ drops: string[]; left: Record<string, boolean> }> {
+    const [cache, index] = await seeded()
+    await cache.set('/data/arch/h.txt/under', new Uint8Array([0x78]))
+    // The listing an empty folder left at this name before a file was
+    // renamed over it: only the unlink flavor, not the write one, drops it.
+    await index.setDir('/data/arch/h.txt', [])
+    const drops: string[] = []
+    const realEvict = cache.evictPrefix.bind(cache)
+    const realInvalidate = index.invalidatePrefix.bind(index)
+    cache.evictPrefix = (prefix, excluded) => {
+      drops.push(`body:${prefix}`)
+      return realEvict(prefix, excluded)
+    }
+    index.invalidatePrefix = (path, excluded) => {
+      drops.push(`index:${path}`)
+      return realInvalidate(path, excluded)
+    }
+    const manager = new CacheManager(cache, index, '/data/', true)
+    await manager.invalidateAfterMove(PathSpec.fromStrPath('/arch/h.txt'), folder)
+    return {
+      drops,
+      left: {
+        body: await cache.exists('/data/arch/h.txt'),
+        under: await cache.exists('/data/arch/h.txt/under'),
+        listing: ((await index.listDir('/data/arch')).entries ?? null) !== null,
+        ownListing: ((await index.listDir('/data/arch/h.txt')).entries ?? null) !== null,
+        entry: ((await index.get('/data/arch/h.txt')).entry ?? null) !== null,
+      },
+    }
+  }
+
+  it('a moved file drops no subtree', async () => {
+    // The unlink flavor: the body, its own listing and its parent's go,
+    // and nothing walks the stores for what lies beneath a file.
+    const { drops, left } = await moveCase(false)
+    expect(drops).toEqual([])
+    expect(left).toEqual({
+      body: false,
+      under: true,
+      listing: false,
+      ownListing: false,
+      entry: false,
+    })
+  })
+
+  it('a moved folder drops its subtree', async () => {
+    const { drops, left } = await moveCase(true)
+    expect(drops).toEqual(['body:/data/arch/h.txt/', 'index:/data/arch/h.txt'])
+    expect(left.under).toBe(false)
+    expect(left.body).toBe(false)
+  })
+})

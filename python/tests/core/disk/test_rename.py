@@ -35,6 +35,14 @@ class _FakeManager:
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         self.unlinks.append(path.mount_path)
 
+    async def invalidate_after_move(
+        self, path: PathSpec, folder: bool
+    ) -> None:
+        if folder:
+            await self.invalidate_subtree(path)
+        else:
+            await self.invalidate_after_unlink(path)
+
     async def invalidate_subtree(self, path: PathSpec) -> None:
         self.subtrees.append(path.mount_path)
 
@@ -69,3 +77,27 @@ async def test_rename_evicts_both_identities(tmp_path):
     assert manager.subtrees == ["/src", "/dst"]
     assert manager.writes == []
     assert (tmp_path / "dst" / "f.txt").read_bytes() == b"x"
+
+
+async def _managed(coro) -> _FakeManager:
+    manager = _FakeManager()
+    prev = push_cache_manager(manager)
+    try:
+        await coro
+    finally:
+        push_cache_manager(prev)
+    return manager
+
+
+@pytest.mark.asyncio
+async def test_rename_of_a_file_evicts_no_subtree(tmp_path):
+    # A regular file has nothing beneath it: both ends take the unlink
+    # flavor, which still drops the destination's own listing.
+    (tmp_path / "a.txt").write_bytes(b"A")
+    accessor = DiskAccessor(tmp_path)
+    manager = await _managed(
+        rename(accessor, _spec("/a.txt"), _spec("/b.txt"))
+    )
+    assert manager.subtrees == []
+    assert manager.unlinks == ["/a.txt", "/b.txt"]
+    assert (tmp_path / "b.txt").read_bytes() == b"A"

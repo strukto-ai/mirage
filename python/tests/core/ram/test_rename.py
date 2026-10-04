@@ -15,9 +15,11 @@
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.context import push_cache_manager
 from mirage.core.ram.rename import rename
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
+from tests.core.object_store.conftest import FakeManager
 
 
 def spec(path: str) -> PathSpec:
@@ -129,3 +131,30 @@ async def test_rename_resolves_dest_before_source(accessor):
 async def test_rename_to_root_child_is_allowed(accessor):
     await rename(accessor, spec("/a.txt"), spec("/b.txt"))
     assert accessor.store.files["/b.txt"] == b"hi"
+
+
+async def _managed(coro) -> FakeManager:
+    manager = FakeManager()
+    prev = push_cache_manager(manager)
+    try:
+        await coro
+    finally:
+        push_cache_manager(prev)
+    return manager
+
+
+@pytest.mark.asyncio
+async def test_rename_file_evicts_no_subtree(accessor):
+    # A file has nothing beneath it: both ends take the unlink flavor.
+    manager = await _managed(
+        rename(accessor, spec("/a.txt"), spec("/d/b.txt"))
+    )
+    assert manager.subtrees == []
+    assert manager.unlinks == ["/d/b.txt", "/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_rename_dir_evicts_both_subtrees(accessor):
+    manager = await _managed(rename(accessor, spec("/dir"), spec("/d/moved")))
+    assert manager.subtrees == ["/d/moved", "/dir"]
+    assert manager.unlinks == []

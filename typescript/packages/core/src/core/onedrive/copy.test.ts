@@ -33,6 +33,7 @@ function recorder(): [CacheInvalidator, string[]] {
     invalidateAfterWrite: note('write'),
     invalidateAfterUnlink: note('unlink'),
     invalidateSubtree: note('subtree'),
+    invalidateAfterMove: (path, folder) => note(folder ? 'subtree' : 'unlink')(path),
     invalidateAncestors: note('ancestors'),
     cachedBytes: () => Promise.resolve(null),
     readThrough: (_path, fetch) => fetch(),
