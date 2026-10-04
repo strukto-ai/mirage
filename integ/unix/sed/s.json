@@ -106,6 +106,40 @@
         "stdout": "HELLo WORLD\nHello World\nhello\nHello\nAb\nx\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sed_s_case_escape_drops_a_carried_one_shot",
+      "seq": 15300010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo a | sed 's/\\(x*\\)a/\\u\\1\\Lz/'; echo a | sed 's/\\(x*\\)a/\\l\\1\\UZz/'; echo ab | sed 's/\\(x*\\)a\\(b\\)/\\u\\1\\E\\2/'; echo ab | sed 's/\\(x*\\)a/\\u\\1\\l\\1\\Uq/'; echo ab | sed 's/\\(x*\\)\\(y*\\)\\(a\\)/\\u\\1\\2\\3/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "z\nZZ\nb\nQb\nab\n",
+        "stderr": ""
+      }
     }
   ]
 }

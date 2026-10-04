@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import itertools
-import math
 import re
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
@@ -45,15 +44,20 @@ from mirage.types import PathSpec
 FORMAT_DIRECTIVE = re.compile(r"([-+#0 ']*)([0-9]*)(?:\.([0-9]*))?(L?)")
 FLOAT_CONVERSIONS = "efgaEFGA"
 
-# The magnitude from which strtold reads an infinity on x86-64, whose
-# long double keeps 64 mantissa bits: halfway from LDBL_MAX to 2**16384,
-# a tie that rounds up to the even 2**16384. GNU refuses an operand that
-# large. arm64's 113-bit long double moves the edge by a part in 2**65.
-LONG_DOUBLE_OVERFLOW = (2**65 - 1) << 16319
+# GNU's long double, as the pins here measure it: IEEE binary128, arm64
+# Linux's, with 112 fraction bits under the lead bit and a least normal
+# exponent of -16382. x86-64's 80-bit one has the same exponent range.
+QUAD_FRACTION_BITS = 112
+QUAD_MIN_EXPONENT = -16382
+
+# The magnitude from which strtold reads an infinity: halfway from
+# LDBL_MAX to 2**16384, a tie that rounds up to the even 2**16384. GNU
+# refuses an operand that large.
+LONG_DOUBLE_OVERFLOW = (2**114 - 1) << 16270
 
 # strtold reads zero for a magnitude at or under 2**-UNDERFLOW_BITS, half
-# of the x86-64 long double's least subnormal, and GNU takes the zero.
-UNDERFLOW_BITS = 16446
+# of the least subnormal, and GNU takes the zero.
+UNDERFLOW_BITS = 16495
 
 # About how many bytes of output one chunk of the stream carries.
 OUTPUT_CHUNK = 64 * 1024
@@ -123,65 +127,6 @@ def parse_format(fmt: str) -> SeqFormat:
         match.groups() if match else ("", "", None, "")
     )
     return SeqFormat(fmt[:start], flags, width, precision, fmt[end], suffix)
-
-
-def _hex_float(value: float, spec: SeqFormat) -> str:
-    """``value`` through a ``%a`` directive, as glibc renders it.
-
-    The hex digits round half to even at the precision without
-    renormalizing (``%.0a`` of 3 is ``0x2p+1``), ``#`` keeps the point
-    and ``0`` pads after ``0x``. GNU's value is a long double, so a value
-    needing more than a double's 53 bits shows fewer digits here.
-
-    Args:
-        value (float): the value to print.
-        spec (SeqFormat): the parsed format.
-    """
-    flags = spec.flags
-    sign = (
-        "-"
-        if math.copysign(1.0, value) < 0
-        else "+"
-        if "+" in flags
-        else " "
-        if " " in flags
-        else ""
-    )
-    magnitude = abs(float(value))
-    zero = False
-    if not math.isfinite(magnitude):
-        body = "nan" if math.isnan(magnitude) else "inf"
-    else:
-        mantissa, exponent = magnitude.hex().split("p")
-        lead, _, digits = mantissa[2:].partition(".")
-        if spec.precision is None:
-            digits = digits.rstrip("0")
-        else:
-            places = int(spec.precision or "0")
-            if places >= len(digits):
-                digits = digits.ljust(places, "0")
-            else:
-                kept = int(lead + digits[:places], 16)
-                rest = int(digits[places:], 16)
-                half = 8 << 4 * (len(digits) - places - 1)
-                if rest > half or (rest == half and kept % 2):
-                    kept += 1
-                text = f"{kept:0{places + 1}x}"
-                lead, digits = (
-                    text[: len(text) - places],
-                    text[len(text) - places :],
-                )
-        point = "." if digits or "#" in flags else ""
-        body = f"0x{lead}{point}{digits}p{int(exponent):+d}"
-        zero = "0" in flags and "-" not in flags
-    if spec.conversion == "A":
-        body = body.upper()
-    width = int(spec.width or "0")
-    if "-" in flags:
-        return (sign + body).ljust(width)
-    if zero:
-        return sign + body[:2] + body[2:].rjust(width - len(sign) - 2, "0")
-    return (sign + body).rjust(width)
 
 
 class NumberKind(Enum):
@@ -285,7 +230,7 @@ def read_number(found: re.Match[str]) -> SeqNumber | None:
 
     A magnitude far outside the long double range is settled from its
     digit count before any arithmetic (from 10**4933 up it overflows,
-    under 10**-4951 it is zero, as are 2**16384 and 2**-16446 for a hex
+    under 10**-4966 it is zero, as are 2**16384 and 2**-16495 for a hex
     float), so an exponent of any length costs nothing.
 
     Args:
@@ -314,7 +259,7 @@ def read_number(found: re.Match[str]) -> SeqNumber | None:
         top = len(significant) + exponent
         if top > 4933:
             return None
-        if top < -4950:
+        if top < -4965:
             return SeqNumber(negative)
         units = int_of_digits(significant)
         if exponent >= 0:
@@ -330,7 +275,7 @@ def read_number(found: re.Match[str]) -> SeqNumber | None:
         top = bits.bit_length() + exponent
         if top > 16384:
             return None
-        if top < -16445:
+        if top < -16494:
             return SeqNumber(negative)
         shift = min((bits & -bits).bit_length() - 1, max(-exponent, 0))
         bits >>= shift
@@ -426,6 +371,19 @@ def default_format(
     return SeqFormat("", "0", str(width), str(precision), "f", "")
 
 
+def _nearest(numerator: int, denominator: int) -> int:
+    """``numerator / denominator`` rounded half to even.
+
+    Args:
+        numerator (int): a dividend, not negative.
+        denominator (int): a divisor, positive.
+    """
+    kept, rest = divmod(numerator, denominator)
+    if 2 * rest > denominator or (2 * rest == denominator and kept % 2):
+        kept += 1
+    return kept
+
+
 def _rounded(units: int, drop: int) -> int:
     """``units / 10**drop`` rounded half to even, exact for a negative drop.
 
@@ -437,11 +395,7 @@ def _rounded(units: int, drop: int) -> int:
         factor: int = 10**-drop
         return units * factor
     unit: int = 10**drop
-    kept, rest = divmod(units, unit)
-    half = unit // 2
-    if rest > half or (rest == half and kept % 2):
-        kept += 1
-    return kept
+    return _nearest(units, unit)
 
 
 def _fixed_text(value: SeqNumber, precision: int, alternate: bool) -> str:
@@ -511,6 +465,19 @@ def _general_text(value: SeqNumber, precision: int, alternate: bool) -> str:
     return mantissa + mark + power
 
 
+def _sign_text(value: SeqNumber, flags: str) -> str:
+    """The sign printf writes ahead of a number: ``-``, or what ``+`` or a
+    space flag asks for a positive one.
+
+    Args:
+        value (SeqNumber): the number.
+        flags (str): the directive's flags.
+    """
+    if value.negative:
+        return "-"
+    return "+" if "+" in flags else " " if " " in flags else ""
+
+
 def _float_text(value: SeqNumber, spec: SeqFormat) -> str:
     """``value`` through a ``%e``, ``%f`` or ``%g`` directive, as printf.
 
@@ -524,15 +491,7 @@ def _float_text(value: SeqNumber, spec: SeqFormat) -> str:
         spec (SeqFormat): the parsed format.
     """
     flags = spec.flags
-    sign = (
-        "-"
-        if value.negative
-        else "+"
-        if "+" in flags
-        else " "
-        if " " in flags
-        else ""
-    )
+    sign = _sign_text(value, flags)
     zero = "0" in flags and "-" not in flags
     if value.kind is not NumberKind.FINITE:
         body = "nan" if value.kind is NumberKind.NAN else "inf"
@@ -557,20 +516,93 @@ def _float_text(value: SeqNumber, spec: SeqFormat) -> str:
     return (sign + body).rjust(width)
 
 
-def _to_float(value: SeqNumber) -> float:
-    """The nearest double, for the ``%a`` directive.
+def _quad_digits(value: SeqNumber) -> tuple[str, str, int]:
+    """A finite number as a binary128 long double holds it, in hex.
+
+    The value rounds half to even to 113 significant bits, or to the
+    subnormal grid under 2**-16382, which glibc writes with a lead digit
+    of 0 and that least exponent (``0x0.00004p-16382``).
 
     Args:
-        value (SeqNumber): the number.
+        value (SeqNumber): a finite number.
+
+    Returns:
+        tuple[str, str, int]: the lead hex digit, the 28 fraction digits
+            and the binary exponent.
     """
-    if value.kind is NumberKind.NAN:
-        return math.nan
-    magnitude = (
-        math.inf
-        if value.kind is NumberKind.INFINITE
-        else float(f"{digits_of_int(value.units)}e-{value.scale}")
+    places = QUAD_FRACTION_BITS // 4
+    denominator: int = 10**value.scale
+    exponent = value.units.bit_length() - denominator.bit_length()
+    if value.units << max(-exponent, 0) < denominator << max(exponent, 0):
+        exponent -= 1
+    exponent = max(exponent, QUAD_MIN_EXPONENT)
+    shift = QUAD_FRACTION_BITS - exponent
+    mantissa = (
+        _nearest(value.units << shift, denominator)
+        if shift >= 0
+        else _nearest(value.units, denominator << -shift)
     )
-    return -magnitude if value.negative else magnitude
+    if not mantissa:
+        return "0", "0" * places, 0
+    if mantissa >> (QUAD_FRACTION_BITS + 1):
+        mantissa >>= 1
+        exponent += 1
+    fraction = mantissa & ((1 << QUAD_FRACTION_BITS) - 1)
+    lead = mantissa >> QUAD_FRACTION_BITS
+    return f"{lead:x}", f"{fraction:0{places}x}", exponent
+
+
+def _hex_float(value: SeqNumber, spec: SeqFormat) -> str:
+    """``value`` through a ``%a`` directive, as glibc renders it.
+
+    The value is the binary128 long double nearest it. The hex digits
+    round half to even at the precision without renormalizing (``%.0a``
+    of 3 is ``0x2p+1``), ``#`` keeps the point and ``0`` pads after
+    ``0x``. GNU sums in long double while these sums are exact, so a
+    printed sum can differ in its last bit (``seq -f %a 0.1 0.1 0.3``
+    stops after 0.2 in GNU, whose third sum overshoots 0.3).
+
+    Args:
+        value (SeqNumber): the number to print.
+        spec (SeqFormat): the parsed format.
+    """
+    flags = spec.flags
+    sign = _sign_text(value, flags)
+    zero = False
+    if value.kind is not NumberKind.FINITE:
+        body = "nan" if value.kind is NumberKind.NAN else "inf"
+    else:
+        lead, digits, exponent = (
+            _quad_digits(value) if value.units else ("0", "", 0)
+        )
+        if spec.precision is None:
+            digits = digits.rstrip("0")
+        else:
+            places = int(spec.precision or "0")
+            if places >= len(digits):
+                digits = digits.ljust(places, "0")
+            else:
+                kept = int(lead + digits[:places], 16)
+                rest = int(digits[places:], 16)
+                half = 8 << 4 * (len(digits) - places - 1)
+                if rest > half or (rest == half and kept % 2):
+                    kept += 1
+                text = f"{kept:0{places + 1}x}"
+                lead, digits = (
+                    text[: len(text) - places],
+                    text[len(text) - places :],
+                )
+        point = "." if digits or "#" in flags else ""
+        body = f"0x{lead}{point}{digits}p{exponent:+d}"
+        zero = "0" in flags and "-" not in flags
+    if spec.conversion == "A":
+        body = body.upper()
+    width = int(spec.width or "0")
+    if "-" in flags:
+        return (sign + body).ljust(width)
+    if zero:
+        return sign + body[:2] + body[2:].rjust(width - len(sign) - 2, "0")
+    return (sign + body).rjust(width)
 
 
 def render(spec: SeqFormat, value: SeqNumber) -> str:
@@ -581,7 +613,7 @@ def render(spec: SeqFormat, value: SeqNumber) -> str:
         value (SeqNumber): the number to print.
     """
     if spec.conversion in "aA":
-        body = _hex_float(_to_float(value), spec)
+        body = _hex_float(value, spec)
     else:
         body = _float_text(value, spec)
     return (

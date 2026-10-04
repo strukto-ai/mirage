@@ -36,15 +36,20 @@ import { strtodWhole } from '../utils/strtod.ts'
 const FORMAT_DIRECTIVE = /([-+#0 ']*)([0-9]*)(?:\.([0-9]*))?(L?)/y
 const FLOAT_CONVERSIONS = 'efgaEFGA'
 
-// The magnitude from which strtold reads an infinity on x86-64, whose long
-// double keeps 64 mantissa bits: halfway from LDBL_MAX to 2**16384, a tie that
-// rounds up to the even 2**16384. GNU refuses an operand that large. arm64's
-// 113-bit long double moves the edge by a part in 2**65.
-const LONG_DOUBLE_OVERFLOW = ((1n << 65n) - 1n) << 16319n
+// GNU's long double, as the pins here measure it: IEEE binary128, arm64
+// Linux's, with 112 fraction bits under the lead bit and a least normal
+// exponent of -16382. x86-64's 80-bit one has the same exponent range.
+const QUAD_FRACTION_BITS = 112
+const QUAD_MIN_EXPONENT = -16382
+
+// The magnitude from which strtold reads an infinity: halfway from LDBL_MAX to
+// 2**16384, a tie that rounds up to the even 2**16384. GNU refuses an operand
+// that large.
+const LONG_DOUBLE_OVERFLOW = ((1n << 114n) - 1n) << 16270n
 
 // strtold reads zero for a magnitude at or under 2**-UNDERFLOW_BITS, half of
-// the x86-64 long double's least subnormal, and GNU takes the zero.
-const UNDERFLOW_BITS = 16446n
+// the least subnormal, and GNU takes the zero.
+const UNDERFLOW_BITS = 16495n
 
 // About how many bytes of output one chunk of the stream carries.
 const OUTPUT_CHUNK = 64 * 1024
@@ -100,62 +105,6 @@ export function parseFormat(fmt: string): SeqFormat {
     conversion,
     suffix,
   }
-}
-
-// `value` through a `%a` directive, as glibc renders it: the hex digits
-// round half to even at the precision without renormalizing (`%.0a` of 3
-// is `0x2p+1`), `#` keeps the point and `0` pads after `0x`. GNU's value is
-// a long double, so a value needing more than a double's 53 bits shows
-// fewer digits here. Mirrors Python's _hex_float.
-function hexFloat(value: number, spec: SeqFormat): string {
-  const flags = spec.flags
-  const sign =
-    value < 0 || Object.is(value, -0)
-      ? '-'
-      : flags.includes('+')
-        ? '+'
-        : flags.includes(' ')
-          ? ' '
-          : ''
-  const magnitude = Math.abs(value)
-  let zero = false
-  let body: string
-  if (!Number.isFinite(magnitude)) {
-    body = Number.isNaN(magnitude) ? 'nan' : 'inf'
-  } else {
-    const view = new DataView(new ArrayBuffer(8))
-    view.setFloat64(0, magnitude)
-    const bits = view.getBigUint64(0)
-    const biased = Number(bits >> 52n)
-    const fraction = bits & ((1n << 52n) - 1n)
-    let lead = biased === 0 ? '0' : '1'
-    const exponent = biased === 0 ? (fraction === 0n ? 0 : -1022) : biased - 1023
-    let digits = fraction.toString(16).padStart(13, '0')
-    if (spec.precision === null) {
-      digits = digits.replace(/0+$/, '')
-    } else {
-      const places = Number(spec.precision || '0')
-      if (places >= digits.length) {
-        digits = digits.padEnd(places, '0')
-      } else {
-        let kept = BigInt(`0x${lead}${digits.slice(0, places)}`)
-        const rest = BigInt(`0x${digits.slice(places)}`)
-        const half = 8n << BigInt(4 * (digits.length - places - 1))
-        if (rest > half || (rest === half && kept % 2n === 1n)) kept += 1n
-        const text = kept.toString(16).padStart(places + 1, '0')
-        lead = text.slice(0, text.length - places)
-        digits = text.slice(text.length - places)
-      }
-    }
-    const point = digits !== '' || flags.includes('#') ? '.' : ''
-    body = `0x${lead}${point}${digits}p${exponent < 0 ? '-' : '+'}${String(Math.abs(exponent))}`
-    zero = flags.includes('0') && !flags.includes('-')
-  }
-  if (spec.conversion === 'A') body = body.toUpperCase()
-  const width = spec.width === '' ? 0 : Number(spec.width)
-  if (flags.includes('-')) return (sign + body).padEnd(width)
-  if (zero) return sign + body.slice(0, 2) + body.slice(2).padStart(width - sign.length - 2, '0')
-  return (sign + body).padStart(width)
 }
 
 export enum NumberKind {
@@ -231,7 +180,7 @@ function inRange(negative: boolean, units: bigint, scale: number): SeqNumber | n
 // The value strtold reads for a STRTOD match, held exactly, or null when it
 // overflows. A magnitude far outside the long double range is settled from
 // its digit count before any arithmetic (from 10**4933 up it overflows, under
-// 10**-4951 it is zero, as are 2**16384 and 2**-16446 for a hex float), so an
+// 10**-4966 it is zero, as are 2**16384 and 2**-16495 for a hex float), so an
 // exponent of any length costs nothing. Mirrors Python's read_number.
 export function readNumber(found: RegExpExecArray): SeqNumber | null {
   const [, sign, hexa, decimal, inf] = found
@@ -247,7 +196,7 @@ export function readNumber(found: RegExpExecArray): SeqNumber | null {
       signedDigits(power) - BigInt(fraction.length) + BigInt(digits.length - significant.length)
     const top = BigInt(significant.length) + exponent
     if (top > 4933n) return null
-    if (top < -4950n) return seqNumber(negative)
+    if (top < -4965n) return seqNumber(negative)
     const units = BigInt(significant)
     if (exponent >= 0n) return inRange(negative, units * 10n ** exponent, 0)
     return inRange(negative, units, Number(-exponent))
@@ -260,7 +209,7 @@ export function readNumber(found: RegExpExecArray): SeqNumber | null {
     let exponent = signedDigits(power) - BigInt(4 * fraction.length)
     const top = BigInt(bits.toString(2).length) + exponent
     if (top > 16384n) return null
-    if (top < -16445n) return seqNumber(negative)
+    if (top < -16494n) return seqNumber(negative)
     const trailing = BigInt((bits & -bits).toString(2).length - 1)
     const room = exponent < 0n ? -exponent : 0n
     const shift = trailing < room ? trailing : room
@@ -344,15 +293,19 @@ export function defaultFormat(
   }
 }
 
+// `numerator / denominator` rounded half to even, for a dividend that is not
+// negative and a positive divisor.
+function nearest(numerator: bigint, denominator: bigint): bigint {
+  let kept = numerator / denominator
+  const rest = numerator % denominator
+  if (2n * rest > denominator || (2n * rest === denominator && kept % 2n === 1n)) kept += 1n
+  return kept
+}
+
 // `units / 10**drop` rounded half to even, exact for a negative drop.
 function rounded(units: bigint, drop: number): bigint {
   if (drop <= 0) return units * 10n ** BigInt(-drop)
-  const unit = 10n ** BigInt(drop)
-  let kept = units / unit
-  const rest = units % unit
-  const half = unit / 2n
-  if (rest > half || (rest === half && kept % 2n === 1n)) kept += 1n
-  return kept
+  return nearest(units, 10n ** BigInt(drop))
 }
 
 // A finite magnitude in `%f` style; `#` keeps a bare point.
@@ -406,6 +359,13 @@ function generalText(value: SeqNumber, precision: number, alternate: boolean): s
   return mantissa + power
 }
 
+// The sign printf writes ahead of a number: `-`, or what `+` or a space flag
+// asks for a positive one.
+function signText(value: SeqNumber, flags: string): string {
+  if (value.negative) return '-'
+  return flags.includes('+') ? '+' : flags.includes(' ') ? ' ' : ''
+}
+
 // `value` through a `%e`, `%f` or `%g` directive, as printf renders it. The
 // digits round half to even on the exact value. GNU rounds its long double,
 // so a number that sits exactly halfway at the last printed digit (`seq -f
@@ -413,7 +373,7 @@ function generalText(value: SeqNumber, precision: number, alternate: boolean): s
 // x86-64 and arm64.
 function floatText(value: SeqNumber, spec: SeqFormat): string {
   const flags = spec.flags
-  const sign = value.negative ? '-' : flags.includes('+') ? '+' : flags.includes(' ') ? ' ' : ''
+  const sign = signText(value, flags)
   let zero = flags.includes('0') && !flags.includes('-')
   let body: string
   if (value.kind !== NumberKind.FINITE) {
@@ -434,22 +394,83 @@ function floatText(value: SeqNumber, spec: SeqFormat): string {
   return (sign + body).padStart(width)
 }
 
-// The nearest double, for the `%a` directive.
-function toFloat(value: SeqNumber): number {
-  if (value.kind === NumberKind.NAN) return Number.NaN
-  const magnitude =
-    value.kind === NumberKind.INFINITE
-      ? Infinity
-      : Number(`${String(value.units)}e-${String(value.scale)}`)
-  return value.negative ? -magnitude : magnitude
+// A finite, nonzero number as a binary128 long double holds it, in hex: the
+// lead digit, the 28 fraction digits and the binary exponent. The value rounds
+// half to even to 113 significant bits, or to the subnormal grid under
+// 2**-16382, which glibc writes with a lead digit of 0 and that least exponent
+// (`0x0.00004p-16382`). Mirrors Python's _quad_digits.
+function quadDigits(value: SeqNumber): [string, string, number] {
+  const places = QUAD_FRACTION_BITS / 4
+  const denominator = 10n ** BigInt(value.scale)
+  let exponent = value.units.toString(2).length - denominator.toString(2).length
+  const left = value.units << BigInt(Math.max(-exponent, 0))
+  if (left < denominator << BigInt(Math.max(exponent, 0))) exponent -= 1
+  exponent = Math.max(exponent, QUAD_MIN_EXPONENT)
+  const shift = QUAD_FRACTION_BITS - exponent
+  let mantissa =
+    shift >= 0
+      ? nearest(value.units << BigInt(shift), denominator)
+      : nearest(value.units, denominator << BigInt(-shift))
+  if (mantissa === 0n) return ['0', '0'.repeat(places), 0]
+  if (mantissa >> BigInt(QUAD_FRACTION_BITS + 1) !== 0n) {
+    mantissa >>= 1n
+    exponent += 1
+  }
+  const fraction = mantissa & ((1n << BigInt(QUAD_FRACTION_BITS)) - 1n)
+  const lead = mantissa >> BigInt(QUAD_FRACTION_BITS)
+  return [lead.toString(16), fraction.toString(16).padStart(places, '0'), exponent]
+}
+
+// `value` through a `%a` directive, as glibc renders it. The value is the
+// binary128 long double nearest it. The hex digits round half to even at the
+// precision without renormalizing (`%.0a` of 3 is `0x2p+1`), `#` keeps the
+// point and `0` pads after `0x`. GNU sums in long double while these sums are
+// exact, so a printed sum can differ in its last bit (`seq -f %a 0.1 0.1 0.3`
+// stops after 0.2 in GNU, whose third sum overshoots 0.3). Mirrors Python's
+// _hex_float.
+function hexFloat(value: SeqNumber, spec: SeqFormat): string {
+  const flags = spec.flags
+  const sign = signText(value, flags)
+  let zero = false
+  let body: string
+  if (value.kind !== NumberKind.FINITE) {
+    body = value.kind === NumberKind.NAN ? 'nan' : 'inf'
+  } else {
+    const quad: [string, string, number] = value.units === 0n ? ['0', '', 0] : quadDigits(value)
+    let [lead, digits] = quad
+    const exponent = quad[2]
+    if (spec.precision === null) {
+      digits = digits.replace(/0+$/, '')
+    } else {
+      const places = Number(spec.precision || '0')
+      if (places >= digits.length) {
+        digits = digits.padEnd(places, '0')
+      } else {
+        let kept = BigInt(`0x${lead}${digits.slice(0, places)}`)
+        const rest = BigInt(`0x${digits.slice(places)}`)
+        const half = 8n << BigInt(4 * (digits.length - places - 1))
+        if (rest > half || (rest === half && kept % 2n === 1n)) kept += 1n
+        const text = kept.toString(16).padStart(places + 1, '0')
+        lead = text.slice(0, text.length - places)
+        digits = text.slice(text.length - places)
+      }
+    }
+    const point = digits !== '' || flags.includes('#') ? '.' : ''
+    const mark = exponent < 0 ? '-' : '+'
+    body = `0x${lead}${point}${digits}p${mark}${String(Math.abs(exponent))}`
+    zero = flags.includes('0') && !flags.includes('-')
+  }
+  if (spec.conversion === 'A') body = body.toUpperCase()
+  const width = spec.width === '' ? 0 : Number(spec.width)
+  if (flags.includes('-')) return (sign + body).padEnd(width)
+  if (zero) return sign + body.slice(0, 2) + body.slice(2).padStart(width - sign.length - 2, '0')
+  return (sign + body).padStart(width)
 }
 
 // One number through a seq format, as C's printf renders it. Mirrors
 // Python's render.
 export function render(spec: SeqFormat, value: SeqNumber): string {
-  const body = 'aA'.includes(spec.conversion)
-    ? hexFloat(toFloat(value), spec)
-    : floatText(value, spec)
+  const body = 'aA'.includes(spec.conversion) ? hexFloat(value, spec) : floatText(value, spec)
   return spec.prefix.replaceAll('%%', '%') + body + spec.suffix.replaceAll('%%', '%')
 }
 

@@ -416,6 +416,11 @@ it.each([
   ['s/.*/\\L\\u&/', 'hELLO\n', 'Hello\n'],
   ['s/\\(x*\\)\\(a\\)/\\u\\1\\2/', 'ab\n', 'Ab\n'],
   ['s/abc/\\u\\lX/', 'abc\n', 'x\n'],
+  ['s/\\(x*\\)a/\\u\\1\\Lz/', 'a\n', 'z\n'],
+  ['s/\\(x*\\)a/\\l\\1\\UZz/', 'a\n', 'ZZ\n'],
+  ['s/\\(x*\\)a\\(b\\)/\\u\\1\\E\\2/', 'ab\n', 'b\n'],
+  ['s/\\(x*\\)a/\\u\\1\\l\\1\\Uq/', 'ab\n', 'Qb\n'],
+  ['s/\\(x*\\)\\(y*\\)\\(a\\)/\\u\\1\\2\\3/', 'ab\n', 'ab\n'],
   ['s/.*/\\U&/', 'a\u00e9\n', byteView('A\u00e9\n')],
 ])('case conversion: %s', (script, text, expected) => {
   expect(sed(script, text)).toBe(expected)

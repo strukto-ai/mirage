@@ -226,11 +226,14 @@ def _apply_repl(m: "re.Match[str]", repl: str) -> str:
 
     ``\\U`` and ``\\L`` map everything after them to upper or lower case
     until ``\\E`` or the other one; ``\\u`` and ``\\l`` map only the next
-    character. A one-shot escape a case escape follows is dropped, and of
-    two one-shots the later wins. One that lands on an empty group passes
-    to whatever comes next (GNU sed 4.9's ``append_replacement``). The C
-    locale maps ASCII letters only, so a byte above 0x7f is written as it
-    is; GNU 4.9 writes 0xff for it, which is not copied.
+    character, and one that lands on an empty group passes to what
+    directly follows the group. Every case escape drops a one-shot still
+    waiting, written before it or carried to it, so the later of two
+    one-shots wins: GNU sed 4.9's ``setup_replacement`` cuts the
+    replacement at each escape and ``append_replacement`` hands a carried
+    one-shot to the next piece only. The C locale maps ASCII letters only,
+    so a byte above 0x7f is written as it is; GNU 4.9 writes 0xff for it,
+    which is not copied.
 
     Args:
         m (re.Match): The regex match for the current substitution.
@@ -264,9 +267,10 @@ def _apply_repl(m: "re.Match[str]", repl: str) -> str:
                 emit(m.group(int(nxt)) or "", group=True)
             elif nxt in "ULE":
                 sticky = None if nxt == "E" else nxt == "U"
-                pending = None
+                pending = carried = None
             elif nxt in "ul":
                 pending = nxt == "u"
+                carried = None
             elif nxt == "n":
                 emit("\n")
             elif nxt == "t":

@@ -165,6 +165,40 @@
         "w",
         "f"
       ]
+    },
+    {
+      "id": "seq_f_hex_prints_the_long_double",
+      "seq": 601235,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq -f %a 0x1p1024 0x1p1024 | head -1; seq -f %a 0.1 0.1; seq -f %a 0x1p-16400 0x1p-16400; seq -f %a 0x1p-16495 0x1p-16495; seq -f %a -0 1; seq -f %#a 0 0; seq -f %A 1e300 1e300 | head -1; seq 1.18973149535723176508e4932 | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "0x1p+1024\n0x1.999999999999999999999999999ap-4\n0x0.00004p-16382\n0x0p+0\n-0x0p+0\n0x1p+0\n0x0.p+0\n0X1.7E43C8800759BA59C08E14C7CD7BP+996\n1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
     }
   ]
 }
