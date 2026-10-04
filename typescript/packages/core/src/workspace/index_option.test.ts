@@ -149,11 +149,18 @@ describe('Workspace index option', () => {
     const built = vi.spyOn(indexFactory, 'buildIndex')
     try {
       expect(() =>
-        ws.addMount('/d', new RAMVFS(), MountMode.READ, { policy: ReadPolicy.FRESH, ttl: 600 }, null, {
-          type: IndexType.REDIS,
-          url: 'redis://127.0.0.1:1/0',
-          ttl: 0,
-        } as RedisIndexConfig),
+        ws.addMount(
+          '/d',
+          new RAMVFS(),
+          MountMode.READ,
+          { policy: ReadPolicy.FRESH, ttl: 600 },
+          null,
+          {
+            type: IndexType.REDIS,
+            url: 'redis://127.0.0.1:1/0',
+            ttl: 0,
+          } as RedisIndexConfig,
+        ),
       ).toThrow(/caches reads or listings/)
       // The verdict runs before the registry builds a store, so a refused
       // call leaves no Redis client behind and no mount.

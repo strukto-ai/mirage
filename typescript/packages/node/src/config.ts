@@ -518,9 +518,8 @@ function validateEnvBlock(value: unknown): void {
 // index blocks. A mount block is left in its own spelling but for its
 // `index:`: its `config:` carries VFS credentials whose snake_case keys
 // (aws_access_key_id, ...) are consumed downstream as-is, and
-// command_limits is parsed separately. The mounts map is rebuilt rather
-// than edited, because it is the caller's object: the CLI posts the
-// document it checked, and the daemon loads it again.
+// command_limits is parsed separately. The mounts map is rebuilt, as
+// the store block is, rather than edited.
 function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unknown> {
   const out = camelizeKeys(raw)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)

@@ -1817,8 +1817,8 @@ describe('mount index block', () => {
 
   it('posts the checked document unchanged and loads it twice', async () => {
     // The CLI sends the snake_case document `checkWorkspaceConfigFile`
-    // returns and the daemon loads it again; a camelize done in place
-    // would hand the daemon `keyPrefix`, which it refuses.
+    // returns and the daemon loads it again; camelizing the mount index
+    // in the check would send `keyPrefix`, which the daemon refuses.
     const file = join(root, 'w.yaml')
     writeFileSync(
       file,
