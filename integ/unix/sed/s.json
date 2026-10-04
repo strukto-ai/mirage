@@ -72,6 +72,40 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "sed_s_case_conversion",
+      "seq": 15300009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 'hello world' | sed 's/.*/\\U&/;s/\\(O\\) \\(W\\)/\\L\\1\\E \\2/'; echo 'hello world' | sed 's/\\w\\+/\\u&/g'; echo 'hELLO' | sed 's/.*/\\u\\L&/'; echo 'hello' | sed 's/.*/\\L\\u&/'; echo 'ab' | sed 's/\\(x*\\)\\(a\\)/\\u\\1\\2/'; echo 'abc' | sed 's/abc/\\u\\lX/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLo WORLD\nHello World\nhello\nHello\nAb\nx\n",
+        "stderr": ""
+      }
     }
   ]
 }

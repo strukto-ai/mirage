@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 
@@ -204,6 +204,8 @@ class Interpreter:
         host (AwkHost): the doors to files and commands.
         argv (Sequence[str]): the operands as typed, ARGV[1] onward.
         assignments (dict[str, str] | None): the ``-v`` assignments.
+        environ (Mapping[str, str] | None): the exported environment,
+            which ENVIRON holds; writing ENVIRON reaches no command.
     """
 
     def __init__(
@@ -212,6 +214,7 @@ class Interpreter:
         host: AwkHost,
         argv: Sequence[str] = (),
         assignments: dict[str, str] | None = None,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         self.program = program
         self.host = host
@@ -248,6 +251,9 @@ class Interpreter:
         for position, operand in enumerate(argv, 1):
             self.tables["ARGV"][str(position)] = strnum(operand)
         self.globals["ARGC"] = num(len(argv) + 1)
+        self.tables["ENVIRON"] = {
+            name: strnum(value) for name, value in (environ or {}).items()
+        }
 
     def special(self, name: str) -> str:
         return to_str(self.globals.get(name, UNINIT), "%.6g")

@@ -319,6 +319,7 @@ async def awk(
     shell: ShellFn | None = None,
     ns: NamespaceView | None = None,
     mount_prefix: str = "",
+    env: Mapping[str, str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run an awk program over backend paths or stdin.
 
@@ -347,6 +348,8 @@ async def awk(
         ns (NamespaceView | None): The name plane's facts, which say
             which operands another mount serves.
         mount_prefix (str): The prefix of the mount awk runs on.
+        env (Mapping[str, str] | None): The exported environment, which
+            ENVIRON holds.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Output stream and exit metadata.
@@ -393,6 +396,7 @@ async def awk(
         streams,
         [byte_view(p.raw_path) for p in paths],
         split_assignments(f.assignments),
+        {byte_view(k): byte_view(v) for k, v in (env or {}).items()},
     )
     if f.field_separator is not None:
         interp.set_var(

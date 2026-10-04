@@ -189,6 +189,23 @@ def test_branch_and_label_end_at_newline(script, text, expected):
     assert _sed(script, text) == expected
 
 
+@pytest.mark.parametrize(
+    "expr,text,expected",
+    [
+        ("s/.*/\\U&/", "hello world\n", "HELLO WORLD\n"),
+        ("s/\\w\\+/\\u&/g", "hello world\n", "Hello World\n"),
+        ("s/\\(o\\) \\(w\\)/\\U\\1\\E \\2/", "hello world\n", "hellO world\n"),
+        ("s/.*/\\u\\L&/", "hELLO\n", "hello\n"),
+        ("s/.*/\\L\\u&/", "hELLO\n", "Hello\n"),
+        ("s/\\(x*\\)\\(a\\)/\\u\\1\\2/", "ab\n", "Ab\n"),
+        ("s/abc/\\u\\lX/", "abc\n", "x\n"),
+        ("s/.*/\\U&/", "a\u00e9\n", byte_view("A\u00e9\n")),
+    ],
+)
+def test_s_case_conversion(expr, text, expected):
+    assert _sed(expr, text) == expected
+
+
 def test_l_escapes_and_octal():
     assert list_line("a\tb\\c\x01", 70) == "a\\tb\\\\c\\001$\n"
     assert (

@@ -226,6 +226,19 @@ async def test_command_line_assignment_is_a_strnum():
 
 
 @pytest.mark.asyncio
+async def test_environ_holds_the_environment_as_strnums():
+    interp = Interpreter(
+        parse(
+            'BEGIN{print ENVIRON["n"]+1, (ENVIRON["n"]==5), ("m" in ENVIRON)}'
+        ),
+        FakeHost(),
+        environ={"n": "05"},
+    )
+    await interp.run_begin()
+    assert (await interp.drain())[0] == b"6 1 0\n"
+
+
+@pytest.mark.asyncio
 async def test_exit_carries_its_code_and_end_still_runs():
     interp = Interpreter(
         parse('NR==2{exit 3} {print} END{print "end"}'),

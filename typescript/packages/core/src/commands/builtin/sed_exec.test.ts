@@ -408,6 +408,19 @@ it.each([
   expect(sed(script, text)).toBe(expected)
 })
 
+it.each([
+  ['s/.*/\\U&/', 'hello world\n', 'HELLO WORLD\n'],
+  ['s/\\w\\+/\\u&/g', 'hello world\n', 'Hello World\n'],
+  ['s/\\(o\\) \\(w\\)/\\U\\1\\E \\2/', 'hello world\n', 'hellO world\n'],
+  ['s/.*/\\u\\L&/', 'hELLO\n', 'hello\n'],
+  ['s/.*/\\L\\u&/', 'hELLO\n', 'Hello\n'],
+  ['s/\\(x*\\)\\(a\\)/\\u\\1\\2/', 'ab\n', 'Ab\n'],
+  ['s/abc/\\u\\lX/', 'abc\n', 'x\n'],
+  ['s/.*/\\U&/', 'a\u00e9\n', byteView('A\u00e9\n')],
+])('case conversion: %s', (script, text, expected) => {
+  expect(sed(script, text)).toBe(expected)
+})
+
 describe('sed l (GNU sed 4.9)', () => {
   it('shows C escapes, a doubled backslash and octal for other bytes', () => {
     expect(listLine('a\tb\\c\x01', 70)).toBe('a\\tb\\\\c\\001$\n')

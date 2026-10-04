@@ -672,18 +672,57 @@ export class SedMachine {
 }
 
 /** Expand against the original captures, preserving boundary context and case. */
+// `text` with its ASCII letters mapped, as the C locale maps them.
+function caseMapped(text: string, upper: boolean): string {
+  return upper
+    ? text.replace(/[a-z]+/g, (run) => run.toUpperCase())
+    : text.replace(/[A-Z]+/g, (run) => run.toLowerCase())
+}
+
+/**
+ * Expand a GNU sed replacement against a match: `&` is the whole match,
+ * `\1`..`\9` are groups, `\n`/`\t` are newline/tab and `\X` is a literal
+ * X. `\U` and `\L` map everything after them to upper or lower case until
+ * `\E` or the other one; `\u` and `\l` map only the next character. A
+ * one-shot escape a case escape follows is dropped, and of two one-shots
+ * the later wins. One that lands on an empty group passes to whatever comes
+ * next (GNU sed 4.9's `append_replacement`). The C locale maps ASCII letters
+ * only, so a byte above 0x7f is written as it is; GNU 4.9 writes 0xff for
+ * it, which is not copied. Mirrors Python's `_apply_repl`.
+ */
 function applyReplacement(repl: string, groups: readonly (string | undefined)[]): string {
   let out = ''
+  let sticky: boolean | null = null
+  let pending: boolean | null = null
+  let carried: boolean | null = null
+  const emit = (piece: string, group = false): void => {
+    const first = pending ?? carried
+    const own = pending !== null
+    pending = carried = null
+    if (piece === '') {
+      if (group && own) carried = first
+      return
+    }
+    if (first !== null) {
+      out += caseMapped(piece.charAt(0), first)
+      piece = piece.slice(1)
+    }
+    out += sticky === null ? piece : caseMapped(piece, sticky)
+  }
   for (let i = 0; i < repl.length; i++) {
-    const ch = repl[i]
-    if (ch === '&') out += groups[0] ?? ''
+    const ch = repl[i] ?? ''
+    if (ch === '&') emit(groups[0] ?? '', true)
     else if (ch === '\\' && i + 1 < repl.length) {
       const next = repl[++i] ?? ''
-      if (/[0-9]/.test(next)) out += groups[Number(next)] ?? ''
-      else if (next === 'n') out += '\n'
-      else if (next === 't') out += '\t'
-      else out += next
-    } else out += ch ?? ''
+      if (/[0-9]/.test(next)) emit(groups[Number(next)] ?? '', true)
+      else if (next === 'U' || next === 'L' || next === 'E') {
+        sticky = next === 'E' ? null : next === 'U'
+        pending = null
+      } else if (next === 'u' || next === 'l') pending = next === 'u'
+      else if (next === 'n') emit('\n')
+      else if (next === 't') emit('\t')
+      else emit(next)
+    } else emit(ch)
   }
   return out
 }
