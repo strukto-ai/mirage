@@ -1093,6 +1093,28 @@ class SplicingRAMVFS extends RAMVFS {
   }
 }
 
+/** A RAM mount whose pwrite never answers until the test releases it. */
+class StalledRAMVFS extends RAMVFS {
+  calls = 0
+  release = (): void => undefined
+
+  override ops(): readonly RegisteredOp[] {
+    return super.ops().map((op) =>
+      op.name === 'pwrite'
+        ? {
+            ...op,
+            fn: () => {
+              this.calls += 1
+              return new Promise<void>((resolve) => {
+                this.release = resolve
+              })
+            },
+          }
+        : op,
+    )
+  }
+}
+
 describe('dispatch runs writers to one path one at a time', () => {
   it('lands every offset write on a store that splices', async () => {
     // Four sessions' edits at once: each pwrite reads the file before any
@@ -1157,33 +1179,11 @@ describe('dispatch runs writers to one path one at a time', () => {
   it('times out a writer queued behind a call that never answers', async () => {
     // The stalled call keeps the path, since it may still write; a writer
     // queued behind it times out on its own budget and then never runs.
-    let calls = 0
-    let release = (): void => undefined
-    class StalledRAMVFS extends RAMVFS {
-      override ops(): readonly RegisteredOp[] {
-        return super.ops().map((op) =>
-          op.name === 'pwrite'
-            ? {
-                ...op,
-                fn: () => {
-                  calls += 1
-                  return new Promise<void>((resolve) => {
-                    release = resolve
-                  })
-                },
-              }
-            : op,
-        )
-      }
-    }
+    const store = new StalledRAMVFS()
     const parser = await getTestParser()
     const ws = new Workspace(
       {
-        '/data': [
-          new StalledRAMVFS(),
-          MountMode.WRITE,
-          { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
-        ],
+        '/data': [store, MountMode.WRITE, { pwrite: new Limit({ timeoutSeconds: 0.01 }) }],
       },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
@@ -1195,11 +1195,38 @@ describe('dispatch runs writers to one path one at a time', () => {
       await expect(
         ws.dispatch('pwrite', '/data/f', [ENC.encode('B')], { offset: 3 }),
       ).rejects.toThrow()
-      release()
+      store.release()
       await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(calls).toBe(1)
+      expect(store.calls).toBe(1)
     } finally {
-      release()
+      store.release()
+      await ws.close()
+    }
+  })
+
+  it('lets go of a name when a rename gives up waiting for the other', async () => {
+    // The rename holds /data/f and waits for /data/g, which a stalled
+    // pwrite keeps; once the rename times out, /data/f is free again.
+    const store = new StalledRAMVFS()
+    const parser = await getTestParser()
+    const limit = new Limit({ timeoutSeconds: 0.01 })
+    const ws = new Workspace(
+      { '/data': [store, MountMode.WRITE, { pwrite: limit, rename: limit }] },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/f', [ENC.encode('f')])
+      await ws.dispatch('write', '/data/g', [ENC.encode('g')])
+      await expect(
+        ws.dispatch('pwrite', '/data/g', [ENC.encode('G')], { offset: 0 }),
+      ).rejects.toThrow()
+      await expect(
+        ws.dispatch('rename', '/data/f', [PathSpec.fromStrPath('/data/g')]),
+      ).rejects.toThrow()
+      await ws.dispatch('write', '/data/f', [ENC.encode('after')])
+      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('after')
+    } finally {
+      store.release()
       await ws.close()
     }
   })

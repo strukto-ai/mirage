@@ -579,19 +579,21 @@ export class Dispatcher {
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
     try {
-      const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
+      const run = (opKwargs: OpKwargs, timeout = opTimeout) =>
         mount.use(async () => {
           const answer = await runWithMountContext(
             () =>
-              runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () => {
-                const call = Promise.resolve(
-                  opName === 'setattr'
-                    ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                    : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
-                )
-                onCall?.(call)
-                return runWithTimeout(call, opTimeout, opName)
-              }),
+              runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
+                runWithTimeout(
+                  Promise.resolve(
+                    opName === 'setattr'
+                      ? this.applySetattr(mount, vfs, scope, p, opKwargs)
+                      : this.opsRegistry.call(opName, vfs, vfs.accessor, scope, fullArgs, opKwargs),
+                  ),
+                  timeout,
+                  opName,
+                ),
+              ),
             mount.mountId,
           )
           return wrapOpStream(answer, mount.mountId, mount.activity)
@@ -607,56 +609,69 @@ export class Dispatcher {
         // changes beside the store (caches, the node table's links and
         // attributes) changes under the same hold: a chain of renames
         // finishing out of order would move one name's attributes onto
-        // another. The hold lasts until the store has answered, past a
-        // per-op timeout too: the timeout cannot stop the call, and a
-        // timed-out pwrite still writes back what it read.
+        // another.
         const prefix = rstripSlash(mountPrefix)
         const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
           .map((name) => `${String(this.storeId(vfs))}:${mountKey(name, prefix)}`)
           .sort(compareCodePoints)
-        // A writer's timeout counts its wait for the hold too: a call that
-        // never answers keeps the path, and a writer queued behind it times
-        // out on its own budget and then never runs.
-        const turn = { entered: false, abandoned: false, answered: false }
-        const queued = new Promise<unknown>((settle) => {
+        // The caller's timeout covers its wait for the hold and the store's
+        // call, not the bookkeeping after it, which it then waits for. A
+        // writer that gives up while queued lets go of any name it already
+        // holds and never runs. One that gives up after its call started
+        // keeps the hold until the store answers, since the timeout cannot
+        // stop the call and a timed-out pwrite still writes back what it
+        // read; a failure nobody waits for any more is reported.
+        const turn = { entered: false, abandoned: false, late: false, answered: false }
+        let giveUp = (): void => undefined
+        const gaveUp = new Promise<void>((resolve) => {
+          giveUp = resolve
+        })
+        let answer: Promise<unknown> = Promise.resolve()
+        let settled: Promise<void> = Promise.resolve()
+        const entered = new Promise<void>((enter) => {
           const held = async (): Promise<void> => {
             if (turn.abandoned) return
             turn.entered = true
-            let call: Promise<unknown> = Promise.resolve()
-            const answered = (async () => {
-              const answer = await run(fullKwargs, (started) => {
-                call = started
-                // A failure after the caller has its answer (its timeout)
-                // reaches no one else, so it is reported here.
-                started.catch((err: unknown) => {
-                  if (turn.answered) {
-                    console.warn(`${opName} ${p.virtual} failed after its timeout: ${String(err)}`)
-                  }
-                })
-              })
-              served(report, answer)
+            answer = run(fullKwargs, null)
+            answer.then(
+              () => {
+                turn.answered = true
+              },
+              () => {
+                turn.answered = true
+              },
+            )
+            settled = answer.then(async (value) => {
+              if (!turn.late) served(report, value)
               await this.settleWrite(opName, p, renameDst)
-              return answer
-            })()
-            settle(answered)
-            // Waited on, not dropped: the caller receives this answer, and
-            // the call's own failure is reported above.
-            await answered.catch(() => undefined)
-            await call.catch(() => undefined)
+            })
+            enter()
+            await settled.catch((err: unknown) => {
+              if (turn.late) {
+                console.warn(`${opName} ${p.virtual} failed after its timeout: ${String(err)}`)
+              }
+            })
           }
           void keys.reduceRight<() => Promise<void>>(
-            (inner, key) => () => this.writers.withLock(key, inner),
+            (inner, key) => () => this.writers.withLock(key, () => Promise.race([inner(), gaveUp])),
             held,
           )()
         })
         try {
-          result = await runWithTimeout(queued, opTimeout, opName)
+          result = await runWithTimeout(
+            entered.then(() => answer),
+            opTimeout,
+            opName,
+          )
         } catch (err) {
-          if (!turn.entered) turn.abandoned = true
+          if (!turn.answered) turn.late = true
+          if (!turn.entered) {
+            turn.abandoned = true
+            giveUp()
+          }
           throw err
-        } finally {
-          turn.answered = true
         }
+        await settled
       } else {
         result = await run(fullKwargs)
       }
