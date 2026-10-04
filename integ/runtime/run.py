@@ -94,6 +94,8 @@ RUNTIME_LANGUAGE: dict[str, str | None] = {
     "apple_container": None,
 }
 PROGRAM_HEAD: dict[str, str] = {"python": "python3 -c", "js": "node -e"}
+# The expect keys that read the workspace's op ledger.
+LEDGER_CHECKS = frozenset({"ops_contain", "ops_absent", "ops_count"})
 # What a `runtimes` entry needs on this host before it can run. A runtime
 # missing here does not exist on this host (pyodide is typescript's), so
 # its variant is not listed at all.
@@ -790,7 +792,8 @@ async def _run_parallel(
 
     The branches start together, so their ops reach the mounts
     interleaved as two agents' would, and each is checked against its
-    own ``expect``. A branch's ledger slice holds every branch's ops.
+    own ``expect``. A branch cannot check the ledger: the workspace
+    keeps one, and every branch's ops land in it.
 
     Args:
         ws (Workspace): the workspace under test.
@@ -798,6 +801,14 @@ async def _run_parallel(
         index (int): the step's place in the case.
         branches (list[dict[str, Any]]): the steps to run together.
     """
+    ledger = [
+        f"{case_id} step[{index}].parallel[{k}]: a branch cannot check "
+        "the ledger, which holds every branch's ops"
+        for k, branch in enumerate(branches)
+        if set(branch.get("expect", {})) & LEDGER_CHECKS
+    ]
+    if ledger:
+        return ledger
     runs = []
     for k, branch in enumerate(branches):
         session_id = f"parallel-{index}-{k}"

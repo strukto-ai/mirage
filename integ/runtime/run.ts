@@ -768,9 +768,9 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
 /**
  * Run each branch on a session of its own, all at once. The branches
  * start together, so their ops reach the mounts interleaved as two
- * agents' would, and each is checked against its own `expect`. A
- * branch's ledger slice holds every branch's ops. Mirrors run.py
- * `_run_parallel`.
+ * agents' would, and each is checked against its own `expect`. A branch
+ * cannot check the ledger: the workspace keeps one, and every branch's
+ * ops land in it. Mirrors run.py `_run_parallel`.
  */
 async function runParallel(
   ws: Workspace,
@@ -778,6 +778,15 @@ async function runParallel(
   index: number,
   branches: Step[],
 ): Promise<string[]> {
+  const ledger = branches.flatMap((branch, k) =>
+    Object.keys(branch.expect ?? {}).some((key) => LEDGER_CHECKS.has(key))
+      ? [
+          `${caseId} step[${index}].parallel[${k}]: a branch cannot check ` +
+            "the ledger, which holds every branch's ops",
+        ]
+      : [],
+  )
+  if (ledger.length > 0) return ledger
   const runs = branches.map((branch, k) => {
     const sessionId = `parallel-${index}-${k}`
     ws.createSession(sessionId)
@@ -901,6 +910,8 @@ const RUNTIME_LANGUAGE: Record<string, string | null> = {
   apple_container: null,
 }
 const PROGRAM_HEAD: Record<string, string> = { python: 'python3 -c', js: 'node -e' }
+// The expect keys that read the workspace's op ledger.
+const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 // What a `runtimes` entry needs on this host before it can run. A runtime
 // missing here does not exist on this host (wasi is python's), so its
 // variant is not listed at all. e2b is left out: E2B's sandbox proxy drops

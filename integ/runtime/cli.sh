@@ -160,7 +160,7 @@ cli_expressible() {
     and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select((type == "object" and .name == "echobox") or . == "echobox")) | length) == 0)
     and (((.world.register_runtimes // {}) | length) == 0)
-    and (((.steps // []) | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op") or has("facade"))) | length) == 0)
+    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op") or has("facade"))) | length) == 0)
   ' >/dev/null <<<"$case_json"
 }
 

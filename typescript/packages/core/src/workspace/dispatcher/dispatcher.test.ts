@@ -1074,6 +1074,10 @@ describe('a marked op is judged on the paths the door reaches', () => {
  * give the loop a turn, and write the whole file back.
  */
 class SplicingRAMVFS extends RAMVFS {
+  constructor(private readonly pause = 0) {
+    super()
+  }
+
   override ops(): readonly RegisteredOp[] {
     const found = new Map(super.ops().map((op) => [op.name, op.fn]))
     const read = found.get('read')
@@ -1081,7 +1085,7 @@ class SplicingRAMVFS extends RAMVFS {
     if (read === undefined || write === undefined) throw new Error('RAM lacks read or write')
     const pwrite: RegisteredOp['fn'] = async (accessor, path, args, kwargs) => {
       const whole = (await read(accessor, path, [], {})) as Uint8Array
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, this.pause))
       const data = args[0] as Uint8Array
       await write(accessor, path, [spliceWindow(whole, kwargs.offset as number, data)], {})
     }
@@ -1115,6 +1119,66 @@ describe('dispatch runs writers to one path one at a time', () => {
         ),
       )
       expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('A12B45C78D')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('holds one store mounted twice as one file', async () => {
+    // The same store under two names: one writer at a time by the store's
+    // own key, not by the name. Mirrors python's
+    // test_offset_writes_through_two_mounts_of_one_store_all_land.
+    const parser = await getTestParser()
+    const store = new SplicingRAMVFS()
+    const ws = new Workspace(
+      { '/a': store, '/b': store },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/a/f', [ENC.encode('0123456789')])
+      await Promise.all(
+        (
+          [
+            ['/a/f', 'A', 0],
+            ['/b/f', 'B', 3],
+            ['/a/f', 'C', 6],
+            ['/b/f', 'D', 9],
+          ] as const
+        ).map(([name, letter, offset]) =>
+          ws.dispatch('pwrite', name, [ENC.encode(letter)], { offset }),
+        ),
+      )
+      expect(DEC.decode((await ws.dispatch('read', '/b/f')) as Uint8Array)).toBe('A12B45C78D')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('holds the path past a timeout until the store has answered', async () => {
+    // A timeout rejects the caller but cannot stop the call: the timed-out
+    // pwrite still writes back what it read, so the next writer must not
+    // read before that lands.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      {
+        '/data': [
+          new SplicingRAMVFS(50),
+          MountMode.WRITE,
+          { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
+        ],
+      },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
+      await expect(
+        ws.dispatch('pwrite', '/data/f', [ENC.encode('A')], { offset: 0 }),
+      ).rejects.toThrow()
+      await expect(
+        ws.dispatch('pwrite', '/data/f', [ENC.encode('B')], { offset: 3 }),
+      ).rejects.toThrow()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('A12B456789')
     } finally {
       await ws.close()
     }

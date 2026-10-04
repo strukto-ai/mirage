@@ -1371,3 +1371,32 @@ async def test_offset_writes_to_one_path_all_land_on_a_splicing_store():
         )
         got, _ = await ws.dispatch("read", f)
         assert bytes(got) == b"A12B45C78D"
+
+
+@pytest.mark.asyncio
+async def test_offset_writes_through_two_mounts_of_one_store_all_land():
+    # One store mounted twice holds one file under two names: the writes
+    # are one writer at a time by the store's own key, not by the name.
+    store = _SplicingRAMVFS()
+    with Workspace({"/a/": store, "/b/": store}, mode=MountMode.WRITE) as ws:
+        await ws.dispatch(
+            "write", PathSpec.from_str_path("/a/f"), data=b"0123456789"
+        )
+        await asyncio.gather(
+            *(
+                ws.dispatch(
+                    "pwrite",
+                    PathSpec.from_str_path(name),
+                    data=letter,
+                    offset=offset,
+                )
+                for name, letter, offset in (
+                    ("/a/f", b"A", 0),
+                    ("/b/f", b"B", 3),
+                    ("/a/f", b"C", 6),
+                    ("/b/f", b"D", 9),
+                )
+            )
+        )
+        got, _ = await ws.dispatch("read", PathSpec.from_str_path("/b/f"))
+        assert bytes(got) == b"A12B45C78D"

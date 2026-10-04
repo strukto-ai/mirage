@@ -80,7 +80,8 @@ the typescript runners leave e2b out of their runtime tables.
   `runtime@host`, `backend` or `runtime@backend`. Every override is a
   recorded difference, named in the folder's README.
 - `parallel` holds steps that run at once, each on a session of its own;
-  each is checked against its own `expect` once all have ended.
+  each is checked against its own `expect` once all have ended. A branch
+  cannot check the op ledger, which holds every branch's ops.
 - `backends` repeats a case over `ram`, `disk`, `ssh`, `s3` and `redis`;
   each mount gets its own key space or directory. `ssh` mounts a fresh
   directory on the ssh runtime's box over SFTP.

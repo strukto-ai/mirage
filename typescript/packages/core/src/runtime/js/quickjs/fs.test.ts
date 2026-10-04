@@ -110,13 +110,16 @@ describe('quickjs gives the event loop a turn', () => {
         longest = Math.max(longest, now - last)
         last = now
       }, 0)
-      const result = await ws.shell(
-        "node -e \"const end = Date.now() + 400; while (Date.now() < end) std.open('/data/f.txt', 'r').close()\"",
-      )
-      clearInterval(timer)
-      longest = Math.max(longest, performance.now() - last)
-      expect(result.exitCode).toBe(0)
-      expect(longest).toBeLessThan(200)
+      try {
+        const result = await ws.shell(
+          "node -e \"const end = Date.now() + 400; while (Date.now() < end) std.open('/data/f.txt', 'r').close()\"",
+        )
+        longest = Math.max(longest, performance.now() - last)
+        expect(result.exitCode).toBe(0)
+        expect(longest).toBeLessThan(200)
+      } finally {
+        clearInterval(timer)
+      }
     } finally {
       await ws.close()
     }
