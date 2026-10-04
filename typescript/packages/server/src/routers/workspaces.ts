@@ -20,6 +20,8 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { DiskWorkspaceStateStore, DOT_IDS, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
+import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
+import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { type WorkspaceRegistry } from '../registry.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
@@ -133,6 +135,29 @@ async function readLoadBody(req: FastifyRequest): Promise<[LoadWorkspaceBody, Ui
   return [body, new Uint8Array(joined.buffer, joined.byteOffset, joined.byteLength)]
 }
 
+/**
+ * Whether a capture (snapshot, clone) failed because the workspace's
+ * lines did not end in time; such a request answers 409: cancel them and
+ * retry.
+ */
+function isBusy(error: unknown): boolean {
+  return (error as { code?: unknown }).code === 'EBUSY'
+}
+
+// Under the snapshot store: one key prefix per account.
+const ACCOUNTS_DIR = 'accounts'
+
+/**
+ * The key the caller's snapshot `key` has in the store, or null for a key
+ * that is not a plain relative path. An account's snapshots live under
+ * its own prefix, so no account can write or load another's by naming
+ * its key.
+ */
+function storeKey(account: string | null, key: string): string | null {
+  if (!isSafeBlobPath(key)) return null
+  return account === null ? key : `${ACCOUNTS_DIR}/${quoteName(account)}/${key}`
+}
+
 function noStore(reply: FastifyReply): FastifyReply {
   return reply.status(400).send({ detail: 'this server has no snapshot store' })
 }
@@ -200,11 +225,14 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
         }
         if (deps.registry.has(wid)) {
-          const held = deps.registry.get(wid)
-          if (deps.registry.removing(wid) || held.configDigest !== digest) {
+          const held = deps.registry.visible(wid, req.account)
+          if (held === null || deps.registry.removing(wid) || held.configDigest !== digest) {
             return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
           }
           return reply.status(200).send(await makeDetail(held))
+        }
+        if (!(await deps.registry.claim(wid, req.account))) {
+          return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
         }
         let args: WorkspaceArgs
         try {
@@ -247,7 +275,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
             await ws.addFuseMount(prefix, mountpoint, undefined, backend)
           }
-          entry = deps.registry.add(ws, wid)
+          entry = deps.registry.add(ws, wid, req.account)
           entry.configDigest = digest
         } catch (e) {
           await ws.close()
@@ -258,7 +286,12 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     },
   )
 
-  app.get('/v1/workspaces', () => deps.registry.list().map(makeBrief))
+  app.get('/v1/workspaces', (req) =>
+    deps.registry
+      .list()
+      .filter((e) => deps.registry.visible(e.id, req.account) !== null)
+      .map(makeBrief),
+  )
 
   app.post('/v1/workspaces/load', WRITE_RATE_LIMIT, async (req, reply) => {
     const multipart = (req.headers['content-type'] ?? '').startsWith('multipart/')
@@ -272,7 +305,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         if (body.key === undefined) {
           throw new MultipartError(400, "load needs a 'key' or an uploaded 'snapshot' part")
         }
-        source = body.key
+        const scoped = storeKey(req.account, body.key)
+        if (scoped === null) throw new MultipartError(400, `invalid snapshot key: ${body.key}`)
+        source = scoped
       }
     } catch (e) {
       if (!(e instanceof MultipartError)) throw e
@@ -286,6 +321,10 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     }
     const store = typeof source === 'string' ? deps.snapshotStore : undefined
     if (typeof source === 'string' && store === undefined) return noStore(reply)
+    const wid = workspaceId ?? newWorkspaceId()
+    if (!(await deps.registry.claim(wid, req.account))) {
+      return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
+    }
     let overrides: Record<string, BaseVFS | Mount>
     try {
       // An override mount's credential may be a pointer at one of
@@ -313,7 +352,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     }
     let entry
     try {
-      entry = deps.registry.add(ws, workspaceId)
+      entry = deps.registry.add(ws, wid, req.account)
     } catch (e) {
       return reply.status(409).send({ detail: (e as Error).message })
     }
@@ -323,16 +362,18 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
   app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceGetQuery }>(
     '/v1/workspaces/:id',
     async (req, reply) => {
-      const { id } = req.params
-      if (!deps.registry.has(id)) return reply.status(404).send({ detail: 'workspace not found' })
+      const entry = deps.registry.visible(req.params.id, req.account)
+      if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
       const verbose = req.query.verbose === 'true'
-      return await makeDetail(deps.registry.get(id), verbose)
+      return await makeDetail(entry, verbose)
     },
   )
 
   app.delete<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id', async (req, reply) => {
     const { id } = req.params
-    if (!deps.registry.has(id)) return reply.status(404).send({ detail: 'workspace not found' })
+    if (deps.registry.visible(id, req.account) === null) {
+      return reply.status(404).send({ detail: 'workspace not found' })
+    }
     try {
       await deps.registry.remove(id)
     } catch (err) {
@@ -343,17 +384,45 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     return { id, closed_at: Date.now() / 1000 }
   })
 
+  /** Close the workspace and keep its state for the owner to reopen. */
+  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/close', async (req, reply) => {
+    const { id } = req.params
+    if (deps.registry.visible(id, req.account) === null) {
+      return reply.status(404).send({ detail: 'workspace not found' })
+    }
+    await deps.registry.close(id)
+    return { id, closed_at: Date.now() / 1000 }
+  })
+
+  /** Cancel every session's running and queued lines; all stay open. */
+  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/cancel', async (req, reply) => {
+    const entry = deps.registry.visible(req.params.id, req.account)
+    if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+    return { canceled: await entry.runner.ws.cancel() }
+  })
+
+  /** Kill every session's background jobs and runners. */
+  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/kill', async (req, reply) => {
+    const entry = deps.registry.visible(req.params.id, req.account)
+    if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+    return { killed: await entry.runner.ws.kill() }
+  })
+
   app.post<{ Params: WorkspaceIdParams; Body: CloneWorkspaceBody }>(
     '/v1/workspaces/:id/clone',
     async (req, reply) => {
-      const { id } = req.params
-      if (!deps.registry.has(id)) return reply.status(404).send({ detail: 'workspace not found' })
+      const source = deps.registry.visible(req.params.id, req.account)
+      if (source === null) return reply.status(404).send({ detail: 'workspace not found' })
       const body = req.body
       if (body.id !== undefined && DOT_IDS.has(body.id)) return refuseId(reply, body.id)
       if (body.id !== undefined && deps.registry.has(body.id)) {
         return reply.status(409).send({ detail: `workspace id already exists: ${body.id}` })
       }
-      const src = deps.registry.get(id).runner.ws
+      const wid = body.id ?? newWorkspaceId()
+      if (!(await deps.registry.claim(wid, req.account))) {
+        return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
+      }
+      const src = source.runner.ws
       let newWs
       try {
         newWs = await cloneWorkspaceWithOverride(src, body.override ?? null)
@@ -364,11 +433,12 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           // answer create, load and the historical clone already give.
           return reply.status(400).send({ detail: e.message })
         }
+        if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
         throw e
       }
       let entry
       try {
-        entry = deps.registry.add(newWs, body.id)
+        entry = deps.registry.add(newWs, wid, req.account)
       } catch (e) {
         return reply.status(409).send({ detail: (e as Error).message })
       }
@@ -377,9 +447,15 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
   )
 
   app.get<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/snapshot', async (req, reply) => {
-    const { id } = req.params
-    if (!deps.registry.has(id)) return reply.status(404).send({ detail: 'workspace not found' })
-    const tar = await deps.registry.get(id).runner.ws.snapshot()
+    const entry = deps.registry.visible(req.params.id, req.account)
+    if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+    let tar: Uint8Array
+    try {
+      tar = await entry.runner.ws.snapshot()
+    } catch (e) {
+      if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
+      throw e
+    }
     return reply
       .type('application/x-tar')
       .send(Buffer.from(tar.buffer, tar.byteOffset, tar.byteLength))
@@ -390,14 +466,25 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     WRITE_RATE_LIMIT,
     async (req, reply) => {
       const { id } = req.params
-      if (!deps.registry.has(id)) return reply.status(404).send({ detail: 'workspace not found' })
+      const entry = deps.registry.visible(id, req.account)
+      if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
       const parsed = SnapshotBodySchema.safeParse(req.body)
       if (!parsed.success) {
         return reply.status(400).send({ detail: `bad snapshot request: ${parsed.error.message}` })
       }
       if (deps.snapshotStore === undefined) return noStore(reply)
       const { key } = parsed.data
-      const size = await deps.registry.get(id).runner.ws.snapshot(key, { s3: deps.snapshotStore })
+      const scoped = storeKey(req.account, key)
+      if (scoped === null) {
+        return reply.status(400).send({ detail: `invalid snapshot key: ${key}` })
+      }
+      let size: number
+      try {
+        size = await entry.runner.ws.snapshot(scoped, { s3: deps.snapshotStore })
+      } catch (e) {
+        if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
+        throw e
+      }
       return reply.status(200).send({ id, key, size })
     },
   )

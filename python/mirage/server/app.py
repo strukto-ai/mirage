@@ -45,7 +45,7 @@ from mirage.server.paths import (
     pid_file_path,
     state_root_path,
 )
-from mirage.server.registry import WorkspaceRegistry
+from mirage.server.registry import OWNERS_PREFIX, WorkspaceRegistry
 from mirage.server.routers import (
     asks,
     health,
@@ -61,6 +61,7 @@ from mirage.server.ssh.constants import SERVER_MODULE
 from mirage.server.ssh.errors import SSHConfigError
 from mirage.server.ssh.types import SSHListener, StartSSH
 from mirage.vfs.s3.config import S3Config
+from mirage.workspace.record.disk import DiskRecordClient
 
 logger = logging.getLogger(__name__)
 
@@ -232,16 +233,18 @@ def build_app(
     app.state.started_at = time.time()
     app.state.exit_event = exit_event or asyncio.Event()
     app.state.on_idle_exit = on_idle_exit
+    app.state.state_root = state_root_path(state_root)
     app.state.registry = WorkspaceRegistry(
         idle_grace_seconds=idle_grace_seconds,
         exit_event=app.state.exit_event,
+        accounts_required=auth.mode == AuthMode.JWT,
+        owners=DiskRecordClient(str(app.state.state_root), OWNERS_PREFIX),
     )
     app.state.jobs = JobTable()
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )
     app.state.snapshot_store = snapshot_store
-    app.state.state_root = state_root_path(state_root)
     app.state.ssh_config = (
         ssh_config if ssh_config is not None else resolve_ssh_config()
     )

@@ -215,3 +215,108 @@ async def test_authorization_header_without_bearer_prefix_rejected():
     async with _client(app, {"Authorization": "correct-token"}) as c:
         r = await c.get("/v1/workspaces")
         assert r.status_code == 401
+
+
+def _jwt_app(rsa_keys, tmp_path):
+    jwt_cfg = JWTConfig(key=rsa_keys.public_pem.decode(), algorithm="RS256")
+    return build_app(
+        idle_grace_seconds=10.0,
+        auth_config=AuthConfig(mode="jwt", jwt=jwt_cfg),
+        state_root=tmp_path / "state",
+    )
+
+
+def _bearer(rsa_keys, claims: dict) -> dict[str, str]:
+    token = pyjwt.encode(
+        {"exp": int(time.time()) + 60, **claims},
+        rsa_keys.private_pem,
+        algorithm="RS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+_RAM = {"config": {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}}}
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+async def test_jwt_mode_rejects_a_token_without_sub(rsa_keys, tmp_path):
+    app = _jwt_app(rsa_keys, tmp_path)
+    async with _client(app, _bearer(rsa_keys, {})) as c:
+        r = await c.get("/v1/workspaces")
+        assert r.status_code == 401
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+async def test_an_account_reaches_only_its_own_workspaces(rsa_keys, tmp_path):
+    app = _jwt_app(rsa_keys, tmp_path)
+    alice = _client(app, _bearer(rsa_keys, {"sub": "alice"}))
+    bob = _client(app, _bearer(rsa_keys, {"sub": "bob"}))
+    async with alice, bob:
+        r = await alice.post("/v1/workspaces", json={**_RAM, "id": "a"})
+        assert r.status_code == 201, r.text
+        r = await alice.post(
+            "/v1/workspaces/a/shell",
+            json={"command": "echo hi"},
+        )
+        assert r.status_code == 200, r.text
+        job_id = r.headers["X-Mirage-Job-Id"]
+        assert [w["id"] for w in (await alice.get("/v1/workspaces")).json()]
+        assert (await bob.get("/v1/workspaces")).json() == []
+        for method, path, body in [
+            ("GET", "/v1/workspaces/a", None),
+            ("DELETE", "/v1/workspaces/a", None),
+            ("POST", "/v1/workspaces/a/shell", {"command": "echo x"}),
+            ("POST", "/v1/workspaces/a/read", {"path": "/x"}),
+            ("POST", "/v1/workspaces/a/rpc", {}),
+            ("POST", "/v1/workspaces/a/mcp", {}),
+            ("POST", "/v1/workspaces/a/sessions", {}),
+            ("GET", "/v1/workspaces/a/sessions", None),
+            ("POST", "/v1/workspaces/a/clone", {}),
+            ("POST", "/v1/workspaces/a/close", None),
+            ("POST", "/v1/workspaces/a/cancel", None),
+            ("POST", "/v1/workspaces/a/kill", None),
+            ("GET", "/v1/workspaces/a/snapshot", None),
+            ("GET", f"/v1/jobs/{job_id}", None),
+            ("DELETE", f"/v1/jobs/{job_id}", None),
+            ("POST", f"/v1/jobs/{job_id}/wait", {}),
+        ]:
+            r = await bob.request(method, path, json=body)
+            assert r.status_code == 404, (method, path, r.status_code)
+        assert (await bob.get("/v1/jobs")).json() == []
+        # The id is taken, whoever asks; bob learns no more than that.
+        r = await bob.post("/v1/workspaces", json={**_RAM, "id": "a"})
+        assert r.status_code == 409
+        assert (await alice.get("/v1/workspaces/a")).status_code == 200
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+async def test_a_stored_workspace_reopens_only_for_its_owner(
+    rsa_keys, tmp_path
+):
+    first = _jwt_app(rsa_keys, tmp_path)
+    async with _client(first, _bearer(rsa_keys, {"sub": "alice"})) as alice:
+        r = await alice.post("/v1/workspaces", json={**_RAM, "id": "a"})
+        assert r.status_code == 201, r.text
+    await first.state.registry.close_all()
+    # A restarted daemon over the same state root.
+    second = _jwt_app(rsa_keys, tmp_path)
+    async with _client(second, _bearer(rsa_keys, {"sub": "bob"})) as bob:
+        r = await bob.post("/v1/workspaces", json={**_RAM, "id": "a"})
+        assert r.status_code == 409
+    async with _client(second, _bearer(rsa_keys, {"sub": "alice"})) as alice:
+        r = await alice.post("/v1/workspaces", json={**_RAM, "id": "a"})
+        assert r.status_code == 201, r.text
+    await second.state.registry.close_all()
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+async def test_an_account_cannot_shut_the_daemon_down(rsa_keys, tmp_path):
+    app = _jwt_app(rsa_keys, tmp_path)
+    async with _client(app, _bearer(rsa_keys, {"sub": "alice"})) as c:
+        r = await c.post("/v1/shutdown")
+        assert r.status_code == 403
+    assert not app.state.exit_event.is_set()

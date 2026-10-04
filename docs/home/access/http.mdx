@@ -43,10 +43,21 @@ Every route but `GET /v1/health` needs `Authorization: Bearer <token>`. `MIRAGE_
 | `token` | one fixed token | `MIRAGE_AUTH_TOKEN` |
 | `jwt` | a JWT your issuer signed | `MIRAGE_JWT_PUBKEY` or `MIRAGE_JWT_PUBKEY_FILE`, and `MIRAGE_JWT_ALG` |
 
-In `jwt` mode the server checks the signature against that public key, accepts only the pinned algorithm, requires `exp`, and checks `iss`, `aud` and `azp` when `MIRAGE_JWT_ISSUER`, `MIRAGE_JWT_AUDIENCE` and `MIRAGE_JWT_AUTHORIZED_PARTIES` are set. It never fetches keys, so a new key needs a restart.
+In `jwt` mode the server checks the signature against that public key, accepts only the pinned algorithm, requires `exp` and `sub`, and checks `iss`, `aud` and `azp` when `MIRAGE_JWT_ISSUER`, `MIRAGE_JWT_AUDIENCE` and `MIRAGE_JWT_AUTHORIZED_PARTIES` are set. It never fetches keys, so a new key needs a restart.
+
+### Accounts
+
+In `jwt` mode the token's `sub` is the caller's account, and an account reaches only the workspaces it created:
+
+- Another account's workspace answers `404` on every route, the same as a missing one, and so do its sessions, jobs and asks. `GET /v1/workspaces` and `GET /v1/jobs` list only the caller's.
+- The owner is kept under the state root, so after a restart a stored workspace reopens only for its owner.
+- Snapshot keys live under `accounts/<account>/` in the snapshot store.
+- `POST /v1/shutdown` answers `403`.
+
+An [SSH key](/home/access/ssh#bind-a-key-to-an-account) belongs to an account through its `mirage-account` option.
 
 <Warning>
-  The server checks that a token is valid, not what it may do: any accepted token can use every route and every workspace, including `POST /v1/shutdown`. Give one server to one tenant. In `local` mode with no token in the environment or in `~/.mirage/auth_token`, the server asks for none.
+  Accounts keep workspaces apart, not the host: a workspace config can still mount a host directory or run the `local` runtime. In `local` and `token` mode any accepted token can use every route and every workspace, including `POST /v1/shutdown`. In `local` mode with no token in the environment or in `~/.mirage/auth_token`, the server asks for none.
 </Warning>
 
 ## Errors
@@ -57,8 +68,9 @@ A failed request answers `{"detail": "<message>"}`.
 | --- | --- |
 | `400` | The body is not JSON or fails its schema, or the `Host` is not allowed. |
 | `401` | A missing or rejected token. |
-| `404` | An unknown workspace, session, job or ask. |
-| `409` | A taken id, or an ask already answered. |
+| `403` | An account asked to shut the server down. |
+| `404` | An unknown workspace, session, job or ask, or one of another account's. |
+| `409` | A taken id, an ask already answered, or a workspace whose lines did not end for a snapshot or clone. |
 | `413` | A body over 4 MiB, or an uploaded snapshot over 1 GiB. |
 | `422` | An unknown profile or a bad mode. |
 | `499` | The job was canceled. |
@@ -111,6 +123,24 @@ curl -s http://127.0.0.1:8765/v1/workspaces \
 
 Closes the workspace and deletes its state.
 
+### Close a workspace
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/close`
+
+Stops the workspace and keeps its state: creating the same id again picks up its sessions, history and disk files. RAM mounts are lost unless you snapshot first.
+
+### Cancel a workspace's lines
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/cancel`
+
+Cancels the running and queued lines of every session, from HTTP, the CLI and SSH alike, and answers `{"canceled": 2}` once they have ended. The sessions stay open.
+
+### Kill a workspace's jobs
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/kill`
+
+Kills every session's background jobs (`cmd &`) and the processes runtimes started, and answers `{"killed": 1}`.
+
 ### Clone a workspace
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/clone`
@@ -122,7 +152,7 @@ Closes the workspace and deletes its state.
 
 <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/snapshot`
 
-Answers the tar (`application/x-tar`). Secrets are stored redacted. The server never writes a snapshot to its own disk.
+Answers the tar (`application/x-tar`). Secrets are stored redacted. The server never writes a snapshot to its own disk. While it captures, new lines wait and running ones get 30 seconds to end; lines still running then answer `409`, so cancel them and retry. A clone waits the same way.
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/snapshot`
 
@@ -155,6 +185,20 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 ### Delete a session
 
 <Badge color="red">DELETE</Badge> `/v1/workspaces/{id}/sessions/{session_id}`
+
+Cancels its lines, kills its jobs and closes it.
+
+### Cancel a session's lines
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/sessions/{session_id}/cancel`
+
+Cancels the session's running and queued lines, from every way in, and answers `{"canceled": 1}` once they have ended. The session stays open.
+
+### Kill a session's jobs
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/sessions/{session_id}/kill`
+
+Kills the session's background jobs and the processes its runtimes started, and answers `{"killed": 1}`. The session stays open.
 
 ## Shell and tools
 

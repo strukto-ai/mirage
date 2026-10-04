@@ -42,6 +42,7 @@ import { buildFileCache } from './cache.ts'
 import { rejectConfigScript } from './guard.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
 import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
+import { makeStagingDir, removeDir } from '../snapshot/fs.ts'
 import {
   applyStateDict,
   buildMountArgs,
@@ -51,7 +52,7 @@ import {
 } from '../snapshot/state.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { resolveGlobs } from '../expand/globs.ts'
-import { normMountPrefix } from '../snapshot/utils.ts'
+import { QUIESCE_SECONDS, normMountPrefix } from '../snapshot/utils.ts'
 import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
 import type { FileEvent } from '../../types.ts'
 import {
@@ -87,7 +88,7 @@ import {
   runAsProgram,
 } from '../../context/session_context.ts'
 import { namespaceViewOf } from '../mount/namespace/view.ts'
-import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { asyncContextIsolatesTasks, createAsyncContext } from '../../utils/async_context.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { enoent } from '../../utils/errors.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
@@ -139,6 +140,10 @@ import { encodeText } from '../../shell/bytes.ts'
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
 
+// The stop of the top-level line this context runs in, so a line that
+// cancels its own session does not wait on itself.
+const LINE_STOP = createAsyncContext<AbortController>()
+
 export class Workspace {
   private readonly runtimeBinding: WorkspaceBinding
   readonly registry: MountRegistry
@@ -171,6 +176,23 @@ export class Workspace {
   private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
   private readonly lineLock = new KeyLock()
+  /**
+   * Every top-level line in flight or queued, by its stop: the session it
+   * named (undefined for the default) and a promise settled once it has
+   * ended. `cancel` reaches lines of every door this way, whoever holds
+   * them.
+   */
+  private readonly lines = new Map<
+    AbortController,
+    { sessionId: string | undefined; ended: Promise<void> }
+  >()
+  /**
+   * Open unless a capture holds it: a new top-level line waits here, so
+   * what a snapshot or copy reads is what the lines left.
+   */
+  private admitting: Promise<void> = Promise.resolve()
+  /** Captures take turns; each waits for the one before it. */
+  private captures: Promise<void> = Promise.resolve()
   private readonly closers: (() => Promise<void>)[] = []
   private closing: Promise<void> | null = null
   private stateDropped = false
@@ -1055,7 +1077,9 @@ export class Workspace {
   async closeSession(sessionId: string): Promise<void> {
     // The manager refuses the default and an unknown id first; a session
     // that did close takes its jobs with it, so a later session reusing
-    // the id inherits nothing.
+    // the id inherits nothing. Its lines are cancelled first, as a hangup
+    // ends a terminal's foreground job.
+    if (sessionId !== this.defaultSessionId) await this.cancel(sessionId)
     await this.sessionManager.close(sessionId)
     await this.jobTable.closeSession(sessionId)
     this.toolTables.delete(sessionId)
@@ -1550,7 +1574,119 @@ export class Workspace {
     // internal dispatch path stays open, which is what the journal replay
     // uses.
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    return this.executeInternal(command, options)
+    await this.admitting
+    // A top-level line also answers the workspace's own stop, set by
+    // `cancel`; nested lines take the internal path and inherit it.
+    const stop = new AbortController()
+    let settle = (): void => undefined
+    const ended = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    this.lines.set(stop, { sessionId: options.sessionId, ended })
+    try {
+      return await LINE_STOP.run(stop, () =>
+        this.executeInternal(command, {
+          ...options,
+          signal:
+            options.signal === undefined
+              ? stop.signal
+              : AbortSignal.any([options.signal, stop.signal]),
+        }),
+      )
+    } finally {
+      this.lines.delete(stop)
+      settle()
+    }
+  }
+
+  /**
+   * Cancel the top-level lines running or queued in a session, or in
+   * every session when `sessionId` is undefined. What Ctrl-C does to a
+   * foreground line, for every door at once: HTTP jobs, SSH and codex
+   * lines and SDK callers alike reject with the abort error, their `$?`
+   * left as they found it. Resolves once those lines have ended, so the
+   * session is quiet; a line cancelling its own session is stopped but
+   * not waited for. Returns how many lines were cancelled.
+   */
+  async cancel(sessionId?: string): Promise<number> {
+    const own = LINE_STOP.getStore()
+    const hit = [...this.lines].filter(
+      ([, line]) =>
+        sessionId === undefined || (line.sessionId ?? this.defaultSessionId) === sessionId,
+    )
+    const cancelled = hit.filter(([stop]) => !stop.signal.aborted).length
+    for (const [stop] of hit) stop.abort()
+    await Promise.all(hit.filter(([stop]) => stop !== own).map(([, line]) => line.ended))
+    return cancelled
+  }
+
+  /**
+   * Run `capture` while new top-level lines wait and the running ones have
+   * ended. A capture (a snapshot, a copy, a clone) reads disk files after
+   * its state names them, so what it reads is the revision the lines left.
+   * Lines still running after `seconds` reject it with EBUSY; cancel them
+   * first to capture at once. The caller's own line is not waited for, and
+   * captures take turns.
+   */
+  async quiesced<T>(capture: () => Promise<T>, seconds = QUIESCE_SECONDS): Promise<T> {
+    const previous = this.captures
+    let finished = (): void => undefined
+    this.captures = new Promise<void>((resolve) => {
+      finished = resolve
+    })
+    await previous
+    let reopen = (): void => undefined
+    this.admitting = new Promise<void>((resolve) => {
+      reopen = resolve
+    })
+    try {
+      const own = LINE_STOP.getStore()
+      const running = [...this.lines].filter(([stop]) => stop !== own).map(([, line]) => line.ended)
+      if (running.length > 0) {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const late = new Promise<true>((resolve) => {
+          timer = setTimeout(() => {
+            resolve(true)
+          }, seconds * 1000)
+        })
+        const busy = await Promise.race([Promise.all(running).then(() => false), late])
+        clearTimeout(timer)
+        if (busy) {
+          const pending = [...this.lines].filter(([stop]) => stop !== own).length
+          throw Object.assign(
+            new Error(`workspace busy: ${String(pending)} line(s) still running`),
+            { code: 'EBUSY' },
+          )
+        }
+      }
+      return await capture()
+    } finally {
+      reopen()
+      finished()
+    }
+  }
+
+  /**
+   * Kill the background jobs and runners a session started, or every
+   * session's when `sessionId` is undefined: what `kill` does to
+   * `cmd &` jobs, leaving the session open. Runners outside the job list
+   * (a runtime's spawned process) are stopped too. Returns how many jobs
+   * and runners were stopped.
+   */
+  async kill(sessionId?: string): Promise<number> {
+    const jobs =
+      sessionId === undefined
+        ? this.jobTable.allRunningJobs()
+        : this.jobTable.runningJobs(sessionId)
+    let killed = 0
+    for (const job of jobs) {
+      if (await this.jobTable.kill(job.id, job.sessionId)) killed += 1
+    }
+    for (const runner of this.processes.live()) {
+      if (sessionId !== undefined && runner.info.sessionId !== sessionId) continue
+      if (runner.terminate()) killed += 1
+    }
+    return killed
   }
 
   private async executeInternal(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
@@ -1670,7 +1806,7 @@ export class Workspace {
   snapshot(target: string, options?: { s3?: S3Config }): Promise<number>
   async snapshot(target?: string, options: { s3?: S3Config } = {}): Promise<Uint8Array | number> {
     const tar = await writeSnapshot(this, target, options)
-    return target === undefined ? tar : tar.byteLength
+    return target === undefined || typeof tar === 'number' ? tar : tar.byteLength
   }
 
   /**
@@ -1685,8 +1821,18 @@ export class Workspace {
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const { s3, ...rest } = options
-    const state = (await readSnapshot(source, s3 !== undefined ? { s3 } : {})) as WorkspaceStateDict
-    return this.fromState(state, rest, overrides, cliOverrides)
+    // A tar file's disk mount files are staged on disk, not held in
+    // memory, until the restored mounts have copied them in.
+    const staging = typeof source === 'string' && s3 === undefined ? await makeStagingDir() : null
+    try {
+      const state = (await readSnapshot(source, {
+        ...(s3 !== undefined ? { s3 } : {}),
+        ...(staging !== null ? { staging } : {}),
+      })) as WorkspaceStateDict
+      return await this.fromState(state, rest, overrides, cliOverrides)
+    } finally {
+      if (staging !== null) await removeDir(staging)
+    }
   }
 
   static async fromState<T extends typeof Workspace>(
@@ -1748,6 +1894,10 @@ export class Workspace {
   }
 
   async copy(options: WorkspaceOptions = {}): Promise<this> {
+    return this.quiesced(() => this.copyQuiesced(options))
+  }
+
+  private async copyQuiesced(options: WorkspaceOptions): Promise<this> {
     // Mirrors Python's Workspace.copy(): remote-backed mounts (Redis, S3,
     // GDrive — with redacted config) are reused; local mounts (RAM, Disk)
     // are reconstructed from snapshot state. Uses _fromState directly (no tar

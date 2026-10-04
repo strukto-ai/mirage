@@ -16,8 +16,8 @@ import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import {
   chmod,
+  copyFile,
   mkdir,
-  readFile,
   stat as fsStat,
   statfs as fsStatfs,
   writeFile,
@@ -51,7 +51,11 @@ export interface DiskVFSOptions {
 export interface DiskVFSState {
   type: string
   config?: { root: string; folderVersions: boolean }
-  files: Record<string, Uint8Array>
+  /**
+   * Each file as bytes, or as a host path read by whoever consumes the
+   * state (a snapshot tar, a copy).
+   */
+  files: Record<string, Uint8Array | string>
   modes?: Record<string, number>
 }
 
@@ -133,14 +137,16 @@ export class DiskVFS extends BaseVFS {
 
   override async getState(): Promise<DiskVFSState> {
     await mkdir(this.root, { recursive: true })
-    const files: Record<string, Uint8Array> = {}
+    const files: Record<string, string> = {}
     const modes: Record<string, number> = {}
     const fileList: string[] = []
     await walkFiles(this.root, fileList)
     for (const full of fileList) {
       const rel = path.relative(this.root, full).split(path.sep).join('/')
-      const data = await readFile(full)
-      files[rel] = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      // By reference: the consumer reads each file, one at a time, so
+      // capturing a large tree costs no memory. It keeps the files still
+      // until it has read them.
+      files[rel] = full
       // Capture the real inode mode: it is the base truth for disk
       // permissions (the sidecar is gone), so restore must reapply it or
       // a chmod would reset to the host umask.
@@ -160,7 +166,11 @@ export class DiskVFS extends BaseVFS {
       if (path.isAbsolute(rel)) throw new Error(`snapshot path must be relative: ${rel}`)
       const full = await resolveInside(this.root, PathSpec.fromStrPath('/' + rel), rel)
       await mkdir(path.dirname(full), { recursive: true })
-      await writeFile(full, data)
+      // A host path (a staged restore, another disk mount's state) is
+      // copied; one that already is the target (a copy over the same root)
+      // is left alone.
+      if (typeof data !== 'string') await writeFile(full, data)
+      else if (path.resolve(data) !== path.resolve(full)) await copyFile(data, full)
       const mode = state.modes?.[rel]
       if (mode !== undefined) await chmod(full, mode)
     }

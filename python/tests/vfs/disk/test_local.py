@@ -250,3 +250,44 @@ async def test_root_alias_keeps_the_same_visible_tree(host_tree):
         await IO.du.size(mounted.accessor, PathSpec.from_str_path("/")) == 13
     )
     assert sorted(mounted.get_state()["files"]) == fixture["visible_files"]
+
+
+def test_get_state_names_files_by_path_not_bytes(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "f.txt").write_text("hi")
+    files = DiskVFS(str(root)).get_state()["files"]
+    assert files == {"f.txt": root / "f.txt"}
+
+
+def test_load_state_copies_paths_and_leaves_the_same_file(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text("from a path")
+    dst = DiskVFS(str(tmp_path / "dst"))
+    dst.load_state({"files": {"a.txt": src / "a.txt", "b.txt": b"bytes"}})
+    assert (tmp_path / "dst" / "a.txt").read_text() == "from a path"
+    assert (tmp_path / "dst" / "b.txt").read_bytes() == b"bytes"
+    same = DiskVFS(str(src))
+    same.load_state(same.get_state())
+    assert (src / "a.txt").read_text() == "from a path"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_round_trip_streams_disk_files(tmp_path, monkeypatch):
+    src = DiskVFS(str(tmp_path / "src"))
+    ws = Workspace({"/data": src}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    target = tmp_path / "ws.tar"
+
+    def no_whole_reads(self):
+        raise AssertionError(f"read whole: {self}")
+
+    monkeypatch.setattr(Path, "read_bytes", no_whole_reads)
+    await ws.snapshot(str(target))
+    loaded = await Workspace.load(str(target))
+    monkeypatch.undo()
+    io = await loaded.shell("cat /data/f.txt")
+    assert await io.stdout_str() == "kept\n"
+    await ws.close()
+    await loaded.close()

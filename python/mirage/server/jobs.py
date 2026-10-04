@@ -25,6 +25,7 @@ from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import ExecutionRecord as JobEntry
 from mirage.execution.types import ExecutionStatus as JobStatus
 from mirage.types import JsonValue
+from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.execution import ExecutionScope
 
 logger = logging.getLogger(__name__)
@@ -153,7 +154,10 @@ class JobTable:
                 factory(ExecutionScope(started))
             )
             result = await control.work
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, MirageAbortError):
+            # The job's own cancel arrives as CancelledError; the
+            # workspace's (a session or workspace cancel) as the abort
+            # the line raised.
             status = JobStatus.CANCELED
         except Exception as exc:
             status, error = JobStatus.FAILED, f"{type(exc).__name__}: {exc}"

@@ -15,9 +15,11 @@
 import type { FastifyInstance } from 'fastify'
 import { toBriefDict, type JobBriefDict, type JobEntry, type JobTable } from '../jobs.ts'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import type { WorkspaceRegistry } from '../registry.ts'
 
 export interface JobsRoutesDeps {
   jobs: JobTable
+  registry: WorkspaceRegistry
 }
 
 interface JobIdParams {
@@ -43,13 +45,26 @@ function toDetailDict(entry: JobEntry): JobDetailDict {
 }
 
 export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): void {
+  /**
+   * The job, when its workspace is the caller's to reach; a job of
+   * another account's workspace answers null like a missing one.
+   */
+  const reachable = async (id: string, account: string | null): Promise<JobEntry | null> => {
+    const entry = await deps.jobs.store.get(id)
+    if (entry === null) return null
+    return (await deps.registry.allows(entry.workspaceId, account)) ? entry : null
+  }
+
   app.get<{ Querystring: JobsListQuery }>('/v1/jobs', async (req) => {
-    return (await deps.jobs.list(req.query.workspace_id)).map(toBriefDict)
+    const jobs: JobEntry[] = []
+    for (const job of await deps.jobs.list(req.query.workspace_id)) {
+      if (await deps.registry.allows(job.workspaceId, req.account)) jobs.push(job)
+    }
+    return jobs.map(toBriefDict)
   })
 
   app.get<{ Params: JobIdParams }>('/v1/jobs/:id', async (req, reply) => {
-    const { id } = req.params
-    const entry = await deps.jobs.store.get(id)
+    const entry = await reachable(req.params.id, req.account)
     if (entry === null) return reply.status(404).send({ detail: 'job not found' })
     return toDetailDict(entry)
   })
@@ -58,7 +73,7 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
     '/v1/jobs/:id/wait',
     async (req, reply) => {
       const { id } = req.params
-      if ((await deps.jobs.store.get(id)) === null)
+      if ((await reachable(id, req.account)) === null)
         return reply.status(404).send({ detail: 'job not found' })
       const entry = await deps.jobs.wait(id, req.body?.timeout_s)
       return toDetailDict(entry)
@@ -67,7 +82,7 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
 
   app.delete<{ Params: JobIdParams }>('/v1/jobs/:id', async (req, reply) => {
     const { id } = req.params
-    if ((await deps.jobs.store.get(id)) === null)
+    if ((await reachable(id, req.account)) === null)
       return reply.status(404).send({ detail: 'job not found' })
     return { job_id: id, canceled: await deps.jobs.cancel(id) }
   })

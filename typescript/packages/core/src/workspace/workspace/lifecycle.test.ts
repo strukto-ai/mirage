@@ -669,3 +669,121 @@ describe('Workspace.delete', () => {
     await expect(ws.delete()).rejects.toThrow('closed before delete')
   })
 })
+
+describe('cancel and kill', () => {
+  async function linesRunning(ws: Workspace, count: number): Promise<void> {
+    const lines = (ws as unknown as { lines: Map<unknown, unknown> }).lines
+    for (let i = 0; i < 500; i += 1) {
+      if (lines.size === count) return
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error(`expected ${String(count)} lines, saw ${String(lines.size)}`)
+  }
+
+  it('cancels only the lines of the named session', async () => {
+    const ws = buildWs()
+    ws.createSession('a')
+    ws.createSession('b')
+    const a = ws.shell('sleep 30', { sessionId: 'a' })
+    const b = ws.shell('sleep 30', { sessionId: 'b' })
+    let bDone = false
+    void b.then(
+      () => (bDone = true),
+      () => (bDone = true),
+    )
+    try {
+      await linesRunning(ws, 2)
+      expect(await ws.cancel('a')).toBe(1)
+      await expect(a).rejects.toMatchObject({ name: 'AbortError' })
+      expect(bDone).toBe(false)
+      expect(await ws.cancel()).toBe(1)
+      await expect(b).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reaches a line queued behind another', async () => {
+    const ws = buildWs()
+    const running = ws.shell('sleep 30')
+    const queued = ws.shell('echo late')
+    try {
+      await linesRunning(ws, 2)
+      expect(await ws.cancel(ws.defaultSessionId)).toBe(2)
+      await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+      await expect(queued).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('kills background jobs and keeps the session', async () => {
+    const ws = buildWs()
+    ws.createSession('a')
+    try {
+      await ws.shell('sleep 30 &', { sessionId: 'a' })
+      expect(await ws.kill('a')).toBe(1)
+      expect(ws.jobTable.runningJobs('a')).toEqual([])
+      expect((await ws.shell('echo alive', { sessionId: 'a' })).stdoutText).toBe('alive\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('cancels a running line when its session closes', async () => {
+    const ws = buildWs()
+    ws.createSession('a')
+    const line = ws.shell('sleep 30', { sessionId: 'a' })
+    try {
+      await linesRunning(ws, 1)
+      await ws.closeSession('a')
+      await expect(line).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('capture barrier', () => {
+  async function linesRunning(ws: Workspace, count: number): Promise<void> {
+    const lines = (ws as unknown as { lines: Map<unknown, unknown> }).lines
+    for (let i = 0; i < 500; i += 1) {
+      if (lines.size === count) return
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error(`expected ${String(count)} lines, saw ${String(lines.size)}`)
+  }
+
+  it('answers EBUSY while a line will not end', async () => {
+    const ws = buildWs()
+    const line = ws.shell('sleep 30')
+    try {
+      await linesRunning(ws, 1)
+      await expect(ws.quiesced(() => Promise.resolve(1), 0.1)).rejects.toMatchObject({
+        code: 'EBUSY',
+      })
+      expect(await ws.cancel()).toBe(1)
+      await expect(line).rejects.toMatchObject({ name: 'AbortError' })
+      expect(await ws.quiesced(() => Promise.resolve(1), 0.1)).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs a line started during a capture after it', async () => {
+    const ws = buildWs()
+    const order: string[] = []
+    try {
+      let line: Promise<unknown> = Promise.resolve()
+      await ws.quiesced(async () => {
+        line = ws.shell('echo after').then((r) => order.push(r.stdoutText))
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        order.push('captured')
+      })
+      await line
+      expect(order).toEqual(['captured', 'after\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+})

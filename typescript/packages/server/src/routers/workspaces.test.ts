@@ -831,3 +831,86 @@ describe('daemon disk-store default', () => {
     rmSync(stateRoot, { recursive: true, force: true })
   })
 })
+
+describe('workspace cancel, kill and close', () => {
+  const RAM = { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }
+
+  it('cancel and kill reach every session', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-cancel-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const wid = (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: RAM })).json<{
+        id: string
+      }>().id
+      await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${wid}/sessions`,
+        payload: { session_id: 'a' },
+      })
+      await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${wid}/shell`,
+        payload: { command: 'sleep 30 &', session_id: 'a' },
+      })
+      const jobId = (
+        await app.inject({
+          method: 'POST',
+          url: `/v1/workspaces/${wid}/shell?background=true`,
+          payload: { command: 'sleep 30' },
+        })
+      ).json<{ job_id: string }>().job_id
+      for (let i = 0; i < 500; i += 1) {
+        const job = (await app.inject({ method: 'GET', url: `/v1/jobs/${jobId}` })).json<{
+          status: string
+        }>()
+        if (job.status === 'running') break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(
+        (await app.inject({ method: 'POST', url: `/v1/workspaces/${wid}/cancel` })).json(),
+      ).toEqual({
+        canceled: 1,
+      })
+      expect(
+        (await app.inject({ method: 'POST', url: `/v1/workspaces/${wid}/kill` })).json(),
+      ).toEqual({
+        killed: 1,
+      })
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('close keeps state for the same id', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-close-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const body = { ...RAM, id: 'keep' }
+      expect(
+        (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: body })).statusCode,
+      ).toBe(201)
+      await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/keep/shell',
+        payload: { command: 'echo kept' },
+      })
+      expect(
+        (await app.inject({ method: 'POST', url: '/v1/workspaces/keep/close' })).statusCode,
+      ).toBe(200)
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })).statusCode).toBe(404)
+      expect(
+        (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: body })).statusCode,
+      ).toBe(201)
+      const r = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/keep/shell',
+        payload: { command: 'history' },
+      })
+      expect(r.json<{ stdout: string }>().stdout).toContain('echo kept')
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

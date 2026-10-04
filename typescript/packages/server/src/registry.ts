@@ -14,18 +14,28 @@
 
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
-import type { Workspace } from '@struktoai/mirage-node'
+import type { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
 
+// Under the daemon's state root: one record per workspace id naming the
+// account that owns it.
+export const OWNERS_PREFIX = 'owners'
+
+/**
+ * One registered workspace. `owner` is the account that created it; null
+ * when it was created by a caller with no account.
+ */
 export class WorkspaceEntry {
   readonly id: string
   readonly runner: WorkspaceRunner
+  readonly owner: string | null
   readonly createdAt: number
   /** The fingerprint of the config it was created from, when it was. */
   configDigest: string | null = null
 
-  constructor(id: string, runner: WorkspaceRunner) {
+  constructor(id: string, runner: WorkspaceRunner, owner: string | null = null) {
     this.id = id
     this.runner = runner
+    this.owner = owner
     this.createdAt = Date.now() / 1000
   }
 }
@@ -33,6 +43,17 @@ export class WorkspaceEntry {
 export interface WorkspaceRegistryOptions {
   idleGraceSeconds?: number
   onIdleExit?: () => void
+  /**
+   * Refuse callers with no account (jwt mode); otherwise such a caller
+   * may use every workspace.
+   */
+  accountsRequired?: boolean
+  /**
+   * Where each workspace id's owning account is kept across restarts, so
+   * a stored workspace is only ever reopened by its owner. Absent keeps
+   * ownership in memory.
+   */
+  owners?: DiskRecordClient
 }
 
 export class WorkspaceRegistry {
@@ -42,10 +63,14 @@ export class WorkspaceRegistry {
   private readonly idleGraceSeconds: number
   private readonly onIdleExit: (() => void) | null
   private idleTimer: NodeJS.Timeout | null = null
+  accountsRequired: boolean
+  private readonly owners: DiskRecordClient | null
 
   constructor(options: WorkspaceRegistryOptions = {}) {
     this.idleGraceSeconds = options.idleGraceSeconds ?? 30
     this.onIdleExit = options.onIdleExit ?? null
+    this.accountsRequired = options.accountsRequired ?? false
+    this.owners = options.owners ?? null
   }
 
   has(id: string): boolean {
@@ -101,10 +126,52 @@ export class WorkspaceRegistry {
     return this.entries.size
   }
 
-  add(ws: Workspace, id?: string): WorkspaceEntry {
+  /**
+   * The live entry `account` may use, else null. The one access rule
+   * every door asks: a caller with no account may use every workspace
+   * unless accounts are required; an account may use only the workspaces
+   * it owns, so one created by a caller with no account is closed to
+   * every account. A workspace that exists but belongs to another
+   * account answers null like a missing one, so its id does not leak.
+   */
+  visible(id: string, account: string | null): WorkspaceEntry | null {
+    const entry = this.entries.get(id)
+    if (entry === undefined) return null
+    if (account === null) return this.accountsRequired ? null : entry
+    return entry.owner === account ? entry : null
+  }
+
+  /**
+   * Whether `account` may reach `id`'s records: the same rule as
+   * `visible`, for an id that may not be live. A deleted workspace's
+   * jobs, or a stored workspace after a restart, answer to the owner its
+   * claim names.
+   */
+  async allows(id: string, account: string | null): Promise<boolean> {
+    if (account === null) return !this.accountsRequired
+    if (this.entries.has(id)) return this.visible(id, account) !== null
+    if (this.owners === null) return false
+    const [stored] = await this.owners.get(id)
+    return stored !== null && stored.account === account
+  }
+
+  /**
+   * Record `account` as the owner of `id`. The claim outlives the
+   * daemon, so after a restart the stored workspace under that id reopens
+   * only for the same account. A caller with no account claims nothing.
+   * False when another account already owns the id.
+   */
+  async claim(id: string, account: string | null): Promise<boolean> {
+    if (account === null || this.owners === null) return true
+    if (await this.owners.casPut(id, { account, generation: 1 }, 0)) return true
+    const [stored] = await this.owners.get(id)
+    return stored !== null && stored.account === account
+  }
+
+  add(ws: Workspace, id?: string, owner: string | null = null): WorkspaceEntry {
     const wid = id ?? newWorkspaceId()
     if (this.entries.has(wid)) throw new Error(`workspace id already exists: ${wid}`)
-    const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws))
+    const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws), owner)
     this.entries.set(wid, entry)
     this.cancelIdleTimer()
     return entry
@@ -112,8 +179,9 @@ export class WorkspaceRegistry {
 
   /**
    * Delete `id`: stop its runner and drop its state. The workspace's
-   * links, history, sessions and metadata leave its state store with it,
-   * so a workspace created later under the same id starts empty.
+   * links, history, sessions, metadata and owner leave with it, so a
+   * workspace created later under the same id starts empty, for any
+   * account.
    * `closeAll` (daemon shutdown) keeps them. The id stays registered
    * until the deletion is done, so a create under it is refused rather
    * than registering a workspace whose state this deletion would then
@@ -136,9 +204,31 @@ export class WorkspaceRegistry {
   private async drop(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
     try {
       await entry.runner.stop({ delete: true })
+      if (this.owners !== null) await this.owners.delete([entry.id])
     } finally {
       this.removals.delete(entry.id)
       this.entries.delete(entry.id)
+      if (this.entries.size === 0) this.startIdleTimer()
+    }
+    return entry
+  }
+
+  /**
+   * Close `id` and keep its state. The runner stops, which cancels its
+   * lines and closes its sessions; the stored sessions, links, history
+   * and owner stay, so the owner creating the same id later picks them
+   * up. The id is released first, so no new request reaches the closing
+   * runner.
+   */
+  async close(id: string): Promise<WorkspaceEntry> {
+    const removal = this.removals.get(id)
+    if (removal !== undefined) return removal
+    const entry = this.entries.get(id)
+    if (entry === undefined) throw new Error(`workspace not found: ${id}`)
+    this.entries.delete(id)
+    try {
+      await entry.runner.stop()
+    } finally {
       if (this.entries.size === 0) this.startIdleTimer()
     }
     return entry

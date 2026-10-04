@@ -72,7 +72,7 @@ ws.listSessions(): SessionState[]
 ws.closeSession(sessionId): Promise<void>
 ```
 
-List the sessions, or close one and end its jobs. The default session cannot be closed.
+List the sessions, or close one: its lines are cancelled and its jobs end. The default session cannot be closed.
 
 <Expandable title="SessionState">
   <ResponseField name="sessionId" type="string" />
@@ -89,6 +89,20 @@ console.log(ws.listSessions().map((s) => s.sessionId))
 await ws.closeSession('agent')
 ```
 
+### ws.cancel, ws.kill
+
+```ts
+ws.cancel(sessionId?): Promise<number>
+ws.kill(sessionId?): Promise<number>
+```
+
+Stop a session's work, or every session's with no id, and leave the sessions open. `cancel` cancels the running and queued lines, whichever way they came in, and resolves once they have ended; each rejects with an `AbortError`. `kill` kills the background jobs (`cmd &`) and the processes runtimes started. Each answers how many it stopped.
+
+```ts
+await ws.cancel('agent')
+await ws.kill()
+```
+
 ### ws.snapshot, Workspace.load
 
 ```ts
@@ -97,7 +111,7 @@ ws.snapshot(target, { s3? }): Promise<number>
 Workspace.load(source, { s3?, ... }): Promise<Workspace>
 ```
 
-Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. See [Snapshots](/home/snapshot) for what a tar holds.
+Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. While it captures, new lines wait and running ones get 30 seconds to end, else it rejects with an `EBUSY` error; a path target streams disk mount files rather than holding them whole. See [Snapshots](/home/snapshot) for what a tar holds.
 
 ```ts
 const tar = await ws.snapshot()

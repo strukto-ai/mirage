@@ -21,14 +21,34 @@ from typing import Any, Iterable
 
 from mirage import Workspace, WorkspaceRunner
 from mirage.utils.ids import new_workspace_id
+from mirage.workspace.record.disk import DiskRecordClient
 
 logger = logging.getLogger(__name__)
 
+# Under the daemon's state root: one record per workspace id naming the
+# account that owns it.
+OWNERS_PREFIX = "owners"
+
 
 class WorkspaceEntry:
-    def __init__(self, workspace_id: str, runner: WorkspaceRunner) -> None:
+    """One registered workspace.
+
+    Args:
+        workspace_id (str): the registry id.
+        runner (WorkspaceRunner): the runner driving it.
+        owner (str | None): the account that created it; None when it
+            was created by a caller with no account.
+    """
+
+    def __init__(
+        self,
+        workspace_id: str,
+        runner: WorkspaceRunner,
+        owner: str | None = None,
+    ) -> None:
         self.id = workspace_id
         self.runner = runner
+        self.owner = owner
         self.created_at = time.time()
         self.config_digest: str | None = None
 
@@ -49,6 +69,8 @@ class WorkspaceRegistry:
         self,
         idle_grace_seconds: float = 30.0,
         exit_event: asyncio.Event | None = None,
+        accounts_required: bool = False,
+        owners: DiskRecordClient | None = None,
     ) -> None:
         """Construct an empty registry.
 
@@ -58,8 +80,17 @@ class WorkspaceRegistry:
                 means exit immediately on empty.
             exit_event (asyncio.Event | None): event to set when the
                 idle timer fires. Defaults to a fresh event.
+            accounts_required (bool): refuse callers with no account
+                (jwt mode); otherwise such a caller may use every
+                workspace.
+            owners (DiskRecordClient | None): where each workspace id's
+                owning account is kept across restarts, so a stored
+                workspace is only ever reopened by its owner. None keeps
+                ownership in memory.
         """
         self._entries: dict[str, WorkspaceEntry] = {}
+        self.accounts_required = accounts_required
+        self._owners = owners
         self._removals: dict[str, asyncio.Task[WorkspaceEntry]] = {}
         self._creates: dict[str, tuple[str, asyncio.Future[None]]] = {}
         self.idle_grace_seconds = idle_grace_seconds
@@ -131,14 +162,83 @@ class WorkspaceRegistry:
     def items(self) -> Iterable[tuple[str, WorkspaceEntry]]:
         return self._entries.items()
 
+    def visible(
+        self, workspace_id: str, account: str | None
+    ) -> WorkspaceEntry | None:
+        """The live entry ``account`` may use, else None.
+
+        The one access rule every door asks. A caller with no account
+        may use every workspace unless accounts are required; an
+        account may use only the workspaces it owns, so one created by
+        a caller with no account is closed to every account. A
+        workspace that exists but belongs to another account answers
+        None like a missing one, so its id does not leak.
+
+        Args:
+            workspace_id (str): the workspace asked for.
+            account (str | None): the caller's account.
+        """
+        entry = self._entries.get(workspace_id)
+        if entry is None:
+            return None
+        if account is None:
+            return None if self.accounts_required else entry
+        return entry if entry.owner == account else None
+
+    async def allows(self, workspace_id: str, account: str | None) -> bool:
+        """Whether ``account`` may reach ``workspace_id``'s records.
+
+        The same rule as ``visible``, for an id that may not be live:
+        a deleted workspace's jobs, or a stored workspace after a
+        restart, answer to the owner its claim names.
+
+        Args:
+            workspace_id (str): the workspace the records belong to.
+            account (str | None): the caller's account.
+        """
+        if account is None:
+            return not self.accounts_required
+        if workspace_id in self._entries:
+            return self.visible(workspace_id, account) is not None
+        if self._owners is None:
+            return False
+        stored, _ = await self._owners.get(workspace_id)
+        return stored is not None and stored.get("account") == account
+
+    async def claim(self, workspace_id: str, account: str | None) -> bool:
+        """Record ``account`` as the owner of ``workspace_id``.
+
+        The claim outlives the daemon, so after a restart the stored
+        workspace under that id reopens only for the same account. A
+        caller with no account claims nothing.
+
+        Args:
+            workspace_id (str): the id being created.
+            account (str | None): the creating caller's account.
+
+        Returns:
+            bool: False when another account already owns the id.
+        """
+        if account is None or self._owners is None:
+            return True
+        record = {"account": account, "generation": 1}
+        if await self._owners.cas_put(workspace_id, record, 0):
+            return True
+        stored, _ = await self._owners.get(workspace_id)
+        return stored is not None and stored.get("account") == account
+
     def add(
-        self, workspace: Workspace, workspace_id: str | None = None
+        self,
+        workspace: Workspace,
+        workspace_id: str | None = None,
+        owner: str | None = None,
     ) -> WorkspaceEntry:
         """Wrap ``workspace`` in a runner and register it.
 
         Args:
             workspace (Workspace): freshly-constructed workspace.
             workspace_id (str | None): explicit id, or None to auto-mint.
+            owner (str | None): the creating caller's account.
 
         Returns:
             WorkspaceEntry: the registered entry.
@@ -150,7 +250,7 @@ class WorkspaceRegistry:
         if wid in self._entries:
             raise ValueError(f"workspace id already exists: {wid!r}")
         runner = WorkspaceRunner(workspace)
-        entry = WorkspaceEntry(wid, runner)
+        entry = WorkspaceEntry(wid, runner, owner)
         self._entries[wid] = entry
         self._cancel_idle_timer()
         return entry
@@ -158,14 +258,14 @@ class WorkspaceRegistry:
     async def remove(self, workspace_id: str) -> WorkspaceEntry:
         """Delete ``workspace_id``: stop its runner and drop its state.
 
-        The workspace's links, history, sessions and metadata leave its
-        state store with it, so a workspace created later under the same
-        id starts empty. ``close_all`` (daemon shutdown) keeps them. The
-        id stays registered until the deletion is done, so a create under
-        it is refused rather than registering a workspace whose state this
-        deletion would then remove. An overlapping remove of the same id
-        joins the deletion in flight, so it never unregisters a workspace
-        created after it.
+        The workspace's links, history, sessions, metadata and owner
+        leave with it, so a workspace created later under the same id
+        starts empty, for any account. ``close_all`` (daemon shutdown)
+        keeps them. The id stays registered until the deletion is done, so
+        a create under it is refused rather than registering a workspace
+        whose state this deletion would then remove. An overlapping remove
+        of the same id joins the deletion in flight, so it never
+        unregisters a workspace created after it.
 
         Args:
             workspace_id (str): id to remove.
@@ -195,9 +295,39 @@ class WorkspaceRegistry:
         """
         try:
             await entry.runner.stop(delete=True)
+            if self._owners is not None:
+                await self._owners.delete([entry.id])
         finally:
             del self._removals[entry.id]
             self._entries.pop(entry.id, None)
+            if not self._entries:
+                self._start_idle_timer()
+        return entry
+
+    async def close(self, workspace_id: str) -> WorkspaceEntry:
+        """Close ``workspace_id`` and keep its state.
+
+        The runner stops, which cancels its lines and closes its
+        sessions; the stored sessions, links, history and owner stay, so
+        the owner creating the same id later picks them up. The id is
+        released first, so no new request reaches the closing runner.
+
+        Args:
+            workspace_id (str): id to close.
+
+        Returns:
+            WorkspaceEntry: the closed entry.
+
+        Raises:
+            KeyError: ``workspace_id`` is not registered.
+        """
+        removal = self._removals.get(workspace_id)
+        if removal is not None:
+            return await asyncio.shield(removal)
+        entry = self._entries.pop(workspace_id)
+        try:
+            await entry.runner.stop()
+        finally:
             if not self._entries:
                 self._start_idle_timer()
         return entry
