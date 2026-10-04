@@ -26,8 +26,8 @@ import type { ErrnoCodes, FSHost } from './types.ts'
 export type FsErrorCode = FsCondition
 
 // Condition -> the name the interpreter's own errno table knows it by.
-// Identity except for mirage's two own conditions: the interpreter
-// calls a cross-mount rename EXDEV, and "attribute not set" ENODATA.
+// Identity except for mirage's own condition: the interpreter calls
+// "attribute not set" ENODATA.
 const CONDITION_KEY: Record<FsCondition, keyof ErrnoCodes> = {
   ENOENT: 'ENOENT',
   ENOTDIR: 'ENOTDIR',
@@ -37,7 +37,6 @@ const CONDITION_KEY: Record<FsCondition, keyof ErrnoCodes> = {
   EPERM: 'EPERM',
   ENOTEMPTY: 'ENOTEMPTY',
   EXDEV: 'EXDEV',
-  CROSS_MOUNT: 'EXDEV',
   ENOTSUP: 'ENOTSUP',
   ELOOP: 'ELOOP',
   EINVAL: 'EINVAL',

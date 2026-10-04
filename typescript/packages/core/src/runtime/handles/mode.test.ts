@@ -47,20 +47,10 @@ describe('parseMode', () => {
     }
   })
 
-  it("reads 'wx' as C fopen's exclusive create", () => {
-    // CPython spells exclusive creation as a bare 'x'; C fopen (and
-    // so qjs-wasi's std.open) spells it 'wx'. One parser serves both
-    // dialects, so both spellings answer the same facts.
-    const mode = parseMode('wx')
-    expect(mode.exclusive && mode.create && mode.truncate).toBe(true)
-    expect(mode.writable).toBe(true)
-    expect(mode.readable).toBe(false)
-  })
-
   it('refuses garbage modes in CPython wording', () => {
-    // One parser, the stricter half's rule: exactly one of rwax, at
-    // most one each of +, b, t, and never b with t.
-    for (const bad of ['', 'q', 'rw', 'rr', 'r++', 'rbb', 'rbt', 'wq', 'b']) {
+    // CPython's rule: exactly one of rwax, at most one each of +, b, t,
+    // and never b with t.
+    for (const bad of ['', 'q', 'rw', 'rr', 'wx', 'r++', 'rbb', 'rbt', 'wq', 'b']) {
       expect(() => parseMode(bad), bad).toThrow(/invalid mode/)
     }
   })

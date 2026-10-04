@@ -15,43 +15,45 @@
 import { describe, expect, it } from 'vitest'
 
 import { FS_CONDITIONS } from '../../../errors/index.ts'
-import { POSIX } from '../../../errors/posix.ts'
 import { CrossMountError } from '../../errors.ts'
-import { asGuestError, CPYTHON, cpythonError, guestError } from './errors.ts'
+import { asGuestError, cpythonError, guestError } from './errors.ts'
 
 describe('the CPython table', () => {
-  it('covers the whole vocabulary', () => {
-    // A condition cannot be half-added: the dialect table stays total
-    // over the vocabulary, keyed on exactly the union.
-    expect(Object.keys(CPYTHON).sort()).toEqual([...FS_CONDITIONS].sort())
+  it('renders every condition of the vocabulary', () => {
+    // A condition cannot be half-added: each one renders as an OSError
+    // or one of the subclasses CPython raises for its errno.
+    const builtins = [
+      'OSError',
+      'FileNotFoundError',
+      'NotADirectoryError',
+      'IsADirectoryError',
+      'FileExistsError',
+      'PermissionError',
+    ]
+    for (const cond of FS_CONDITIONS) {
+      const row = cpythonError(cond)
+      expect(builtins).toContain(row.exception)
+      expect(row.errno).toBeGreaterThan(0)
+    }
   })
 
   it.each([
-    ['ENOENT', 'FileNotFoundError', 2],
-    ['ENOTDIR', 'NotADirectoryError', 20],
-    ['EISDIR', 'IsADirectoryError', 21],
-    ['EEXIST', 'FileExistsError', 17],
-    ['EACCES', 'PermissionError', 13],
-    ['EPERM', 'PermissionError', 1],
-    ['EXDEV', 'OSError', 18],
-    ['CROSS_MOUNT', 'OSError', 18],
-    ['ENOTEMPTY', 'OSError', 39],
-    ['ELOOP', 'OSError', 40],
-  ] as const)('renders %s as CPython on Linux', (cond, exception, errno) => {
-    // A guest interpreter is platform-neutral, so the numbering must
-    // not wobble with the host. Mirrors the python
+    ['ENOENT', 'FileNotFoundError', 2, 'No such file or directory'],
+    ['ENOTDIR', 'NotADirectoryError', 20, 'Not a directory'],
+    ['EISDIR', 'IsADirectoryError', 21, 'Is a directory'],
+    ['EEXIST', 'FileExistsError', 17, 'File exists'],
+    ['EACCES', 'PermissionError', 13, 'Permission denied'],
+    ['EPERM', 'PermissionError', 1, 'Operation not permitted'],
+    ['EXDEV', 'OSError', 18, 'Invalid cross-device link'],
+    ['ENOTEMPTY', 'OSError', 39, 'Directory not empty'],
+    ['ELOOP', 'OSError', 40, 'Too many levels of symbolic links'],
+    ['NO_XATTR', 'OSError', 61, 'No data available'],
+  ] as const)('renders %s as CPython on Linux', (cond, exception, errno, phrase) => {
+    // A guest interpreter is platform-neutral, so neither its numbering
+    // nor its wording wobbles with the host. Mirrors the python
     // tests/runtime/python/monty/test_errors.py pins.
     const row = cpythonError(cond)
-    expect([row.exception, row.errno]).toEqual([exception, errno])
-  })
-
-  it('speaks one phrase per condition, shared with the posix table', () => {
-    // NO_XATTR is exempt: the posix row may resolve to macOS's
-    // "Attribute not found" while a guest always speaks Linux.
-    for (const cond of FS_CONDITIONS) {
-      if (cond === 'NO_XATTR') continue
-      expect(CPYTHON[cond].phrase).toBe(POSIX[cond].phrase)
-    }
+    expect([row.exception, row.errno, row.phrase]).toEqual([exception, errno, phrase])
   })
 })
 

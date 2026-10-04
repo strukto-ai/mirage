@@ -129,17 +129,20 @@
             "js": "const e = {}\nconst w = std.open('/ro/x.txt', 'w', e)\nconsole.log(w === null, e.errno)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "OSError\n"
+            "python": {
+              "exit": 0,
+              "stdout": "OSError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "true 69\n"
+            }
           },
           "expect_on": {
             "pyodide": {
               "exit": 1,
               "stdout": "",
               "stderr_contains": "failed to create /ro/x.txt on mount: mount /ro/ is read-only"
-            },
-            "quickjs": {
-              "stdout": "true 69\n"
             }
           }
         },

@@ -73,6 +73,22 @@ export const LINK_ENTRY_OPS: ReadonlySet<string> = new Set(['unlink', 'rename', 
 // requested/residual split and the overlay write read the same names.
 export const SETATTR_KEYS = ['mode', 'uid', 'gid', 'atime', 'mtime'] as const
 
+// Ops that change a file's bytes or its name. A store that cannot write in
+// place (S3, redis) answers pwrite, append and truncate by reading the file
+// and writing it back whole, so two of these on one path at once could each
+// put back bytes the other had just replaced; the dispatcher runs them one
+// at a time per path, as a kernel's inode lock orders writers to one file.
+export const SERIAL_WRITE_OPS: ReadonlySet<string> = new Set([
+  'write',
+  'write_bytes',
+  'append',
+  'pwrite',
+  'truncate',
+  'create',
+  'unlink',
+  'rename',
+])
+
 // Ops that open the regular file they name with O_CREAT, which answers a
 // slash-terminated name (`x/`, only ever a directory) with EISDIR.
 export const FILE_CREATE_OPS: ReadonlySet<string> = new Set([

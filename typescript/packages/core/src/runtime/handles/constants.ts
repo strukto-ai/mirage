@@ -17,9 +17,8 @@
 // it reads.
 export const MODE_CHARS = 'rwaxbt+'
 
-// The legal base-letter spellings: CPython's four plus C fopen's wx
-// (exclusive create), which CPython spells as a bare x.
-export const MODE_BASES: readonly string[] = ['r', 'w', 'a', 'x', 'wx']
+// The legal base-letter spellings: CPython's four.
+export const MODE_BASES: readonly string[] = ['r', 'w', 'a', 'x']
 
 // The least a read-only handle fetches per trip to the mount. A guest
 // reads in small pieces (a line, a 4 KiB buffer), so one chunk per

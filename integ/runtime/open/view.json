@@ -40,15 +40,19 @@
             "js": "const f = std.open('/.bash_history', 'r')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n",
-            "ops_absent": [
-              "read /.bash_history"
-            ]
-          },
-          "expect_on": {
-            "quickjs": {
-              "stdout": "refused\n"
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n",
+              "ops_absent": [
+                "read /.bash_history"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "read /.bash_history"
+              ]
             }
           }
         },
@@ -58,16 +62,22 @@
             "js": "const f = std.open('/tmp/new.txt', 'w')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n",
-            "ops_absent": [
-              "create /tmp/new.txt"
-            ]
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n",
+              "ops_absent": [
+                "create /tmp/new.txt"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /tmp/new.txt"
+              ]
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "refused\n"
-            },
             "pyodide": {
               "stdout": "opened\n"
             }
@@ -79,13 +89,16 @@
             "js": "console.log(os.stat('/tmp/new.txt')[1])"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "False\n"
+            "python": {
+              "exit": 0,
+              "stdout": "False\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "44\n"
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "44\n"
-            },
             "pyodide": {
               "stdout": "True\n"
             }
@@ -97,11 +110,12 @@
             "js": "const f = std.open('/etc/passwd', 'r')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "refused\n"
             }
           }

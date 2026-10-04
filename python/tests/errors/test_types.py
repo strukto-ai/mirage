@@ -37,7 +37,6 @@ def test_vocabulary_names_the_probed_conditions():
         "EPERM",
         "ENOTEMPTY",
         "EXDEV",
-        "CROSS_MOUNT",
         "ENOTSUP",
         "ELOOP",
         "EINVAL",

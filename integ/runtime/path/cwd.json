@@ -89,11 +89,12 @@
             "js": "'use strict'\ntry { missingName = 1 } catch (e) { console.log(e.name) }\nconsole.log(os.getcwd()[0])"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "/data/sub\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "/data/sub\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "ReferenceError\n/data/sub\n"
             }
           }
@@ -169,11 +170,12 @@
             "js": "console.log(std.open('in.txt', 'r').readAsString())\nconst f = std.open('out.txt', 'w')\nf.puts('written')\nf.close()\nos.rename('out.txt', 'renamed.txt')\nconsole.log(std.open('./sub/../renamed.txt', 'r').readAsString())\nconsole.log(JSON.stringify(os.readdir('.')[0].filter((n) => n[0] !== '.').sort()))\nconsole.log(os.getcwd()[0] + '/in.txt')\nconsole.log(JSON.stringify(os.readdir('sub')[0].filter((n) => n[0] !== '.').sort()))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "hello\nwritten\n['entry.mjs', 'in.txt', 'renamed.txt', 'sub']\n/data/in.txt\n['child.txt', 'item']\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "hello\nwritten\n['entry.mjs', 'in.txt', 'renamed.txt', 'sub']\n/data/in.txt\n['child.txt', 'item']\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "hello\nwritten\n[\"entry.mjs\",\"in.txt\",\"renamed.txt\",\"sub\"]\n/data/in.txt\n[\"child.txt\",\"item\"]\n"
             }
           }
@@ -191,11 +193,12 @@
             "js": "console.log(os.mkdir('empty'))\nconsole.log(os.stat('in.txt')[0].size)\nconsole.log(os.remove('empty'), os.remove('renamed.txt'))\nconst names = os.readdir('.')[0]\nconsole.log(names.includes('empty'), names.includes('renamed.txt'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "5\nFalse False\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "5\nFalse False\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "0\n5\n0 0\nfalse false\n"
             }
           }
@@ -246,15 +249,18 @@
             "js": "console.log(os.chdir('sub'))\nconsole.log(os.getcwd()[0])\nconsole.log(std.open('child.txt', 'r').readAsString())\nconsole.log(std.open('../in.txt', 'r').readAsString())\nos.chdir('..')\nconsole.log(os.getcwd()[0])"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "/data/sub\nchild\nhello\n/data\n"
+            "python": {
+              "exit": 0,
+              "stdout": "/data/sub\nchild\nhello\n/data\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0\n/data/sub\nchild\nhello\n/data\n"
+            }
           },
           "expect_on": {
             "wasi": {
               "stdout": "/data/sub\nchild\nhello\n/data/sub/..\n"
-            },
-            "quickjs": {
-              "stdout": "0\n/data/sub\nchild\nhello\n/data\n"
             },
             "quickjs@python": {
               "stdout": "0\n/data/sub\nchild\nhello\n/data/sub/..\n"
@@ -279,13 +285,16 @@
             "js": "console.log(os.chdir('missing'), os.chdir('in.txt'), os.getcwd()[0])"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\nNotADirectoryError\n/data\n"
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\nNotADirectoryError\n/data\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-44 -54 /data\n"
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "-44 -54 /data\n"
-            },
             "monty@typescript": {
               "exit": 1,
               "stdout": "FileNotFoundError\n",
