@@ -1,12 +1,45 @@
 ---
 title: Claude Code
-description: Run Anthropic's Claude Code CLI against any Mirage workspace by mounting it as a real filesystem via FUSE.
+description: Install Mirage's Claude Code plugin for mounted-data tools and VFS authoring, or expose a workspace through FUSE.
 icon: /images/claude-logo.svg
 ---
 
-[Claude Code](https://github.com/anthropics/claude-code) is Anthropic's CLI for Claude. It expects a real filesystem and doesn't expose a pluggable backend, so instead of an SDK integration, Mirage exposes any workspace as a real filesystem via [FUSE](/typescript/setup/fuse) and lets you point `claude` at the mountpoint.
+[Claude Code](https://github.com/anthropics/claude-code) can load Mirage's MCP tools and skills as a plugin. A [FUSE mount](/typescript/setup/fuse) also lets Claude Code's built-in filesystem tools access a workspace through a real directory.
 
-## Install
+## Install the plugin
+
+In Claude Code, add the repository as a marketplace and install Mirage:
+
+```text
+/plugin marketplace add strukto-ai/mirage
+/plugin install mirage@mirage
+```
+
+For local development, replace `strukto-ai/mirage` with the path to a Mirage checkout. Restart Claude Code after installation, then check `/plugin` and `/mcp` for the plugin and its tool server.
+
+The plugin includes the `mirage-filesystem` and `mirage-vfs-authoring` skills, plus the shared Mirage MCP server. The server requires Node.js 20.10 or newer and launches with `npx -y @struktoai/mirage-cli mcp`.
+
+## Configure a workspace
+
+Create `.mirage/workspace.yaml` in the project where you start Claude Code:
+
+```yaml
+mounts:
+  /scratch:
+    vfs: ram
+  /data:
+    vfs: disk
+    config:
+      root: ${PWD}/data
+```
+
+Create the project's `data` directory for the disk mount. Mirage searches the current directory and its parents for the workspace config; set `MIRAGE_MCP_CONFIG` to an absolute config path when it lives elsewhere.
+
+Ask Claude to use Mirage to list mounted files, search `/data`, or write notes to `/scratch`. The plugin's `shell`, `read`, `write`, `edit`, `ls`, `grep`, and `glob` tools operate on virtual paths. Claude Code's built-in file tools use host paths; use the FUSE setup below to expose the workspace to those tools too. See [MCP](/home/mcp) for the server lifecycle and configuration.
+
+## Use a FUSE mount
+
+Install Mirage's FUSE dependencies:
 
 ```bash
 pnpm add @struktoai/mirage-node @zkochan/fuse-native
@@ -14,7 +47,7 @@ pnpm add @struktoai/mirage-node @zkochan/fuse-native
 
 See [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDependencies` allow-list and macOS macFUSE 4 symlink workaround. Then install [Claude Code](https://docs.claude.com/en/docs/claude-code/setup) separately.
 
-## Usage
+### Usage
 
 ```ts
 import { Mount, MountMode, RAMVFS, S3VFS, Workspace } from '@struktoai/mirage-node'
@@ -32,9 +65,9 @@ await ws.close() // auto-unmounts
 
 The mountpoint behaves like a regular directory. `claude` reads, writes, runs `bash`, and patches files just like it would on a normal disk, every operation goes through Mirage's ops layer, so writes to `/s3/...` hit S3, writes to `/` stay in RAM.
 
-## Why FUSE instead of an SDK integration?
+### How FUSE integrates with Claude Code
 
-Claude Code's tool-use loop is fully internal, there's no `Backend` interface to swap. FUSE gives Mirage a single unforced way in: present a real path, let the agent be the agent.
+FUSE presents a real directory to Claude Code's built-in tools. Every filesystem operation passes through Mirage's ops layer.
 
 You lose:
 - Per-tool prompt customization

@@ -1,0 +1,13 @@
+{
+  "name": "mirage",
+  "version": "0.1.0",
+  "description": "Use Mirage-mounted data through MCP tools and build custom VFS adapters.",
+  "author": {
+    "name": "Strukto.AI",
+    "url": "https://github.com/strukto-ai"
+  },
+  "homepage": "https://docs.mirage.strukto.ai/typescript/agents/claude-code",
+  "repository": "https://github.com/strukto-ai/mirage",
+  "license": "Apache-2.0",
+  "keywords": ["mirage", "filesystem", "mcp", "coding-agent"]
+}

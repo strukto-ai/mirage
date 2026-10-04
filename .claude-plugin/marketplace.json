@@ -1,0 +1,14 @@
+{
+  "name": "mirage",
+  "description": "Mirage filesystem tools and VFS authoring skills for Claude Code.",
+  "owner": {
+    "name": "Strukto.AI"
+  },
+  "plugins": [
+    {
+      "name": "mirage",
+      "source": "./plugins/mirage",
+      "description": "Use Mirage-mounted data through MCP tools and build custom VFS adapters."
+    }
+  ]
+}
