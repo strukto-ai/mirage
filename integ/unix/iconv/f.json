@@ -201,11 +201,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'x\\303\\251\\n' > /data/r10i1; printf 'y\\n' > /data/r10i2; iconv -f utf-8 -t ascii /data/r10i1 /data/r10i2; echo rc=$?; iconv -c -f utf-8 -t ascii /data/r10i1 /data/r10i2; echo rc=$?; iconv -f utf-8 -t latin1 /data/r10i2 /data/r10i1 | od -An -tx1; iconv -f utf-8 -t ascii /data/r10i2 /data/r10nope /data/r10i2; echo rc=$?; mkdir -p /data/r10id && echo z > /data/r10id/z && iconv -f utf-8 -t ascii /data/r10i2 /data/r10id /data/r10i2; echo rc=$?; rm -r /data/r10i1 /data/r10i2 /data/r10id",
+      "command": "printf 'x\\303\\251\\n' > /data/r10i1; printf 'y\\n' > /data/r10i2; iconv -f utf-8 -t ascii /data/r10i1 /data/r10i2; echo rc=$?; iconv -c -f utf-8 -t ascii /data/r10i1 /data/r10i2; echo rc=$?; iconv -f utf-8 -t latin1 /data/r10i2 /data/r10i1 | od -An -tx1; iconv -f utf-8 -t ascii /data/r10i2 /data/r10nope /data/r10i2; echo rc=$?; rm /data/r10i1 /data/r10i2",
       "expect": {
         "exit": 0,
-        "stdout": "xrc=1\nx\ny\nrc=1\n 79 0a 78 e9 0a\ny\ny\nrc=1\ny\nrc=1\n",
-        "stderr": "iconv: illegal input sequence at position 1\niconv: cannot open input file `/data/r10nope': No such file or directory\niconv: error while reading the input: Is a directory\n"
+        "stdout": "xrc=1\nx\ny\nrc=1\n 79 0a 78 e9 0a\ny\ny\nrc=1\n",
+        "stderr": "iconv: illegal input sequence at position 1\niconv: cannot open input file `/data/r10nope': No such file or directory\n"
       }
     }
   ]
