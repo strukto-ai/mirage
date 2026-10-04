@@ -16,5 +16,5 @@ sentry-sdk==2.68.1
 smmap==5.0.3
 typing-extensions==4.16.0
 typing-inspection==0.4.4
-urllib3==2.7.0
+urllib3==2.8.0
 wandb==0.21.1

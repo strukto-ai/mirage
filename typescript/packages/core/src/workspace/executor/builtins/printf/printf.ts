@@ -19,7 +19,7 @@ import { yieldBytes } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -85,7 +85,9 @@ export const HELP =
  * write goes through the door as the whole variable, so a `preSession`
  * rule refusing the name sees `printf -v 'AWS_KEY[0]'` as a write to
  * AWS_KEY. The refusal is thrown, not collapsed into a status, so the
- * rule's own words reach the user as they do from `export`.
+ * rule's own words reach the user as they do from `export`. bash stores the
+ * bytes the format produced, so a `\x` run that is valid UTF-8 is stored as
+ * its characters.
  */
 async function assignPrintfTarget(
   session: SessionState,
@@ -94,7 +96,8 @@ async function assignPrintfTarget(
   subscript: string | undefined,
   value: string,
 ): Promise<'ok' | 'denied' | 'readonly' | 'subscript'> {
-  return assignElement(session, view ?? null, name, subscript ?? null, value)
+  const text = decodeText(encodeText(value))
+  return assignElement(session, view ?? null, name, subscript ?? null, text)
 }
 
 /**

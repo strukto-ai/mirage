@@ -1,5 +1,5 @@
 {
- "baseline": 4836,
+ "baseline": 4777,
  "modules": {
   "ops/generic/factory": {
    "python_only": {

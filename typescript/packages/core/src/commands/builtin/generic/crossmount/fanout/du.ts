@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { humanSize } from '../../../utils/formatting.ts'
+import { humanSize, scaledSize } from '../../../utils/formatting.ts'
 import { rollup, separateTotal } from '../../du.ts'
 import { respellRaw } from '../../../../../utils/path.ts'
 import type { OperandRun } from '../types.ts'
@@ -20,10 +20,6 @@ import { rstripSlash } from '../../../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function formatSize(size: number, human: boolean): string {
-  return human ? humanSize(size) : String(size)
-}
 
 function humanizeRow(line: string): string {
   const tab = line.indexOf('\t')
@@ -59,7 +55,7 @@ export function mergeDuTotals(blocks: readonly Uint8Array[], human: boolean): Ui
     }
     kept.push(...(human ? body.map(humanizeRow) : body))
   }
-  kept.push(`${formatSize(total, human)}\ttotal`)
+  kept.push(`${scaledSize(total, null, human)}\ttotal`)
   return ENC.encode(kept.join('\n') + '\n')
 }
 
@@ -147,11 +143,11 @@ export function mergeDuBlocks(
       label,
     )
     rows.forEach(([, size], i) => {
-      lines.push(`${formatSize(size, opts.human)}\t${shown[i] ?? ''}`)
+      lines.push(`${scaledSize(size, null, opts.human)}\t${shown[i] ?? ''}`)
     })
   }
-  lines.push(`${formatSize(own, opts.human)}\t${label}`)
-  if (opts.total) lines.push(`${formatSize(sum, opts.human)}\ttotal`)
+  lines.push(`${scaledSize(own, null, opts.human)}\t${label}`)
+  if (opts.total) lines.push(`${scaledSize(sum, null, opts.human)}\ttotal`)
   return ENC.encode(lines.join('\n') + '\n')
 }
 

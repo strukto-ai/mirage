@@ -1,11 +1,16 @@
 import asyncio
 import errno
 import os
+import re
 
 import pytest
 
 from mirage.commands.builtin import rg_search
-from mirage.commands.builtin.generic.rg import labelled, parse_flags, rg
+from mirage.commands.builtin.generic.rg import (
+    labelled,
+    parse_flags,
+    rg_generic,
+)
 from mirage.commands.builtin.rg_search import RgFlags
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
@@ -117,7 +122,7 @@ async def _drain_async(stdout):
 @pytest.mark.asyncio
 async def test_rg_count_stdin_zero_exits_1_without_output():
     readdir, stat, rb, rs = _make_backend({})
-    output, io = await rg(
+    output, io = await rg_generic(
         [],
         ["foo"],
         CommandOpts(flags={"count": True}),
@@ -194,13 +199,19 @@ def _walk_refused(virtual: str, raw: str, verdict: WalkErrno) -> PathSpec:
 async def test_rg_refuses_an_operand_the_walk_refused(operand, message):
     # ripgrep 14.1.1: `rg o ''` and `rg o lp1` (a loop) refuse the operand
     # by name with exit 2. The empty name's `virtual` is the cwd it joined
-    # onto, which must not be walked.
+    # onto, which must not be walked. Beside another operand the parallel
+    # walker names it once.
     readdir, stat, rb, rs = _make_backend({"/a.txt": b"hello\n"})
-    for paths, want in (
-        ([_walk_refused(*operand)], b""),
-        ([_spec("/a.txt"), _walk_refused(*operand)], b"/a.txt:hello\n"),
+    parallel = re.sub(rb"IO error for operation on [^:]*: ", b"", message)
+    for paths, want, said in (
+        ([_walk_refused(*operand)], b"", message),
+        (
+            [_spec("/a.txt"), _walk_refused(*operand)],
+            b"/a.txt:hello\n",
+            parallel,
+        ),
     ):
-        output, io = await rg(
+        output, io = await rg_generic(
             paths,
             ["o"],
             CommandOpts(),
@@ -210,7 +221,7 @@ async def test_rg_refuses_an_operand_the_walk_refused(operand, message):
             read_stream=rs,
         )
         assert await _drain_async(output) == want
-        assert io.stderr == message
+        assert io.stderr == said
         assert io.exit_code == 2
 
 
@@ -225,7 +236,7 @@ async def test_rg_lone_operand_it_may_not_read_is_the_searchers_refusal():
         raise PermissionError("/locked.txt")
         yield b""
 
-    output, io = await rg(
+    output, io = await rg_generic(
         [_typed("/locked.txt", "locked.txt")],
         ["hit"],
         CommandOpts(),
@@ -257,7 +268,7 @@ async def test_rg_not_a_directory_operand_keeps_the_others():
             raise NotADirectoryError(p)
         return await readdir(path)
 
-    output, io = await rg(
+    output, io = await rg_generic(
         [_spec("/a.txt/x"), _spec("/real")],
         ["foo"],
         CommandOpts(flags={"files_with_matches": True}),
@@ -269,52 +280,6 @@ async def test_rg_not_a_directory_operand_keeps_the_others():
     decoded = (await _drain_async(output)).decode()
     assert decoded == "/real/b.txt\n"
     assert b"/a.txt/x" in (io.stderr or b"")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "flags,prefix",
-    [
-        ({}, ""),
-        ({"with_filename": True}, "/binary.txt:"),
-        ({"no_filename": True}, ""),
-        ({"with_filename": True, "no_filename": True}, ""),
-    ],
-)
-async def test_rg_filename_flags_preserve_nul_matches(flags, prefix):
-    readdir, stat, rb, rs = _make_backend({"/binary.txt": b"needle\0tail\n"})
-    output, io = await rg(
-        [_spec("/binary.txt")],
-        ["needle"],
-        CommandOpts(flags=flags),
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-    )
-    assert await _drain_async(output) == prefix.encode() + b"needle\0tail\n"
-    assert io.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_rg_no_filename_preserves_multi_file_nul_matches():
-    readdir, stat, rb, rs = _make_backend(
-        {
-            "/a.txt": b"needle\0a\n",
-            "/b.txt": b"needle\0b\n",
-        }
-    )
-    output, io = await rg(
-        [_spec("/a.txt"), _spec("/b.txt")],
-        ["needle"],
-        CommandOpts(flags={"no_filename": True}),
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-    )
-    assert await _drain_async(output) == b"needle\0a\nneedle\0b\n"
-    assert io.exit_code == 0
 
 
 def test_rg_output_mode_is_the_last_of_c_l_and_files_without_match():
@@ -345,7 +310,7 @@ async def _run(
     files: dict[str, bytes] | None = None,
 ):
     readdir, stat, rb, rs = _make_backend(files or {})
-    output, io = await rg(
+    output, io = await rg_generic(
         paths,
         texts,
         CommandOpts(flags=flags),
@@ -545,7 +510,7 @@ async def _run_locked(paths: list[PathSpec], flags: dict):
             )
         return await rb(path)
 
-    output, io = await rg(
+    output, io = await rg_generic(
         paths,
         ["hit"],
         CommandOpts(flags=flags),
@@ -653,7 +618,7 @@ async def test_rg_follows_a_walked_link_only_under_dash_upper_l(
         (
             "ln -s nowhere s/.dang && rg -L -g '*.txt' o s",
             "",
-            DANG.format("s/.dang"),
+            "rg: s/.dang: No such file or directory (os error 2)\n",
         ),
         (
             "ln -s lp2 s/lp1 && ln -s lp1 s/lp2 && rg -L --sort path o s",

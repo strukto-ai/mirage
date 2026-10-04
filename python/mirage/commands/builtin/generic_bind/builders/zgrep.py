@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.zgrep import zgrep as generic_zgrep
+from mirage.commands.builtin.generic.zgrep import zgrep_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,
@@ -39,7 +39,7 @@ async def zgrep(
         if paths and ops.is_mounted(accessor)
         else []
     )
-    return await generic_zgrep(
+    return await zgrep_generic(
         resolved,
         texts,
         opts.flags,

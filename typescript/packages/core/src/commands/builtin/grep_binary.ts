@@ -15,7 +15,8 @@
 import { compilePosixRegex } from '../../utils/posix.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { closeQuietly } from '../../io/stream.ts'
-import { decodeLine, encodeLine, MatchOffsets, prefixOf } from './grep_offsets.ts'
+import { MatchOffsets, prefixOf } from './grep_offsets.ts'
+import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { requiredNeedles } from './grep_prefilter.ts'
 import type { RegexSyntax } from './types.ts'
 import { matchStart, matchText } from './utils/pcre.ts'
@@ -197,7 +198,7 @@ export async function* grepInput(
       number += 1
       const lineStart = bytePos
       bytePos += raw.length + 1
-      const line = decodeLine(raw)
+      const line = decodeText(raw)
       let hit = pat.test(line) !== f.invert
       if (f.maxCount !== null && count >= f.maxCount) hit = false
       if (hit) {
@@ -241,7 +242,7 @@ export async function* grepInput(
               if (text !== '')
                 chunks.push(
                   outputLine(
-                    encodeLine(text),
+                    encodeText(text),
                     number,
                     true,
                     path,

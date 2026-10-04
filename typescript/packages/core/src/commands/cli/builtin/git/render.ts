@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { decodeLine } from '../../../builtin/grep_offsets.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import type { StatusEntry, Upstream } from './types.ts'
 
 const UNCHANGED = ' '
@@ -143,7 +142,7 @@ export function quotePath(path: string, porcelain: boolean, fully = true): strin
       out.push(...ENC.encode(`\\${byte.toString(8).padStart(3, '0')}`))
     else out.push(byte)
   }
-  return `"${decodeLine(new Uint8Array(out))}"`
+  return `"${decodeText(new Uint8Array(out))}"`
 }
 
 /** Whether one byte of a path forces the whole path into quotes. */

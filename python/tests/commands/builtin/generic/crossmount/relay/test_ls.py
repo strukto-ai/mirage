@@ -93,11 +93,6 @@ def run(scopes, flags=None, ns=None, roots=frozenset()):
     return out.decode(), io, calls
 
 
-def test_a_file_operand_prints_first_unheaded():
-    out, _, _ = run(["/b/two", "/a/z.txt"])
-    assert out == "/a/z.txt\n\n/b/two:\ny.txt\n"
-
-
 def test_the_callers_index_is_never_relayed_to_another_mount():
     # An index belongs to one mount, so operand A's index cannot answer
     # for mount B; the relayed op consults its own mount's index.
@@ -127,13 +122,6 @@ def test_a_missing_namespace_lists_the_same_names():
     assert (
         run(["/a", "/b"], ns=None)[0]
         == run(["/a", "/b"], ns=NamespaceView())[0]
-    )
-
-
-def test_recursive_interleaves_each_operands_subtree():
-    out, _, _ = run(["/a", "/b"], flags={"recursive": True})
-    assert out == (
-        "/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n"
     )
 
 

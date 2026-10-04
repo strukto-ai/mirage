@@ -137,7 +137,7 @@ async def test_tree_one_list_per_directory_without_metadata():
         "/volume/sub", mount_key("/volume/sub", "/volume")
     )
     await generic_tree(
-        path,
+        [path],
         readdir=_ls_readdir(accessor),
         stat=_ls_stat(accessor),
         index=index,

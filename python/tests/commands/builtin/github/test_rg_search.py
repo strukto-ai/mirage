@@ -44,7 +44,7 @@ def seam(monkeypatch):
     narrow = AsyncMock(return_value=([_subdir()], 3, False))
     generic = AsyncMock(return_value=(b"", IOResult()))
     monkeypatch.setitem(_GLOBALS, "narrow_scope", narrow)
-    monkeypatch.setitem(_GLOBALS, "generic_rg", generic)
+    monkeypatch.setitem(_GLOBALS, "rg_generic", generic)
     return narrow, generic
 
 

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.gmail.io import resolve_glob
 from mirage.commands.builtin.grep_pattern import pattern_arg
@@ -79,7 +79,7 @@ async def grep(
                 return format_records(lines), IOResult()
 
     resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
-    return await generic_grep(
+    return await grep_generic(
         resolved,
         texts,
         opts,

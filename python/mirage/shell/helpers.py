@@ -107,7 +107,7 @@ def byte_offset(text: str, index: int) -> int:
     Bytes that are not valid UTF-8 ride as surrogate escapes and each
     stand for one byte, which is what makes the count exact. That is a
     requirement on the caller, not a hope: grep's family decodes every
-    line through ``grep_offsets.decode_line`` for it.
+    line through ``decode_text`` for it.
 
     Args:
         text (str): the text the index is into.

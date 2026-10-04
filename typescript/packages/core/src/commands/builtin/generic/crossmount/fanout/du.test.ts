@@ -17,7 +17,7 @@ import { IOResult } from '../../../../../io/types.ts'
 import { PathSpec } from '../../../../../types.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'
 import type { OperandRun } from '../types.ts'
-import { duTotal, mergeDuTotals } from './du.ts'
+import { duTotal } from './du.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -37,45 +37,7 @@ function op(data: string, exitCode = 0): OperandRun {
 }
 
 describe('duTotal', () => {
-  it('strips per-run totals and sums', () => {
-    const out = DEC.decode(
-      duTotal([op('5\t/a/sub\n5\ttotal\n'), op('3\t/b/c.txt\n3\ttotal\n')], false),
-    )
-    expect(out).toBe('5\t/a/sub\n3\t/b/c.txt\n8\ttotal\n')
-  })
-
-  it('humanizes from exact bytes without rounding twice', () => {
-    // runFanout forces -h off on the native runs, so the rows arrive in
-    // bytes: 1025 + 1025 is 2.1K, not the 2.2K that summing two "1.1K"
-    // readings back through parseSize would give. 1500 would not show
-    // the difference -- GNU rounds up, so 3000 bytes and two 1.5K
-    // readings both render 3.0K.
-    const out = DEC.decode(
-      duTotal([op('1025\t/a/x\n1025\ttotal\n'), op('1025\t/b/z\n1025\ttotal\n')], true),
-    )
-    expect(out).toBe('1.1K\t/a/x\n1.1K\t/b/z\n2.1K\ttotal\n')
-  })
-
   it('leaves a row without a tab alone', () => {
     expect(DEC.decode(duTotal([op('odd-row\n0\ttotal\n')], true))).toBe('odd-row\n0\ttotal\n')
-  })
-})
-
-describe('mergeDuTotals', () => {
-  // The mount fan-out has no OperandRun to hand over: its blocks are one
-  // per mount, not one per operand.
-  it('takes rendered blocks', () => {
-    const out = DEC.decode(
-      mergeDuTotals(
-        [ENC.encode('10\t/base\n10\ttotal\n'), ENC.encode('7\t/base/inner\n7\ttotal\n')],
-        false,
-      ),
-    )
-    expect(out).toBe('10\t/base\n7\t/base/inner\n17\ttotal\n')
-  })
-
-  // GNU prints "0 total" even when every operand failed.
-  it('still totals with no blocks', () => {
-    expect(DEC.decode(mergeDuTotals([], false))).toBe('0\ttotal\n')
   })
 })

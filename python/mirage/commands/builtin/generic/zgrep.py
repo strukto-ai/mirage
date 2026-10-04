@@ -5,7 +5,6 @@ from functools import partial
 
 from mirage.commands.builtin.generic.decompress import decompress_inputs
 from mirage.commands.builtin.grep_offsets import (
-    decode_line,
     line_offsets,
     match_offset,
     prefix_of,
@@ -28,6 +27,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec, StatFn
 
 
@@ -64,7 +64,7 @@ def _zgrep_search(
             or, under -o, of the match itself, in the field order GNU
             grep prints (name, line, byte).
     """
-    lines = split_lines(decode_line(data))
+    lines = split_lines(decode_text(data))
     offsets = line_offsets(lines) if byte_offsets else []
     matched: list[tuple[int, int, str]] = []
     for idx, line in enumerate(lines, 1):
@@ -108,7 +108,7 @@ def _zgrep_search(
 def _files_only_match(
     data: bytes, pattern: re.Pattern[str], invert: bool
 ) -> bool:
-    text = decode_line(data)
+    text = decode_text(data)
     for line in split_lines(text):
         hit = bool(pattern.search(line))
         if invert:
@@ -174,7 +174,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> ZgrepFlags:
     )
 
 
-async def zgrep(
+async def zgrep_generic(
     paths: list[PathSpec],
     texts: Sequence[str] = (),
     flags: Mapping[str, FlagValue] | None = None,
@@ -273,4 +273,4 @@ async def zgrep(
     )
 
 
-__all__ = ["zgrep"]
+__all__ = ["zgrep_generic"]

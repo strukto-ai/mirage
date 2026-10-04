@@ -66,7 +66,7 @@ async def test_rg_multi_pattern_skips_imap_search():
             new=fake_resolve,
         ),
         patch(
-            "mirage.commands.builtin.email.rg.generic_rg",
+            "mirage.commands.builtin.email.rg.rg_generic",
             new=fake_generic,
         ),
     ):
@@ -125,7 +125,7 @@ async def test_rg_message_file_operand_defers_to_generic():
             new=AsyncMock(return_value=[]),
         ),
         patch(
-            "mirage.commands.builtin.email.rg.generic_rg",
+            "mirage.commands.builtin.email.rg.rg_generic",
             new=AsyncMock(return_value=(b"", IOResult())),
         ) as generic,
     ):

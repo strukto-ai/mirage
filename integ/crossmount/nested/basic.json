@@ -241,10 +241,10 @@
       "targets": [
         "ram-nested"
       ],
-      "command": "du /data/i*; du -x /data; du /data",
+      "command": "du /data/i*; du -x /data; du /data; du -a /data; du -s /data; du -c /data",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/inner\n4\t/data\n5\t/data/inner\n9\t/data\n",
+        "stdout": "5\t/data/inner\n4\t/data\n5\t/data/inner\n9\t/data\n5\t/data/inner/leaf.txt\n5\t/data/inner\n4\t/data/top.txt\n9\t/data\n9\t/data\n5\t/data/inner\n9\t/data\n9\ttotal\n",
         "stderr": ""
       }
     },
@@ -434,6 +434,19 @@
       }
     },
     {
+      "id": "nest_namespace_ancestor_du_s",
+      "seq": 950036,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "du -s /ghost",
+      "expect": {
+        "exit": 0,
+        "stdout": "6\t/ghost\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "nest_mount_root_file_names_the_path",
       "note": "The file twin of seq 950029: a mount root reached under a namespace-only parent.",
       "seq": 950037,
@@ -504,6 +517,20 @@
         "exit": 1,
         "stdout": "",
         "stderr": "stat: cannot statx '/ghost': No such file or directory\n"
+      }
+    },
+    {
+      "id": "nest_hidden_mount_parent_du",
+      "seq": 950034,
+      "targets": [
+        "ram-nested"
+      ],
+      "session": "blind",
+      "command": "du /ghost",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: cannot access '/ghost': No such file or directory\n"
       }
     },
     {

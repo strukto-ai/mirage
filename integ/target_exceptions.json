@@ -980,6 +980,13 @@
     },
     "integ/unix/sed/s.json :: sed_n_lookahead_skips_a_directory_operand": {
       "nextcloud": "On the python host the nextcloud backend reads a file with a bare WebDAV GET, which Nextcloud answers for a directory with its 200 'This is the WebDAV interface' page, so sed takes a directory operand for that page instead of failing with EISDIR; the typescript host's reader refuses the collection. This case pins how sed handles a directory operand, which every other backend in the list runs."
+    },
+    "integ/unix/ls/operands.json :: ls_empty_dir_operand_still_gets_a_header": {
+      "hf": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case, or the prep case it runs after, makes a directory and uses it before any key lands in it (cd, ls, tree, find, ln or a glob into it), so on hf that directory is absent. hf still runs the rest of the file.",
+      "hf-prefix": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case, or the prep case it runs after, makes a directory and uses it before any key lands in it (cd, ls, tree, find, ln or a glob into it), so on hf that directory is absent. hf still runs the rest of the file."
+    },
+    "integ/unix/ls/flags.json :: ls_sort_width_counts_columns": {
+      "nextcloud": "Nextcloud stores file names NFC-normalized, so the decomposed e + U+0301 name lists precomposed whenever the listing comes from the server. The row only held while mirage's index still had the name as typed, which depends on what earlier cases left cached."
     }
   }
 }

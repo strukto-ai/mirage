@@ -97,10 +97,13 @@ export function osErrorText(err: unknown): string {
   return condition === null ? text : `${text} (os error ${String(posixErrno(condition))})`
 }
 
-// ripgrep's line for a path its walker could not stat or list: the walker's
-// I/O error names the path a second time (ripgrep 14.1.1). Mirrors Python's
-// walk_error_line.
-export function walkErrorLine(shown: string, err: unknown): string {
+// ripgrep's line for a path its walker could not stat or list, worded by the
+// walker it ran. The sequential one names the path a second time; the
+// parallel one, which it runs for more than one path or a directory unless
+// -j1 or a sort holds it to one thread, names it once (ripgrep 14.1.1).
+// Mirrors Python's walk_error_line.
+export function walkErrorLine(shown: string, err: unknown, parallel = false): string {
+  if (parallel) return `rg: ${shown}: ${osErrorText(err)}`
   return `rg: ${shown}: IO error for operation on ${shown}: ${osErrorText(err)}`
 }
 
@@ -173,6 +176,7 @@ export async function* walkHaystacks(
   boundary: ((path: string) => boolean) | null = null,
   door: LinkDoor | null = null,
   follow = false,
+  parallel = false,
 ): AsyncGenerator<Haystack> {
   const walker = new Walker(
     readdirFn,
@@ -185,6 +189,7 @@ export async function* walkHaystacks(
     door,
     follow,
     shownRoot === '',
+    parallel,
   )
   yield* walker.below(root, root, shownRoot, 0, [[root, walker.named(shownRoot)]], false)
 }
@@ -207,6 +212,7 @@ class Walker {
     readonly door: LinkDoor | null,
     readonly follow: boolean,
     readonly implicit: boolean,
+    readonly parallel: boolean,
   ) {}
 
   // A path as the walker names it in a warning. Matches print the implicit
@@ -251,7 +257,7 @@ class Walker {
       entries = door !== null ? await door.readdir(here) : await this.readdirFn(here)
     } catch (err) {
       if (!isWalkError(err)) throw err
-      this.warn(walkErrorLine(chain[0]?.[1] ?? here, err))
+      this.warn(walkErrorLine(chain[0]?.[1] ?? here, err, this.parallel))
       return
     }
     if (this.follow && this.door !== null) {
@@ -272,7 +278,7 @@ class Walker {
         s = door !== null ? await door.stat(entry) : await this.statFn(entry)
       } catch (err) {
         if (!isWalkError(err)) throw err
-        this.warn(walkErrorLine(this.named(shown), err))
+        this.warn(walkErrorLine(this.named(shown), err, this.parallel))
         continue
       }
       const name = gnuBasename(child)
@@ -317,7 +323,7 @@ class Walker {
       s = await door.stat(target)
     } catch (err) {
       if (!isWalkError(err)) throw err
-      this.warn(walkErrorLine(named, err))
+      this.warn(walkErrorLine(named, err, this.parallel))
       return
     }
     const name = gnuBasename(link)

@@ -571,7 +571,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "f() { { shift; sleep 0.05; printf \"bg:%s:%s\\n\" \"$1\" \"$#\"; } & sleep 0.1; printf \"fg:%s:%s\\n\" \"$1\" \"$#\"; wait; }; f first second",
+      "command": "f() { { shift; sleep 0.05; printf \"bg:%s:%s\\n\" \"$1\" \"$#\"; } & sleep 1; printf \"fg:%s:%s\\n\" \"$1\" \"$#\"; wait; }; f first second",
       "expect": {
         "exit": 0,
         "stdout": "bg:second:1\nfg:first:2\n",

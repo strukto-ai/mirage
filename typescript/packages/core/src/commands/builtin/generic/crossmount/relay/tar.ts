@@ -18,7 +18,7 @@ import type { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
 import { relayIsDirOf, relayWalkOf } from '../../../generic_bind/archive_io.ts'
-import { parseTarFlags, tarGeneric } from '../../tar/tar.ts'
+import { parseFlags, tarGeneric } from '../../tar/tar.ts'
 import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 
@@ -55,7 +55,7 @@ export async function runTar(
   ns?: NamespaceView,
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
-  const parsed = parseTarFlags(flagKwargs)
+  const parsed = parseFlags(flagKwargs)
   const archive = parsed.archive
   const created =
     archive !== null && parsed.create ? operands(scopes, [archive, ...parsed.directories]) : []

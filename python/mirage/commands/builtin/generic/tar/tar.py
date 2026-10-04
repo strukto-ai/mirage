@@ -82,7 +82,7 @@ def _read_mode(suffix: CompressionSuffix) -> ReadMode:
     return READ_MODES[suffix]
 
 
-def _stderr(lines: list[str]) -> bytes:
+def _stderr_of(lines: list[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode() if lines else b""
 
 
@@ -187,7 +187,7 @@ def _cut_short(failure: GzipDataError | None, lines: list[str]) -> bytes:
         lines (list[str]): tar's own stderr lines from the run.
     """
     lead = failure.render("stdin").encode() if failure is not None else b""
-    return lead + _stderr(lines + [UNEXPECTED_EOF, FATAL_TRAILER])
+    return lead + _stderr_of(lines + [UNEXPECTED_EOF, FATAL_TRAILER])
 
 
 def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
@@ -199,7 +199,7 @@ def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
         failure (GzipDataError): why gzip stopped.
         lines (list[str]): tar's own stderr lines from the run.
     """
-    return failure.render("stdin").encode() + _stderr(
+    return failure.render("stdin").encode() + _stderr_of(
         lines + [CHILD_STATUS.format(failure.exit_code), FATAL_TRAILER]
     )
 
@@ -207,7 +207,7 @@ def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
 DOTDOT_NOTICE = "tar: Removing leading `../' from member names"
 
 
-def _matches(name: str, selector: str) -> bool:
+def _matches_selector(name: str, selector: str) -> bool:
     """Whether one -t/-x member selector keeps an archive member.
 
     GNU matches the stored spelling exactly (``memory/x`` does not find
@@ -223,7 +223,7 @@ def _matches(name: str, selector: str) -> bool:
     return trimmed == base or trimmed.startswith(base + "/")
 
 
-def _selected(
+def _selected_members(
     names: list[str], selectors: list[str]
 ) -> tuple[set[int], list[str]]:
     """Member indices the selectors keep, and the misses they report.
@@ -243,7 +243,7 @@ def _selected(
     for sel in selectors:
         hit = False
         for idx, name in enumerate(names):
-            if _matches(name, sel):
+            if _matches_selector(name, sel):
                 keep.add(idx)
                 hit = True
         if not hit:
@@ -333,7 +333,7 @@ async def _create_archive(
     archive = buf.getvalue()
     if archive_path.raw_path == "-":
         return archive, IOResult(
-            stderr=_stderr(notices + (names if verbose else [])),
+            stderr=_stderr_of(notices + (names if verbose else [])),
             exit_code=exit_code,
         )
     try:
@@ -347,7 +347,7 @@ async def _create_archive(
     stdout = ("\n".join(names) + "\n").encode() if verbose and names else None
     return stdout, IOResult(
         writes={archive_path.mount_path: archive},
-        stderr=_stderr(notices),
+        stderr=_stderr_of(notices),
         exit_code=exit_code,
     )
 
@@ -396,7 +396,7 @@ def _open_failure(
         if reading and not isinstance(exc, FileNotFoundError):
             lines.extend(EMPTY_PIPE.get(suffix, ()))
         lines += [CHILD_STATUS.format(CREATE_ERROR_EXIT), FATAL_TRAILER]
-    return IOResult(exit_code=CREATE_ERROR_EXIT, stderr=_stderr(lines))
+    return IOResult(exit_code=CREATE_ERROR_EXIT, stderr=_stderr_of(lines))
 
 
 async def _read_archive(
@@ -480,11 +480,11 @@ async def _list_archive(
                 _long_member(member, name) if verbose else name
                 for member, name in zip(tf.getmembers(), names)
             ]
-    keep, misses = _selected(names, selectors)
+    keep, misses = _selected_members(names, selectors)
     if keep:
         errors = await check_directories(directories, is_dir, stat)
         if errors:
-            return None, IOResult(exit_code=2, stderr=_stderr(errors))
+            return None, IOResult(exit_code=2, stderr=_stderr_of(errors))
     shown = [
         row
         for idx, row in enumerate(rows)
@@ -502,7 +502,7 @@ async def _list_archive(
     if result.notices or misses:
         return stdout, IOResult(
             exit_code=2,
-            stderr=_stderr(list(result.notices) + misses + [ERROR_TRAILER]),
+            stderr=_stderr_of(list(result.notices) + misses + [ERROR_TRAILER]),
         )
     return stdout, IOResult()
 
@@ -544,11 +544,13 @@ async def _extract_archive(
                 member.name + "/" if member.isdir() else member.name
                 for member in members
             ]
-            keep, misses = _selected(listed, selectors)
+            keep, misses = _selected_members(listed, selectors)
             if keep:
                 errors = await check_directories(directories, is_dir, stat)
                 if errors:
-                    return None, IOResult(exit_code=2, stderr=_stderr(errors))
+                    return None, IOResult(
+                        exit_code=2, stderr=_stderr_of(errors)
+                    )
             for idx, member in enumerate(members):
                 if result.cut is not None and idx > result.cut:
                     break
@@ -663,7 +665,7 @@ async def _extract_archive(
         stderr_lines = stderr_lines + misses + [ERROR_TRAILER]
     return stdout, IOResult(
         exit_code=2 if misses or failed else 0,
-        stderr=_stderr(stderr_lines),
+        stderr=_stderr_of(stderr_lines),
         writes=writes,
     )
 
@@ -727,7 +729,7 @@ async def tar(
         )
         if not plan.write:
             return None, IOResult(
-                exit_code=plan.exit_code, stderr=_stderr(list(plan.notices))
+                exit_code=plan.exit_code, stderr=_stderr_of(list(plan.notices))
             )
         return await _create_archive(
             plan, archive, mode_suffix, v, read_bytes, write_bytes
@@ -785,7 +787,7 @@ class TarFlags:
 
 
 _MODES = ("create", "extract", "list")
-_STRIP_COUNT = re.compile(rf"^{C_SPACE}\+?([0-9]+)$")
+_STRIP_COUNT_PATTERN = re.compile(rf"^{C_SPACE}\+?([0-9]+)$")
 
 
 def strip_count(raw: str) -> int:
@@ -801,7 +803,7 @@ def strip_count(raw: str) -> int:
     Raises:
         UsageError: the value is no count.
     """
-    match = _STRIP_COUNT.match(raw)
+    match = _STRIP_COUNT_PATTERN.match(raw)
     if match is None or int(match.group(1)) > UINTMAX:
         raise UsageError(
             f"{STRIP_COUNT.format(raw)}\n{USAGE_HINT}", CREATE_ERROR_EXIT

@@ -18,7 +18,7 @@ from collections.abc import Sequence
 def format_records(records: Sequence[str]) -> bytes:
     """Records to output bytes, one per line, smuggled bytes put back.
 
-    A line that came through ``decode_line`` holds a byte that is not
+    A line that came through ``decode_text`` holds a byte that is not
     valid UTF-8 as a surrogate escape, and GNU grep and ripgrep print
     that byte as itself; a strict encode raised on it, and the
     ``printable`` step that used to guard against that printed U+FFFD

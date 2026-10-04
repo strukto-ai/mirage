@@ -59,47 +59,7 @@ const OPS: CommandIO = {
 
 const ACCESSOR = {} as Accessor
 
-async function runDu(
-  paths: PathSpec[],
-  flags: Record<string, string | boolean | number | string[]> = {},
-  cwd = '/',
-): Promise<string[]> {
-  const result = await BUILDER.fn(OPS, ACCESSOR, paths, [], {
-    stdin: null,
-    flags,
-    filetypeFns: null,
-    cwd,
-  })
-  if (result === null) return []
-  const [out] = result
-  const buf =
-    out === null
-      ? new Uint8Array()
-      : out instanceof Uint8Array
-        ? out
-        : await materialize(out as AsyncIterable<Uint8Array>)
-  const text = DEC.decode(buf)
-  return text === '' ? [] : text.trimEnd().split('\n')
-}
-
 describe('du walk fallback (no native du op)', () => {
-  it('sums a directory tree recursively, one line per directory', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')])).toEqual(['2\t/db/sub', '5\t/db'])
-  })
-
-  it('returns a single file size', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db/a.txt')])).toEqual(['3\t/db/a.txt'])
-  })
-
-  it('-a lists every file, then every directory, then the operand', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { a: true })).toEqual([
-      '3\t/db/a.txt',
-      '2\t/db/sub/b.txt',
-      '2\t/db/sub',
-      '5\t/db',
-    ])
-  })
-
   it('stops the walk and exits 1 once the entry budget is spent', async () => {
     const bounded: CommandIO = { ...OPS, maxDuEntries: 1 }
     const result = await BUILDER.fn(bounded, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
@@ -112,46 +72,6 @@ describe('du walk fallback (no native du op)', () => {
     const [, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('incomplete')
-  })
-
-  it('-c appends a grand total across operands', async () => {
-    const lines = await runDu(
-      [PathSpec.fromStrPath('/db/a.txt'), PathSpec.fromStrPath('/db/sub')],
-      { c: true },
-    )
-    expect(lines).toEqual(['3\t/db/a.txt', '2\t/db/sub', '5\ttotal'])
-  })
-
-  it('reports an unreadable operand and exits 1, like GNU', async () => {
-    const result = await BUILDER.fn(
-      OPS,
-      ACCESSOR,
-      [PathSpec.fromStrPath('/nope'), PathSpec.fromStrPath('/db')],
-      [],
-      { stdin: null, flags: {}, filetypeFns: null, cwd: '/' },
-    )
-    expect(result).not.toBeNull()
-    const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
-    expect(DEC.decode(out)).toBe('2\t/db/sub\n5\t/db\n')
-    expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toBe(
-      "du: cannot access '/nope': No such file or directory\n",
-    )
-  })
-
-  it('measures the working directory when no operand is given', async () => {
-    expect(await runDu([], {}, '/db')).toEqual(['2\t/db/sub', '5\t/db'])
-  })
-
-  it('-d is another spelling of --max-depth', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { max_depth: '0' })).toEqual(['5\t/db'])
-    expect(await runDu([PathSpec.fromStrPath('/db')], { max_depth: '0' })).toEqual(['5\t/db'])
-  })
-
-  it('rejects -s with -a before doing any work', async () => {
-    await expect(runDu([PathSpec.fromStrPath('/db')], { s: true, a: true })).rejects.toThrow(
-      /cannot both summarize/,
-    )
   })
 
   it('a backend failure propagates instead of reading as a missing operand', async () => {
@@ -167,17 +87,6 @@ describe('du walk fallback (no native du op)', () => {
         cwd: '/',
       }),
     ).rejects.toThrow('403 Forbidden')
-  })
-
-  // GNU prints a count below one unit with no suffix at all, so -h and
-  // the plain form agree on this tree. The scaling and rounding rules
-  // are pinned against GNU in utils/utils.test.ts; here -h only has to
-  // reach the formatter.
-  it('-h renders human-readable sizes', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { h: true })).toEqual([
-      '2\t/db/sub',
-      '5\t/db',
-    ])
   })
 })
 

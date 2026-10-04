@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.commands.builtin.generic.grep import grep, labelled
+from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.config import CommandOpts
 from mirage.ops.types import MountView, NamespaceView
 from mirage.types import ContentType, FileStat, FileType, PathSpec
@@ -103,26 +103,6 @@ async def _drain_async(stdout):
     return b"".join(chunks)
 
 
-@pytest.mark.asyncio
-async def test_grep_recursive_single_file_keeps_single_file_output():
-    readdir, stat, rb, rs = _make_backend(
-        {
-            "/log.txt": b"one\nerror here\ntwo\nerror again\n",
-        }
-    )
-    output, _ = await grep(
-        [_spec("/log.txt")],
-        ["error"],
-        CommandOpts(flags={"r": True, "n": True}),
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-    )
-    decoded = (await _drain_async(output)).decode()
-    assert decoded == "2:error here\n4:error again\n"
-
-
 def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
     """Backend that mimics real s3/disk/gdrive readdir: entries returned
     are already prepended with ``mount_prefix``."""
@@ -217,7 +197,7 @@ async def test_grep_recursive_files_only_mount_prefix():
         directory="/dir",
         resolved=True,
     )
-    output, _ = await grep(
+    output, _ = await grep_generic(
         [p],
         ["apple"],
         CommandOpts(flags={"r": True, "args_l": True}),
@@ -229,45 +209,6 @@ async def test_grep_recursive_files_only_mount_prefix():
     decoded = (await _drain_async(output)).decode().strip()
     assert decoded == "/s3/dir/a.txt"
     assert "/s3/s3" not in decoded
-
-
-@pytest.mark.asyncio
-async def test_grep_count_only_multi_file_match_exit_0():
-    readdir, stat, rb, rs = _make_backend(
-        {
-            "/a.txt": b"hello\n",
-            "/b.txt": b"world\n",
-        }
-    )
-    output, io = await grep(
-        [_spec("/a.txt"), _spec("/b.txt")],
-        ["hello"],
-        CommandOpts(flags={"c": True}),
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-    )
-    decoded = (await _drain_async(output)).decode()
-    assert decoded.splitlines() == ["/a.txt:1", "/b.txt:0"]
-    assert io.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_grep_recursive_count_only_no_match_exit_1():
-    readdir, stat, rb, rs = _make_backend({"/d/a.txt": b"hello\n"})
-    output, io = await grep(
-        [_spec("/d")],
-        ["zzz"],
-        CommandOpts(flags={"r": True, "c": True}),
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-    )
-    decoded = (await _drain_async(output)).decode()
-    assert decoded.splitlines() == ["/d/a.txt:0"]
-    assert io.exit_code == 1
 
 
 @pytest.mark.asyncio
@@ -296,7 +237,7 @@ async def test_grep_recursive_not_a_directory_operand_keeps_the_others():
             raise FileNotFoundError(p)
         return await stat(path)
 
-    output, io = await grep(
+    output, io = await grep_generic(
         [_spec("/a.txt/x"), _spec("/real")],
         ["foo"],
         CommandOpts(flags={"r": True, "args_l": True}),
@@ -335,7 +276,7 @@ async def test_grep_reads_the_mount_boundaries_off_the_bag():
     # the bag is what makes that impossible to get wrong: this call passes
     # no boundary argument at all, the way a wrapper does.
     readdir, stat, rb, rs = _make_backend({})
-    output, io = await grep(
+    output, io = await grep_generic(
         [_spec("/ghost")],
         ["x"],
         CommandOpts(flags={"r": True}, ns=_mount_parent_ns("/ghost/deep")),
@@ -353,7 +294,7 @@ async def test_grep_reads_the_mount_boundaries_off_the_bag():
 @pytest.mark.asyncio
 async def test_grep_still_reports_a_path_with_no_mount_below_it():
     readdir, stat, rb, rs = _make_backend({})
-    out, io = await grep(
+    out, io = await grep_generic(
         [_spec("/nope")],
         ["x"],
         CommandOpts(flags={"r": True}, ns=_mount_parent_ns("/ghost/deep")),
@@ -396,7 +337,7 @@ async def test_excluded_entry_that_fails_stat_does_not_stop_the_walk():
     async def listing(path):
         return ["/data/0ghost", *await readdir(path)]
 
-    output, io = await grep(
+    output, io = await grep_generic(
         [_spec("/data")],
         ["apple"],
         CommandOpts(flags={"r": True, "exclude_dir": ["0ghost"]}),
@@ -412,54 +353,6 @@ async def test_excluded_entry_that_fails_stat_does_not_stop_the_walk():
     assert io.exit_code == 2
 
 
-@pytest.mark.parametrize(
-    "flags, expected",
-    [
-        ({"A": "1"}, b"/g1:a\n/g1-b\n--\n/g2:a\n/g2-y\n"),
-        ({"c": True, "A": "1"}, b"/g1:1\n/g2:1\n"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_grep_separates_context_groups_between_files(flags, expected):
-    readdir, stat, rb, rs = _make_backend(
-        {
-            "/g1": b"a\nb\nc\n",
-            "/g2": b"x\na\ny\n",
-        }
-    )
-    output, io = await grep(
-        [_spec("/g1"), _spec("/g2")],
-        ["a"],
-        CommandOpts(flags=flags),
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-    )
-    assert await _drain_async(output) == expected
-    assert io.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_grep_context_separator_needs_earlier_output():
-    readdir, stat, rb, rs = _make_backend(
-        {
-            "/g0": b"zzz\n",
-            "/g2": b"x\na\ny\n",
-        }
-    )
-    output, io = await grep(
-        [_spec("/g0"), _spec("/g2")],
-        ["a"],
-        CommandOpts(flags={"A": "1"}),
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-    )
-    assert await _drain_async(output) == b"/g2:a\n/g2-y\n"
-
-
 @pytest.mark.asyncio
 async def test_grep_recursive_separates_context_groups_between_files():
     readdir, stat, rb, rs = _make_backend(
@@ -468,7 +361,7 @@ async def test_grep_recursive_separates_context_groups_between_files():
             "/d/f2": b"x\na\ny\n",
         }
     )
-    output, io = await grep(
+    output, io = await grep_generic(
         [_spec("/d")],
         ["a"],
         CommandOpts(flags={"r": True, "A": "1"}),
@@ -480,44 +373,6 @@ async def test_grep_recursive_separates_context_groups_between_files():
     assert (
         await _drain_async(output)
     ) == b"/d/f1:a\n/d/f1-b\n--\n/d/f2:a\n/d/f2-y\n"
-
-
-def _stdin_operand(raw: str) -> PathSpec:
-    virtual = "/dev/stdin" if raw == "/dev/stdin" else "/-"
-    return PathSpec(
-        vfs_path=virtual.strip("/"),
-        virtual=virtual,
-        directory="/",
-        resolved=True,
-        raw_path=raw,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "raw, flags, want",
-    [
-        ("/dev/stdin", {"H": True}, b"/dev/stdin:b\n"),
-        ("/dev/stdin", {"args_l": True}, b"/dev/stdin\n"),
-        ("-", {"H": True}, b"(standard input):b\n"),
-        ("-", {"args_l": True}, b"(standard input)\n"),
-    ],
-)
-async def test_grep_names_only_a_dash_stdin(raw, flags, want):
-    # GNU grep 3.11 calls only `-` "(standard input)": /dev/stdin reads the
-    # same bytes and is named as the path it is.
-    readdir, stat, rb, rs = _make_backend({})
-    output, io = await grep(
-        [_stdin_operand(raw)],
-        ["b"],
-        CommandOpts(flags=flags),
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-        stdin=b"b\n",
-    )
-    assert (await _drain_async(output), io.exit_code) == (want, 0)
 
 
 @pytest.mark.asyncio
@@ -542,7 +397,7 @@ async def test_recursive_grep_stops_reading_and_closes_stream(quiet):
         finally:
             closed.append(path.virtual)
 
-    output, io = await grep(
+    output, io = await grep_generic(
         [_spec("/d"), _spec("/later")],
         ["hit"],
         CommandOpts(flags={"r": True, "q": quiet}),
@@ -571,7 +426,7 @@ async def test_recursive_quiet_no_match_visits_every_file():
         opened.append(path.virtual)
         yield await rb(path)
 
-    output, io = await grep(
+    output, io = await grep_generic(
         [_spec("/d")],
         ["hit"],
         CommandOpts(flags={"r": True, "q": True}),

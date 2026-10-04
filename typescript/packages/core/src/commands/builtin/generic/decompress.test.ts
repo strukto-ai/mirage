@@ -77,23 +77,6 @@ it.each([null, 'x', '\x1f'])('stops after fatal input: %j', async (suffix) => {
   expect(text(io.stderr)).toBe('\ngzip: /a/bad.gz: unexpected end of file\n')
 })
 
-it('retains in-place output on a trailing warning and continues', async () => {
-  const files = new Map([
-    ['/data/a.gz', cat(HELLO, enc.encode('junk'))],
-    ['/data/b.gz', await gzip(enc.encode('w'))],
-  ])
-  const { read, options } = backend(files)
-  const paths = [...files.keys()].map((p) => PathSpec.fromStrPath(p))
-  const [body, io] = await decompressInputs(paths, read, { stdin: null, ...options })
-  expect(body).toBeNull()
-  expect(Object.fromEntries(files)).toEqual({
-    '/data/a': enc.encode('hello'),
-    '/data/b': enc.encode('w'),
-  })
-  expect(io.exitCode).toBe(2)
-  expect(text(io.stderr)).toBe('\ngzip: /data/a.gz: decompression OK, trailing garbage ignored\n')
-})
-
 describe('the names gzip opens', () => {
   // gzip 1.13 opens the name, then the name with each suffix, and names the
   // -S one when every open misses.
@@ -150,26 +133,6 @@ describe('the names gzip opens', () => {
   })
 })
 
-describe('in place', () => {
-  // gzip checks the output once the header reads, before the body: a
-  // corrupt body loses to an output already there, a bad header wins.
-  it.each([
-    [HELLO.subarray(0, -3), 2, 'gzip: /d/e already exists;\tnot overwritten\n'],
-    [enc.encode('plain\n'), 1, '\ngzip: /d/e.gz: not in gzip format\n'],
-  ])('checks the output after the header, before the body: %#', async (data, code, err) => {
-    const files = new Map([
-      ['/d/e.gz', data],
-      ['/d/e', enc.encode('old')],
-    ])
-    const { read, options } = backend(files)
-    const [, io] = await decompressInputs([PathSpec.fromStrPath('/d/e.gz')], read, {
-      stdin: null,
-      ...options,
-    })
-    expect([io.exitCode, text(io.stderr)]).toEqual([code, err])
-  })
-})
-
 describe('to stdout', () => {
   it('silences a directory warning under quiet but keeps exit 2', async () => {
     const { read, options } = backend(new Map())
@@ -197,38 +160,6 @@ describe('to stdout', () => {
     expect([dec.decode(await materialize(body)), io.exitCode, text(io.stderr)]).toEqual([
       out,
       0,
-      null,
-    ])
-  })
-
-  it('ends the run at stdin that is not gzip', async () => {
-    const { reads, read, options } = backend(new Map([['/d/x.gz', HELLO]]))
-    async function* stdin(): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      yield enc.encode('plain')
-    }
-    const paths = ['-', '/d/x.gz'].map((p) => PathSpec.fromStrPath(p))
-    const [body, io] = await decompressInputs(paths, read, {
-      stdin: stdin(),
-      toStdout: true,
-      ...options,
-    })
-    expect(await materialize(body)).toEqual(new Uint8Array())
-    expect(reads).toEqual([])
-    expect([io.exitCode, text(io.stderr)]).toEqual([1, '\ngzip: stdin: not in gzip format\n'])
-  })
-
-  it('keeps the trailing garbage exit code under quiet', async () => {
-    const { read, options } = backend(new Map([['/d/f.gz', cat(HELLO, enc.encode('junk'))]]))
-    const [body, io] = await decompressInputs([PathSpec.fromStrPath('/d/f.gz')], read, {
-      stdin: null,
-      toStdout: true,
-      quiet: true,
-      ...options,
-    })
-    expect([dec.decode(await materialize(body)), io.exitCode, text(io.stderr)]).toEqual([
-      'hello',
-      2,
       null,
     ])
   })

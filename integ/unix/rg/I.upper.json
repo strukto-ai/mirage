@@ -34,7 +34,7 @@
       ]
     },
     {
-      "id": "rg_no_filename_keeps_nul_match_0",
+      "id": "rg_I_reports_a_binary_match_by_its_notice",
       "seq": 990120,
       "targets": [
         "ram",
@@ -59,12 +59,12 @@
       "command": "printf 'needle\\000tail\\n' > /data/rg-binary.txt; rg -I needle /data/rg-binary.txt",
       "expect": {
         "exit": 0,
-        "stdout": "needle\u0000tail\n",
+        "stdout": "binary file matches (found \"\\0\" byte around offset 6)\n",
         "stderr": ""
       }
     },
     {
-      "id": "rg_no_filename_keeps_nul_match_1",
+      "id": "rg_HI_reports_a_binary_match_by_its_notice",
       "seq": 990121,
       "targets": [
         "ram",
@@ -89,7 +89,7 @@
       "command": "printf 'needle\\000tail\\n' > /data/rg-binary.txt; rg -HI needle /data/rg-binary.txt",
       "expect": {
         "exit": 0,
-        "stdout": "needle\u0000tail\n",
+        "stdout": "binary file matches (found \"\\0\" byte around offset 6)\n",
         "stderr": ""
       }
     }

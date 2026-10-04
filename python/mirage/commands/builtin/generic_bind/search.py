@@ -17,10 +17,13 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.generic.rg import folds_case, rg_syntax
+from mirage.commands.builtin.generic.grep import grep_generic
+from mirage.commands.builtin.generic.rg import (
+    folds_case,
+    rg_generic,
+    rg_syntax,
+)
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
-from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import CommandIO, bound_op
 from mirage.commands.builtin.grep_pattern import (
     PATTERN_KEYS,
@@ -47,7 +50,7 @@ from mirage.vfs.types import SearchQuery
 
 logger = logging.getLogger(__name__)
 
-_GENERICS = {"grep": generic_grep, "rg": generic_rg}
+_GENERICS = {"grep": grep_generic, "rg": rg_generic}
 
 
 def search_options(

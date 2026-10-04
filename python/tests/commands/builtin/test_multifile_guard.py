@@ -98,8 +98,8 @@ def _loops_paths(func: ast.AST) -> bool:
 
 _MULTI_HELPERS = (
     "format_multi",
-    "generic_grep",
-    "generic_rg",
+    "grep_generic",
+    "rg_generic",
     "grep",
     "rg",
     "generic_du",
@@ -115,8 +115,8 @@ def _passes_full_list(func: ast.AST) -> bool:
     """Heuristic: the resolved list is handed to a *_multi / generic helper.
 
     Covers backends that delegate multi-file handling to a generic routine
-    (head_multi, tail_multi, format_multi, du_multi, file_cmd, generic_grep,
-    generic_rg) by passing the whole ``paths``/``resolved`` list as the first
+    (head_multi, tail_multi, format_multi, du_multi, file_cmd, grep_generic,
+    rg_generic) by passing the whole ``paths``/``resolved`` list as the first
     argument.
     """
     for node in ast.walk(func):

@@ -22,7 +22,7 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.printf.format import run_printf
@@ -106,7 +106,8 @@ async def _assign_printf_target(
     ``pre_session`` rule refusing the name sees `printf -v 'AWS_KEY[0]'`
     as a write to AWS_KEY. The refusal is raised, not collapsed into a
     status, so the rule's own words reach the user as they do from
-    ``export``.
+    ``export``. bash stores the bytes the format produced, so a ``\\x``
+    run that is valid UTF-8 is stored as its characters.
 
     Args:
         session (SessionState): shell session whose variables are written.
@@ -123,7 +124,8 @@ async def _assign_printf_target(
         PolicyDenied: a pre_session rule refused the write; the caller
             renders the rule's own message.
     """
-    return await assign_element(session, view, name, subscript, value)
+    text = decode_text(encode_text(value))
+    return await assign_element(session, view, name, subscript, text)
 
 
 async def handle_printf(

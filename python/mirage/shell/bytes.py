@@ -49,3 +49,18 @@ def encode_text(text: str) -> bytes:
         text (str): the text to write.
     """
     return text.encode("utf-8", "surrogateescape")
+
+
+def decode_text(data: bytes) -> str:
+    """Read bytes back as shell text, the inverse of ``encode_text``.
+
+    Valid UTF-8 comes back as its characters and every other byte as its
+    surrogate escape, the stand-in ``byte_char`` makes, so the text
+    round-trips to exactly the bytes it was read from. A lossy decode
+    cannot: one invalid byte becomes U+FFFD, three bytes wide, and every
+    byte offset counted back past it runs ahead of GNU's.
+
+    Args:
+        data (bytes): the bytes to read as text.
+    """
+    return data.decode("utf-8", "surrogateescape")

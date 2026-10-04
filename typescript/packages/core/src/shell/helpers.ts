@@ -72,7 +72,7 @@ export function* quotedParts(node: TSNodeLike): Generator<string | TSNodeLike> {
  * `encodeText` rather than `TextEncoder` because a byte that is not valid
  * UTF-8 rides as a surrogate escape and stands for one byte. That is a
  * requirement on the caller, not a hope: grep's family decodes every line
- * through `grep_offsets.decodeLine` for it.
+ * through `decodeText` for it.
  */
 export function byteOffset(text: string, index: number): number {
   return encodeText(text.slice(0, index)).length

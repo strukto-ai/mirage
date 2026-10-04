@@ -5,8 +5,6 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.grep_offsets import (
     MatchOffsets,
-    decode_line,
-    encode_line,
     prefix_of,
 )
 from mirage.commands.builtin.grep_prefilter import required_needles
@@ -17,6 +15,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import close_quietly
 from mirage.io.types import IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
+from mirage.shell.bytes import decode_text, encode_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +223,7 @@ async def grep_input(
             line_start = byte_pos
             byte_pos += len(raw) + 1
             # Surrogate escapes preserve raw bytes under -a and -ao.
-            line = decode_line(raw)
+            line = decode_text(raw)
             hit = bool(pat.search(line)) != f.invert
             if f.max_count is not None and count >= f.max_count:
                 hit = False
@@ -272,7 +271,7 @@ async def grep_input(
                             if text:
                                 chunks.append(
                                     output_line(
-                                        encode_line(text),
+                                        encode_text(text),
                                         number,
                                         True,
                                         path,

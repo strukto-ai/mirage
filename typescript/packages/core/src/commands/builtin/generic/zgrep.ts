@@ -33,14 +33,15 @@ import { linkDoor } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
-import { decodeLine, lineOffsets, matchOffset, prefixOf } from '../grep_offsets.ts'
+import { lineOffsets, matchOffset, prefixOf } from '../grep_offsets.ts'
+import { decodeText } from '../../../shell/bytes.ts'
 import { formatRecords } from '../utils/output.ts'
 import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 
 function anyLineSelected(data: Uint8Array, pattern: RegExp, invert: boolean): boolean {
-  for (const line of splitLines(decodeLine(data))) {
+  for (const line of splitLines(decodeText(data))) {
     let hit = pattern.test(line)
     if (invert) hit = !hit
     if (hit) return true
@@ -65,7 +66,7 @@ function zgrepSearch(
   opts: ZgrepOpts,
   filename: string | null,
 ): [string[], boolean] {
-  const lines = splitLines(decodeLine(data))
+  const lines = splitLines(decodeText(data))
   const offsets = opts.byteOffsets ? lineOffsets(lines) : []
   const reGlobal = opts.onlyMatching
     ? compilePosixRegex(

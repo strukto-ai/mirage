@@ -125,7 +125,7 @@ async def test_discord_grep_on_a_time_scoped_mount_skips_native_search():
             new=AsyncMock(return_value=paths),
         ),
         patch(
-            "mirage.commands.builtin.discord.grep.generic_grep",
+            "mirage.commands.builtin.discord.grep.grep_generic",
             new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
         ) as fake_scan,
     ):

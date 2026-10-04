@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { decodeLine } from '../../../../commands/builtin/grep_offsets.ts'
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
 import { runAsProgram, runWithSession } from '../../../../context/session_context.ts'
@@ -29,7 +28,7 @@ import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { SharedStdin, asyncChain, yieldBytes } from '../../../../io/stream.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { asyncContextIsolatesTasks } from '../../../../utils/async_context.ts'
 import { fsStrerror } from '../../../../utils/errors.ts'
@@ -597,7 +596,7 @@ async function runLines(
         slot.push(new IOResult({ stderr: ENCODER.encode(event) }))
         continue
       }
-      const words = event.map(decodeLine)
+      const words = event.map(decodeText)
       const name = words[0] ?? ''
       if (opts.trace === true) slot.push(new IOResult({ stderr: ENCODER.encode(trace(event)) }))
       if (registry !== null && !execs(name, session, registry)) {

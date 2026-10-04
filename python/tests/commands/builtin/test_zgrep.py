@@ -17,7 +17,7 @@ import gzip
 
 import pytest
 
-from mirage.commands.builtin.generic.zgrep import zgrep as zgrep_generic
+from mirage.commands.builtin.generic.zgrep import zgrep_generic
 from mirage.io.types import materialize
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS

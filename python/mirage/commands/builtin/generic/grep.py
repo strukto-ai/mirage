@@ -206,7 +206,7 @@ def prints_context(f: GrepFlags) -> bool:
     return bool(f.after_context or f.before_context) and not f.only_matching
 
 
-async def grep(
+async def grep_generic(
     paths: list[PathSpec],
     texts: Sequence[str],
     opts: CommandOpts,

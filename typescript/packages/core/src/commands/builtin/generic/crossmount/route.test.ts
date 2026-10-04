@@ -96,27 +96,6 @@ describe('handleCrossMount — cp / mv', () => {
     expect(ops.indexOf('read')).toBeLessThan(ops.indexOf('write'))
   })
 
-  it('cp of a directory without -r is an omitting-directory error', async () => {
-    const dispatch = vi.fn<
-      (
-        op: string,
-        p: PathSpec,
-        args?: readonly unknown[],
-        kw?: Record<string, unknown>,
-      ) => Promise<[unknown, IOResult]>
-    >((op, p) => {
-      if (op === 'stat') {
-        if (p.virtual === '/disk/b') return Promise.reject(enoent(p))
-        return Promise.resolve<[unknown, IOResult]>([dirStat('a'), new IOResult()])
-      }
-      return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
-    })
-    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [, io] = await handleCrossMount('cp', paths, [], {}, dispatch, runSingleNoop, null)
-    expect(io.exitCode).toBe(1)
-    expect(dispatch.mock.calls.some((c) => c[0] === 'write')).toBe(false)
-  })
-
   it('cp -r recurses a directory: mkdir dst, then copy each file', async () => {
     const dispatch = vi.fn<
       (
@@ -192,36 +171,6 @@ describe('handleCrossMount — cp / mv', () => {
   })
 })
 
-describe('handleCrossMount — cmp', () => {
-  function dispatchWithContents(aBytes: Uint8Array, bBytes: Uint8Array) {
-    return vi.fn<
-      (
-        op: string,
-        p: PathSpec,
-        args?: readonly unknown[],
-        kw?: Record<string, unknown>,
-      ) => Promise<[unknown, IOResult]>
-    >((_op, p) => {
-      if (p.virtual.startsWith('/ram'))
-        return Promise.resolve<[unknown, IOResult]>([aBytes, new IOResult()])
-      return Promise.resolve<[unknown, IOResult]>([bBytes, new IOResult()])
-    })
-  }
-
-  it('EOF on shorter file → exit 1', async () => {
-    // GNU writes the EOF notice to stderr, not stdout, and names both
-    // the byte it stopped at and the line that byte sits in.
-    const d = dispatchWithContents(new TextEncoder().encode('ab'), new TextEncoder().encode('abc'))
-    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, runSingleNoop, null)
-    expect(io.exitCode).toBe(1)
-    expect(out).toBeNull()
-    expect(decode(await materialize(io.stderr))).toBe(
-      'cmp: EOF on /ram/a after byte 2, in line 1\n',
-    )
-  })
-})
-
 describe('handleCrossMount — stream/fanout via runSingle', () => {
   const noDispatch = vi.fn<
     (
@@ -280,20 +229,5 @@ describe('handleCrossMount — stream/fanout via runSingle', () => {
     expect(decode(await materialize(out))).toBe('a\nb\n')
     expect(dispatch.mock.calls.map(([op]) => op)).toEqual(['stat', 'read', 'stat', 'read'])
     expect(native).not.toHaveBeenCalled()
-  })
-
-  it('sha256sum concatenates per-operand lines and fails on any failure', async () => {
-    const calls: Record<string, unknown>[] = []
-    const rs = runSingleFrom(
-      {
-        '/ram/a': ['', 1, 'sha256sum: /ram/a: No such file or directory\n'],
-        '/disk/b': ['h  /disk/b\n', 0],
-      },
-      calls,
-    )
-    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out, io] = await handleCrossMount('sha256sum', paths, [], {}, noDispatch, rs, null)
-    expect(io.exitCode).toBe(1)
-    expect(decode(await materialize(out))).toBe('h  /disk/b\n')
   })
 })

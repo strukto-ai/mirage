@@ -14,7 +14,7 @@
 
 import git from 'isomorphic-git'
 
-import { decodeLine } from '../../../builtin/grep_offsets.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 import { GitError } from './errors.ts'
 import { repoArgs, type Repo } from './repo.ts'
 
@@ -66,7 +66,7 @@ export async function treeItems(repo: Repo, treeOid: string): Promise<TreeItem[]
       byte.toString(16).padStart(2, '0'),
     ).join('')
     items.push({
-      path: decodeLine(raw.subarray(space + 1, nul)),
+      path: decodeText(raw.subarray(space + 1, nul)),
       oid,
       mode: mode === SHORT_TREE_MODE ? TREE_MODE : mode,
     })

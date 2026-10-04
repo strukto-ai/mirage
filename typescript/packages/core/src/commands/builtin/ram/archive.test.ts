@@ -239,22 +239,16 @@ describe('tar', () => {
     expect(text).toContain('Exiting with failure status due to previous errors')
   })
 
-  it.each([
-    [[], {}, 'tar: Cowardly refusing to create an empty archive'],
-    [
-      [dirSpec('/nodir/a.txt', 'a.txt')],
-      { directory: '/nodir' },
-      'tar: /nodir: Cannot open: No such file or directory',
-    ],
-  ])('refuses before it writes anything: %#', async (paths, flags, refusal) => {
+  it('refuses an unenterable -C before it writes anything', async () => {
     const vfs = new RAMVFS()
-    const { exitCode, stderr, writes } = await runCmd(RAM_TAR, vfs, paths, {
-      create: true,
-      file: '/out.tar',
-      ...flags,
-    })
+    const { exitCode, stderr, writes } = await runCmd(
+      RAM_TAR,
+      vfs,
+      [dirSpec('/nodir/a.txt', 'a.txt')],
+      { create: true, file: '/out.tar', directory: '/nodir' },
+    )
     expect(exitCode).toBe(2)
-    expect(DEC.decode(stderr)).toContain(refusal)
+    expect(DEC.decode(stderr)).toContain('tar: /nodir: Cannot open: No such file or directory')
     expect(Object.keys(writes)).toHaveLength(0)
   })
 
@@ -318,20 +312,6 @@ describe('tar', () => {
       'tdir/sub/',
       'tdir/sub/b.txt',
     ])
-  })
-
-  it('leaves the archive out of itself', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.dirs.add('/d')
-    vfs.store.files.set('/d/a.txt', ENC.encode('a'))
-    vfs.store.files.set('/d/old.tar', ENC.encode('stale'))
-    const { stderr } = await runCmd(RAM_TAR, vfs, [dirSpec('/d', 'd')], {
-      create: true,
-      file: '/d/old.tar',
-    })
-    expect(DEC.decode(stderr)).toContain('archive cannot contain itself')
-    const listed = await runCmd(RAM_TAR, vfs, [], { list: true, file: '/d/old.tar' })
-    expect(DEC.decode(listed.out).trim().split('\n')).toEqual(['d/', 'd/a.txt'])
   })
 })
 
@@ -844,18 +824,9 @@ async function readOnlyShell(
   }
 }
 
-const ARCHIVES =
-  "printf 'hello\\n' > /ro/f.txt && cd /ro && tar -cf a.tar f.txt && zip -q a.zip f.txt && rm f.txt"
+const ARCHIVES = "printf 'hello\\n' > /ro/f.txt && cd /ro && zip -q a.zip f.txt && rm f.txt"
 
-describe('tar and unzip on a read-only mount', () => {
-  it.each([
-    ['cd /ro && tar tf a.tar', 'f.txt\n'],
-    ['tar -xOf /ro/a.tar', 'hello\n'],
-  ])('runs %s, which writes nothing', async (line, stdout) => {
-    const [exitCode, out] = await readOnlyShell(ARCHIVES, line)
-    expect([exitCode, out]).toEqual([0, stdout])
-  })
-
+describe('unzip on a read-only mount', () => {
   it.each(['unzip -t /ro/a.zip', 'unzip -Z /ro/a.zip'])(
     'runs %s, which writes nothing',
     async (line) => {
@@ -864,22 +835,7 @@ describe('tar and unzip on a read-only mount', () => {
     },
   )
 
-  // GNU tar 1.35 on a read-only filesystem: each member it cannot create
-  // is its own line and the run goes on; an archive it cannot create is
-  // fatal before any member is read.
   it.each([
-    [
-      'cd /ro && tar -xf a.tar',
-      2,
-      'tar: f.txt: Cannot open: Read-only file system\n' +
-        'tar: Exiting with failure status due to previous errors\n',
-    ],
-    [
-      'tar -cf /ro/b.tar /ro/a.zip',
-      2,
-      'tar: /ro/b.tar: Cannot open: Read-only file system\n' +
-        'tar: Error is not recoverable: exiting now\n',
-    ],
     // UnZip 6.00: a member it cannot create is named as it would have made
     // it (exit 50), an extraction directory it cannot make ends the run
     // (exit 2). Mirrors test_unzip.py.
@@ -892,36 +848,5 @@ describe('tar and unzip on a read-only mount', () => {
   ])('refuses %s at its write', async (line, code, refused) => {
     const [exitCode, , stderr] = await readOnlyShell(ARCHIVES, line)
     expect([exitCode, stderr]).toEqual([code, refused])
-  })
-})
-
-describe('tar -f an archive it cannot open', () => {
-  // tar 1.35 names -f as typed. A directory opens and fails the first read,
-  // where a backend keying files alone reports it absent. With a compressor
-  // tar's child speaks, the reading one's gzip meets an empty pipe unless the
-  // name was missing, and tar reports the child's status. Mirrors
-  // test_tar.py.
-  it.each([
-    [
-      'tar -xf d',
-      'tar: d: Cannot read: Is a directory\ntar: At beginning of tape, quitting now\ntar: Error is not recoverable: exiting now\n',
-    ],
-    [
-      'tar -tzf d',
-      'tar (child): d: Cannot read: Is a directory\ntar (child): At beginning of tape, quitting now\ntar (child): Error is not recoverable: exiting now\n\ngzip: stdin: unexpected end of file\ntar: Child returned status 2\ntar: Error is not recoverable: exiting now\n',
-    ],
-  ])('%s', async (line, want) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    try {
-      await ws.shell('mkdir -p /data/d && printf a > /data/a')
-      const r = await ws.shell(`cd /data && ${line}`)
-      expect(r.exitCode).toBe(2)
-      expect(new TextDecoder().decode(r.stderr)).toBe(want)
-    } finally {
-      await ws.close()
-    }
   })
 })

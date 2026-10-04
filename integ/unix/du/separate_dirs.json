@@ -147,6 +147,82 @@
       "flags": [
         "S"
       ]
+    },
+    {
+      "id": "du_S_keeps_the_grand_total_recursive",
+      "seq": 15800003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/dusd/sub/deep && printf 'deep\\n' > /data/dusd/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dusd/sub/nested.txt && du -Sc /data/dusd/sub; du -Ssc /data/dusd/sub; du -Sc /data/a.txt; rm -r /data/dusd",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\t/data/dusd/sub/deep\n15\t/data/dusd/sub\n20\ttotal\n15\t/data/dusd/sub\n20\ttotal\n24\t/data/a.txt\n24\ttotal\n",
+        "stderr": ""
+      },
+      "flags": [
+        "S",
+        "c"
+      ]
+    },
+    {
+      "id": "du_S_prints_a_directory_of_directories_at_zero",
+      "seq": 15800004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crS/a/b && echo x > /data/crS/a/b/f && du -S /data/crS; du -Sa /data/crS; rm -r /data/crS",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\t/data/crS/a/b\n0\t/data/crS/a\n0\t/data/crS\n2\t/data/crS/a/b/f\n2\t/data/crS/a/b\n0\t/data/crS/a\n0\t/data/crS\n",
+        "stderr": ""
+      },
+      "flags": [
+        "S",
+        "a"
+      ]
     }
   ]
 }

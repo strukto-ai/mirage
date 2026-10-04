@@ -1,17 +1,14 @@
 import re
 
-import pytest
-
 from mirage.commands.builtin.grep_offsets import (
     MatchOffsets,
-    decode_line,
-    encode_line,
     line_offsets,
     match_offset,
     prefix_of,
     rg_pieces,
     rust_matches,
 )
+from mirage.shell.bytes import decode_text
 
 
 def test_line_offsets_count_the_stripped_terminator():
@@ -59,63 +56,20 @@ def test_prefix_of_renders_a_context_line_with_dashes_throughout():
     assert prefix_of(3, 12, False) == "3-12-"
 
 
-def test_decode_line_carries_one_invalid_byte_as_one_character():
-    # A replacing decode reads 0xff as U+FFFD, which is three bytes wide,
-    # so every offset past it ran ahead of GNU's.
-    assert decode_line(b"\xffa") == "\udcffa"
-
-
-def test_decode_line_leaves_valid_utf8_alone():
-    assert decode_line("café abc".encode()) == "café abc"
-
-
-def test_encode_line_round_trips_decode_line():
-    raw = b"\xffa\xc3\xa9\xfe"
-    assert encode_line(decode_line(raw)) == raw
-
-
 def test_line_offsets_are_exact_over_an_invalid_byte():
     # `\xff` is one byte, so the second line starts at 2 -- GNU's answer for
     # `grep -b a` over `\xff\na\n`, where a replacing decode said 4.
-    assert line_offsets([decode_line(b"\xff"), "a"]) == [0, 2]
+    assert line_offsets([decode_text(b"\xff"), "a"]) == [0, 2]
 
 
 def test_match_offset_counts_an_invalid_byte_as_one():
     # `grep -bo a` over `\xffa\n` is `1:a` on GNU grep 3.11.
-    assert match_offset(0, decode_line(b"\xffa"), 1) == 1
+    assert match_offset(0, decode_text(b"\xffa"), 1) == 1
 
 
 def test_incremental_offsets_preserve_unicode_and_escaped_bytes():
     offsets = MatchOffsets(10, "é😀a\udcffé😀a")
     assert [offsets.at(2), offsets.at(6)] == [16, 24]
-
-
-@pytest.mark.parametrize(
-    "raw,expected",
-    [
-        (b"\xef\xbb\xbfa", "\ufeffa"),
-        (b"\xc0\xaf\xc1\xbf", "\udcc0\udcaf\udcc1\udcbf"),
-        (b"\xe0\x80\x80\xed\xa0\x80", "\udce0\udc80\udc80\udced\udca0\udc80"),
-        (b"\xf0\x80\x80\x80", "\udcf0\udc80\udc80\udc80"),
-        (b"\xf4\x90\x80\x80\xf5\xff", "\udcf4\udc90\udc80\udc80\udcf5\udcff"),
-        (
-            b"\xc2A\xe1\x80B\xf0\x90\x80",
-            "\udcc2A\udce1\udc80B\udcf0\udc90\udc80",
-        ),
-        (
-            b"\xef\xbb\xbf\xff\xc2\x80\xe0\xa0\x80\xed\x9f\xbf\xf0\x90\x82\x80\xf4\x8f\xbf\xbf",
-            "\ufeff\udcff\u0080\u0800\ud7ff𐂀\U0010ffff",
-        ),
-    ],
-)
-def test_decode_utf8_boundaries_without_replacing_bytes(raw, expected):
-    assert decode_line(raw) == expected
-    assert encode_line(decode_line(raw)) == raw
-
-
-def test_decode_large_malformed_line():
-    expected = ("x" * 8190 + "𐂀\udcffé") * 4
-    assert decode_line(encode_line(expected)) == expected
 
 
 def test_rust_matches_resume_one_character_after_an_empty_match():

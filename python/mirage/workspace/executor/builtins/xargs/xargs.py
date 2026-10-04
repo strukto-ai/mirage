@@ -17,7 +17,6 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from mirage.commands.builtin.grep_offsets import decode_line
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
@@ -34,7 +33,7 @@ from mirage.io import IOResult
 from mirage.io.stream import SharedStdin, async_chain, materialize, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.join import shell_join
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.quote import shell_quote
@@ -618,7 +617,7 @@ async def _run_lines(
             if isinstance(event, str):
                 results[index].append(IOResult(stderr=event.encode()))
                 continue
-            words = [decode_line(word) for word in event]
+            words = [decode_text(word) for word in event]
             if trace:
                 results[index].append(IOResult(stderr=_trace(event).encode()))
             if registry is not None and not execs(words[0], session, registry):

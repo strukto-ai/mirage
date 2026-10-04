@@ -1112,7 +1112,7 @@ DANGLING = (
         (
             "rg -L o /data",
             "/data/a.txt:hello\n/data/s/f:o\n/data/s/al:hello\n/data/m/g:o\n",
-            DANGLING,
+            b"rg: /data/s/dang: No such file or directory (os error 2)\n",
             2,
         ),
     ],

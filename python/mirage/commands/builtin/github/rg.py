@@ -18,9 +18,9 @@ from mirage.commands.builtin.generic.rg import (
     needs_every_file,
     parse_flags,
     refuse_missing_pattern,
+    rg_generic,
     walk_filter,
 )
-from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
@@ -79,7 +79,7 @@ async def rg(
             return b"", IOResult(exit_code=1, stderr=msg.encode())
         paths = narrowed
 
-    return await generic_rg(
+    return await rg_generic(
         paths,
         texts,
         run_opts,

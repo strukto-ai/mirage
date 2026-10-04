@@ -186,6 +186,45 @@
       "flags": [
         "f"
       ]
+    },
+    {
+      "id": "cut_f_c_print_in_input_order_once",
+      "seq": 15800076,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\n' | cut -f 3,1; printf 'a,b\\nplain\\n' | cut -d, -f2; printf 'abcdef\\n' | cut -c 1-3,2-4",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\tc\nb\nplain\nabcd\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "d",
+        "c"
+      ]
     }
   ]
 }

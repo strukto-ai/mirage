@@ -24,7 +24,7 @@ import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
-import { decodeLine, encodeLine } from '../grep_offsets.ts'
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { NEVER_MATCH, resolvePattern, rustEscape } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { FileTypes, typeListing, type TypeChange, type TypeSelection } from '../rg_filetypes.ts'
@@ -232,15 +232,21 @@ function contextOf(fl: FlagView): [boolean, number, number] {
   return [passthru, before ?? both ?? 0, after ?? both ?? 0]
 }
 
-// Whether -a, --binary or -uuu, the last word of their group, lift the
-// walk's binary-extension skip; --no-text and --no-binary put it back.
-function binaryOf(fl: FlagView, unrestricted: number): boolean {
-  let on = false
+// How rg treats a binary file, the last word of its group deciding: `text`
+// under -a, which searches every byte as text; `binary` under --binary or
+// -uuu, which searches what a walk would skip but still reports a binary
+// match by its notice; `auto` otherwise, and after --no-text or --no-binary.
+// Mirrors Python's _binary_mode.
+function binaryModeOf(fl: FlagView, unrestricted: number): 'auto' | 'binary' | 'text' {
+  let mode: 'auto' | 'binary' | 'text' = 'auto'
   for (const name of fl.typedOrder('text', 'no_text', 'binary', 'no_binary', 'unrestricted')) {
-    if (name === 'unrestricted') on = on || unrestricted >= 3
-    else on = name === 'text' || name === 'binary'
+    if (name === 'unrestricted') {
+      if (unrestricted >= 3 && mode === 'auto') mode = 'binary'
+    } else {
+      mode = name === 'text' ? 'text' : name === 'binary' ? 'binary' : 'auto'
+    }
   }
-  return on
+  return mode
 }
 
 // --path-separator's one byte, null for ripgrep's own `/`; anything but one
@@ -248,7 +254,7 @@ function binaryOf(fl: FlagView, unrestricted: number): boolean {
 function pathSeparator(fl: FlagView): string | null {
   const value = fl.asStr('path_separator')
   if (value === undefined) return null
-  const raw = encodeLine(unescape(value))
+  const raw = encodeText(unescape(value))
   if (raw.length === 0) return null
   if (raw.length !== 1) {
     throw new UsageError(
@@ -257,7 +263,7 @@ function pathSeparator(fl: FlagView): string | null {
         "Windows '/' is automatically expanded. Use '//' instead.",
     )
   }
-  return decodeLine(raw)
+  return decodeText(raw)
 }
 
 /**
@@ -271,7 +277,7 @@ function pathSeparator(fl: FlagView): string | null {
  * ripgrep refuses throws its words.
  */
 export function parseFlags(fl: FlagView): RgFlags {
-  numberFlag(fl, 'threads')
+  const threads = numberFlag(fl, 'threads')
   choice(fl, 'color', '--color', COLOR_CHOICES)
   const caseMode = last(fl, 'ignore_case', 'case_sensitive', 'smart_case')
   const bounds = last(fl, 'word_regexp', 'line_regexp')
@@ -282,6 +288,7 @@ export function parseFlags(fl: FlagView): RgFlags {
   const column = columns !== null ? columns === 'column' : vimgrep
   const [passthru, contextBefore, contextAfter] = contextOf(fl)
   const unrestricted = fl.asInt('unrestricted') ?? 0
+  const binaryMode = binaryModeOf(fl, unrestricted)
   let hidden = false
   for (const name of fl.typedOrder('hidden', 'no_hidden', 'unrestricted')) {
     if (name === 'hidden') hidden = fl.asBool(name)
@@ -367,10 +374,12 @@ export function parseFlags(fl: FlagView): RgFlags {
     maxFilesize: filesizeFlag(fl),
     follow: last(fl, 'follow', 'no_follow') === 'follow',
     oneFileSystem: last(fl, 'one_file_system', 'no_one_file_system') === 'one_file_system',
-    binary: binaryOf(fl, unrestricted),
+    binary: binaryMode !== 'auto',
     sort,
     sortReverse: sortFlag === 'sortr',
     noMessages: last(fl, 'no_messages', 'messages') === 'no_messages',
+    threads,
+    text: binaryMode === 'text',
   }
 }
 
@@ -731,7 +740,7 @@ async function searchSingle(
   const tally: Tally = { selected: false }
   return [
     settled(
-      searchHaystack(stream(p), pat, f, name, label, tally, signal),
+      searchHaystack(stream(p), pat, f, name, label, tally, signal, true, isStdin(p)),
       f,
       label,
       tally,
@@ -756,8 +765,8 @@ async function* settled(
   let printed = false
   try {
     for await (const chunk of chunks) {
-      if (!printed && label !== null && headed(f))
-        yield encodeLine(label + (f.null || f.nullData ? '\0' : '\n'))
+      if (!printed && label !== null && headed(f) && tally.binary !== true)
+        yield encodeText(label + (f.null || f.nullData ? '\0' : '\n'))
       printed = true
       yield chunk
     }
@@ -826,6 +835,10 @@ async function* haystacks(
   boundary: MountView | null,
   door: LinkDoor | null,
 ): AsyncGenerator<Haystack> {
+  // ripgrep holds one path that is not a directory to one thread, as it
+  // does -j1 and a sort; every other line runs its parallel walker.
+  const parallel = f.threads !== 1 && f.sort === null
+  const several = parallel && paths.length > 1
   for (const p of paths) {
     if (isStdin(p)) {
       yield {
@@ -838,7 +851,7 @@ async function* haystacks(
       continue
     }
     if (p.walkError !== null) {
-      warnings.push(walkErrorLine(p.rawPath, walkRefusal(p)))
+      warnings.push(walkErrorLine(p.rawPath, walkRefusal(p), several))
       continue
     }
     let isDir = false
@@ -855,7 +868,7 @@ async function* haystacks(
         isDir = true
       } catch (inner) {
         if (!isWalkError(inner)) throw inner
-        warnings.push(walkErrorLine(p.rawPath, err))
+        warnings.push(walkErrorLine(p.rawPath, err, several))
         continue
       }
     }
@@ -880,6 +893,7 @@ async function* haystacks(
       crosses,
       door,
       f.follow,
+      parallel,
     )
   }
 }
@@ -898,7 +912,7 @@ async function listFiles(
   const term = f.null ? '\0' : '\n'
   const out: Uint8Array[] = []
   for await (const h of found) {
-    out.push(encodeLine(printedPath(h.shown, f) + term))
+    out.push(encodeText(printedPath(h.shown, f) + term))
     if (f.quiet) break
   }
   const code = exitCodeFor(out.length > 0, warnings.length > 0, f.quiet)
@@ -930,6 +944,7 @@ async function searchAll(
   const out: Uint8Array[] = []
   let printed = false
   let selected = false
+  let skipped = false
   let searched = 0
   for await (const h of found) {
     searched += 1
@@ -943,7 +958,18 @@ async function searchAll(
         h.spec === null && h.door !== null
           ? h.door.read(h.virtual)
           : stream(h.spec ?? makeSpec(h.virtual, template))
-      for await (const c of searchHaystack(source, pat, f, name, label, tally, signal)) {
+      const pipe = h.spec !== null && isStdin(h.spec)
+      for await (const c of searchHaystack(
+        source,
+        pat,
+        f,
+        name,
+        label,
+        tally,
+        signal,
+        !walked,
+        pipe,
+      )) {
         chunks.push(c)
       }
     } catch (err) {
@@ -953,12 +979,15 @@ async function searchAll(
       continue
     }
     selected ||= tally.selected
+    skipped ||= tally.skipped === true
     if (chunks.length > 0) {
       if (label !== null && headed(f)) {
         if (printed) out.push(ENC.encode('\n'))
-        out.push(encodeLine(label + (f.null || f.nullData ? '\0' : '\n')))
+        if (tally.binary !== true) {
+          out.push(encodeText(label + (f.null || f.nullData ? '\0' : '\n')))
+        }
       } else if (context && printed && f.contextSeparator !== null) {
-        out.push(encodeLine(f.contextSeparator + '\n'))
+        out.push(encodeText(f.contextSeparator + '\n'))
       }
       out.push(...chunks)
       printed = true
@@ -967,8 +996,9 @@ async function searchAll(
   }
   // ripgrep's status under --files-without-match follows the listing, not
   // the matching: 0 when a file was listed, 1 when every file matched
-  // (14.1.1; GNU grep keeps the match status).
-  if (f.filesWithoutMatch && !f.quiet) selected = printed
+  // (14.1.1; GNU grep keeps the match status). A walked binary file it
+  // skipped counts as one without a match, though no listing names it.
+  if (f.filesWithoutMatch && !f.quiet) selected = printed || skipped
   let code = exitCodeFor(selected, warnings.length > 0, f.quiet)
   const shown = f.noMessages ? [] : [...warnings]
   if (implicit && searched === 0) {

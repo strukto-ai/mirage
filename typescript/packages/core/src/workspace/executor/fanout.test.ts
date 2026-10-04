@@ -976,7 +976,12 @@ it.each([
     DANGLING,
     2,
   ],
-  ['rg -L o /data', '/data/a.txt:hello\n/data/s/f:o\n/data/s/al:hello\n/data/m/g:o\n', DANGLING, 2],
+  [
+    'rg -L o /data',
+    '/data/a.txt:hello\n/data/s/f:o\n/data/s/al:hello\n/data/m/g:o\n',
+    'rg: /data/s/dang: No such file or directory (os error 2)\n',
+    2,
+  ],
 ])('follows links across mounts only under -L: %s', async (line, stdout, stderr, code) => {
   const ws = await linkedTree()
   try {

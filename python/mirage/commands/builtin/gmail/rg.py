@@ -16,8 +16,8 @@ from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.builtin.generic.rg import (
     parse_flags,
     refuse_missing_pattern,
+    rg_generic,
 )
-from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.gmail.grep import (
     RG_SEARCH_HONORED,
@@ -80,7 +80,7 @@ async def rg(
             return format_records(lines), IOResult()
 
     resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
-    return await generic_rg(
+    return await rg_generic(
         resolved,
         texts,
         opts,

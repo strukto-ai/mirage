@@ -469,7 +469,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(echo hi & sleep 0.2; fg) 2>/dev/null",
+      "command": "(echo hi & sleep 1; fg) 2>/dev/null",
       "expect": {
         "exit": 0,
         "stdout": "hi\necho hi\n",

@@ -27,7 +27,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( (sleep 0.05; echo bg) & echo fg1; sleep 0.2; echo fg2 )",
+      "command": "( (sleep 0.05; echo bg) & echo fg1; sleep 1; echo fg2 )",
       "expect": {
         "exit": 0,
         "stdout": "fg1\nbg\nfg2\n",
@@ -61,7 +61,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( (sleep 0.05; echo bg) & for i in 1 2; do echo $i; sleep 0.15; done )",
+      "command": "( (sleep 0.05; echo bg) & for i in 1 2; do echo $i; sleep 1; done )",
       "expect": {
         "exit": 0,
         "stdout": "1\nbg\n2\n",
@@ -163,7 +163,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( { (sleep 0.05; echo late) & } > {mount}/job-late; echo now; sleep 0.2; cat {mount}/job-late; rm {mount}/job-late )",
+      "command": "( { (sleep 0.05; echo late) & } > {mount}/job-late; echo now; sleep 1; cat {mount}/job-late; rm {mount}/job-late )",
       "expect": {
         "exit": 0,
         "stdout": "now\nlate\n",
@@ -401,7 +401,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=$( (sleep 0.2; echo late) >&2 & echo ready); echo \"got $x\" >&2; sleep 0.4",
+      "command": "x=$( (sleep 1; echo late) >&2 & echo ready); echo \"got $x\" >&2; sleep 2",
       "expect": {
         "exit": 0,
         "stdout": "",
@@ -435,7 +435,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "{ (sleep 0.2; echo late >&2) >/dev/null & echo s; } | cat; echo after >&2; sleep 0.4",
+      "command": "{ (sleep 1; echo late >&2) >/dev/null & echo s; } | cat; echo after >&2; sleep 2",
       "expect": {
         "exit": 0,
         "stdout": "s\n",

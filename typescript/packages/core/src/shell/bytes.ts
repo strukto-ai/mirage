@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 const ENC = new TextEncoder()
+const DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
 const SURROGATE_BASE = 0xdc00
 const SURROGATE_LOW = 0xdc80
@@ -94,4 +95,75 @@ export function encodeText(text: string): Uint8Array {
     at += part.length
   }
   return out
+}
+
+/**
+ * Read bytes back as shell text, the inverse of `encodeText`.
+ *
+ * Valid UTF-8 comes back as its characters and every other byte as its
+ * surrogate escape, the stand-in `byteChar` makes, so the text round-trips
+ * to exactly the bytes it was read from. `TextDecoder`'s replacement cannot:
+ * one invalid byte becomes U+FFFD, three bytes wide, and every byte offset
+ * counted back past it runs ahead of GNU's.
+ */
+export function decodeText(raw: Uint8Array): string {
+  try {
+    return DECODER.decode(raw)
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error
+  }
+  const parts: string[] = []
+  const units = new Uint16Array(Math.min(raw.length, 8192))
+  let used = 0
+  for (let i = 0; i < raw.length;) {
+    const byte = raw[i] ?? 0
+    const second = raw[i + 1] ?? 0
+    const third = raw[i + 2] ?? 0
+    const fourth = raw[i + 3] ?? 0
+    let code = byte < ASCII_MAX ? byte : SURROGATE_BASE + byte
+    let width = 1
+    // Reject overlong encodings, surrogate code points and values above
+    // U+10FFFF. An invalid sequence escapes only its first byte, just as
+    // Python's surrogateescape does, then retries at the following byte.
+    if (byte >= 0xc2 && byte <= 0xdf && second >= 0x80 && second <= 0xbf) {
+      code = ((byte & 0x1f) << 6) | (second & 0x3f)
+      width = 2
+    } else if (
+      byte >= 0xe0 &&
+      byte <= 0xef &&
+      second >= (byte === 0xe0 ? 0xa0 : 0x80) &&
+      second <= (byte === 0xed ? 0x9f : 0xbf) &&
+      third >= 0x80 &&
+      third <= 0xbf
+    ) {
+      code = ((byte & 0x0f) << 12) | ((second & 0x3f) << 6) | (third & 0x3f)
+      width = 3
+    } else if (
+      byte >= 0xf0 &&
+      byte <= 0xf4 &&
+      second >= (byte === 0xf0 ? 0x90 : 0x80) &&
+      second <= (byte === 0xf4 ? 0x8f : 0xbf) &&
+      third >= 0x80 &&
+      third <= 0xbf &&
+      fourth >= 0x80 &&
+      fourth <= 0xbf
+    ) {
+      code = ((byte & 7) << 18) | ((second & 0x3f) << 12) | ((third & 0x3f) << 6) | (fourth & 0x3f)
+      width = 4
+    }
+    if (code > 0xffff) {
+      code -= 0x10000
+      units[used++] = 0xd800 + (code >> 10)
+      units[used++] = 0xdc00 + (code & 0x3ff)
+    } else {
+      units[used++] = code
+    }
+    i += width
+    if (used >= units.length - 1) {
+      parts.push(String.fromCharCode(...units.subarray(0, used)))
+      used = 0
+    }
+  }
+  if (used > 0) parts.push(String.fromCharCode(...units.subarray(0, used)))
+  return parts.join('')
 }

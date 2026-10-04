@@ -16,12 +16,8 @@ from collections.abc import Sequence
 
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
 from mirage.commands.builtin.generic.du import rollup, separate_total
-from mirage.commands.builtin.utils.formatting import human_size
+from mirage.commands.builtin.utils.formatting import human_size, scaled_size
 from mirage.utils.path import respell_raw
-
-
-def _format_size(size: int, human: bool) -> str:
-    return human_size(size) if human else str(size)
 
 
 def _parse_rows(blocks: Sequence[bytes]) -> list[tuple[str, int]]:
@@ -40,7 +36,7 @@ def _parse_rows(blocks: Sequence[bytes]) -> list[tuple[str, int]]:
     return rows
 
 
-def _leaves(
+def _leaves_of(
     rows: Sequence[tuple[str, int]], dirs: Sequence[str] = ()
 ) -> list[tuple[str, int]]:
     """Keep the rows nothing else sits under.
@@ -114,7 +110,7 @@ def merge_du_blocks(
             ``0`` row, which the leaf inference would otherwise read as a
             zero-byte file and hide.
     """
-    leaves = _leaves(_parse_rows(blocks), dirs)
+    leaves = _leaves_of(_parse_rows(blocks), dirs)
     total = sum(size for _, size in leaves)
     # -S scopes to the operand's own row; GNU keeps the -c grand total
     # recursive (coreutils 9.7 over a real mount: `du -bSc base` prints
@@ -132,12 +128,12 @@ def merge_du_blocks(
         )
         shown = respell_raw([node for node, _ in rows], root, label)
         lines = [
-            _format_size(size, human) + "\t" + name
+            scaled_size(size, None, human) + "\t" + name
             for name, (_, size) in zip(shown, rows)
         ]
-    lines.append(_format_size(own, human) + "\t" + label)
+    lines.append(scaled_size(own, None, human) + "\t" + label)
     if c:
-        lines.append(_format_size(total, human) + "\ttotal")
+        lines.append(scaled_size(total, None, human) + "\ttotal")
     return ("\n".join(lines) + "\n").encode()
 
 
@@ -176,7 +172,7 @@ def merge_du_totals(blocks: Sequence[bytes], human: bool) -> bytes:
             total += int(body[-1].rsplit("\t", 1)[0])
             body = body[:-1]
         kept.extend(_humanize_row(line) if human else line for line in body)
-    kept.append(_format_size(total, human) + "\ttotal")
+    kept.append(scaled_size(total, None, human) + "\ttotal")
     return ("\n".join(kept) + "\n").encode()
 
 

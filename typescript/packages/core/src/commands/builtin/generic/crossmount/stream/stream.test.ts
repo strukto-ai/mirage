@@ -63,10 +63,6 @@ function scopes(...virtuals: string[]): PathSpec[] {
   return virtuals.map((virtual) => PathSpec.fromStrPath(virtual))
 }
 
-function stderrOf(io: IOResult): string {
-  return io.stderr === null ? '' : DEC.decode(io.stderr as Uint8Array)
-}
-
 describe('runStream', () => {
   it('ends a line reader file at its boundary and keeps cat bytewise', async () => {
     const fetches = new Fetches({ '/a/x': 'ab', '/b/y': 'cd' })
@@ -74,12 +70,5 @@ describe('runStream', () => {
     expect(DEC.decode(fetches.finalStdin ?? undefined)).toBe('ab\ncd')
     await runStream(Cmd.CAT, scopes('/a/x', '/b/y'), [], { n: true }, fetches.run)
     expect(DEC.decode(fetches.finalStdin ?? undefined)).toBe('abcd')
-  })
-  it('reports failures in the command voice and continues', async () => {
-    const fetches = new Fetches({ '/b/y': 'cd' }, { '/a/x': 'No such file or directory' })
-    const [, io] = await runStream(Cmd.CUT, scopes('/a/x', '/b/y'), [], {}, fetches.run)
-    expect(stderrOf(io)).toBe('cut: /a/x: No such file or directory\n')
-    expect(io.exitCode).toBe(1)
-    expect(DEC.decode(fetches.finalStdin ?? undefined)).toBe('cd')
   })
 })

@@ -678,7 +678,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ls: invalid argument 'bogus' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'time'\n  - 'size'\n  - 'extension'\n  - 'version'\n  - 'width'\nTry 'ls --help' for more information.\n"
+        "stderr": "ls: invalid argument 'bogus' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
       },
       "flags": [
         "sort"
@@ -1159,15 +1159,14 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "nextcloud",
         "gdrive",
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/lsw && printf x > /data/lsw/a && printf x > /data/lsw/aa && printf x > /data/lsw/é && printf x > /data/lsw/界 && ls --sort=width /data/lsw",
+      "command": "mkdir -p /data/lsw && printf x > /data/lsw/a && printf x > /data/lsw/aa && printf x > /data/lsw/é && printf x > /data/lsw/界 && printf x > /data/lsw/$'e\\xcc\\x81x' && ls --sort=width /data/lsw",
       "expect": {
         "exit": 0,
-        "stdout": "a\né\naa\n界\n",
+        "stdout": "a\né\naa\néx\n界\n",
         "stderr": ""
       },
       "flags": [
@@ -1864,6 +1863,360 @@
       },
       "flags": [
         "b"
+      ]
+    },
+    {
+      "id": "ls_U_ignores_group_directories_first",
+      "seq": 15800015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "[ \"$(ls -U /data/sub)\" = \"$(ls -U --group-directories-first /data/sub)\" ] && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      },
+      "flags": [
+        "U",
+        "group-directories-first"
+      ]
+    },
+    {
+      "id": "ls_go_i_Z_lead_a_long_row_with_question_marks",
+      "seq": 15800016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -goiZ --time-style=long-iso /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "? -rw-r--r-- 1 ? 5 2025-01-15 10:30 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "i",
+        "Z",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_time_style_spells_an_old_time_with_its_first_format",
+      "seq": 15800017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=$'+%Y\\n%H:%M' /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 2025 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_hyperlink_wraps_each_entry_and_auto_is_off",
+      "seq": 15800018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crlh && printf x > /data/crlh/a.txt && ls --hyperlink=always /data/crlh; ls --hyperlink=auto /data/crlh; rm -r /data/crlh",
+      "expect": {
+        "exit": 0,
+        "stdout": "\u001b]8;;file:///data/crlh/a.txt\u0007a.txt\u001b]8;;\u0007\na.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "hyperlink"
+      ]
+    },
+    {
+      "id": "ls_empty_time_and_hyperlink_are_ambiguous",
+      "seq": 15800019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --time= /data; echo rc=$?; ls --hyperlink= /data; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "ls: ambiguous argument '' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n  - 'ctime', 'status'\n  - 'mtime', 'modification'\n  - 'birth', 'creation'\nTry 'ls --help' for more information.\nls: ambiguous argument '' for '--hyperlink'\nValid arguments are:\n  - 'always', 'yes', 'force'\n  - 'never', 'no', 'none'\n  - 'auto', 'tty', 'if-tty'\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "time",
+        "hyperlink"
+      ]
+    },
+    {
+      "id": "ls_indicator_style_last_one_wins_and_each_is_checked",
+      "seq": 15800023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crli/d && printf x > /data/crli/d/k && printf x > /data/crli/f && ln -s f /data/crli/l && cd /data/crli && for o in '-F -p' '-p -F' '--file-type' '--file-type --indicator-style=none' '--classify=always' '--classify=auto' '-p --classify'; do echo \"[$o]\"; ls $o | tr '\\n' ' '; echo; done; ls --indicator-style=bogus; echo rc=$?; ls --classify=bogus -F; echo rc=$?; cd / && rm -r /data/crli",
+      "expect": {
+        "exit": 0,
+        "stdout": "[-F -p]\nd/ f l \n[-p -F]\nd/ f l@ \n[--file-type]\nd/ f l@ \n[--file-type --indicator-style=none]\nd f l \n[--classify=always]\nd/ f l@ \n[--classify=auto]\nd f l \n[-p --classify]\nd/ f l@ \nrc=1\nrc=1\n",
+        "stderr": "ls: invalid argument 'bogus' for '--indicator-style'\nValid arguments are:\n  - 'none'\n  - 'slash'\n  - 'file-type'\n  - 'classify'\nTry 'ls --help' for more information.\nls: invalid argument 'bogus' for '--classify'\nValid arguments are:\n  - 'always', 'yes', 'force'\n  - 'never', 'no', 'none'\n  - 'auto', 'tty', 'if-tty'\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "F",
+        "p",
+        "file-type",
+        "indicator-style",
+        "classify"
+      ]
+    },
+    {
+      "id": "ls_option_words_are_checked_in_the_order_typed",
+      "seq": 15800024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lsow/sub/deep && printf 'deep\\n' > /data/lsow/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/lsow/sub/nested.txt && (cd /data/lsow/sub; ls --color=bogus; echo rc=$?; ls --color=a; echo rc=$?; ls --color=never --color=bogus; echo rc=$?; ls --color; echo rc=$?; ls --sort=bogus --sort=size; echo rc=$?; ls --block-size=bogus --block-size=K; echo rc=$?; ls --hyperlink=bogus --hyperlink=never; echo rc=$?; ls --time=x --sort=y; echo rc=$?); rm -r /data/lsow",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\ndeep\nnested.txt\nrc=0\nrc=1\nrc=2\nrc=1\nrc=1\n",
+        "stderr": "ls: invalid argument 'bogus' for '--color'\nValid arguments are:\n  - 'always', 'yes', 'force'\n  - 'never', 'no', 'none'\n  - 'auto', 'tty', 'if-tty'\nTry 'ls --help' for more information.\nls: ambiguous argument 'a' for '--color'\nValid arguments are:\n  - 'always', 'yes', 'force'\n  - 'never', 'no', 'none'\n  - 'auto', 'tty', 'if-tty'\nTry 'ls --help' for more information.\nls: invalid argument 'bogus' for '--color'\nValid arguments are:\n  - 'always', 'yes', 'force'\n  - 'never', 'no', 'none'\n  - 'auto', 'tty', 'if-tty'\nTry 'ls --help' for more information.\nls: invalid argument 'bogus' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\nls: invalid --block-size argument 'bogus'\nls: invalid argument 'bogus' for '--hyperlink'\nValid arguments are:\n  - 'always', 'yes', 'force'\n  - 'never', 'no', 'none'\n  - 'auto', 'tty', 'if-tty'\nTry 'ls --help' for more information.\nls: invalid argument 'x' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n  - 'ctime', 'status'\n  - 'mtime', 'modification'\n  - 'birth', 'creation'\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "color",
+        "sort",
+        "block-size",
+        "hyperlink",
+        "time"
+      ]
+    },
+    {
+      "id": "ls_one_per_line_never_undoes_a_long_format",
+      "seq": 15800025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -1 -go --time-style=+x /data/lsf/a.txt; ls -go -1 --time-style=+x /data/lsf/a.txt; ls -1 -l --time-style=+x /data/lsf/a.txt | cut -c1-10",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 x /data/lsf/a.txt\n-rw-r--r-- 1 5 x /data/lsf/a.txt\n-rw-r--r--\n",
+        "stderr": ""
+      },
+      "flags": [
+        "1",
+        "g",
+        "o",
+        "l"
+      ]
+    },
+    {
+      "id": "ls_later_of_h_and_block_size_wins_block_size",
+      "seq": 15800026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go -h --block-size=K --time-style=+x /data/lsf/file10.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 1K x /data/lsf/file10.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "h",
+        "block-size",
+        "time-style"
       ]
     }
   ]

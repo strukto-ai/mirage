@@ -176,7 +176,7 @@ async function walkTree(
   return { dirs, files, failed: false, unopened }
 }
 
-function treeSummary(dirs: number, files: number, dirsOnly: boolean): string {
+function summary(dirs: number, files: number, dirsOnly: boolean): string {
   const dirWord = dirs === 1 ? 'directory' : 'directories'
   if (dirsOnly) return `${String(dirs)} ${dirWord}`
   return `${String(dirs)} ${dirWord}, ${String(files)} ${files === 1 ? 'file' : 'files'}`
@@ -284,7 +284,7 @@ export async function treeGeneric(
     // makes the run exit 2, as GNU does, with nothing on stderr.
     if (counts.unopened > 0) anyError = true
   }
-  lines.push('', treeSummary(totalDirs, totalFiles, treeOpts.dirsOnly))
+  lines.push('', summary(totalDirs, totalFiles, treeOpts.dirsOnly))
   const out: ByteSource = formatRecords(lines)
   return [out, new IOResult({ exitCode: anyError ? 2 : 0 })]
 }

@@ -17,13 +17,12 @@ import { isEacces, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
 import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import { IOResult } from '../../../../io/types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import {
   DEFAULT_MAX_DU_ENTRIES,
   type ComputeEntries,
   type ComputeSize,
-  runDu,
+  duGeneric,
 } from '../../generic/du.ts'
 import { type DuEntries } from '../../../../vfs/types.ts'
 import { type Builder, type CommandIO, resolveGlobOf } from '../adapter.ts'
@@ -186,7 +185,7 @@ export const BUILDER: Builder = {
         ? (p) => walkEntries(ops, accessor, idx, budget, p)
         : (p) => native.entries(accessor, p, idx)
 
-    const out = await runDu(
+    return duGeneric(
       paths,
       opts,
       (targets) => resolveGlobOf(ops)(accessor, targets, idx),
@@ -197,6 +196,5 @@ export const BUILDER: Builder = {
       () => budget.unreadable,
       () => budget.directories,
     )
-    return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
   },
 }

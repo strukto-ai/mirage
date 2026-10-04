@@ -20,8 +20,7 @@ import { ensureLiveTree } from '../../../core/github/tree.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { IOResult } from '../../../io/types.ts'
-import { DEFAULT_MAX_DU_ENTRIES, runDu } from '../generic/du.ts'
+import { DEFAULT_MAX_DU_ENTRIES, duGeneric } from '../generic/du.ts'
 import { WalkBudget, walkEntries, walkSize } from '../generic_bind/builders/du.ts'
 import type { DuEntries } from '../../../vfs/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -72,7 +71,7 @@ async function duCommand(
   const live = (): Promise<void> =>
     (probe ??= ensureLiveTree(accessor, idx, opts.mountPrefix ?? ''))
   const budget = new WalkBudget(IO.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
-  const out = await runDu(
+  return duGeneric(
     paths,
     opts,
     async (targets) => {
@@ -104,7 +103,6 @@ async function duCommand(
     () => budget.unreadable,
     () => budget.directories,
   )
-  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }
 
 export const GITHUB_DU = command({

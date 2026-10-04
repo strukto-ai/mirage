@@ -4,7 +4,8 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.builtin.utils.formatting import human_size
+from mirage.commands.builtin.constants import INTMAX
+from mirage.commands.builtin.utils.formatting import scaled_size
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
@@ -31,6 +32,7 @@ ComputeEntries = Callable[[PathSpec], Awaitable[DuEntries]]
 
 DEFAULT_MAX_DU_ENTRIES = 10000
 USAGE_HINT = "Try 'du --help' for more information."
+TRUNCATED_NOTE = "du: walk stopped early: the reported sizes are incomplete"
 _DEPTH_HEX = re.compile(r"^[+-]?0[xX][0-9a-fA-F]+$")
 _DEPTH_OCT = re.compile(r"^[+-]?0[0-7]*$")
 _DEPTH_DEC = re.compile(r"^[+-]?[1-9][0-9]*$")
@@ -79,13 +81,13 @@ class DuOutput:
 
 
 def parse_depth(text: str) -> int | None:
-    """Read a ``--max-depth`` value the way GNU's ``xstrtoul`` does.
+    """Read a ``--max-depth`` value the way GNU's ``xstrtoimax`` does.
 
-    That is C ``strtoul`` with base 0: a ``0x`` prefix is hexadecimal, a
+    That is C ``strtoimax`` with base 0: a ``0x`` prefix is hexadecimal, a
     bare leading ``0`` is octal (so ``010`` is 8 and ``09`` is invalid),
-    anything else is decimal. Surrounding whitespace is not allowed and
-    neither are Python's own ``int`` conveniences (``1_0``, non-ASCII
-    digits), which GNU rejects.
+    anything else is decimal, and a value outside ``intmax_t`` overflows.
+    Surrounding whitespace is not allowed and neither are Python's own
+    ``int`` conveniences (``1_0``, non-ASCII digits), which GNU rejects.
 
     Args:
         text (str): the raw flag value.
@@ -94,23 +96,17 @@ def parse_depth(text: str) -> int | None:
         int | None: the depth, or None if the text is not a number.
     """
     if _DEPTH_HEX.match(text):
-        return int(text, 16)
-    if _DEPTH_OCT.match(text):
-        return int(text, 8)
-    if _DEPTH_DEC.match(text):
-        return int(text, 10)
-    return None
+        value = int(text, 16)
+    elif _DEPTH_OCT.match(text):
+        value = int(text, 8)
+    elif _DEPTH_DEC.match(text):
+        value = int(text, 10)
+    else:
+        return None
+    return value if -INTMAX - 1 <= value <= INTMAX else None
 
 
-def parse_flags(
-    *,
-    s: bool,
-    a: bool,
-    h: bool,
-    c: bool,
-    max_depth: str | None,
-    separate_dirs: bool = False,
-) -> DuFlags:
+def parse_flags(opts: CommandOpts) -> DuFlags:
     """Validate a ``du`` command line the way GNU does, before any I/O.
 
     GNU parses ``--max-depth`` as each option is read, so a bad depth is
@@ -118,23 +114,21 @@ def parse_flags(
     whole line is parsed. All three exit 1, du's usage-error code.
 
     Args:
-        s (bool): -s.
-        a (bool): -a.
-        h (bool): -h.
-        c (bool): -c.
-        max_depth (str | None): raw --max-depth/-d text, unparsed.
-        separate_dirs (bool): -S/--separate-dirs.
+        opts (CommandOpts): the flags as the dispatcher parsed them.
 
     Raises:
         UsageError: on a bad depth or a conflicting combination.
     """
+    fl = FlagView(opts.flags, spec=SPECS["du"])
+    s = fl.as_bool("s")
+    a = fl.as_bool("a")
+    raw = fl.as_str("max_depth")
     depth: int | None = None
-    if max_depth is not None:
-        depth = parse_depth(max_depth)
+    if raw is not None:
+        depth = parse_depth(raw)
         if depth is None:
             raise UsageError(
-                f"du: invalid maximum depth '{quote_text(max_depth)}'\n"
-                f"{USAGE_HINT}",
+                f"du: invalid maximum depth '{quote_text(raw)}'\n{USAGE_HINT}",
                 1,
             )
     if s and a:
@@ -153,7 +147,13 @@ def parse_flags(
             )
         warning = "du: warning: summarizing is the same as using --max-depth=0"
     return DuFlags(
-        s=s, a=a, h=h, c=c, S=separate_dirs, max_depth=depth, warning=warning
+        s=s,
+        a=a,
+        h=fl.as_bool("h"),
+        c=fl.as_bool("c"),
+        S=fl.as_bool("separate_dirs"),
+        max_depth=depth,
+        warning=warning,
     )
 
 
@@ -322,24 +322,20 @@ async def du_has_content(
         return False
 
 
-def _format_size(size: int, human: bool) -> str:
-    return human_size(size) if human else str(size)
-
-
 def _line(size: int, human: bool, label: str) -> str:
-    return _format_size(size, human) + "\t" + label
+    return scaled_size(size, None, human) + "\t" + label
 
 
 def _norm(path: str) -> str:
     return path.rstrip("/") or "/"
 
 
-def _parent(path: str) -> str:
+def _parent_of(path: str) -> str:
     cut = _norm(path).rfind("/")
     return path[:cut] if cut > 0 else "/"
 
 
-def _depth(entry_path: str, base_path: str) -> int:
+def _depth_of(entry_path: str, base_path: str) -> int:
     base = base_path.rstrip("/")
     rel = entry_path.rstrip("/")[len(base) :]
     if not rel:
@@ -385,7 +381,7 @@ def separate_total(entries: Sequence[tuple[str, int]], root: str) -> int:
     """
     root_key = _norm(root)
     return sum(
-        size for leaf, size in entries if _parent(_norm(leaf)) == root_key
+        size for leaf, size in entries if _parent_of(_norm(leaf)) == root_key
     )
 
 
@@ -437,7 +433,7 @@ def rollup(
         if node == root_key or not node.startswith(prefix):
             continue
         files[node] = size
-        parent = _parent(node)
+        parent = _parent_of(node)
         immediate = True
         while parent != root_key and parent.startswith(prefix):
             if separate_dirs and not immediate:
@@ -448,7 +444,7 @@ def rollup(
             else:
                 sizes[parent] = sizes.get(parent, 0) + size
             immediate = False
-            parent = _parent(parent)
+            parent = _parent_of(parent)
 
     # setdefault, never assignment: a hinted directory that does hold
     # leaves already carries their total.
@@ -456,7 +452,7 @@ def rollup(
         node = _norm(hinted)
         while node != root_key and node.startswith(prefix):
             sizes.setdefault(node, 0)
-            node = _parent(node)
+            node = _parent_of(node)
 
     # Keyed backends (S3, GridFS) carry a zero-byte marker object for a
     # directory, which arrives here as a leaf. Under -a it must not
@@ -465,7 +461,7 @@ def rollup(
     nodes.update(sizes)
     kids: dict[str, list[str]] = {}
     for node in nodes:
-        kids.setdefault(_parent(node), []).append(node)
+        kids.setdefault(_parent_of(node), []).append(node)
     for group in kids.values():
         group.sort()
 
@@ -474,7 +470,9 @@ def rollup(
     while stack:
         node, expanded = stack.pop()
         if expanded:
-            deep = max_depth is not None and _depth(node, root_key) > max_depth
+            deep = (
+                max_depth is not None and _depth_of(node, root_key) > max_depth
+            )
             if node != root_key and not deep:
                 order.append((node, nodes[node]))
             continue
@@ -632,88 +630,6 @@ async def _du_one(
     return lines, total
 
 
-async def run_du(
-    paths: list[PathSpec],
-    cwd: PathSpec | str,
-    resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
-    compute_size: ComputeSize,
-    compute_entries: ComputeEntries,
-    *,
-    s: bool = False,
-    a: bool = False,
-    h: bool = False,
-    c: bool = False,
-    max_depth: str | None = None,
-    separate_dirs: bool = False,
-    truncated: Callable[[], bool] | None = None,
-    links: LinkView | None = None,
-    mounts: MountView | None = None,
-    stat_path: StatPath | None = None,
-    unreadable: Callable[[], Sequence[str]] | None = None,
-    directories: Callable[[], Sequence[str]] | None = None,
-) -> DuOutput:
-    """Run one whole ``du`` invocation, from raw flags to rendered bytes.
-
-    Every caller needs the same three steps in the same order: validate
-    the flags before touching I/O, split the operands into readable and
-    unreadable, then render. Keeping them here means a backend wrapper is
-    wiring only, and the three steps cannot drift apart per backend.
-
-    Args:
-        paths (list[PathSpec]): the operands as parsed, possibly empty.
-        cwd (PathSpec | str): working directory, measured when empty.
-        resolve_glob (Callable): expands globs against the backend.
-        stat (Callable): raises when an operand cannot be read.
-        compute_size (ComputeSize): recursive byte size of one operand.
-        compute_entries (ComputeEntries): per-file breakdown.
-        s (bool): -s.
-        a (bool): -a.
-        h (bool): -h.
-        c (bool): -c.
-        max_depth (str | None): raw --max-depth text.
-        separate_dirs (bool): -S/--separate-dirs.
-        truncated (Callable[[], bool] | None): whether a walk was cut off.
-        links (LinkView | None): the namespace's symlink facts.
-        mounts (MountView | None): where the mount boundaries are, so
-            keys shadowed by a nested mount are excluded from every row
-            and total.
-        stat_path (StatPath | None): dispatcher-backed stat, which is what
-            answers for a directory the bound backend cannot see.
-        unreadable (Callable[[], Sequence[str]] | None): the directories
-            a walk could not open, read after the walks.
-        directories (Callable[[], Sequence[str]] | None): every directory
-            a walk met, read after each operand's walk.
-
-    Raises:
-        UsageError: on a bad depth or a conflicting flag combination.
-    """
-    flags = parse_flags(
-        s=s, a=a, h=h, c=c, max_depth=max_depth, separate_dirs=separate_dirs
-    )
-    present, missing = await du_operands(
-        paths,
-        cwd,
-        resolve_glob,
-        stat,
-        partial(du_has_content, compute_entries),
-        links=links,
-        stat_path=stat_path,
-    )
-    return await du(
-        present,
-        compute_size=compute_size,
-        compute_entries=compute_entries,
-        flags=flags,
-        missing=missing,
-        truncated=truncated,
-        unreadable=unreadable,
-        directories=directories,
-        links=links,
-        mounts=mounts,
-    )
-
-
 async def du(
     paths: list[PathSpec],
     *,
@@ -791,9 +707,7 @@ async def du(
         )
         exit_code = 1
     if truncated is not None and truncated():
-        notes.append(
-            "du: walk stopped early: the reported sizes are incomplete"
-        )
+        notes.append(TRUNCATED_NOTE)
         exit_code = 1
     stderr = ("\n".join(notes) + "\n").encode() if notes else b""
     return DuOutput(format_records(lines), stderr, exit_code)
@@ -825,15 +739,19 @@ async def du_generic(
     unreadable: Callable[[], Sequence[str]] | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
 ) -> tuple[bytes, IOResult]:
-    """Run du over the given operands; mirrors duGeneric.
+    """Run one whole ``du`` invocation, from raw flags to rendered bytes.
 
-    The wiring binds the backend ops (native du or the readdir walk plus
-    its budget); flag semantics live here. -L dereferences: the operand
-    was already rewritten at dispatch, and withholding the link table
-    stops the links below it from being counted as entries in their own
-    right, which is what GNU does (it follows each one and finds the
-    target already accounted for). A link pointing outside the operand's
-    own subtree is undercounted; GNU would traverse into it.
+    Every caller needs the same three steps in the same order: validate
+    the flags before touching I/O, split the operands into readable and
+    unreadable, then render. Keeping them here means a backend wrapper is
+    wiring only, and the three steps cannot drift apart per backend.
+
+    -L dereferences: the operand was already rewritten at dispatch, and
+    withholding the link table stops the links below it from being
+    counted as entries in their own right, which is what GNU does (it
+    follows each one and finds the target already accounted for). A link
+    pointing outside the operand's own subtree is undercounted; GNU would
+    traverse into it. The last of -L and -P decides, as it does in GNU.
 
     Args:
         paths (list[PathSpec]): The operands as parsed, possibly empty.
@@ -845,35 +763,37 @@ async def du_generic(
         compute_entries (ComputeEntries): Per-file breakdown.
         truncated (Callable[[], bool] | None): Whether the walk was cut.
         unreadable (Callable[[], Sequence[str]] | None): The directories
-            the walk could not open.
+            the walk could not open, read after the walks.
         directories (Callable[[], Sequence[str]] | None): Every directory
-            the walk met.
+            the walk met, read after each operand's walk.
+
+    Raises:
+        UsageError: on a bad depth or a conflicting flag combination.
     """
+    flags = parse_flags(opts)
     fl = FlagView(opts.flags, spec=SPECS["du"])
-    out = await run_du(
+    links = None
+    if opts.ns is not None and fl.typed_order("L", "P")[-1:] != ["L"]:
+        links = opts.ns.links
+    present, missing = await du_operands(
         paths,
         opts.cwd,
         resolve_glob,
         stat,
-        compute_size,
-        compute_entries,
-        s=fl.as_bool("s"),
-        a=fl.as_bool("a"),
-        h=fl.as_bool("h"),
-        c=fl.as_bool("c"),
-        max_depth=fl.as_str("max_depth"),
-        separate_dirs=fl.as_bool("separate_dirs"),
+        partial(du_has_content, compute_entries),
+        links=links,
+        stat_path=opts.stat_path,
+    )
+    out = await du(
+        present,
+        compute_size=compute_size,
+        compute_entries=compute_entries,
+        flags=flags,
+        missing=missing,
         truncated=truncated,
         unreadable=unreadable,
         directories=directories,
-        links=(
-            None
-            if fl.typed_order("L", "P")[-1:] == ["L"]
-            else opts.ns.links
-            if opts.ns is not None
-            else None
-        ),
+        links=links,
         mounts=opts.ns.mounts if opts.ns is not None else None,
-        stat_path=opts.stat_path,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)
