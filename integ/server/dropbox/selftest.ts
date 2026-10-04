@@ -20,12 +20,6 @@ import { fileURLToPath } from 'node:url'
 import { ANNOUNCE_RE } from '../kit/typescript/announce.ts'
 import { headerJson } from './wire.ts'
 
-// The dropbox fake's read wire. mirage stamps a read with the content_hash
-// a download's Dropbox-API-Result names and compares it with the hash stat
-// takes from a list_folder row, so a fake that dropped the header, or sent
-// it on a full read only, would let every `read: fresh` case pass by
-// refetching each time. Wire-level on purpose: no mirage client in between.
-
 const HERE = dirname(fileURLToPath(import.meta.url))
 const INTEG = resolve(HERE, '..', '..')
 const TENANT = 'selftest-dropbox'
@@ -133,6 +127,11 @@ async function main(): Promise<void> {
     await upload(fake.endpoint, '0123456789')
     const hash = await rowHash(fake.endpoint)
 
+    // mirage stamps a read with the content_hash a download's
+    // Dropbox-API-Result names and compares it with the hash stat takes from a
+    // list_folder row, so a fake that dropped the header, or sent it on a full
+    // read only, would let every `read: fresh` case pass by refetching each
+    // time. Wire-level on purpose: no mirage client in between.
     const whole = await download(fake.endpoint)
     check(
       'a whole download names the row content_hash in Dropbox-API-Result',
