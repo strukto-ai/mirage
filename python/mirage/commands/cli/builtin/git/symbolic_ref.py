@@ -32,8 +32,7 @@ from mirage.commands.cli.builtin.git.errors import (
     NoWorkspaceError,
     SymbolicRefLockError,
     SymbolicRefReadOnlyError,
-    SymbolicRefSwitchError,
-    SymbolicRefUsageError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.io import (
     remove_file,
@@ -54,10 +53,9 @@ from mirage.commands.cli.builtin.git.refs import (
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
-    switches,
+    verb_usage,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -208,12 +206,7 @@ async def symbolic_ref(
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(
-            inv.texts,
-            SymbolicRefSwitchError,
-            escaped(inv.argv),
-            switches(inv),
-        )
+        check_switches(inv, inv.texts)
         _, location = await opened(fl, doors)
         message = fl.as_str("m")
         if message == "":
@@ -225,7 +218,7 @@ async def symbolic_ref(
         name = names[0] if names else ""
         if _switched(fl, "delete", False):
             if len(names) != 1:
-                raise SymbolicRefUsageError()
+                raise UsageError("", verb_usage(inv))
             found = await resolve_symbolic(
                 dispatch, gitdir, table, name, False
             )
@@ -251,7 +244,7 @@ async def symbolic_ref(
             )
             return None, IOResult()
         if len(names) != 1:
-            raise SymbolicRefUsageError()
+            raise UsageError("", verb_usage(inv))
         found = await resolve_symbolic(
             dispatch, gitdir, table, name, _switched(fl, "recurse", True)
         )

@@ -38,11 +38,10 @@ import {
   InvalidReferenceError,
   NoWorkspaceError,
   PathsWithBranchError,
-  RefReadOnlyError,
   RefLockError,
+  RefReadOnlyError,
   UnknownPathspecError,
   UnresolvableSourceError,
-  UnknownSwitchError,
 } from './errors.ts'
 import { GITLINK_MODE, HEAD } from './constants.ts'
 import { short } from './format.ts'
@@ -78,14 +77,7 @@ import { commitEntries, type TreeEntry } from './tree.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType } from '../../../../types.ts'
 import type { Dispatch, HeadMove, HeadRef, IndexEntry, ReadOnlyRefusal } from './types.ts'
-import {
-  checkOperands,
-  escaped,
-  fatal,
-  splitMarked,
-  startPoint as lineStart,
-  switches,
-} from './util.ts'
+import { checkSwitches, fatal, splitMarked, startPoint as lineStart } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -667,7 +659,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const detach = fl.asBool('detach')
     if (detach && fl.asBool('b')) throw new DetachWithCreateError()
     const target = texts[0] ?? (detach ? HEAD : undefined)

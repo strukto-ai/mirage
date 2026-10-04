@@ -59,7 +59,11 @@ from mirage.commands.cli.builtin.git.transport import (
     open_transport,
 )
 from mirage.commands.cli.builtin.git.types import Refspec, RepoLocation
-from mirage.commands.cli.builtin.git.util import fatal, multivar
+from mirage.commands.cli.builtin.git.util import (
+    check_switches,
+    fatal,
+    multivar,
+)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -638,6 +642,7 @@ async def fetch(
     """
     fl = FlagView(inv.flags)
     try:
+        check_switches(inv, inv.texts)
         doors = inv.doors or CLIDoors()
         _, location = await opened(fl, doors)
         dispatch = doors.dispatch

@@ -52,7 +52,7 @@ import {
   type Transport,
 } from './transport.ts'
 import type { ReadOnlyRefusal, Refspec } from './types.ts'
-import { fatal } from './util.ts'
+import { checkSwitches, fatal } from './util.ts'
 
 const ENC = new TextEncoder()
 export const HEADS = 'refs/heads/'
@@ -477,6 +477,7 @@ async function prune(repo: Repo, adv: Advertisement, specs: readonly Refspec[]):
 export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
+    checkSwitches(inv, inv.texts)
     const doors = inv.doors ?? {}
     if (doors.dispatch === undefined) throw new NoWorkspaceError()
     const repo = await opened(fl, doors)

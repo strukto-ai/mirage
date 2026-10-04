@@ -21,10 +21,11 @@ from mirage.commands.cli.builtin.git.checkout import (
 from mirage.commands.cli.builtin.git.clone import clone, clone_read_only
 from mirage.commands.cli.builtin.git.commit import commit
 from mirage.commands.cli.builtin.git.diff import diff
+from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.fetch import fetch, fetch_read_only
 from mirage.commands.cli.builtin.git.for_each_ref import for_each_ref
 from mirage.commands.cli.builtin.git.fsck import fsck
-from mirage.commands.cli.builtin.git.init import init, init_read_only
+from mirage.commands.cli.builtin.git.init import init
 from mirage.commands.cli.builtin.git.inspect import (
     config,
     remote,
@@ -51,10 +52,11 @@ from mirage.commands.cli.builtin.git.symbolic_ref import (
     symbolic_ref_read_only,
 )
 from mirage.commands.cli.builtin.git.tag import tag, tag_read_only
+from mirage.commands.cli.builtin.git.util import check_switches, fatal
 from mirage.commands.cli.types import CLIInvocation, CLISpec, UsageStyle
 from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.spec.types import Operand, Option
-from mirage.io.types import IOResult
+from mirage.io.types import ByteSource, IOResult
 
 # `-C` is git's own before-anything-else option, so it sits on the root
 # and every verb inherits it. The "." default is load-bearing: a PATH
@@ -644,12 +646,18 @@ STATUS_OPTIONS = (
 )
 
 
-async def help_cmd(inv: CLIInvocation[None]) -> tuple[bytes | None, IOResult]:
+async def help_cmd(
+    inv: CLIInvocation[None],
+) -> tuple[ByteSource | None, IOResult]:
     """Render the declared command tree, without needing a repository.
 
     Args:
         inv (CLIInvocation[None]): optional command to describe.
     """
+    try:
+        check_switches(inv, inv.texts)
+    except GitError as exc:
+        return fatal(exc)
     found = find_node(GIT, inv.texts)
     if found is None:
         return None, IOResult(
@@ -797,7 +805,7 @@ GIT = CLISpec(
         ),
         CLISpec(
             name="init",
-            fn=verb(init, init_read_only),
+            fn=verb(init),
             description=(
                 "Create an empty Git repository or reinitialize an "
                 "existing one"
@@ -884,6 +892,8 @@ GIT = CLISpec(
             fn=verb(show_ref),
             rest=REVISION,
         ),
+        # symbolic-ref has every option git's has, so its rows carry git's
+        # own help and its usage block reads exactly as git's.
         CLISpec(
             name="symbolic-ref",
             description="Read, change or delete a symbolic ref",
@@ -892,8 +902,8 @@ GIT = CLISpec(
                 Option(
                     short="-q",
                     long="--quiet",
-                    description="Exit 1 without a message for a ref that "
-                    "is not symbolic",
+                    description="suppress error message for non-symbolic "
+                    "(detached) refs",
                 ),
                 Option(
                     long="--no-quiet",
@@ -902,7 +912,7 @@ GIT = CLISpec(
                 Option(
                     short="-d",
                     long="--delete",
-                    description="Delete the symbolic ref",
+                    description="delete symbolic ref",
                 ),
                 Option(
                     long="--no-delete",
@@ -910,7 +920,7 @@ GIT = CLISpec(
                 ),
                 Option(
                     long="--short",
-                    description="Shorten the name the ref points at",
+                    description="shorten ref output",
                 ),
                 Option(
                     long="--no-short",
@@ -918,8 +928,7 @@ GIT = CLISpec(
                 ),
                 Option(
                     long="--recurse",
-                    description="Follow symbolic refs to the end of the "
-                    "chain (the default)",
+                    description="recursively dereference (default)",
                 ),
                 Option(
                     long="--no-recurse",
@@ -929,7 +938,8 @@ GIT = CLISpec(
                 Option(
                     short="-m",
                     type="str",
-                    description="Reason recorded in the reflog",
+                    metavar="reason",
+                    description="reason of the update",
                 ),
             ),
             rest=Operand(type="str"),

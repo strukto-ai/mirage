@@ -290,6 +290,19 @@ export async function exists(dispatch: Dispatch, path: string): Promise<boolean>
   return true
 }
 
+/**
+ * Write a file back as it is, if it is there.
+ *
+ * git rewrites the index and the config under a lock even when nothing in them
+ * changes, so a read-only repository refuses the verb before it looks any
+ * further. Writing the same bytes back is that write: a no-op where writes go
+ * through, and the refusal where they do not.
+ */
+export async function rewrite(dispatch: Dispatch, path: string): Promise<void> {
+  const kept = await readOptional(dispatch, path)
+  if (kept !== null) await dispatch('write', PathSpec.fromStrPath(path), [kept])
+}
+
 /** Write one virtual path, creating the directories above it. */
 export async function writeFile(dispatch: Dispatch, path: string, data: Uint8Array): Promise<void> {
   await ensureDir(dispatch, parent(path))

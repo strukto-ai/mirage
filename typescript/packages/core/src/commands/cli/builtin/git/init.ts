@@ -1,14 +1,22 @@
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
+import { isErofs } from '../../../../utils/errors.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { discover } from './discover.ts'
-import { GitError, InitReadOnlyError, NoWorkspaceError, NoWorkingDirectoryError } from './errors.ts'
-import { ensureDir, readOptional, under, writeFile } from './io.ts'
+import {
+  CannotMkdirError,
+  ConfigLockError,
+  GitError,
+  InitReadOnlyError,
+  NoWorkspaceError,
+  NoWorkingDirectoryError,
+} from './errors.ts'
+import { ensureDir, readOptional, rewrite, under, writeFile } from './io.ts'
 import { validRefName } from './refs.ts'
-import type { Dispatch, ReadOnlyRefusal } from './types.ts'
+import type { Dispatch } from './types.ts'
 import { fatal, startPoint } from './util.ts'
 
 /** Write a new git directory's skeleton, keeping what is there. */
@@ -44,11 +52,16 @@ function namedGitdir(fl: FlagView, texts: readonly string[]): string {
   return fl.asBool('bare') ? target : under(target, '.git')
 }
 
-/** init's refusal by a read-only mount, at the first directory git makes. */
-export const initReadOnly: ReadOnlyRefusal = (inv) =>
-  new InitReadOnlyError(namedGitdir(new FlagView(inv.flags), inv.texts))
-
-/** Initialize through the dispatcher; no host templates, hooks or branch advisory. */
+/**
+ * Initialize through the dispatcher; no host templates, hooks or branch advisory.
+ *
+ * Reinitializing rewrites the config as git does, so a read-only mount refuses
+ * a re-init too, in git's words for where it stopped: the directory an operand
+ * names, the config's lock, or the first other directory it had to make
+ * (pinned against git 2.47.3). With no templates, a bare repository in an
+ * existing directory stops at `objects` where git stops at its first template
+ * directory.
+ */
 export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const doors = inv.doors ?? {}
@@ -91,12 +104,24 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
       gitdir = location.commondir
     }
     const existing = (await readOptional(dispatch, under(gitdir, 'HEAD'))) !== null
-    await layOut(
-      dispatch,
-      gitdir,
-      branch,
-      `[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = ${bare ? 'true' : 'false'}\n`,
-    )
+    const [typed] = inv.texts
+    const made = typed !== undefined && (await doors.statPath(target)) === null
+    const settings = under(gitdir, 'config')
+    try {
+      await layOut(
+        dispatch,
+        gitdir,
+        branch,
+        `[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = ${bare ? 'true' : 'false'}\n`,
+      )
+      if (existing) await rewrite(dispatch, settings)
+    } catch (err) {
+      if (!isErofs(err)) throw err
+      if (made) throw new CannotMkdirError(typed)
+      const path = (err as { virtualPath?: string }).virtualPath
+      if (path === settings) throw new ConfigLockError(settings)
+      throw new InitReadOnlyError(path ?? gitdir)
+    }
     const text = existing
       ? `Reinitialized existing Git repository in ${gitdir}/\n`
       : `Initialized empty Git repository in ${gitdir}/\n`

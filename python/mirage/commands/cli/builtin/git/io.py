@@ -335,6 +335,23 @@ async def write_file(dispatch: DispatchFn, path: str, data: bytes) -> None:
     await dispatch("write", PathSpec.from_str_path(path), data=data)
 
 
+async def rewrite(dispatch: DispatchFn, path: str) -> None:
+    """Write a file back as it is, if it is there.
+
+    git rewrites the index and the config under a lock even when nothing
+    in them changes, so a read-only repository refuses the verb before
+    it looks any further. Writing the same bytes back is that write: a
+    no-op where writes go through, and the refusal where they do not.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        path (str): absolute virtual path.
+    """
+    kept = await read_optional(dispatch, path)
+    if kept is not None:
+        await dispatch("write", PathSpec.from_str_path(path), data=kept)
+
+
 async def write_once(dispatch: DispatchFn, path: str, data: bytes) -> None:
     """Write a path only if nothing is there yet.
 

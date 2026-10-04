@@ -27,7 +27,6 @@ import {
   NoWorkspaceError,
   PathspecError,
   UnknownPathspecError,
-  UnknownSwitchError,
 } from './errors.ts'
 import type { IgnoreStack } from './ignore.ts'
 import { loadIgnores } from './ignore.ts'
@@ -38,7 +37,7 @@ import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { EXECUTABLE, OWNER_EXECUTE, REGULAR, SYMLINK } from './constants.ts'
 import type { Dispatch, IndexEntry, IndexState, RepoLocation, WorkTree } from './types.ts'
-import { checkOperands, escaped, fatal, startPoint, switches } from './util.ts'
+import { checkSwitches, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_ALL, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -264,7 +263,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const parsed = parseFlags(fl)
     if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
     const repo: Repo = await opened(fl, doors, true)

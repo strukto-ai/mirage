@@ -34,11 +34,10 @@ import {
   RefUpdateConflictError,
   TagExistsError,
   TagNotFoundError,
-  TagUsageError,
   TagWriteReadOnlyError,
   TooManyArgumentsError,
-  UnknownSwitchError,
   UnresolvedRefError,
+  UsageError,
 } from './errors.ts'
 import { short } from './format.ts'
 import { under } from './io.ts'
@@ -50,7 +49,7 @@ import { configuredSort, listingResult, matchShort, refListing, sortKeys } from 
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveObject } from './revparse.ts'
-import { checkOperands, escaped, fatal, switches } from './util.ts'
+import { checkSwitches, fatal, verbUsage } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -178,7 +177,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const dispatch = doors.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const flags = parseFlags(fl)
     if (flags.listing && flags.remove) throw new IncompatibleOptionsError('-l', '-d')
     // -a, -m and -f create a tag, so a line that lists or deletes instead has
@@ -189,7 +188,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
       (flags.annotate || flags.force) &&
       (flags.listing || flags.remove || flags.lines !== undefined || filtered || texts.length === 0)
     ) {
-      throw new TagUsageError()
+      throw new UsageError('', verbUsage(inv))
     }
     // After the two usage refusals above, which git reaches first: `-l -d -n1`
     // is the incompatible pair and `-d -f -n1` the usage, both exiting 129,

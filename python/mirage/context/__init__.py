@@ -14,6 +14,7 @@
 
 from mirage.context.session_context import (
     DEFAULT_UMASK,
+    RedirectOpener,
     clear_program_invocation,
     dotglob_active,
     effective_mount_mode,
@@ -32,6 +33,7 @@ from mirage.context.session_context import (
     path_rules_active,
     program_invocation,
     readonly_below,
+    redirect_opener_for,
     redirect_paths_for,
     redirect_target_judged,
     require_mount_writable,
@@ -78,6 +80,8 @@ __all__ = [
     "path_rules_active",
     "readonly_below",
     "require_paths_writable",
+    "RedirectOpener",
+    "redirect_opener_for",
     "redirect_paths_for",
     "redirect_target_judged",
     "require_mount_writable",

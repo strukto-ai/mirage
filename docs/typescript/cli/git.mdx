@@ -42,7 +42,10 @@ A write the mount refuses as read-only is answered in git's words,
 naming the lock git would have taken first: `Unable to create
 '/repo/.git/index.lock': Read-only file system` for a verb that writes
 the index, `cannot lock ref 'refs/heads/topic'` for one that writes a
-ref, and `could not create work tree dir` for `clone`.
+ref, and `could not create work tree dir` for `clone`. `commit` takes
+the index's lock before it looks for anything to commit, as git does,
+so an empty one is refused too, and `init` names the directory it could
+not make, or the config's lock when it reinitializes.
 
 `-C` defaults to the working directory, and the repository is found by
 walking up from there, so a path inside the tree works:
@@ -76,9 +79,8 @@ GIT_DIR=/repo/.git git log --oneline -1
 through the mount dispatcher. Reinitializing preserves existing objects,
 configuration and HEAD. The default initial branch is `master`; use `-b`
 to choose another. Host templates, hooks and the default-branch advisory
-are omitted. With no template to copy, reinitializing a repository on a
-read-only mount succeeds where git fails making the template's
-directories.
+are omitted. Reinitializing rewrites the config, as git does, so a
+read-only mount refuses it.
 
 `git help [<command>]` renders the same declared grammar as `--help`.
 `git stash list` reads the stash reflog, and `git stash show [-p | --stat |
@@ -92,6 +94,21 @@ Missing and corrupt objects cause a nonzero exit. Corruption diagnostics
 retain the object ID and cause; their wording can differ from native Git.
 
 ## Verbs
+
+An option a verb does not take is refused in git's words and followed
+by the verb's usage block: git's synopsis lines, cut down to the forms
+this build implements, then a row per option in git's layout. `-h`
+prints the same block on stdout (on stderr for `diff`) and exits 129.
+The rows carry mirage's own help for each option, so only
+`symbolic-ref`, which has every option git's has, prints git's block
+byte for byte. `log`, `show` and `reflog` refuse with `unrecognized
+argument`, `diff` with `invalid option` unless the line names a
+revision or `--cached`, and `rev-list`, `diff-tree` and such a `diff`
+print the block alone, as git does.
+`rev-parse` refuses an option it does not know where git would print it
+back, because it cannot tell one git does not know from one this build
+lacks. `remote` lists remotes and refuses any subcommand as git refuses
+one it does not know.
 
 ### Inspect
 
@@ -149,7 +166,9 @@ warns `refname '<name>' is ambiguous.` on stderr, as git does each time;
 `rev-parse -q` and `core.warnAmbiguousRefs=false` leave the warning out.
 `checkout` and `switch` take such a name as the branch, and `branch`,
 `switch -c` and `checkout -b` refuse it as a start point.
-`rev-parse --abbrev-ref` takes `strict` or `loose`, and a missing path
+`rev-parse --abbrev-ref` prints `error: refname '<name>' is ambiguous`
+for such a name, right after its warning, and takes `strict` or
+`loose`; a missing path
 in `<rev>:<path>` or `:<path>` is refused in git's words (`does not
 exist in 'HEAD'`, `exists on disk, but not in 'HEAD~1'`, `is in the
 index, but not at stage 2`).
@@ -356,9 +375,7 @@ serve, and inventing a name would put an unreviewed one into history.
   delete the link with it. The merged view decides, which is what POSIX
   promises.
 - **`tag -a` needs `-m`**, for the reason `commit` does: there is no
-  editor to open. `mv` prints only its two usage lines for a missing
-  operand, and `tag` prints only the synopsis lines for the options this
-  build has, neither of them git's full option table.
+  editor to open.
 - **`tag -n` asks for a listing, so `-d` cannot also be on the line.**
   With nothing else there `-n` *makes* the line a listing, which is why
   `tag -n1 nosuch` is a pattern matching nothing at exit 0; once `-d`

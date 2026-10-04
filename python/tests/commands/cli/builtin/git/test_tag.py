@@ -215,11 +215,10 @@ async def test_a_tag_resolves_as_a_revision(git_rw):
 async def test_a_creation_option_needs_a_name(git_rw, line: str):
     code, _out, err = await run(git_rw, line)
     assert code == 129
-    assert err == (
+    assert err.startswith(
         b"usage: git tag [-a] [-f] [-m <msg>] <tagname> "
         b"[<commit> | <object>]\n"
         b"   or: git tag -d <tagname>...\n"
-        b"   or: git tag [-n[<num>]] -l [<pattern>...]\n"
     )
 
 

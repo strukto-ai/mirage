@@ -26,19 +26,16 @@ from mirage.commands.cli.builtin.git.errors import (
     GitError,
     NoWorkspaceError,
     RevisionResetError,
-    UnknownSwitchError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
     links_of,
     start_point,
-    switches,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
@@ -123,9 +120,7 @@ async def reset(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         repo, location = await opened(fl, doors)
         named = fl.as_str("work_tree") is not None
         if not named and await is_bare(dispatch, location):

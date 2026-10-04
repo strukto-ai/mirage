@@ -31,7 +31,6 @@ from mirage.commands.cli.builtin.git.errors import (
     NoWorkspaceError,
     PathspecError,
     UnknownPathspecError,
-    UnknownSwitchError,
 )
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
@@ -45,12 +44,10 @@ from mirage.commands.cli.builtin.git.types import (
     WorkTree,
 )
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
     links_of,
     start_point,
-    switches,
 )
 from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_ALL,
@@ -355,9 +352,7 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         parsed = parse_flags(fl)
         if not texts and not parsed.every and not parsed.update:
             raise NothingSpecifiedError()

@@ -29,10 +29,10 @@ from mirage.commands.cli.builtin.git.errors import (
     NothingToCommitError,
     NoWorkspaceError,
     PartialCommitError,
-    UnknownSwitchError,
     UnmergedIndexError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
+from mirage.commands.cli.builtin.git.io import rewrite
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.reflog import record
 from mirage.commands.cli.builtin.git.refs import (
@@ -47,12 +47,10 @@ from mirage.commands.cli.builtin.git.status import render_report
 from mirage.commands.cli.builtin.git.summary import report
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
     links_of,
     start_point,
-    switches,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -186,9 +184,7 @@ async def commit(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(
-            inv.texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, inv.texts)
         staging = fl.as_bool("all")
         if inv.texts:
             raise (AllWithPathsError if staging else PartialCommitError)(
@@ -198,6 +194,9 @@ async def commit(
         if not message:
             raise MissingMessageError()
         repo, location = await opened(fl, doors, work_tree=True)
+        # git locks and rewrites the index before it looks for anything to
+        # commit, so a read-only repository refuses an empty commit too.
+        await rewrite(dispatch, f"{location.gitdir}/index")
         state = await read_index(dispatch, location.gitdir)
         if state.conflicts:
             raise UnmergedIndexError()

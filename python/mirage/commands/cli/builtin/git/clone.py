@@ -27,6 +27,7 @@ from mirage.commands.cli.builtin.git.errors import (
     CloneReadOnlyError,
     GitError,
     NoWorkspaceError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.fetch import (
     HEADS,
@@ -64,11 +65,13 @@ from mirage.commands.cli.builtin.git.transport import (
 from mirage.commands.cli.builtin.git.tree import tree_of
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
+    check_switches,
     config_section,
     fatal,
     links_of,
     mounts_of,
     start_point,
+    verb_usage,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -76,7 +79,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType
 
 DEFAULT_BRANCH = "master"
-USAGE = "usage: git clone [<options>] [--] <repo> [<dir>]\n"
 
 
 def default_directory(url: str) -> str:
@@ -161,15 +163,16 @@ async def clone(
     fl = FlagView(inv.flags)
     doors = inv.doors or CLIDoors()
     dispatch, stat_path = doors.dispatch, doors.stat_path
-    if not inv.texts:
-        return None, IOResult(
-            exit_code=129,
-            stderr=(
+    try:
+        check_switches(inv, inv.texts)
+        if not inv.texts:
+            raise UsageError(
+                "",
                 "fatal: You must specify a repository to clone.\n\n"
-                + USAGE
-                + "\n"
-            ).encode(),
-        )
+                + verb_usage(inv),
+            )
+    except GitError as exc:
+        return fatal(exc)
     url = inv.texts[0]
     name = inv.texts[1] if len(inv.texts) > 1 else default_directory(url)
     quiet = fl.as_bool("quiet")

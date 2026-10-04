@@ -143,6 +143,20 @@ def _exec(cmd, session=None, dispatch=None, registry=None, env=None):
     )
 
 
+def _data_writes(dispatch):
+    """The writes that carried output, past the empty one a ``>`` target
+    gets when it is opened before the command runs.
+
+    Args:
+        dispatch (AsyncMock): the mocked op dispatcher.
+    """
+    return [
+        c
+        for c in dispatch.call_args_list
+        if c[0][0] == "write" and c[1].get("data")
+    ]
+
+
 # ── simple commands ─────────────────────────────
 
 
@@ -286,7 +300,7 @@ def test_or_fallback():
 
 def test_redirect_stdout():
     _, io, _, _, _, dispatch = _exec("echo hello > /out.txt")
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/out.txt"
     assert io.exit_code == 0
@@ -799,7 +813,7 @@ def test_subshell_in_if():
 
 def test_redirect_with_pipeline():
     _, io, _, _, _, dispatch = _exec("echo hello | grep hello > /out.txt")
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/out.txt"
 
@@ -1425,7 +1439,7 @@ def test_pipeline_redirect_expansion():
     _, _, _, _, _, dispatch = _exec(
         "cat $F | grep p > /data/out", env={"F": "/data/input.txt"}
     )
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/data/out"
 
@@ -1654,7 +1668,7 @@ def test_redirect_concat_var_target():
     _, _, _, _, _, dispatch = _exec(
         "echo x > $DIR/out.txt", env={"DIR": "/data"}
     )
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/data/out.txt"
 
@@ -1674,7 +1688,7 @@ def test_redirect_cmd_sub_target():
     _run(
         execute_node(dispatch, reg, job_table, execute_fn, "a", node, session)
     )
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/data/out.txt"
 
@@ -1691,7 +1705,7 @@ def test_redirect_stderr_path():
         dispatch=dispatch,
         registry=(reg, mount),
     )
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/data/err.log"
     assert io.stderr is None
@@ -1740,7 +1754,7 @@ def test_full_pipeline_with_expansion():
     # cat should receive PathSpec for /data/in.txt
     # grep should receive "error" as text arg
     # redirect should tee to /data/out.txt
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/data/out.txt"
 
@@ -1750,7 +1764,7 @@ def test_for_with_redirect_expansion():
     _, _, _, _, _, dispatch = _exec(
         "for f in a b; do echo $f > /data/$f.txt; done"
     )
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 2
     targets = {c[0][1].virtual for c in write_calls}
     assert "/data/a.txt" in targets
@@ -1843,7 +1857,7 @@ def test_for_multi_with_redirect():
         "for f in a b; do echo $f > /data/$f.txt; export DONE=yes; done"
     )
     assert session.env["DONE"] == "yes"
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 2
 
 
@@ -2627,7 +2641,7 @@ def test_redirect_in_for_with_expansion():
     _, _, _, _, _, dispatch = _exec(
         "for name in alpha beta; do echo $name > /data/${name}.txt; done"
     )
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 2
     targets = {c[0][1].virtual for c in write_calls}
     assert "/data/alpha.txt" in targets
@@ -2639,7 +2653,7 @@ def test_function_calling_function_with_redirect():
     _, _, _, _, _, dispatch = _exec(
         "inner() { echo result; }; outer() { inner > /data/out.txt; }; outer"
     )
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/data/out.txt"
 
@@ -2726,7 +2740,7 @@ def test_python3_in_pipeline():
 def test_python3_with_redirect():
     """python3 script.py > /data/out.txt → redirect works."""
     _, _, _, _, _, dispatch = _exec("python3 /data/script.py > /data/out.txt")
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/data/out.txt"
 
@@ -2789,7 +2803,7 @@ def test_echo_pipe_to_cat():
 
 def test_echo_redirect():
     _, _, _, _, _, dispatch = _exec("echo hello > /data/out.txt")
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
     assert write_calls[0][0][1].virtual == "/data/out.txt"
 
@@ -2918,7 +2932,7 @@ def test_sort_in_while_read():
 def test_echo_redirect_then_cat():
     """echo writes to file, cat reads it back."""
     _, _, _, _, mount, dispatch = _exec("echo hello > /data/out.txt")
-    write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
+    write_calls = _data_writes(dispatch)
     assert len(write_calls) == 1
 
 

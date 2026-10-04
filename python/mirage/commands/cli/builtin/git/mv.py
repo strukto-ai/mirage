@@ -19,11 +19,10 @@ from mirage.commands.cli.builtin.git.errors import (
     GitError,
     MoveOverlapError,
     MoveRefusedError,
-    MoveUsageError,
     NotADirectoryDestinationError,
     NoWorkspaceError,
     RenameFailedError,
-    UnknownSwitchError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import remove_file, rename_path
@@ -31,13 +30,12 @@ from mirage.commands.cli.builtin.git.pathspec import repo_relative, under
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import IndexState, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
     links_of,
     mounts_of,
     start_point,
-    switches,
+    verb_usage,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -472,12 +470,10 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         flags = parse_flags(fl)
         if len(texts) < 2:
-            raise MoveUsageError()
+            raise UsageError("", verb_usage(inv))
         repo, location = await opened(fl, doors, work_tree=True)
         state = await read_index(dispatch, location.gitdir)
         conflicted = {

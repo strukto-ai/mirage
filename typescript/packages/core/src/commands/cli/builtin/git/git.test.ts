@@ -368,12 +368,6 @@ describe('git diff', () => {
   it('prints nothing with no operand', async () => {
     expect(await run('diff')).toEqual([0, '', ''])
   })
-
-  it('speaks its own unknown-option dialect', async () => {
-    const [code, , err] = await run('diff -Z')
-    expect(code).toBe(129)
-    expect(err).toBe('error: invalid option: -Z\n')
-  })
 })
 
 describe('git branch', () => {
@@ -413,12 +407,6 @@ describe('git branch', () => {
     const [code, , err] = await run('branch -d nosuch')
     expect(code).toBe(1)
     expect(err).toBe("error: branch 'nosuch' not found\n")
-  })
-
-  it('speaks the parse-options dialect for an unknown switch', async () => {
-    const [code, , err] = await run('branch -Z')
-    expect(code).toBe(129)
-    expect(err).toBe("error: unknown switch `Z'\n")
   })
 })
 

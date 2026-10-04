@@ -25,20 +25,19 @@ import {
   AmbiguousArgumentError,
   AmbiguousObjectNameError,
   BranchExistsError,
-  BranchPointError,
-  InvalidObjectNameError,
   BranchNameRequiredError,
-  BranchUsageError,
+  BranchPointError,
   CheckedOutBranchError,
   GitError,
   InvalidBranchNameError,
+  InvalidObjectNameError,
   NoBranchError,
   NoWorkspaceError,
   RefDeleteReadOnlyError,
   RefLockError,
   RefReadOnlyError,
-  UnknownSwitchError,
   UnmergedBranchError,
+  UsageError,
 } from './errors.ts'
 import { parseFlags, select } from './history.ts'
 import { short } from './format.ts'
@@ -75,15 +74,7 @@ import {
   type RefItem,
   type Upstream,
 } from './types.ts'
-import {
-  checkOperands,
-  configSection,
-  escaped,
-  fatal,
-  gitBool,
-  switches,
-  withoutSection,
-} from './util.ts'
+import { checkSwitches, configSection, fatal, gitBool, verbUsage, withoutSection } from './util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -487,7 +478,7 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const dispatch = doors.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const repo = await opened(fl, doors)
     const mode = await trackMode(repo)
     const filter = await refFilter(repo, words)
@@ -497,7 +488,7 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
       return [ENC.encode(head.branch ? head.branch + '\n' : ''), new IOResult()]
     const force = fl.asBool('D')
     if (fl.asBool('delete') || force) {
-      if (listing) throw new BranchUsageError()
+      if (listing) throw new UsageError('', verbUsage(inv))
       if (texts.length === 0) throw new BranchNameRequiredError()
       const parts: string[] = []
       for (const name of texts) parts.push(await remove(dispatch, repo, refs, head, name, force))

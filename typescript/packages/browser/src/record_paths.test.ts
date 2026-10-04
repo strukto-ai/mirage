@@ -79,7 +79,9 @@ const GENERIC_OUT: [string, string][] = [
   ['write', '/m/m/cs01'],
 ]
 
+// The `>` redirect opens k.txt before echo runs and writes it after: two writes.
 const SHELL_LEDGER: [string, string][] = [
+  ['write', K],
   ['write', K],
   ['append', K],
   ['append', K],
