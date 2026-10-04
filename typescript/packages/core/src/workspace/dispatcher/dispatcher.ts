@@ -620,10 +620,13 @@ export class Dispatcher {
           (onCall) => run(fullKwargs, onCall),
           async (value, late) => {
             // A call that lands after its timeout still owes the caches and
-            // the node table its change, unless the mount it ran on has
-            // been replaced by then: the bookkeeping would land on a store
-            // the call never touched.
-            if (late && this.namespace.tryMountFor(p.virtual) !== mount) return
+            // the node table its change, unless the mount it ran on no longer
+            // owns one of its names (it was replaced, or another mount now
+            // sits over a rename's destination): the bookkeeping would land
+            // on a store the call never touched.
+            const owned = (name: PathSpec | null): boolean =>
+              name === null || this.namespace.tryMountFor(name.virtual) === mount
+            if (late && !(owned(p) && owned(renameDst))) return
             if (!late) served(report, value)
             await this.settleWrite(opName, p, renameDst)
           },
