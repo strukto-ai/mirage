@@ -17,6 +17,10 @@ import { commandStarted, runInCommandScope } from '../../../cache/index/scope.ts
 import { IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
+import { MountMode } from '../../../types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 
 it('reads the output inside the running command', async () => {
   // A fresh mount trusts only the listings the running command made, so a
@@ -43,3 +47,35 @@ it('reads the output inside the running command', async () => {
   ])
   expect([new TextDecoder().decode(stdout as Uint8Array), seen]).toEqual(['hit\n', [started]])
 })
+
+class CachedRAM extends RAMVFS {
+  override readonly cachesReads = true
+}
+
+it.each([false, true])(
+  'caches relayed inputs and replacements (overwrite=%s)',
+  async (overwrite) => {
+    const enc = new TextEncoder()
+    const left = new CachedRAM()
+    const right = new CachedRAM()
+    left.loadState({ type: 'ram', files: { '/input': enc.encode('z\na\n') } })
+    right.loadState({ type: 'ram', files: { '/input': enc.encode('m\n') } })
+    const ws = new Workspace(
+      { '/a': left, '/b': right },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    const command = 'sort /a/input /b/input'
+    try {
+      const result = await ws.shell(command + (overwrite ? ' -o /a/input' : ''))
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toEqual(enc.encode(overwrite ? '' : 'a\nm\nz\n'))
+      expect(await ws.cache.get('/a/input')).toEqual(enc.encode(overwrite ? 'a\nm\nz\n' : 'z\na\n'))
+      expect(await ws.cache.get('/b/input')).toEqual(enc.encode('m\n'))
+      left.loadState({ type: 'ram', files: { '/input': enc.encode('changed\n') } })
+      const again = await ws.shell(overwrite ? 'cat /a/input' : command)
+      expect(again.stdout).toEqual(enc.encode('a\nm\nz\n'))
+    } finally {
+      await ws.close()
+    }
+  },
+)

@@ -19,9 +19,12 @@ import type { NamespaceView, SessionView } from '../../../../ops/types.ts'
 import { formatFsError, isFsError } from '../../../../utils/errors.ts'
 import { strategyFor } from './detect.ts'
 import { runFanout } from './fanout/index.ts'
+import type { AggregateFn } from '../../../config.ts'
+import { runOperands, mergeOperandIos } from './utils.ts'
 import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
 import { runRelay } from './relay/index.ts'
 import { runStream } from './stream/index.ts'
+import { runSearch } from './search.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { readFailExitCode } from '../../../spec/usage.ts'
 import { UsageError } from '../../../errors.ts'
@@ -53,6 +56,7 @@ export async function handleCrossMount(
   // (cp's link sources).
   cwd = '/',
   argv: readonly string[] = [],
+  aggregate: AggregateFn | null = null,
 ): Promise<CrossResult> {
   const native = runSingle
   const input = resolveSource(stdin)
@@ -62,8 +66,27 @@ export async function handleCrossMount(
       stdin: paths.some((p) => isStdin(p)) ? input : (options?.stdin ?? null),
     })
   try {
-    // isCrossMount gated on CROSS_MOUNT_COMMANDS membership, so the name is
-    // one of the Cmd values by the time it reaches the strategy layer.
+    if (aggregate !== null) {
+      const results = await runOperands(runSingle, cmdName, scopes, textArgs, flagKwargs)
+      const body = aggregate(results.map((r) => [r.scope.virtual, r.data]))
+      return [
+        body,
+        await mergeOperandIos(results, Math.max(0, ...results.map((r) => r.io.exitCode))),
+      ]
+    }
+    if (cmdName === 'grep' || cmdName === 'rg') {
+      return await runSearch(
+        cmdName,
+        scopes,
+        textArgs,
+        flagKwargs,
+        dispatch,
+        runSingle,
+        cwd,
+        ns,
+        input,
+      )
+    }
     const cmd = cmdName as Cmd
     const strategy = strategyFor(cmd)
     if (strategy === Strategy.RELAY) {

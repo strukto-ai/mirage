@@ -17,12 +17,18 @@ from typing import Any, Callable
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
 from mirage.commands.builtin.generic.crossmount.fanout import run_fanout
 from mirage.commands.builtin.generic.crossmount.relay import run_relay
+from mirage.commands.builtin.generic.crossmount.search import run_search
 from mirage.commands.builtin.generic.crossmount.stream import run_stream
 from mirage.commands.builtin.generic.crossmount.types import (
     CrossResult,
     RunSingle,
     Strategy,
 )
+from mirage.commands.builtin.generic.crossmount.utils import (
+    merge_operand_ios,
+    run_operands,
+)
+from mirage.commands.builtin.generic_bind.adapter import AggregateFn
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagValue
@@ -48,6 +54,7 @@ async def handle_cross_mount(
     session_view: SessionView | None = None,
     cwd: str = "/",
     argv: tuple[str, ...] = (),
+    aggregate: AggregateFn | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -96,6 +103,28 @@ async def handle_cross_mount(
 
     run_single = run_input
     try:
+        if aggregate is not None:
+            results = await run_operands(
+                run_single, cmd_name, scopes, text_args, flag_kwargs
+            )
+            body = await aggregate(
+                [(r.scope.virtual, r.data) for r in results]
+            )
+            return body, await merge_operand_ios(
+                results, max((r.io.exit_code for r in results), default=0)
+            )
+        if cmd_name in ("grep", "rg"):
+            return await run_search(
+                cmd_name,
+                scopes,
+                text_args,
+                flag_kwargs,
+                dispatch,
+                run_single,
+                cwd,
+                ns,
+                input_source,
+            )
         strategy = strategy_for(cmd_name)
         if strategy is Strategy.RELAY:
             return await run_relay(

@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Cmd } from '../types.ts'
-
 // grep-style: `-q` with a match exits 0 whatever else failed (GNU grep and
 // ripgrep both), then a usage error (2) dominates, then a failed operand (a
 // read error, seen as exit 1 with stderr) forces 1 even when another operand
@@ -26,17 +24,17 @@ import { Cmd } from '../types.ts'
 // branch below is for an operand that reported something on stderr while
 // still exiting 1, which no read failure does now.
 export function combinedExit(
-  cmdName: Cmd,
+  cmdName: string,
   codes: number[],
   errored?: boolean[],
   quiet = false,
 ): number {
-  if (cmdName === Cmd.GREP || cmdName === Cmd.RG) {
+  if (cmdName === 'grep' || cmdName === 'rg') {
     if (quiet && codes.includes(0)) return 0
     if (codes.some((c) => c > 1)) return Math.max(...codes)
     if (errored?.some(Boolean) === true) return 1
     if (codes.includes(0)) return 0
-    return codes.length > 0 ? Math.max(...codes) : 0
+    return codes.length > 0 ? Math.max(...codes) : 1
   }
   return codes.length > 0 ? Math.max(...codes) : 0
 }

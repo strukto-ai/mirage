@@ -17,25 +17,53 @@ import { NOOPAccessor } from '../../../accessor/base.ts'
 import { materialize, IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileType, PathSpec } from '../../../types.ts'
+import { eisdir } from '../../../utils/errors.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { NamespaceView } from '../../../ops/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
+import { FlagView } from '../../spec/flag_view.ts'
+import { specOf } from '../../spec/builtins.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { Builder, CommandIO } from './adapter.ts'
 
-/** Use the workspace's policy-checked operations as a generic read adapter. */
-export function dispatchIO(dispatch: DispatchFn): CommandIO {
+/** Use the workspace's policy-checked operations as a generic IO adapter. */
+export function dispatchIO(dispatch: DispatchFn, reads?: IOResult): CommandIO {
   return {
     readdir: async (_accessor, path) => (await dispatch('readdir', path))[0] as string[],
     stat: async (_accessor, path) =>
       (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat,
-    readBytes: async (_accessor, path) =>
-      await materialize((await dispatch('read', path))[0] as ByteSource),
+    readBytes: async (_accessor, path) => {
+      if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
+        throw eisdir(path)
+      const body = await materialize((await dispatch('read', path))[0] as ByteSource)
+      if (reads !== undefined) {
+        reads.reads[path.virtual] = body
+        if (!reads.cache.includes(path.virtual)) reads.cache.push(path.virtual)
+      }
+      return body
+    },
     readStream: async function* (_accessor, path) {
+      if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
+        throw eisdir(path)
       yield* chunks((await dispatch('read', path))[0] as ByteSource)
     },
     isMounted: () => true,
+    unlink: async (_accessor, path) => {
+      await dispatch('unlink', path)
+      if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
+    },
+    mkdir: async (_accessor, path, parents = false) => {
+      await dispatch('mkdir', path, [], { parents })
+    },
+    truncate: async (_accessor, path, size, options) => {
+      await dispatch('truncate', path, [size], { no_create: options ?? false })
+      if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
+    },
+    write: async (_accessor, path, data) => {
+      await dispatch('write', path, [data])
+      if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
+    },
   }
 }
 
@@ -60,16 +88,19 @@ export async function runDispatch(
   ns?: NamespaceView,
   stdin: ByteSource | null = null,
   signal?: AbortSignal,
+  argv: readonly string[] = [],
 ): Promise<[ByteSource | null, IOResult]> {
+  const bounded = builder.name === 'du' && new FlagView(bag, specOf('du')).asBool('one_file_system')
   const view =
-    ns?.mounts === undefined
+    ns?.mounts === undefined || bounded
       ? ns
       : {
           ...ns,
           mounts: { ...ns.mounts, descendants: noneBelow, visibleDescendants: noneBelow },
         }
+  const reads = new IOResult()
   const result = await builder.fn(
-    dispatchIO(dispatch),
+    dispatchIO(dispatch, reads),
     new NOOPAccessor(),
     paths.map(
       (p) =>
@@ -92,10 +123,12 @@ export async function runDispatch(
       mountPrefix: '',
       cwd,
       dispatch,
+      argv,
       ...(signal === undefined ? {} : { signal }),
       ...(view === undefined ? {} : { ns: view }),
     },
   )
   if (result === null) return [null, new IOResult()]
-  return [await materialize(result[0]), result[1]]
+  const body = await materialize(result[0])
+  return [body, await reads.merge(result[1])]
 }

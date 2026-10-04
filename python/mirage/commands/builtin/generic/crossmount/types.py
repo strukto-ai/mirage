@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable
+from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Callable, NamedTuple
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 class Strategy(Enum):
@@ -104,3 +105,12 @@ class OperandRun(NamedTuple):
     scope: PathSpec
     data: bytes
     io: IOResult
+
+
+@dataclass(frozen=True, slots=True)
+class OwnedScope:
+    path: PathSpec
+    walked: bool = False
+    stat: FileStat | None = None
+    error: OSError | None = None
+    diagnostic: str | None = None
