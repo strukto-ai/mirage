@@ -1124,6 +1124,11 @@ export class Workspace {
    * The runtime door runs the same read-policy verdict the constructor
    * does: a mount added here is no more able to declare a policy its
    * backend cannot honour than one declared in config.
+   *
+   * `index` is the mount's own index; left out, the workspace's. A VFS
+   * already mounted elsewhere keeps the index of that mount, as in the
+   * constructor, and this one goes unused -- though a typo in it is still
+   * refused, before the read policy is judged.
    */
   addMount(
     prefix: string,
@@ -1131,21 +1136,18 @@ export class Workspace {
     mode: MountMode = MountMode.READ,
     read?: ReadSpec,
     vfsRef: string | null = null,
+    index?: IndexConfig,
   ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    const own = index === undefined ? this.indexConfig : normalizeIndexConfig(index)
     this.registry.checkVfsAvailable(vfs)
     const resolvedRead = read ?? this.readDefault
     // An alias keeps the index of the VFS's other mount.
     const alias = this.registry.allMounts().find((m) => m.vfs === vfs)
-    checkReadCapability(
-      prefix,
-      vfs,
-      resolvedRead,
-      alias !== undefined ? alias.indexConfig : this.indexConfig,
-    )
+    checkReadCapability(prefix, vfs, resolvedRead, alias !== undefined ? alias.indexConfig : own)
     const previous = this.registry.allMounts()
     const m = this.registry.mount(prefix, vfs, mode, resolvedRead, {
-      ...(this.indexConfig !== undefined ? { index: this.indexConfig } : {}),
+      ...(own !== undefined ? { index: own } : {}),
       vfsRef,
     })
     prepareAddedMount(this.registry, m, previous)

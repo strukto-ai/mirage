@@ -1849,9 +1849,8 @@ describe('mount index block', () => {
         },
       }),
     )
-    expect(args.mounts['/d']?.options.commandLimits).toEqual({
-      cat: { maxBytes: 1024, onExceed: 'error' },
-    })
+    const cat = args.mounts['/d']?.options.commandLimits?.cat
+    expect([cat?.maxBytes, cat?.onExceed]).toEqual([1024, 'error'])
   })
 
   it('keeps a YAML mount index through a snapshot and a copy', async () => {

@@ -207,6 +207,7 @@ const MOUNT_KEYS = [
   'mountpoint',
   'read',
   'ttl',
+  'index',
 ] as const
 // A source instance is a type beside a config, the way a mount is. Its
 // `config:` block has no table for the same reason `mounts.*.config`
@@ -418,6 +419,10 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
     for (const [prefix, block] of Object.entries(raw.mounts)) {
       if (!isPlainObject(block)) throw new Error(`mount \`${prefix}\` must be a mapping`)
       rejectUnknownKeys(block, MOUNT_KEYS, `mount \`${prefix}\``)
+      // Ahead of the read rules, where Python's field validation runs
+      // ahead of the model validator carrying them: a mount with both a
+      // bad index and `ttl:` without `read:` names the index on both.
+      validateTypedBlock(block.index, INDEX_KEYS, `mounts.${prefix}.index`)
       validateReadBlock(prefix, block)
       parseCommandLimits(block.command_limits)
     }
@@ -510,14 +515,27 @@ function validateEnvBlock(value: unknown): void {
 // Workspace YAML uses Python's snake_case keys (default_session_id, the
 // cache/index key_prefix/max_drain_bytes, ...). TS code stays camelCase, so
 // normalize at the boundary: camelize the top-level keys plus the cache and
-// index blocks. Mounts are left untouched on purpose, their `config:` blocks
-// carry VFS credentials whose snake_case keys (aws_access_key_id, ...)
-// are consumed downstream as-is, and command_limits is parsed separately.
+// index blocks. A mount block is left in its own spelling but for its
+// `index:`: its `config:` carries VFS credentials whose snake_case keys
+// (aws_access_key_id, ...) are consumed downstream as-is, and
+// command_limits is parsed separately. The mounts map is rebuilt rather
+// than edited, because it is the caller's object: the CLI posts the
+// document it checked, and the daemon loads it again.
 function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unknown> {
   const out = camelizeKeys(raw)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
   if (isPlainObject(out.index)) out.index = camelizeKeys(out.index)
   if (isPlainObject(out.console)) out.console = camelizeKeys(out.console)
+  if (isPlainObject(out.mounts)) {
+    out.mounts = Object.fromEntries(
+      Object.entries(out.mounts).map(([prefix, block]) => [
+        prefix,
+        isPlainObject(block) && isPlainObject(block.index)
+          ? { ...block, index: camelizeKeys(block.index) }
+          : block,
+      ]),
+    )
+  }
   if (isPlainObject(out.store)) {
     const store = camelizeKeys(out.store)
     for (const group of STORE_GROUPS) {
@@ -640,12 +658,20 @@ export interface MountBlock {
   mountpoint?: string
   /**
    * How cached bytes for this mount are revalidated, and the bound that
-   * goes with `bounded`. The bound lives only here, where no other `ttl`
-   * does: at workspace level it would sit beside `index: {ttl:}` and mean
-   * a different thing.
+   * goes with `bounded`. The bound has no workspace-level spelling: there
+   * it would sit beside `index: {ttl:}` and mean a different thing. Here
+   * the two are told apart by nesting -- `ttl:` bounds this mount's bytes
+   * and listings, `index: {ttl:}` is how long its own listing store keeps
+   * them, capped by that bound.
    */
   read?: string
   ttl?: number
+  /**
+   * This mount's listing store, replacing the workspace `index:` whole:
+   * nothing is inherited from it, so `type` is required and a missing
+   * `ttl` is the store's own default.
+   */
+  index?: RedisIndexBlock | (RamIndexBlock & { type: 'ram' }) | null
 }
 
 interface RamIndexBlock {
@@ -1076,11 +1102,13 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     const m = coerceMountMode(block.mode, wsMode)
     // Already validated by the sync door (validateReadBlock).
     const read = block.read === undefined ? defaultRead : resolveReadSpec(block.read, block.ttl)
+    const mountIndex = buildIndex(block.index)
     mounts[prefix] = new Mount(r, {
       mode: m,
       read,
       commandLimits: parseCommandLimits(block.command_limits),
       vfsRef: block.vfs,
+      ...(mountIndex !== undefined ? { index: mountIndex } : {}),
     })
     const backend = (block.backend ?? MountBackend.WORKSPACE) as MountBackend
     if (KERNEL_BACKENDS.includes(backend)) kernelMounts[prefix] = [backend, block.mountpoint]
