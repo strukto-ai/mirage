@@ -138,7 +138,7 @@ Existing listings in a persisted Redis index retain their stored expiry until re
 
 ### A mount's own index
 
-A mount's `index:` block takes the top-level `index:` keys and replaces that block for this mount, whole: nothing is inherited from it, so `type:` is required, a missing `ttl:` is 600 seconds, and a Redis store needs its own `url:` and `key_prefix:`. A mount without one takes the top-level `index:`, and with neither, the backend's own listing lifetime ([Index TTL](/home/cache#index-ttl)). `index: null` is the same as leaving it out. The file cache has no per-mount block; a mount's `cache:` is refused.
+A mount's `index:` block takes the top-level `index:` keys and replaces that block for this mount, whole: nothing is inherited from it, so `type:` is required, a missing `ttl:` is 600 seconds, and a Redis store's `url:` and `key_prefix:` take the block's own defaults, not the top-level ones. A mount without one takes the top-level `index:`, and with neither, the backend's own listing lifetime ([Index TTL](/home/cache#index-ttl)). `index: null` is the same as leaving it out. The file cache has no per-mount block; a mount's `cache:` is refused.
 
 ```yaml
 index: {type: redis, url: redis://cache:6379/0, ttl: 600}
