@@ -341,7 +341,7 @@ async def handle_redirect(
     for r in redirects:
         if r.kind == RedirectKind.AMBIGUOUS:
             return _shell_failure(
-                f"{_redirect_word(r)}: ambiguous redirect\n".encode()
+                encode_text(f"{_redirect_word(r)}: ambiguous redirect\n")
             )
         if r.kind == RedirectKind.UNEXPANDED and isinstance(
             r.target, ExitSignal
@@ -717,7 +717,7 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
     """
     label = scope.raw_path
     strerror = fs_strerror(exc)
-    return (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode()
+    return encode_text(f"{label}: {strerror}\n" if strerror else f"{label}\n")
 
 
 def _closed_write_line(command: TSNodeLike) -> bytes:
@@ -728,7 +728,7 @@ def _closed_write_line(command: TSNodeLike) -> bytes:
     """
     words = get_text(command).split()
     name = words[0] if words else "redirect"
-    return f"{name}: write error: Bad file descriptor\n".encode()
+    return encode_text(f"{name}: write error: Bad file descriptor\n")
 
 
 def _redirect_word(r: Redirect) -> str:
@@ -867,7 +867,7 @@ async def _open_refusal(
             if earlier is not None:
                 return earlier
             return _shell_failure(
-                f"{scope.raw_path}: Is a directory\n".encode()
+                encode_text(f"{scope.raw_path}: Is a directory\n")
             )
         path = scope.virtual
         is_dir = False
@@ -893,7 +893,7 @@ async def _open_refusal(
                 if is_dir
                 else "cannot overwrite existing file"
             )
-            return _shell_failure(f"{scope.raw_path}: {detail}\n".encode())
+            return _shell_failure(encode_text(f"{scope.raw_path}: {detail}\n"))
         # This open succeeds, so the target exists for every redirect
         # after it, and a truncating one leaves it empty to be found.
         # Without the option nothing was stat'd, so an append target of

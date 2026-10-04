@@ -28,8 +28,7 @@ import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { advanceColumn, isSpace } from '../../../utils/width.ts'
 import { shellQuote } from '../../../utils/quote.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -229,7 +228,7 @@ export function formatCountRows(
   total: WcFlags['total'],
   width: number | null = null,
 ): ByteSource | null {
-  if (total === 'only') return ENC.encode(`${totalValues.join(' ')}\n`)
+  if (total === 'only') return encodeText(`${totalValues.join(' ')}\n`)
   const out = [...rows]
   if (total === 'always' || (total === 'auto' && operandCount > 1)) {
     out.push({ values: totalValues, label: 'total' })
@@ -252,7 +251,7 @@ export async function wcGeneric(
   stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   }
   if (paths.length > 0) {
     const rows: WcRow[] = []
@@ -282,7 +281,7 @@ export async function wcGeneric(
     const width = numberWidth(sizes, paths.length, shownCounts(parsed))
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
-      stderr: err === '' ? null : ENC.encode(err),
+      stderr: err === '' ? null : encodeText(err),
     })
     return [
       formatCountRows(rows, selectedValues(total, parsed), paths.length, parsed.total, width),
@@ -294,12 +293,12 @@ export async function wcGeneric(
     source = resolveSource(opts.stdin)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${msg}\n`) })]
   }
   const counts = await countsOf(source, opts, parsed)
   const values = selectedValues(counts, parsed)
   if (parsed.total === 'only') {
-    return [ENC.encode(`${values.join(' ')}\n`), new IOResult()]
+    return [encodeText(`${values.join(' ')}\n`), new IOResult()]
   }
   const rows: WcRow[] = [{ values, label: null }]
   if (parsed.total === 'always') rows.push({ values, label: 'total' })

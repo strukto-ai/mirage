@@ -24,6 +24,7 @@ import { fail } from '../shared.ts'
 import { ALIAS_USAGE, BAD_NAME_CHARS, FIRST_WORD, UNALIAS_USAGE } from './constants.ts'
 import type { AliasMark } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 /** Whether a name holds a character bash refuses in an alias name. */
 function hasBadChar(name: string): boolean {
@@ -70,8 +71,8 @@ export function handleAlias(args: string[], session: SessionState, mark: AliasMa
     if (val !== undefined) lines.push(`alias ${word}=${singleQuote(val)}`)
     else errors.push(`bash: alias: ${word}: not found`)
   }
-  const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-  const err = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+  const out = lines.length > 0 ? encodeText(lines.join('\n') + '\n') : null
+  const err = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
   const code = errors.length > 0 ? 1 : 0
   return [
     out,
@@ -104,7 +105,7 @@ export function handleUnalias(args: string[], session: SessionState): Result {
       session.aliasMarks.delete(name)
     } else errors.push(`bash: unalias: ${name}: not found`)
   }
-  const err = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+  const err = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
   const code = errors.length > 0 ? 1 : 0
   return [
     null,

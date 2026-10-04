@@ -16,6 +16,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
+from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.declare.constants import (
@@ -120,9 +121,9 @@ async def handle_readonly(
     """
     flags, names, bad = split_decl_flags(assignments, READONLY_FLAGS)
     if bad is not None:
-        err = (
+        err = encode_text(
             f"bash: readonly: -{bad}: invalid option\n{READONLY_USAGE}"
-        ).encode()
+        )
         return (
             None,
             IOResult(exit_code=2, stderr=err),
@@ -132,7 +133,7 @@ async def handle_readonly(
         return readonly_functions(session, names)
     if not names and not arrays:
         lines = _readonly_lines(session, flags)
-        out = (("\n".join(lines) + "\n") if lines else "").encode()
+        out = encode_text(("\n".join(lines) + "\n") if lines else "")
         return out, IOResult(), ExecutionNode(command="readonly", exit_code=0)
     view = require_view(state)
     errors: list[str] = []

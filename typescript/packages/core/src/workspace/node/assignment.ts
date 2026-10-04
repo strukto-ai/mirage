@@ -40,6 +40,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -58,7 +59,7 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
  * bad `-i` value.
  */
 function arithFatal(err: ArithError): ExitSignal {
-  return new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+  return new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
 }
 
 /** `subscriptIndex` whose failure ends the line, in bash's words. */
@@ -95,13 +96,13 @@ async function assignVar(view: SessionView, key: string, value: ShellValue): Pro
     await view.set(key, value)
   } catch (err) {
     if (err instanceof PolicyDenied) {
-      throw new DiscardSignal(new TextEncoder().encode(`${err.message}\n`))
+      throw new DiscardSignal(encodeText(`${err.message}\n`))
     }
     if (err instanceof ArithError) {
       // The `-i` coercion refused the text. GNU ends the shell with 1 the
       // way a subscript that does not evaluate does, in the evaluator's
       // voice with the text led.
-      throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+      throw new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
     }
     throw err
   }
@@ -208,7 +209,7 @@ export async function executeAssignment(
     // A bare assignment to a readonly variable is a variable-assignment
     // error: the rest of the line is discarded (builtins like `export`
     // merely fail with 1 and continue).
-    throw new DiscardSignal(new TextEncoder().encode(`bash: ${key}: readonly variable\n`))
+    throw new DiscardSignal(encodeText(`bash: ${key}: readonly variable\n`))
   }
   const valNodes = node.namedChildren.filter(
     (c) => c.type !== NT.VARIABLE_NAME && c.type !== 'subscript',
@@ -301,7 +302,7 @@ export async function executeAssignment(
       // empty stays legal (arithmetic on nothing is 0), so only the
       // associative kind checks the expanded text.
       const nameText = text.slice(0, eq).replace(/\+$/, '')
-      throw new DiscardSignal(new TextEncoder().encode(`bash: ${nameText}: bad array subscript\n`))
+      throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
     }
     if (heldMap !== undefined) {
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
@@ -329,7 +330,7 @@ export async function executeAssignment(
     if (idx < 0) {
       // Same fatal shape as the empty subscript above.
       const nameText = text.slice(0, eq).replace(/\+$/, '')
-      throw new DiscardSignal(new TextEncoder().encode(`bash: ${nameText}: bad array subscript\n`))
+      throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
     }
     arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
     await assignVar(view, key, arr)

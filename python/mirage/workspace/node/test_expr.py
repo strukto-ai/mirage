@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.ops.types import SessionView
+from mirage.shell.bytes import decode_text
 from mirage.shell.types import NodeType as NT
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import unmark_globs
@@ -103,7 +104,7 @@ async def _flatten(
             continue
         if not child.is_named:
             if ctype not in _FLAT_SKIP_TOKENS:
-                out.append(child.text.decode())
+                out.append(decode_text(child.text))
             continue
         if ctype in _CONTAINER_TYPES:
             negative = _negative_number_child(child)
@@ -119,7 +120,7 @@ async def _flatten(
                 return False
             continue
         if ctype == NT.TEST_OPERATOR:
-            out.append(child.text.decode())
+            out.append(decode_text(child.text))
             continue
         chunks = await expand_chunks(child, session, execute_fn, cs, view=view)
         out.extend(
@@ -210,7 +211,7 @@ async def _build_unary(
     operand_node = None
     for child in node.children:
         if child.type == NT.TEST_OPERATOR:
-            op = child.text.decode()
+            op = decode_text(child.text)
         elif child.is_named:
             operand_node = child
     if op is None and operand_node is not None and negated:
@@ -254,7 +255,7 @@ async def _build_binary(
                 op = child.type
             continue
         if child.type == NT.TEST_OPERATOR and op is None and operands:
-            op = child.text.decode()
+            op = decode_text(child.text)
             continue
         operands.append(child)
     if op in ("&&", "||") and len(operands) == 2:
@@ -277,7 +278,7 @@ async def _build_binary(
     )
     right_node = operands[1]
     if op == "=~" and right_node.type == NT.REGEX:
-        raw = right_node.text.decode()
+        raw = decode_text(right_node.text)
         # After =~ tree-sitter lexes even a quoted operand as one regex
         # token; quoted means bash matches it literally.
         if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":

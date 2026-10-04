@@ -49,6 +49,7 @@ import type { ExecuteFn } from '../expand/node.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { concat } from '../../io/cachable_iterator.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 export interface FindActionDoors {
   // Runs an `-exec` line in the session; absent outside a workspace,
@@ -78,8 +79,6 @@ export interface FindActionDoors {
    * walk; empty means the working directory. */
   readonly starts?: readonly PathSpec[]
 }
-
-const enc = new TextEncoder()
 
 /**
  * The shell line one `-exec` run becomes. GNU execs the words directly, so
@@ -164,7 +163,7 @@ async function runExec(
   const head = words[0] ?? action.argv[0] ?? ''
   const [missing, shadowed] = await headState(head, registry, cwd, statPath)
   if (missing) {
-    errors.push(enc.encode(`find: '${head}': No such file or directory\n`))
+    errors.push(encodeText(`find: '${head}': No such file or directory\n`))
     return false
   }
   // A function or alias of the head's name is invisible to execvp, so the
@@ -195,7 +194,7 @@ async function deleteRow(
 ): Promise<boolean> {
   const path = ps.rawPath || ps.virtual
   if (dispatch === null) {
-    errors.push(enc.encode('find: -delete requires an operation dispatcher\n'))
+    errors.push(encodeText('find: -delete requires an operation dispatcher\n'))
     return false
   }
   try {
@@ -206,7 +205,7 @@ async function deleteRow(
     await dispatch(op, ps)
     return true
   } catch (err) {
-    errors.push(enc.encode(`find: cannot delete '${path}': ${refusalWhy(err)}\n`))
+    errors.push(encodeText(`find: cannot delete '${path}': ${refusalWhy(err)}\n`))
     return false
   }
 }
@@ -243,7 +242,7 @@ async function rowStat(
 ): Promise<FileStat | null> {
   const path = ps.rawPath || ps.virtual
   if (statPath === null) {
-    errors.push(enc.encode(`find: '${path}': no stat door\n`))
+    errors.push(encodeText(`find: '${path}': no stat door\n`))
     return null
   }
   const link = ns?.links?.statAt(ps.virtual) ?? null
@@ -251,11 +250,11 @@ async function rowStat(
   try {
     st = link ?? (await statPath(ps.virtual))
   } catch (err) {
-    errors.push(enc.encode(`find: '${path}': ${refusalWhy(err)}\n`))
+    errors.push(encodeText(`find: '${path}': ${refusalWhy(err)}\n`))
     return null
   }
   if (st === null) {
-    errors.push(enc.encode(`find: '${path}': ${gnuStrerror('ENOENT') ?? 'ENOENT'}\n`))
+    errors.push(encodeText(`find: '${path}': ${gnuStrerror('ENOENT') ?? 'ENOENT'}\n`))
     return null
   }
   return st
@@ -264,7 +263,7 @@ async function rowStat(
 /** Render one accepted row in `find -ls`'s own layout. */
 function lsRow(ps: PathSpec, st: FileStat, identity: Identity | null): Uint8Array {
   const path = ps.rawPath || ps.virtual
-  return enc.encode(`${formatFindLs(st.with({ name: path }), identity)}\n`)
+  return encodeText(`${formatFindLs(st.with({ name: path }), identity)}\n`)
 }
 
 /**
@@ -302,7 +301,7 @@ function printfRow(
   warnings: string[],
   identity: Identity | null,
 ): Uint8Array {
-  return enc.encode(expandPrintf(action.format, path, base, st, warnings, identity))
+  return encodeText(expandPrintf(action.format, path, base, st, warnings, identity))
 }
 
 /** Whether an action reads the row's stat: `-ls`, and a `-printf` whose
@@ -420,7 +419,7 @@ export async function applyFindActions(
   const executeFn = doors.executeFn
   const execs = execActions(expr.actions)
   if (execs.length > 0 && executeFn === undefined) {
-    return [null, enc.encode('find: -exec: no shell to run the command\n'), 1]
+    return [null, encodeText('find: -exec: no shell to run the command\n'), 1]
   }
   const sessionId = doors.sessionId ?? ''
   const ns = doors.ns ?? null
@@ -433,7 +432,7 @@ export async function applyFindActions(
     doors.stdin === undefined || doors.stdin === null ? null : new SharedStdin(doors.stdin)
   await materialize(stdout)
   if (matchedRuns === null)
-    return [null, enc.encode('find: actions require structured matches\n'), 1]
+    return [null, encodeText('find: actions require structured matches\n'), 1]
   // The runs arrive one per start point, in operand order, so each row
   // carries the spelling of the start point it was found under.
   const matches = matchedRuns.flatMap((run, i) =>
@@ -512,7 +511,7 @@ export async function applyFindActions(
           break
         }
       } else {
-        out.push(enc.encode(path + (action.kind === 'print0' ? '\0' : '\n')))
+        out.push(encodeText(path + (action.kind === 'print0' ? '\0' : '\n')))
       }
     }
   }
@@ -539,6 +538,6 @@ export async function applyFindActions(
   const body = concat(out)
   // GNU warns about a directive it cannot render once, ahead of anything
   // the actions report.
-  const warned = warnings.map((line) => enc.encode(`${line}\n`))
+  const warned = warnings.map((line) => encodeText(`${line}\n`))
   return [body.byteLength > 0 ? body : null, concat([...warned, ...errors]), exitCode]
 }

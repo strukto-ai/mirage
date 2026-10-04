@@ -28,6 +28,7 @@ from mirage.commands.spec.usage import (
 from mirage.io import IOResult
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.workspace.abort import cancellable_sleep
 from mirage.workspace.executor.builtins.sleep.constants import (
     SLEEP_INTERVAL,
@@ -196,7 +197,7 @@ async def handle_sleep(
         # Missing operand is the same `usage (EXIT_FAILURE)` refusal the
         # invalid-interval one is, so it carries the same Try-help line
         # (measured on 9.4: `sleep` is two lines, not one).
-        err = (f"sleep: missing operand\n{usage_hint('sleep')}\n").encode()
+        err = encode_text(f"sleep: missing operand\n{usage_hint('sleep')}\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
@@ -233,13 +234,13 @@ async def handle_sleep(
         # 1x` names 1x twice). Each operand goes through gnulib's
         # `quote()` like every other coreutils operand diagnostic
         # (measured on 9.4: `sleep -- <e-acute>` names `'\303\251'`).
-        err = (
+        err = encode_text(
             "".join(
                 f"sleep: invalid time interval '{quote_text(raw)}'\n"
                 for raw in bad
             )
             + f"{usage_hint('sleep')}\n"
-        ).encode()
+        )
         return (
             None,
             IOResult(exit_code=1, stderr=err),

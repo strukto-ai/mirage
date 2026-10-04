@@ -23,8 +23,8 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { parent } from '../../../utils/path.ts'
 import { pathAllowed } from '../../../context/session_context.ts'
 import { dispatchStat, linkTarget } from '../utils/paths.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
-const ENC = new TextEncoder()
 const MODES: Record<string, string> = { canonicalize_existing: 'e', canonicalize_missing: 'm' }
 const LINKS: Record<string, string> = { logical: 'L', physical: 'P', strip: 's', no_symlinks: 's' }
 const LOOP_CHECK_AFTER = 20
@@ -174,7 +174,7 @@ export async function realpath(
       if (!(err instanceof Error)) throw err
       return [
         null,
-        new IOResult({ exitCode: 1, stderr: ENC.encode(fsErrorLine('realpath', word, err)) }),
+        new IOResult({ exitCode: 1, stderr: encodeText(fsErrorLine('realpath', word, err)) }),
       ]
     }
     if (word === relativeTo) [to, base] = [path, word === flags.relativeBase ? path : null]
@@ -199,8 +199,8 @@ export async function realpath(
   }
   const end = flags.zero ? '\0' : '\n'
   const out: ByteSource | null =
-    lines.length > 0 ? ENC.encode(lines.map((l) => l + end).join('')) : null
-  const stderr = errors.length > 0 ? ENC.encode(errors.join('')) : null
+    lines.length > 0 ? encodeText(lines.map((l) => l + end).join('')) : null
+  const stderr = errors.length > 0 ? encodeText(errors.join('')) : null
   return [out, new IOResult({ stderr, exitCode: failed ? 1 : 0 })]
 }
 

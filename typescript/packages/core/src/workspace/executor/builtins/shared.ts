@@ -28,8 +28,7 @@ import { optionError, parseFlags } from '../command/flags.ts'
 import type { ParsedCommand } from '../command/types.ts'
 import { COUNT_WORD_RE, IDENTIFIER_RE } from './constants.ts'
 import type { Result } from './types.ts'
-
-const ENC = new TextEncoder()
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
 
 interface ResultInit {
   out?: Uint8Array | null
@@ -49,7 +48,7 @@ interface ResultInit {
 export function result(cmd: string, init: ResultInit = {}): Result {
   const exitCode = init.exitCode ?? 0
   const err =
-    init.stderr !== undefined && init.stderr !== '' ? ENC.encode(init.stderr) : new Uint8Array()
+    init.stderr !== undefined && init.stderr !== '' ? encodeText(init.stderr) : new Uint8Array()
   const io = init.io ?? new IOResult()
   io.exitCode = exitCode
   if (err.length > 0) io.stderr = err
@@ -101,7 +100,7 @@ export function parseLine(
   const refused = optionError(cmd, parsed)
   if (refused !== null) {
     const [message, code] = refused
-    return [parsed, new FlagView({}, spec), fail(cmd, new TextDecoder().decode(message), code)]
+    return [parsed, new FlagView({}, spec), fail(cmd, decodeText(message), code)]
   }
   return [parsed, new FlagView(parsed.flagKwargs, spec), null]
 }
@@ -292,7 +291,7 @@ export function requireView(state: SessionView | null): SessionView {
 
 /** Render a policy denial in the builtin's own voice. */
 export function refusal(cmd: string, err: PolicyDenied): Result {
-  const encoded = new TextEncoder().encode(`${err.message}\n`)
+  const encoded = encodeText(`${err.message}\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),
@@ -302,7 +301,7 @@ export function refusal(cmd: string, err: PolicyDenied): Result {
 
 /** Render the shell's own readonly refusal, checked before the door. */
 export function readonlyRefusal(cmd: string, name: string): Result {
-  const encoded = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+  const encoded = encodeText(`bash: ${name}: readonly variable\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),
@@ -321,7 +320,7 @@ export function readonlyRefusal(cmd: string, name: string): Result {
  * without a builtin name.
  */
 export function arithRefusal(cmd: string, err: ArithError): Result {
-  const encoded = new TextEncoder().encode(`bash: ${cmd}: ${err.message}\n`)
+  const encoded = encodeText(`bash: ${cmd}: ${err.message}\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: encoded }),
@@ -346,7 +345,7 @@ export function isCountWord(word: string): boolean {
 
 /** A shell builtin's diagnostic in bash's voice. Mirrors Python's builtin_error. */
 export function builtinError(name: string, message: string): Uint8Array {
-  return new TextEncoder().encode(`bash: ${name}: ${message}\n`)
+  return encodeText(`bash: ${name}: ${message}\n`)
 }
 
 /**

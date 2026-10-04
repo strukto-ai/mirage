@@ -36,6 +36,7 @@ import {
   storeStagedArrays,
 } from './declare.ts'
 import type { Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 function readonlyLines(session: SessionState, flags: Set<string>): string[] {
   // -a narrows to indexed arrays and -A to associative ones, as bash
@@ -106,7 +107,7 @@ export async function handleReadonly(
   if (flags.has('f')) return readonlyFunctions(session, names)
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = readonlyLines(session, flags)
-    const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+    const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
   }
   const view = requireView(state)

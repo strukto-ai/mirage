@@ -35,8 +35,7 @@ import { lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError } from '../../spec/usage.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 const TYPE_LABELS: Partial<Record<FileType, string>> = {
   [FileType.DIRECTORY]: 'directory',
@@ -147,7 +146,7 @@ function needsEscape(char: string): boolean {
 function escapeChar(char: string): string {
   const named = ESCAPE_NAMES[char]
   if (named !== undefined) return named
-  return Array.from(ENC.encode(char), (byte) => '\\' + byte.toString(8).padStart(3, '0')).join('')
+  return Array.from(encodeText(char), (byte) => '\\' + byte.toString(8).padStart(3, '0')).join('')
 }
 
 // Whether a name holding an apostrophe still fits in double quotes. GNU only
@@ -479,7 +478,7 @@ async function fileSystems(
   }
   const io = new IOResult({
     exitCode: err === '' ? 0 : 1,
-    stderr: err === '' ? null : ENC.encode(err),
+    stderr: err === '' ? null : encodeText(err),
   })
   if (lines.length === 0) return [null, io]
   return [formatRecords(lines), io]
@@ -544,7 +543,7 @@ export async function statGeneric(
   }
   const io = new IOResult({
     exitCode: err === '' ? 0 : 1,
-    stderr: err === '' ? null : ENC.encode(err),
+    stderr: err === '' ? null : encodeText(err),
   })
   if (lines.length === 0) return [null, io]
   const out: ByteSource = formatRecords(lines)

@@ -28,6 +28,7 @@ import { readonlyFunctionUnset } from '../declare/declare.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * Clear the getopts residue after a whole-variable unset.
@@ -72,7 +73,7 @@ async function fatalIndex(
     return await subscriptIndex(session, subscript, view)
   } catch (err) {
     if (err instanceof ArithError) {
-      throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+      throw new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
     }
     throw err
   }
@@ -148,7 +149,7 @@ export async function handleUnset(
       i += 1
       continue
     }
-    const err = new TextEncoder().encode(`bash: unset: ${tok}: invalid option\n`)
+    const err = encodeText(`bash: unset: ${tok}: invalid option\n`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -216,7 +217,7 @@ export async function handleUnset(
         status === 'notarray'
           ? `unset: ${base}: not an array variable`
           : `unset: ${name.slice(base.length)}: bad array subscript`
-      const err = new TextEncoder().encode(`bash: ${detail}\n`)
+      const err = encodeText(`bash: ${detail}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),

@@ -26,6 +26,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { fail, requireView } from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 
 const USAGE =
   'mapfile: usage: mapfile [-d delim] [-n count] [-O origin] [-s count] [-t] [-u fd] [-C callback] [-c quantum] [array]'
@@ -102,7 +103,6 @@ export async function handleMapfile(
   const buffer = stdin !== null ? lineBuffer(stdin) : null
   const existing = visibleArrays(session)[name]
   const arr: ShellArray = existing !== undefined && 'O' in flags ? [...existing] : []
-  const dec = new TextDecoder()
   let index = origin
   let stored = 0
   let seen = 0
@@ -113,7 +113,7 @@ export async function handleMapfile(
     if (!found && data.byteLength === 0) break
     seen++
     if (seen <= skip) continue
-    let text = dec.decode(data)
+    let text = decodeText(data)
     if (found && !strip) text += String.fromCharCode(delim)
     arraySet(arr, index, text)
     stored++

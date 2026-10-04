@@ -42,6 +42,7 @@ import {
 } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -56,7 +57,7 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
 function mergeConversionErrors(result: Result, errors: readonly string[]): Result {
   if (errors.length === 0) return result
   const [stream, io, node] = result
-  const extra = new TextEncoder().encode(errors.join('\n') + '\n')
+  const extra = encodeText(errors.join('\n') + '\n')
   const prior = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array(0)
   const merged = new Uint8Array(prior.length + extra.length)
   merged.set(prior, 0)
@@ -156,7 +157,7 @@ function plusRefusals(
   for (const { name } of staged ?? []) names.push(name)
   for (const name of names) {
     if (plusChars.has('r') && view.isReadonly(name)) {
-      const err = new TextEncoder().encode(`bash: ${cmd}: ${name}: readonly variable\n`)
+      const err = encodeText(`bash: ${cmd}: ${name}: readonly variable\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -225,7 +226,7 @@ async function stampAttrs(
     }
   } catch (err) {
     if (!(err instanceof PolicyDenied)) throw err
-    const denied = new TextEncoder().encode(`${err.message}\n`)
+    const denied = encodeText(`${err.message}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: denied }),
@@ -285,7 +286,7 @@ async function stampExport(
       await view.mark(name, VarAttr.Export, true)
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
-      const encoded = new TextEncoder().encode(`${err.message}\n`)
+      const encoded = encodeText(`${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: encoded }),
@@ -444,7 +445,7 @@ export async function executeDeclaration(
         ensureVarVisible(session, bare)
       } catch (err) {
         if (!(err instanceof PolicyDenied)) throw err
-        throw new DiscardSignal(new TextEncoder().encode(`${err.message}\n`))
+        throw new DiscardSignal(encodeText(`${err.message}\n`))
       }
       if (wantAssoc && Object.hasOwn(session.arrays, bare)) {
         conversionErrors.push(

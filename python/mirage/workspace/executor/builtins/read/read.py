@@ -18,6 +18,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator, line_buffer
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError
 from mirage.utils.errors import BadDescriptorError
 from mirage.workspace.executor.builtins.constants import TARGET_RE
@@ -83,14 +84,14 @@ async def _read_store(
     if status == "readonly":
         return readonly_refusal("read", base)
     if status == "denied":
-        err = f"bash: {base}: permission denied\n".encode()
+        err = encode_text(f"bash: {base}: permission denied\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
             ExecutionNode(command="read", exit_code=1, stderr=err),
         )
     if status != "ok":
-        err = f"bash: read: {var}: bad array subscript\n".encode()
+        err = encode_text(f"bash: read: {var}: bad array subscript\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
@@ -102,7 +103,7 @@ async def _read_store(
 def _read_refusal(
     msg: str,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    err = msg.encode()
+    err = encode_text(msg)
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -242,10 +243,10 @@ async def _read_raw(
     """
     if exact is not None:
         data, complete = await buffer.read_chars(exact, None)
-        return data.decode(errors="replace"), complete
+        return decode_text(data), complete
     if nchars is not None:
         data, complete = await buffer.read_chars(nchars, delim)
-        text = data.decode(errors="replace")
+        text = decode_text(data)
         while (
             not raw
             and complete
@@ -254,10 +255,10 @@ async def _read_raw(
             and len(text) < nchars
         ):
             more, complete = await buffer.read_chars(nchars - len(text), delim)
-            text += more.decode(errors="replace")
+            text += decode_text(more)
         return text, complete
     data, complete = await buffer.read_until(delim)
-    text = data.decode(errors="replace")
+    text = decode_text(data)
     while (
         not raw
         and complete
@@ -265,7 +266,7 @@ async def _read_raw(
         and (len(text) - len(text.rstrip("\\"))) % 2 == 1
     ):
         more, complete = await buffer.read_until(delim)
-        text += "\n" + more.decode(errors="replace")
+        text += "\n" + decode_text(more)
     return text, complete
 
 
@@ -316,17 +317,17 @@ async def handle_read(
             if parse.invalid.startswith("--")
             else f"-{parse.invalid}"
         )
-        err = f"bash: read: {token}: invalid option\n{READ_USAGE}".encode()
+        err = encode_text(f"bash: read: {token}: invalid option\n{READ_USAGE}")
         return (
             None,
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="read", exit_code=2),
         )
     if parse.needs_value is not None:
-        missing = (
+        missing = encode_text(
             f"bash: read: -{parse.needs_value}: option requires an argument\n"
             f"{READ_USAGE}"
-        ).encode()
+        )
         return (
             None,
             IOResult(exit_code=2, stderr=missing),
@@ -337,7 +338,7 @@ async def handle_read(
     delim = b"\n"
     if "d" in flags:
         text = str(flags["d"])
-        delim = text[:1].encode() if text else b"\0"
+        delim = encode_text(text[:1]) if text else b"\0"
     nchars: int | None = None
     exact: int | None = None
     # `-n` and `-N` are one setting in bash: the last one written wins.

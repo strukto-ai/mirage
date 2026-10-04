@@ -49,6 +49,7 @@ import { filenameMode } from '../../commands/builtin/generic/grep.ts'
 import { labelFlags, walksDescendantMounts } from '../../commands/builtin/generic/rg.ts'
 import { FlagView, flagOccurrences } from '../../commands/spec/flag_view.ts'
 import { specOf } from '../../commands/spec/builtins.ts'
+import { decodeText, encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -392,11 +393,11 @@ export async function filterUnderPrefixes(
   cmdName: string,
 ): Promise<Uint8Array> {
   const data = await materialize(stdout)
-  const text = new TextDecoder().decode(data)
+  const text = decodeText(data)
   if (cmdName === 'ls') {
     const grouped = dropShadowedLsGroups(text, descendantPrefixes)
     if (grouped.length === 0) return new Uint8Array()
-    return new TextEncoder().encode(grouped.join('\n') + '\n')
+    return encodeText(grouped.join('\n') + '\n')
   }
   const outLines: string[] = []
   for (const line of text.split('\n')) {
@@ -427,7 +428,7 @@ export async function filterUnderPrefixes(
     outLines.push(line)
   }
   if (outLines.length === 0) return new Uint8Array()
-  return new TextEncoder().encode(outLines.join('\n') + '\n')
+  return encodeText(outLines.join('\n') + '\n')
 }
 
 export async function fanOutTraversal(
@@ -473,7 +474,7 @@ export async function fanOutTraversal(
       if (!(err instanceof UsageError)) throw err
       io = new IOResult({
         exitCode: err.exitCode,
-        stderr: new TextEncoder().encode(`${err.message}\n`),
+        stderr: encodeText(`${err.message}\n`),
       })
     }
     io.producer = {
@@ -678,7 +679,7 @@ export async function fanOutTraversal(
       // single-mount path reports it once as the command's result (#452),
       // and so does the walk, rather than aborting the line.
       if (err instanceof UsageError) {
-        const usage = new TextEncoder().encode(`${err.message}\n`)
+        const usage = encodeText(`${err.message}\n`)
         return [
           null,
           new IOResult({ exitCode: err.exitCode, stderr: usage }),
@@ -763,9 +764,7 @@ export async function fanOutTraversal(
     }
     rows = findMatches.flat()
     if (!findMatchesComplete && rows.length > 0) {
-      allStdout.push(
-        new TextEncoder().encode(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n'),
-      )
+      allStdout.push(encodeText(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n'))
     }
   }
 
@@ -783,9 +782,7 @@ export async function fanOutTraversal(
               `du: cannot access '${respellOne(row, targetPath, raw)}': ${fsStrerror(err) ?? ''}\n`,
           )
           .join('')
-        mergedIo = await mergedIo.merge(
-          new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(notes) }),
-        )
+        mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: encodeText(notes) }))
         exitCodes.push(1)
         errored.push(true)
       }
@@ -801,7 +798,7 @@ export async function fanOutTraversal(
       )
       findMatches = [rows]
     }
-    combined = new TextEncoder().encode(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n')
+    combined = encodeText(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n')
   } else if (allStdout.length > 0) {
     // `ls -R` separates directory groups with a blank line, and a
     // per-mount block is one more group; grep and rg put `--` between one

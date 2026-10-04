@@ -22,6 +22,7 @@ from mirage.commands.builtin.utils.paths import (
     typed_spec,
 )
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import CapacityResult, CapacityState, PathSpec
 from mirage.utils.errors import (
     DotWalkError,
@@ -396,7 +397,9 @@ async def handle_df(
         cells.append(mount.prefix.rstrip("/") or "/")
         data.append(cells)
 
-    table = _render_table(header, data, show_type).encode() if data else None
+    table = (
+        encode_text(_render_table(header, data, show_type)) if data else None
+    )
     if errors:
         return result("df", out=table, exit_code=1, stderr="".join(errors))
     return ok("df", table)

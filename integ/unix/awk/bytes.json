@@ -143,6 +143,16 @@
         "stdout": " 63 61 66 45 0a e9 0a\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "awk_bytes_nested_commands",
+      "seq": 14470212,
+      "command": "( export LC_ALL=C; awk 'BEGIN{system(\"echo \\351\"); \"echo \\352\" | getline v; print v; print \"x\" | \"cat; echo \\353\"}' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " e9 0a ea 0a 78 0a eb 0a\n",
+        "stderr": ""
+      }
     }
   ]
 }

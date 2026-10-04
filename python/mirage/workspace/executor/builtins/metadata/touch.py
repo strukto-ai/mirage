@@ -21,6 +21,7 @@ from mirage.commands.spec.usage import invalid_argument_error, usage_hint
 from mirage.context import DEFAULT_UMASK
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.utils.errors import (
     FS_ERRORS,
@@ -78,7 +79,7 @@ async def handle_touch(
             message, code = invalid_argument_error(
                 "touch", "--time", time, TIME_GROUPS, kind=match.kind
             )
-            return fail("touch", message.decode(), code)
+            return fail("touch", decode_text(message), code)
         time = match.word
     stamp_text = fl.as_str("t")
     date_text = fl.as_str("date")

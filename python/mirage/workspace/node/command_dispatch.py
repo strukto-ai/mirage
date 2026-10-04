@@ -32,6 +32,7 @@ from mirage.io.types import materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import (
@@ -171,16 +172,16 @@ async def execute_command(
         mark = (session._parse_current, node.start_point[0])
         source = node.text or b""
         base = node.start_byte
-        rest = source[head_node.end_byte - base :].decode()
+        rest = decode_text(source[head_node.end_byte - base :])
         rewrite = alias_command_text(session, head, rest, mark)
         if rewrite is not None:
             rewritten, texts = rewrite
             at = head_node.start_byte - base
-            line = source[:at].decode() + rewritten
+            line = decode_text(source[:at]) + rewritten
             ast = parse(line)
             own: dict[str, tuple[int, int]] = {}
             for alias, text in texts:
-                own[alias] = (at, at + len(text.encode()))
+                own[alias] = (at, at + len(encode_text(text)))
                 at = own[alias][1]
             offending = find_syntax_error(
                 ast, expanding_aliases(session), own, source_offsets(line, ast)
@@ -266,14 +267,14 @@ async def execute_command(
                 ),
             )
         except PolicyDenied as exc:
-            err = f"bash: {exc.strerror}\n".encode()
+            err = encode_text(f"bash: {exc.strerror}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
                 ExecutionNode(command=name or k, exit_code=1, stderr=err),
             )
         if k in session.readonly_vars:
-            err = f"bash: {k}: readonly variable\n".encode()
+            err = encode_text(f"bash: {k}: readonly variable\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -412,7 +413,7 @@ async def _dispatch_command_body(
             clean_parts.append(
                 SimpleNamespace(
                     type=NT.WORD,
-                    text=path.encode(),
+                    text=encode_text(path),
                     children=[],
                     named_children=[],
                 )
@@ -696,7 +697,7 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
     """
     if not said:
         return lines
-    spoken = {t.strip() for t in said.decode(errors="replace").split("\n")}
+    spoken = {t.strip() for t in decode_text(said).split("\n")}
     return [line for line in lines if line.strip() not in spoken]
 
 
@@ -750,7 +751,7 @@ async def _route_argv(
     # Returning a clear error lets LLMs detect a capability gap instead
     # of treating it as a missing binary or a silent no-op.
     if name in UNSUPPORTED_BUILTINS:
-        err = f"mirage: unsupported builtin: {name}\n".encode()
+        err = encode_text(f"mirage: unsupported builtin: {name}\n")
         return (
             None,
             IOResult(exit_code=2, stderr=err),
@@ -871,7 +872,7 @@ async def _route_argv(
                             IOResult(),
                             ExecutionNode(command=name, exit_code=0),
                         )
-                    err = "".join(link_errors).encode()
+                    err = encode_text("".join(link_errors))
                     return (
                         None,
                         IOResult(exit_code=1, stderr=err),
@@ -884,7 +885,7 @@ async def _route_argv(
                 if early is not None:
                     return early
         except CycleError as exc:
-            err = f"{name}: {exc.filename}: {exc.strerror}\n".encode()
+            err = encode_text(f"{name}: {exc.filename}: {exc.strerror}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -949,12 +950,12 @@ async def _route_argv(
         # bookkeeping above so the operands the backend did remove
         # still shed their node meta.
         tail = io.stderr if isinstance(io.stderr, bytes) else b""
-        err = "".join(unsaid(link_errors, tail)).encode()
+        err = encode_text("".join(unsaid(link_errors, tail)))
         io.stderr = err + tail
         if io.exit_code == 0:
             io.exit_code = 1
         node_tail = exec_node.stderr or b""
-        node_err = "".join(unsaid(link_errors, node_tail)).encode()
+        node_err = encode_text("".join(unsaid(link_errors, node_tail)))
         exec_node.stderr = node_err + node_tail
         if exec_node.exit_code == 0:
             exec_node.exit_code = 1

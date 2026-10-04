@@ -20,6 +20,7 @@ from mirage.io import IOResult
 from mirage.ops.types import SessionView
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.backticks import split_backtick_region
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import (
     ArithError,
@@ -108,7 +109,7 @@ async def _expand_backtick_region(
                 offset + byte_offset(raw, segment.end),
             ),
         )
-        parts.append((await io.stdout_str()).rstrip("\n"))
+        parts.append(decode_text(await io.materialize_stdout()).rstrip("\n"))
         session._diagnostics.append(await io.materialize_stderr())
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
@@ -181,7 +182,7 @@ def arith_exit(expr: str, exc: ArithError) -> DiscardSignal:
         expr (str): the expression text handed to the evaluator.
         exc (ArithError): what the evaluator refused.
     """
-    return DiscardSignal(f"bash: {expr.strip()}: {exc}\n".encode())
+    return DiscardSignal(encode_text(f"bash: {expr.strip()}: {exc}\n"))
 
 
 async def expand_arith(
@@ -225,7 +226,7 @@ async def _arith_text(
     end = 0
     for child in ts_node.children:
         start = child.start_byte - ts_node.start_byte
-        parts.append(raw[end:start].decode("utf-8"))
+        parts.append(decode_text(raw[end:start]))
         end = child.end_byte - ts_node.start_byte
         if child.type in ARITH_DELIMITERS:
             continue
@@ -267,7 +268,7 @@ async def _arith_text(
                     child, session, execute_fn, call_stack, view=view
                 )
             )
-    parts.append(raw[end:].decode("utf-8"))
+    parts.append(decode_text(raw[end:]))
     return "".join(parts).strip()
 
 
@@ -577,7 +578,7 @@ async def _string_chunks(
     yielded = False
     document = getattr(node.parent, "heredoc", None)
     inside = (
-        document.body.decode()
+        decode_text(document.body)
         if document is not None
         else get_text(node)[1:-1]
     )
@@ -642,13 +643,18 @@ async def _substitution(
         await land_arith_writes(session, view, result.writes, reader)
         return str(result.value)
     source = getattr(ts_node, "source_text", ts_node.text) or b""
-    raw = source.decode()[len(prefix) :]
+    raw = decode_text(source)[len(prefix) :]
     if raw.startswith("`") and raw.endswith("`"):
         # Backtick regions are re-lexed here rather than trusted from
         # the grammar, which merges adjacent pairs (see
         # split_backtick_region).
         return await _expand_backtick_region(
-            raw, session, execute_fn, ts_node, len(prefix.encode()), call_stack
+            raw,
+            session,
+            execute_fn,
+            ts_node,
+            len(encode_text(prefix)),
+            call_stack,
         )
     if raw.startswith("$((") and raw.endswith("))"):
         # Inside heredoc bodies tree-sitter parses `$((expr))` as a
@@ -672,7 +678,7 @@ async def _substitution(
     # The substitution names its own node: the nested line's
     # commands stand under it, which is where the pass placed them.
     io = await child_line(session, execute_fn, inner, ts_node, call_stack)
-    text = (await io.stdout_str()).rstrip("\n")
+    text = decode_text(await io.materialize_stdout()).rstrip("\n")
     # Record the substitution's status: an assignment-only
     # statement whose value ran substitutions reports the last
     # one's status as its own (see assignment_status).

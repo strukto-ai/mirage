@@ -20,19 +20,20 @@ import { classifyBarePath } from '../expand/classify/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 export const NEWER = '-newer'
 export const NEWERMT = '-newermt'
 
 /** GNU's line for a `-newer` reference that does not exist. */
 export function missingReferenceLine(ref: string): Uint8Array {
-  return new TextEncoder().encode(`find: '${ref}': No such file or directory\n`)
+  return encodeText(`find: '${ref}': No such file or directory\n`)
 }
 
 /** GNU's line for a `-newer` reference that is a symlink loop, under a
  * policy that follows it. */
 export function loopReferenceLine(ref: string): Uint8Array {
-  return new TextEncoder().encode(`find: '${ref}': Too many levels of symbolic links\n`)
+  return encodeText(`find: '${ref}': Too many levels of symbolic links\n`)
 }
 
 /**

@@ -136,7 +136,7 @@ export async function handlePrintf(
     if (parsed === null) {
       // bash validates the name before formatting, so a bad name
       // suppresses the conversion errors the format would report.
-      const err = new TextEncoder().encode(`bash: printf: \`${target}': not a valid identifier\n`)
+      const err = encodeText(`bash: printf: \`${target}': not a valid identifier\n`)
       return [
         null,
         new IOResult({ exitCode: 2, stderr: err }),
@@ -153,7 +153,7 @@ export async function handlePrintf(
         // is bash's usage error rather than an empty one (bash 5.2.21:
         // `printf --` is exit 2 with the usage, where `printf -- --zzz` prints
         // `--zzz`).
-        const err = new TextEncoder().encode(USAGE)
+        const err = encodeText(USAGE)
         return [
           null,
           new IOResult({ exitCode: 2, stderr: err }),
@@ -167,7 +167,7 @@ export async function handlePrintf(
       // `--version`) takes the invalid-option path below (bash 5.2.37). The
       // page is the BUILTIN's, in bash's own words and layout, because that
       // is whose printf this is; see HELP.
-      const page = new TextEncoder().encode(HELP)
+      const page = encodeText(HELP)
       return [
         yieldBytes(page),
         new IOResult({ exitCode: 2 }),
@@ -197,7 +197,7 @@ export async function handlePrintf(
     args = args.slice(1)
   }
   if (args.length === 0 && isProgramInvocation(session)) {
-    const err = new TextEncoder().encode(`printf: missing operand\n${usageHint('printf')}\n`)
+    const err = encodeText(`printf: missing operand\n${usageHint('printf')}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -206,7 +206,7 @@ export async function handlePrintf(
   }
   if (args.length === 0) {
     // A format is required: bash's usage error, `printf -v x` too.
-    const err = new TextEncoder().encode(USAGE)
+    const err = encodeText(USAGE)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -216,7 +216,7 @@ export async function handlePrintf(
   const [output, rawMessages, failed, excess] = runPrintf(args[0] ?? '', args.slice(1))
   const voice = isProgramInvocation(session) ? '' : 'bash: '
   const messages = rawMessages.map((message) => voice + message)
-  const errBytes = messages.length > 0 ? new TextEncoder().encode(messages.join('')) : null
+  const errBytes = messages.length > 0 ? encodeText(messages.join('')) : null
   const exitCode = failed ? 1 : 0
   if (target !== null && parsed !== null) {
     const base = parsed[1] ?? ''
@@ -227,7 +227,7 @@ export async function handlePrintf(
       if (err instanceof ArithError) {
         // The target carries `-i` and the formatted text does not
         // evaluate; bash voices the evaluator after the builtin name.
-        const bad = new TextEncoder().encode(messages.join('') + `bash: printf: ${err.message}\n`)
+        const bad = encodeText(messages.join('') + `bash: printf: ${err.message}\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: bad }),
@@ -235,7 +235,7 @@ export async function handlePrintf(
         ]
       }
       if (!(err instanceof PolicyDenied)) throw err
-      const denied = new TextEncoder().encode(messages.join('') + `bash: ${err.message}\n`)
+      const denied = encodeText(messages.join('') + `bash: ${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: denied }),
@@ -249,7 +249,7 @@ export async function handlePrintf(
           : status === 'denied'
             ? `bash: ${base}: permission denied\n`
             : `bash: ${target}: bad array subscript\n`
-      const err = new TextEncoder().encode(messages.join('') + detail)
+      const err = encodeText(messages.join('') + detail)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -275,7 +275,7 @@ export async function handlePrintf(
       : ''
   const text = messages.join('') + warning
   if (text !== '') {
-    const stderr = new TextEncoder().encode(text)
+    const stderr = encodeText(text)
     return [
       out,
       new IOResult({ exitCode, stderr }),

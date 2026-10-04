@@ -12,6 +12,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.context import path_allowed
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec, StatFn
 from mirage.utils.errors import eloop, enoent, enotdir, fs_error_line
 from mirage.utils.key_prefix import mount_prefix_of
@@ -219,7 +220,7 @@ async def realpath(
         except OSError as exc:
             return None, IOResult(
                 exit_code=1,
-                stderr=fs_error_line("realpath", word, exc).encode(),
+                stderr=encode_text(fs_error_line("realpath", word, exc)),
             )
         if word != relative_to:
             to, base = (to, path) if _under(path, to or "/") else (None, to)
@@ -241,9 +242,10 @@ async def realpath(
         else:
             lines.append(_relative(path, to))
     end = "\0" if flags.zero else "\n"
-    out = "".join(line + end for line in lines).encode() or None
+    out = encode_text("".join(line + end for line in lines)) or None
     return out, IOResult(
-        stderr="".join(errors).encode() or None, exit_code=1 if failed else 0
+        stderr=encode_text("".join(errors)) or None,
+        exit_code=1 if failed else 0,
     )
 
 

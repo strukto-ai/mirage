@@ -66,6 +66,7 @@ import { expandTilde } from '../../utils/path.ts'
 import { OPERAND_DQUOTE_ESCAPES } from './constants.ts'
 import { chunksText, ifsJoiner, splatChunks, valuePiece } from './fields.ts'
 import { type Chunk, piece } from './types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 export type ExpandChild = (node: TSNodeLike, quoted: boolean) => Promise<Chunk[]>
 
@@ -133,7 +134,7 @@ function guardExpansionWrite(session: SessionState, ...names: string[]): void {
       ensureVarVisible(session, name)
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
-      throw new DiscardSignal(new TextEncoder().encode(`bash: ${err.message}\n`))
+      throw new DiscardSignal(encodeText(`bash: ${err.message}\n`))
     }
   }
 }
@@ -764,7 +765,7 @@ class ArithOperand {
       await landArithWrites(this.session, this.view, err.writes, reader)
       throw new ExitSignal(
         1,
-        new TextEncoder().encode(`bash: ${this.ref}: ${text.trim()}: ${err.message}\n`),
+        encodeText(`bash: ${this.ref}: ${text.trim()}: ${err.message}\n`),
         null,
         1,
       )
@@ -891,7 +892,7 @@ async function unsetError(
   const message =
     word !== '' ? word : p.op === '?' ? 'parameter not set' : 'parameter null or not set'
   const ref = p.subscript === null ? (p.varName ?? '') : `${p.varName ?? ''}[${p.subscript}]`
-  return new ExitSignal(127, new TextEncoder().encode(`bash: ${ref}: ${message}\n`), null, 1)
+  return new ExitSignal(127, encodeText(`bash: ${ref}: ${message}\n`), null, 1)
 }
 
 /** The refusal of a `:=` that names no single element. */
@@ -978,7 +979,7 @@ function valueOp(op: string, val: string, groups: string[]): string {
  * refusing the text ends the shell with 1, as `n=1+` does.
  */
 function writeRefusal(err: PolicyDenied | ArithError): ExitSignal {
-  const stderr = new TextEncoder().encode(`bash: ${err.message}\n`)
+  const stderr = encodeText(`bash: ${err.message}\n`)
   return err instanceof PolicyDenied
     ? new DiscardSignal(stderr)
     : new ExitSignal(1, stderr, null, 1)
@@ -1033,9 +1034,7 @@ export async function expansionWrite(
   }
   if (status === 'readonly') throw new ReadonlyVariableError(name)
   if (status !== 'ok') {
-    throw new DiscardSignal(
-      new TextEncoder().encode(`bash: ${name}[${key ?? ''}]: bad array subscript\n`),
-    )
+    throw new DiscardSignal(encodeText(`bash: ${name}[${key ?? ''}]: bad array subscript\n`))
   }
 }
 
@@ -1361,9 +1360,7 @@ async function expandSplat(
     }
     if (triggered && p.subscript !== null) throw badSubscript(p)
     if (triggered) {
-      throw new DiscardSignal(
-        new TextEncoder().encode(`bash: $${p.varName ?? ''}: cannot assign in this way\n`),
-      )
+      throw new DiscardSignal(encodeText(`bash: $${p.varName ?? ''}: cannot assign in this way\n`))
     }
   }
   if (star && quoted) return [valuePiece(items.join(joiner), true)]

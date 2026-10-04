@@ -24,6 +24,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import ShellArray, array_set
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.shared import fail, require_view
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -104,7 +105,7 @@ async def handle_mapfile(
     delim = b"\n"
     if "d" in flags:
         text = str(flags["d"])
-        delim = text[:1].encode() if text else b"\0"
+        delim = encode_text(text[:1]) if text else b"\0"
     limit = 0
     origin = 0
     skip = 0
@@ -166,9 +167,9 @@ async def handle_mapfile(
         seen += 1
         if seen <= skip:
             continue
-        text = data.decode(errors="replace")
+        text = decode_text(data)
         if found and not strip:
-            text += delim.decode(errors="replace")
+            text += decode_text(delim)
         array_set(arr, index, text)
         stored += 1
         if callback is not None and stored % quantum == 0:

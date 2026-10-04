@@ -37,6 +37,7 @@ from mirage.io.stream import SharedStdin, materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent, fs_strerror
@@ -161,7 +162,9 @@ async def _run_exec(
     head = words[0] if words else action.argv[0]
     missing, shadowed = await _head_state(head, registry, cwd, stat_path)
     if missing:
-        errors.append(f"find: '{head}': No such file or directory\n".encode())
+        errors.append(
+            encode_text(f"find: '{head}': No such file or directory\n")
+        )
         return False
     # A function or alias of the head's name is invisible to execvp, so
     # the line runs the program past it, as `command` does. The run is
@@ -235,7 +238,7 @@ async def _delete(
         why = (
             exc.strerror if isinstance(exc, OSError) else None
         ) or failure_text(exc)
-        errors.append(f"find: cannot delete '{path}': {why}\n".encode())
+        errors.append(encode_text(f"find: cannot delete '{path}': {why}\n"))
         return False
 
 
@@ -266,7 +269,7 @@ async def _row_stat(
     """
     path = ps.raw_path or ps.virtual
     if stat_path is None:
-        errors.append(f"find: '{path}': no stat door\n".encode())
+        errors.append(encode_text(f"find: '{path}': no stat door\n"))
         return None
     link = (
         ns.links.stat_at(ps.virtual)
@@ -283,11 +286,13 @@ async def _row_stat(
         why = (
             exc.strerror if isinstance(exc, OSError) else None
         ) or failure_text(exc)
-        errors.append(f"find: '{path}': {why}\n".encode())
+        errors.append(encode_text(f"find: '{path}': {why}\n"))
         return None
     if st is None:
         errors.append(
-            f"find: '{path}': {fs_strerror(FileNotFoundError())}\n".encode()
+            encode_text(
+                f"find: '{path}': {fs_strerror(FileNotFoundError())}\n"
+            )
         )
         return None
     return st
@@ -304,7 +309,7 @@ def _ls_row(ps: PathSpec, st: FileStat, identity: Identity | None) -> bytes:
     """
     path = ps.raw_path or ps.virtual
     row = format_find_ls(st.model_copy(update={"name": path}), identity)
-    return (row + "\n").encode()
+    return encode_text(row + "\n")
 
 
 async def _printf_row(
@@ -343,15 +348,17 @@ async def _printf_row(
         and links.stat_at(ps.virtual) is not None
         else None
     )
-    return expand_printf(
-        action.format,
-        ps.raw_path or ps.virtual,
-        start,
-        st,
-        warnings,
-        target,
-        identity,
-    ).encode()
+    return encode_text(
+        expand_printf(
+            action.format,
+            ps.raw_path or ps.virtual,
+            start,
+            st,
+            warnings,
+            target,
+            identity,
+        )
+    )
 
 
 def _reads_stat(action: FindAction) -> bool:
@@ -619,7 +626,7 @@ async def _apply_find_actions(
                     break
             else:
                 out.append(
-                    path.encode("utf-8")
+                    encode_text(path)
                     + (b"\x00" if action.kind == "print0" else b"\n")
                 )
     for position, action in enumerate(actions):
@@ -643,5 +650,5 @@ async def _apply_find_actions(
     body = b"".join(out)
     # GNU warns about a directive it cannot render once, ahead of anything
     # the actions report.
-    warned = [f"{line}\n".encode() for line in warnings]
+    warned = [encode_text(f"{line}\n") for line in warnings]
     return (body if body else None), b"".join(warned + errors), exit_code

@@ -25,6 +25,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { fail, operandText, parseLine, result } from '../shared.ts'
 import { operandAbs } from './ln.ts'
 import type { Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Any filesystem answer other than a target: a refusal (session view or
 // policy), EINVAL (not a link), ENOENT (absent, which is what a hidden
@@ -143,5 +144,5 @@ export async function handleReadlink(
   const stderr = errors.join('')
   if (lines.length === 0) return result('readlink', { exitCode, stderr })
   const text = lines.map((l) => l + end).join('')
-  return result('readlink', { out: new TextEncoder().encode(text), exitCode, stderr })
+  return result('readlink', { out: encodeText(text), exitCode, stderr })
 }

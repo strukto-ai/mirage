@@ -39,6 +39,7 @@ import { makeAbortError, mergeSignals } from '../../abort.ts'
 import type { Flags } from './types.ts'
 import { parseFlags } from './flags.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 export interface RunOnMountCtx {
   registry: MountRegistry
@@ -100,7 +101,7 @@ interface RunOnMountOpts {
 /** The 126 result for a command no runtime accepted. */
 function admissionDenial(cmdName: string): IOResult {
   const msg = `${cmdName}: no runtime accepted this line\n`
-  return new IOResult({ exitCode: 126, stderr: new TextEncoder().encode(msg) })
+  return new IOResult({ exitCode: 126, stderr: encodeText(msg) })
 }
 
 /**
@@ -203,13 +204,13 @@ export async function runOnMount(
       mount = await registry.resolveMount(cmdName, resolvePaths, session.cwd)
     } catch (err) {
       if (err instanceof MountCommandUnsupported) {
-        const errBytes = new TextEncoder().encode(`${err.message}\n`)
+        const errBytes = encodeText(`${err.message}\n`)
         return [null, new IOResult({ exitCode: 1, stderr: errBytes })]
       }
       throw err
     }
     if (mount === null) {
-      const errBytes = new TextEncoder().encode(`${cmdName}: command not found`)
+      const errBytes = encodeText(`${cmdName}: command not found`)
       return [null, new IOResult({ exitCode: 127, stderr: errBytes })]
     }
   }
@@ -294,7 +295,7 @@ export async function runOnMount(
         null,
         new IOResult({
           exitCode: err.exitCode,
-          stderr: new TextEncoder().encode(`${err.message}\n`),
+          stderr: encodeText(`${err.message}\n`),
         }),
       ]
     }

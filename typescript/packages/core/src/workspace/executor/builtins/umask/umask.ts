@@ -19,6 +19,7 @@ import { scanOptions } from '../getopt.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { fail } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 const USAGE = 'umask: usage: umask [-p] [-S] [mode]'
 
@@ -90,7 +91,7 @@ export function handleUmask(args: string[], session: SessionState): Result {
     let body = symbolic ? symbolicUmask(session.umask) : session.umask.toString(8).padStart(4, '0')
     if (reusable) body = `umask ${symbolic ? '-S ' : ''}${body}`
     return [
-      new TextEncoder().encode(body + '\n'),
+      encodeText(body + '\n'),
       new IOResult(),
       new ExecutionNode({ command: 'umask', exitCode: 0 }),
     ]

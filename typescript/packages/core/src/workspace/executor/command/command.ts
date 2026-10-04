@@ -87,6 +87,7 @@ import { findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
 import type { Result } from './types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 // One handler per JOB_BUILTINS member; lookup already narrowed the name.
 const JOB_HANDLERS: Record<
@@ -301,7 +302,7 @@ export async function handleCommand(
   // dispatch chokepoint) stay ahead of this so
   // protective refusals keep their specific messages.
   if (lookup(cmdName, session, registry) === Consumer.UNKNOWN) {
-    const errBytes = new TextEncoder().encode(`${cmdName}: command not found\n`)
+    const errBytes = encodeText(`${cmdName}: command not found\n`)
     return [
       null,
       new IOResult({ exitCode: 127, stderr: errBytes }),
@@ -399,7 +400,7 @@ export async function handleCommand(
       findExpr = parseFindExpression(findExprTokens)
     } catch (err) {
       if (err instanceof FindParseError) {
-        const errBytes = new TextEncoder().encode(`${err.message}\n`)
+        const errBytes = encodeText(`${err.message}\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -620,7 +621,7 @@ export async function handleCommand(
     mount = await registry.resolveMount(cmdName, routingScopes, session.cwd)
   } catch (err) {
     if (err instanceof MountCommandUnsupported) {
-      const errBytes = new TextEncoder().encode(`${err.message}\n`)
+      const errBytes = encodeText(`${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -630,7 +631,7 @@ export async function handleCommand(
     throw err
   }
   if (mount === null) {
-    const err = new TextEncoder().encode(`${cmdName}: command not found`)
+    const err = encodeText(`${cmdName}: command not found`)
     return [
       null,
       new IOResult({ exitCode: 127, stderr: err }),
@@ -670,7 +671,7 @@ export async function handleCommand(
   }
   const warnBytes =
     parseWarnings.length > 0
-      ? new TextEncoder().encode(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
+      ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       : null
 
   const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch)

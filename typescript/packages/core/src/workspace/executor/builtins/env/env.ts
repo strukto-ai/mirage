@@ -23,9 +23,10 @@ import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { ENV_HELP_HINT } from './constants.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 function envError(message: string): Result {
-  const err = new TextEncoder().encode(`${message}\n${ENV_HELP_HINT}`)
+  const err = encodeText(`${message}\n${ENV_HELP_HINT}`)
   return [
     null,
     new IOResult({ exitCode: 125, stderr: err }),

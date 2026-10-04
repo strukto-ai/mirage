@@ -46,6 +46,7 @@ import {
   STOP_SIGNALS,
 } from './constants.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 const SYNOPSIS = 'timeout [OPTION] DURATION COMMAND [ARG]...'
 
@@ -66,8 +67,6 @@ const SIGNUM_BOUND = SIGRTMAX
 
 const TIMED_OUT: unique symbol = Symbol('timed-out')
 
-const ENCODER = new TextEncoder()
-
 function refuse(stderr: Uint8Array, exitCode = 125): Result {
   return [
     null,
@@ -79,7 +78,7 @@ function refuse(stderr: Uint8Array, exitCode = 125): Result {
 function usageError(message: string): Result {
   // GNU timeout reserves 125 for its own failures; 124 means the
   // command was killed at the deadline.
-  return refuse(ENCODER.encode(`timeout: ${message}\n${usageHint('timeout')}\n`))
+  return refuse(encodeText(`timeout: ${message}\n${usageHint('timeout')}\n`))
 }
 
 /** GNU's report of a command timeout finds nothing to run for. */
@@ -260,14 +259,14 @@ export async function handleTimeout(
     if (name === 'help') {
       const text = renderHelp('timeout', SHELL_SPECS.timeout, [], undefined, SYNOPSIS)
       return [
-        yieldBytes(ENCODER.encode(text)),
+        yieldBytes(encodeText(text)),
         new IOResult(),
         new ExecutionNode({ command: 'timeout', exitCode: 0 }),
       ]
     }
     if (name === 'version') {
       return [
-        yieldBytes(ENCODER.encode(versionLine('timeout'))),
+        yieldBytes(encodeText(versionLine('timeout'))),
         new IOResult(),
         new ExecutionNode({ command: 'timeout', exitCode: 0 }),
       ]
@@ -296,13 +295,13 @@ export async function handleTimeout(
   if (parse.needsValue !== null) return refuse(...missingValueError('timeout', parse.needsValue))
   const [raw, ...command] = parse.operands
   if (raw === undefined || command.length === 0) {
-    return refuse(ENCODER.encode(`${usageHint('timeout')}\n`))
+    return refuse(encodeText(`${usageHint('timeout')}\n`))
   }
   const seconds = parseDuration(raw)
   if (seconds === null) return usageError(`invalid time interval '${quoteText(raw)}'`)
   const name = command[0] ?? ''
   if (registry !== null && !execs(name, session, registry)) {
-    return refuse(ENCODER.encode(timeoutMissing(name)), 127)
+    return refuse(encodeText(timeoutMissing(name)), 127)
   }
 
   const drained: Uint8Array[] = []
@@ -419,7 +418,7 @@ async function ended(
     : source instanceof Uint8Array
       ? source
       : new Uint8Array()
-  const tail = ENCODER.encode(said.join(''))
+  const tail = encodeText(said.join(''))
   const stderr = concat([head, tail])
   const partial = concat(drained)
   return [

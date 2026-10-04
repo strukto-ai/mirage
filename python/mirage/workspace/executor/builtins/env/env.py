@@ -18,6 +18,7 @@ from typing import Any
 from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.workspace.executor.builtins.env.constants import ENV_HELP_HINT
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -28,7 +29,7 @@ from mirage.workspace.types import ExecutionNode
 
 
 def _env_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
-    err = (message + "\n" + ENV_HELP_HINT).encode()
+    err = encode_text(message + "\n" + ENV_HELP_HINT)
     return (
         None,
         IOResult(exit_code=125, stderr=err),
@@ -132,7 +133,7 @@ async def handle_env(
         return _env_error("env: cannot specify --null (-0) with command")
     if not command:
         sep = "\0" if null else "\n"
-        out = "".join(f"{k}={v}{sep}" for k, v in base.items()).encode()
+        out = encode_text("".join(f"{k}={v}{sep}" for k, v in base.items()))
         return out, IOResult(), ExecutionNode(command="env", exit_code=0)
 
     # `env NAME=v cmd` runs the command with a replaced environment.

@@ -15,6 +15,7 @@
 import { Channel, type ConsoleChunk, type OwnedStream, type ReadResult } from './types.ts'
 import { RAMConsoleStore } from './ram.ts'
 import type { ConsoleStore } from './store.ts'
+import { encodeText } from '../bytes.ts'
 
 function join(chunks: ConsoleChunk[]): Uint8Array {
   const total = chunks.reduce((sum, c) => sum + c.data.byteLength, 0)
@@ -95,7 +96,7 @@ export class JobConsole {
     if (this.finishedFlag) return
     this.finishedFlag = true
     if (this.backing.closed) return
-    await this.backing.append(Channel.CONTROL, new TextEncoder().encode(outcome))
+    await this.backing.append(Channel.CONTROL, encodeText(outcome))
   }
 
   /** Read chunks at or after a cursor. */

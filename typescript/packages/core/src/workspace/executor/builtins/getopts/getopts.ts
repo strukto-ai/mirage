@@ -22,6 +22,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { isValidName, requireView } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { positionalParams, sessionView } from '../../../session/state.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 async function getoptsFinish(
   session: SessionState,
@@ -41,10 +42,10 @@ async function getoptsFinish(
   // OPTIND refuses here too.
   try {
     if (!isValidName(name)) {
-      stderr = new TextEncoder().encode(`bash: getopts: \`${name}': not a valid identifier\n`)
+      stderr = encodeText(`bash: getopts: \`${name}': not a valid identifier\n`)
       exitCode = 1
     } else if (session.readonlyVars.has(name)) {
-      stderr = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+      stderr = encodeText(`bash: ${name}: readonly variable\n`)
       exitCode = 1
     } else {
       await view.set(name, optValue)
@@ -54,10 +55,10 @@ async function getoptsFinish(
     await view.set('OPTIND', String(newOptind))
   } catch (err) {
     if (err instanceof ReadonlyVariableError) {
-      stderr = new TextEncoder().encode(`bash: ${err.varName}: readonly variable\n`)
+      stderr = encodeText(`bash: ${err.varName}: readonly variable\n`)
       exitCode = 1
     } else if (err instanceof PolicyDenied) {
-      stderr = new TextEncoder().encode(`${err.message}\n`)
+      stderr = encodeText(`${err.message}\n`)
       exitCode = 1
     } else {
       throw err
@@ -81,7 +82,7 @@ export async function handleGetopts(
   state: SessionView | null = null,
 ): Promise<Result> {
   if (args.length < 2) {
-    const err = new TextEncoder().encode('getopts: usage: getopts optstring name [arg ...]\n')
+    const err = encodeText('getopts: usage: getopts optstring name [arg ...]\n')
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -122,12 +123,11 @@ export async function handleGetopts(
   const idx = optstring.indexOf(letter)
   const isValid = letter !== ':' && idx !== -1
   const takesArg = isValid && idx + 1 < optstring.length && optstring[idx + 1] === ':'
-  const enc = new TextEncoder()
 
   if (!isValid) {
     const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
     if (silent) return getoptsFinish(session, view, name, '?', letter, afterOptind, afterPos, 0)
-    const err = verbose ? enc.encode(`bash: illegal option -- ${letter}\n`) : null
+    const err = verbose ? encodeText(`bash: illegal option -- ${letter}\n`) : null
     return getoptsFinish(session, view, name, '?', null, afterOptind, afterPos, 0, err)
   }
 
@@ -141,7 +141,7 @@ export async function handleGetopts(
     return getoptsFinish(session, view, name, letter, params[optind] ?? '', optind + 2, 0, 0)
   }
   if (silent) return getoptsFinish(session, view, name, ':', letter, optind + 1, 0, 0)
-  const err = verbose ? enc.encode(`bash: option requires an argument -- ${letter}\n`) : null
+  const err = verbose ? encodeText(`bash: option requires an argument -- ${letter}\n`) : null
   return getoptsFinish(session, view, name, '?', null, optind + 1, 0, 0, err)
 }
 
