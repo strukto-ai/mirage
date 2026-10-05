@@ -32,7 +32,6 @@ from mirage.commands.builtin.utils.links import typed_link
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.core.generic.find import walk_find
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import StatOverlay
@@ -123,10 +122,7 @@ async def cp(
             replace(ops, mkdir=None).require(Operation.MKDIR), accessor
         )
     strategy: NativeCopy | PrimitiveCopy
-    guarded = path_rules_active() or any(
-        hidden_paths_intersect(p.virtual) for p in paths
-    )
-    primitive = ops.copy is None or (guarded and mkdir is not None)
+    primitive = ops.copy is None
     if primitive and ops.write is not None:
         # A native copy moves a tree in one backend call and a native
         # find lists it, neither of which passes an entry through the

@@ -155,7 +155,8 @@ class Admitted:
             under a grant for: the one the door answered for this
             line, and the session's standing ones.
         scoped (bool): whether a path rule in force reads this
-            command's paths (``EntryGate.scoped``).
+            command's paths, or a pre_ops policy speaks for its session
+            (``EntryGate.scoped``).
     """
 
     rules: AdmissionRules | None
@@ -502,7 +503,10 @@ async def admit(
             tokens=ctx.tokens,
             judged=frozenset(_norm(p.virtual) for p in ctx.paths),
             granted=tuple(granted),
-            scoped=scopes_paths(rules, name),
+            scoped=scopes_paths(rules, name)
+            or await registry.policies.wants_for(
+                "pre_ops", session.session_id
+            ),
         )
     err, code = (
         render_pending(name, action)

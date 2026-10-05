@@ -19,7 +19,7 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.builtin.generic_bind.adapter import (
-    with_path_guards,
+    with_command_guards,
     with_policy_guard,
 )
 from mirage.commands.builtin.generic_bind.builders.du import (
@@ -30,6 +30,7 @@ from mirage.commands.builtin.generic_bind.builders.du import (
 from mirage.commands.builtin.github.io import IO, resolve_glob
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
+from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.core.github.tree import ensure_tree
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -87,6 +88,21 @@ async def _stat(
     return await IO.stat(accessor, path, index)
 
 
+def _walked(accessor: GitHubAccessor, path: PathSpec) -> bool:
+    """Whether du walks the subtree through the command guards rather
+    than summing the tree it already holds.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        path (PathSpec): the operand being sized.
+    """
+    return (
+        accessor.truncated
+        or path_rules_active()
+        or hidden_paths_intersect(path.virtual)
+    )
+
+
 async def _live_size(
     live: Callable[[], Awaitable[None]],
     accessor: GitHubAccessor,
@@ -96,10 +112,12 @@ async def _live_size(
 ) -> int:
     await live()
     # A truncated tree names only some paths and is never refetched, so it
-    # is walked folder by folder, as a backend with no tree would be.
-    if accessor.truncated:
+    # is walked folder by folder, as a backend with no tree would be; so
+    # is a subtree under a hide or a path rule, whose raw sum would count
+    # what the session cannot see and never report a refused directory.
+    if _walked(accessor, path):
         return await walk_size(
-            with_policy_guard(with_path_guards(IO)),
+            with_command_guards(with_policy_guard(IO)),
             accessor,
             index,
             budget,
@@ -117,9 +135,9 @@ async def _live_entries(
     path: PathSpec,
 ) -> tuple[list[tuple[str, int]], int]:
     await live()
-    if accessor.truncated:
+    if _walked(accessor, path):
         return await walk_entries(
-            with_policy_guard(with_path_guards(IO)),
+            with_command_guards(with_policy_guard(IO)),
             accessor,
             index,
             budget,

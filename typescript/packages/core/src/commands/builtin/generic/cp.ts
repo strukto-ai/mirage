@@ -1063,7 +1063,7 @@ export async function copyEntries(
       continue
     }
     wroteAny = true
-    if (opts.reads !== undefined) opts.reads[entrySpec.virtual] = data
+    if (opts.reads !== undefined) opts.reads[entrySpec.mountPath] = data
     if (opts.writes !== undefined) opts.writes[entryDstSpec.mountPath] = new Uint8Array()
     if (opts.lines !== undefined) opts.lines.push(transferLine(entrySpec, entryDstSpec, backup))
   }
@@ -1405,7 +1405,7 @@ export async function cpGeneric(
         )
         continue
       }
-      reads[src.virtual] = data
+      reads[src.mountPath] = data
     } else {
       try {
         await strategy.copy(src, target)

@@ -19,14 +19,14 @@ import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
-import { withPathGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
+import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
 import { ensureTree } from '../../../core/github/tree.ts'
 
 const resolveGlob = resolveGlobOf(IO)
-const WALK_IO = withPolicyGuard(withPathGuards(IO))
+const WALK_IO = withCommandGuards(withPolicyGuard(IO))
 
 async function find(
   accessor: GitHubAccessor,

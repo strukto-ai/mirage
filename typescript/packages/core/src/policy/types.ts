@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ScriptSource } from '../runtime/types.ts'
-import type { Limit, PathSpec, Producer, Refusal } from '../types.ts'
+import type { Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
 
 /**
  * The one registry question policy hooks may ask. MountRegistry
@@ -70,6 +70,9 @@ export interface Deny {
   policy?: string
   /** True when the chain refused on a policy's behalf because it raised. */
   failed?: boolean
+  /** The error a built-in refusal raises in place of EACCES (ENOENT for a
+   * hidden path, EROFS for a read-only one). */
+  error?: Error
 }
 
 /**
@@ -503,6 +506,13 @@ export interface OpsContext {
   prefix: string
   sessionId?: string
   issuer?: symbol
+  /** The owning mount's mode, judged by the mount-mode built-in; unset at
+   * a door that judges it itself. */
+  mode?: MountMode
+  /** The op creates the path. */
+  create?: boolean
+  /** The op mutates the path's descendants too. */
+  subtree?: boolean
 }
 
 /** One completed VFS op, as postOps hooks see it; a Deny suppresses

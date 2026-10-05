@@ -24,7 +24,6 @@ from mirage.commands.builtin.generic.du import (
 )
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.config import CommandOpts
-from mirage.context import path_rules_active
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import MountView
 from mirage.types import FileType, PathSpec
@@ -217,9 +216,9 @@ async def du(
     native = ops.du
     compute_size: ComputeSize
     compute_entries: ComputeEntries
-    # A native du sums the raw tree; under a path rule the walk is what
-    # reports a directory the rule refuses to open, where GNU does.
-    if native is None or path_rules_active():
+    # Hides and path rules turn the native du off upstream (scoped_io),
+    # so the walk is what reports a directory a rule refuses to open.
+    if native is None:
         compute_size = partial(walk_size, ops, accessor, opts.index, budget)
         compute_entries = partial(
             walk_entries, ops, accessor, opts.index, budget

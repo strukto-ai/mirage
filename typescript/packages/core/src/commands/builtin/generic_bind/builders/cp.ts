@@ -17,7 +17,6 @@ import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { StatOverlay } from '../../../../ops/types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { NativeCopy, PathSpec, PrimitiveCopy, StatFn } from '../../../../types.ts'
-import { hiddenPathsIntersect, pathRulesActive } from '../../../../context/session_context.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
 import { typedLink } from '../../utils/links.ts'
@@ -79,8 +78,7 @@ export const BUILDER: Builder = {
     // relay's own path), which is also where GNU's per-entry refusals
     // are worded.
     const { write } = ops
-    const guarded = pathRulesActive() || resolved.some((p) => hiddenPathsIntersect(p.virtual))
-    const primitive = ops.copy === undefined || (guarded && mkdir !== undefined)
+    const primitive = ops.copy === undefined
     const strategy: NativeCopy | PrimitiveCopy =
       primitive && write !== undefined
         ? {

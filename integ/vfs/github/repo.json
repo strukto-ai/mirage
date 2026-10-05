@@ -367,6 +367,118 @@
         "stdout": "",
         "stderr": "sed: -i not supported on this backend: Permission denied\n"
       }
+    },
+    {
+      "id": "github_repo_find_refuses_sealed_subtree",
+      "seq": 530920,
+      "targets": [
+        "github"
+      ],
+      "session": "sealed",
+      "command": "find /repo/src -path '/repo/src/cache/*'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: '/repo/src/cache': Permission denied\n"
+      }
+    },
+    {
+      "id": "github_repo_du_refuses_sealed_subtree",
+      "seq": 530921,
+      "targets": [
+        "github"
+      ],
+      "session": "sealed",
+      "command": "du -s /repo/src",
+      "expect": {
+        "exit": 1,
+        "stdout": "13135\t/repo/src\n",
+        "stderr": "du: cannot read directory '/repo/src/cache': Permission denied\n"
+      }
+    },
+    {
+      "id": "github_repo_grep_refuses_sealed_subtree",
+      "seq": 530922,
+      "targets": [
+        "github"
+      ],
+      "session": "sealed",
+      "command": "grep -r cache_step_1 /repo/src",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: /repo/src/cache: Permission denied\n"
+      }
+    },
+    {
+      "id": "github_repo_rg_refuses_sealed_subtree",
+      "seq": 530923,
+      "targets": [
+        "github"
+      ],
+      "session": "sealed",
+      "command": "rg cache_step_1 /repo/src",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: /repo/src/cache: Permission denied (os error 13)\n"
+      }
+    },
+    {
+      "id": "github_trunc_find_refuses_sealed_subtree",
+      "seq": 530924,
+      "targets": [
+        "github"
+      ],
+      "session": "sealed",
+      "command": "find /trunc/src -path '/trunc/src/cache/*'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: '/trunc/src/cache': Permission denied\n"
+      }
+    },
+    {
+      "id": "github_trunc_du_refuses_sealed_subtree",
+      "seq": 530925,
+      "targets": [
+        "github"
+      ],
+      "session": "sealed",
+      "command": "du -s /trunc/src",
+      "expect": {
+        "exit": 1,
+        "stdout": "13135\t/trunc/src\n",
+        "stderr": "du: cannot read directory '/trunc/src/cache': Permission denied\n"
+      }
+    },
+    {
+      "id": "github_trunc_grep_refuses_sealed_subtree",
+      "seq": 530926,
+      "targets": [
+        "github"
+      ],
+      "session": "sealed",
+      "command": "grep -r cache_step_1 /trunc/src",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: /trunc/src/cache: Permission denied\n"
+      }
+    },
+    {
+      "id": "github_trunc_rg_refuses_sealed_subtree",
+      "seq": 530927,
+      "targets": [
+        "github"
+      ],
+      "session": "sealed",
+      "command": "rg cache_step_1 /trunc/src",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: /trunc/src/cache: Permission denied (os error 13)\n"
+      }
     }
   ]
 }

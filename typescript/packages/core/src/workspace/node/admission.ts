@@ -426,6 +426,14 @@ export async function admit(
   // Paths no policy is shown, as `gate` takes them.
   unread: ReadonlySet<string> = new Set(),
 ): Promise<Refused | Admitted> {
+  // Asked before the gate so the answer is in by the time the gate's is:
+  // admission takes no extra turns, and background jobs launched in order
+  // still finish in order.
+  const opsJudged = registry.policies.wantsFor('preOps', session.sessionId)
+  // A refused command never awaits it, so a failure is reported here.
+  opsJudged.catch((err: unknown) => {
+    console.warn(`preOps policy query failed for ${name}: ${String(err)}`)
+  })
   const gated = await gate(
     name,
     args,
@@ -464,7 +472,7 @@ export async function admit(
       tokens: ctx.tokens ?? [],
       judged: new Set(ctx.paths.map((p) => norm(p.virtual))),
       granted,
-      scoped: scopesPaths(rules, name),
+      scoped: scopesPaths(rules, name) || (await opsJudged),
     })
   }
   const [stderr, exitCode] =

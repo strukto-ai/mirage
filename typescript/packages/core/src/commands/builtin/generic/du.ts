@@ -519,9 +519,13 @@ async function duOne(
       pathAllowed(d) &&
       !roots.some((r) => norm(d) === r || norm(d).startsWith(r + '/')),
   )
-  if (raw.length === 0 && leaves.length === 0 && dirs.length === 0) {
+  const walked = (directories?.() ?? []).some((d) => norm(d) === rootKey)
+  if (raw.length === 0 && leaves.length === 0 && dirs.length === 0 && !walked) {
     // A backend that can only produce a size degrades to one total; it
-    // cannot enumerate, so shadowed keys cannot be excluded either.
+    // cannot enumerate, so shadowed keys cannot be excluded either. A
+    // walk that opened the operand already said all it can: an empty
+    // directory, or one a rule refused, which a second walk would
+    // report twice.
     const fallback = await computeSize(path)
     return [
       [line(fallback, flags.h, label)],

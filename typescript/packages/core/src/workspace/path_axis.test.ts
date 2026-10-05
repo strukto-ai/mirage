@@ -17,7 +17,7 @@ import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
-import type { Action, OpsContext, Policy } from '../policy/index.ts'
+import type { Action, OpsContext, OpsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Session } from './workspace/handle.ts'
@@ -30,6 +30,13 @@ class DenyRemnantUnlink implements Policy {
       return { kind: 'deny', reason: 'protected' }
     }
     return null
+  }
+}
+
+/** Refuse every unlink once it has run. */
+class DenyUnlinkAfter implements Policy {
+  postOps(ctx: OpsResultContext): Action | null {
+    return ctx.op === 'unlink' ? { kind: 'deny', reason: 'too late' } : null
   }
 }
 
@@ -693,6 +700,34 @@ describe('the ops door against hides', () => {
     })
     const kept = await ws.shell('cat /a/d/sec/k')
     expect(stdoutStr(kept)).toBe('k\n')
+  })
+
+  it('a postOps deny does not strand the cascade', async () => {
+    // A deletion is done by the time postOps could speak, so the cascade
+    // never asks it: the rmdir takes the hidden remnant and the directory,
+    // rather than refusing with a child already gone.
+    const parser = await getTestParser()
+    const a = new RAMVFS()
+    const registry = new OpsRegistry()
+    registry.registerVfs(a)
+    const ws = new Workspace(
+      { '/a': [a, MountMode.WRITE] as const },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParser: parser,
+        policies: [new DenyUnlinkAfter()],
+      },
+    )
+    open.push(ws)
+    const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+    expect(io.exitCode).toBe(0)
+    const sess = ws.createSession('rev', {
+      profile: parseSessionProfile({ paths: { hide: ['/a/d/sec'] } }),
+    })
+    await runWithSession(sess, () => ws.dispatch('rmdir', '/a/d'))
+    const gone = await ws.shell('test -e /a/d')
+    expect(gone.exitCode).toBe(1)
   })
 
   it('takes hidden namespace links with the removed directory', async () => {

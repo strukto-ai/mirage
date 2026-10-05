@@ -20,7 +20,7 @@ import { eacces, enoent } from '../../../../utils/errors.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { EntryGate } from '../../../../types.ts'
-import type { CommandIO } from '../adapter.ts'
+import { scopedIo, type CommandIO } from '../adapter.ts'
 import type { MountView } from '../../../../ops/types.ts'
 
 const DEC = new TextDecoder()
@@ -92,9 +92,9 @@ describe('du walk fallback (no native du op)', () => {
 })
 
 // A gate that scopes the line but refuses nothing, which is what a `du`
-// run under any path rule looks like: `pathRulesActive()` is true, so the
-// builder sets the native du op aside and walks through the guarded
-// readdir instead (adapter.ts's `withRuleGuard` doc states that trade).
+// run under any path rule looks like: the gate is scoped, so `scopedIo`
+// sets the native du op aside and the builder walks through the guarded
+// readdir instead.
 const SCOPED_GATE: EntryGate = {
   scoped: true,
   granted: [],
@@ -121,7 +121,7 @@ async function runScoped(
   paths: PathSpec[],
 ): Promise<[Uint8Array, { exitCode: number; stderr: Uint8Array | null }]> {
   const result = await runWithAdmission(SCOPED_GATE, async () =>
-    BUILDER.fn(ops, ACCESSOR, paths, [], {
+    BUILDER.fn(scopedIo(ops, paths, ''), ACCESSOR, paths, [], {
       stdin: null,
       flags: {},
       filetypeFns: null,
