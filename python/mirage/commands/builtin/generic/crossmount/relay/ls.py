@@ -22,14 +22,17 @@ from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic_bind.adapter import overlaid_stat
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.spec.types import FlagValue
-from mirage.ops.types import NamespaceView, SessionView
+from mirage.ops.types import LinkView, NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import gnu_basename
 
 
 async def relayed_readdir(
-    dispatch: DispatchFn, path: PathSpec, index: IndexCacheStore | None
+    dispatch: DispatchFn,
+    links: LinkView | None,
+    path: PathSpec,
+    index: IndexCacheStore | None,
 ) -> list[str]:
     """Read one directory on the mount that owns it.
 
@@ -37,13 +40,20 @@ async def relayed_readdir(
     one mount, so the caller's index cannot answer for the mount this
     path routes to; the relayed op consults its own mount's index.
 
+    The namespace's links are left out, as a backend's listing never
+    holds one: ls merges them from ``links`` and renders them unfollowed,
+    where a listed one would be statted through to its target.
+
     Args:
         dispatch (DispatchFn): Workspace operation dispatcher.
+        links (LinkView | None): The namespace's symlinks.
         path (PathSpec): Directory addressed by its full virtual path.
         index (IndexCacheStore | None): Unused, see above.
     """
     names: list[str] = await relay(dispatch, "readdir", path)
-    return names
+    if links is None:
+        return names
+    return [n for n in names if links.stat_at(n.rstrip("/")) is None]
 
 
 async def relayed_stat(
@@ -109,11 +119,12 @@ async def run_ls(
     overlay = ns.stat_overlay if ns is not None else None
     if overlay is not None:
         stat_fn = p(overlaid_stat, stat_fn, overlay)
+    links = ns.links if ns is not None else None
     return await generic_ls(
         flat_scopes(scopes),
-        readdir=p(relayed_readdir, dispatch),
+        readdir=p(relayed_readdir, dispatch, links),
         stat=stat_fn,
-        links=ns.links if ns is not None else None,
+        links=links,
         child_mounts=(ns.child_mounts if ns is not None else None),
         identity=identity_from(ns, session_view),
         **ls_options(flag_kwargs),

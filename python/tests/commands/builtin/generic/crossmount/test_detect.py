@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import SimpleNamespace
+
 import pytest
 
 from mirage.commands.builtin.generic.crossmount.constants import (
@@ -21,6 +23,7 @@ from mirage.commands.builtin.generic.crossmount.constants import (
     STREAM_COMMANDS,
 )
 from mirage.commands.builtin.generic.crossmount.detect import (
+    aggregate_for,
     is_cross_mount,
     strategy_for,
 )
@@ -29,18 +32,23 @@ from mirage.types import PathSpec
 
 
 class _Mount:
-    def __init__(self, prefix: str):
+    def __init__(self, prefix: str, handlers: dict | None = None):
         self.prefix = prefix
+        self._handlers = handlers or {}
+
+    def resolve_command(self, name: str):
+        return self._handlers.get(name)
 
 
 class _Registry:
-    def __init__(self, prefixes: dict[str, str]):
+    def __init__(self, prefixes: dict[str, str], handlers=None):
         self._prefixes = prefixes
+        self._handlers = handlers or {}
 
     def try_mount_for(self, virtual: str) -> _Mount | None:
         for prefix in self._prefixes.values():
             if virtual.startswith(prefix.rstrip("/") + "/"):
-                return _Mount(prefix)
+                return _Mount(prefix, self._handlers.get(prefix))
         return None
 
     def descendant_mounts(self, virtual: str) -> list[_Mount]:
@@ -112,8 +120,45 @@ def test_is_cross_mount_false_for_single_mount_or_unknown_command():
     same = [_scope("/a/x.txt"), _scope("/a/y.txt")]
     assert not is_cross_mount("sort", same, registry)
     spanning = [_scope("/a/x.txt"), _scope("/b/y.txt")]
-    assert not is_cross_mount("uniq", spanning, registry)
+    assert not is_cross_mount("nocross", spanning, registry)
     assert not is_cross_mount("sort", spanning[:1], registry)
+
+
+def test_every_generic_builder_crosses_mounts():
+    registry = _Registry({"a": "/a/", "b": "/b/"})
+    spanning = [_scope("/a/x.txt"), _scope("/b/y.txt")]
+    assert is_cross_mount("uniq", spanning, registry)
+    assert strategy_for("uniq") is Strategy.RELAY
+
+
+async def _merge(parts):
+    return b"".join(data for _, data in parts)
+
+
+async def _other(parts):
+    return b""
+
+
+def test_aggregate_for_takes_one_shared_reducer_only():
+    shared = SimpleNamespace(aggregate=_merge)
+    spanning = [_scope("/a/x.txt"), _scope("/b/y.txt")]
+    both = _Registry(
+        {"a": "/a/", "b": "/b/"},
+        {"/a/": {"custom": shared}, "/b/": {"custom": shared}},
+    )
+    assert aggregate_for("custom", spanning, both) is _merge
+    assert is_cross_mount("custom", spanning, both)
+    mixed = _Registry(
+        {"a": "/a/", "b": "/b/"},
+        {
+            "/a/": {"custom": shared},
+            "/b/": {"custom": SimpleNamespace(aggregate=_other)},
+        },
+    )
+    assert aggregate_for("custom", spanning, mixed) is None
+    one_side = _Registry({"a": "/a/", "b": "/b/"}, {"/a/": {"custom": shared}})
+    assert aggregate_for("custom", spanning, one_side) is None
+    assert aggregate_for("sort", spanning, both) is None
 
 
 def test_cp_crosses_for_a_source_holding_a_mount_not_the_destination():

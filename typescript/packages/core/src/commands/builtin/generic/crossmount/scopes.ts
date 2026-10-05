@@ -1,0 +1,64 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import type { OwnedScope } from './types.ts'
+import type { NamespaceView } from '../../../../ops/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
+import { isFsError } from '../../../../utils/errors.ts'
+import { respellOne } from '../../../../utils/path.ts'
+import { isStdin } from '../../utils/stream.ts'
+
+/** Lazily partition an operand into maximal scopes with one owner.
+ * Only directories containing mount boundaries are expanded. Listings
+ * come through the dispatcher so hidden and shadowed entries stay hidden. */
+export async function* ownedScopes(
+  path: PathSpec,
+  dispatch: DispatchFn,
+  ns: NamespaceView | undefined,
+  admit: (path: PathSpec, stat: FileStat) => boolean,
+  walked = false,
+): AsyncIterable<OwnedScope> {
+  if (path.walkError !== null || isStdin(path)) {
+    yield { path, walked }
+    return
+  }
+  let entries: string[]
+  try {
+    const [info] = await dispatch('stat', path, [], { nofollow: true })
+    const stat = info as FileStat
+    if (walked && !admit(path, stat)) return
+    const boundaries = ns?.mounts?.descendants(path.virtual) ?? []
+    if (stat.type !== FileType.DIRECTORY || boundaries.length === 0) {
+      yield { path, walked, stat }
+      return
+    }
+    entries = (await dispatch('readdir', path))[0] as string[]
+  } catch (error) {
+    if (!isFsError(error)) throw error
+    yield { path, walked, error: error as Error }
+    return
+  }
+  for (const entry of entries) {
+    const virtual =
+      path.virtual.replace(/\/$/, '') + '/' + (entry.replace(/\/$/, '').split('/').at(-1) ?? '')
+    const child = new PathSpec({
+      virtual,
+      directory: virtual,
+      vfsPath: virtual.replace(/^\/+|\/+$/g, ''),
+      rawPath: respellOne(virtual, path.virtual, path.rawPath),
+    })
+    yield* ownedScopes(child, dispatch, ns, admit, true)
+  }
+}

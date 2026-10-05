@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.builtin.generic_bind import (
     CommandIO,
     make_generic_commands,
@@ -147,6 +148,12 @@ class BaseVFS:
     # mount's config, so an instance sets it; None pins nothing.
     listings_pin: str | None = None
 
+    # How many entries a du walk of this mount visits before it stops and
+    # reports a partial answer, None for no cap: the command table's own
+    # ``max_du_entries``, read here by a walk that crosses mounts through
+    # the dispatcher, which charges each entry to the mount serving it.
+    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
+
     _closed: bool = False
 
     # Whether this driver was built from a table, and the two tables
@@ -250,6 +257,7 @@ class BaseVFS:
             raise ValueError("a VFS built from a table needs a name")
         self._from_table = True
         table = io.to_command_io() if isinstance(io, VFSAdapter) else io
+        self.max_du_entries = table.max_du_entries
         self._commands_table = registered_commands(
             [
                 *make_generic_commands(self.name, table, overrides=overrides),

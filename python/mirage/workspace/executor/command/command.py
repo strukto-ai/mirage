@@ -22,7 +22,10 @@ from mirage.commands.builtin.generic.crossmount import (
     handle_cross_mount,
     is_cross_mount,
 )
-from mirage.commands.builtin.generic.crossmount.detect import strategy_for
+from mirage.commands.builtin.generic.crossmount.detect import (
+    aggregate_for,
+    strategy_for,
+)
 from mirage.commands.builtin.generic.crossmount.types import Strategy
 from mirage.commands.builtin.generic.program import (
     PROGRAM_FILE_COMMANDS,
@@ -466,7 +469,9 @@ async def handle_command(
         # word mean two things by mount count -- `cat --vers=x /ram/a` was
         # `option '--version' doesn't allow an argument` and the two-mount
         # line was `unrecognized option '--vers=x'`.
-        shared_spec = SPECS.get(cmd_name)
+        shared_spec = SPECS.get(cmd_name) or (
+            cmd_mount.spec_for(cmd_name) if cmd_mount else None
+        )
         cross_parsed = prepared or parse_flags(
             parts[1:],
             registered_spec(cmd_name, shared_spec)
@@ -546,7 +551,7 @@ async def handle_command(
             registry,
             session.cwd,
             cross_ns,
-            cross_stat,
+            session_view(session, registry.policies),
             dispatch=dispatch,
         )
         stdout, io = await handle_cross_mount(
@@ -562,6 +567,7 @@ async def handle_command(
             session_view=session_view(session, registry.policies),
             cwd=session.cwd,
             argv=spelled_words(parts[1:]),
+            aggregate=aggregate_for(cmd_name, cross_scopes, registry),
         )
         if cmd_name == "find":
             stdout = await _finish_find(
@@ -709,8 +715,18 @@ async def handle_command(
             cmd_str,
             stdin,
             ns=single_ns,
-            stat_path=single_stat,
+            session_view=session_view(session, registry.policies),
             dispatch=dispatch,
+            native=functools.partial(
+                run_on_mount,
+                registry,
+                session,
+                dispatch,
+                namespace,
+                routing_decision=routing_decision,
+                argv=spelled_words(parts[1:]),
+                execute_fn=execute_fn,
+            ),
         )
         if cmd_name == "find":
             stdout = await _finish_find(

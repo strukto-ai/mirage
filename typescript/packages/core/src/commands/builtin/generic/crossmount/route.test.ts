@@ -37,7 +37,7 @@ describe('isCrossMount', () => {
 
   it.each([
     ['cp', ['/ram/a', '/disk/b'], true],
-    ['uniq', ['/ram/a', '/disk/b'], false],
+    ['unknown', ['/ram/a', '/disk/b'], false],
     ['cp', ['/ram/a', '/ram/b'], false],
     ['cp', ['/ram/a'], false],
   ])('%s %j → %s', (cmd, paths, expected) => {

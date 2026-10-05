@@ -33,19 +33,22 @@ async def with_timeout(
     stream = ensure_stream(src)
     start = time.monotonic()
     iterator = stream.__aiter__()
-    while True:
-        remaining = seconds - (time.monotonic() - start)
-        if remaining <= 0:
-            raise CommandTimeoutError(command, seconds)
-        try:
-            chunk = await asyncio.wait_for(
-                iterator.__anext__(), timeout=remaining
-            )
-        except StopAsyncIteration:
-            return
-        except asyncio.TimeoutError as exc:
-            raise CommandTimeoutError(command, seconds) from exc
-        yield chunk
+    try:
+        while True:
+            remaining = seconds - (time.monotonic() - start)
+            if remaining <= 0:
+                raise CommandTimeoutError(command, seconds)
+            try:
+                chunk = await asyncio.wait_for(
+                    iterator.__anext__(), timeout=remaining
+                )
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError as exc:
+                raise CommandTimeoutError(command, seconds) from exc
+            yield chunk
+    finally:
+        await close_quietly(stream)
 
 
 def maybe_with_timeout(

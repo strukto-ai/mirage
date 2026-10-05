@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.cache.context import active_cache_manager
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin import find_eval
 from mirage.commands.builtin.find_parse import (
     parse_depth,
@@ -879,6 +880,9 @@ async def find_walk_generic(
         stat (Callable): Bound overlaid stat called as ``stat(p, index)``.
     """
     parsed = parse_flags(opts.flags)
+    flags = FlagView(opts.flags, spec=SPECS["find"])
+    bounded = flags.as_bool("xdev") or flags.as_bool("mount")
+    mounts = opts.ns.mounts if opts.ns else None
     stat_path = opts.stat_path
     links = opts.ns.links if opts.ns is not None else None
     searches = (
@@ -925,9 +929,22 @@ async def find_walk_generic(
             else:
                 unreadable: list[str] = []
                 unstatted: dict[str, Exception] = {}
+
+                async def read_directory(
+                    path: PathSpec, index: IndexCacheStore | None
+                ) -> list[str]:
+                    if (
+                        bounded
+                        and mounts is not None
+                        and mounts.root_of(path.virtual)
+                        != mounts.root_of(search.virtual)
+                    ):
+                        return []
+                    return await readdir(path, index)
+
                 walked = await walk_find(
                     search,
-                    readdir=readdir,
+                    readdir=read_directory,
                     stat=stat,
                     index=opts.index,
                     args=args,

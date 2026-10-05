@@ -1,0 +1,855 @@
+{
+  "cases": [
+    {
+      "id": "xm_native_seed",
+      "seq": 961000,
+      "targets": [
+        "command-service"
+      ],
+      "command": "mkdir -p /a/keep /shadow/inner/deep; printf 'hit\\nmiss\\nhit\\n' > /a/top.txt; printf 'none\\n' > /a/keep/k.txt; printf 'hit child\\n' > /a/inner/i.txt; printf 'hit deep\\n' > /a/inner/deep/d.txt; printf 'miss\\nhit b\\n' > /b/b.txt; printf 'hit ghost\\n' > /ghost/deep/g.txt; printf 'hit shadow\\n' > /shadow/inner/shadow.txt; printf 'hit shadow deep\\n' > /shadow/inner/deep/shadow.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_single_handler",
+      "seq": 961001,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -H hit /a/top.txt; calls /a",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt:hit\n/a/top.txt:hit\ngrep /a/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_operand_order",
+      "seq": 961002,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -n hit /a/top.txt /b/b.txt /a/top.txt; calls /a; calls /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt:1:hit\n/a/top.txt:3:hit\n/b/b.txt:2:hit b\n/a/top.txt:1:hit\n/a/top.txt:3:hit\ngrep /a/top.txt\ngrep /a/top.txt\ngrep /b/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_nested_ownership",
+      "seq": 961003,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r hit /a; calls /a; calls /a/inner; calls /a/inner/deep",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/a/inner/deep/d.txt:hit deep\n/a/top.txt:hit\n/a/top.txt:hit\ngrep /a/keep\ngrep /a/top.txt\ngrep /a/inner/i.txt\ngrep /a/inner/deep\n",
+        "stderr": ""
+      },
+      "note": "Dispatcher reads are refused by this VFS. Parent storage contains shadowed matches at both child mount roots; delegation must exclude them before running the registered handler."
+    },
+    {
+      "id": "xm_native_nested_and_flat",
+      "seq": 961004,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r hit /a /b /a",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/a/inner/deep/d.txt:hit deep\n/a/top.txt:hit\n/a/top.txt:hit\n/b/b.txt:hit b\n/a/inner/i.txt:hit child\n/a/inner/deep/d.txt:hit deep\n/a/top.txt:hit\n/a/top.txt:hit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_overlapping_operands",
+      "seq": 961005,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r hit /a/inner /a/inner/deep",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/a/inner/deep/d.txt:hit deep\n/a/inner/deep/d.txt:hit deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_namespace_ancestor",
+      "seq": 961006,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r hit /ghost; calls /ghost/deep",
+      "expect": {
+        "exit": 0,
+        "stdout": "/ghost/deep/g.txt:hit ghost\ngrep /ghost/deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_quiet_lazy",
+      "seq": 961007,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -rq hit /a /b; echo rc=$?; calls /a; calls /a/inner; calls /a/inner/deep; calls /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\ngrep /a/inner/i.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_quiet_error_then_match",
+      "seq": 961008,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -q hit /a/absent /b/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": "grep: /a/absent: No such file or directory\n"
+      }
+    },
+    {
+      "id": "xm_native_quiet_match_then_error",
+      "seq": 961009,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -q hit /a/top.txt /b/absent; echo rc=$?; calls /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_error_and_match",
+      "seq": 961010,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep hit /a/absent /b/b.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/b/b.txt:hit b\n",
+        "stderr": "grep: /a/absent: No such file or directory\n"
+      }
+    },
+    {
+      "id": "xm_native_no_matches",
+      "seq": 961011,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep absent /a/top.txt /b/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_missing_command_pattern",
+      "seq": 961012,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -e \"[\" /a/top.txt /b/b.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: Invalid regular expression\n"
+      }
+    },
+    {
+      "id": "xm_native_count_per_file",
+      "seq": 961013,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -rc hit /a /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:1\n/a/inner/deep/d.txt:1\n/a/keep/k.txt:0\n/a/top.txt:2\n/b/b.txt:1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_limit_per_file",
+      "seq": 961014,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -rm1 hit /a /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/a/inner/deep/d.txt:hit deep\n/a/top.txt:hit\n/b/b.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_invert",
+      "seq": 961015,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -rv hit /a /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/keep/k.txt:none\n/a/top.txt:miss\n/b/b.txt:miss\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_files_without_match",
+      "seq": 961016,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -rL hit /a /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/keep/k.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_files_with_match",
+      "seq": 961017,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -rl hit /a /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt\n/a/inner/deep/d.txt\n/a/top.txt\n/b/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_include_exclude",
+      "seq": 961018,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r --include=\"*.txt\" --exclude=\"i.txt\" --exclude-dir=deep hit /a",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt:hit\n/a/top.txt:hit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_exclude_mount",
+      "seq": 961019,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r --exclude-dir=inner hit /a; calls /a/inner; calls /a/inner/deep",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt:hit\n/a/top.txt:hit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_exclude_all",
+      "seq": 961020,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r --include=\"*.never\" hit /a",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_filename_flag_order",
+      "seq": 961021,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -hH hit /a/top.txt /b/b.txt; grep -Hh hit /a/top.txt /b/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt:hit\n/a/top.txt:hit\n/b/b.txt:hit b\nhit\nhit\nhit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_context",
+      "seq": 961022,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -A1 hit /a/top.txt /b/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt:hit\n/a/top.txt-miss\n/a/top.txt:hit\n--\n/b/b.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_patterns_stdin",
+      "seq": 961023,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; printf 'hit\\n' | grep -f - /a/top.txt /b/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt:hit\n/a/top.txt:hit\n/b/b.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_empty_patterns",
+      "seq": 961024,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; printf '' | grep -f - /a/top.txt /b/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_input_cursor",
+      "seq": 961025,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; printf 'hit input\\n' | grep -H hit - /a/top.txt - /b/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "(standard input):hit input\n/a/top.txt:hit\n/a/top.txt:hit\n/b/b.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_hidden_nested",
+      "seq": 961026,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r hit /a",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/a/top.txt:hit\n/a/top.txt:hit\n",
+        "stderr": ""
+      },
+      "session": "blind",
+      "explain_blind": true
+    },
+    {
+      "id": "xm_native_relative",
+      "seq": 961027,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; cd /a && grep -r hit inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "inner/i.txt:hit child\ninner/deep/d.txt:hit deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_newline_names",
+      "seq": 961028,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; printf 'hit colon\\n' > '/a/name:colon.txt'; printf 'hit newline\\n' > '/b/name\nnewline.txt'; grep -l hit '/a/name:colon.txt' '/b/name\nnewline.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/name:colon.txt\n/b/name\nnewline.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_find_batch_repeated",
+      "seq": 961029,
+      "targets": [
+        "command-service"
+      ],
+      "command": "find /a /b /a -name top.txt -type f -exec echo batch {} +",
+      "expect": {
+        "exit": 0,
+        "stdout": "batch /a/top.txt /a/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_find_nested_depth",
+      "seq": 961030,
+      "targets": [
+        "command-service"
+      ],
+      "command": "find /a/inner -maxdepth 1 -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_find_size_rounding",
+      "seq": 961031,
+      "targets": [
+        "command-service"
+      ],
+      "command": "find /a/top.txt /b/b.txt /a/top.txt -size 1; find /a/top.txt /b/b.txt /a/top.txt -size 13c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt\n/b/b.txt\n/a/top.txt\n/a/top.txt\n/a/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_cli_once",
+      "seq": 961032,
+      "targets": [
+        "command-service"
+      ],
+      "command": "scope-probe /a/top.txt /b/b.txt /a/top.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "37:/a/top.txt,/b/b.txt,/a/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_nested",
+      "seq": 961033,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; rg hit /a/inner; calls /a/inner; calls /a/inner/deep",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/a/inner/deep/d.txt:hit deep\nrg /a/inner/i.txt\nrg /a/inner/deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_quiet",
+      "seq": 961034,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; rg -q hit /a/inner /b; echo rc=$?; calls /a/inner; calls /a/inner/deep; calls /b",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrg /a/inner/i.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_error",
+      "seq": 961035,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; rg hit /a/absent /b/b.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/b/b.txt:hit b\n",
+        "stderr": "rg: /a/absent: No such file or directory (os error 2)\n"
+      }
+    },
+    {
+      "id": "xm_native_rg_no_messages",
+      "seq": 961036,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; rg --no-messages hit /a/absent /b/b.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/b/b.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_context",
+      "seq": 961037,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; rg -A1 hit /a/top.txt /b/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt:hit\n/a/top.txt-miss\n/a/top.txt:hit\n--\n/b/b.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_invalid_pattern",
+      "seq": 961038,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; rg \"[\" /a/top.txt /b/b.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: regex parse error:\n    (?:[)\n       ^\nerror: unclosed character class\n"
+      }
+    },
+    {
+      "id": "xm_native_rg_depth_native",
+      "seq": 961100,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --max-depth 1 hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_glob_native",
+      "seq": 961101,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg -g \"d.txt\" hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/deep/d.txt:hit deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_glob_exclude_native",
+      "seq": 961102,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg -g \"!**/deep/**\" hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_sort_native",
+      "seq": 961103,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --sort path hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/deep/d.txt:hit deep\n/a/inner/i.txt:hit child\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_reverse_native",
+      "seq": 961104,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --sortr path hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/a/inner/deep/d.txt:hit deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_sorted_repeated",
+      "seq": 961105,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --sort path hit /b/b.txt /a/inner /b/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/b/b.txt:hit b\n/a/inner/deep/d.txt:hit deep\n/a/inner/i.txt:hit child\n/b/b.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_type_native",
+      "seq": 961106,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg -t txt hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/a/inner/deep/d.txt:hit deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_size_native",
+      "seq": 961107,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --max-filesize 9 hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/deep/d.txt:hit deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_depth_files",
+      "seq": 961108,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --files --max-depth 1 /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_sorted_quiet",
+      "seq": 961109,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a/inner >/dev/null; calls /a/inner/deep >/dev/null; rg -q --sort path hit /a/inner; calls /a/inner; calls /a/inner/deep",
+      "expect": {
+        "exit": 0,
+        "stdout": "rg /a/inner/deep/d.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_hidden_filter_native",
+      "seq": 961110,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --sort path -g \"*.txt\" hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n",
+        "stderr": ""
+      },
+      "session": "blind"
+    },
+    {
+      "id": "xm_native_rg_mixed_backend",
+      "seq": 961111,
+      "targets": [
+        "command-service"
+      ],
+      "command": "printf \"hit bytes\\n\" > /plain/b.txt; rg --sort path hit /a/inner /plain",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/deep/d.txt:hit deep\n/a/inner/i.txt:hit child\n/plain/b.txt:hit bytes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_follow_service",
+      "seq": 961112,
+      "targets": [
+        "command-service"
+      ],
+      "command": "ln -s /b/b.txt /a/inner/link.txt; rg -L --sort path hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/deep/d.txt:hit deep\n/a/inner/i.txt:hit child\n/a/inner/link.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_no_follow_service",
+      "seq": 961113,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --sort path hit /a/inner",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/deep/d.txt:hit deep\n/a/inner/i.txt:hit child\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_rg_filesystem_boundary",
+      "seq": 961114,
+      "targets": [
+        "command-service"
+      ],
+      "command": "rg --one-file-system hit /a/inner /b/b.txt; rm /a/inner/link.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/inner/i.txt:hit child\n/b/b.txt:hit b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_custom_aggregate_order",
+      "seq": 961115,
+      "targets": [
+        "command-service"
+      ],
+      "command": "meter /a/top.txt /b/b.txt /a/top.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/top.txt\n/b/b.txt\n/a/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_partial_native_stream",
+      "seq": 961116,
+      "targets": [
+        "command-service"
+      ],
+      "command": "printf abc > /a/test.broken; printf abc > /b/test.rev; rev /a/test.broken /b/test.rev",
+      "expect": {
+        "exit": 1,
+        "stdout": "partial\ncba",
+        "stderr": "rev: cannot open /a/test.broken: Permission denied\n"
+      }
+    },
+    {
+      "id": "xm_native_metadata_only_child",
+      "seq": 961150,
+      "targets": [
+        "command-service"
+      ],
+      "command": "printf \"hit root\\n\" > /meta/top; printf \"hit child\\n\" > /meta/child/leaf; find /meta -type f; du -s /meta",
+      "expect": {
+        "exit": 0,
+        "stdout": "/meta/child/leaf\n/meta/top\n19\t/meta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_missing_native_child",
+      "seq": 961151,
+      "targets": [
+        "command-service"
+      ],
+      "command": "grep -r hit /meta; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/meta/top:hit root\nrc=1\n",
+        "stderr": "grep: /meta/child: Operation not supported\n"
+      }
+    },
+    {
+      "id": "xm_native_stream_timeout",
+      "seq": 961152,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a >/dev/null; calls /b >/dev/null; timeout 0.1 rev /a/first.slow /b/second.slow; echo rc=$?; calls /a | grep \"^closed \"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=124\nclosed /a/first.slow\n",
+        "stderr": ""
+      },
+      "note": "The timeout builtin discards the cancelled invocation output; native stream cleanup must still run."
+    },
+    {
+      "id": "xm_native_stream_early_close",
+      "seq": 961153,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a >/dev/null; calls /b >/dev/null; timeout 1 sh -c \"rev /a/first.slow /b/second.slow | head -n1\"; echo rc=$?; calls /a | grep \"^closed \"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/first.slow\nrc=0\nclosed /a/first.slow\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_bounded_preparation",
+      "seq": 961160,
+      "targets": [
+        "command-service"
+      ],
+      "command": "timeout 2 rev /a/0.gated /b/1.gated /a/2.gated /b/3.gated /a/4.gated; gate-status /a",
+      "expect": {
+        "exit": 0,
+        "stdout": "/a/0.gated\n/b/1.gated\n/a/2.gated\n/b/3.gated\n/a/4.gated\nstarted=5 peak=4 active=0\n",
+        "stderr": ""
+      },
+      "note": "The first four native invocations wait at a barrier. A serial executor times out; an unbounded executor exceeds the measured peak; output must retain operand order."
+    },
+    {
+      "id": "xm_native_find_prune_before_io",
+      "seq": 961170,
+      "targets": [
+        "command-service"
+      ],
+      "command": "mkdir -p /meta/child/x.deny; find /meta -path /meta/child/x.deny -prune -o -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/meta\n/meta/child\n/meta/child/leaf\n/meta/top\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_find_prune_mount",
+      "seq": 961171,
+      "targets": [
+        "command-service"
+      ],
+      "command": "find /meta -path /meta/child -prune -o -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/meta\n/meta/top\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_find_prune_start",
+      "seq": 961172,
+      "targets": [
+        "command-service"
+      ],
+      "command": "find /meta -prune",
+      "expect": {
+        "exit": 0,
+        "stdout": "/meta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_native_find_refused_listing",
+      "seq": 961173,
+      "targets": [
+        "command-service"
+      ],
+      "command": "find /meta -path /meta/child/x.deny",
+      "expect": {
+        "exit": 1,
+        "stdout": "/meta/child/x.deny\n",
+        "stderr": "find: '/meta/child/x.deny': Permission denied\n"
+      }
+    }
+  ]
+}
