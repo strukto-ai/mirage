@@ -56,7 +56,7 @@ async def test_unzip_without_a_dispatcher_sees_a_member_it_just_wrote(
         accessor,
         [PathSpec.from_str_path("/m.zip")],
         [],
-        CommandOpts(flags=flags, cwd="/"),
+        CommandOpts(flags=flags),
     )
     assert await read(accessor, PathSpec.from_str_path("/a/b.txt")) == kept
     assert io.exit_code == 1
@@ -76,7 +76,7 @@ async def test_unzip_without_a_dispatcher_never_replaces_a_file_under_n():
         accessor,
         [PathSpec.from_str_path("/m.zip")],
         [],
-        CommandOpts(flags={"n": True}, cwd="/"),
+        CommandOpts(flags={"n": True}),
     )
     assert await read(accessor, PathSpec.from_str_path("/a/b.txt")) == b"old\n"
     assert io.exit_code == 1
