@@ -14,7 +14,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import close_quietly
 from mirage.io.types import IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
-from mirage.shell.bytes import byte_view, from_byte_view
+from mirage.shell.bytes import byte_view, encode_text, from_byte_view
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +98,19 @@ async def binary_notice(io: IOResult, path: str) -> None:
     ) + f"grep: {path}: binary file matches\n".encode()
 
 
+def valid_utf8(data: bytes) -> bool:
+    """Whether every byte of ``data`` belongs to a UTF-8 character.
+
+    Args:
+        data (bytes): the output to check.
+    """
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 def output_line(
     raw: bytes,
     number: int,
@@ -138,8 +151,14 @@ async def grep_input(
     show_filename: bool,
     io: IOResult,
     after_output: bool = False,
+    utf8: bool = False,
 ) -> AsyncGenerator[bytes, None]:
     """Scan one input, yielding grep's output for it.
+
+    Under a UTF-8 locale a line is matched as text, and a line or match
+    to print that holds a byte no character owns is binary output: GNU
+    leaves it out and ends with the binary-file notice, as it does for
+    a NUL, but goes on printing the lines after it.
 
     Args:
         source (AsyncIterator[bytes]): the input's bytes.
@@ -151,6 +170,7 @@ async def grep_input(
         after_output (bool): whether an earlier input already printed
             lines; GNU then opens this input's first context group with
             the separator, as it does between groups within one input.
+        utf8 (bool): match characters rather than bytes.
     """
     budget = YieldBudget()
     io.exit_code = 1
@@ -212,7 +232,7 @@ async def grep_input(
             number += 1
             line_start = byte_pos
             byte_pos += len(raw) + 1
-            line = byte_view(raw)
+            line = byte_view(raw, utf8)
             hit = bool(pat.search(line)) != f.invert
             if f.max_count is not None and count >= f.max_count:
                 hit = False
@@ -252,16 +272,22 @@ async def grep_input(
                         for m in pat.finditer(line):
                             await budget.run()
                             text = match_text(m)
+                            start = match_start(m)
                             if text:
                                 chunks.append(
                                     output_line(
-                                        from_byte_view(text),
+                                        from_byte_view(text, utf8),
                                         number,
                                         True,
                                         path,
                                         show_filename,
                                         f,
-                                        line_start + match_start(m),
+                                        line_start
+                                        + (
+                                            len(encode_text(line[:start]))
+                                            if utf8
+                                            else start
+                                        ),
                                     )
                                 )
                 else:
@@ -313,7 +339,9 @@ async def grep_input(
                 await binary_notice(io, path)
                 notified = True
             for chunk in chunks:
-                if f.binary_mode != "text" and binary.nul:
+                if f.binary_mode != "text" and (
+                    binary.nul or (utf8 and not valid_utf8(chunk))
+                ):
                     if f.binary_mode == "binary" and not notified:
                         await binary_notice(io, path)
                         notified = True

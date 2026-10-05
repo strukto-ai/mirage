@@ -27,7 +27,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff -u /data/sorted_a.txt /data/sorted_b.txt",
+      "command": "( set -o pipefail; diff -u /data/sorted_a.txt /data/sorted_b.txt | cut -f1 )",
       "expect": {
         "exit": 1,
         "stdout": "--- /data/sorted_a.txt\n+++ /data/sorted_b.txt\n@@ -1,3 +1,3 @@\n-apple\n banana\n-cherry\n+date\n+elder\n",
@@ -166,7 +166,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff -U 0 /data/sorted_a.txt /data/sorted_b.txt",
+      "command": "( set -o pipefail; diff -U 0 /data/sorted_a.txt /data/sorted_b.txt | cut -f1 )",
       "expect": {
         "exit": 1,
         "stdout": "--- /data/sorted_a.txt\n+++ /data/sorted_b.txt\n@@ -1 +0,0 @@\n-apple\n@@ -3 +2,2 @@\n-cherry\n+date\n+elder\n",
@@ -200,7 +200,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff --unified=0 /data/sorted_a.txt /data/sorted_b.txt",
+      "command": "( set -o pipefail; diff --unified=0 /data/sorted_a.txt /data/sorted_b.txt | cut -f1 )",
       "expect": {
         "exit": 1,
         "stdout": "--- /data/sorted_a.txt\n+++ /data/sorted_b.txt\n@@ -1 +0,0 @@\n-apple\n@@ -3 +2,2 @@\n-cherry\n+date\n+elder\n",
@@ -239,6 +239,40 @@
         "exit": 2,
         "stdout": "",
         "stderr": "diff: invalid context length 'bad'\ndiff: Try 'diff --help' for more information.\n"
+      }
+    },
+    {
+      "id": "diff_u_stdin_header_is_the_present",
+      "seq": 1320025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | diff -u - /data/a.txt | head -1 | sed 's/[0-9]/N/g'",
+      "expect": {
+        "exit": 0,
+        "stdout": "--- -\tNNNN-NN-NN NN:NN:NN.NNNNNNNNN +NNNN\n",
+        "stderr": ""
       }
     }
   ]

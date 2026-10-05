@@ -409,7 +409,7 @@ export function grepSearchMeta<A extends Accessor>(
 /** A plain resource query is literal text; grep owns its optional namespace. */
 export function grepSearchOptions(query: SearchQuery): GrepSearchOptions {
   const options = query.options?.grep === undefined ? {} : query.options.grep
-  const allowed = ['ignore_case', 'fixed_string', 'whole_word', 'syntax']
+  const allowed = ['ignore_case', 'fixed_string', 'whole_word', 'syntax', 'utf8']
   if (
     options === null ||
     typeof options !== 'object' ||
@@ -431,5 +431,6 @@ export function grepSearchOptions(query: SearchQuery): GrepSearchOptions {
     fixedString: options.fixed_string !== false,
     wholeWord: options.whole_word === true,
     syntax: syntax as RegexSyntax,
+    utf8: options.utf8 === true,
   }
 }

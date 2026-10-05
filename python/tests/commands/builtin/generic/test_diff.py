@@ -13,8 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import pytest
 
-from mirage.commands.builtin.generic.diff import DiffFlags, diff, switch_words
+from mirage.commands.builtin.generic.diff import (
+    DiffFlags,
+    c_escape,
+    diff,
+    switch_words,
+)
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.timezone import resolve_tz
 
 
 def _operand(raw: str, virtual: str) -> PathSpec:
@@ -74,4 +80,116 @@ def test_switch_words_keep_the_option_words_as_typed():
         "pat",
         "-U",
         "1",
+    ]
+
+
+def test_c_escape_quotes_a_header_name_the_way_diffutils_does():
+    assert c_escape("plain/é\x7f") == "plain/é\x7f"
+    assert c_escape("sp ace") == '"sp ace"'
+    assert c_escape('t\tq"b\\') == '"t\\tq\\"b\\\\"'
+    assert c_escape("c\x01") == '"c\\001"'
+
+
+@pytest.mark.asyncio
+async def test_unified_headers_carry_each_side_mtime():
+    files = {"/d/a b": b"x\ny\n", "/d/c": b"x\nz\n"}
+
+    async def read(path: PathSpec) -> bytes:
+        return files[path.virtual]
+
+    async def stat(path: PathSpec) -> FileStat:
+        if path.virtual not in files:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(
+            name=path.virtual,
+            type=FileType.FILE,
+            modified="2026-01-02T03:04:05Z",
+        )
+
+    pair = [_operand("a b", "/d/a b"), _operand("c", "/d/c")]
+    out, io = await diff(
+        pair,
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=stat,
+        flags=DiffFlags(unified=True),
+    )
+    assert io.exit_code == 1
+    assert isinstance(out, bytes)
+    assert out.splitlines()[:2] == [
+        b'--- "a b"\t2026-01-02 03:04:05.000000000 +0000',
+        b"+++ c\t2026-01-02 03:04:05.000000000 +0000",
+    ]
+    out, _ = await diff(
+        [pair[1], _operand("gone", "/d/gone")],
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=stat,
+        flags=DiffFlags(unified=True, new_file=True, new_first=True),
+    )
+    assert isinstance(out, bytes)
+    assert out.splitlines()[1] == (
+        b"+++ gone\t1970-01-01 00:00:00.000000000 +0000"
+    )
+
+
+@pytest.mark.asyncio
+async def test_unified_headers_read_the_time_the_namespace_keeps():
+    async def read(path: PathSpec) -> bytes:
+        return b"x\n" if path.virtual == "/d/a" else b"y\n"
+
+    async def stat(path: PathSpec) -> FileStat:
+        return FileStat(
+            name=path.virtual,
+            type=FileType.FILE,
+            modified="2026-10-05T00:00:00Z",
+        )
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return FileStat(
+            name=virtual, type=FileType.FILE, modified="2021-06-15T12:00:00Z"
+        )
+
+    out, _ = await diff(
+        [_operand("a", "/d/a"), _operand("b", "/d/b")],
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=stat,
+        flags=DiffFlags(unified=True),
+        stat_path=stat_path,
+    )
+    assert isinstance(out, bytes)
+    assert out.splitlines()[0] == b"--- a\t2021-06-15 12:00:00.000000000 +0000"
+
+
+@pytest.mark.asyncio
+async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
+    async def read(path: PathSpec) -> bytes:
+        return b"x\n"
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return FileStat(
+            name=virtual,
+            type=FileType.FILE,
+            modified="2026-03-04T05:06:07.123456789Z",
+        )
+
+    async def missing(path: PathSpec) -> FileStat:
+        if path.virtual == "/d/gone":
+            raise FileNotFoundError(path.virtual)
+        return FileStat(name=path.virtual, type=FileType.FILE)
+
+    out, _ = await diff(
+        [_operand("a", "/d/a"), _operand("gone", "/d/gone")],
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=missing,
+        flags=DiffFlags(unified=True, new_file=True, new_first=True),
+        stat_path=stat_path,
+        zone=resolve_tz("Asia/Hong_Kong"),
+    )
+    assert isinstance(out, bytes)
+    assert out.splitlines()[:2] == [
+        b"--- a\t2026-03-04 13:06:07.123456789 +0800",
+        b"+++ gone\t1970-01-01 08:00:00.000000000 +0800",
     ]

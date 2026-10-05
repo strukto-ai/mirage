@@ -27,22 +27,25 @@ export type LineMatcher = (line: string) => boolean
  * Whether the generic scan would select a line, for this request. A searcher
  * that has to decide a line itself (a candidate the service returned, or a
  * line it rendered) decides it with this, so what it prints is what grep over
- * the same file would print. grep's dialects run in the C locale and match a
- * line's byte view, as its scan does; ripgrep's match the text. Mirrors
+ * the same file would print. grep's dialects match a line's byte view in the C
+ * locale and its text under a UTF-8 one, as its scan does; ripgrep's match the
+ * text. Mirrors
  * `query_matcher` in `mirage/core/hierarchy/search.py`.
  */
 export function queryMatcher(query: SearchQuery): LineMatcher {
   const options = grepSearchOptions(query)
   const rust = options.syntax === RegexSyntax.RUST
+  const utf8 = options.utf8
   const pattern = compilePattern(
-    rust ? query.query : byteView(query.query),
+    rust ? query.query : byteView(query.query, utf8),
     options.ignoreCase,
     options.fixedString,
     options.wholeWord,
     options.syntax,
+    utf8,
   )
   if (rust) return (line) => pattern.test(line)
-  return (line) => pattern.test(byteView(line))
+  return (line) => pattern.test(byteView(line, utf8))
 }
 
 export type Searcher<A extends Accessor> = (

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { byteView, decodeText, encodeText, textView } from '../../../shell/bytes.ts'
+import { byteView, decodeText, encodeText, textView, utf8Locale } from '../../../shell/bytes.ts'
 import { compilePosixRegex } from '../../../utils/posix.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -34,14 +34,20 @@ import { linkDoor } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
+import { validUtf8 } from '../grep_binary.ts'
 import { prefixOf } from '../grep_offsets.ts'
 import { formatRecords } from '../utils/output.ts'
 import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 
-function anyLineSelected(data: Uint8Array, pattern: RegExp, invert: boolean): boolean {
-  for (const line of splitLines(byteView(data))) {
+function anyLineSelected(
+  data: Uint8Array,
+  pattern: RegExp,
+  invert: boolean,
+  utf8: boolean,
+): boolean {
+  for (const line of splitLines(byteView(data, utf8))) {
     let hit = pattern.test(line)
     if (invert) hit = !hit
     if (hit) return true
@@ -59,6 +65,8 @@ interface ZgrepOpts {
   // itself, in the field order GNU grep prints (name, line, byte). A line
   // is matched as its byte view, so its length is already its byte count.
   byteOffsets: boolean
+  // A UTF-8 locale: match characters, counting each one's bytes for -b.
+  utf8: boolean
 }
 
 function zgrepSearch(
@@ -66,7 +74,7 @@ function zgrepSearch(
   pattern: RegExp,
   opts: ZgrepOpts,
   filename: string | null,
-): [string[], boolean] {
+): [string[], boolean, boolean] {
   const reGlobal = opts.onlyMatching
     ? compilePosixRegex(
         pattern.source,
@@ -75,18 +83,19 @@ function zgrepSearch(
     : null
   const matched: [number, number, string][] = []
   let start = 0
-  for (const [i, line] of splitLines(byteView(data)).entries()) {
+  const bytesOf = (view: string): number => (opts.utf8 ? encodeText(view).length : view.length)
+  for (const [i, line] of splitLines(byteView(data, opts.utf8)).entries()) {
     if (opts.onlyMatching && !opts.invert && reGlobal !== null) {
       reGlobal.lastIndex = 0
       let m: RegExpExecArray | null
       const hits: RegExpExecArray[] = []
       while ((m = reGlobal.exec(line)) !== null) {
         hits.push(m)
-        if (m[0] === '') reGlobal.lastIndex += 1
+        if (m[0] === '') reGlobal.lastIndex += (line.codePointAt(m.index) ?? 0) > 0xffff ? 2 : 1
       }
       if (hits.length > 0) {
         for (const h of hits) {
-          matched.push([i + 1, start + matchStart(h), matchText(h)])
+          matched.push([i + 1, start + bytesOf(line.slice(0, matchStart(h))), matchText(h)])
           if (opts.maxCount !== null && matched.length >= opts.maxCount) break
         }
       }
@@ -96,21 +105,29 @@ function zgrepSearch(
       if (hit) matched.push([i + 1, start, line])
     }
     if (opts.maxCount !== null && matched.length >= opts.maxCount) break
-    start += line.length + 1
+    start += bytesOf(line) + 1
   }
   if (opts.count) {
     const value =
       filename !== null ? `${filename}:${String(matched.length)}` : String(matched.length)
-    return [[value], matched.length > 0]
+    return [[value], matched.length > 0, false]
   }
+  // Under a UTF-8 locale a line or match to print that holds a byte no
+  // character owns is binary output, which grep leaves out and reports once
+  // the input is done; the third value says whether any was.
   const result: string[] = []
+  let binary = false
   for (const [idx, offset, line] of matched) {
+    if (opts.utf8 && !validUtf8(encodeText(line))) {
+      binary = true
+      continue
+    }
     let prefix = ''
     if (filename !== null) prefix = filename + ':'
     prefix += prefixOf(opts.lineNumbers ? idx : null, opts.byteOffsets ? offset : null)
-    result.push(prefix + textView(line))
+    result.push(prefix + textView(line, opts.utf8))
   }
-  return [result, matched.length > 0]
+  return [result, matched.length > 0, binary]
 }
 
 export async function zgrepGeneric(
@@ -172,13 +189,21 @@ export async function zgrepGeneric(
   const forceH = fl.asBool('H')
   const hideH = fl.asBool('h')
   const maxCount = fl.asInt('m') ?? null
+  const utf8 = utf8Locale(opts.env)
   // GNU grep 3.11 skips regex validation and selection under -m0.
   const pattern =
     maxCount === 0
       ? null
       : neverMatch
         ? new RegExp(NEVER_MATCH)
-        : compilePattern(byteView(rawPattern), ignoreCase, fixedString, wholeWord, syntax)
+        : compilePattern(
+            byteView(rawPattern, utf8),
+            ignoreCase,
+            fixedString,
+            wholeWord,
+            syntax,
+            utf8,
+          )
 
   const multi = paths.length > 1
   const showFilename = forceH || (multi && !hideH)
@@ -215,18 +240,20 @@ export async function zgrepGeneric(
     if (filesOnly || filesWithoutMatch) {
       // -L lists the files that selected nothing; the status still
       // follows the matching, as GNU grep's does.
-      const matched = anyLineSelected(data, pattern, invert)
+      const matched = anyLineSelected(data, pattern, invert, utf8)
       if (matched === filesOnly) allResults.push(p.rawPath)
       anyMatch ||= matched
     } else {
-      const [result, hadMatch] = zgrepSearch(
+      const [result, hadMatch, binary] = zgrepSearch(
         data,
         pattern,
-        { invert, count: countOnly, lineNumbers, onlyMatching, maxCount, byteOffsets },
+        { invert, count: countOnly, lineNumbers, onlyMatching, maxCount, byteOffsets, utf8 },
         fname,
       )
       if (hadMatch) anyMatch = true
       for (const r of result) allResults.push(r)
+      if (binary && !quiet)
+        errors += `grep: ${operandLabel(p, '(standard input)')}: binary file matches\n`
     }
   }
 
