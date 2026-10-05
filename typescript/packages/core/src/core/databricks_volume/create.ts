@@ -15,12 +15,12 @@
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 export async function create(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<void> {
-  await writeBytes(accessor, path, new Uint8Array(0), index)
+  await write(accessor, path, new Uint8Array(0), index)
 }

@@ -17,7 +17,7 @@ from mirage.core.dropbox.create import create as _create
 from mirage.core.dropbox.exists import exists as _exists
 from mirage.core.dropbox.mkdir import mkdir as _mkdir
 from mirage.core.dropbox.read import read as _read
-from mirage.core.dropbox.read import stream as _stream
+from mirage.core.dropbox.read import read_stream as _stream
 from mirage.core.dropbox.readdir import readdir as _readdir
 from mirage.core.dropbox.rename import rename as _rename
 from mirage.core.dropbox.rm import rm_r as _rm_r
@@ -25,7 +25,7 @@ from mirage.core.dropbox.rmdir import rmdir as _rmdir
 from mirage.core.dropbox.search import narrow_paths
 from mirage.core.dropbox.stat import stat as _stat
 from mirage.core.dropbox.unlink import unlink as _unlink
-from mirage.core.dropbox.write import write_bytes as _write
+from mirage.core.dropbox.write import write as _write
 from mirage.core.generic.du import make_walked_du
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import ContentSearchOps, NativeReadOps, ReadOps, WriteOps

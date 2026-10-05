@@ -14,7 +14,7 @@ from mirage.core.msgraph.drive import (
     iter_tree,
     rename_replace,
 )
-from mirage.core.onedrive.read import read_bytes as onedrive_read
+from mirage.core.onedrive.read import read as onedrive_read
 from mirage.core.onedrive.stream import read_stream as onedrive_stream
 from mirage.observe.context import (
     RecordingScope,

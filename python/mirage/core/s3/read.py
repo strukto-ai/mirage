@@ -49,7 +49,7 @@ def _fp_rev_from_s3_response(
     return etag, vid
 
 
-async def read_bytes(
+async def read(
     accessor: S3Accessor,
     path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

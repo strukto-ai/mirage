@@ -19,7 +19,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import type { ReadStream, SFTPWrapper } from 'ssh2'
 import { SSHAccessor } from '../../accessor/ssh.ts'
 import { makeFakeAccessor } from './_test_utils.ts'
-import { stream } from './stream.ts'
+import { readStream } from './stream.ts'
 
 class DelayedCloseStream extends Readable {
   private sent = false
@@ -97,7 +97,7 @@ describe('core/ssh/stream', () => {
       dirs: new Map([['/', {}]]),
     })
     const chunks: Uint8Array[] = []
-    for await (const c of stream(accessor, spec('/x'))) chunks.push(c)
+    for await (const c of readStream(accessor, spec('/x'))) chunks.push(c)
     const decoded = chunks.map((c) => new TextDecoder().decode(c)).join('')
     expect(decoded).toBe('hello stream')
   })
@@ -107,14 +107,14 @@ describe('core/ssh/stream', () => {
       files: new Map(),
       dirs: new Map([['/', {}]]),
     })
-    const it = stream(accessor, spec('/missing'))
+    const it = readStream(accessor, spec('/missing'))
     await expect(it[Symbol.asyncIterator]().next()).rejects.toBeDefined()
   })
 
   it('waits for the remote handle to close after reading ends', async () => {
     const rs = new DelayedCloseStream()
     const accessor = new DelayedCloseAccessor(rs as unknown as ReadStream)
-    const iterator = stream(accessor, spec('/x'))[Symbol.asyncIterator]()
+    const iterator = readStream(accessor, spec('/x'))[Symbol.asyncIterator]()
     await expect(iterator.next()).resolves.toMatchObject({ done: false })
     const done = iterator.next()
     const settledBeforeClose = await Promise.race([done.then(markSettled), markPending()])

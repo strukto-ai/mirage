@@ -20,7 +20,7 @@ from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
-async def write_bytes(
+async def write(
     accessor: OneDriveAccessor, path: PathSpec, data: bytes
 ) -> None:
     timer = start_op()

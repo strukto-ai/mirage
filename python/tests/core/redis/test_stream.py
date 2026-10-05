@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.core.redis.stream import stream
+from mirage.core.redis.stream import read_stream
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
 
@@ -50,7 +50,7 @@ async def mk_store(redis_prefix):
 async def test_stream_reads_content(mk_store):
     a = await mk_store("test:stream:1:", {"/file.txt": b"hello world"})
     chunks = []
-    async for chunk in stream(a, PathSpec.from_str_path("/file.txt")):
+    async for chunk in read_stream(a, PathSpec.from_str_path("/file.txt")):
         chunks.append(chunk)
     assert b"".join(chunks) == b"hello world"
 
@@ -59,7 +59,7 @@ async def test_stream_reads_content(mk_store):
 async def test_stream_single_chunk(mk_store):
     a = await mk_store("test:stream:2:", {"/file.txt": b"data"})
     chunks = []
-    async for chunk in stream(a, PathSpec.from_str_path("/file.txt")):
+    async for chunk in read_stream(a, PathSpec.from_str_path("/file.txt")):
         chunks.append(chunk)
     assert len(chunks) == 1
 
@@ -68,7 +68,7 @@ async def test_stream_single_chunk(mk_store):
 async def test_stream_not_found(mk_store):
     a = await mk_store("test:stream:3:")
     with pytest.raises(FileNotFoundError):
-        async for _ in stream(a, PathSpec.from_str_path("/nope.txt")):
+        async for _ in read_stream(a, PathSpec.from_str_path("/nope.txt")):
             pass
 
 
@@ -76,6 +76,6 @@ async def test_stream_not_found(mk_store):
 async def test_stream_empty_file(mk_store):
     a = await mk_store("test:stream:4:", {"/empty": b""})
     chunks = []
-    async for chunk in stream(a, PathSpec.from_str_path("/empty")):
+    async for chunk in read_stream(a, PathSpec.from_str_path("/empty")):
         chunks.append(chunk)
     assert b"".join(chunks) == b""

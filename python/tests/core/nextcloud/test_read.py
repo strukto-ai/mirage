@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.core.nextcloud.read import read_bytes
+from mirage.core.nextcloud.read import read
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
@@ -8,21 +8,21 @@ from mirage.types import PathSpec
 @pytest.mark.asyncio
 async def test_read_bytes_whole_file(make_acc):
     acc = make_acc({"greet.txt": b"hello world"})
-    out = await read_bytes(acc, PathSpec.from_str_path("/greet.txt"))
+    out = await read(acc, PathSpec.from_str_path("/greet.txt"))
     assert out == b"hello world"
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_offset_size_returns_slice(make_acc):
     acc = make_acc({"x": b"abcdef"})
-    out = await read_bytes(acc, PathSpec.from_str_path("/x"), offset=2, size=4)
+    out = await read(acc, PathSpec.from_str_path("/x"), offset=2, size=4)
     assert out == b"cdef"
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_offset_only(make_acc):
     acc = make_acc({"x": b"abcdef"})
-    out = await read_bytes(acc, PathSpec.from_str_path("/x"), offset=3)
+    out = await read(acc, PathSpec.from_str_path("/x"), offset=3)
     assert out == b"def"
 
 
@@ -30,7 +30,7 @@ async def test_read_bytes_offset_only(make_acc):
 async def test_read_bytes_missing_raises_filenotfound(make_acc):
     acc = make_acc({})
     with pytest.raises(FileNotFoundError):
-        await read_bytes(acc, PathSpec.from_str_path("/nope"))
+        await read(acc, PathSpec.from_str_path("/nope"))
 
 
 @pytest.mark.asyncio
@@ -42,7 +42,7 @@ async def test_read_records_the_virtual_path(make_acc):
     )
     scope = RecordingScope()
     try:
-        out = await read_bytes(acc, spec)
+        out = await read(acc, spec)
     finally:
         scope.close()
     assert out == b"hello"

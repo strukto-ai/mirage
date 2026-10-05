@@ -19,7 +19,7 @@ from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
-async def write_bytes(
+async def write(
     accessor: SSHAccessor, path_spec: PathSpec, data: bytes
 ) -> None:
     path = path_spec.mount_path

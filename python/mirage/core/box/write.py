@@ -21,9 +21,7 @@ from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
-async def write_bytes(
-    accessor: BoxAccessor, path: PathSpec, data: bytes
-) -> None:
+async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     parts = path_parts(path)
     if not parts:
         raise IsADirectoryError(path.virtual)

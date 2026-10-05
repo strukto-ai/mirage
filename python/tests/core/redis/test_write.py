@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.core.redis.write import write_bytes
+from mirage.core.redis.write import write
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
 
@@ -40,7 +40,7 @@ async def accessor(redis_prefix):
 
 @pytest.mark.asyncio
 async def test_write_bytes(accessor):
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"
@@ -53,14 +53,14 @@ async def test_write_bytes(accessor):
 
 @pytest.mark.asyncio
 async def test_write_bytes_overwrite(accessor):
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"
         ),
         b"first",
     )
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"
@@ -79,7 +79,7 @@ async def test_write_bytes_parent_not_found(redis_prefix):
     # The operand is what a GNU stderr line names, so the error carries the
     # virtual path, not the internal "parent does not exist" phrasing.
     with pytest.raises(FileNotFoundError, match="/no/parent/file.txt"):
-        await write_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="no/parent/file.txt",
@@ -101,7 +101,7 @@ async def test_write_bytes_under_a_plain_file_is_not_a_directory(redis_prefix):
     await s.set_file("/plain", b"x")
     a = RedisAccessor(s)
     with pytest.raises(NotADirectoryError):
-        await write_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="plain/file.txt",
@@ -125,7 +125,7 @@ async def test_write_bytes_deep_under_a_plain_file_is_not_a_directory(
     await s.set_file("/plain", b"x")
     a = RedisAccessor(s)
     with pytest.raises(NotADirectoryError):
-        await write_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="plain/sub/file.txt",
@@ -141,14 +141,14 @@ async def test_write_bytes_deep_under_a_plain_file_is_not_a_directory(
 @pytest.mark.asyncio
 async def test_write_bytes_onto_a_directory_is_a_directory(accessor):
     with pytest.raises(IsADirectoryError):
-        await write_bytes(accessor, PathSpec.from_str_path("/sub"), b"data")
+        await write(accessor, PathSpec.from_str_path("/sub"), b"data")
     assert not await accessor.store.has_file("/sub")
     assert await accessor.store.has_dir("/sub")
 
 
 @pytest.mark.asyncio
 async def test_write_bytes_to_subdir(accessor):
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="sub/file.txt",
@@ -166,7 +166,7 @@ async def test_write_bytes_root_parent(redis_prefix):
     await s.clear()
     await s.add_dir("/")
     a = RedisAccessor(s)
-    await write_bytes(
+    await write(
         a,
         PathSpec(
             vfs_path="root_file.txt",
@@ -182,7 +182,7 @@ async def test_write_bytes_root_parent(redis_prefix):
 
 @pytest.mark.asyncio
 async def test_write_bytes_sets_modified(accessor):
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"
@@ -194,7 +194,7 @@ async def test_write_bytes_sets_modified(accessor):
 
 @pytest.mark.asyncio
 async def test_write_bytes_modified_uses_z_suffix(accessor):
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"

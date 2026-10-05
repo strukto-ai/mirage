@@ -78,7 +78,7 @@ async function readFile(
 
 export const read = makeRead<GSheetsAccessor>(detectScope, { file: readFile })
 
-export async function* stream(
+export async function* readStream(
   accessor: GSheetsAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

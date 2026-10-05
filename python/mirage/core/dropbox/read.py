@@ -111,7 +111,7 @@ async def read(
     return await dropbox_download(accessor.token_manager, dropbox_path, window)
 
 
-async def stream(
+async def read_stream(
     accessor: DropboxAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

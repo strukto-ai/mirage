@@ -17,7 +17,7 @@ import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { read } from './read.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -32,7 +32,7 @@ describe('core/ssh/write', () => {
         ['/data', {}],
       ]),
     })
-    await writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello'))
+    await write(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello'))
     const out = await read(accessor, spec('/data/a.txt'))
     expect(new TextDecoder().decode(out)).toBe('hello')
   })
@@ -45,7 +45,7 @@ describe('core/ssh/write', () => {
         ['/data', {}],
       ]),
     })
-    await writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('new'))
+    await write(accessor, spec('/data/a.txt'), new TextEncoder().encode('new'))
     const out = await read(accessor, spec('/data/a.txt'))
     expect(new TextDecoder().decode(out)).toBe('new')
   })
@@ -61,7 +61,7 @@ describe('core/ssh/write', () => {
       },
       '/srv',
     )
-    await writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('rooted'))
+    await write(accessor, spec('/data/a.txt'), new TextEncoder().encode('rooted'))
     const out = await read(accessor, spec('/data/a.txt'))
     expect(new TextDecoder().decode(out)).toBe('rooted')
   })
@@ -75,7 +75,7 @@ describe('core/ssh/write', () => {
       ]),
     })
     const [, records] = await runWithRecording(async () => {
-      await writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello'))
+      await write(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello'))
     })
     expect(records).toHaveLength(1)
     expect(records[0]?.op).toBe('write')

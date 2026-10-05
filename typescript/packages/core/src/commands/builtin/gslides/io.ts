@@ -15,7 +15,7 @@
 import { VFSAdapter } from '../../../vfs/adapter.ts'
 
 import type { GSlidesAccessor } from '../../../accessor/gslides.ts'
-import { read as gslidesRead, stream as gslidesStream } from '../../../core/gslides/read.ts'
+import { read as gslidesRead, readStream as gslidesStream } from '../../../core/gslides/read.ts'
 import { readdir as gslidesReaddir } from '../../../core/gslides/readdir.ts'
 import { stat as gslidesStat } from '../../../core/gslides/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'

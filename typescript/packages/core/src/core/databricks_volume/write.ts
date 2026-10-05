@@ -43,7 +43,7 @@ async function ensureParentDirectory(
   throw enotdir(virtualTarget)
 }
 
-export async function writeBytes(
+export async function write(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
   data: Uint8Array,

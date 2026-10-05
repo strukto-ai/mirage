@@ -77,7 +77,7 @@ export async function read(
   return dropboxDownload(accessor.tokenManager, dropboxPath, window)
 }
 
-export async function* stream(
+export async function* readStream(
   accessor: DropboxAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

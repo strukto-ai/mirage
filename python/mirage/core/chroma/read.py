@@ -9,7 +9,7 @@ from mirage.core.slug_tree.read import file_entry, join_lines
 from mirage.types import PathSpec
 
 
-async def read_bytes(
+async def read(
     accessor: ChromaAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

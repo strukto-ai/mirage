@@ -17,7 +17,7 @@ import asyncio
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.context import push_cache_manager
 from mirage.core.gridfs import driver as gridfs_driver
-from mirage.core.gridfs.write import write_bytes
+from mirage.core.gridfs.write import write
 from mirage.types import PathSpec
 from mirage.vfs.gridfs.config import GridFSConfig
 
@@ -61,7 +61,7 @@ async def _write(monkeypatch, mount_path: str) -> tuple[_FakeManager, list]:
     manager = _FakeManager()
     prev = push_cache_manager(manager)
     try:
-        await write_bytes(
+        await write(
             GridFSAccessor(
                 GridFSConfig(uri="mongodb://localhost:27017", database="db")
             ),

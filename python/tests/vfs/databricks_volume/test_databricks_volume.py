@@ -24,7 +24,7 @@ from mirage import MountMode, Workspace
 from mirage.cache.index import IndexEntry, LookupStatus
 from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.path import backend_path
-from mirage.core.databricks_volume.read import read_bytes
+from mirage.core.databricks_volume.read import read
 from mirage.core.databricks_volume.stream import read_stream
 from mirage.types import PathSpec, VFSName
 from mirage.utils.key_prefix import mount_key
@@ -334,7 +334,7 @@ async def test_read_stat_readdir_range_stream_and_exists():
     vfs = make_vfs(files)
 
     assert (
-        await read_bytes(
+        await read(
             vfs.accessor,
             PathSpec.from_str_path(
                 "/volume/reports/latest.md",
@@ -344,7 +344,7 @@ async def test_read_stat_readdir_range_stream_and_exists():
         == b"abcdef"
     )
     assert (
-        await read_bytes(
+        await read(
             vfs.accessor,
             PathSpec.from_str_path(
                 "/volume/reports/latest.md",

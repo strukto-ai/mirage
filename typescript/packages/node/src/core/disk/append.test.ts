@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { appendBytes } from './append.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -33,7 +33,7 @@ afterEach(() => {
 
 describe('core/disk/append', () => {
   it('appends to an existing file', async () => {
-    await writeBytes(accessor, spec('/x'), new TextEncoder().encode('A'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('A'))
     await appendBytes(accessor, spec('/x'), new TextEncoder().encode('B'))
     expect(await readFile(join(root, 'x'), 'utf-8')).toBe('AB')
   })

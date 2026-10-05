@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.create import create
-from mirage.core.dropbox.write import write_bytes
+from mirage.core.dropbox.write import write
 from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
 
@@ -39,7 +39,7 @@ async def test_write_uploads_through_subfolder_root():
     with patch(
         "mirage.core.dropbox.write.dropbox_upload", new_callable=AsyncMock
     ) as upload:
-        await write_bytes(
+        await write(
             make_accessor("/Team/data"),
             PathSpec.from_str_path("/note.txt"),
             b"hi",

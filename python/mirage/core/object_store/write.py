@@ -73,7 +73,7 @@ async def _put(
         raise
 
 
-def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
+def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
     """Build the whole-object write over one driver.
 
     Args:

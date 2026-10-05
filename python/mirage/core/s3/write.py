@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.object_store.write import make_write_bytes
+from mirage.core.object_store.write import make_write
 from mirage.core.s3.driver import DRIVER
 
-write_bytes = make_write_bytes(DRIVER)
+write = make_write(DRIVER)

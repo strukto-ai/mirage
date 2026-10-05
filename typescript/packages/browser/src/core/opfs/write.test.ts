@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 let accessor: ReturnType<typeof makeMockAccessor>
 beforeEach(() => {
@@ -26,7 +26,7 @@ afterEach(() => undefined)
 
 describe('opfs/write.writeBytes', () => {
   it('writes bytes and is readable back', async () => {
-    await writeBytes(accessor, spec('/x'), new TextEncoder().encode('hi'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('hi'))
     expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('hi')
   })
   it('does not create parent directories', async () => {
@@ -34,27 +34,27 @@ describe('opfs/write.writeBytes', () => {
     // rather than building the chain. OPFS creates per segment, so this
     // has to be refused explicitly rather than inherited from the kernel.
     await expect(
-      writeBytes(accessor, spec('/a/b/c'), new TextEncoder().encode('deep')),
+      write(accessor, spec('/a/b/c'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('writes into an existing directory', async () => {
     await mkdir(accessor, spec('/a'), true)
-    await writeBytes(accessor, spec('/a/c'), new TextEncoder().encode('deep'))
+    await write(accessor, spec('/a/c'), new TextEncoder().encode('deep'))
     expect(new TextDecoder().decode(await read(accessor, spec('/a/c')))).toBe('deep')
   })
 
   it('a parent that is a plain file is ENOTDIR', async () => {
-    await writeBytes(accessor, spec('/plain'), new TextEncoder().encode('y'))
+    await write(accessor, spec('/plain'), new TextEncoder().encode('y'))
     await expect(
-      writeBytes(accessor, spec('/plain/c'), new TextEncoder().encode('deep')),
+      write(accessor, spec('/plain/c'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 
   it('a target that is a directory is EISDIR', async () => {
     await mkdir(accessor, spec('/a'), true)
-    await expect(
-      writeBytes(accessor, spec('/a'), new TextEncoder().encode('x')),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
+    await expect(write(accessor, spec('/a'), new TextEncoder().encode('x'))).rejects.toMatchObject({
+      code: 'EISDIR',
+    })
   })
 })

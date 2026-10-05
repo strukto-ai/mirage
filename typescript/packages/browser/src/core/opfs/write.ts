@@ -18,11 +18,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { openError, resolveFileHandle, toWritableChunk } from './utils.ts'
 
-export async function writeBytes(
-  accessor: OPFSAccessor,
-  p: PathSpec,
-  data: Uint8Array,
-): Promise<void> {
+export async function write(accessor: OPFSAccessor, p: PathSpec, data: Uint8Array): Promise<void> {
   const root = await accessor.root()
   const timer = startOp()
   const key = p.mountPath

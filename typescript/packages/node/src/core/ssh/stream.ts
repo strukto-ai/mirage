@@ -43,7 +43,7 @@ export async function* readChunks(rs: ReadStream): AsyncIterable<Uint8Array> {
   if (closeError !== null) throw closeError
 }
 
-export async function* stream(accessor: SSHAccessor, p: PathSpec): AsyncIterable<Uint8Array> {
+export async function* readStream(accessor: SSHAccessor, p: PathSpec): AsyncIterable<Uint8Array> {
   const sftp = await accessor.sftp()
   const virtual = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)

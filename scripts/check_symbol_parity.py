@@ -83,9 +83,10 @@ def fold(name: str) -> str:
 def python_names(path: Path) -> dict[str, str]:
     """Top-level names a python module defines, keyed by folded name.
 
-    Functions, classes and capitalized assignments, unpacked ones
-    included (constants and type aliases); a TypeVar is skipped because
-    typescript declares generics inline.
+    Functions, classes and assignments, unpacked ones included, as
+    typescript counts every top-level const. A TypeVar is skipped because
+    typescript declares generics inline, a module logger because
+    typescript has none, and a dunder because it is python's own.
 
     Args:
         path (Path): the module.
@@ -98,10 +99,12 @@ def python_names(path: Path) -> dict[str, str]:
             names[fold(node.name)] = node.name
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
-            if (
-                isinstance(value, ast.Call)
-                and isinstance(value.func, ast.Name)
-                and value.func.id in TYPE_VARS
+            if isinstance(value, ast.Call) and (
+                (
+                    isinstance(value.func, ast.Name)
+                    and value.func.id in TYPE_VARS
+                )
+                or ast.unparse(value.func) == "logging.getLogger"
             ):
                 continue
             targets = (
@@ -113,9 +116,8 @@ def python_names(path: Path) -> dict[str, str]:
                 else:
                     leaves = [target]
                 for leaf in leaves:
-                    if (
-                        isinstance(leaf, ast.Name)
-                        and leaf.id.lstrip("_")[:1].isupper()
+                    if isinstance(leaf, ast.Name) and not (
+                        leaf.id.startswith("__") and leaf.id.endswith("__")
                     ):
                         names[fold(leaf.id)] = leaf.id
     return names

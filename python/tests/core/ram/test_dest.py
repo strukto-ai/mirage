@@ -3,12 +3,12 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.copy import copy
 from mirage.core.ram.dest import lookup_error
-from mirage.core.ram.read import read_bytes
+from mirage.core.ram.read import read
 from mirage.core.ram.rename import rename
 from mirage.core.ram.rmdir import rmdir
 from mirage.core.ram.set_attrs import set_attrs
 from mirage.core.ram.stat import stat
-from mirage.core.ram.stream import stream
+from mirage.core.ram.stream import read_stream
 from mirage.core.ram.unlink import unlink
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
@@ -51,12 +51,12 @@ def test_lookup_error_stops_at_the_first_non_directory(accessor, key, kind):
 
 
 async def _drain(accessor: RAMAccessor, spec: PathSpec) -> None:
-    async for _ in stream(accessor, spec):
+    async for _ in read_stream(accessor, spec):
         pass
 
 
 _OPS = {
-    "read": lambda a, p: read_bytes(a, p),
+    "read": lambda a, p: read(a, p),
     "stream": _drain,
     "stat": lambda a, p: stat(a, p),
     "set_attrs": lambda a, p: set_attrs(a, p, mode=0o644),

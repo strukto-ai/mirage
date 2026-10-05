@@ -3,7 +3,7 @@ from aioresponses import aioresponses
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.sharepoint.read import read_bytes
+from mirage.core.sharepoint.read import read
 from mirage.core.sharepoint.readdir import readdir
 from mirage.core.sharepoint.stat import stat
 from mirage.types import FileType, PathSpec
@@ -315,7 +315,7 @@ async def test_stat_size_matches_read_for_every_file():
                 else:
                     assert info.size is not None, child
                     files.append(child)
-                    body = await read_bytes(accessor, _ps(child))
+                    body = await read(accessor, _ps(child))
                     assert info.size == len(body), child
     expected = sorted("/sp/Engineering/Documents" + p for p in contents)
     assert sorted(files) == expected

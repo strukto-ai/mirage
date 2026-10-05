@@ -96,14 +96,12 @@ def test_read_stream_yields_chunks():
 
 
 def test_read_bytes_returns_bytes():
-    from mirage.core.s3.read import read_bytes
+    from mirage.core.s3.read import read
 
     config = _config()
     session = _mock_session(b"file content here")
 
     with patch("mirage.core.s3.read.async_session", return_value=session):
-        result = asyncio.run(
-            read_bytes(config, PathSpec.from_str_path("test.txt"))
-        )
+        result = asyncio.run(read(config, PathSpec.from_str_path("test.txt")))
     assert isinstance(result, bytes)
     assert result == b"file content here"

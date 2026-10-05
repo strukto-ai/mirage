@@ -14,7 +14,7 @@
 
 from mirage.core.hf_hub.constants import SCOPE_ERROR
 from mirage.core.hf_hub.exists import exists as _exists
-from mirage.core.hf_hub.read import read_bytes as _read
+from mirage.core.hf_hub.read import read as _read
 from mirage.core.hf_hub.readdir import readdir as _readdir
 from mirage.core.hf_hub.stat import stat as _stat
 from mirage.core.hf_hub.stream import read_stream as _read_stream
