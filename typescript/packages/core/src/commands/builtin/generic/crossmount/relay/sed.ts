@@ -31,5 +31,11 @@ export async function runSed(
     fileStreamOp(dispatch, reads),
     write,
   )) ?? [null, new IOResult()]
-  return [body, await reads.merge(io)]
+  const merged = await reads.merge(io)
+  // Every read went through the dispatcher, whose cold read keeps what the
+  // file cache may hold; listing a read path again would keep a filetype
+  // renderer's output there, which cat would then print. A written path
+  // stays listed. Mirrors Python's run_sed.
+  merged.cache = merged.cache.filter((p) => !(p in merged.reads))
+  return [body, merged]
 }
