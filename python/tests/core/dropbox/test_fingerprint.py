@@ -30,10 +30,20 @@ from mirage.core.dropbox.fingerprint import result_token
         ),
         (None, None, False),
         (json.dumps({"server_modified": "t"}), None, False),
+        (json.dumps({"content_hash": ""}), None, False),
+        (json.dumps({"content_hash": 7}), None, False),
         ("not json", None, True),
         (json.dumps(["a"]), None, True),
     ],
-    ids=["hash", "absent", "no-hash", "not-json", "not-object"],
+    ids=[
+        "hash",
+        "absent",
+        "no-hash",
+        "empty-hash",
+        "number-hash",
+        "not-json",
+        "not-object",
+    ],
 )
 def test_a_result_header_names_its_content_hash(raw, token, warns, caplog):
     # Never the modified stamp: stat stamps content_hash. Dropbox always

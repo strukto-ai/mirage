@@ -26,6 +26,8 @@ describe('dropbox fingerprint', () => {
     ['hash', JSON.stringify({ server_modified: 't', content_hash: 'h' }), 'h', false],
     ['absent', null, null, false],
     ['no-hash', JSON.stringify({ server_modified: 't' }), null, false],
+    ['empty-hash', JSON.stringify({ content_hash: '' }), null, false],
+    ['number-hash', JSON.stringify({ content_hash: 7 }), null, false],
     ['not-json', 'not json', null, true],
     ['not-object', JSON.stringify(['a']), null, true],
   ])('reads a result header (%s)', (_id, raw, token, warns) => {

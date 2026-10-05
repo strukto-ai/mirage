@@ -60,12 +60,17 @@ export class DropboxApiError extends Error {
   }
 }
 
+/** An error body's `error_summary`, or '' when it carries no string. */
 function summaryOf(text: string): string {
+  let body: unknown
   try {
-    return (JSON.parse(text) as { error_summary?: string }).error_summary ?? ''
+    body = JSON.parse(text)
   } catch {
     return ''
   }
+  if (typeof body !== 'object' || body === null) return ''
+  const summary = (body as Record<string, unknown>).error_summary
+  return typeof summary === 'string' ? summary : ''
 }
 
 function tokenUrlOf(config: DropboxConfig): string {
