@@ -23,7 +23,7 @@ from mirage.core.linear.pathing import (
     split_suffix_id,
     team_dirname,
 )
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 
 
 def test_split_suffix_id_basic():
@@ -124,7 +124,7 @@ def test_a_cjk_label_fits_name_max_and_still_addresses_the_id(
     for field in fields:
         record[field] = CJK
     name = build(record)
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert "\ufffd" not in name
     assert split_suffix_id(name, suffix=suffix)[1] == UUID
 

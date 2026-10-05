@@ -4,7 +4,7 @@ description: The Mirage server in Python, a FastAPI app that holds workspaces an
 icon: server
 ---
 
-The Mirage server is a FastAPI app. It holds workspaces and serves them over the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc), and over [SSH](/home/access/ssh) when `ssh_port` is set. The TypeScript server speaks the same protocol, so a client of one works against the other.
+The Mirage server is a FastAPI app. It holds workspaces and serves them over the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc), and over [SSH](/home/access/ssh), on its own port when `ssh_port` is set and through its HTTP port either way. The TypeScript server speaks the same protocol, so a client of one works against the other.
 
 ## Install
 

@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
-import { stream } from './stream.ts'
+import { readStream } from './stream.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -46,7 +46,7 @@ describe('a recorded OneDrive stream', () => {
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
     const [out, records] = await runWithRecording(async () => {
       const chunks: number[] = []
-      for await (const chunk of stream(accessor, spec)) chunks.push(...chunk)
+      for await (const chunk of readStream(accessor, spec)) chunks.push(...chunk)
       return chunks
     })
     expect(out).toEqual([1, 2, 3])

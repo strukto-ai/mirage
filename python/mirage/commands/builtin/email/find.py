@@ -20,7 +20,6 @@ from mirage.commands.builtin.generic.find import (
     is_link,
     parse_find_args,
     resolve_start,
-    walk_find,
 )
 from mirage.commands.builtin.grep_pushdown import lone_operand
 from mirage.commands.builtin.utils.output import format_records
@@ -32,6 +31,7 @@ from mirage.core.email.readdir import _date_bucket, _msg_filename
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.search import search_messages
 from mirage.core.email.stat import stat as _stat
+from mirage.core.generic.find import walk_find
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch

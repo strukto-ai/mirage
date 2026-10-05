@@ -98,9 +98,10 @@ async def test_read_missing_file_raises_by_id(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_spreadsheet_asks_for_grid_data():
+async def test_read_spreadsheet_asks_for_grid_data_and_values_only():
     # spreadsheets.get returns no cell values unless asked, so the
-    # rendered .gsheet.json would be tab metadata without this.
+    # rendered .gsheet.json would be tab metadata without this; the mask
+    # keeps every cell's formats out of it.
     token_manager = SimpleNamespace(config=SimpleNamespace(api_base=""))
     with patch(
         "mirage.core.gsheets.read.google_get",
@@ -109,7 +110,12 @@ async def test_read_spreadsheet_asks_for_grid_data():
     ) as get:
         await read_spreadsheet(token_manager, "s1")
     assert get.await_args.args[1].endswith("/spreadsheets/s1")
-    assert get.await_args.args[2] == {"includeGridData": "true"}
+    assert get.await_args.args[2] == {
+        "includeGridData": "true",
+        "fields": "spreadsheetId,spreadsheetUrl,properties,namedRanges,"
+        "sheets(properties,data(startRow,startColumn,"
+        "rowData(values(formattedValue,userEnteredValue,effectiveValue))))",
+    }
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,7 @@ import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -28,13 +28,13 @@ from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
+from mirage.commands.resolve import get_extension
 from mirage.context import (
     get_current_session,
     hidden_paths_intersect,
     hidden_refusal,
     path_allowed,
 )
-from mirage.errors import POSIX, FsCondition
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
@@ -63,7 +63,9 @@ from mirage.utils.errors import (
     eisdir,
     eloop,
     enoent,
+    exdev,
     no_mount,
+    no_xattr,
     walk_refusal,
 )
 from mirage.utils.hidden import move_reveals
@@ -127,11 +129,6 @@ def _served(report: OpReport | None, result: Any) -> None:
             None,
             len(result) if isinstance(result, (bytes, bytearray)) else None,
         )
-
-
-def _no_xattr(path: PathSpec) -> OSError:
-    condition = POSIX[FsCondition.NO_XATTR]
-    return OSError(condition.errno, condition.phrase, path.virtual)
 
 
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
@@ -283,16 +280,24 @@ class Dispatcher:
     workspace state. The snapshot drift queue rides along because this
     is the one door: a strict restore's pending fingerprint checks must
     run before ANY op can touch a mount, and FUSE and the ops facade
-    reach here without passing Workspace.dispatch.
+    reach here without passing Workspace.dispatch. So does the
+    workspace's write admission, which holds a write while a capture
+    reads.
     """
 
     def __init__(
-        self, namespace: Namespace, cache, drift: DriftQueue | None = None
+        self,
+        namespace: Namespace,
+        cache,
+        drift: DriftQueue | None = None,
+        admit_write: Callable[[], AbstractAsyncContextManager[None]]
+        | None = None,
     ) -> None:
         self._namespace = namespace
         self._cache = cache
         self._reconciler = Reconciler(cache, namespace)
         self._drift = drift
+        self._admit_write = admit_write
         self._writers = KeyLock()
 
     @property
@@ -354,6 +359,19 @@ class Dispatcher:
         return fallback
 
     async def dispatch(
+        self,
+        op: str,
+        path: PathSpec,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[Any, IOResult]:
+        if self._admit_write is None or op not in POLICY_WRITE_OPS:
+            return await self._dispatch(op, path, report=report, **kwargs)
+        async with self._admit_write():
+            return await self._dispatch(op, path, report=report, **kwargs)
+
+    async def _dispatch(
         self,
         op: str,
         path: PathSpec,
@@ -507,6 +525,20 @@ class Dispatcher:
                 await self._gated_namespace(op, path, fallback, report),
                 IOResult(),
             )
+        # A mount is a filesystem boundary: rename(2) moves a name within
+        # one and answers EXDEV across two, before any permission is
+        # weighed, so `mv` falls back to copy and unlink instead of the
+        # source's backend taking the destination for one of its keys. It
+        # resolves both parent directories first, so a missing one is
+        # ENOENT (ENOTDIR through a file) ahead of EXDEV.
+        if (
+            op == "rename"
+            and isinstance(dst, PathSpec)
+            and self._namespace.try_mount_for(dst.virtual) is not mount
+        ):
+            refusal = await self._parent_refusal(path)
+            refusal = refusal or await self._parent_refusal(dst)
+            raise refusal or exdev(path)
         # Admission policies fire at the door, before the warm-cache
         # early return below: a cached read must be refused exactly
         # like a cold one, or the cache becomes a policy bypass.
@@ -538,29 +570,26 @@ class Dispatcher:
             )
         await mount.ensure_ready()
         caches_reads = mount.vfs.caches_reads
-        # The file cache is keyed on the path alone, and what it holds is
-        # the rendered read. A raw read asks for a different value under
-        # the same key, so it is neither served from that cache nor kept
-        # in it.
+        # The file cache holds what commands read, keyed on the path
+        # alone. A raw read, or a read through a filetype renderer
+        # (whoever registered it), asks for a different value under the
+        # same key, so it is neither served from that cache nor kept in
+        # it. The renderer read still gets the freshness check, so a path
+        # the backend reports gone fails.
         raw = "filetype" in kwargs and kwargs["filetype"] is None
-        # A cold read keeps the whole file it fetched for the next reader,
-        # through the mount's own manager, the one a command's read
-        # fills: a write racing the fetch retires its generation, so the
-        # bytes it read are not kept. A ranged read comes from the store
-        # only where the store can serve one; elsewhere the read op would
-        # fetch the whole file and slice it for every range, so the whole
-        # file is read once, kept, and each range sliced from it.
+        filetype = (
+            kwargs["filetype"]
+            if "filetype" in kwargs
+            else get_extension(path.virtual)
+        )
+
+        def renders_read() -> bool:
+            return filetype is not None and mount.has_filetype_op(
+                "read", filetype
+            )
+
         offset, size = _window(kwargs)
         whole = (offset, size) == (0, None)
-        filler = (
-            mount.cache_manager
-            if caches_reads
-            and not raw
-            and op in DISPATCH_READ_OPS
-            and size != 0
-            and (whole or not mount.reads_ranges(path.virtual))
-            else None
-        )
 
         if caches_reads and not raw and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
@@ -569,6 +598,7 @@ class Dispatcher:
                 and await self._reconciler.may_serve_cached(
                     mount, path.virtual
                 )
+                and not renders_read()
                 and not mount.retiring
                 and self._namespace.try_mount_for(path.virtual) is mount
             ):
@@ -590,6 +620,26 @@ class Dispatcher:
                 if bound is not None:
                     served = await apply_op_limit(served, bound)
                 return served, IOResult(reads={path.virtual: served})
+
+        # A cold read keeps the whole file it fetched for the next reader,
+        # through the mount's own manager, the one a command's read
+        # fills: a write racing the fetch retires its generation, so the
+        # bytes it read are not kept. A ranged read comes from the store
+        # only where the store can serve one; elsewhere the read op would
+        # fetch the whole file and slice it for every range, so the whole
+        # file is read once, kept, and each range sliced from it. The op
+        # is resolved only once the mount is ready, so a renderer can land
+        # after this check; the fill asks again before it keeps anything.
+        filler = (
+            mount.cache_manager
+            if caches_reads
+            and not raw
+            and op in DISPATCH_READ_OPS
+            and size != 0
+            and (whole or not mount.reads_ranges(path.virtual))
+            and not renders_read()
+            else None
+        )
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             # Ops.rename addresses both endpoints against the source's
@@ -617,6 +667,7 @@ class Dispatcher:
                         path.virtual,
                         **_whole_read(kwargs),
                     ),
+                    keep=lambda: not renders_read(),
                 )
                 result = kept if whole else slice_window(kept, offset, size)
             elif op in SERIAL_WRITE_OPS:
@@ -1344,7 +1395,7 @@ class Dispatcher:
         elif op == "getxattr":
             found = stored.get(name)
             if found is None:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             result = found
         elif op == "setxattr":
             if kwargs.get("create") and name in stored:
@@ -1352,13 +1403,13 @@ class Dispatcher:
                     errno.EEXIST, os.strerror(errno.EEXIST), path.virtual
                 )
             if kwargs.get("replace") and name not in stored:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             await self._namespace.set_xattr(
                 path.virtual, name, bytes(kwargs.get("value") or b"")
             )
         else:
             if name not in stored:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             await self._namespace.remove_xattr(path.virtual, name)
         record(
             op,

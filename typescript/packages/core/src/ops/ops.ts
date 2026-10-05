@@ -19,10 +19,11 @@ import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
-import { exdev, isEnotdir, isMissingPath } from '../utils/errors.ts'
+import { isEnotdir, isMissingPath } from '../utils/errors.ts'
 import { dottedSpelling } from '../utils/path.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { getCurrentSession, pathAllowed } from '../context/session_context.ts'
+import type { SessionBind } from './types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
 export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>
@@ -33,14 +34,6 @@ interface MountOwner {
 }
 
 export type OwnerOf = (path: string) => MountOwner | null
-
-/**
- * Run one facade op as a session: `(sessionId, run) => result`, null
- * naming the workspace's default session as it is when the op runs.
- * The workspace supplies it, so the facade binds the session the way a
- * shell line does without holding the session manager itself.
- */
-export type SessionBind = <T>(sessionId: string | null, run: () => Promise<T>) => Promise<T>
 
 /** What a derived facade carries over and a constructor may set. */
 export interface OpsOptions {
@@ -543,15 +536,12 @@ export class Ops {
    * Rename a file or directory within one mount.
    *
    * Both ends must resolve to the same mount: a mount is a filesystem
-   * boundary, and the facade is where a kernel-facing whole-workspace
-   * FUSE mount needs the refusal, so `mv` between two backends falls
-   * back to its copy+unlink path instead of corrupting one backend's
-   * key space with the other's path. Mirrors Python's Ops.rename.
+   * boundary, and the dispatcher answers EXDEV across two (ENOENT when a
+   * parent directory is missing), which a kernel-facing whole-workspace FUSE
+   * mount needs so `mv` between two backends falls back to its copy+unlink
+   * path. Mirrors Python's Ops.rename.
    */
   async rename(src: string, dst: string, sessionId?: string): Promise<void> {
-    if ((this.ownerOf(src)?.prefix ?? '') !== (this.ownerOf(dst)?.prefix ?? '')) {
-      throw exdev(src)
-    }
     await this.through('rename', src, [PathSpec.fromStrPath(dst)], {}, sessionId)
   }
 

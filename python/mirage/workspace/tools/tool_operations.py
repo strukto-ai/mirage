@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 import shlex
 from collections.abc import Mapping
@@ -29,6 +30,8 @@ from mirage.workspace.tools.io_text import decode, io_to_str, replace_text
 
 if TYPE_CHECKING:
     from mirage.workspace.workspace.handle import Session
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_READ_LIMIT = 2000
 
@@ -103,6 +106,26 @@ async def ensure_parents(vfs: Ops, path: str) -> None:
             raise
 
 
+async def missing(vfs: Ops, path: str) -> bool:
+    """Whether a path a read just failed on is absent, which picks the
+    failure's wording.
+
+    A probe the workspace refuses means the path is there: a hidden one
+    answers absent, never refused. A probe that fails for any other
+    filesystem reason proves nothing either way. In both cases the
+    read's own error stands rather than the probe's.
+
+    Args:
+        vfs (Ops): The op facade the read went through.
+        path (str): Virtual path of the failed read.
+    """
+    try:
+        return not await vfs.exists(path)
+    except OSError as exc:
+        logger.debug("exists probe failed for %s: %s", path, exc)
+        return False
+
+
 class MirageToolOperations:
     """The agent tools for one session, independent of any agent
     framework.
@@ -166,7 +189,7 @@ class MirageToolOperations:
         try:
             data = await versions.read(path)
         except (OSError, ValueError) as exc:
-            if not await versions.vfs.exists(path):
+            if await missing(versions.vfs, path):
                 return ToolResult(f"Error: file '{path}' not found", True)
             return ToolResult(f"Error: {exc}", True)
         text = decode(data)
@@ -191,7 +214,11 @@ class MirageToolOperations:
             ToolResult: The confirmation, or the failure.
         """
         versions = await self._versions()
-        if await versions.vfs.exists(path) and not versions.has_read(path):
+        try:
+            present = await versions.vfs.exists(path)
+        except OSError as exc:
+            return ToolResult(f"Error: {exc}", True)
+        if present and not versions.has_read(path):
             return ToolResult(
                 f"Error: file '{path}' exists; read all of it before "
                 "overwriting it",
@@ -228,7 +255,7 @@ class MirageToolOperations:
         except StaleMirageFileError as exc:
             return ToolResult(f"Error: {exc}", True)
         except (OSError, ValueError) as exc:
-            if not await versions.vfs.exists(path):
+            if await missing(versions.vfs, path):
                 return ToolResult(f"Error: file '{path}' not found", True)
             return ToolResult(f"Error: {exc}", True)
         new_content, count = replace_text(
@@ -322,7 +349,9 @@ class MirageToolOperations:
         The pattern is expanded by ``Session.glob``, the shell's own
         resolver: ``**`` matches any number of directories, and a
         relative pattern is matched under ``path``. A symlink to a file
-        counts; a dangling one does not.
+        counts; a dangling one does not, nor does a match the workspace
+        refuses to stat, since nothing says what it is. Any other failure
+        propagates rather than pass for a short list.
 
         Args:
             pattern (str): A pathname pattern such as ``**/*.py``.
@@ -331,12 +360,18 @@ class MirageToolOperations:
         Returns:
             ToolResult: One path per line, sorted.
         """
-        matches = await self._session.glob(posixpath.join(path, pattern))
-        files = [
-            match
-            for match in matches
-            if await self._session.vfs.is_file(match)
-        ]
+        try:
+            matches = await self._session.glob(posixpath.join(path, pattern))
+        except PermissionError as exc:
+            logger.debug("glob refused for %s: %s", pattern, exc)
+            matches = []
+        files: list[str] = []
+        for match in matches:
+            try:
+                if await self._session.vfs.is_file(match):
+                    files.append(match)
+            except PermissionError as exc:
+                logger.debug("glob match refused for %s: %s", match, exc)
         return ToolResult("".join(f"{match}\n" for match in files))
 
     async def call(

@@ -19,10 +19,10 @@ import zipfile
 import pytest
 
 from mirage.commands.builtin.generic.unzip import (
-    CORRUPT_CDIR,
     EXTRA_BYTES,
     MISSING_BYTES,
     ZERO_TESTED,
+    corrupt_cdir,
     unzip,
 )
 from mirage.commands.errors import UsageError
@@ -232,7 +232,7 @@ _CDIR_AT = int.from_bytes(_MULTI_ZIP[_END + 16 : _END + 20], "little")
             {"args_l": True},
             None,
             3,
-            CORRUPT_CDIR.format("/a.zip"),
+            corrupt_cdir("/a.zip"),
         ),
         (
             _patch(_MULTI_ZIP, b"PK\x05\x06", 10, 2, 2),
@@ -240,7 +240,7 @@ _CDIR_AT = int.from_bytes(_MULTI_ZIP[_END + 16 : _END + 20], "little")
             {"Z": True},
             None,
             3,
-            CORRUPT_CDIR.format("/a.zip"),
+            corrupt_cdir("/a.zip"),
         ),
         (
             b"X" + _MULTI_ZIP,

@@ -53,7 +53,7 @@ async function* gmailStream(
   yield await gmailRead(accessor, p, index)
 }
 
-async function grepCommand(
+async function grep(
   accessor: GmailAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -99,5 +99,5 @@ export const GMAIL_GREP = command({
   name: 'grep',
   vfs: VFSName.GMAIL,
   spec: specOf('grep'),
-  fn: grepCommand,
+  fn: grep,
 })

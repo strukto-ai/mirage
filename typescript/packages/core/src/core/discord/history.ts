@@ -18,19 +18,9 @@ import { historyJsonlBytes } from './render.ts'
 
 export const DISCORD_EPOCH = 1420070400000n
 
-export function dateToSnowflake(dateStr: string, endOfDay = false): string {
-  const parts = dateStr.split('-')
-  if (parts.length !== 3) throw new Error(`invalid date: ${dateStr}`)
-  const y = Number.parseInt(parts[0] ?? '', 10)
-  const m = Number.parseInt(parts[1] ?? '', 10)
-  const d = Number.parseInt(parts[2] ?? '', 10)
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
-    throw new Error(`invalid date: ${dateStr}`)
-  }
-  const ms = endOfDay ? Date.UTC(y, m - 1, d, 23, 59, 59) : Date.UTC(y, m - 1, d, 0, 0, 0)
-  if (!Number.isFinite(ms)) throw new Error(`invalid date: ${dateStr}`)
-  const offset = BigInt(ms) - DISCORD_EPOCH
-  return (offset << 22n).toString()
+/** The lowest snowflake Discord mints at `seconds` of Unix time. */
+export function snowflakeAt(seconds: number): bigint {
+  return (BigInt(Math.round(seconds * 1000)) - DISCORD_EPOCH) << 22n
 }
 
 export interface DiscordMessage extends Record<string, unknown> {
@@ -46,8 +36,8 @@ async function* streamMessagesForDay(
 ): AsyncIterableIterator<DiscordMessage[]> {
   const [start, end] = accessor.timeRange.dayBounds(dateStr)
   if (start >= end) return
-  const first = (BigInt(Math.round(start * 1000)) - DISCORD_EPOCH) << 22n
-  const beforeBig = (BigInt(Math.round(end * 1000)) - DISCORD_EPOCH) << 22n
+  const first = snowflakeAt(start)
+  const beforeBig = snowflakeAt(end)
   const after = (first > 0n ? first - 1n : 0n).toString()
   for await (const page of afterIdPages<DiscordMessage>(accessor, {
     endpoint: `/channels/${channelId}/messages`,

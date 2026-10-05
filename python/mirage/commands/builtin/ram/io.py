@@ -32,7 +32,7 @@ from mirage.core.ram.stat import stat as _stat
 from mirage.core.ram.stream import read_stream as _read_stream
 from mirage.core.ram.truncate import truncate as _truncate
 from mirage.core.ram.unlink import unlink as _unlink
-from mirage.core.ram.write import write_bytes as _write
+from mirage.core.ram.write import write as _write
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import DuOps, NativeReadOps, ReadOps, WriteOps
 

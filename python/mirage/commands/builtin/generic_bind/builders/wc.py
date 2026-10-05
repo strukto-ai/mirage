@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.aggregators import wc_aggregate
 from mirage.commands.builtin.generic.wc import wc_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
@@ -39,4 +38,4 @@ async def wc(
     )
 
 
-BUILDER = Builder("wc", wc, aggregate=wc_aggregate, read=True)
+BUILDER = Builder("wc", wc, read=True)

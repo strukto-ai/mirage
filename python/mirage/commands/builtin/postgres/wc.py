@@ -31,7 +31,7 @@ from mirage.core.postgres import client
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.readdir import entity_exists
 from mirage.core.postgres.scope import detect_scope
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, CountedRun, IOResult
 from mirage.types import PathSpec
 
 
@@ -80,9 +80,10 @@ async def wc(
                 )
                 rows.append((WCCounts(lines=count), p.raw_path))
                 total += count
+        runs = [CountedRun((counts.lines,), label) for counts, label in rows]
         return format_count_rows(
             rows, WCCounts(lines=total), len(resolved), parsed
-        ), IOResult()
+        ), IOResult(counted_runs=runs)
     return await wc_generic(
         resolved,
         list(texts),

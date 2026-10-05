@@ -154,7 +154,7 @@ export function headerDelay(response: Response, attempt: number, retry: RetryPol
   return Math.min(2 ** attempt, retry.maxBackoff)
 }
 
-function textDelay(text: string, retry: RetryPolicy): number {
+export function bodyDelay(text: string, retry: RetryPolicy): number {
   let data: unknown = {}
   try {
     data = JSON.parse(text) as unknown
@@ -172,10 +172,6 @@ function textDelay(text: string, retry: RetryPolicy): number {
     : Math.min(1, retry.maxBackoff)
 }
 
-export async function bodyDelay(response: Response, retry: RetryPolicy): Promise<number> {
-  return textDelay(await response.text(), retry)
-}
-
 /** Raise a wait to the policy's floor for this status, then cap it. */
 export function flooredDelay(delay: number, status: number, retry: RetryPolicy): number {
   const floor = retry.minDelays?.[status]
@@ -185,7 +181,7 @@ export function flooredDelay(delay: number, status: number, retry: RetryPolicy):
 
 function retryDelay(response: Response, text: string, attempt: number, retry: RetryPolicy): number {
   const delay =
-    retry.delaySource === 'body' ? textDelay(text, retry) : headerDelay(response, attempt, retry)
+    retry.delaySource === 'body' ? bodyDelay(text, retry) : headerDelay(response, attempt, retry)
   return flooredDelay(delay, response.status, retry)
 }
 

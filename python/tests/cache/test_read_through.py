@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from functools import partial
 from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.cache.context import push_cache_manager
+from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
@@ -227,6 +229,50 @@ async def test_inflight_read_cannot_repopulate_retired_mount():
 
     assert await manager.read_through(_spec(), fetch) == b"old"
     live = True
+    assert await manager.cached_bytes(_spec()) is None
+
+
+@pytest.mark.asyncio
+async def test_fill_keeps_nothing_when_keep_turns_false_mid_fetch():
+    keepable = True
+    manager = CacheManager(RAMFileCacheStore(), None, "/s3/", True)
+
+    async def fetch():
+        nonlocal keepable
+        keepable = False
+        return b"old"
+
+    assert await manager.fill(_spec(), fetch, keep=lambda: keepable) == b"old"
+    assert await manager.cached_bytes(_spec()) is None
+
+
+@pytest.mark.asyncio
+async def test_fill_asks_keep_once_it_holds_the_mutation_lock():
+    # A fill that fetched waits for the lock behind another holder; what
+    # keep answers while it waits is not the answer it must act on.
+    keepable = True
+    store = RAMFileCacheStore()
+    manager = CacheManager(store, None, "/s3/", True)
+    fetched = asyncio.Event()
+
+    async def fetch():
+        fetched.set()
+        return b"old"
+
+    lock = mutation_lock(store)
+    await lock.acquire()
+    filling = asyncio.ensure_future(
+        manager.fill(_spec(), fetch, keep=lambda: keepable)
+    )
+    try:
+        await asyncio.wait_for(fetched.wait(), 1)
+        keepable = False
+        lock.release()
+        assert await asyncio.wait_for(filling, 1) == b"old"
+    finally:
+        if lock.locked():
+            lock.release()
+        await asyncio.gather(filling, return_exceptions=True)
     assert await manager.cached_bytes(_spec()) is None
 
 

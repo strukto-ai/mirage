@@ -26,7 +26,7 @@ from mirage.utils.errors import listing_error
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-def _resource_type(entry: dict[str, Any]) -> str:
+def _resource_type_for(entry: dict[str, Any]) -> str:
     if entry.get(".tag") == "folder":
         return "dropbox/folder"
     return "dropbox/file"
@@ -122,7 +122,7 @@ async def readdir(
         entry = IndexEntry(
             id=f.get("id") or f.get("path_display") or filename,
             name=filename,
-            resource_type=_resource_type(f),
+            resource_type=_resource_type_for(f),
             remote_time=modified,
             vfs_name=filename,
             size=size if not folder and isinstance(size, int) else None,

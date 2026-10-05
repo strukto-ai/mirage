@@ -22,7 +22,7 @@ import { exists as hubExists } from '../../../core/hf_hub/exists.ts'
 import { read as hubRead } from '../../../core/hf_hub/read.ts'
 import { readdir as hubReaddir } from '../../../core/hf_hub/readdir.ts'
 import { stat as hubStat } from '../../../core/hf_hub/stat.ts'
-import { stream as hubStream } from '../../../core/hf_hub/stream.ts'
+import { readStream as hubStream } from '../../../core/hf_hub/stream.ts'
 
 // No native find or du op, and that is not an omission. Those exist to spare
 // an API tree one request per directory, and this mount has no such cost: the

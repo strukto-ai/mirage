@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     relay,
     transfer_primitives,
 )
-from mirage.commands.builtin.generic.tee import tee
+from mirage.commands.builtin.generic.tee import tee_generic
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult
@@ -59,7 +59,7 @@ async def run_tee(
         await dispatch("append", path, data=data)
 
     p = functools.partial
-    out, io = await tee(
+    out, io = await tee_generic(
         flat_scopes(scopes),
         [],
         read_stream=read_stream,

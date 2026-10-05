@@ -7,6 +7,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
 import { eacces } from '../../utils/errors.ts'
 import { MountEntry } from '../mount/mount.ts'
+import type { RegisteredOp } from '../../ops/registry.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 
@@ -59,25 +60,40 @@ it.each([
   }
 })
 
-it.each([
-  ['find', true],
-  ['du', false],
-] as const)('keeps nested %s failure inside the line', async (name, lazy) => {
-  const bad = new RAMVFS()
+class FailingListing extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    return super
+      .ops()
+      .map((ro) =>
+        ro.name === 'readdir'
+          ? { ...ro, fn: () => Promise.reject(new Error('remote failure')) }
+          : ro,
+      )
+  }
+}
+
+it.each(['find', 'du', 'ls -R'])('keeps nested %s failure inside the line', async (name) => {
+  // find and du hand each mount's part to that mount's own command; ls -R
+  // lists the nested mount through the dispatcher.
+  const listing = name === 'ls -R'
   const ws = new Workspace(
-    { '/bad': bad, '/good': new RAMVFS() },
+    { '/bad': listing ? new FailingListing() : new RAMVFS(), '/good': new RAMVFS() },
     { mode: 'exec', shellParser: await getTestParser() },
   )
-  for (const cmd of failingCommand(name, new Error('remote failure'), lazy))
-    ws.registry.mountFor('/bad/f').register(cmd)
+  if (!listing) {
+    for (const cmd of failingCommand(name, new Error('remote failure'), false))
+      ws.registry.mountFor('/bad/f').register(cmd)
+  }
   try {
     await ws.shell('echo data >/good/file')
-    const result = await ws.shell(`echo before; ${name} / 2>/dev/null; echo after=$?`)
-    const out = DEC.decode(result.stdout)
-    expect(out).toMatch(/^before\n/)
-    expect(out).toMatch(/after=1\n$/)
-    expect(out).toContain('/good')
+    const result = await ws.shell(`echo before; ${name} / >/dev/null 2>&1; echo after=$?`)
+    expect(DEC.decode(result.stdout)).toBe('before\nafter=1\n')
     expect(DEC.decode(result.stderr)).toBe('')
+    const failed = await ws.shell(`${name} /`)
+    expect(DEC.decode(failed.stderr)).toBe(`${name.split(' ')[0] ?? ''}: remote failure\n`)
+    expect(failed.exitCode).toBe(1)
+    // A mount's own find or du fails alone; the other mounts answer.
+    expect(DEC.decode(failed.stdout).includes('/good')).toBe(!listing)
   } finally {
     await ws.close()
   }

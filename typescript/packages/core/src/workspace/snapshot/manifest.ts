@@ -17,7 +17,7 @@ import { CacheKey, JobKey, MountKey, VFSStateKey, StateKey } from './keys.ts'
 import { BLOB_REF_KEY, isSafeBlobPath } from './utils.ts'
 
 class BlobAllocator {
-  readonly blobs: Record<string, Uint8Array> = {}
+  readonly blobs: Record<string, Uint8Array | string> = {}
   private readonly counters = new Map<string, number>()
 
   alloc(category: string): string {
@@ -41,9 +41,12 @@ function isDict(v: unknown): v is AnyDict {
  * untouched. It is built that way round on purpose. An allowlist of keys
  * silently dropped whatever it forgot from every tar snapshot while
  * leaving in-memory snapshots (which never pass through here) green,
- * which is exactly how installed CLIs went missing.
+ * which is exactly how installed CLIs went missing. A disk mount's files
+ * ride as host paths, read only when the tar is written.
  */
-export function splitManifestAndBlobs(state: AnyDict): [AnyDict, Record<string, Uint8Array>] {
+export function splitManifestAndBlobs(
+  state: AnyDict,
+): [AnyDict, Record<string, Uint8Array | string>] {
   const a = new BlobAllocator()
   const cache = (state[StateKey.CACHE] as AnyDict | undefined) ?? {}
   const cacheEntries = (cache[CacheKey.ENTRIES] as AnyDict[] | undefined) ?? []
@@ -95,7 +98,7 @@ function mountToManifest(mount: AnyDict, a: BlobAllocator): AnyDict {
   const ps = { ...(mount[MountKey.VFS_STATE] as AnyDict) }
   const ptype = ps[VFSStateKey.TYPE] as string
   const files = (ps[VFSStateKey.FILES] as Record<string, Uint8Array> | undefined) ?? {}
-  if (ptype === VFSName.RAM) {
+  if (ptype === VFSName.RAM || ptype === VFSName.OPFS) {
     ps[VFSStateKey.FILES] = stashBlobs(
       files,
       a,

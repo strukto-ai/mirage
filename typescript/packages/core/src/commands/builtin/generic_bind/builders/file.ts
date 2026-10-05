@@ -13,19 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { fileGeneric } from '../../generic/file.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const file: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return fileGeneric(
+    resolved,
+    opts,
+    (p) => ops.stat(accessor, p, idx),
+    (p) => ops.readBytes(accessor, p, idx),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'file',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return fileGeneric(
-      resolved,
-      opts,
-      (p) => ops.stat(accessor, p, idx),
-      (p) => ops.readBytes(accessor, p, idx),
-    )
-  },
+  fn: file,
 }

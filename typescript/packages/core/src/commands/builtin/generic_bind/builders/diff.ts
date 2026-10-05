@@ -13,20 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { diffGeneric } from '../../generic/diff.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const diff: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return diffGeneric(
+    resolved,
+    opts,
+    (p) => ops.readStream(accessor, p, idx),
+    (p) => ops.readdir(accessor, p, idx),
+    (p) => ops.stat(accessor, p, idx),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'diff',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return diffGeneric(
-      resolved,
-      opts,
-      (p) => ops.readStream(accessor, p, idx),
-      (p) => ops.readdir(accessor, p, idx),
-      (p) => ops.stat(accessor, p, idx),
-    )
-  },
+  fn: diff,
 }

@@ -415,6 +415,20 @@ directories newer than X alone, and `-prune -newermt X` skips every
 directory's contents and prints the newer ones, as GNU orders them. A
 repeated `-print` prints each row once per occurrence, as in GNU.
 
+`grep`, `zgrep`, `sed` and `expr` follow the locale the command's environment
+names, as GNU does: the first of `LC_ALL`, `LC_CTYPE` and `LANG` that is set
+and not empty. In the C locale, the default, they match, count and index
+bytes. When that variable names a UTF-8 codeset (`C.UTF-8`, `en_US.utf8`),
+they work on whole characters: `.` and a bracket expression match one
+character and never a byte that is not part of one, `expr length` and
+`substr` count characters, and grep leaves out a line or match holding such a
+byte and reports `binary file matches`, unless `-a` is given. Every UTF-8 name
+counts as installed, where glibc falls back to the C locale for a missing
+one. Character classes, `\w`, word boundaries, `-i` and sed's `\U` and `\L`
+keep their ASCII meaning under a UTF-8 locale, and diagnostics keep the C
+locale's quoting. `awk` and `tr` work on bytes under any locale, as mawk and
+GNU `tr` do.
+
 ## Supported bash syntax
 
 Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements the constructs LLMs reach for most often. What is not supported returns a clear, parseable error so an agent can self-correct on its next turn.

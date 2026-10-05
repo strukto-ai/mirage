@@ -6,7 +6,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { HfModelsHubAccessor } from '../../accessor/hf_hub.ts'
+import { HfModelsAccessor } from '../../accessor/hf_hub.ts'
 import { GridFSVFS } from '../gridfs/gridfs.ts'
 import { R2VFS } from '../r2/r2.ts'
 import { S3VFS } from './s3.ts'
@@ -42,7 +42,7 @@ const PREFIX_BACKENDS: Record<string, (keyPrefix: string | undefined) => string 
   r2: (p) => new R2VFS({ bucket: BUCKET, accountId: 'a', ...opt(p) }).accessor.config.keyPrefix,
   gridfs: (p) => new GridFSVFS({ uri: 'mongodb://h', database: 'd', ...opt(p) }).config.keyPrefix,
   hf_buckets: (p) => new HfBucketsAccessor({ bucket: 'o/b', ...opt(p) }).keyPrefix,
-  hf_models: (p) => new HfModelsHubAccessor({ repoId: 'o/r', ...opt(p) }).keyPrefix,
+  hf_models: (p) => new HfModelsAccessor({ repoId: 'o/r', ...opt(p) }).keyPrefix,
 }
 
 describe('one key prefix rule across backends', () => {

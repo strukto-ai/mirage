@@ -126,13 +126,26 @@ async function* trStream(
   }
 }
 
+interface TrFlags {
+  readonly delete: boolean
+  readonly squeeze: boolean
+  readonly complement: boolean
+  readonly truncateSet1: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): TrFlags {
+  const fl = new FlagView(bag, specOf('tr'))
+  return {
+    delete: fl.asBool('delete'),
+    squeeze: fl.asBool('squeeze_repeats'),
+    complement: fl.asBool('C') || fl.asBool('complement'),
+    truncateSet1: fl.asBool('truncate_set1'),
+  }
+}
+
 function buildOptions(texts: readonly string[], bag: Record<string, FlagValue>): TrOptions {
   if (texts.length === 0) throw new Error(`tr: missing operand${TRY_HELP}`)
-  const fl = new FlagView(bag, specOf('tr'))
-  const complement = fl.asBool('C') || fl.asBool('complement')
-  const del = fl.asBool('delete')
-  const squeeze = fl.asBool('squeeze_repeats')
-  const truncateSet1 = fl.asBool('truncate_set1')
+  const { delete: del, squeeze, complement, truncateSet1 } = parseFlags(bag)
   // -d without -s takes one string, so the extra operand is the second one:
   // `tr -d a b c` names b (tr.c reports argv[optind + max_operands]).
   const maxOperands = del && !squeeze ? 1 : 2

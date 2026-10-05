@@ -86,7 +86,7 @@ def _format_values(data: bytes, type_spec: str) -> str:
     return " ".join(values)
 
 
-async def od(
+async def od_generic(
     paths: list[PathSpec],
     *,
     read_stream: Callable[[PathSpec], AsyncIterator[bytes]],
@@ -132,4 +132,4 @@ async def od(
     return ("\n".join(lines) + "\n").encode(), IOResult()
 
 
-__all__ = ["od", "parse_count"]
+__all__ = ["od_generic", "parse_count"]

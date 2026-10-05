@@ -14,11 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { HF_TIMEOUT_MS } from '../vfs/hf_buckets/config.ts'
-import { HfModelsHubAccessor } from './hf_hub.ts'
+import { HfModelsAccessor } from './hf_hub.ts'
 
 describe('HfHubAccessor', () => {
   it("waits python's 30 seconds without progress unless configured", () => {
-    expect(new HfModelsHubAccessor({ repoId: 'a/b' }).timeoutMs).toBe(HF_TIMEOUT_MS)
-    expect(new HfModelsHubAccessor({ repoId: 'a/b', timeoutMs: 5000 }).timeoutMs).toBe(5000)
+    expect(new HfModelsAccessor({ repoId: 'a/b' }).timeoutMs).toBe(HF_TIMEOUT_MS)
+    expect(new HfModelsAccessor({ repoId: 'a/b', timeoutMs: 5000 }).timeoutMs).toBe(5000)
   })
 })

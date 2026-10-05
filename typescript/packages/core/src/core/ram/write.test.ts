@@ -21,7 +21,7 @@ import { appendBytes } from './append.ts'
 import { create } from './create.ts'
 import { mkdir } from './mkdir.ts'
 import { truncate } from './truncate.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 const ENC = new TextEncoder()
 
@@ -53,13 +53,13 @@ async function codeOf(fn: () => Promise<void>): Promise<string> {
 describe('core/ram writeBytes destination parents', () => {
   it('writes into an existing directory', async () => {
     const acc = mkAccessor()
-    await writeBytes(acc, mkPath('/d/f.txt'), ENC.encode('hi'))
+    await write(acc, mkPath('/d/f.txt'), ENC.encode('hi'))
     expect(acc.store.files.has('/d/f.txt')).toBe(true)
   })
 
   it('a missing parent is ENOENT and leaves no orphan', async () => {
     const acc = mkAccessor()
-    expect(await codeOf(() => writeBytes(acc, mkPath('/missing/f.txt'), ENC.encode('hi')))).toBe(
+    expect(await codeOf(() => write(acc, mkPath('/missing/f.txt'), ENC.encode('hi')))).toBe(
       'ENOENT',
     )
     expect(acc.store.files.has('/missing/f.txt')).toBe(false)
@@ -67,22 +67,20 @@ describe('core/ram writeBytes destination parents', () => {
 
   it('a missing grandparent is ENOENT', async () => {
     const acc = mkAccessor()
-    expect(
-      await codeOf(() => writeBytes(acc, mkPath('/missing/sub/f.txt'), ENC.encode('hi'))),
-    ).toBe('ENOENT')
+    expect(await codeOf(() => write(acc, mkPath('/missing/sub/f.txt'), ENC.encode('hi')))).toBe(
+      'ENOENT',
+    )
   })
 
   it('a parent that is a plain file is ENOTDIR', async () => {
     const acc = mkAccessor()
-    expect(await codeOf(() => writeBytes(acc, mkPath('/plain/f.txt'), ENC.encode('hi')))).toBe(
-      'ENOTDIR',
-    )
+    expect(await codeOf(() => write(acc, mkPath('/plain/f.txt'), ENC.encode('hi')))).toBe('ENOTDIR')
     expect(acc.store.files.has('/plain/f.txt')).toBe(false)
   })
 
   it('a plain file deeper in the parent chain is ENOTDIR', async () => {
     const acc = mkAccessor()
-    expect(await codeOf(() => writeBytes(acc, mkPath('/plain/sub/f.txt'), ENC.encode('hi')))).toBe(
+    expect(await codeOf(() => write(acc, mkPath('/plain/sub/f.txt'), ENC.encode('hi')))).toBe(
       'ENOTDIR',
     )
   })
@@ -90,7 +88,7 @@ describe('core/ram writeBytes destination parents', () => {
   it('reports the operand, not the internal parent phrasing', async () => {
     const acc = mkAccessor()
     try {
-      await writeBytes(acc, mkPath('/missing/f.txt'), ENC.encode('hi'))
+      await write(acc, mkPath('/missing/f.txt'), ENC.encode('hi'))
       expect.unreachable()
     } catch (err) {
       expect((err as { virtualPath?: string }).virtualPath).toBe('/missing/f.txt')
@@ -102,7 +100,7 @@ describe('core/ram writeBytes destination parents', () => {
 describe('core/ram write target is a directory', () => {
   it('writeBytes onto a directory is EISDIR and leaves the directory alone', async () => {
     const acc = mkAccessor()
-    expect(await codeOf(() => writeBytes(acc, mkPath('/d'), ENC.encode('hi')))).toBe('EISDIR')
+    expect(await codeOf(() => write(acc, mkPath('/d'), ENC.encode('hi')))).toBe('EISDIR')
     expect(acc.store.files.has('/d')).toBe(false)
     expect(acc.store.dirs.has('/d')).toBe(true)
   })

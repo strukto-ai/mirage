@@ -30,7 +30,7 @@
       "command": "cat /data/a.txt | fmt -w 20",
       "expect": {
         "exit": 0,
-        "stdout": "hello world foo bar\nbaz\n",
+        "stdout": "hello world foo\nbar baz\n",
         "stderr": ""
       },
       "flags": [
@@ -67,7 +67,7 @@
       "command": "fmt -w 10 /data/c.txt; fmt /data/a.txt /data/b.txt /data/no_nl.txt /data/one_byte.txt",
       "expect": {
         "exit": 0,
-        "stdout": "alpha beta\ngamma\ndelta\nhello world foo bar baz\n1 2 3\nno trailing newline\nx\n",
+        "stdout": "alpha\nbeta\ngamma\ndelta\nhello world foo bar baz\n1 2 3\nno trailing newline\nx\n",
         "stderr": ""
       },
       "flags": [

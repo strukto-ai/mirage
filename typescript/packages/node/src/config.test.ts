@@ -14,10 +14,12 @@
 
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/index'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
+import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
+import { normalizeIndexConfig } from '@struktoai/mirage-core/cache/index/config'
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
 import { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
 import { DiskNamespaceStore } from './workspace/mount/namespace/disk.ts'
@@ -1360,6 +1362,30 @@ describe.each(ACCEPTED_FIXTURES)('shared acceptance fixture: %s', (fixture) => {
 
   it.each(cases)('accepts $name', ({ config }) => {
     expect(() => loadWorkspaceConfig(config)).not.toThrow()
+  })
+})
+
+describe('shared acceptance fixture cache and index blocks', () => {
+  // The same keys are held a second time, camelCase, by the code door
+  // in core; a key accepted here and refused there would load a config
+  // the workspace then refuses to build.
+  const cases = ACCEPTED_FIXTURES.flatMap((fixture) => fixtureCases(fixture)).filter(
+    ({ config }) => config.cache != null || config.index != null,
+  )
+
+  it('has a redis cache case and a redis index case', () => {
+    const types = cases.map(({ config }) => [
+      (config.cache as { type?: unknown } | undefined)?.type,
+      (config.index as { type?: unknown } | undefined)?.type,
+    ])
+    expect(types.some(([cache]) => cache === 'redis')).toBe(true)
+    expect(types.some(([, index]) => index === 'redis')).toBe(true)
+  })
+
+  it.each(cases)('builds the cache and index of $name', ({ config }) => {
+    const { cache, index } = loadWorkspaceConfig(config)
+    if (cache != null) expect(() => normalizeCacheConfig(cache)).not.toThrow()
+    if (index != null) expect(() => normalizeIndexConfig(index)).not.toThrow()
   })
 })
 

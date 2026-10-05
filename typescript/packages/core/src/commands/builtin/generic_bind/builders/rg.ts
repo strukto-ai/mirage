@@ -28,51 +28,53 @@ import {
 } from '../../generic/rg.ts'
 import { patternArg } from '../../grep_pattern.ts'
 import { walkCandidates } from '../../rg_scan.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const rg: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+  if (ops.search !== undefined) return runSearch(ops, 'rg', accessor, paths, texts, opts)
+  const idx = opts.index ?? undefined
+  let resolved: PathSpec[] = []
+  let runOpts = opts
+  if (paths.length > 0 && ops.contentSearch === undefined) {
+    resolved = await resolveGlobOf(ops)(accessor, paths, idx)
+  } else if (paths.length > 0) {
+    const fl = new FlagView(opts.flags, specOf('rg'))
+    const f = parseFlags(fl)
+    // -v and the rest of needsEveryFile need the walk (a narrowed superset
+    // hides the files they answer for); -g/-t keep the walk so their file
+    // filtering stays in one place.
+    const narrowed = await narrowScope(
+      ops,
+      accessor,
+      paths,
+      patternArg(texts, opts.flags, 'regexp'),
+      {
+        fixedString: f.fixedString,
+        recursive: true,
+        wholeWord: f.wholeWord,
+        exactFileSet: needsEveryFile(fl, f) || filtersFiles(f),
+        index: idx,
+      },
+    )
+    resolved = narrowed.resolved
+    if (narrowed.usedSearch) {
+      resolved = walkCandidates(resolved, paths, walkFilter(f), opts.cwd)
+      if (resolved.length === 0) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
+      runOpts = labelled(opts)
+    }
+  }
+  return rgGeneric(
+    resolved,
+    texts,
+    runOpts,
+    (p) => ops.stat(accessor, p, idx),
+    (p) => ops.readdir(accessor, p, idx),
+    (p) => ops.readStream(accessor, p, idx),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'rg',
   read: true,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    if (ops.search !== undefined) return runSearch(ops, 'rg', accessor, paths, texts, opts)
-    const idx = opts.index ?? undefined
-    let resolved: PathSpec[] = []
-    let runOpts = opts
-    if (paths.length > 0 && ops.contentSearch === undefined) {
-      resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    } else if (paths.length > 0) {
-      const fl = new FlagView(opts.flags, specOf('rg'))
-      const f = parseFlags(fl)
-      // -v and the rest of needsEveryFile need the walk (a narrowed superset
-      // hides the files they answer for); -g/-t keep the walk so their file
-      // filtering stays in one place.
-      const narrowed = await narrowScope(
-        ops,
-        accessor,
-        paths,
-        patternArg(texts, opts.flags, 'regexp'),
-        {
-          fixedString: f.fixedString,
-          recursive: true,
-          wholeWord: f.wholeWord,
-          exactFileSet: needsEveryFile(fl, f) || filtersFiles(f),
-          index: idx,
-        },
-      )
-      resolved = narrowed.resolved
-      if (narrowed.usedSearch) {
-        resolved = walkCandidates(resolved, paths, walkFilter(f), opts.cwd)
-        if (resolved.length === 0) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
-        runOpts = labelled(opts)
-      }
-    }
-    return rgGeneric(
-      resolved,
-      texts,
-      runOpts,
-      (p) => ops.stat(accessor, p, idx),
-      (p) => ops.readdir(accessor, p, idx),
-      (p) => ops.readStream(accessor, p, idx),
-    )
-  },
+  fn: rg,
 }

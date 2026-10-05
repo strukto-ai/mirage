@@ -105,7 +105,7 @@ import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core
 import { normalizePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 import { normalizeMongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
 import { normalizeTrelloConfig } from '@struktoai/mirage-core/vfs/trello/config'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/types'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { ChromaClient } from 'chromadb'
@@ -120,6 +120,7 @@ import { commit as hubCommit } from '@struktoai/mirage-node/core/hf_hub/commit'
 import type { Mount, Target } from '../harness.ts'
 import type { ExecWorkspace } from '../execution.ts'
 import { buildSecretsEnv } from './secrets.ts'
+import { CommandService, CLI as COMMAND_CLI } from './commands.ts'
 import { start as startKitFake } from '../../../server/kit/typescript/index.ts'
 import { buildRfc822 } from '../../../server/mail/rfc822.ts'
 import type { MailEntry } from '../../../server/mail/rfc822.ts'
@@ -253,6 +254,7 @@ function installLocalClis(
   target: Target,
 ): void {
   if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
+  if (target.clis?.includes('scope-probe') === true) ws.registerCli('scope-probe', COMMAND_CLI)
 }
 
 // Where a target declares console: {type: 'redis'}, each job's console
@@ -331,7 +333,11 @@ async function openRam(target: Target): Promise<Open> {
     if (m.alias_of !== undefined && existing === undefined) {
       throw new Error(`alias_of names no built mount: ${m.alias_of}`)
     }
-    const vfs = existing ?? new RAMVFS()
+    const vfs =
+      existing ??
+      (['command-service', 'metadata-service'].includes(m.backend ?? '')
+        ? new CommandService(m.backend === 'metadata-service')
+        : new RAMVFS())
     built[m.path] = vfs
     mounts[m.path] =
       m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs

@@ -17,19 +17,19 @@ import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { exists } from './exists.ts'
 import { mkdir } from './mkdir.ts'
 import { rmR } from './rm.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/rm.rmR', () => {
   it('removes a directory recursively', async () => {
     const accessor = makeMockAccessor()
     await mkdir(accessor, spec('/d'))
-    await writeBytes(accessor, spec('/d/x'), new TextEncoder().encode('x'))
+    await write(accessor, spec('/d/x'), new TextEncoder().encode('x'))
     await rmR(accessor, spec('/d'))
     expect(await exists(accessor, spec('/d'))).toBe(false)
   })
   it('removes a single file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/x'), new Uint8Array())
+    await write(accessor, spec('/x'), new Uint8Array())
     await rmR(accessor, spec('/x'))
     expect(await exists(accessor, spec('/x'))).toBe(false)
   })

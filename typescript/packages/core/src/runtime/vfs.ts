@@ -33,33 +33,12 @@ import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn, RuntimeContext } from './types.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { concat } from '../io/cachable_iterator.ts'
+import type { VFSEntry, VFSStat } from './types.ts'
 
 /** Whether a failure is the mount saying the path is not there. */
 function isAbsent(err: unknown): boolean {
   const condition = classify(err)
   return condition !== null && ABSENT_PATH.has(condition)
-}
-
-/** One directory entry as the mounts report it. */
-export interface VFSEntry {
-  path: string
-  size: number
-  isDir: boolean
-  // A namespace symlink. Marked so a whole-tree preload can skip it:
-  // stat follows links, so a directory link would otherwise read as a
-  // plain directory and a cyclic one would recurse the walk forever.
-  isLink?: boolean
-  // The stat's mode and stamp, absent on a row that carries no stat.
-  // A backend that slash-marks its directories is listed without one,
-  // which is the whole point of the mark, and so is an entry the
-  // listing did not classify, so the row says "not known" rather than
-  // inventing a default the guest cannot tell from an answer. A row
-  // that did stat carries both, so a guest seeding a whole tree from
-  // one listing needs no second stat per file.
-  mode?: number
-  mtimeMs?: number
-  // Encoded logical major:minor; present only for a character device.
-  rdev?: number
 }
 
 /**
@@ -73,26 +52,6 @@ export interface VFSEntry {
  */
 export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
   return entry.mode === undefined && !entry.isDir && entry.isLink !== true
-}
-
-/** One path's metadata, in the shape every guest encoder needs. */
-export interface VFSStat {
-  size: number
-  isDir: boolean
-  // Milliseconds here and nanoseconds in python, on purpose: epoch
-  // nanoseconds are past 2**53, so a number cannot hold them exactly.
-  mtimeMs: number
-  // The full st_mode, type bits included, so a chmod the shell made is
-  // what a guest's stat reports. A guest that has no mode field on its
-  // own wire (preview1's filestat carries only a filetype) reads the
-  // type bits and drops the rest. `isDir` and `isLink` are this
-  // field's type bits spelled out; mode is the authority.
-  mode: number
-  // Only ever set for a stat the caller asked not to follow, since
-  // every other answer is the target's.
-  isLink?: boolean
-  // Encoded logical major:minor; present only for a character device.
-  rdev?: number
 }
 
 /**

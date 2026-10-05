@@ -19,7 +19,7 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { populateIndex, refillSnapshot } from './tree.ts'
-import { read, stream } from './read.ts'
+import { read, readStream } from './read.ts'
 import { stat } from './stat.ts'
 import type { GitHubTransport } from './client.ts'
 import { FakeGitHub, blobSha, raceIndex, servedAccessor } from './_test_util.ts'
@@ -160,7 +160,7 @@ describe('a read against the wire', () => {
     serve({ 'a.txt': 'streamed' })
     const [chunks, records] = await runWithRecording(async () => {
       const out: Uint8Array[] = []
-      for await (const chunk of stream(
+      for await (const chunk of readStream(
         servedAccessor(),
         at('a.txt', '/gh'),
         new RAMIndexCacheStore(),

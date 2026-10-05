@@ -47,7 +47,7 @@ import * as gslidesIo from '@struktoai/mirage-core/commands/builtin/gslides/io'
 import type { CommandIO } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
 import * as githubIo from '@struktoai/mirage-core/commands/builtin/github/io'
-import { stream as githubStream } from '@struktoai/mirage-core/core/github/read'
+import { readStream as githubStream } from '@struktoai/mirage-core/core/github/read'
 import type { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive, runWithRecording } from '@struktoai/mirage-core/observe/context'
@@ -1249,16 +1249,20 @@ describe('the read-token contract', () => {
         if (row === 'bytes') first = await line(ws, 'cat /r/a.txt')
         expect(first).toEqual(row === 'drain' ? data.slice(0, 1) : data)
 
+        // A cp of a rendered Google file reads through the dispatcher, where a
+        // filetype read op always renders and keeps nothing, so its second cp
+        // fetches again. Every other read left an entry reconcile calls
+        // FRESH, and the warm read made no content fetch.
+        const renders = row === 'bytes' && name in GAPPS
         const stat = await reconcileStat(ws, fake, virtual)
         expect(stat.fingerprint).not.toBeNull()
-        expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(true)
+        expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(!renders)
 
         // The drain row's second run reads the whole entry back, so a drain
         // that cached a truncated buffer cannot pass.
         let second = await line(ws, command)
         if (row === 'bytes') second = await line(ws, 'cat /r/a.txt')
-        // Reconcile answered FRESH: the warm read made no content fetch.
-        expect(fake.fetches()).toBe(1)
+        expect(fake.fetches()).toBe(renders ? 2 : 1)
         expect(second).toEqual(data)
         expect(H.reach).toEqual([])
       } finally {

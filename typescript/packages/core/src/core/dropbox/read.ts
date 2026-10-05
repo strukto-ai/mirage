@@ -89,7 +89,7 @@ export async function read(
   return data
 }
 
-export async function* stream(
+export async function* readStream(
   accessor: DropboxAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

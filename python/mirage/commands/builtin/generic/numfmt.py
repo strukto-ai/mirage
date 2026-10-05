@@ -61,7 +61,7 @@ def _suffix_error(value: str, junk: str) -> UsageError:
     )
 
 
-def _missing_i_error(value: str) -> UsageError:
+def _missing_i_suffix_error(value: str) -> UsageError:
     """GNU's ``--from=iec-i`` complaint that the ``i`` is absent, exit 2.
 
     It answers for every field whose unit letter is not followed by an
@@ -103,7 +103,7 @@ def _scale_of(value: str, suffix: str, from_mode: str) -> tuple[int, int]:
     tail = suffix[1:]
     if from_mode == "iec-i":
         if tail[:1] != "i":
-            raise _missing_i_error(value)
+            raise _missing_i_suffix_error(value)
         if tail[1:]:
             raise _suffix_error(value, tail[1:])
         return 1024, exponent
@@ -233,7 +233,7 @@ def _convert_line(line: str, to_mode: str, from_mode: str, suffix: str) -> str:
     return lead + _convert_field(field, to_mode, from_mode, suffix) + rest
 
 
-async def numfmt(
+async def numfmt_generic(
     *texts: str,
     stdin: ByteSource | None = None,
     to_mode: str = "none",
@@ -269,4 +269,4 @@ async def numfmt(
     return printed.encode(), IOResult()
 
 
-__all__ = ["numfmt"]
+__all__ = ["numfmt_generic"]

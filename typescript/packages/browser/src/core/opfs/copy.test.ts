@@ -16,12 +16,12 @@ import { describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { copy } from './copy.ts'
 import { read } from './read.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/copy', () => {
   it('duplicates a file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/src'), new TextEncoder().encode('CP'))
+    await write(accessor, spec('/src'), new TextEncoder().encode('CP'))
     await copy(accessor, spec('/src'), spec('/dst'))
     expect(new TextDecoder().decode(await read(accessor, spec('/dst')))).toBe('CP')
   })
@@ -29,7 +29,7 @@ describe('opfs/copy', () => {
     // cp is not `mkdir -p`: GNU reports ENOENT on the destination rather
     // than building the chain, and leaves nothing behind.
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/src'), new TextEncoder().encode('X'))
+    await write(accessor, spec('/src'), new TextEncoder().encode('X'))
     await expect(copy(accessor, spec('/src'), spec('/a/b/dst'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
@@ -37,8 +37,8 @@ describe('opfs/copy', () => {
 
   it('a destination parent that is a plain file is ENOTDIR', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/src'), new TextEncoder().encode('X'))
-    await writeBytes(accessor, spec('/plain'), new TextEncoder().encode('y'))
+    await write(accessor, spec('/src'), new TextEncoder().encode('X'))
+    await write(accessor, spec('/plain'), new TextEncoder().encode('y'))
     await expect(copy(accessor, spec('/src'), spec('/plain/dst'))).rejects.toMatchObject({
       code: 'ENOTDIR',
     })

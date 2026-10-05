@@ -7,6 +7,7 @@ from mirage.commands.config import command
 from mirage.commands.errors import CommandTimeoutError
 from mirage.commands.spec import SPECS
 from mirage.io.types import IOResult, materialize
+from mirage.ops.registry import op as register_op
 from mirage.types import PathSpec
 from mirage.utils.errors import eacces
 from mirage.workspace.mount.mount import MountEntry
@@ -61,26 +62,39 @@ async def test_lazy_errors_remain_on_the_producer(error, tail, expected):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,lazy", [("find", True), ("du", False)])
-async def test_nested_mount_failure_keeps_the_line(name, lazy, caplog):
+@pytest.mark.parametrize("name", ["find", "du", "ls -R"])
+async def test_nested_mount_failure_keeps_the_line(name, caplog):
     caplog.set_level(logging.DEBUG, logger="mirage.workspace")
-    bad = RAMVFS()
     error = RuntimeError("remote failure")
-    ws = Workspace({"/bad": bad, "/good": RAMVFS()}, mode="exec")
-    ws.mount("/bad").register_fns([failing_command(name, error, lazy)])
+
+    @register_op("readdir", vfs="ram")
+    async def failing_readdir(accessor, path, **kwargs):
+        raise error
+
+    ws = Workspace({"/bad": RAMVFS(), "/good": RAMVFS()}, mode="exec")
+    # find and du hand each mount's part to that mount's own command;
+    # ls -R lists the nested mount through the dispatcher.
+    ws.mount("/bad").register_fns(
+        [failing_readdir]
+        if name == "ls -R"
+        else [failing_command(name, error, lazy=False)]
+    )
     try:
         await ws.shell("echo data >/good/file")
         result = await ws.shell(
-            f"echo before; {name} / 2>/dev/null; echo after=$?"
+            f"echo before; {name} / >/dev/null 2>&1; echo after=$?"
         )
-        assert result.stdout.startswith(b"before\n")
-        assert result.stdout.endswith(b"after=1\n")
-        assert b"/good" in result.stdout
+        assert result.stdout == b"before\nafter=1\n"
         assert not result.stderr
         assert any(
             record.exc_info and record.exc_info[1] is error
             for record in caplog.records
         )
+        result = await ws.shell(f"{name} /")
+        assert result.stderr == f"{name.split()[0]}: remote failure\n".encode()
+        assert result.exit_code == 1
+        # A mount's own find or du fails alone; the other mounts answer.
+        assert (b"/good" in result.stdout) == (name != "ls -R")
     finally:
         await ws.close()
 

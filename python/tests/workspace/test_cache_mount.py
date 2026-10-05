@@ -17,7 +17,7 @@ import pytest
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.constants import SCOPE_ERROR
-from mirage.core.disk.read import read_bytes
+from mirage.core.disk.read import read
 from mirage.core.disk.readdir import readdir
 from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
@@ -39,7 +39,7 @@ async def stat_zzz_disk(
     **_extra: object,
 ) -> tuple[bytes | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
-    raw = await read_bytes(accessor, paths[0])
+    raw = await read(accessor, paths[0])
     return b"CUSTOM DISK STAT %d\n" % len(raw), IOResult(
         reads={paths[0].mount_path: raw}, cache=[paths[0].mount_path]
     )

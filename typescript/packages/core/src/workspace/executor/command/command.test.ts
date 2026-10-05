@@ -21,7 +21,7 @@ import { BaseVFS } from '../../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { MountRegistry } from '../../mount/registry.ts'
 import { SessionState } from '../../session/session.ts'
-import type { ExecuteNodeFn } from '../jobs.ts'
+import type { ExecuteNodeFn } from './types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { handleCommand } from './command.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -232,20 +232,6 @@ describe('door options route nothing', () => {
     )
     const r = await ws.shell(line)
     expect([r.exitCode, decode(r.stdout), decode(r.stderr)]).toEqual([0, out, ''])
-    await ws.close()
-  })
-
-  it('still refuses positional operands on two mounts', async () => {
-    const ws = new Workspace(
-      { '/data/': new RAMVFS(), '/work/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    await ws.shell('echo 1 > /work/t.json; echo 2 > /data/d.json')
-    const r = await ws.shell('jq . /work/t.json /data/d.json')
-    expect(r.exitCode).toBe(1)
-    expect(decode(r.stderr)).toBe(
-      'jq: paths span multiple mounts (/data/, /work/), cross-mount not supported\n',
-    )
     await ws.close()
   })
 })

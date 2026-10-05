@@ -197,6 +197,7 @@ describe('loginEnv', () => {
     const request = {
       username: 'demo',
       profile: [],
+      account: [],
       command: null,
       term: 'xterm-256color',
       peer: { address: '10.0.0.5', port: 40000 },
@@ -357,6 +358,8 @@ describe('shell channels', () => {
     const client = await connect(h)
     const stream = await shell(client, null)
     const done = collect(stream)
+    stream.write('echo ready\n')
+    await readUntil(stream, 'ready\n')
     await h.registry.remove('demo')
     stream.write('echo hi\n')
     const run = await done
@@ -412,6 +415,7 @@ describe('a pty without a terminal type', () => {
     const request = {
       username: 'demo',
       profile: [],
+      account: [],
       command: null,
       term: '',
       peer: null,
@@ -499,5 +503,47 @@ describe('key profiles', () => {
     expect(run.stdout).toBe('')
     expect(run.stderr).toContain('cannot open a session')
     expect(run.stderr).toContain(reason)
+  })
+})
+
+describe('key accounts', () => {
+  /** The error a fresh SFTP channel answers its first listing with. */
+  function sftpListError(client: Client): Promise<{ code?: number }> {
+    return new Promise((resolve, reject) => {
+      client.sftp((err, sftp) => {
+        if (err !== undefined) {
+          reject(err)
+          return
+        }
+        sftp.readdir('/', (listErr) => {
+          resolve((listErr ?? {}) as { code?: number })
+        })
+      })
+    })
+  }
+
+  it('open only the workspaces the account owns', async () => {
+    const h = await startHarness()
+    h.registry.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'mine', 'alice')
+    const alice = bindKey(h, 'mirage-account="alice"')
+    const own = await exec(await connect(h, 'mine', alice), 'echo mine')
+    const otherClient = await connect(h, 'demo', alice)
+    const other = await exec(otherClient, 'echo never')
+    const listing = await sftpListError(otherClient)
+    const admin = await exec(await connect(h, 'mine'), 'echo admin')
+    expect(own.stdout).toBe('mine\n')
+    expect(other).toEqual({ stdout: '', stderr: 'mirage: no such workspace: demo\n', code: 1 })
+    expect(listing.code).toBe(2)
+    expect(admin.stdout).toBe('admin\n')
+  })
+
+  it('refuse a key without one when accounts are required', async () => {
+    const h = await startHarness()
+    h.registry.accountsRequired = true
+    expect(await exec(await connect(h), 'echo never')).toEqual({
+      stdout: '',
+      stderr: 'mirage: no such workspace: demo\n',
+      code: 1,
+    })
   })
 })

@@ -41,6 +41,7 @@ import argparse
 import asyncio
 import json
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -50,12 +51,21 @@ from typing import Any
 
 import httpx
 from adapters import (
+    SSH_OPTIONS,
     Answer,
+    Cli,
+    Http,
     InAppPython,
     InAppTypeScript,
+    Mcp,
+    McpStdio,
     Recorder,
+    Rpc,
+    RpcStdio,
     RpcStream,
     Server,
+    Ssh,
+    SshProxy,
     io_answer,
     run,
     server_accesses,
@@ -63,6 +73,7 @@ from adapters import (
 from deploy import (
     DEPLOYMENTS,
     HOSTS,
+    INTEG,
     ROOT,
     SEED,
     STORE_DEPLOYMENTS,
@@ -76,6 +87,9 @@ from deploy import (
     snapshot_store,
 )
 from issuer import Issuer
+from starlette.routing import WebSocketRoute
+
+from mirage.server.app import build_app
 
 CASES = json.loads(Path(__file__).with_name("cases.json").read_text())
 OVERVIEW = ROOT / "docs" / "home" / "access" / "overview.mdx"
@@ -85,7 +99,7 @@ COLUMNS = {
     "MCP": ("mcp", "mcp_stdio"),
     "RPC": ("rpc", "rpc_stdio"),
     "CLI": ("cli",),
-    "SSH": ("ssh",),
+    "SSH": ("ssh", "ssh_proxy"),
 }
 ACCESSES = (
     "inapp",
@@ -96,6 +110,7 @@ ACCESSES = (
     "rpc",
     "rpc_stdio",
     "ssh",
+    "ssh_proxy",
 )
 
 
@@ -211,6 +226,7 @@ def credentials(d: Deployment, issuer: Issuer) -> dict[str, str | None]:
         "other_token": "some-other-token",
         "fixed_token": TOKEN,
         "jwt_valid": issuer.token(),
+        "oauth_valid": issuer.oauth_token(),
         **issuer.bad(),
     }
     if d.name == "dev":
@@ -288,6 +304,13 @@ async def access_auth(server: Server, access: str, token: str) -> str:
             return "ok"
         except (Exception, TimeoutError):
             return "refused"
+    if access == "ssh_proxy":
+        proxy = SshProxy(server, Path(tempfile.mkdtemp()))
+        proxy.token = token
+        code, _, _ = await proxy.run(
+            [*proxy.argv("ssh"), "-T", f"{SEED}@127.0.0.1", "true"]
+        )
+        return "ok" if code == 0 else "refused"
     key = "plain" if token == "plain" else "unknown"
     ssh = [
         "ssh",
@@ -353,6 +376,91 @@ async def auth(
         report.note(f"{server.key} auth.{access}")
 
 
+async def login(server: Server, scratch: Path, report: Report) -> None:
+    """``mirage login``, ``whoami`` and ``logout`` against one deployment.
+
+    The CLI gets a home of its own and no token, so the login is all it
+    has. On ``jwt`` the browser is a user already signed in to the
+    issuer; the login then drives the CLI and SSH through
+    ``ssh-proxy``, refreshes its ended token, and ends after 30 days.
+
+    Args:
+        server (Server): the deployment.
+        scratch (Path): a directory for the CLI's home and browser.
+        report (Report): where the checks go.
+    """
+    d = server.d
+    home = scratch / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    browser = scratch / "browser"
+    browser.write_text(
+        "#!/bin/sh\nexec "
+        + shlex.join([sys.executable, str(INTEG / "access" / "browser.py")])
+        + ' "$1"\n'
+    )
+    browser.chmod(0o755)
+    env = {**d.cli_env(), "MIRAGE_HOME": str(home), "BROWSER": str(browser)}
+    env.pop("MIRAGE_TOKEN", None)
+    stored = home / "login.json"
+
+    async def cli(*args: str) -> tuple[int, str, str]:
+        return await run(server.cli(*args), env)
+
+    async def lists() -> str:
+        code, _, err = await cli("workspace", "list")
+        return (
+            "ok" if code == 0 else err.strip().splitlines()[-1].split(";")[0]
+        )
+
+    got: dict[str, Any] = {}
+    async with httpx.AsyncClient(
+        base_url=d.url,
+        timeout=30,
+        event_hooks={"request": [server.recorder.hook(server.key)]},
+    ) as http:
+        found = await http.get("/.well-known/oauth-protected-resource")
+        got["resource"] = found.status_code
+    _, out, _ = await cli("login")
+    got["login"] = out.strip().replace(d.url, "{url}")
+    if d.name == "token":
+        got["login_wrong_token"], _, _ = await cli(
+            "login", "--token", "some-other-token"
+        )
+        got["login_token"], _, _ = await cli("login", "--token", TOKEN)
+    code, out, _ = await cli("whoami")
+    got["whoami"] = json.loads(out)["account"] if code == 0 else code
+    if stored.exists():
+        got["list"] = await lists()
+    if d.name == "jwt":
+        proxy = shlex.join(server.cli("ssh-proxy", "%r"))
+        code, _, _ = await run(
+            ["ssh", *SSH_OPTIONS, "-o", f"ProxyCommand={proxy}"]
+            + [f"{SEED}@mirage", "true"],
+            env,
+        )
+        got["ssh_proxy"] = code
+        kept = json.loads(stored.read_text())
+        stored.write_text(json.dumps({**kept, "expires_at": time.time() - 1}))
+        got["ended_token"] = await lists()
+        got["refreshed"] = (
+            json.loads(stored.read_text())["access_token"]
+            != kept["access_token"]
+        )
+        month = time.time() - 31 * 24 * 60 * 60
+        stored.write_text(
+            json.dumps(
+                {**json.loads(stored.read_text()), "logged_in_at": month}
+            )
+        )
+        got["after_30_days"] = await lists()
+    _, out, _ = await cli("logout")
+    got["logout"] = out.strip().replace(d.url, "{url}")
+    if d.name != "dev":
+        got["after_logout"] = await lists()
+    for key, want in CASES["login"][d.name].items():
+        report.check(f"{server.key} login.{key}", got.get(key), want)
+
+
 async def cross_host(
     server: Server, recorder: Recorder, report: Report
 ) -> None:
@@ -412,7 +520,11 @@ async def server_checks(server: Server, report: Report) -> None:
                 want["no_snapshot_store"],
             )
         stop = await http.post("/v1/shutdown", headers=auth)
-        report.check(f"{server.key} server.shutdown", stop.status_code, 200)
+        report.check(
+            f"{server.key} server.shutdown",
+            stop.status_code,
+            want["shutdown"][d.name],
+        )
     deadline = time.monotonic() + 15
     state = "serving"
     while time.monotonic() < deadline:
@@ -740,13 +852,14 @@ async def lifecycle(
 
 
 def python_routes() -> set[tuple[str, str]]:
-    from mirage.server.app import build_app
-
     found = set()
     for route in build_app().routes:
-        for method in getattr(route, "methods", None) or ():
+        methods = getattr(route, "methods", None) or (
+            ("GET",) if isinstance(route, WebSocketRoute) else ()
+        )
+        for method in methods:
             if method not in ("HEAD", "OPTIONS") and route.path.startswith(
-                "/v1"
+                ("/v1", "/.well-known")
             ):
                 found.add((method, re.sub(r"\{[^}]+\}", "{}", route.path)))
     return found
@@ -849,12 +962,20 @@ def gate_commands(
 
 
 def gate_ops(report: Report) -> None:
-    from adapters import Cli, Http, Mcp, McpStdio, Rpc, RpcStdio, Ssh
-
     table = CASES["ops"]
     implemented = {
         cls.name: cls.OPS
-        for cls in (InAppPython, Http, Cli, Mcp, McpStdio, Rpc, RpcStdio, Ssh)
+        for cls in (
+            InAppPython,
+            Http,
+            Cli,
+            Mcp,
+            McpStdio,
+            Rpc,
+            RpcStdio,
+            Ssh,
+            SshProxy,
+        )
     }
     report.check("ops.inapp_hosts_match", InAppTypeScript.OPS, InAppPython.OPS)
     for access, ops in implemented.items():
@@ -918,6 +1039,7 @@ async def main(args: argparse.Namespace) -> int:
     with (
         tempfile.TemporaryDirectory(prefix="mirage-access-") as tmp,
         snapshot_store() as store,
+        issuer.serving(),
     ):
         for host in hosts:
             scratch = Path(tmp) / host
@@ -935,6 +1057,8 @@ async def main(args: argparse.Namespace) -> int:
                         server, scratch / name / "scratch", wanted, report
                     )
                     await auth(server, issuer, wanted, report)
+                    if "cli" in wanted:
+                        await login(server, scratch / name / "login", report)
                     if name != "dev" and "cli" in wanted:
                         await cross_host(server, recorder, report)
                     await server_checks(server, report)

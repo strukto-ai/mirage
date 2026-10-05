@@ -1,6 +1,11 @@
 {
- "baseline": 4758,
+ "baseline": 4082,
  "modules": {
+  "ops/registry": {
+   "typescript_only": {
+    "OpsRegistry": "Python keeps each mount's op table on its Mount (`Mount._ops`, `register_op`, the filetype-then-VFS cascade); TypeScript holds one OpsRegistry on the Workspace and scopes entries per VFS. Same lookup, held in a different place."
+   }
+  },
   "ops/generic/factory": {
    "python_only": {
     "_make_pwrite": "Python builds every emitted op through a named `_make_*` closure builder; TypeScript writes the same closure inline in makeGenericOps, as it does for the module's older builders.",
@@ -9,15 +14,7 @@
   },
   "core/github/tree": {
    "python_only": {
-    "fetch_head": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "_head_of": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureLiveTree."
-   }
-  },
-  "core/github/client": {
-   "typescript_only": {
-    "fetchHead": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "headOf": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts."
+    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureTree."
    }
   },
   "core/hf_hub/client": {
@@ -140,6 +137,147 @@
   "workspace/executor/jobs": {
    "typescript_only": {
     "JobCopy": "A JS promise cannot be cancelled, so a TypeScript job races each write it passes on against its kill signal; Python's cancelled job task unwinds at the same await on its own."
+   }
+  },
+  "cli/session": {
+   "python_only": {
+    "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
+    "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands."
+   }
+  },
+  "cli/workspace": {
+   "python_only": {
+    "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "close_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands."
+   }
+  },
+  "server/auth/middleware": {
+   "python_only": {
+    "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline."
+   }
+  },
+  "server/routers/sessions": {
+   "python_only": {
+    "_require_session": "The session lookup the delete, cancel and kill routes share; TypeScript's is sessionWorkspace, declared inside registerSessionsRoutes.",
+    "cancel_session_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes.",
+    "kill_session_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes."
+   }
+  },
+  "server/routers/workspaces": {
+   "python_only": {
+    "_require_entry": "The account check every workspace route shares, raising 404; TypeScript calls registry.visible inline and answers 404 in each route.",
+    "cancel_workspace_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "close_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy."
+   },
+   "typescript_only": {
+    "isBusy": "TypeScript awaits a capture inline and asks isBusy for the EBUSY that answers 409; Python's run_capture does both."
+   }
+  },
+  "server/schemas": {
+   "python_only": {
+    "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
+    "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal."
+   }
+  },
+  "workspace/snapshot/state": {
+   "typescript_only": {
+    "diskStateAsRam": "Only TypeScript restores a disk mount into a fresh RAM mount (restoresAsFreshRAM, where no disk root can be rebuilt), so only it converts a disk state to RAM's shape."
+   }
+  },
+  "workspace/snapshot/tar_io": {
+   "python_only": {
+    "_stage_disk_files": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+   },
+   "typescript_only": {
+    "diskFileRefs": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+   }
+  },
+  "workspace/dispatcher/dispatcher": {
+   "typescript_only": {
+    "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable."
+   }
+  },
+  "cli/ssh": {
+   "python_only": {
+    "ssh_proxy_cmd": "Typer commands are module functions; commander registers the same command inline in registerSshProxyCommand."
+   },
+   "typescript_only": {
+    "registerSshProxyCommand": "commander registers a command through a function; Typer's is the module function ssh_proxy_cmd."
+   }
+  },
+  "server/routers/ssh": {
+   "python_only": {
+    "ssh_tunnel": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSshRoutes."
+   },
+   "typescript_only": {
+    "SshParams": "Fastify types a route's path parameters with an interface; FastAPI reads them from the handler's arguments.",
+    "SshRoutesDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
+    "registerSshRoutes": "Fastify registers routes through a function; FastAPI's route is the module function ssh_tunnel."
+   }
+  },
+  "server/ssh/constants": {
+   "python_only": {
+    "TUNNEL_CHUNK": "Python's route reads the SSH server's side of a socket pair in chunks; TypeScript pipes a ws stream, which chunks for itself.",
+    "TUNNEL_MODULE": "Python loads asyncssh's module by path, so a server without the ssh extra starts; TypeScript imports the module dynamically by its literal path."
+   }
+  },
+  "server/ssh/server": {
+   "typescript_only": {
+    "Admit": "ssh2 takes a login decision as a callback, typed here; asyncssh asks a server object (MirageSSHServer, TunnelSSHServer).",
+    "admitTunnel": "ssh2 admits a tunneled login through a callback; asyncssh's twin is the TunnelSSHServer class in session."
+   }
+  },
+  "server/ssh/session": {
+   "python_only": {
+    "TunnelSSHServer": "asyncssh admits a login through a server object, and key_account reads the tunnel's account off it; ssh2's twin is the admitTunnel callback in server."
+   }
+  },
+  "server/ssh/types": {
+   "python_only": {
+    "SSHTunnel": "Python types the connection its lazily loaded tunnel returns; TypeScript's serveTunnel resolves when the connection ends.",
+    "ServeTunnel": "Python types serve_tunnel for the route that loads it by path; TypeScript imports it and keeps its own signature."
+   }
+  },
+  "cli/login": {
+   "python_only": {
+    "login_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "logout_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "whoami_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing."
+   },
+   "typescript_only": {
+    "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd."
+   }
+  },
+  "server/routers/oauth": {
+   "python_only": {
+    "protected_resource": "FastAPI routes are module functions; Fastify registers the same handler inline in registerOAuthRoutes."
+   },
+   "typescript_only": {
+    "OAuthDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
+    "registerOAuthRoutes": "Fastify registers routes through a function; FastAPI's route is the module function protected_resource."
+   }
+  },
+  "cache/file/config": {
+   "typescript_only": {
+    "CacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "RedisCacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "normalizeCacheConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
+   }
+  },
+  "cache/index/config": {
+   "typescript_only": {
+    "IndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "RedisIndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "normalizeIndexConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
+   }
+  },
+  "vfs/secrets": {
+   "typescript_only": {
+    "refuseRepeatedFields": "Python's models take one spelling of a field, so a second spelling is an extra field pydantic refuses; a TypeScript config takes either spelling, so the code door refuses one field named in both."
    }
   }
  }

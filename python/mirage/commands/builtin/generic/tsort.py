@@ -108,7 +108,7 @@ def _topological_sort(
     return order, loops
 
 
-async def tsort(
+async def tsort_generic(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -145,4 +145,4 @@ async def tsort(
     return output, IOResult(exit_code=1, stderr=report.encode())
 
 
-__all__ = ["tsort"]
+__all__ = ["tsort_generic"]

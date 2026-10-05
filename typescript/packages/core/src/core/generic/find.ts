@@ -27,6 +27,8 @@ import {
   settlePrunes,
   startBasename,
   treeHasEmpty,
+  treeHasPrune,
+  prunedKeys,
   treeHasType,
   type FindEntry,
   type PredNode,
@@ -36,7 +38,8 @@ import { FileType, PathSpec, type FileStat } from '../../types.ts'
 import type { LinkView } from '../../ops/types.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { DIR_SIZE } from '../../utils/stat_view.ts'
+import { DIR_SIZE, contentSize } from '../../utils/stat_view.ts'
+import { printfKind } from '../../commands/builtin/find_printf.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
@@ -192,6 +195,32 @@ export async function walkFind(
   // root), so `-maxdepth 0` prints just the root and `-name` can match
   // the root's own basename.
   const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
+  const pruneTree = bindTree(optionsTree(options), prefix, path.virtual, path.rawPath)
+  const readDirectory = async (spec: PathSpec, cache?: IndexCacheStore): Promise<string[]> => {
+    if (treeHasPrune(pruneTree)) {
+      const key = rstripSlash(spec.mountPath) || '/'
+      const depth =
+        rstripSlash(spec.virtual).split('/').length - rstripSlash(rootPath).split('/').length
+      const info = await statEntry(deps, spec.virtual, prefix, cache)
+      const isEmpty = treeHasEmpty(pruneTree)
+        ? await isEmptyEntry(deps, spec.virtual, true, prefix, cache)
+        : null
+      keep(
+        {
+          key,
+          name: rstripSlash(spec.virtual).split('/').pop() ?? '',
+          kind: 'd',
+          depth,
+          isEmpty,
+          mtime: info === null ? null : modifiedTs(info.modified),
+        },
+        pruneTree,
+        options.minDepth,
+      )
+      if (prunedKeys(pruneTree).includes(key)) return []
+    }
+    return deps.readdir(spec, cache)
+  }
   let rootStat: FileStat | null = null
   try {
     rootStat = await deps.stat(path, index)
@@ -207,7 +236,14 @@ export async function walkFind(
   // is either an error the walk would have to swallow (Box answers
   // ENOTDIR) or a wasted round trip everywhere else.
   if (rootStat === null || rootStat.type === FileType.DIRECTORY) {
-    await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
+    await walk(
+      { ...deps, readdir: readDirectory },
+      path,
+      index,
+      options.maxDepth ?? null,
+      1,
+      collected,
+    )
   }
   const results: string[] = []
   const tree = bindTree(optionsTree(options), prefix, path.virtual, path.rawPath)
@@ -423,4 +459,89 @@ export function makeSearchBackedFind<A>(
     }
     return filtered.sort(compareCodePoints)
   }
+}
+
+// Namespace symlinks under the search root that match the expression.
+//
+// Symlinks live in the namespace, not in any backend, so a backend's
+// find never sees them. Merging them here, above every backend, is what
+// keeps a mount's symlink behavior from depending on its backend.
+//
+// GNU find without -L reports the link itself and never walks through
+// it, so a link is kind 'l'. Its size is the target string's length,
+// which is what -size compares, and it carries the link's own mtime.
+//
+// Under -L a link is classified by what it points at instead: a link to
+// a file tests as 'f', a link to a directory as 'd', and only a dangling
+// link stays 'l' (GNU reports the link itself when the target cannot be
+// stat'd). -size and -mtime then compare the target's stat, since that
+// is the file being reported.
+export async function linkResults(
+  links: LinkView | null,
+  searchRoot: string,
+  prefix: string,
+  searchKey: string,
+  tree: PredNode,
+  minDepth: number | null,
+  maxDepth: number | null,
+  minSize: number | null,
+  maxSize: number | null,
+  mtimeMin: number | null,
+  mtimeMax: number | null,
+  follow: boolean,
+): Promise<string[]> {
+  if (links === null) return []
+  const out: string[] = []
+  // GNU find's default is -P: a start point that is itself a symlink is
+  // reported as the link and never walked through. The backend cannot
+  // see it at all, so the subtree scan (which only covers entries
+  // *under* the root) would miss it.
+  const entries = [...links.subtree(searchRoot)]
+  const own = links.statAt(searchRoot)
+  if (own !== null) entries.push([searchRoot, own])
+  for (const [path, ownStat] of entries) {
+    let st = ownStat
+    let kind: FindEntry['kind'] = 'l'
+    if (follow) {
+      const target = await links.targetStat(path)
+      if (target !== null) {
+        kind = printfKind(target)
+        st = target
+      }
+    }
+    const key = prefix !== '' && path.startsWith(prefix) ? path.slice(prefix.length) : path
+    const rel = stripSlash(key)
+    const depth =
+      searchKey !== ''
+        ? rel === searchKey
+          ? 0
+          : rel.split('/').length - searchKey.split('/').length
+        : rel === ''
+          ? 0
+          : rel.split('/').length
+    if (maxDepth !== null && depth > maxDepth) continue
+    const entry: FindEntry = {
+      key,
+      name: path.split('/').pop() ?? path,
+      kind,
+      depth,
+      mtime: modifiedTs(st.modified),
+    }
+    if (!keep(entry, tree, minDepth)) continue
+    const size = contentSize(st)
+    if (minSize !== null && size < minSize) continue
+    if (maxSize !== null && size > maxSize) continue
+    if (mtimeMin !== null || mtimeMax !== null) {
+      // `modifiedTs` is the helper the rest of this file uses. A bare
+      // Date.parse gives NaN for a date-only or malformed stamp, which the
+      // `=== null` guard below does not catch, so every comparison came out
+      // false and the entry was kept -- where Python drops it.
+      const ts = modifiedTs(st.modified)
+      if (ts === null) continue
+      if (mtimeMin !== null && ts < mtimeMin) continue
+      if (mtimeMax !== null && ts > mtimeMax) continue
+    }
+    out.push(path)
+  }
+  return out
 }

@@ -17,7 +17,7 @@ import pytest
 from mirage.commands.builtin.generic.truncate import (
     TruncateFlags,
     parse_size,
-    truncate,
+    truncate_generic,
 )
 from mirage.commands.errors import UsageError
 from mirage.types import FileStat, FileType, PathSpec
@@ -124,7 +124,7 @@ async def test_a_slashed_operand_is_the_opens_eisdir():
     async def truncate_fn(path, length, no_create) -> None:
         lengths.append((path.raw_path, length))
 
-    _, io = await truncate(
+    _, io = await truncate_generic(
         [
             _operand("/missing", "/missing/"),
             _operand("/nodir/x", "/nodir/x"),
@@ -141,7 +141,7 @@ async def test_a_slashed_operand_is_the_opens_eisdir():
         b"truncate: cannot open '/nodir/x' for writing: "
         b"No such file or directory\n"
     )
-    _, io = await truncate(
+    _, io = await truncate_generic(
         [_operand("/missing", "/missing")],
         flags=TruncateFlags(size="4", no_create=True),
         stat=stat,
@@ -162,7 +162,7 @@ async def test_no_create_reaches_the_mutation_after_a_successful_stat():
     async def mutate(path, length, no_create):
         calls.append((path.virtual, length, no_create))
 
-    _, result = await truncate(
+    _, result = await truncate_generic(
         [PathSpec.from_str_path("/file")],
         flags=TruncateFlags("2", True),
         stat=stat,

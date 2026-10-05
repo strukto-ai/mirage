@@ -24,7 +24,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.builtin.utils.paths import dot_refusal
-from mirage.commands.config import CommandFnResult, CommandOpts
+from mirage.commands.config import AggregateFn, CommandFnResult, CommandOpts
 from mirage.context import (
     effective_path_mode,
     get_admission,
@@ -84,9 +84,6 @@ class BuilderFn(Protocol):
         texts: list[str],
         opts: CommandOpts,
     ) -> Awaitable[CommandFnResult]: ...
-
-
-AggregateFn = Callable[[list[tuple[str, bytes]]], Awaitable[bytes]]
 
 
 async def overlaid_stat(

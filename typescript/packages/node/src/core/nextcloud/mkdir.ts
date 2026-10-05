@@ -1,7 +1,7 @@
 import type { Operator } from 'opendal'
 import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eexist, enotdir } from '@struktoai/mirage-core/utils/errors'
+import { eexist, enoent, enotdir } from '@struktoai/mirage-core/utils/errors'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
@@ -24,15 +24,12 @@ async function fileLevel(op: Operator, key: string): Promise<string | null> {
 }
 
 /**
- * Create a collection; opendal creates missing parents either way.
+ * Create a collection.
  *
- * `parents` only picks the path a refusal names, because `createDir` is
- * MKCOL over every missing level whatever it says. That is
- * also why the ancestor invalidation is unconditional: a bare `mkdir a/b/c`
- * materializes a whole chain here, and gating the walk on `parents` (as the
- * backends whose mkdir really does create one level correctly do) left every
- * ancestor above the parent serving a cached listing that hid the new levels
- * until the index TTL expired.
+ * opendal's `createDir` is MKCOL over every missing level, so a bare mkdir
+ * looks its parent up first and refuses a missing one, as mkdir(2) does; only
+ * `-p` materializes a chain, and only it walks the ancestor listings. With
+ * `parents`, a file in the way is named rather than the operand.
  */
 export async function mkdir(
   accessor: NextcloudAccessor,
@@ -41,6 +38,17 @@ export async function mkdir(
 ): Promise<void> {
   const key = rstripSlash(nextcloudKey(path))
   const op = await accessor.operator()
+  const parent = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : ''
+  if (!parents && parent !== '') {
+    let isDir: boolean
+    try {
+      isDir = (await op.stat(parent)).isDirectory()
+    } catch (error) {
+      if (!isNotFound(error)) throw error
+      throw (await fileLevel(op, parent)) === null ? enoent(path) : enotdir(path)
+    }
+    if (!isDir) throw enotdir(path)
+  }
   // MKCOL under a file is a 409 opendal leaves unnamed, and opendal reads
   // MKCOL's 405 on a taken name as done, a file holding the name included:
   // look the levels up to tell ENOTDIR from EEXIST.
@@ -55,7 +63,7 @@ export async function mkdir(
     throw enotdir(parents ? mountedPath(path, `/${level}`) : path)
   }
   await invalidateAfterWrite(path)
-  await invalidateAncestors(path)
+  if (parents) await invalidateAncestors(path)
   let taken = false
   try {
     taken = !(await op.stat(key)).isDirectory()

@@ -19,9 +19,10 @@ A Mirage virtual terminal is a workspace: one terminal over your mounted backend
 | [MCP](/home/access/mcp) | agent harnesses such as Claude Code, Cursor and Codex | `/v1/workspaces/{id}/mcp`, or `mirage mcp` on stdio |
 | [RPC](/home/access/rpc) | programs that run lines and move bytes | `/v1/workspaces/{id}/rpc`, or `mirage rpc` on stdio |
 | [CLI](/home/access/cli) | people and scripts | `mirage <verb>` |
-| [SSH](/home/access/ssh) | people and tools that speak SSH | `ssh`, `sftp`, `scp` |
+| [SSH](/home/access/ssh) | people and tools that speak SSH | `ssh`, `sftp`, `scp`, on the SSH port or through `mirage ssh-proxy` |
+| [FUSE](/home/access/fuse) | any program that works on files | a folder: `backend: fuse` on the server's machine, `sshfs` on yours |
 
-Every way in but in-app goes through the Mirage server, a FastAPI app in [Python](/python/access/server) and a Fastify app in [TypeScript](/typescript/access/server) that speak the same protocol. It serves HTTP, and SSH too when `ssh_port` is set; MCP and RPC are HTTP routes, and the CLI is an HTTP client that starts the server on your machine when it needs one.
+Every way in but in-app goes through the Mirage server, a FastAPI app in [Python](/python/access/server) and a Fastify app in [TypeScript](/typescript/access/server) that speak the same protocol. It serves HTTP, and SSH on its own port when `ssh_port` is set or over HTTP through `mirage ssh-proxy`; MCP and RPC are HTTP routes, a FUSE folder is mounted by the server itself or by `sshfs` over its SSH, and the CLI is an HTTP client that starts the server on your machine when it needs one.
 
 ## What each one exposes
 
@@ -34,20 +35,21 @@ Each way in exposes what its own protocol defines. A dash means the protocol has
 | Run a line | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Send stdin to a line | ✓ | ✓ | – | ✓ | ✓ | ✓ |
 | Cancel a running line | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Cancel or kill all of a session's or workspace's work | ✓ | ✓ | – | – | ✓ | – |
 | The seven agent tools | ✓ | ✓ | ✓ | ✓ | ✓ | – |
-| File operations on bytes | ✓ | via RPC | – | ✓ | – | `sftp`, `scp` |
+| File operations on bytes | ✓ | via RPC | – | ✓ | – | `sftp`, `scp`, `sshfs` |
 | Snapshots | ✓ | ✓ | – | – | ✓ | – |
 | Asks | ✓ | ✓ | – | – | ✓ | – |
 | Jobs | – | ✓ | – | – | ✓ | – |
 
 ## Sessions
 
-Every call acts as one session, with its own working directory and environment, under the [profile](/home/permissions) it was created with. HTTP picks the session with `session_id`, MCP and RPC with `?session_id=` or `-s`, and the CLI with `-s`; each SSH login gets a fresh session under its key's profile. Without one, a call runs in the workspace's default session, under the default profile: the one the config's `profile:` names, else the profile called `default`, else none.
+Every call acts as one session, with its own working directory and environment, under the [profile](/home/permissions) it was created with. HTTP picks the session with `session_id`, MCP and RPC with `?session_id=` or `-s`, and the CLI with `-s`; each SSH login, an `sshfs` mount among them, gets a fresh session under its key's profile. Without one, a call runs in the workspace's default session, under the default profile: the one the config's `profile:` names, else the profile called `default`, else none. A FUSE folder the server mounts is the exception: it belongs to no session, so no profile applies.
 
 ## Cancel
 
-Each way in stops a running line as its clients do: Ctrl-C in the CLI and SSH, `notifications/cancelled` in MCP, `$/cancelRequest` in RPC, and a dropped request or `DELETE /v1/jobs/{id}` over HTTP. Through the server every line runs as a job, listed by `GET /v1/jobs`, and a cancelled one ends `canceled`.
+Each way in stops a running line as its clients do: Ctrl-C in the CLI and SSH, `notifications/cancelled` in MCP, `$/cancelRequest` in RPC, and a dropped request or `DELETE /v1/jobs/{id}` over HTTP. Through the server every line runs as a job, listed by `GET /v1/jobs`, and a cancelled one ends `canceled`. To stop everything a session or a workspace is running, whichever way it came in, HTTP and the CLI cancel its lines and kill its background jobs (`mirage session cancel`, `mirage workspace kill`).
 
 ## Auth
 
-The server asks every HTTP request but `GET /v1/health` for a bearer token; in the default local mode the CLI reads it from `~/.mirage/auth_token` for you. See [Auth](/home/access/http#auth). SSH logins use public keys instead.
+The server asks every HTTP request but `GET /v1/health` for a bearer token; in the default local mode the CLI reads it from `~/.mirage/auth_token` for you. See [Auth](/home/access/http#auth). SSH logins on the SSH port use public keys instead; through `mirage ssh-proxy` they use the CLI's token. In `jwt` mode a token's `sub` is an [account](/home/access/http#accounts) that reaches only its own workspaces, and an SSH key names its account with `mirage-account`.

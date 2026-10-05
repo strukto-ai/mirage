@@ -31,7 +31,7 @@ from mirage.core.hf_hub.lookup import (
     probe_dir,
     probe_file,
 )
-from mirage.core.hf_hub.read import read_bytes, resolve_entry
+from mirage.core.hf_hub.read import read, resolve_entry
 from mirage.core.hf_hub.stat import stat
 from mirage.core.hf_hub.tree import parse_entry, refill_index, seed_index
 from tests.core.hf_hub.conftest import file_row, ps, seed
@@ -142,7 +142,7 @@ async def test_direct_lookup_refreshes_invalidated_snapshot(
         path = ps(changed, "/m")
         for _ in range(2):
             if deleted:
-                for reader in (stat, read_bytes):
+                for reader in (stat, read):
                     with pytest.raises(FileNotFoundError):
                         await reader(loaded, path, index)
             else:

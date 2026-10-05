@@ -12,13 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import dataclasses
 import functools
+from collections import deque
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any, cast
 
 from mirage.commands.builtin.generic.cp import TransferLinks
 from mirage.commands.builtin.generic.crossmount.types import (
     Cmd,
+    CrossResult,
     OperandRun,
     RunSingle,
 )
@@ -32,12 +37,15 @@ from mirage.commands.builtin.generic.rg import (
     between_files as rg_between_files,
 )
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
+from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io import IOResult
-from mirage.io.stream import materialize
+from mirage.io.cooperative import chunks as byte_chunks
+from mirage.io.stream import discard_streams, ensure_stream, materialize
+from mirage.io.types import ByteSource
 from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -96,7 +104,6 @@ async def run_operands(
     scopes: list[PathSpec],
     texts: list[str],
     flag_kwargs: dict[str, FlagValue],
-    stop_at_success: bool = False,
 ) -> list[OperandRun]:
     """Run one native single-mount command per operand, in operand order.
 
@@ -110,14 +117,14 @@ async def run_operands(
         scopes (list[PathSpec]): Path operands in command-line order.
         texts (list[str]): Positional text operands shared by every run.
         flag_kwargs (dict): Flags shared by every run.
-        stop_at_success (bool): run no operand after one that exits 0,
-            which is how grep -q and rg -q stop at their first match.
     """
     results: list[OperandRun] = []
     for scope in scopes:
         out, io = await run_single(cmd_name, [scope], texts, flag_kwargs)
+        chunks: list[bytes] = []
         try:
-            data = await materialize(out) if out is not None else b""
+            async for chunk in ensure_stream(out or b""):
+                chunks.append(chunk)
         except FS_ERRORS as exc:
             # A lazy stream can fail on first pull (head/tail opening the
             # operand mid-drain); report it like the native run would and
@@ -130,11 +137,8 @@ async def run_operands(
             # a lazy operand that fails here is the same failure the
             # single-mount run reports eagerly, and it must answer the
             # same number.
-            io.exit_code = read_fail_exit(cmd_name, exc)
-            data = b""
-        results.append(OperandRun(scope, data, io))
-        if stop_at_success and io.exit_code == 0:
-            break
+            io.exit_code = read_fail_exit_code(cmd_name, exc)
+        results.append(OperandRun(scope, b"".join(chunks), io))
     return results
 
 
@@ -212,7 +216,7 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
     )
 
 
-def transfer_links(
+def transfer_links_of(
     links: LinkView, dispatch: DispatchFn, cwd: str
 ) -> TransferLinks:
     """Namespace links with the dispatcher primitives shared by cp and mv.
@@ -235,3 +239,100 @@ def transfer_links(
         ),
         relay_stat=prim["stat"],
     )
+
+
+async def stream_operands(
+    run_single: RunSingle,
+    cmd_name: str,
+    scopes: list[PathSpec],
+    texts: list[str],
+    flags: dict[str, FlagValue],
+    separator: bytes = b"",
+) -> tuple[ByteSource, IOResult]:
+    """Stream ordered native reads with at most four open invocations.
+
+    Only independent read families use this path. Later handlers may prepare
+    while the current stream is consumed; their streams are not pulled ahead.
+    Closing or cancelling the consumer cancels preparations and discards every
+    opened stream, including one that finished preparing during cancellation.
+    The returned result settles as the stream drains, as any lazy command's
+    does: its exit code is final once the stream is exhausted.
+
+    Args:
+        run_single (RunSingle): Executor-injected single-mount runner.
+        cmd_name (str): Command to run for every operand.
+        scopes (list[PathSpec]): Path operands in command-line order.
+        texts (list[str]): Positional text operands shared by every run.
+        flags (dict[str, FlagValue]): Flags shared by every run.
+        separator (bytes): What sets one operand's output off from the
+            next's (head and tail headers).
+    """
+    io = IOResult()
+
+    async def stream() -> AsyncIterator[bytes]:
+        pending: deque[tuple[PathSpec, asyncio.Task[CrossResult]]] = deque()
+        operands = iter(scopes)
+        printed = False
+
+        async def execute(scope: PathSpec) -> CrossResult:
+            return await run_single(cmd_name, [scope], texts, flags)
+
+        def start() -> None:
+            scope = next(operands, None)
+            if scope is not None:
+                pending.append(
+                    (
+                        scope,
+                        asyncio.create_task(execute(scope)),
+                    )
+                )
+
+        concurrency = 1 if any(is_stdin(p) for p in scopes) else 4
+        for _ in range(concurrency):
+            start()
+        try:
+            while pending:
+                scope, task = pending[0]
+                out, branch = await task
+                first = True
+                try:
+                    async with aclosing(byte_chunks(out or b"")) as source:
+                        async for data in source:
+                            if not data:
+                                continue
+                            if first and printed and separator:
+                                yield separator
+                            first = False
+                            printed = True
+                            yield data
+                except FS_ERRORS as exc:
+                    existing = await materialize(branch.stderr)
+                    branch.stderr = existing + encode_text(
+                        fs_error_line(cmd_name, scope, exc)
+                    )
+                    branch.exit_code = read_fail_exit_code(cmd_name, exc)
+                io.reads.update(branch.reads)
+                io.writes.update(branch.writes)
+                io.cache.extend(branch.cache)
+                io.renames.extend(branch.renames)
+                io.stderr = await materialize(io.stderr) + await materialize(
+                    branch.stderr
+                )
+                io.exit_code = max(io.exit_code, branch.exit_code)
+                if branch.refusal is not None:
+                    io.refusal = branch.refusal
+                pending.popleft()
+                start()
+        finally:
+            for _, task in pending:
+                if not task.done():
+                    task.cancel()
+            settled = await asyncio.gather(
+                *(task for _, task in pending), return_exceptions=True
+            )
+            for result in settled:
+                if isinstance(result, tuple):
+                    out, branch = result
+                    await discard_streams(out, branch.stderr)
+
+    return stream(), io

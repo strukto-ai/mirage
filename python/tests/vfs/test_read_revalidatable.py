@@ -981,9 +981,13 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
     assert fetched == 1
     assert first == (data[:1] if row == "drain" else data)
     assert stat.fingerprint is not None
-    assert fresh
-    # Reconcile answered FRESH: the warm read made no content fetch.
-    assert refetched == 0
+    # A cp of a rendered Google file reads through the dispatcher, where a
+    # filetype read op always renders and keeps nothing, so its second cp
+    # fetches again. Every other read left an entry reconcile calls FRESH,
+    # and the warm read made no content fetch.
+    renders = row == "bytes" and name in GAPPS
+    assert fresh is not renders
+    assert refetched == (1 if renders else 0)
     assert second == data
     assert fake.reach == []
 

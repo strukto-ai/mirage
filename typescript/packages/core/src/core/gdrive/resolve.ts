@@ -15,7 +15,6 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
 import { eacces, enoent, enotdir } from '../../utils/errors.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 import { GoogleApiError, type TokenManager } from '../google/client.ts'
 import { FOLDER_MIME, MIME_TO_EXT, getFile, listFiles, listSharedDrives } from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
@@ -181,22 +180,25 @@ export async function resolveDir(
   virtual: string,
 ): Promise<[string, string | null]> {
   if (key === '') return rootContext(accessor)
-  const node = await resolveKey(accessor, key)
+  let node: DriveNode | null
+  try {
+    node = await resolveKey(accessor, key)
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ENOTDIR') throw enotdir(virtual)
+    throw error
+  }
   if (node === null) throw enoent(virtual)
   if (!isFolder(node)) throw enotdir(virtual)
   return [node.id, node.driveId]
 }
 
-// Resolve the parent directory of a path for a create-style op.
+// Resolve the parent directory of a path for a create-style op. A missing or
+// non-directory parent, at any depth, names the operand, as mkdir(2) does.
 export async function resolveParent(
   accessor: GDriveAccessor,
   path: PathSpec,
 ): Promise<[string, string | null]> {
   const key = path.vfsPath
   const parentKey = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : ''
-  const trimmed = rstripSlash(path.virtual)
-  const parentVirtual = trimmed.includes('/')
-    ? trimmed.slice(0, trimmed.lastIndexOf('/')) || '/'
-    : '/'
-  return resolveDir(accessor, parentKey, parentVirtual)
+  return resolveDir(accessor, parentKey, path.virtual)
 }

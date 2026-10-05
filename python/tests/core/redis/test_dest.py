@@ -3,12 +3,12 @@ import pytest
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.copy import copy
 from mirage.core.redis.dest import lookup_error
-from mirage.core.redis.read import read_bytes
+from mirage.core.redis.read import read
 from mirage.core.redis.rename import rename
 from mirage.core.redis.rmdir import rmdir
 from mirage.core.redis.set_attrs import set_attrs
 from mirage.core.redis.stat import stat
-from mirage.core.redis.stream import stream
+from mirage.core.redis.stream import read_stream
 from mirage.core.redis.unlink import unlink
 from mirage.types import PathSpec
 
@@ -46,12 +46,12 @@ async def test_lookup_error_stops_at_the_first_non_directory(store, key, kind):
 
 
 async def _drain(accessor: RedisAccessor, spec: PathSpec) -> None:
-    async for _ in stream(accessor, spec):
+    async for _ in read_stream(accessor, spec):
         pass
 
 
 _OPS = {
-    "read": lambda a, p: read_bytes(a, p),
+    "read": lambda a, p: read(a, p),
     "stream": _drain,
     "stat": lambda a, p: stat(a, p),
     "set_attrs": lambda a, p: set_attrs(a, p, mode=0o644),

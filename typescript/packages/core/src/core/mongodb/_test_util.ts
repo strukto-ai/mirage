@@ -33,7 +33,6 @@ export function stubMongoDriver(overrides: Partial<MongoDriver> = {}): MongoDriv
     iterInserts: () => emptyAsyncIter(),
     countDocuments: () => Promise.resolve(0),
     listIndexes: () => Promise.resolve([]),
-    getIndexStats: () => Promise.resolve({}),
     close: () => Promise.resolve(),
     ...overrides,
   }

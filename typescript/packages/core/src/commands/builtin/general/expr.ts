@@ -17,7 +17,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { byteView, fromByteView } from '../../../shell/bytes.ts'
+import { byteView, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
 import { BreError, compileBre } from '../utils/bre.ts'
 import { quoteWord } from '../../quote.ts'
 
@@ -72,13 +72,14 @@ export class ExprError extends Error {}
 // than the operator that needed an operand -- `expr substr abc 1` reports
 // `1`, not `substr`. It outranks an unclosed parenthesis: `expr '(' 1 +`
 // reports this, not `expecting ')'`.
-function missingArgumentAfter(word: string): string {
-  return `expr: syntax error: missing argument after '${quoteWord(word)}'`
+// `utf8` means the word is text, under a UTF-8 locale.
+function missingArgumentAfter(word: string, utf8 = false): string {
+  return `expr: syntax error: missing argument after '${quoteWord(word, utf8)}'`
 }
 
 // GNU's wording for a leftover word the grammar had no slot for.
-function unexpectedArgument(word: string): string {
-  return `expr: syntax error: unexpected argument '${quoteWord(word)}'`
+function unexpectedArgument(word: string, utf8 = false): string {
+  return `expr: syntax error: unexpected argument '${quoteWord(word, utf8)}'`
 }
 
 // GNU's wording for a parenthesis that was never closed.
@@ -89,11 +90,11 @@ function unexpectedArgument(word: string): string {
 // second, so `expr '(' 1` reports `after '1'` while `expr '(' 1 1`
 // reports `instead of '1'` -- the same text for different reasons, and
 // different text for what looks like the same error.
-function expectingClose(current: string | null, prev: string): string {
+function expectingClose(current: string | null, prev: string, utf8 = false): string {
   if (current === null) {
-    return `expr: syntax error: expecting ')' after '${quoteWord(prev)}'`
+    return `expr: syntax error: expecting ')' after '${quoteWord(prev, utf8)}'`
   }
-  return `expr: syntax error: expecting ')' instead of '${quoteWord(current)}'`
+  return `expr: syntax error: expecting ')' instead of '${quoteWord(current, utf8)}'`
 }
 
 // The one detail clause with no `argument` noun in it, for a `)` where a
@@ -179,9 +180,9 @@ function compare(left: string, op: string, right: string): string {
 
 // Compile a BRE, re-wording glibc's refusal under expr's own program
 // prefix the way GNU's `error()` does.
-function compileOrRefuse(pattern: string): [RegExp, number] {
+function compileOrRefuse(pattern: string, utf8: boolean): [RegExp, number] {
   try {
-    return compileBre(pattern)
+    return compileBre(pattern, utf8)
   } catch (err) {
     if (err instanceof BreError) throw new ExprError(`expr: ${err.message}`, { cause: err })
     throw err
@@ -199,14 +200,15 @@ function compileOrRefuse(pattern: string): [RegExp, number] {
 // Both the subject and the pattern are byte views, so `.` matches one
 // byte and the length this answers with is a byte count: GNU reads
 // `expr <e-acute> : '.'` as 1 and `expr <e-acute> : '\(.\)'` as the
-// single byte `c3`.
-function docolon(subject: string, pattern: string): string {
-  const [regex, groups] = compileOrRefuse(pattern)
+// single byte `c3`. Under a UTF-8 locale (`utf8`) both are text, and the
+// same two answer the whole character.
+function docolon(subject: string, pattern: string, utf8 = false): string {
+  const [regex, groups] = compileOrRefuse(pattern, utf8)
   regex.lastIndex = 0
   const matched = regex.exec(subject)
   if (matched === null) return groups > 0 ? '' : '0'
   if (groups > 0) return matched[1] ?? ''
-  return String(matched[0].length)
+  return String(Array.from(matched[0]).length)
 }
 
 // The `index` operator, which is `strcspn` over a character set. It is
@@ -214,11 +216,14 @@ function docolon(subject: string, pattern: string): string {
 // earlier in the subject than `e` does. Both arguments are byte views, so
 // the set is a set of bytes and the position counts bytes:
 // `expr index <a-umlaut> <e-acute>` is 1, because both characters begin
-// with the byte `c3`.
+// with the byte `c3`. Every count here goes by code point, which is one
+// byte in a byte view and one character in a UTF-8 locale's text.
 function doIndex(text: string, charSet: string): string {
   const wanted = new Set(charSet)
-  for (let offset = 0; offset < text.length; offset += 1) {
-    if (wanted.has(text.charAt(offset))) return String(offset + 1)
+  let offset = 0
+  for (const ch of text) {
+    offset += 1
+    if (wanted.has(ch)) return String(offset)
   }
   return '0'
 }
@@ -237,10 +242,11 @@ function doSubstr(text: string, posArg: string, lenArg: string): string {
   const start = intOperandOrNone(posArg)
   const count = intOperandOrNone(lenArg)
   if (start === null || count === null) return ''
-  const size = BigInt(text.length)
+  const chars = Array.from(text)
+  const size = BigInt(chars.length)
   if (start < 1n || count < 0n || start > size) return ''
   const from = Number(start - 1n)
-  return text.slice(from, from + Number(count > size ? size : count))
+  return chars.slice(from, from + Number(count > size ? size : count)).join('')
 }
 
 // GNU expr's grammar as a recursive descent over argv words.
@@ -262,14 +268,17 @@ function doSubstr(text: string, posArg: string, lenArg: string): string {
 // in a diagnostic is a byte view (`byteView`), which is what makes
 // `length`, `index`, `substr` and `:` count bytes as GNU does and makes a
 // string comparison the `strcmp` byte order GNU uses. The conversion is
-// the command's, not the parser's.
+// the command's, not the parser's. Under a UTF-8 locale (`utf8`) every word
+// is text instead, and the same operators count characters.
 class ExprParser {
   private readonly args: string[]
+  private readonly utf8: boolean
   private pos = 0
   private depth = 0
 
-  constructor(args: string[]) {
+  constructor(args: string[], utf8 = false) {
     this.args = args
+    this.utf8 = utf8
   }
 
   // Whether every word has been consumed.
@@ -310,7 +319,7 @@ class ExprParser {
 
   // Refuse a line that ended where an operand was needed.
   private requireMoreArgs(): void {
-    if (this.atEnd()) throw new ExprError(missingArgumentAfter(this.prev()))
+    if (this.atEnd()) throw new ExprError(missingArgumentAfter(this.prev(), this.utf8))
   }
 
   // Level 1: `|`, which short-circuits on a truthy left operand. It
@@ -391,7 +400,7 @@ class ExprParser {
     let left = this.evalKeyword(evaluate)
     while (this.nextarg(':')) {
       const right = this.evalKeyword(evaluate)
-      if (evaluate) left = docolon(left, right)
+      if (evaluate) left = docolon(left, right, this.utf8)
     }
     return left
   }
@@ -413,12 +422,12 @@ class ExprParser {
       return this.take()
     }
     if (this.nextarg('length')) {
-      return String(this.evalKeyword(evaluate).length)
+      return String(Array.from(this.evalKeyword(evaluate)).length)
     }
     if (this.nextarg('match')) {
       const left = this.evalKeyword(evaluate)
       const right = this.evalKeyword(evaluate)
-      return evaluate ? docolon(left, right) : left
+      return evaluate ? docolon(left, right, this.utf8) : left
     }
     if (this.nextarg('index')) {
       const left = this.evalKeyword(evaluate)
@@ -442,7 +451,8 @@ class ExprParser {
       if (this.depth > MAX_NESTING) throw new ExprError(NESTING_TOO_DEEP)
       const value = this.evalOr(evaluate)
       this.depth -= 1
-      if (!this.nextarg(')')) throw new ExprError(expectingClose(this.peek(), this.prev()))
+      if (!this.nextarg(')'))
+        throw new ExprError(expectingClose(this.peek(), this.prev(), this.utf8))
       return value
     }
     if (this.peek() === ')') throw new ExprError(UNEXPECTED_CLOSE)
@@ -453,33 +463,38 @@ class ExprParser {
 // Evaluate a whole expr line, answering the value to print and the exit
 // code. GNU exits 1 when the value is false even on full success, so exit
 // 1 means "the answer was zero or empty" and exit 2 is the only error
-// status. The words in and the value out are byte views.
-export function exprEval(args: string[]): [string, number] {
-  const parser = new ExprParser(args)
+// status. The words in and the value out are byte views, or text under a
+// UTF-8 locale (`utf8`).
+export function exprEval(args: string[], utf8 = false): [string, number] {
+  const parser = new ExprParser(args, utf8)
   const value = parser.evalOr(true)
-  if (!parser.atEnd()) throw new ExprError(unexpectedArgument(parser.current()))
+  if (!parser.atEnd()) throw new ExprError(unexpectedArgument(parser.current(), utf8))
   return [value, isNull(value) ? 1 : 0]
 }
 
-function exprCommand(
+function expr(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  _opts: CommandOpts,
+  opts: CommandOpts,
 ): CommandFnResult {
   if (texts.length === 0) {
     return [null, new IOResult({ exitCode: 2, stderr: fromByteView(MISSING_OPERAND) })]
   }
+  const utf8 = utf8Locale(opts.env)
   try {
-    const [result, exitCode] = exprEval(texts.map((text) => byteView(text)))
-    return [fromByteView(result + '\n'), new IOResult({ exitCode })]
+    const [result, exitCode] = exprEval(
+      texts.map((text) => byteView(text, utf8)),
+      utf8,
+    )
+    return [fromByteView(result + '\n', utf8), new IOResult({ exitCode })]
   } catch (err) {
     if (err instanceof ExprError) {
       // GNU writes the refusal to stderr, nothing to stdout, and exits
       // 2; exit 1 is reserved for a zero-valued success. The diagnostic
       // quotes a byte view of the offending word, so it leaves through
       // the same door the value does.
-      return [null, new IOResult({ exitCode: 2, stderr: fromByteView(`${err.message}\n`) })]
+      return [null, new IOResult({ exitCode: 2, stderr: fromByteView(`${err.message}\n`, utf8) })]
     }
     throw err
   }
@@ -489,5 +504,5 @@ export const GENERAL_EXPR = command({
   name: 'expr',
   vfs: null,
   spec: specOf('expr'),
-  fn: exprCommand,
+  fn: expr,
 })

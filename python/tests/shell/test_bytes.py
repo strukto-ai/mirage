@@ -7,6 +7,7 @@ from mirage.shell.bytes import (
     encode_text,
     from_byte_view,
     text_view,
+    utf8_locale,
 )
 
 
@@ -105,3 +106,33 @@ def test_invalid_utf8_is_never_replaced():
     ):
         assert encode_text(decode_text(raw)) == raw
         assert encode_text(text_view(byte_view(raw))) == raw
+
+
+@pytest.mark.parametrize(
+    "env,expected",
+    [
+        (None, False),
+        ({}, False),
+        ({"LANG": "C.UTF-8"}, True),
+        ({"LANG": "C.UTF-8", "LC_ALL": "C"}, False),
+        ({"LANG": "C.UTF-8", "LC_ALL": ""}, True),
+        ({"LANG": "C", "LC_CTYPE": "en_US.utf8"}, True),
+        ({"LC_CTYPE": "C.UTF-8", "LC_ALL": "POSIX"}, False),
+        ({"LC_ALL": "de_DE.UTF-8@euro"}, True),
+        ({"LC_ALL": "en_US.ISO-8859-1"}, False),
+        ({"LC_ALL": "UTF-8"}, False),
+    ],
+)
+def test_utf8_locale_follows_setlocale_precedence(env, expected):
+    assert utf8_locale(env) is expected
+
+
+def test_a_utf8_view_is_the_text_itself():
+    raw = "规定é".encode() + b"\xff"
+    view = byte_view(raw, True)
+    assert view == "规定é\udcff"
+    assert len(view) == 4
+    assert byte_view("规定", True) == "规定"
+    assert from_byte_view(view, True) == raw
+    assert text_view(view, True) == view
+    assert len(byte_view(raw)) == len(raw)

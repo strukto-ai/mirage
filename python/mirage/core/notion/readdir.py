@@ -17,8 +17,11 @@ from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.notion.normalize import (
+    data_source_segment_name,
+    database_segment_name,
     normalize_data_source,
     normalize_database,
+    page_segment_name,
     to_json_bytes,
 )
 from mirage.core.notion.pages import (
@@ -29,10 +32,7 @@ from mirage.core.notion.pages import (
     search_pages,
 )
 from mirage.core.notion.pathing import (
-    data_source_dirname,
-    database_dirname,
     format_segment,
-    page_dirname,
 )
 from mirage.core.notion.resolve import guard_row
 from mirage.core.notion.scope import detect_scope
@@ -47,7 +47,7 @@ async def _list_pages_root(
     ]
     entries = []
     for page in top_level:
-        dirname = page_dirname(page)
+        dirname = page_segment_name(page)
         entries.append(
             (
                 dirname,
@@ -82,7 +82,7 @@ async def _list_databases_root(
         database = await get_database(
             accessor.config, database_id, session=accessor.pool
         )
-        dirname = database_dirname(database)
+        dirname = database_segment_name(database)
         entries.append(
             (
                 dirname,
@@ -165,7 +165,7 @@ async def _list_database(
         )
     ]
     for stub in database.get("data_sources", []):
-        dirname = data_source_dirname(stub)
+        dirname = data_source_segment_name(stub)
         entries.append(
             (
                 dirname,

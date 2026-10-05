@@ -16,7 +16,7 @@ import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
 import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
 import { stat as githubStat } from '../../../core/github/stat.ts'
-import { stream as githubStream } from '../../../core/github/read.ts'
+import { readStream as githubStream } from '../../../core/github/read.ts'
 import { IOResult } from '../../../io/types.ts'
 import { type FileStat, VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -30,7 +30,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 
 const ENC = new TextEncoder()
 
-async function grepCommand(
+async function grep(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -81,6 +81,6 @@ export const GITHUB_GREP = command({
   name: 'grep',
   vfs: VFSName.GITHUB,
   spec: specOf('grep'),
-  fn: grepCommand,
+  fn: grep,
   aggregate: prefixAggregate,
 })

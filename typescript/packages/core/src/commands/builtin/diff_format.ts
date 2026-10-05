@@ -148,13 +148,15 @@ export function unifiedDiff(
   fromFile = '',
   toFile = '',
   n = 3,
+  fromDate = '',
+  toDate = '',
 ): string[] {
   const out: string[] = []
   if (a.length === 0 && b.length === 0) return out
   const opcodes = getOpcodes(a, b)
   if (opcodes.every((op) => op[0] === DiffOpTag.EQUAL)) return out
-  out.push(`--- ${fromFile}\n`)
-  out.push(`+++ ${toFile}\n`)
+  out.push(`--- ${fromFile}${fromDate === '' ? '' : '\t' + fromDate}\n`)
+  out.push(`+++ ${toFile}${toDate === '' ? '' : '\t' + toDate}\n`)
   const groups = groupOpcodes(opcodes, n)
   for (const group of groups) {
     const first = group[0]

@@ -55,30 +55,63 @@ describe('dispatch applies limits on the executing mount', () => {
   }, 30_000)
 })
 
-describe('dispatch rename addresses dst against the source mount', () => {
-  it('cross-mount dst is refused like Python refuses it (EXDEV is a follow-up)', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/a': new RAMVFS(), '/b': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
-    try {
-      await ws.shell('echo moved-bytes > /a/x.txt')
-      // Both languages execute the rename on the source backend and address
-      // the dst key against it, so '/b/y.txt' means 'b/y.txt' inside /a, a
-      // directory that does not exist there. The store-backed backends
-      // refuse (rename(2) ENOENT) instead of growing an orphan key under a
-      // directory they never recorded. Neither language crosses mounts.
-      await expect(
-        ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath('/b/y.txt')]),
-      ).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(DEC.decode((await ws.shell('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
-      expect((await ws.shell('cat /a/b/y.txt')).exitCode).not.toBe(0)
-      expect((await ws.shell('cat /b/y.txt')).exitCode).not.toBe(0)
-    } finally {
-      await ws.close()
-    }
-  }, 30_000)
+describe('dispatch rename across mounts', () => {
+  it.each([
+    ['/nope/y.txt', 'ENOENT'],
+    ['/b/f/y.txt', 'ENOTDIR'],
+    ['/x/y.txt', 'EXDEV'],
+  ])(
+    'resolves the parent of %s first: %s',
+    async (dst, code) => {
+      // Mirrors Python's test_dispatch_rename_across_mounts_resolves_the_parent_first.
+      // rename(2) resolves the destination's directory before it compares
+      // filesystems: a missing one is ENOENT and one through a file ENOTDIR;
+      // /x, which the namespace holds above the /x/m mount, is there, so the
+      // answer is EXDEV.
+      const parser = await getTestParser()
+      const ws = new Workspace(
+        { '/a': new RAMVFS(), '/b': new RAMVFS(), '/x/m': new RAMVFS() },
+        { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+      )
+      try {
+        await ws.shell('echo moved-bytes > /a/x.txt; echo f > /b/f')
+        await expect(
+          ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath(dst)]),
+        ).rejects.toMatchObject({ code })
+        expect(DEC.decode((await ws.shell('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
+      } finally {
+        await ws.close()
+      }
+    },
+    30_000,
+  )
+
+  it.each(['/a/x.txt', '/a/missing.txt'])(
+    'answers EXDEV and moves nothing: %s',
+    async (src) => {
+      // Mirrors Python's test_dispatch_rename_across_mounts_is_exdev. A mount
+      // is a filesystem boundary, so rename(2) answers EXDEV across two before
+      // it looks the source up, and nothing moves: the source's backend never
+      // takes '/b/y.txt' for one of its own keys.
+      const parser = await getTestParser()
+      const ws = new Workspace(
+        { '/a': new RAMVFS(), '/b': new RAMVFS() },
+        { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+      )
+      try {
+        await ws.shell('echo moved-bytes > /a/x.txt')
+        await expect(
+          ws.dispatch('rename', src, [PathSpec.fromStrPath('/b/y.txt')]),
+        ).rejects.toMatchObject({ code: 'EXDEV' })
+        expect(DEC.decode((await ws.shell('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
+        expect((await ws.shell('cat /a/b/y.txt')).exitCode).not.toBe(0)
+        expect((await ws.shell('cat /b/y.txt')).exitCode).not.toBe(0)
+      } finally {
+        await ws.close()
+      }
+    },
+    30_000,
+  )
 })
 
 describe('dispatch resolves filetype-registered ops by path extension', () => {
@@ -852,20 +885,27 @@ describe('rmdir namespace entries', () => {
 })
 
 describe('a cold read keeps its bytes for the next reader', () => {
-  // A caching mount whose `.count` reads render BODY, one tally per fetch;
-  // with `race` the first fetch is overtaken by a write. Mirrors Python's
-  // tests/workspace/dispatcher/test_dispatcher.py.
-  function counted(race = false): { ws: Workspace; fetched: string[] } {
+  // A caching mount whose reads answer BODY, one tally per fetch. The
+  // counted read replaces the mount's plain read, or with `filetype`
+  // renders only that extension; with `race` the first fetch is overtaken
+  // by a write. Mirrors Python's tests/workspace/dispatcher/test_dispatcher.py.
+  function counted(
+    race = false,
+    filetype: string | null = null,
+  ): { ws: Workspace; fetched: string[]; ops: OpsRegistry } {
     const fetched: string[] = []
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
     const ops = new OpsRegistry()
     ops.registerVfs(vfs)
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, ops })
+    const ws = new Workspace(
+      { '/data': vfs },
+      { mode: MountMode.WRITE, ops, shellParserFactory: getTestParser },
+    )
     ops.register({
       name: 'read',
       vfs: vfs.name,
-      filetype: '.count',
+      filetype,
       write: false,
       fn: async (_accessor, path, _args, kwargs) => {
         fetched.push(path.virtual)
@@ -875,13 +915,13 @@ describe('a cold read keeps its bytes for the next reader', () => {
         return sliceWindow(ENC.encode('BODY'), offset, size)
       },
     })
-    return { ws, fetched }
+    return { ws, fetched, ops }
   }
 
-  it('serves the ranges of a render from one kept read', async () => {
-    // A render has no remote range: the read op would fetch the whole file
-    // and slice it for every range, so the first range keeps the file and
-    // the rest, and the whole read, are served from it.
+  it('serves the ranges of an unranged read from one kept read', async () => {
+    // A read op with no remote range would fetch the whole file and slice
+    // it for every range, so the first range keeps the file and the rest,
+    // and the whole read, are served from it.
     const { ws, fetched } = counted()
     await ws.vfs.write('/data/f.count', 'STORED')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('BO')
@@ -894,7 +934,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
   it('keeps nothing from a raw or a natively ranged read', async () => {
     // A raw read is not the rendering the cache holds under the same key,
     // and a store that serves a range itself moved only that range.
-    const { ws, fetched } = counted()
+    const { ws, fetched } = counted(false, '.count')
     await ws.vfs.write('/data/f.count', 'STORED')
     await ws.vfs.write('/data/f.txt', '0123456789')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { raw: true }))).toBe('STORED')
@@ -912,6 +952,83 @@ describe('a cold read keeps its bytes for the next reader', () => {
     await ws.vfs.read('/data/f.count')
     await ws.vfs.read('/data/f.count')
     expect(fetched).toHaveLength(2)
+  })
+
+  it.each([
+    ['whole', {}, 'RENDER'],
+    ['ranged', { offset: 0, size: 2 }, 'RE'],
+  ])(
+    'keeps nothing from a renderer registered after the probe (%s)',
+    async (_name, window, rendered) => {
+      // The fill is chosen after the probe, but the op is resolved only once
+      // the mount is ready; a renderer landing in between runs, and its
+      // rendering must not become what cat reads. A ranged read on a store
+      // with no native range fills the whole file too.
+      const { ws, ops } = counted()
+      await ws.vfs.write('/data/f.count', 'STORED')
+      const mount = ws.mount('/data')
+      const probe = ws.cache.get.bind(ws.cache)
+      const ready = mount.ensureReady.bind(mount)
+      let probed = false
+      Object.assign(ws.cache, {
+        get: async (path: string) => {
+          probed = true
+          return probe(path)
+        },
+      })
+      Object.assign(mount, {
+        ensureReady: async () => {
+          if (probed && ops.find('read', mount.vfs, '.count') === null) {
+            ops.register({
+              name: 'read',
+              vfs: mount.vfs.name,
+              filetype: '.count',
+              write: false,
+              fn: () => Promise.resolve(ENC.encode('RENDER')),
+            })
+          }
+          await ready()
+        },
+      })
+      expect(DEC.decode(await ws.vfs.read('/data/f.count', window))).toBe(rendered)
+      expect(await ws.cache.exists('/data/f.count')).toBe(false)
+      expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('STORED')
+    },
+  )
+
+  it('hands a ranged render to the renderer as its range', async () => {
+    // A render is never kept, so filling the whole file for a range would
+    // only render more than the read asked for.
+    const { ws, ops } = counted()
+    const mount = ws.mount('/data')
+    const windows: [unknown, unknown][] = []
+    ops.register({
+      name: 'read',
+      vfs: mount.vfs.name,
+      filetype: '.count',
+      write: false,
+      fn: (_accessor, _path, _args, kwargs) => {
+        windows.push([kwargs.offset, kwargs.size])
+        return Promise.resolve(ENC.encode('RE'))
+      },
+    })
+    await ws.vfs.write('/data/f.count', 'STORED')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('RE')
+    expect(windows).toEqual([[0, 2]])
+  })
+
+  it('neither keeps a render nor serves one to a command', async () => {
+    // The file cache holds what commands read under the path alone, so a
+    // kept render would be what cat prints, and a kept cat what the
+    // renderer read returns.
+    const { ws, fetched } = counted(false, '.count')
+    await ws.vfs.write('/data/f.count', 'STORED')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count'))).toBe('BODY')
+    expect(await ws.cache.exists('/data/f.count')).toBe(false)
+    expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('STORED')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('BO')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count'))).toBe('BODY')
+    expect(fetched).toEqual(['/data/f.count', '/data/f.count', '/data/f.count'])
   })
 })
 

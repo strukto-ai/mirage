@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 import httpx2
@@ -27,6 +28,7 @@ from mcp.types import (
 )
 
 from mirage import __version__
+from mirage.concurrency.limiter import run_blocking
 
 
 class McpRelay:
@@ -88,18 +90,31 @@ class McpRelay:
         )
 
 
-async def relay_stdio(url: str, headers: dict[str, str]) -> None:
+async def relay_stdio(url: str, token: Callable[[], str]) -> None:
     """Relay this process's stdio to a daemon's MCP endpoint.
+
+    A tool call may run for as long as its command does, so reads are
+    not timed.
 
     Args:
         url (str): the workspace's ``/v1/workspaces/{id}/mcp`` URL.
-        headers (dict[str, str]): request headers, the bearer token among
-            them. A tool call may run for as long as its command does, so
-            reads are not timed.
+        token (Callable[[], str]): the bearer token, asked for on every
+            request, so a login refreshed while the relay runs is sent;
+            empty sends none.
     """
+
+    class Bearer(httpx2.Auth):
+        async def async_auth_flow(
+            self, request: httpx2.Request
+        ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
+            value = await run_blocking(token)
+            if value:
+                request.headers["Authorization"] = f"Bearer {value}"
+            yield request
+
     async with (
         httpx2.AsyncClient(
-            headers=headers, timeout=httpx2.Timeout(30.0, read=None)
+            auth=Bearer(), timeout=httpx2.Timeout(30.0, read=None)
         ) as http,
         Client(streamable_http_client(url, http_client=http)) as upstream,
         stdio_server() as (read_stream, write_stream),

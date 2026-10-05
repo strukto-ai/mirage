@@ -1,18 +1,18 @@
 {
  "description": "The access corpus. Every way into a workspace (in-app, HTTP, the CLI, MCP over HTTP and mirage mcp, RPC over HTTP and mirage rpc, SSH) must give the in-app answer for every case its protocol can express. The ops table says which accesses have which operation; it is the matrix on docs/home/access/overview.mdx. Each suite runs in order on a fresh workspace per access, built from the suite's config and setup lines; a suite's deployments, when given, are the only ones its server accesses run on. expect pins the in-app answer.",
  "ops": {
-  "shell": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
-  "stdin": ["inapp", "http", "cli", "rpc", "rpc_stdio", "ssh"],
+  "shell": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "stdin": ["inapp", "http", "cli", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
   "tool": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"],
-  "bytes": ["inapp", "rpc", "rpc_stdio", "ssh"],
-  "cancel": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
+  "bytes": ["inapp", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "cancel": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
   "session": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
   "workspace": ["inapp", "http", "cli"],
   "session_admin": ["inapp", "http", "cli"],
   "snapshot": ["inapp", "http", "cli"],
   "ask": ["inapp", "http", "cli"],
   "job": ["http", "cli"],
-  "auth": ["http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
+  "auth": ["http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
   "server": ["http"]
  },
  "matrix": {
@@ -21,6 +21,7 @@
   "Run a line": "shell",
   "Send stdin to a line": "stdin",
   "Cancel a running line": "cancel",
+  "Cancel or kill all of a session's or workspace's work": "session_admin",
   "The seven agent tools": "tool",
   "File operations on bytes": "bytes",
   "Snapshots": "snapshot",
@@ -184,8 +185,14 @@
     {"id": "gets_its_internals", "accesses": ["http", "cli"], "input": {"step": "internals", "id": "w1"}, "expect": {"text": "cache_bytes cache_entries"}},
     {"id": "clones", "input": {"step": "clone", "id": "w1", "to": "w2"}, "expect": {"text": "w2"}},
     {"id": "the_clone_has_the_file", "input": {"step": "shell", "id": "w2", "command": "cat /f"}, "expect": {"text": "one\n", "is_error": false}},
+    {"id": "starts_a_background_job", "input": {"step": "shell", "id": "w2", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},
+    {"id": "cancels_its_lines", "input": {"step": "cancel_lines", "id": "w2"}, "expect": {"text": "0"}},
+    {"id": "kills_its_jobs", "input": {"step": "kill_jobs", "id": "w2"}, "expect": {"text": "1"}},
     {"id": "deletes", "input": {"step": "delete", "id": "w1"}, "expect": {"text": "deleted"}},
     {"id": "lists_what_is_left", "input": {"step": "list"}, "expect": {"text": "w2"}},
+    {"id": "creates_a_third", "input": {"step": "create", "id": "w3"}, "expect": {"text": "w3"}},
+    {"id": "closes_it", "input": {"step": "close_workspace", "id": "w3"}, "expect": {"text": "closed"}},
+    {"id": "lists_without_it", "input": {"step": "list"}, "expect": {"text": "w2"}},
     {"id": "deletes_the_clone", "input": {"step": "delete", "id": "w2"}, "expect": {"text": "deleted"}}
    ]
   },
@@ -200,6 +207,10 @@
     {"id": "the_session_has_its_profile", "input": {"step": "shell", "id": "w", "session": "s1", "command": "cat /vault/key.txt"}, "expect": {"text": "cat: /vault/key.txt: No such file or directory\n", "is_error": true}},
     {"id": "deletes_the_session", "input": {"step": "session_delete", "id": "w", "session": "s1"}, "expect": {"text": "deleted"}},
     {"id": "lists_what_is_left", "input": {"step": "session_list", "id": "w"}, "expect": {"text": ""}},
+    {"id": "creates_another_session", "input": {"step": "session_create", "id": "w", "session": "s2", "profile": "asker"}, "expect": {"text": "s2"}},
+    {"id": "starts_a_job_in_it", "input": {"step": "shell", "id": "w", "session": "s2", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},
+    {"id": "cancels_the_sessions_lines", "input": {"step": "cancel_lines", "id": "w", "session": "s2"}, "expect": {"text": "0"}},
+    {"id": "kills_the_sessions_jobs", "input": {"step": "kill_jobs", "id": "w", "session": "s2"}, "expect": {"text": "1"}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },
@@ -273,13 +284,15 @@
     "local_token": 200,
     "other_token": 401,
     "fixed_token": 401,
-    "jwt_valid": 401
+    "jwt_valid": 401,
+    "oauth_valid": 401
    },
    "token": {
     "none": 401,
     "other_token": 401,
     "fixed_token": 200,
     "jwt_valid": 401,
+    "oauth_valid": 401,
     "opaque": 401
    },
    "jwt": {
@@ -287,9 +300,12 @@
     "other_token": 401,
     "fixed_token": 401,
     "jwt_valid": 200,
+    "oauth_valid": 200,
+    "oauth_wrong_audience": 401,
     "jwt_expired": 401,
     "jwt_wrong_issuer": 401,
     "jwt_wrong_party": 401,
+    "jwt_no_party": 401,
     "jwt_wrong_key": 401,
     "jwt_alg_none": 401,
     "jwt_hs256": 401,
@@ -301,6 +317,37 @@
    "wrong": "refused"
   }
  },
+ "login": {
+  "description": "mirage login, whoami and logout per deployment, with a CLI home of its own and no token. dev and token publish no login (404); jwt publishes the issuer and client, and its browser is a user already signed in. On jwt the login then drives the CLI and SSH through ssh-proxy, refreshes an ended access token, and ends 30 days after sign-in. token takes a pasted token the server accepts.",
+  "dev": {
+   "resource": 404,
+   "login": "{url} publishes no login: a local daemon needs none, and a server with a shared token takes `mirage login --token`",
+   "whoami": 1,
+   "logout": "Not logged in."
+  },
+  "token": {
+   "resource": 404,
+   "login": "{url} publishes no login: a local daemon needs none, and a server with a shared token takes `mirage login --token`",
+   "login_wrong_token": 1,
+   "login_token": 0,
+   "whoami": null,
+   "list": "ok",
+   "logout": "Logged out of {url}.",
+   "after_logout": "daemon error 401: Unauthorized"
+  },
+  "jwt": {
+   "resource": 200,
+   "login": "Logged in to {url} as user_alice.",
+   "whoami": "user_alice",
+   "list": "ok",
+   "ssh_proxy": 0,
+   "ended_token": "ok",
+   "refreshed": true,
+   "after_30_days": "the login is 30 days old",
+   "logout": "Logged out of {url}.",
+   "after_logout": "daemon error 401: Unauthorized"
+  }
+ },
  "server": {
   "health_without_token": 200,
   "unknown_host": 400,
@@ -309,6 +356,11 @@
    "delete": 405
   },
   "no_snapshot_store": [400, "this server has no snapshot store"],
+  "shutdown": {
+   "dev": 200,
+   "token": 200,
+   "jwt": 403
+  },
   "after_shutdown": {
    "dev": "exited",
    "token": "serving",

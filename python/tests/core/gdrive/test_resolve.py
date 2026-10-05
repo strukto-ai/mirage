@@ -178,3 +178,18 @@ async def test_eacces_on_denied_maps_403():
         await denied(None, spec)
     with pytest.raises(aiohttp.ClientResponseError):
         await server_error(None, spec)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parent", ["missing", "file", "file/sub"])
+async def test_resolve_parent_error_names_full_operand(
+    fake_drive, gdrive_accessor, parent
+):
+    fake_drive.add("file", content=b"x")
+    path = PathSpec.from_str_path(
+        f"/drive/{parent}/child", vfs_path=f"{parent}/child"
+    )
+    error = FileNotFoundError if parent == "missing" else NotADirectoryError
+    with pytest.raises(error) as raised:
+        await resolve_parent(gdrive_accessor, path)
+    assert str(raised.value) == path.virtual

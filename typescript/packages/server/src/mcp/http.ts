@@ -123,8 +123,12 @@ export class McpDoor {
     private readonly jobs: JobTable,
   ) {}
 
-  private async fetch(request: Request, parsedBody?: unknown): Promise<Response> {
-    const target = await this.target(new URL(request.url))
+  private async fetch(
+    request: Request,
+    parsedBody: unknown,
+    account: string | null,
+  ): Promise<Response> {
+    const target = await this.target(new URL(request.url), account)
     if (typeof target === 'string') return Response.json({ detail: target }, { status: 404 })
     const { handler, workspaceId, sessionId } = target
     const options = parsedBody === undefined ? {} : { parsedBody }
@@ -197,7 +201,7 @@ export class McpDoor {
       headers,
       signal: gone.signal,
     })
-    return reply.send(await this.fetch(request, req.body))
+    return reply.send(await this.fetch(request, req.body, req.account))
   }
 
   /** Close every handler; the app's `onClose` awaits it. */
@@ -213,13 +217,15 @@ export class McpDoor {
    * workspace and live session, shared by every door that serves the
    * tools (this endpoint, the HTTP tool routes, the RPC endpoint and the
    * CLI through them), so a read through one door stamps the file for an
-   * edit through another. No session is the workspace's default.
+   * edit through another. No session is the workspace's default; another
+   * account's workspace is not found.
    */
   async tools(
     workspaceId: string,
-    sessionId?: string | null,
+    sessionId: string | null,
+    account: string | null,
   ): Promise<DaemonToolOperations | string> {
-    const served = await this.servedFor(workspaceId, sessionId ?? '')
+    const served = await this.servedFor(workspaceId, sessionId ?? '', account)
     return typeof served === 'string' ? served : served.operations
   }
 
@@ -229,11 +235,16 @@ export class McpDoor {
    */
   private async target(
     url: URL,
+    account: string | null,
   ): Promise<{ handler: McpHttpHandler; workspaceId: string; sessionId: string } | string> {
     const match = /^\/v1\/workspaces\/([^/]+)\/mcp$/.exec(url.pathname)
     if (match === null) return 'not found'
     const workspaceId = decodeURIComponent(match[1] ?? '')
-    const served = await this.servedFor(workspaceId, url.searchParams.get('session_id') ?? '')
+    const served = await this.servedFor(
+      workspaceId,
+      url.searchParams.get('session_id') ?? '',
+      account,
+    )
     if (typeof served === 'string') return served
     return { handler: served.handler, workspaceId, sessionId: served.session.sessionId }
   }
@@ -241,6 +252,7 @@ export class McpDoor {
   private async servedFor(
     workspaceId: string,
     named: string,
+    account: string | null,
   ): Promise<
     | {
         entry: WorkspaceEntry
@@ -251,8 +263,8 @@ export class McpDoor {
     | string
   > {
     await this.dropStale()
-    if (!this.registry.has(workspaceId)) return 'workspace not found'
-    const entry = this.registry.get(workspaceId)
+    const entry = this.registry.visible(workspaceId, account)
+    if (entry === null) return 'workspace not found'
     const ws = entry.runner.ws
     await ws.ensureSessionsLoaded()
     const sessionId = named === '' ? ws.defaultSessionId : named

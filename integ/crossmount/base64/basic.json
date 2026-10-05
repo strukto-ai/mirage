@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_base64_across_mounts",
+      "seq": 963200,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hi\\n' > /data/xm_rt_b64; base64 /data/xm_rt_b64 > /data2/xm_rt_b64; cat /data2/xm_rt_b64; base64 -d /data2/xm_rt_b64; rm /data/xm_rt_b64 /data2/xm_rt_b64",
+      "expect": {
+        "exit": 0,
+        "stdout": "aGkK\nhi\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

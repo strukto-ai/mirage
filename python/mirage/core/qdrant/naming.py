@@ -20,7 +20,7 @@ from mirage.core.hierarchy.codec import PATH_SAFE
 from mirage.core.qdrant.payload import field_value
 from mirage.core.render.json import value_text
 from mirage.utils.naming import fit_id_name, parse_id_name
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len, path_safe_name
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, path_safe_name
 from mirage.vfs.qdrant.config import QdrantConfig
 
 
@@ -49,7 +49,7 @@ def group_name(value: Any, *, basename: bool = False) -> str:
     trimmed = without_query.rstrip("/\\")
     leaf = trimmed.replace("\\", "/").rsplit("/", 1)[-1]
     segment = PATH_SAFE.encode(leaf or name)
-    if byte_len(segment) <= NAME_MAX_BYTES:
+    if byte_length(segment) <= NAME_MAX_BYTES:
         return segment
     return fit_id_name(
         segment, hashlib.md5(segment.encode("utf-8")).hexdigest()
@@ -76,7 +76,7 @@ def row_stem(row: Mapping[str, Any], config: QdrantConfig) -> str:
         suffixes.append(".txt")
     if config.blob_field:
         suffixes.append(f".{config.blob_ext}")
-    longest_suffix = max(suffixes, key=byte_len)
+    longest_suffix = max(suffixes, key=byte_length)
     fitted = fit_id_name(
         path_safe_name(value_text(label)), point_id, longest_suffix
     )

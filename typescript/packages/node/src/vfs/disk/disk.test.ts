@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chmodSync, existsSync, statSync } from 'node:fs'
-import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { CapacityState, FileType, PathSpec, VFSName } from '@struktoai/mirage-core/types'
@@ -24,7 +24,7 @@ import { size as duSize } from '../../core/disk/du/index.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
 import { find as findCore } from '../../core/disk/find.ts'
 import { rmR as rmRCore } from '../../core/disk/rm.ts'
-import { stream as streamCore } from '../../core/disk/stream.ts'
+import { readStream as streamCore } from '../../core/disk/stream.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { DiskVFS } from './disk.ts'
 
@@ -201,6 +201,25 @@ describe('DiskVFS — getState / loadState round-trip', () => {
       const res2 = new DiskVFS({ root: root2 })
       await res2.loadState(state)
       expect(statSync(join(root2, 'f.txt')).mode & 0o777).toBe(0o640)
+    } finally {
+      c2()
+    }
+  })
+
+  it('refuses a captured file replaced by a link', async () => {
+    // A copy reads each file after the state named it; one swapped for a
+    // link to a host file in between must not be copied through.
+    await ops(res).write(spec('/f.txt'), new TextEncoder().encode('mine'))
+    const state = await res.getState()
+    const { root: other, cleanup: c2 } = tmpRoot('mirage-diskvfs-swap-')
+    try {
+      const secret = join(other, 'secret')
+      await writeFile(secret, 'host')
+      await unlink(join(root, 'f.txt'))
+      await symlink(secret, join(root, 'f.txt'))
+      const dst = join(other, 'dst')
+      await expect(new DiskVFS({ root: dst }).loadState(state)).rejects.toThrow()
+      expect(existsSync(join(dst, 'f.txt'))).toBe(false)
     } finally {
       c2()
     }

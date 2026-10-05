@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult } from '../../io/types.ts'
+import { encodeText } from '../bytes.ts'
 import type { TSNodeLike } from '../types.ts'
 
 import {
@@ -50,13 +52,17 @@ export function findUnterminatedQuote(node: TSNodeLike): string | null {
   return null
 }
 
-export function syntaxErrorMessage(offending: string, node: TSNodeLike): string {
+/** Exit 2 with the bash-style diagnostic for an unparsable line. */
+export function syntaxErrorResult(offending: string, node: TSNodeLike): IOResult {
   const quote = findUnterminatedQuote(node)
-  if (quote !== null) return 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
   const snippet = offending.trim()
-  return snippet.length > 0
-    ? `mirage: syntax error near '${snippet}'\n`
-    : 'mirage: syntax error in command\n'
+  const message =
+    quote !== null
+      ? 'mirage: unexpected EOF while looking for matching `' + quote + "'\n"
+      : snippet.length > 0
+        ? `mirage: syntax error near '${snippet}'\n`
+        : 'mirage: syntax error in command\n'
+  return new IOResult({ exitCode: 2, stderr: encodeText(message) })
 }
 
 // Locate a backtick substitution that is never closed. tree-sitter

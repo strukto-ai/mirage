@@ -38,7 +38,7 @@
       },
       "disk": {
         "filetypes": [],
-        "has_aggregate": true,
+        "has_aggregate": false,
         "has_write": false
       },
       "dropbox": {
@@ -173,12 +173,12 @@
       },
       "ram": {
         "filetypes": [],
-        "has_aggregate": true,
+        "has_aggregate": false,
         "has_write": false
       },
       "redis": {
         "filetypes": [],
-        "has_aggregate": true,
+        "has_aggregate": false,
         "has_write": false
       },
       "s3": {
@@ -213,7 +213,7 @@
       }
     },
     "filetypes": [],
-    "has_aggregate": true,
+    "has_aggregate": false,
     "has_write": false,
     "vfs_names": [
       "airtable",

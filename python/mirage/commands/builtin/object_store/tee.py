@@ -17,7 +17,7 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.tee import tee as generic_tee
+from mirage.commands.builtin.generic.tee import tee_generic as generic_tee
 from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS

@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { READ_FAILURES, fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -279,6 +280,23 @@ function convert(raw: Uint8Array, charset: Charset, encoder: Encoder, omit: bool
 // no -f or -t the charset is UTF-8, where GNU takes the locale's (ASCII under
 // LC_ALL=C). Mirrors Python's `iconv`, which also converts the other charsets
 // Python's codecs know.
+interface IconvFlags {
+  readonly fromEnc: string
+  readonly toEnc: string
+  readonly ignoreErrors: boolean
+  readonly outputPath: string | null
+}
+
+function parseFlags(bag: Record<string, FlagValue>): IconvFlags {
+  const fl = new FlagView(bag, specOf('iconv'))
+  return {
+    fromEnc: fl.asStr('f') ?? 'utf-8',
+    toEnc: fl.asStr('t') ?? 'utf-8',
+    ignoreErrors: fl.asBool('c'),
+    outputPath: fl.asStr('o') ?? null,
+  }
+}
+
 export async function iconvGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -286,9 +304,9 @@ export async function iconvGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
-  const fl = new FlagView(opts.flags, specOf('iconv'))
-  const fromName = fl.asStr('f') ?? 'utf-8'
-  const toName = fl.asStr('t') ?? 'utf-8'
+  const parsed = parseFlags(opts.flags)
+  const fromName = parsed.fromEnc
+  const toName = parsed.toEnc
   const fromCharset = charsetOf(fromName)
   const toCharset = charsetOf(toName)
   if (fromCharset === null || toCharset === null) {
@@ -320,7 +338,7 @@ export async function iconvGeneric(
         continue
       }
     }
-    const converted = convert(raw, fromCharset, encoder, fl.asBool('c'))
+    const converted = convert(raw, fromCharset, encoder, parsed.ignoreErrors)
     chunks.push(converted.data)
     failed = failed || converted.dropped
     if (converted.error !== null) {
@@ -331,7 +349,7 @@ export async function iconvGeneric(
   }
   const stderr = errors.length > 0 ? ENC.encode(errors.map((line) => `${line}\n`).join('')) : null
   const encoded = concat(chunks)
-  const outPath = fl.asStr('o') ?? null
+  const outPath = parsed.outputPath
   if (outPath !== null) {
     const spec = PathSpec.fromStrPath(outPath, mountKey(outPath, opts.mountPrefix ?? ''))
     await write(spec, encoded)

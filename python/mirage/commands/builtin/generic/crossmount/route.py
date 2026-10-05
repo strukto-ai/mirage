@@ -15,22 +15,31 @@
 from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
+from mirage.commands.builtin.generic.crossmount.du import run_du
 from mirage.commands.builtin.generic.crossmount.fanout import run_fanout
 from mirage.commands.builtin.generic.crossmount.relay import run_relay
+from mirage.commands.builtin.generic.crossmount.search import run_search
 from mirage.commands.builtin.generic.crossmount.stream import run_stream
 from mirage.commands.builtin.generic.crossmount.types import (
+    Cmd,
     CrossResult,
     RunSingle,
     Strategy,
 )
+from mirage.commands.builtin.generic.crossmount.utils import (
+    merge_operand_ios,
+    run_operands,
+)
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.commands.config import AggregateFn
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error
 
@@ -48,6 +57,7 @@ async def handle_cross_mount(
     session_view: SessionView | None = None,
     cwd: str = "/",
     argv: tuple[str, ...] = (),
+    aggregate: AggregateFn | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -57,7 +67,9 @@ async def handle_cross_mount(
     once per operand and combines the outputs, RELAY moves per-file data
     through the dispatcher into one shared generic. STREAM and FANOUT
     execute through ``run_single``, so each mount expands its own glob
-    operands and uses its own native command implementation.
+    operands and uses its own native command implementation. grep, rg
+    and du compose each mount's own command instead: a search from its
+    owned scopes (``run_search``), du from its measurement (``run_du``).
 
     Args:
         cmd_name (str): Command name, such as ``cp``, ``sort``, or ``grep``.
@@ -79,6 +91,9 @@ async def handle_cross_mount(
         cwd (str): The session's working directory, which a typed
             operand resolves against (cp's link sources).
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
+        aggregate (AggregateFn | None): The reducer every operand's mount
+            registered for a custom command, which then runs once per
+            operand and reduces the outputs.
     """
     native = run_single
     input_source = resolve_source(stdin)
@@ -96,6 +111,39 @@ async def handle_cross_mount(
 
     run_single = run_input
     try:
+        if aggregate is not None:
+            results = await run_operands(
+                run_single, cmd_name, scopes, text_args, flag_kwargs
+            )
+            body = await aggregate(
+                [(r.scope.virtual, r.data) for r in results]
+            )
+            return body, await merge_operand_ios(
+                results, max((r.io.exit_code for r in results), default=0)
+            )
+        if cmd_name in ("grep", "rg"):
+            return await run_search(
+                cmd_name,
+                scopes,
+                text_args,
+                flag_kwargs,
+                dispatch,
+                run_single,
+                cwd,
+                ns,
+                input_source,
+            )
+        if cmd_name == Cmd.DU:
+            return await run_du(
+                scopes,
+                text_args,
+                flag_kwargs,
+                dispatch,
+                run_single,
+                cwd,
+                ns,
+                input_source,
+            )
         strategy = strategy_for(cmd_name)
         if strategy is Strategy.RELAY:
             return await run_relay(
@@ -124,10 +172,10 @@ async def handle_cross_mount(
         # operand) is its result, and the rest of the line runs, as the
         # single-mount path answers it.
         return None, IOResult(
-            exit_code=exc.exit_code, stderr=f"{exc}\n".encode()
+            exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
         )
     except FS_ERRORS as exc:
         return None, IOResult(
-            exit_code=read_fail_exit(cmd_name, exc),
+            exit_code=read_fail_exit_code(cmd_name, exc),
             stderr=format_fs_error(cmd_name, exc, scopes),
         )

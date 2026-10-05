@@ -21,7 +21,6 @@ import {
   eaccesOnDenied,
   isFolder,
   nodeFromItem,
-  resolveKey,
   resolveParent,
   resolveSegment,
   rootContext,
@@ -35,8 +34,6 @@ async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = fal
     throw eexist(path)
   }
   if (!parents) {
-    const node = await resolveKey(accessor, key)
-    if (node !== null) throw eexist(path)
     const [parentId] = await resolveParent(accessor, path)
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
     await createFolder(tm, basename, parentId)

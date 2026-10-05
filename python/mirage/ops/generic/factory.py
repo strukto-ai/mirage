@@ -17,7 +17,7 @@ import os
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.ops.generic.types import OpFn, OpsTable
+from mirage.ops.generic.types import OpCoreFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import eexist, einval, enotsup
@@ -29,7 +29,7 @@ from mirage.utils.ranges import (
 )
 
 
-def _make_read(fn: OpFn) -> OpFn:
+def _make_read(fn: OpCoreFn) -> OpCoreFn:
 
     async def read(
         accessor: Accessor,
@@ -43,7 +43,7 @@ def _make_read(fn: OpFn) -> OpFn:
     return read
 
 
-def _make_ranged_read(table: OpsTable) -> OpFn:
+def _make_ranged_read(table: OpsTable) -> OpCoreFn:
     """Build the ``read`` op, honoring a byte range when one is asked for.
 
     A backend that can fetch a range natively does so, which is the whole
@@ -94,7 +94,7 @@ def _make_ranged_read(table: OpsTable) -> OpFn:
     return read
 
 
-def _make_glob(table: OpsTable) -> OpFn:
+def _make_glob(table: OpsTable) -> OpCoreFn:
     # Glob expansion is a walk over readdir, so it is derived here rather
     # than written per driver: one walker, capped by the table's own
     # limit, with the table's stat so a trailing slash keeps directories
@@ -117,7 +117,7 @@ def _make_glob(table: OpsTable) -> OpFn:
     return glob
 
 
-def _make_data_write(fn: OpFn) -> OpFn:
+def _make_data_write(fn: OpCoreFn) -> OpCoreFn:
 
     async def write(
         accessor: Accessor, path: PathSpec, data: bytes, **kwargs
@@ -128,8 +128,8 @@ def _make_data_write(fn: OpFn) -> OpFn:
 
 
 def _make_emulated_append(
-    stat: OpFn, read_bytes: OpFn, write_bytes: OpFn
-) -> OpFn:
+    stat: OpCoreFn, read_bytes: OpCoreFn, write_bytes: OpCoreFn
+) -> OpCoreFn:
 
     async def append(
         accessor: Accessor,
@@ -175,7 +175,7 @@ def _expect_offset(offset: int, path: PathSpec) -> int:
     return offset
 
 
-def _make_pwrite(fn: OpFn) -> OpFn:
+def _make_pwrite(fn: OpCoreFn) -> OpCoreFn:
 
     async def pwrite(
         accessor: Accessor, path: PathSpec, data: bytes, offset: int, **kwargs
@@ -186,8 +186,8 @@ def _make_pwrite(fn: OpFn) -> OpFn:
 
 
 def _make_emulated_pwrite(
-    read_bytes: OpFn, write_bytes: OpFn, stat: OpFn
-) -> OpFn:
+    read_bytes: OpCoreFn, write_bytes: OpCoreFn, stat: OpCoreFn
+) -> OpCoreFn:
 
     async def pwrite(
         accessor: Accessor,
@@ -241,7 +241,7 @@ def _make_emulated_pwrite(
     return pwrite
 
 
-def _make_path_write(fn: OpFn) -> OpFn:
+def _make_path_write(fn: OpCoreFn) -> OpCoreFn:
 
     async def mutate(accessor: Accessor, path: PathSpec, **kwargs) -> None:
         await fn(accessor, path)
@@ -250,7 +250,7 @@ def _make_path_write(fn: OpFn) -> OpFn:
 
 
 async def refuse_taken(
-    stat: OpFn, accessor: Accessor, path: PathSpec, parents: bool
+    stat: OpCoreFn, accessor: Accessor, path: PathSpec, parents: bool
 ) -> None:
     """Refuse a mkdir of a name that is taken, as mkdir(2) does.
 
@@ -264,7 +264,7 @@ async def refuse_taken(
     ENOTDIR. Mirrors TS ``refuseTaken``.
 
     Args:
-        stat (OpFn): the backend's stat.
+        stat (OpCoreFn): the backend's stat.
         accessor (Accessor): the call's accessor.
         path (PathSpec): the directory to make.
         parents (bool): ``-p``.
@@ -282,8 +282,8 @@ async def refuse_taken(
 
 
 def _make_mkdir_parents(
-    fn: OpFn, stat: OpFn, force_parents: bool = True
-) -> OpFn:
+    fn: OpCoreFn, stat: OpCoreFn, force_parents: bool = True
+) -> OpCoreFn:
 
     async def mkdir(accessor: Accessor, path: PathSpec, **kwargs) -> None:
         parents = kwargs.get("parents") is True
@@ -293,7 +293,7 @@ def _make_mkdir_parents(
     return mkdir
 
 
-def _make_rename(fn: OpFn) -> OpFn:
+def _make_rename(fn: OpCoreFn) -> OpCoreFn:
 
     async def rename(
         accessor: Accessor, src: PathSpec, dst: PathSpec, **kwargs
@@ -303,7 +303,7 @@ def _make_rename(fn: OpFn) -> OpFn:
     return rename
 
 
-def _make_truncate(fn: OpFn) -> OpFn:
+def _make_truncate(fn: OpCoreFn) -> OpCoreFn:
 
     async def truncate(
         accessor: Accessor,
@@ -317,7 +317,9 @@ def _make_truncate(fn: OpFn) -> OpFn:
     return truncate
 
 
-def _make_emulated_truncate(read_bytes: OpFn, write_bytes: OpFn) -> OpFn:
+def _make_emulated_truncate(
+    read_bytes: OpCoreFn, write_bytes: OpCoreFn
+) -> OpCoreFn:
 
     async def truncate(
         accessor: Accessor,
@@ -337,7 +339,7 @@ def _make_emulated_truncate(read_bytes: OpFn, write_bytes: OpFn) -> OpFn:
     return truncate
 
 
-def _make_set_attrs(fn: OpFn) -> OpFn:
+def _make_set_attrs(fn: OpCoreFn) -> OpCoreFn:
 
     async def set_attrs(
         accessor: Accessor,
@@ -368,7 +370,7 @@ def _emit(
     ops: list[RegisteredOp],
     vfs_names: list[str],
     name: str,
-    fn: OpFn,
+    fn: OpCoreFn,
     write: bool,
     filetype: str | None,
     overrides: set[str],

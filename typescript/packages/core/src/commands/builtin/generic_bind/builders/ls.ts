@@ -13,18 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { lsGeneric } from '../../generic/ls.ts'
-import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
+import { type Builder, overlaidStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const ls: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return lsGeneric(
+    resolved,
+    opts,
+    (p) => ops.readdir(accessor, p, idx),
+    overlaidStat((p) => ops.stat(accessor, p, idx), opts.ns?.statOverlay),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'ls',
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return lsGeneric(
-      resolved,
-      opts,
-      (p) => ops.readdir(accessor, p, idx),
-      overlaidStat((p) => ops.stat(accessor, p, idx), opts.ns?.statOverlay),
-    )
-  },
+  fn: ls,
 }

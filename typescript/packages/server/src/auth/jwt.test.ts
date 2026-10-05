@@ -36,6 +36,7 @@ function cfg(material: KeyMaterial, overrides: Partial<JWTConfig> = {}): JWTConf
   return {
     key: material.publicPem,
     algorithm: 'RS256',
+    audiences: [],
     authorizedParties: [],
     clockSkewSeconds: 5,
     ...overrides,
@@ -96,7 +97,46 @@ describe('verifyJwt', () => {
       exp: Math.floor(Date.now() / 1000) + 60,
       aud: 'something-else',
     })
-    await expect(verifyJwt(token, cfg(keys, { audience: 'mirage-daemon' }))).rejects.toBeInstanceOf(
+    await expect(
+      verifyJwt(token, cfg(keys, { audiences: ['mirage-daemon'] })),
+    ).rejects.toBeInstanceOf(JWTVerificationError)
+  })
+
+  it('accepts an aud among the audiences', async () => {
+    for (const aud of ['cli', ['other', 'cli']]) {
+      const token = await sign(keys, { sub: 'x', exp: Math.floor(Date.now() / 1000) + 60, aud })
+      expect((await verifyJwt(token, cfg(keys, { audiences: ['web', 'cli'] }))).sub).toBe('x')
+    }
+  })
+
+  it('rejects an aud when no audience is configured', async () => {
+    const token = await sign(keys, {
+      sub: 'x',
+      exp: Math.floor(Date.now() / 1000) + 60,
+      aud: 'cli',
+    })
+    await expect(verifyJwt(token, cfg(keys))).rejects.toBeInstanceOf(JWTVerificationError)
+  })
+
+  it('takes session and OAuth tokens on one server', async () => {
+    // An app's session token names its origin in azp and has no aud; an
+    // OAuth client's access token names the client in aud.
+    const both = cfg(keys, {
+      audiences: ['client_cli'],
+      authorizedParties: ['https://app.example'],
+    })
+    const exp = Math.floor(Date.now() / 1000) + 60
+    const session = await sign(keys, { sub: 'x', exp, azp: 'https://app.example' })
+    const oauth = await sign(keys, { sub: 'x', exp, aud: 'client_cli' })
+    const stray = await sign(keys, { sub: 'x', exp, azp: 'https://evil.example' })
+    expect((await verifyJwt(session, both)).sub).toBe('x')
+    expect((await verifyJwt(oauth, both)).sub).toBe('x')
+    await expect(verifyJwt(stray, both)).rejects.toBeInstanceOf(JWTVerificationError)
+  })
+
+  it('needs an aud when only audiences are configured', async () => {
+    const token = await sign(keys, { sub: 'x', exp: Math.floor(Date.now() / 1000) + 60 })
+    await expect(verifyJwt(token, cfg(keys, { audiences: ['client_cli'] }))).rejects.toBeInstanceOf(
       JWTVerificationError,
     )
   })

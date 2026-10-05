@@ -42,7 +42,7 @@ function parseBool(value: string): boolean {
   return v === 'true' || v === '1' || v === 'yes'
 }
 
-async function trelloCardUpdateCommand(
+async function trelloCardUpdate(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
@@ -87,6 +87,6 @@ export const TRELLO_CARD_UPDATE = command({
   name: 'trello card update',
   vfs: VFSName.TRELLO,
   spec: SPEC,
-  fn: trelloCardUpdateCommand,
+  fn: trelloCardUpdate,
   write: true,
 })

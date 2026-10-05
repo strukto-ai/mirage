@@ -63,7 +63,7 @@ async function* discordStream(
   yield await discordRead(accessor, p, index)
 }
 
-async function grepCommand(
+async function grep(
   accessor: DiscordAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -143,5 +143,5 @@ export const DISCORD_GREP = command({
   name: 'grep',
   vfs: VFSName.DISCORD,
   spec: specOf('grep'),
-  fn: grepCommand,
+  fn: grep,
 })

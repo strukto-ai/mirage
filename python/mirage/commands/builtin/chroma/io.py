@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.chroma.read import read_bytes as _read
+from mirage.core.chroma.read import read as _read
 from mirage.core.chroma.read import read_stream as _read_stream
 from mirage.core.chroma.search import search_many, search_resource
 from mirage.core.chroma.stat import stat as _stat

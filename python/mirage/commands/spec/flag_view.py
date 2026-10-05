@@ -215,9 +215,7 @@ class FlagView:
         return []
 
     def as_paths(self, name: str) -> list[PathSpec]:
-        # PATH-typed flag values arrive as PathSpec in both executors; a
-        # line parsed for a cross-mount strategy keeps its resolved
-        # strings, so it answers empty there. Mirrors TS asPaths.
+        # PATH-typed flag values arrive as PathSpec. Mirrors TS asPaths.
         value = self._flags.get(self._key(name))
         if isinstance(value, list):
             return [item for item in value if isinstance(item, PathSpec)]

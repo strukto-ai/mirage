@@ -8,7 +8,7 @@ from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
-async def read_bytes(
+async def read(
     accessor: NextcloudAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

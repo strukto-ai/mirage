@@ -12,22 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ContentType } from '../../types.ts'
-import { CORPUS } from '../google/constants.ts'
+import { appScopes } from '../google/scope.ts'
+import { makeDetectScope, type Scope } from '../hierarchy/scope.ts'
 import { FILE_NAME } from './constants.ts'
-import { Slot, Scope, makeDetectScope } from '../hierarchy/scope.ts'
 
-// One description of the tree: readdir, stat, read and unlink all classify
-// through it, so the file surface and the write surface cannot disagree
-// about what a path means.
-export const SCOPES: readonly Scope[] = [
-  new Scope({ kind: 'corpus', segments: [new Slot('corpus', CORPUS)], probed: false }),
-  new Scope({
-    kind: 'file',
-    segments: [new Slot('corpus', CORPUS), new Slot('name', FILE_NAME, 'file_id')],
-    leaf: true,
-    filetype: ContentType.JSON,
-  }),
-]
+export const SCOPES: readonly Scope[] = appScopes(FILE_NAME)
 
 export const detectScope = makeDetectScope(SCOPES)

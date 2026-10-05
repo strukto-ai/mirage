@@ -22,7 +22,10 @@ import { isNoFileError, resolveFileId } from './read.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 
-export async function* stream(accessor: GridFSAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
+export async function* readStream(
+  accessor: GridFSAccessor,
+  path: PathSpec,
+): AsyncIterable<Uint8Array> {
   const virtual = path.virtual
   const raw = rawPathOf(path)
   const key = gridfsKey(raw, accessor.config)

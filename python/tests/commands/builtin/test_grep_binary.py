@@ -7,6 +7,7 @@ import pytest
 
 from mirage.commands.builtin.generic.grep import parse_flags
 from mirage.commands.builtin.grep_binary import PROBE_BLOCK_BYTES, grep_input
+from mirage.commands.builtin.grep_pattern import compile_pattern
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -979,3 +980,40 @@ async def test_cancellation_while_skipping_nonmatching_buffers():
             )
         )
     assert closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,pattern,stdout,stderr",
+    [
+        ({}, "a", "a1\néa2\n", b"grep: f: binary file matches\n"),
+        ({"args_I": True}, "a", "a1\néa2\n", b""),
+        ({"text": True}, "a", "a1\na\udcff\néa2\n", b""),
+        ({"c": True}, "a.", "2\n", b""),
+        ({"o": True, "byte_offset": True}, "2", "9:2\n", b""),
+    ],
+)
+async def test_a_utf8_scan_leaves_out_a_line_no_character_owns(
+    flags, pattern, stdout, stderr
+):
+    async def source() -> AsyncIterator[bytes]:
+        yield "a1\na\udcff\néa2\n".encode("utf-8", "surrogateescape")
+
+    f = parse_flags(FlagView(flags, spec=SPECS["grep"]), False)
+    io = IOResult(exit_code=1)
+    out = await materialize(
+        grep_input(
+            source(),
+            compile_pattern(pattern, utf8=True),
+            f,
+            "f",
+            False,
+            io,
+            utf8=True,
+        )
+    )
+    assert (out, io.stderr or b"", io.exit_code) == (
+        stdout.encode("utf-8", "surrogateescape"),
+        stderr,
+        0,
+    )

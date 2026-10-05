@@ -3,7 +3,7 @@ import asyncio
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.s3.find import find
-from mirage.core.s3.read import read_bytes
+from mirage.core.s3.read import read
 from mirage.core.s3.readdir import readdir
 from mirage.types import PathSpec
 from mirage.vfs.s3 import S3Config
@@ -52,7 +52,7 @@ def test_read_bytes_with_key_prefix():
         path = PathSpec(
             vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"
         )
-        data = asyncio.run(read_bytes(accessor, path))
+        data = asyncio.run(read(accessor, path))
     assert data == b"hello"
 
 

@@ -12,56 +12,89 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { IOResult } from '../../../../../io/types.ts'
-import type { FlagValue } from '../../../../spec/types.ts'
+import { expect, it } from 'vitest'
+import { IOResult, materialize } from '../../../../../io/types.ts'
 import { PathSpec } from '../../../../../types.ts'
-import { mountKey } from '../../../../../utils/key_prefix.ts'
-import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
+import { enoent } from '../../../../../utils/errors.ts'
+import type { Cmd, CrossResult } from '../types.ts'
 import { runFanout } from './fanout.ts'
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder()
 
-function scope(path: string): PathSpec {
-  return new PathSpec({
-    virtual: path,
-    directory: path.slice(0, path.lastIndexOf('/') + 1),
-    resolved: true,
-    vfsPath: mountKey(path, ''),
-  })
-}
-
-interface Call {
-  cmd: string
-  paths: string[]
-  flags: Record<string, FlagValue>
-}
-
-function fakeRunSingle(outputs: Record<string, string>): { fn: RunSingle; calls: Call[] } {
-  const calls: Call[] = []
-  const fn: RunSingle = (cmdName, paths, _texts, flagKwargs): Promise<CrossResult> => {
-    calls.push({
-      cmd: cmdName,
-      paths: paths.map((p) => p.virtual),
-      flags: { ...flagKwargs },
-    })
-    const key = paths[0]?.virtual ?? ''
-    return Promise.resolve([ENC.encode(outputs[key] ?? ''), new IOResult()])
+// Serves canned per-operand outputs and records the calls in flight.
+function fakeRunSingle(outputs: Record<string, string | Error>) {
+  const state = { calls: [] as [string, Record<string, unknown>][], open: 0, peak: 0 }
+  const run = async (
+    _cmd: string,
+    paths: PathSpec[],
+    _texts: string[],
+    flags: Record<string, unknown>,
+  ): Promise<CrossResult> => {
+    const virtual = paths[0]?.virtual ?? ''
+    state.calls.push([virtual, { ...flags }])
+    state.open += 1
+    state.peak = Math.max(state.peak, state.open)
+    await Promise.resolve()
+    const out = outputs[virtual]
+    async function* stream(): AsyncIterable<Uint8Array> {
+      try {
+        if (out instanceof Error) throw out
+        yield await Promise.resolve(ENC.encode(out ?? ''))
+      } finally {
+        state.open -= 1
+      }
+    }
+    return [stream(), new IOResult()]
   }
-  return { fn, calls }
+  return { run, state }
 }
 
-describe('runFanout -q', () => {
-  it.each([
-    [Cmd.GREP, { q: true }],
-    [Cmd.RG, { quiet: true }],
-  ])('stops %s -q at its first match', async (cmd, flags) => {
-    // grep -q and rg -q exit at the first match, so the operands after it
-    // are never read (GNU grep 3.11, ripgrep 14.1.1: `rg -q x a /nope` says
-    // nothing about /nope).
-    const { fn, calls } = fakeRunSingle({ '/a/x': '', '/b/y': '' })
-    const [, io] = await runFanout(cmd, [scope('/a/x'), scope('/b/y')], ['pat'], flags, fn)
-    expect(calls.map((c) => c.paths)).toEqual([['/a/x']])
-    expect(io.exitCode).toBe(0)
+it('head names every operand and joins with a blank line', async () => {
+  const { run, state } = fakeRunSingle({
+    '/a/x': '==> /a/x <==\n1\n',
+    '/b/y': '==> /b/y <==\n2\n',
   })
+  const [out, io] = await runFanout(
+    'head' as Cmd,
+    [PathSpec.fromStrPath('/a/x'), PathSpec.fromStrPath('/b/y')],
+    [],
+    {},
+    run,
+  )
+  expect(DEC.decode(await materialize(out))).toBe('==> /a/x <==\n1\n\n==> /b/y <==\n2\n')
+  expect(state.calls.every(([, flags]) => flags.verbose === true)).toBe(true)
+  expect(io.exitCode).toBe(0)
+})
+
+it('reads prepare at most four ahead in operand order', async () => {
+  const names = Array.from({ length: 7 }, (_, i) => `/m${String(i)}/f`)
+  const { run, state } = fakeRunSingle(Object.fromEntries(names.map((n) => [n, n + '\n'])))
+  const [out] = await runFanout(
+    'rev' as Cmd,
+    names.map((n) => PathSpec.fromStrPath(n)),
+    [],
+    {},
+    run,
+  )
+  expect(DEC.decode(await materialize(out))).toBe(names.map((n) => n + '\n').join(''))
+  expect(state.calls.map(([p]) => p)).toEqual(names)
+  expect(state.peak).toBeLessThanOrEqual(4)
+})
+
+it('a failed read keeps the rest and settles the status', async () => {
+  const { run } = fakeRunSingle({ '/a/x': enoent('/a/x'), '/b/y': 'ok\n' })
+  const [out, io] = await runFanout(
+    'rev' as Cmd,
+    [PathSpec.fromStrPath('/a/x'), PathSpec.fromStrPath('/b/y')],
+    [],
+    {},
+    run,
+  )
+  expect(io.exitCode).toBe(0)
+  expect(DEC.decode(await materialize(out))).toBe('ok\n')
+  expect(io.exitCode).toBe(1)
+  expect(DEC.decode(await materialize(io.stderr))).toBe(
+    'rev: cannot open /a/x: No such file or directory\n',
+  )
 })

@@ -15,8 +15,8 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.crossmount.utils import transfer_links
-from mirage.commands.builtin.generic.mv import mv as generic_mv
+from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
+from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
@@ -56,7 +56,7 @@ async def mv(
         readdir=bound_op(ops.readdir, accessor, opts.index),
         guard=refuse_reveal,
         copies=(
-            transfer_links(
+            transfer_links_of(
                 opts.ns.links,
                 opts.dispatch,
                 opts.cwd.virtual if opts.cwd is not None else "/",

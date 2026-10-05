@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
-import type { RuntimeVFS, VFSStat } from '../../vfs.ts'
+import type { RuntimeVFS } from '../../vfs.ts'
+import type { VFSStat } from '../../types.ts'
 import { WASI, errnoFor } from './errors.ts'
 
 export async function stat(

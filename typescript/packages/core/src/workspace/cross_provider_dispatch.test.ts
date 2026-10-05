@@ -265,11 +265,11 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
     await ws.close()
   })
 
-  it('unsupported multi-stream commands still refuse cleanly', async () => {
+  it('a generic builder writes its output operand on the other mount', async () => {
     const ws = await twoMounts()
-    const io = await ws.shell('uniq /m1/a.txt /m2/c.txt')
-    expect(io.exitCode).toBe(1)
-    expect(stderrStr(io)).toContain('cross-mount not supported')
+    const io = await ws.shell('uniq /m1/a.txt /m2/c.txt; cat /m2/c.txt')
+    expect(io.exitCode).toBe(0)
+    expect(dec(io)).toBe('r2\nr1\n')
     await ws.close()
   })
 })

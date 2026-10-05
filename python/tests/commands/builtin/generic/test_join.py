@@ -7,7 +7,7 @@ from mirage.commands.builtin.generic.join import (
     parse_flags,
 )
 from mirage.commands.errors import UsageError
-from mirage.core.ram.write import write_bytes
+from mirage.core.ram.write import write
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -49,7 +49,7 @@ async def _shell(
 ) -> tuple[int, bytes, bytes]:
     ram = RAMVFS()
     for name, body in files.items():
-        await write_bytes(ram.accessor, PathSpec.from_str_path(name), body)
+        await write(ram.accessor, PathSpec.from_str_path(name), body)
     ws = Workspace({"/data": (ram, MountMode.WRITE)}, mode=MountMode.WRITE)
     ws._cwd = "/data"
     io = await ws.shell(cmd, stdin=stdin or None)
@@ -95,12 +95,8 @@ def test_parse_flags(flags, expected):
 @pytest.mark.asyncio
 async def test_cross_mount_relay_reads_every_flag():
     one, two = RAMVFS(), RAMVFS()
-    await write_bytes(
-        one.accessor, PathSpec.from_str_path("/a"), b"B 2\nx 1\n"
-    )
-    await write_bytes(
-        two.accessor, PathSpec.from_str_path("/b"), b"b y\nC z\n"
-    )
+    await write(one.accessor, PathSpec.from_str_path("/a"), b"B 2\nx 1\n")
+    await write(two.accessor, PathSpec.from_str_path("/b"), b"b y\nC z\n")
     ws = Workspace(
         {"/data": (one, MountMode.WRITE), "/data2": (two, MountMode.WRITE)},
         mode=MountMode.WRITE,

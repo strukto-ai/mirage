@@ -25,6 +25,7 @@ async def run_sed(
     stdin: ByteSource | None,
     cwd: str,
     argv: tuple[str, ...],
+    env: dict[str, str] | None = None,
 ) -> CrossResult:
     """Keep one sed machine and each operand's identity across mounts.
 
@@ -41,6 +42,8 @@ async def run_sed(
         stdin (ByteSource | None): Shared standard input cursor.
         cwd (str): Directory for filenames in the script.
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
+        env (dict[str, str] | None): The session's environment, whose
+            locale decides bytes or characters.
     """
     reads = IOResult()
 
@@ -56,10 +59,17 @@ async def run_sed(
             stdin=stdin,
             cwd=PathSpec.from_str_path(cwd),
             dispatch=dispatch,
+            env=env,
             argv=argv,
         ),
         _resolved,
         partial(read_file, dispatch, reads),
         write,
     )
-    return body, await reads.merge(io)
+    merged = await reads.merge(io)
+    # Every read went through the dispatcher, whose cold read keeps what
+    # the file cache may hold; listing a read path again would keep a
+    # filetype renderer's output there, which cat would then print. A
+    # written path stays listed.
+    merged.cache = [p for p in merged.cache if p not in merged.reads]
+    return body, merged

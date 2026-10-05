@@ -264,7 +264,7 @@ async def write_output(
     return raw, IOResult(writes=writes, cache=cache)
 
 
-async def tee(
+async def tee_generic(
     paths: list[PathSpec],
     texts: list[str],
     *,
@@ -287,7 +287,7 @@ async def tee(
 
 
 __all__ = [
-    "tee",
+    "tee_generic",
     "parse_flags",
     "TeeFlags",
     "write_output",

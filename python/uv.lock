@@ -4150,7 +4150,7 @@ requires-dist = [
     { name = "openhands-sdk", marker = "python_full_version >= '3.12' and extra == 'openhands'", specifier = "==1.49.1" },
     { name = "openhands-tools", marker = "python_full_version >= '3.12' and extra == 'openhands'", specifier = "==1.49.1" },
     { name = "orjson", specifier = ">=3.11" },
-    { name = "pydantic-ai-backend", marker = "extra == 'pydantic-ai'", specifier = ">=0.2.16" },
+    { name = "pydantic-ai-backend", marker = "extra == 'pydantic-ai'", specifier = ">=0.2.16,<0.2.30" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai"], marker = "extra == 'pydantic-ai'", specifier = ">=2.13.0" },
     { name = "pydantic-monty", marker = "extra == 'monty'", specifier = "==1.0.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.14.0" },

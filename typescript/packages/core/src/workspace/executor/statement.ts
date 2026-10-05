@@ -30,8 +30,8 @@ import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { SessionState, StatusWriter } from '../session/session.ts'
-import { abortedLine, lineStatusWriter, makeAbortError } from '../abort.ts'
+import type { SessionState } from '../session/session.ts'
+import { abortedLine, lineStatusWriter, makeAbortError, type StatusWriter } from '../abort.ts'
 
 /**
  * Record a finished statement's exit status: `$?` and `${PIPESTATUS[@]}`

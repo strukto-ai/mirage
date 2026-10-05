@@ -22,7 +22,7 @@ from mirage.core.ssh.exists import exists as _exists
 from mirage.core.ssh.find import find as _find
 from mirage.core.ssh.mkdir import mkdir as _mkdir
 from mirage.core.ssh.pwrite import pwrite as _pwrite
-from mirage.core.ssh.read import read_bytes as _read
+from mirage.core.ssh.read import read as _read
 from mirage.core.ssh.readdir import readdir as _readdir
 from mirage.core.ssh.rename import rename as _rename
 from mirage.core.ssh.rm import rm_r as _rm_r
@@ -32,7 +32,7 @@ from mirage.core.ssh.stat import stat as _stat
 from mirage.core.ssh.stream import read_stream as _read_stream
 from mirage.core.ssh.truncate import truncate as _truncate
 from mirage.core.ssh.unlink import unlink as _unlink
-from mirage.core.ssh.write import write_bytes as _write
+from mirage.core.ssh.write import write as _write
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import DuOps, NativeReadOps, ReadOps, WriteOps
 

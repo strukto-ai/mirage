@@ -13,14 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { revGeneric } from '../../generic/rev.ts'
-import { type Builder, dirAwareStream, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStream, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const rev: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return revGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
+}
 
 export const BUILDER: Builder = {
   name: 'rev',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return revGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
-  },
+  fn: rev,
 }

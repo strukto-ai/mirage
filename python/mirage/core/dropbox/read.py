@@ -122,7 +122,7 @@ async def read(
     return data
 
 
-async def stream(
+async def read_stream(
     accessor: DropboxAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

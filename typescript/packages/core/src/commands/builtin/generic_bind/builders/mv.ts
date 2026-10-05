@@ -15,32 +15,34 @@
 import { transferLinksOf } from '../../generic/crossmount/utils.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { mvGeneric, parseFlags } from '../../generic/mv.ts'
-import type { Builder } from '../adapter.ts'
+import type { Builder, BuilderFn } from '../adapter.ts'
 import { refuseReveal, requireOp, resolveGlobOf } from '../adapter.ts'
 import { overlayableStat } from './cp.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 
+const mv: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const rename = requireOp(ops.rename, 'rename')
+  const idx = opts.index ?? undefined
+  const parsed = parseFlags(new FlagView(opts.flags, specOf('mv')))
+  return mvGeneric(
+    await resolveGlobOf(ops)(accessor, paths, idx),
+    overlayableStat(ops, accessor, idx, opts.ns?.statOverlay),
+    { rename: (src: PathSpec, target: PathSpec) => rename(accessor, src, target) },
+    parsed,
+    idx,
+    undefined,
+    (p: PathSpec) => ops.readdir(accessor, p, idx),
+    refuseReveal,
+    opts.ns?.links == null || opts.dispatch == null
+      ? undefined
+      : transferLinksOf(opts.ns.links, opts.dispatch, opts.cwd),
+    opts.stdin,
+  )
+}
+
 export const BUILDER: Builder = {
   name: 'mv',
   write: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const rename = requireOp(ops.rename, 'rename')
-    const idx = opts.index ?? undefined
-    const parsed = parseFlags(new FlagView(opts.flags, specOf('mv')))
-    return mvGeneric(
-      await resolveGlobOf(ops)(accessor, paths, idx),
-      overlayableStat(ops, accessor, idx, opts.ns?.statOverlay),
-      { rename: (src: PathSpec, target: PathSpec) => rename(accessor, src, target) },
-      parsed,
-      idx,
-      undefined,
-      (p: PathSpec) => ops.readdir(accessor, p, idx),
-      refuseReveal,
-      opts.ns?.links == null || opts.dispatch == null
-        ? undefined
-        : transferLinksOf(opts.ns.links, opts.dispatch, opts.cwd),
-      opts.stdin,
-    )
-  },
+  fn: mv,
 }

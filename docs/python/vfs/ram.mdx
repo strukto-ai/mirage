@@ -41,9 +41,10 @@ exists.
 
 ## Cache
 
-The RAM VFS uses `IndexCacheStore` with `index_ttl = 0` (no
-expiry). Since all data is in-memory, the index is always fresh,
-no network calls or stale cache concerns.
+The RAM VFS uses `IndexCacheStore` with `index_ttl = 0`, so its
+listings are not cached: the data is in memory, and every listing reads
+it. A workspace `index:` block still applies its `ttl` to this mount; see
+[index TTL](/home/cache#index-ttl).
 
 ## Example
 

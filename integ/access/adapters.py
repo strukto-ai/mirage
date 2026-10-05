@@ -25,6 +25,7 @@ import asyncio
 import base64
 import json
 import os
+import shlex
 import signal
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -33,7 +34,8 @@ from typing import Any
 
 import httpx
 import httpx2
-from deploy import ROOT, Deployment, mirage_cli
+import websockets
+from deploy import ROOT, SEED, Deployment, mirage_cli
 from mcp import Client, StdioServerParameters
 from mcp.client.streamable_http import streamable_http_client
 
@@ -443,6 +445,21 @@ class HttpSteps:
     async def session_delete(self, wid: str, session: str) -> None:
         await self._ok("DELETE", f"/v1/workspaces/{wid}/sessions/{session}")
 
+    def _scope(self, wid: str, session: str | None) -> str:
+        base = f"/v1/workspaces/{wid}"
+        return base if session is None else f"{base}/sessions/{session}"
+
+    async def cancel_lines(self, wid: str, session: str | None) -> int:
+        reply = await self._ok("POST", f"{self._scope(wid, session)}/cancel")
+        return reply["canceled"]
+
+    async def kill_jobs(self, wid: str, session: str | None) -> int:
+        reply = await self._ok("POST", f"{self._scope(wid, session)}/kill")
+        return reply["killed"]
+
+    async def close_workspace(self, wid: str) -> None:
+        await self._ok("POST", f"/v1/workspaces/{wid}/close")
+
     async def snapshot(self, wid: str, name: str) -> None:
         reply = await self.http.get(f"/v1/workspaces/{wid}/snapshot")
         reply.raise_for_status()
@@ -606,6 +623,27 @@ class CliSteps:
     async def session_delete(self, wid: str, session: str) -> None:
         await self._json("session", "delete", wid, session)
 
+    async def cancel_lines(self, wid: str, session: str | None) -> int:
+        args = (
+            ("workspace", wid)
+            if session is None
+            else ("session", wid, session)
+        )
+        reply = await self._json(args[0], "cancel", *args[1:])
+        return reply["canceled"]
+
+    async def kill_jobs(self, wid: str, session: str | None) -> int:
+        args = (
+            ("workspace", wid)
+            if session is None
+            else ("session", wid, session)
+        )
+        reply = await self._json(args[0], "kill", *args[1:])
+        return reply["killed"]
+
+    async def close_workspace(self, wid: str) -> None:
+        await self._json("workspace", "close", wid)
+
     async def snapshot(self, wid: str, name: str) -> None:
         await self._json(
             "workspace", "snapshot", wid, str(self.snapshots / name)
@@ -726,6 +764,15 @@ class InAppSteps:
     async def session_delete(self, wid: str, session: str) -> None:
         await self.workspaces[wid].close_session(session)
 
+    async def cancel_lines(self, wid: str, session: str | None) -> int:
+        return await self.workspaces[wid].cancel(session)
+
+    async def kill_jobs(self, wid: str, session: str | None) -> int:
+        return await self.workspaces[wid].kill(session)
+
+    async def close_workspace(self, wid: str) -> None:
+        await self.workspaces.pop(wid).close()
+
     async def snapshot(self, wid: str, name: str) -> None:
         await self.workspaces[wid].snapshot(str(self.scratch / name))
 
@@ -833,6 +880,15 @@ async def run_steps(
             elif kind == "session_delete":
                 await steps.session_delete(wid, step["session"])
                 answer = {"text": "deleted"}
+            elif kind == "cancel_lines":
+                canceled = await steps.cancel_lines(wid, step.get("session"))
+                answer = {"text": str(canceled)}
+            elif kind == "kill_jobs":
+                killed = await steps.kill_jobs(wid, step.get("session"))
+                answer = {"text": str(killed)}
+            elif kind == "close_workspace":
+                await steps.close_workspace(wid)
+                answer = {"text": "closed"}
             elif kind == "snapshot":
                 await steps.snapshot(wid, prefix + step["name"])
                 answer = {"text": "saved"}
@@ -1649,6 +1705,15 @@ class Ssh:
         self.server = server
         self.scratch = scratch
 
+    def env(self) -> dict[str, str] | None:
+        """The environment ssh, sftp and scp run in; None inherits ours."""
+        return None
+
+    async def run(
+        self, argv: list[str], stdin: bytes | None = b""
+    ) -> tuple[int, str, str]:
+        return await run(argv, env=self.env(), stdin=stdin)
+
     def argv(self, program: str, key: str = "plain") -> list[str]:
         port = "-P" if program in ("sftp", "scp") else "-p"
         return [
@@ -1678,12 +1743,12 @@ class Ssh:
     ) -> Answer:
         login = f"{wid}@127.0.0.1"
         if op in ("shell", "session"):
-            code, out, err = await run(
+            code, out, err = await self.run(
                 [*self.argv("ssh", key), "-T", login, step["command"]]
             )
             return shell_answer(out, err, code)
         if op == "stdin" and "stream" not in step:
-            code, out, err = await run(
+            code, out, err = await self.run(
                 [*self.argv("ssh", key), "-T", login, step["command"]],
                 stdin=stdin_bytes(step["stdin"]),
             )
@@ -1708,6 +1773,7 @@ class Ssh:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=self.env(),
         )
         assert process.stdin is not None
         process.stdin.write(first.encode())
@@ -1727,7 +1793,7 @@ class Ssh:
         )
 
     async def sftp(self, login: str, batch: str) -> tuple[int, str, str]:
-        return await run(
+        return await self.run(
             [*self.argv("sftp"), "-b", "-", login], stdin=batch.encode()
         )
 
@@ -1739,7 +1805,7 @@ class Ssh:
         if call == "write":
             local.write_bytes(base64.b64decode(step["data_base64"]))
             if step.get("via") == "scp":
-                code, _, err = await run(
+                code, _, err = await self.run(
                     [*self.argv("scp"), str(local), f"{login}:{path}"]
                 )
             else:
@@ -1748,7 +1814,7 @@ class Ssh:
         if call == "read":
             local.unlink(missing_ok=True)
             if step.get("via") == "scp":
-                code, _, err = await run(
+                code, _, err = await self.run(
                     [*self.argv("scp"), f"{login}:{path}", str(local)]
                 )
             else:
@@ -1800,7 +1866,7 @@ class Ssh:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "TERM": "xterm"},
+            env={**(self.env() or os.environ), "TERM": "xterm"},
         )
         assert process.stdin is not None and process.stdout is not None
         process.stdin.write(f"{command}\n".encode())
@@ -1824,8 +1890,58 @@ class Ssh:
         )
 
 
+class SshProxy(Ssh):
+    """SSH over the HTTPS route: ``mirage ssh-proxy`` is ssh's ProxyCommand.
+
+    The CLI's token logs in, so there is no key and no SSH port; on
+    ``jwt`` it is an OAuth access token, as a CLI that logged in through
+    the issuer holds. The tunnel runs under the workspace's default
+    profile, so the session suite, which binds a key to a profile, is
+    not its.
+    """
+
+    name = "ssh_proxy"
+    OPS = frozenset({"shell", "stdin", "bytes", "cancel"})
+
+    def __init__(self, server: Server, scratch: Path) -> None:
+        super().__init__(server, scratch)
+        d = server.d
+        self.token = d.issuer.oauth_token() if d.name == "jwt" else None
+
+    def env(self) -> dict[str, str] | None:
+        return self.server.env(self.token)
+
+    def argv(self, program: str, key: str = "plain") -> list[str]:
+        proxy = shlex.join(self.server.cli("ssh-proxy", "%r"))
+        return [program, *SSH_OPTIONS, "-o", f"ProxyCommand={proxy}"]
+
+    async def suite(
+        self, suite: dict[str, Any], prefix: str, config: dict[str, Any]
+    ) -> list[Answer]:
+        await self.reach_route()
+        return await super().suite(suite, prefix, config)
+
+    async def reach_route(self) -> None:
+        """Open the SSH route as the proxy does, and record it only once
+        the server's SSH banner comes back over it."""
+        d = self.server.d
+        route = f"/v1/workspaces/{SEED}/ssh"
+        token = self.token or d.bearer()
+        async with websockets.connect(
+            f"ws://127.0.0.1:{d.port}{route}",
+            additional_headers={"Authorization": f"Bearer {token}"},
+        ) as ws:
+            banner = await asyncio.wait_for(ws.recv(), 10)
+        raw = banner.encode() if isinstance(banner, str) else bytes(banner)
+        if raw.startswith(b"SSH-"):
+            seen = self.server.recorder.requests.setdefault(
+                self.server.key, set()
+            )
+            seen.add(("GET", route))
+
+
 def server_accesses(server: Server, scratch: Path) -> list[Any]:
     return [
         cls(server, scratch)
-        for cls in (Http, Cli, Mcp, McpStdio, Rpc, RpcStdio, Ssh)
+        for cls in (Http, Cli, Mcp, McpStdio, Rpc, RpcStdio, Ssh, SshProxy)
     ]

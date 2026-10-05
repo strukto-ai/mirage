@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.awk import awk as generic_awk
+from mirage.commands.builtin.generic.awk import awk_generic as generic_awk
 from mirage.commands.builtin.generic.awk import served_here
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,

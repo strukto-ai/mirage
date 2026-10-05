@@ -12,9 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { writeTar, readTar, type TarEntry } from '../../commands/builtin/tar_helper.ts'
-import { readSnapshotTar, writeSnapshotTar } from './tar_io.ts'
+import { VFSName } from '../../types.ts'
+import { MountKey, StateKey, VFSStateKey } from './keys.ts'
+import {
+  readSnapshotTar,
+  readTar as readFileTar,
+  writeSnapshotTar,
+  writeTar as writeFileTar,
+} from './tar_io.ts'
 import { BLOB_REF_KEY } from './utils.ts'
 
 const ENC = new TextEncoder()
@@ -104,5 +114,52 @@ describe('readSnapshotTar path-traversal defense', () => {
     const entries: TarEntry[] = [{ name: 'other.txt', data: ENC.encode('x'), isFile: true }]
     const tarBytes = await writeTar(entries)
     await expect(readSnapshotTar(tarBytes)).rejects.toThrow(/manifest\.json/)
+  })
+})
+
+describe('snapshot tars of disk files', () => {
+  const diskManifest = (blob: string): Record<string, unknown> => ({
+    [StateKey.MOUNTS]: [
+      {
+        [MountKey.VFS_STATE]: {
+          [VFSStateKey.TYPE]: VFSName.DISK,
+          [VFSStateKey.FILES]: { f: { [BLOB_REF_KEY]: blob } },
+        },
+      },
+    ],
+  })
+
+  it('refuses a captured file replaced by a link', async () => {
+    // The tar reads a disk file after the state named it; a link put in
+    // its place since must not carry a host file into the snapshot.
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-tar-'))
+    try {
+      const secret = join(dir, 'secret')
+      await writeFile(secret, 'host')
+      const captured = join(dir, 'f')
+      await symlink(secret, captured)
+      await expect(
+        writeFileTar(join(dir, 's.tar'), diskManifest('b/f'), { 'b/f': captured }),
+      ).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a staged blob inside the staging directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-tar-'))
+    try {
+      const tar = join(dir, 's.tar')
+      await writeFileTar(tar, diskManifest('b/f'), { 'b/f': ENC.encode('data') })
+      const outside = join(dir, 'outside')
+      await mkdir(outside)
+      const staging = join(dir, 'staging')
+      await mkdir(staging)
+      await symlink(outside, join(staging, 'b'))
+      await expect(readFileTar(tar, staging)).rejects.toThrow(/Unsafe blob path/)
+      await expect(readFile(join(outside, 'f'))).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

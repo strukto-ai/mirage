@@ -13,14 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { sha256sumGeneric } from '../../generic/sha256sum.ts'
-import { type Builder, dirAwareStream, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStream, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const sha256sum: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return sha256sumGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
+}
 
 export const BUILDER: Builder = {
   name: 'sha256sum',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return sha256sumGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
-  },
+  fn: sha256sum,
 }

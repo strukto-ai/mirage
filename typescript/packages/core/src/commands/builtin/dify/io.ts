@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readBytes, readStream } from '../../../core/dify/read.ts'
+import { read, readStream } from '../../../core/dify/read.ts'
 import { searchMany, searchResource } from '../../../core/dify/search.ts'
 import { stat } from '../../../core/dify/stat.ts'
 import { DIFY_TREE } from '../../../core/dify/tree.ts'
@@ -28,8 +28,8 @@ import { type CommandIO, rangeOf } from '../generic_bind/index.ts'
 // detail timestamps), mirroring the Python wiring.
 export const IO: CommandIO<DifyAccessor> = new VFSAdapter<DifyAccessor>({
   search: { search: searchResource, searchMany },
-  read: { readdir: DIFY_TREE.readdir, readBytes, stat },
-  native: { readRange: rangeOf(readBytes), readStream },
+  read: { readdir: DIFY_TREE.readdir, readBytes: read, stat },
+  native: { readRange: rangeOf(read), readStream },
   isMounted: () => true,
   local: false,
 }).toCommandIO()

@@ -34,6 +34,7 @@ import {
   isMissError,
   isMissingOp,
   eloop,
+  exdev,
   noMount,
   noXattr,
   walkRefusal,
@@ -218,6 +219,9 @@ function followOrLoop(
   }
 }
 
+/** Runs a write once the workspace admits it. */
+type AdmitWrite = <T>(write: () => Promise<T>) => Promise<T>
+
 export class Dispatcher {
   private readonly namespace: Namespace
   private readonly cache: FileCache & BaseVFS
@@ -228,6 +232,9 @@ export class Dispatcher {
   // op can touch a mount, and FUSE and the op facade reach here
   // without passing Workspace.dispatch.
   private readonly drift: DriftQueue | null
+  // So does the workspace's write admission, which holds a write while a
+  // capture reads.
+  private readonly admitWrite: AdmitWrite | null
   private readonly writers = new KeyLock()
   private readonly stores = new WeakMap<BaseVFS, number>()
   private storeCount = 0
@@ -239,12 +246,14 @@ export class Dispatcher {
     opsRegistry: OpsRegistry,
     policies?: Policies,
     drift?: DriftQueue,
+    admitWrite?: AdmitWrite,
   ) {
     this.namespace = namespace
     this.cache = cache
     this.opsRegistry = opsRegistry
     this.policies = policies ?? new Policies()
     this.drift = drift ?? null
+    this.admitWrite = admitWrite ?? null
     this.reconciler = new Reconciler(cache, namespace, opsRegistry)
   }
 
@@ -266,7 +275,14 @@ export class Dispatcher {
     return null
   }
 
-  dispatch: DispatchFn = async (opName, path, args, kwargs, report) => {
+  dispatch: DispatchFn = (opName, path, args, kwargs, report) => {
+    const run = (): ReturnType<DispatchFn> =>
+      this.dispatchAdmitted(opName, path, args, kwargs, report)
+    if (this.admitWrite === null || !POLICY_WRITE_OPS.has(opName)) return run()
+    return this.admitWrite(run)
+  }
+
+  private dispatchAdmitted: DispatchFn = async (opName, path, args, kwargs, report) => {
     // The caller's own mark on the op, lifted before any gate fires so
     // each one is told whose op it judges.
     const [issuer, stripped] = takeIssuer(kwargs)
@@ -401,6 +417,23 @@ export class Dispatcher {
     const resolvedOwner = this.namespace.tryMountFor(p.virtual)
     const opWrite = POLICY_WRITE_OPS.has(opName)
     if (resolvedOwner !== null) {
+      // A mount is a filesystem boundary: rename(2) moves a name within one
+      // and answers EXDEV across two, before any permission is weighed, so
+      // `mv` falls back to copy and unlink instead of the source's backend
+      // taking the destination for one of its keys. It resolves both parent
+      // directories first, so a missing one is ENOENT (ENOTDIR through a
+      // file) ahead of EXDEV.
+      if (
+        opName === 'rename' &&
+        dstArg instanceof PathSpec &&
+        this.namespace.tryMountFor(dstArg.virtual) !== resolvedOwner
+      ) {
+        throw (
+          (await this.parentRefusal(p, issuer)) ??
+          (await this.parentRefusal(dstArg, issuer)) ??
+          exdev(p)
+        )
+      }
       // Admission policies fire at the door, before the warm-cache early
       // return below: a cached read must be refused exactly like a cold
       // one, or the cache becomes a policy bypass. This dispatcher is the
@@ -486,34 +519,28 @@ export class Dispatcher {
       throw enotempty(p.virtual)
     }
     const caches = vfs.cachesReads
-    // The file cache is keyed on the path alone, and what it holds is the
-    // rendered read. A raw read asks for a different value under the same
-    // key, so it is neither served from that cache nor kept in it.
+    // The file cache holds what commands read, keyed on the path alone. A
+    // raw read, or a read through a filetype renderer (whoever registered
+    // it), asks for a different value under the same key, so it is neither
+    // served from that cache nor kept in it. The renderer read still gets
+    // the freshness check, so a path the backend reports gone fails.
     // Mirrors Python's Dispatcher.dispatch.
     await mount.ensureReady()
     const raw = kwargs?.filetype === null
-    // A cold read keeps the whole file it fetched for the next reader,
-    // through the mount's own manager, the one a command's read fills: a
-    // write racing the fetch retires its generation, so the bytes it read
-    // are not kept. A ranged read comes from the store only where the store
-    // can serve one; elsewhere the read op would fetch the whole file and
-    // slice it for every range, so the whole file is read once, kept, and
-    // each range sliced from it. Mirrors Python's Dispatcher.dispatch.
+    const filetype = getExtension(p.virtual)
+    const requested = kwargs?.filetype
+    const readType =
+      requested === undefined ? filetype : typeof requested === 'string' ? requested : null
+    const rendersRead = (): boolean =>
+      readType !== null && this.opsRegistry.find('read', vfs, readType) !== null
     const [readOffset, readSize] = readWindow(kwargs)
     const whole = readOffset === 0 && readSize === null
-    const filler =
-      caches &&
-      !raw &&
-      DISPATCH_READ_OPS.has(opName) &&
-      readSize !== 0 &&
-      (whole || !this.opsRegistry.readsRanges(vfs, getExtension(p.virtual)))
-        ? mount.cacheManager
-        : null
     if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (
         cached !== null &&
         (await this.reconciler.mayServeCached(mount, p.virtual)) &&
+        !rendersRead() &&
         !mount.retiring &&
         this.namespace.tryMountFor(p.virtual) === mount
       ) {
@@ -536,6 +563,24 @@ export class Dispatcher {
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
+    // A cold read keeps the whole file it fetched for the next reader,
+    // through the mount's own manager, the one a command's read fills: a
+    // write racing the fetch retires its generation, so the bytes it read
+    // are not kept. A ranged read comes from the store only where the store
+    // can serve one; elsewhere the read op would fetch the whole file and
+    // slice it for every range, so the whole file is read once, kept, and
+    // each range sliced from it. The op is resolved only once the mount is
+    // ready, so a renderer can land after this check; the fill asks again
+    // before it keeps anything. Mirrors Python's Dispatcher.dispatch.
+    const filler =
+      caches &&
+      !raw &&
+      DISPATCH_READ_OPS.has(opName) &&
+      readSize !== 0 &&
+      (whole || !this.opsRegistry.readsRanges(vfs, filetype)) &&
+      !rendersRead()
+        ? mount.cacheManager
+        : null
     if (this.opsRegistry.find(opName, vfs)?.write === true) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofsReadOnly(`mount at '${p.virtual}' is read-only`, p)
@@ -550,7 +595,6 @@ export class Dispatcher {
     // gmail reads) resolve by the path's extension; Python reaches them
     // because its dispatcher routes through Mount.execute_op, which
     // stamps the filetype. Stamp it here the same way.
-    const filetype = getExtension(p.virtual)
     const fullKwargs: OpKwargs = {
       ...(kwargs ?? {}),
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
@@ -598,7 +642,11 @@ export class Dispatcher {
           return wrapOpStream(answer, mount.mountId, mount.activity)
         })
       if (filler !== null) {
-        const kept = await filler.fill(p, () => run(wholeRead(fullKwargs)))
+        const kept = await filler.fill(
+          p,
+          () => run(wholeRead(fullKwargs)),
+          () => !rendersRead(),
+        )
         result =
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)
       } else if (SERIAL_WRITE_OPS.has(opName)) {

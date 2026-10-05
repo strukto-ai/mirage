@@ -17,7 +17,8 @@ import { coerceRuntimeConfig, type RuntimeConfig } from './config.ts'
 import type { WorkspaceBinding } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isEvaluator, isLineExecutor, isProcessExecutor } from './mixin.ts'
-import { ScriptSource, type RouteScript } from './routing/types.ts'
+import type { RouteScript } from './routing/types.ts'
+import { ScriptSource } from './types.ts'
 import type {
   ExecutionRequest,
   FilesystemOperation,

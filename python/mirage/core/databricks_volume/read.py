@@ -76,7 +76,7 @@ def _download_bytes_sync(
     return _read_response_bytes(response)
 
 
-async def read_bytes(
+async def read(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

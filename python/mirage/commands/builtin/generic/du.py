@@ -17,7 +17,7 @@ from mirage.context import (
     path_allowed,
     path_rules_active,
 )
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, SizedRun
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import ZERO_LENGTH_NAME, DotWalkError, fs_strerror
@@ -73,11 +73,15 @@ class DuOutput:
         exit_code (int): 0, or 1 when an operand could not be read or a
             walk was cut short (GNU exits 1 when it could not fully
             account for every operand).
+        runs (list[SizedRun] | None): each readable operand's
+            measurement, None when one was only summed (``-s``, or a
+            backend that can only produce a size).
     """
 
     stdout: bytes
     stderr: bytes
     exit_code: int
+    runs: list[SizedRun] | None = None
 
 
 def parse_depth(text: str) -> int | None:
@@ -538,7 +542,7 @@ async def _du_one(
     links: LinkView | None = None,
     mounts: MountView | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
-) -> tuple[list[str], int]:
+) -> tuple[list[str], int, SizedRun | None]:
     label = path.raw_path
 
     link_row = links.stat_at(path.virtual) if links is not None else None
@@ -546,7 +550,11 @@ async def _du_one(
         # GNU du does not follow a symlink operand without -L; the
         # operand is the link, and it accounts for the link alone.
         size = link_row.size or 0
-        return [_line(size, flags.h, label)], size
+        return (
+            [_line(size, flags.h, label)],
+            size,
+            SizedRun(((path.virtual, size),)),
+        )
 
     roots = mounts.descendants(path.virtual) if mounts is not None else []
     leaves = link_leaves(links, path.virtual)
@@ -568,7 +576,7 @@ async def _du_one(
         # rule likewise, since the walk is where a refused directory is
         # reported. Per operand: a hide elsewhere keeps this total.
         total = await compute_size(path) + link_total
-        return [_line(total, flags.h, label)], total
+        return [_line(total, flags.h, label)], total, None
 
     entries, total = await compute_entries(path)
     total += link_total
@@ -587,7 +595,11 @@ async def _du_one(
         # A backend that can only produce a size degrades to one total;
         # it cannot enumerate, so shadowed keys cannot be excluded either.
         total = await compute_size(path)
-        return [_line(total, flags.h, label)], total
+        return (
+            [_line(total, flags.h, label)],
+            total,
+            SizedRun() if total == 0 else None,
+        )
 
     virtual = to_virtual(entries, path) + leaves
     visible = [(leaf, size) for leaf, size in virtual if path_allowed(leaf)]
@@ -601,18 +613,19 @@ async def _du_one(
         # honest number is the sum of what survived.
         virtual = drop_shadowed(virtual, roots)
         total = sum(size for _, size in virtual)
+    run = SizedRun(tuple(virtual), tuple(dirs))
     # A file operand walks to itself. GNU prints it once, with or
     # without -a, never as a leaf line plus a roll-up line. GNU scopes
     # -S to directories, so a file operand keeps its own size in both
     # its row and the grand total.
     if len(virtual) == 1 and _norm(virtual[0][0]) == root_key:
-        return [_line(virtual[0][1], flags.h, label)], total
+        return [_line(virtual[0][1], flags.h, label)], total, run
     # -S changes what the operand's own row counts, not what the operand
     # contributes to -c: GNU's grand total stays recursive (coreutils
     # 9.7, `du -bSc dir` prints `3 dir` then `6 total`).
     own = separate_total(virtual, path.virtual) if flags.S else total
     if flags.s:
-        return [_line(own, flags.h, label)], total
+        return [_line(own, flags.h, label)], total, run
 
     rows = rollup(
         virtual,
@@ -627,7 +640,7 @@ async def _du_one(
         _line(size, flags.h, name) for name, (_, size) in zip(shown, rows)
     ]
     lines.append(_line(own, flags.h, label))
-    return lines, total
+    return lines, total, run
 
 
 async def du(
@@ -675,8 +688,9 @@ async def du(
     """
     lines: list[str] = []
     totals: list[int] = []
+    runs: list[SizedRun] | None = []
     for path in paths:
-        block, total = await _du_one(
+        block, total, run = await _du_one(
             path,
             compute_size,
             compute_entries,
@@ -687,6 +701,10 @@ async def du(
         )
         lines.extend(block)
         totals.append(total)
+        if run is None:
+            runs = None
+        elif runs is not None:
+            runs.append(run)
     # GNU still prints the grand total when every operand failed ("0
     # total"), so this stays outside the loop guard.
     if flags.c:
@@ -710,7 +728,7 @@ async def du(
         notes.append(TRUNCATED_NOTE)
         exit_code = 1
     stderr = ("\n".join(notes) + "\n").encode() if notes else b""
-    return DuOutput(format_records(lines), stderr, exit_code)
+    return DuOutput(format_records(lines), stderr, exit_code, runs)
 
 
 def _respell_under(virtual: str, paths: Sequence[PathSpec]) -> str:
@@ -796,4 +814,6 @@ async def du_generic(
         links=links,
         mounts=opts.ns.mounts if opts.ns is not None else None,
     )
-    return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)
+    return out.stdout, IOResult(
+        stderr=out.stderr, exit_code=out.exit_code, sized_runs=out.runs
+    )

@@ -1,9 +1,17 @@
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Protocol
+from typing import Protocol, TypeVar
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
+from mirage.core.hierarchy.probe import (
+    ReaddirFn,
+    ancestor_entry,
+    resolve_entry,
+)
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 TIMESTAMP = re.compile(
@@ -119,3 +127,31 @@ async def guard_day(
         virtual (str): path reported in ENOENT.
     """
     accessor.time_range.require_day(match.slots["day"], virtual)
+
+
+A = TypeVar("A", bound=Accessor)
+
+
+async def day_channel_id(
+    readdir: ReaddirFn[A], accessor: A, path: PathSpec, index: IndexCacheStore
+) -> str:
+    """The channel a day's chat.jsonl reads, proven by the listing.
+
+    The typed ``name__id`` dirname is only trusted once the listing
+    proves it, so a fabricated channel id is ENOENT rather than a raw
+    API error. A sealed day lists nothing but the file still reads
+    through the channel, reproducing the API's own answer for the fetch.
+
+    Args:
+        readdir (ReaddirFn): the backend's readdir.
+        accessor (Accessor): backend accessor.
+        path (PathSpec): the chat.jsonl path.
+        index (IndexCacheStore): index cache.
+    """
+    entry = await resolve_entry(readdir, accessor, path, index)
+    if entry is not None:
+        return entry.id.split(":", 1)[0]
+    channel = await ancestor_entry(readdir, accessor, path, index, up=2)
+    if channel is None:
+        raise enoent(path.virtual)
+    return channel.id

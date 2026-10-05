@@ -18,7 +18,7 @@ import type { PathSpec } from '../../types.ts'
 import { streamItem } from '../msgraph/drive.ts'
 import { driveLoc, resolveItem } from './resolve.ts'
 
-export async function* stream(
+export async function* readStream(
   accessor: SharePointAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,

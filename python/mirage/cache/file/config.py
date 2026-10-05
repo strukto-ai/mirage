@@ -14,7 +14,7 @@
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class CacheType(str, Enum):
@@ -23,6 +23,8 @@ class CacheType(str, Enum):
 
 
 class CacheConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     type: CacheType = CacheType.RAM
     limit: str | int = "512MB"
     max_drain_bytes: int | None = None

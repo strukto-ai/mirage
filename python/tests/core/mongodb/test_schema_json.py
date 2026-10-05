@@ -50,10 +50,6 @@ async def test_build_collection_schema_json_assembles_all_sections(accessor):
             new=AsyncMock(return_value=indexes),
         ),
         patch(
-            "mirage.core.mongodb.client.get_index_stats",
-            new=AsyncMock(side_effect=AssertionError("volatile counters")),
-        ),
-        patch(
             "mirage.core.mongodb.client.count_documents",
             new=AsyncMock(side_effect=AssertionError("full scan")),
         ),
@@ -102,10 +98,6 @@ async def test_build_collection_schema_json_text_index_tagged(accessor):
             new=AsyncMock(return_value=indexes),
         ),
         patch(
-            "mirage.core.mongodb.client.get_index_stats",
-            new=AsyncMock(return_value={}),
-        ),
-        patch(
             "mirage.core.mongodb.client.count_documents",
             new=AsyncMock(return_value=0),
         ),
@@ -136,14 +128,6 @@ async def test_build_collection_schema_json_view_skips_indexes(accessor):
             new=AsyncMock(
                 side_effect=AssertionError(
                     "get_indexes must not be called for views"
-                )
-            ),
-        ),
-        patch(
-            "mirage.core.mongodb.client.get_index_stats",
-            new=AsyncMock(
-                side_effect=AssertionError(
-                    "get_index_stats must not be called for views"
                 )
             ),
         ),

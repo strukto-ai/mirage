@@ -16,7 +16,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { fetchSecret, knownSources, sourceFor } from '@struktoai/mirage-core/secrets/registry'
 
-import { BUILTIN_SOURCE_NAMES } from './constants.ts'
+import './constants.ts'
+
+const BUILTIN_SOURCE_NAMES = ['1password', 'aws-sm', 'dotenv', 'env']
 
 describe('builtin registration', () => {
   afterEach(() => {

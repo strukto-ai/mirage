@@ -1319,6 +1319,36 @@
         "stdout": "y\nrc=1\n",
         "stderr": "iconv: error while reading the input: Is a directory\n"
       }
+    },
+    {
+      "id": "readfail_xxd_output_missing_parent_is_open_failed",
+      "seq": 963226,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'hi\\n' > /data/xxd_md; xxd /data/xxd_md /data/xxd_nope/o; echo rc=$?; rm /data/xxd_md",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=3\n",
+        "stderr": "xxd: /data/xxd_nope/o: No such file or directory\n"
+      }
+    },
+    {
+      "id": "readfail_xxd_output_dir_is_open_failed",
+      "seq": 963229,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'hi\\n' > /data/xxd_od_in; mkdir /data/xxd_od; xxd /data/xxd_od_in /data/xxd_od; echo rc=$?; rm -r /data/xxd_od_in /data/xxd_od",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=3\n",
+        "stderr": "xxd: /data/xxd_od: Is a directory\n"
+      }
     }
   ]
 }

@@ -36,7 +36,7 @@ from pathlib import Path
 
 import boto3
 import httpx
-from issuer import AUTHORIZED_PARTY, ISSUER, Issuer
+from issuer import ACCOUNT, AUTHORIZED_PARTY, CLIENT_ID, Issuer
 from moto.server import ThreadedMotoServer
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -80,7 +80,11 @@ def clean_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not k.startswith("MIRAGE_")}
 
 
-def ssh_keys(root: Path) -> None:
+def _key_line(public: str, options: list[str]) -> str:
+    return (",".join(options) + " " if options else "") + public
+
+
+def ssh_keys(root: Path, account: str | None = None) -> None:
     for name in ("id_plain", "id_guarded", "id_unknown"):
         subprocess.run(
             [
@@ -95,9 +99,13 @@ def ssh_keys(root: Path) -> None:
             ],
             check=True,
         )
+    owner = [] if account is None else [f'mirage-account="{account}"']
     lines = [
-        (root / "id_plain.pub").read_text(),
-        'mirage-profile="guarded" ' + (root / "id_guarded.pub").read_text(),
+        _key_line((root / "id_plain.pub").read_text(), owner),
+        _key_line(
+            (root / "id_guarded.pub").read_text(),
+            [*owner, 'mirage-profile="guarded"'],
+        ),
     ]
     (root / "authorized_keys").write_text("".join(lines))
 
@@ -156,13 +164,14 @@ class Deployment:
         if self.name == "token":
             env |= {"MIRAGE_AUTH_MODE": "token", "MIRAGE_AUTH_TOKEN": TOKEN}
         if self.name == "jwt":
-            (self.root / "issuer.pem").write_text(self.issuer.public_pem)
             env |= {
                 "MIRAGE_AUTH_MODE": "jwt",
                 "MIRAGE_JWT_ALG": "RS256",
-                "MIRAGE_JWT_PUBKEY_FILE": str(self.root / "issuer.pem"),
-                "MIRAGE_JWT_ISSUER": ISSUER,
+                "MIRAGE_JWT_JWKS_URL": self.issuer.jwks_url,
+                "MIRAGE_JWT_ISSUER": self.issuer.url,
+                "MIRAGE_JWT_AUDIENCE": CLIENT_ID,
                 "MIRAGE_JWT_AUTHORIZED_PARTIES": AUTHORIZED_PARTY,
+                "MIRAGE_LOGIN_CLIENT_ID": CLIENT_ID,
             }
         return env
 
@@ -219,7 +228,7 @@ class Deployment:
 
 def _start(d: Deployment) -> None:
     d.home.mkdir(parents=True, exist_ok=True)
-    ssh_keys(d.root)
+    ssh_keys(d.root, ACCOUNT if d.name == "jwt" else None)
     if d.name == "dev":
         config = d.root / "seed.yaml"
         config.write_text(RAM)

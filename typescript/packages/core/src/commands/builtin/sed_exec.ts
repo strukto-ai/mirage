@@ -46,12 +46,13 @@ const LIST_ESCAPES: Record<number, string> = {
  * line is folded with `\` before an escape that would reach `width`
  * columns, so 69 characters and the `\` fill a 70-column line; `width` 0
  * turns folding off, and 1 folds before every character. The end is `$`.
+ * `utf8` means the pattern space is text, under a UTF-8 locale.
  */
-export function listLine(text: string, width: number): string {
+export function listLine(text: string, width: number, utf8 = false): string {
   let out = ''
   let col = 0
   for (const ch of text) {
-    for (const byte of fromByteView(ch)) {
+    for (const byte of fromByteView(ch, utf8)) {
       let piece: string
       if (byte >= 0x20 && byte < 0x7f) piece = byte === 0x5c ? '\\\\' : String.fromCharCode(byte)
       else piece = LIST_ESCAPES[byte] ?? '\\' + byte.toString(8).padStart(3, '0')
@@ -117,6 +118,8 @@ export interface SedRunOptions {
   // script was compiled.
   files: ReadonlyMap<string, SedFileContent>
   readerFiles: ReadonlyMap<string, SedFileContent>
+  // A UTF-8 locale: the script and the input are characters, not bytes.
+  utf8?: boolean
 }
 
 /** Thrown to stop the run the way GNU's panic exits: a message, then exit 4. */
@@ -223,7 +226,7 @@ export class SedMachine {
 
   /** What the program wrote to /dev/stderr, then the error lines. */
   stderr(): string {
-    return textView(this.specialErr.chunks.join('')) + this.stderrLines.join('')
+    return textView(this.specialErr.chunks.join(''), this.opts.utf8) + this.stderrLines.join('')
   }
 
   /** The exit status GNU would end with after the runs so far. */
@@ -349,7 +352,7 @@ export class SedMachine {
     const cache = global ? this.globalCache : this.regexCache
     let hit = cache.get(regex)
     if (hit === undefined) {
-      hit = compilePosixRegex(regex.source, sedRegexFlags(regex, global))
+      hit = compilePosixRegex(regex.source, sedRegexFlags(regex, global), this.opts.utf8)
       cache.set(regex, hit)
     }
     return hit
@@ -565,7 +568,7 @@ export class SedMachine {
             const width =
               cmd.intArg === undefined || cmd.intArg === -1 ? this.opts.lineLength : cmd.intArg
             this.main.flushNewline()
-            this.main.raw(listLine(this.pattern, width))
+            this.main.raw(listLine(this.pattern, width, this.opts.utf8))
             break
           }
           case 'L':
@@ -658,7 +661,7 @@ export class SedMachine {
             break
           case 'F':
             this.main.flushNewline()
-            this.main.raw(byteView(`${this.fileName}\n`))
+            this.main.raw(byteView(`${this.fileName}\n`, this.opts.utf8))
             break
           default:
             break

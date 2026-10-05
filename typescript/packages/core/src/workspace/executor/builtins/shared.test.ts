@@ -36,7 +36,6 @@ import {
   readonlyRefusal,
   recordDelimiter,
   refusal,
-  splitFlags,
   splitValueFlags,
   requireView,
 } from './shared.ts'
@@ -93,24 +92,6 @@ describe('builtins/shared: operands and flags', () => {
   it('absPath resolves a relative operand against the cwd', () => {
     expect(absPath(PathSpec.fromStrPath('/data/f.txt'), '/tmp')).toBe('/data/f.txt')
     expect(absPath('f.txt', '/data')).toBe('/data/f.txt')
-  })
-
-  it('splitFlags collects known letters', () => {
-    const [flags, operands] = splitFlags(['-sf', 'a', 'b'], 'sfnv')
-    expect([...flags].sort()).toEqual(['f', 's'])
-    expect(operands).toEqual(['a', 'b'])
-  })
-
-  it('splitFlags keeps a token with an unknown letter as an operand', () => {
-    const [flags, operands] = splitFlags(['-q', 'a'], 'sfnv')
-    expect(flags.size).toBe(0)
-    expect(operands).toEqual(['-q', 'a'])
-  })
-
-  it('splitFlags stops parsing at --', () => {
-    const [flags, operands] = splitFlags(['-s', '--', '-f'], 'sfnv')
-    expect([...flags]).toEqual(['s'])
-    expect(operands).toEqual(['-f'])
   })
 
   it('splitValueFlags takes a detached value', () => {

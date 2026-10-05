@@ -68,7 +68,6 @@ export const FD_STDOUT = 1
 export const FD_STDERR = 2
 export const FD_BOTH = -1
 export const FD_CLOSE = -1
-export const SHELL_FDS: ReadonlySet<number> = new Set([FD_STDIN, FD_STDOUT, FD_STDERR])
 
 // The dynamic variables the shell answers itself: PIPESTATUS reads the
 // session's record of the last pipeline (`SessionState.pipeStatus`), FUNCNAME

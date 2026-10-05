@@ -18,8 +18,8 @@ from typing import Callable
 
 from mirage.types import FileStat
 
-AsyncStat = Callable[[str], Awaitable[FileStat]]
-AsyncReaddir = Callable[[str], Awaitable[list[str]]]
+AsyncStatFn = Callable[[str], Awaitable[FileStat]]
+AsyncReaddirFn = Callable[[str], Awaitable[list[str]]]
 
 
 @dataclass(frozen=True, slots=True)

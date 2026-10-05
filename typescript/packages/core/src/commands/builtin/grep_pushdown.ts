@@ -18,7 +18,7 @@ import { RegexSyntax, type GrepSearchOptions, type GrepSearchMeta } from './type
 import type { PathSpec } from '../../types.ts'
 import { getExtension } from '../resolve.ts'
 import { BINARY_EXTENSIONS, PatternType } from './constants.ts'
-import { hasUnresolvedGlob } from './utils/operands.ts'
+import { hasUnresolvedGlob } from './utils/paths.ts'
 import { isStdin } from './utils/stream.ts'
 import { breSource, ereSource, perlRegex, rustSource } from './grep_pattern.ts'
 import { FlagView } from '../spec/flag_view.ts'
@@ -409,7 +409,7 @@ export function grepSearchMeta<A extends Accessor>(
 /** A plain resource query is literal text; grep owns its optional namespace. */
 export function grepSearchOptions(query: SearchQuery): GrepSearchOptions {
   const options = query.options?.grep === undefined ? {} : query.options.grep
-  const allowed = ['ignore_case', 'fixed_string', 'whole_word', 'syntax']
+  const allowed = ['ignore_case', 'fixed_string', 'whole_word', 'syntax', 'utf8']
   if (
     options === null ||
     typeof options !== 'object' ||
@@ -431,5 +431,6 @@ export function grepSearchOptions(query: SearchQuery): GrepSearchOptions {
     fixedString: options.fixed_string !== false,
     wholeWord: options.whole_word === true,
     syntax: syntax as RegexSyntax,
+    utf8: options.utf8 === true,
   }
 }

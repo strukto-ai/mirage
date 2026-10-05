@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { FlagView } from '../../../spec/flag_view.ts'
+import { specOf } from '../../../spec/builtins.ts'
 import { hiddenPathsIntersect, pathRulesActive } from '../../../../context/session_context.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
@@ -81,6 +83,9 @@ export function findWalk<A extends Accessor>(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const idx = opts.index ?? undefined
+  const flags = new FlagView(opts.flags, specOf('find'))
+  const bounded = flags.asBool('xdev') || flags.asBool('mount')
+  const mounts = opts.ns?.mounts
   // The walk classifies entries through stat (see walkFind). A directory the guarded readdir
   // refuses, and an entry whose stat fails, are collected here and
   // reported by the generic per start point.
@@ -96,7 +101,12 @@ export function findWalk<A extends Accessor>(
         {
           unreadable: closed,
           unstatted,
-          readdir: (spec, i) => ops.readdir(accessor, spec, i),
+          readdir: async (spec, i) =>
+            bounded &&
+            mounts !== undefined &&
+            mounts.rootOf(spec.virtual) !== mounts.rootOf(root.virtual)
+              ? []
+              : ops.readdir(accessor, spec, i),
           // -mtime must see namespace times (touch results, observed
           // writes on mtime-less backends), same as ls.
           stat: async (spec, i) => {

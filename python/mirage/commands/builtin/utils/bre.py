@@ -828,7 +828,9 @@ def translate_ere(
     return source, groups, tuple(translator.warnings)
 
 
-def compile_bre(pattern: str) -> tuple[re.Pattern[str], int]:
+def compile_bre(
+    pattern: str, utf8: bool = False
+) -> tuple[re.Pattern[str], int]:
     """Translate a POSIX BRE and compile it.
 
     `re.DOTALL` is set because `RE_SYNTAX_POSIX_BASIC` carries
@@ -837,6 +839,7 @@ def compile_bre(pattern: str) -> tuple[re.Pattern[str], int]:
 
     Args:
         pattern (str): the BRE exactly as it arrived on the line.
+        utf8 (bool): the subject is text under a UTF-8 locale.
 
     Returns:
         tuple[re.Pattern[str], int]: the compiled pattern and its group
@@ -848,7 +851,7 @@ def compile_bre(pattern: str) -> tuple[re.Pattern[str], int]:
     """
     source, groups = translate_bre(pattern)
     try:
-        compiled = re.compile(source, re.DOTALL | re.ASCII)
+        compiled = compile_posix_regex(source, re.DOTALL, utf8)
     except re.error as exc:
         raise BreError(INVALID_PATTERN) from exc
     return compiled, groups

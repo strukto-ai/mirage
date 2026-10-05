@@ -20,7 +20,6 @@ import type {
   SearchOps,
   ReadStreamOp,
   MkdirOp,
-  ReaddirOp,
   ResolveGlobOp,
   StatOp,
 } from '../../../vfs/types.ts'
@@ -65,26 +64,11 @@ import {
 } from '../../../utils/errors.ts'
 import { dotRefusal } from '../utils/paths.ts'
 import type { ChildMounts } from '../../../ops/types.ts'
-import {
-  DEFAULT_MAX_GLOB_MATCHES,
-  resolveGlobWith,
-  type TargetStat,
-} from '../../../utils/glob_walk.ts'
+import { makeResolveGlob, type TargetStat } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 import type { AggregateFn, CommandFnResult, CommandOpts } from '../../config.ts'
-
-export function makeResolveGlob<A extends Accessor = Accessor>(
-  readdir: ReaddirOp<A>,
-  maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
-  children?: ChildMounts,
-  stat?: StatOp<A>,
-  targetStat?: TargetStat,
-): ResolveGlobOp<A> {
-  return async (accessor, paths, index) =>
-    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches, children, stat, targetStat)
-}
 
 export interface CommandIO<A extends Accessor = Accessor>
   extends ReadOps<A>, NativeReadOps<A>, WriteOps<A> {

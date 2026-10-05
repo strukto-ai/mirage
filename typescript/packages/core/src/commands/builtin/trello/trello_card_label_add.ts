@@ -32,7 +32,7 @@ const SPEC = new CommandSpec({
   ],
 })
 
-async function trelloCardLabelAddCommand(
+async function trelloCardLabelAdd(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
@@ -55,6 +55,6 @@ export const TRELLO_CARD_LABEL_ADD = command({
   name: 'trello card label',
   vfs: VFSName.TRELLO,
   spec: SPEC,
-  fn: trelloCardLabelAddCommand,
+  fn: trelloCardLabelAdd,
   write: true,
 })
