@@ -92,6 +92,14 @@ slightly stale results are acceptable. See
 [Dropbox (Python) — Search push-down](/python/vfs/dropbox#search-push-down) for the
 mirrored Python knob.
 
+## Reads under `fresh`
+
+Under `read: fresh`, a cached file is checked against its `content_hash`
+before it is served: one `get_metadata` per warm read, never a folder
+listing. A download names the hash in its `Dropbox-API-Result` header, full
+or ranged, so a read stamps it with no extra request. `server_modified` is
+not used: Dropbox repeats it across same-size rewrites.
+
 ## Browser (PKCE, no client secret)
 
 ```bash

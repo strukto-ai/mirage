@@ -40,6 +40,10 @@ export class DropboxVFS extends BaseVFS {
   // list_folder carries an exact byte `size` for every file (0 included).
   // Paper docs 409 on raw download, a loud error, never a silent empty read.
   override readonly sizesAlwaysKnown: boolean = true
+  // stat and every read stamp content_hash: a listing row and get_metadata
+  // carry it, and a download, ranged or not, names it in Dropbox-API-Result
+  // at no extra request.
+  override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = PROMPT
   readonly config: DropboxConfig

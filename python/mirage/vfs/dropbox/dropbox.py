@@ -37,6 +37,10 @@ class DropboxVFS(BaseVFS):
     # Paper docs 409 on raw download, a loud error, never a silent empty
     # read.
     sizes_always_known: bool = True
+    # stat and every read stamp content_hash: a listing row and
+    # get_metadata carry it, and a download, ranged or not, names it in
+    # Dropbox-API-Result at no extra request.
+    read_revalidatable: bool = True
     prompt: str = PROMPT
 
     def __init__(self, config: DropboxConfig) -> None:
