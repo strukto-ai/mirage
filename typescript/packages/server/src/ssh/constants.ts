@@ -29,6 +29,17 @@ export const AUTHORIZED_KEYS_NAME = 'authorized_keys'
  */
 export const PROFILE_OPTION = 'mirage-profile'
 
+// The authorized_keys option naming the account a key belongs to
+// (`mirage-account="alice" ssh-ed25519 AAAA...`). The account opens only
+// the workspaces it owns; in jwt mode a key without one opens nothing.
+export const ACCOUNT_OPTION = 'mirage-account'
+
+// A client that answers no keepalive for this many intervals is gone, so
+// its connection closes and the line it was running is cancelled rather
+// than left behind a half-open socket.
+export const KEEPALIVE_INTERVAL_SECONDS = 15
+export const KEEPALIVE_COUNT_MAX = 3
+
 /**
  * The subsystem Codex opens (`ssh ... -s codex-exec`) to run its tools in
  * a workspace. It speaks Codex's exec-server protocol: one JSON-RPC

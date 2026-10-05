@@ -218,7 +218,7 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
     '/v1/workspaces/:wsId/shell',
     async (req, reply) => {
       const { wsId } = req.params
-      if (!deps.registry.has(wsId)) {
+      if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
       const background = req.query.background === 'true'

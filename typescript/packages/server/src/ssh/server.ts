@@ -19,7 +19,13 @@ import type { AuthContext, Connection, ParsedKey, PseudoTtyInfo, ServerChannel }
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { SSHConfig } from './config.ts'
 import { serveCodex } from './codex.ts'
-import { CODEX_SUBSYSTEM, PROFILE_OPTION } from './constants.ts'
+import {
+  ACCOUNT_OPTION,
+  CODEX_SUBSYSTEM,
+  KEEPALIVE_COUNT_MAX,
+  KEEPALIVE_INTERVAL_SECONDS,
+  PROFILE_OPTION,
+} from './constants.ts'
 import { SSHConfigError } from './errors.ts'
 import { loadHostKey } from './keys.ts'
 import {
@@ -50,11 +56,13 @@ async function loadSsh2(): Promise<typeof Ssh2Mod> {
   return mod.default ?? mod
 }
 
-/** A key allowed to log in, with the profile its line binds it to. */
+/** A key allowed to log in, with the profile and account its line binds it to. */
 export interface AuthorizedKey {
   key: ParsedKey
   /** The line's `mirage-profile` values; empty when it has none. */
   profile: readonly string[]
+  /** The line's `mirage-account` values; empty when it has none. */
+  account: readonly string[]
 }
 
 interface KeyOption {
@@ -65,10 +73,10 @@ interface KeyOption {
 /**
  * The public keys allowed to log in, read fresh for every attempt so a key
  * added or revoked takes effect on the next login. A line that cannot be
- * read is skipped with a warning. `mirage-profile` is the one OpenSSH-style
- * key option this door reads; a line carrying any other (`command=`,
- * `from=`, ...) is skipped too, since the door does not honor it and so
- * will not accept the key as if it were absent.
+ * read is skipped with a warning. `mirage-profile` and `mirage-account`
+ * are the OpenSSH-style key options this door reads; a line carrying any
+ * other (`command=`, `from=`, ...) is skipped too, since the door does not
+ * honor it and so will not accept the key as if it were absent.
  */
 export async function readAuthorizedKeys(
   path: string,
@@ -97,24 +105,26 @@ export async function readAuthorizedKeys(
 }
 
 /**
- * One authorized_keys line as its key and `mirage-profile` values. A line
- * ssh2 reads as it stands carries no options; otherwise its leading
- * options field is split off the way OpenSSH reads it.
+ * One authorized_keys line as its key and its `mirage-profile` and
+ * `mirage-account` values. A line ssh2 reads as it stands carries no
+ * options; otherwise its leading options field is split off the way
+ * OpenSSH reads it.
  */
 function authorizedKey(line: string, utils: typeof Ssh2Mod.utils): AuthorizedKey | Error {
   const plain = utils.parseKey(line)
-  if (!(plain instanceof Error)) return { key: plain, profile: [] }
+  if (!(plain instanceof Error)) return { key: plain, profile: [], account: [] }
   const split = splitOptions(line)
   if (split === null) return plain
   const profile: string[] = []
+  const account: string[] = []
   for (const option of split.options) {
-    if (option.name.toLowerCase() !== PROFILE_OPTION) {
-      return new Error(`unsupported key option ${option.name}`)
-    }
-    profile.push(option.value ?? '')
+    const name = option.name.toLowerCase()
+    if (name === PROFILE_OPTION) profile.push(option.value ?? '')
+    else if (name === ACCOUNT_OPTION) account.push(option.value ?? '')
+    else return new Error(`unsupported key option ${option.name}`)
   }
   const key = utils.parseKey(split.rest)
-  return key instanceof Error ? key : { key, profile }
+  return key instanceof Error ? key : { key, profile, account }
 }
 
 /**
@@ -194,12 +204,14 @@ function serveConnection(
 ): void {
   let username = ''
   let profile: readonly string[] = []
+  let account: readonly string[] = []
   client.on('authentication', (ctx) => {
     void authenticate(ctx, config.authorizedKeysFile, utils)
       .then((match) => {
         if (match !== null) {
           username = ctx.username
           profile = match.profile
+          account = match.account
           ctx.accept()
         }
       })
@@ -214,7 +226,7 @@ function serveConnection(
       let term: string | null = null
       let shell: ShellChannel | null = null
       const start = (channel: ServerChannel, command: string | null): void => {
-        const request: ChannelRequest = { username, profile, command, term, peer, local }
+        const request: ChannelRequest = { username, profile, account, command, term, peer, local }
         void handleChannel(registry, channel, request, (s) => {
           shell = s
         })
@@ -237,7 +249,7 @@ function serveConnection(
         start(acceptExec(), info.command)
       })
       session.on('sftp', (acceptSftp) => {
-        serveSFTP(registry, username, profile, acceptSftp())
+        serveSFTP(registry, username, profile, account, acceptSftp())
       })
       session.on('subsystem', (acceptSubsystem, _reject, info) => {
         const channel = acceptSubsystem()
@@ -248,6 +260,7 @@ function serveConnection(
         const request: ChannelRequest = {
           username,
           profile,
+          account,
           command: null,
           term: null,
           peer,
@@ -289,17 +302,21 @@ export async function startSSHServer(
   const hostKey = await loadHostKey(config.hostKeyFile, ssh2.utils)
   const clients = new Set<Connection>()
   let port = config.port
-  const server = new ssh2.Server({ hostKeys: [hostKey] }, (client, info) => {
-    clients.add(client)
-    client.on('close', () => {
-      clients.delete(client)
-    })
-    const peer = { address: info.ip, port: info.port }
-    serveConnection(client, registry, config, ssh2.utils, peer, {
-      address: config.host,
-      port,
-    })
-  })
+  const server = new ssh2.Server(
+    {
+      hostKeys: [hostKey],
+      keepaliveInterval: KEEPALIVE_INTERVAL_SECONDS * 1000,
+      keepaliveCountMax: KEEPALIVE_COUNT_MAX,
+    },
+    (client, info) => {
+      clients.add(client)
+      client.on('close', () => {
+        clients.delete(client)
+      })
+      const peer = { address: info.ip, port: info.port }
+      serveConnection(client, registry, config, ssh2.utils, peer, { address: config.host, port })
+    },
+  )
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(config.port, config.host, () => {

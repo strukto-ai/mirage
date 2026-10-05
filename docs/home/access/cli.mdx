@@ -75,6 +75,9 @@ With `-w`, it serves a workspace the server already holds. Otherwise it creates 
 | `mirage workspace list` | List workspaces. |
 | `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
 | `mirage workspace delete ID` | Close a workspace and delete its state. |
+| `mirage workspace close ID` | Close a workspace and keep its state for the same id. |
+| `mirage workspace cancel ID` | Cancel the running lines of every session. |
+| `mirage workspace kill ID` | Kill the background jobs of every session. |
 | `mirage workspace clone SRC [--id ID]` | Copy a workspace. |
 | `mirage workspace snapshot ID FILE.tar` | Save it to a tar here: the server sends the tar back, on this machine or another. |
 | `mirage workspace snapshot ID --key KEY` | Save it to the server's [snapshot store](/home/snapshot#an-s3-like-store) instead. |
@@ -96,6 +99,8 @@ With `-w`, it serves a workspace the server already holds. Otherwise it creates 
 | `mirage session create ID [--id S] [-p PROFILE] [-m /prefix:mode]...` | Add a session under a [profile](/home/permissions), with mounts narrowed to `r`, `rw` or `rwx`. |
 | `mirage session list ID` | List sessions. |
 | `mirage session delete ID S` | Close a session. |
+| `mirage session cancel ID S` | Cancel the session's running lines. |
+| `mirage session kill ID S` | Kill the session's background jobs. |
 
 ## Jobs
 

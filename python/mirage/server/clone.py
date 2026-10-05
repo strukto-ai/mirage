@@ -119,6 +119,13 @@ async def clone_workspace_with_override(
     Returns:
         Workspace: a new, independent workspace.
     """
+    async with src_ws._quiesced():
+        return await clone(src_ws, override)
+
+
+async def clone(
+    src_ws: Workspace, override: dict[str, Any] | None
+) -> Workspace:
     state = await to_state_dict(src_ws)
     # Same-process, so the declarations travel with the clone the way
     # a reused remote VFS does: the state carries the env

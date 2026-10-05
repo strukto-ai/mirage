@@ -412,7 +412,11 @@ async def server_checks(server: Server, report: Report) -> None:
                 want["no_snapshot_store"],
             )
         stop = await http.post("/v1/shutdown", headers=auth)
-        report.check(f"{server.key} server.shutdown", stop.status_code, 200)
+        report.check(
+            f"{server.key} server.shutdown",
+            stop.status_code,
+            want["shutdown"][d.name],
+        )
     deadline = time.monotonic() + 15
     state = "serving"
     while time.monotonic() < deadline:

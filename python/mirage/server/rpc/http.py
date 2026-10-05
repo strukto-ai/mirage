@@ -172,13 +172,18 @@ class RpcDoor:
         self.inflight = InFlight()
 
     async def server(
-        self, workspace_id: str, session_id: str | None = None
+        self,
+        workspace_id: str,
+        session_id: str | None,
+        account: str | None,
     ) -> DaemonRpcServer:
         """The RPC server for a workspace session.
 
         Args:
             workspace_id (str): the workspace.
             session_id (str | None): the session; None is the default.
+            account (str | None): the caller's account; another
+                account's workspace is not found.
 
         Returns:
             DaemonRpcServer: the server.
@@ -186,7 +191,7 @@ class RpcDoor:
         Raises:
             LookupError: the workspace or the session does not exist.
         """
-        operations = await self._mcp.tools(workspace_id, session_id)
+        operations = await self._mcp.tools(workspace_id, session_id, account)
         entry = self._registry.get(workspace_id)
         return DaemonRpcServer(
             entry,
@@ -207,7 +212,9 @@ class RpcDoor:
         workspace_id = request.path_params["workspace_id"]
         try:
             server = await self.server(
-                workspace_id, request.query_params.get("session_id")
+                workspace_id,
+                request.query_params.get("session_id"),
+                request.state.account,
             )
         except LookupError as exc:
             return JSONResponse({"detail": exc.args[0]}, status_code=404)

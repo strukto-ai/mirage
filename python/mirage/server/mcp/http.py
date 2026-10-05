@@ -214,7 +214,9 @@ class McpDoor:
         workspace_id = request.path_params["workspace_id"]
         try:
             served = await self._served_for(
-                workspace_id, request.query_params.get("session_id")
+                workspace_id,
+                request.query_params.get("session_id"),
+                request.state.account,
             )
         except LookupError as exc:
             response = JSONResponse({"detail": exc.args[0]}, status_code=404)
@@ -361,7 +363,10 @@ class McpDoor:
         await self._task
 
     async def tools(
-        self, workspace_id: str, session_id: str | None = None
+        self,
+        workspace_id: str,
+        session_id: str | None,
+        account: str | None,
     ) -> DaemonToolOperations:
         """The tool table a workspace session is served by.
 
@@ -374,6 +379,8 @@ class McpDoor:
             workspace_id (str): the workspace.
             session_id (str | None): the session; None is the
                 workspace's default.
+            account (str | None): the caller's account; another
+                account's workspace is not found.
 
         Returns:
             DaemonToolOperations: the table.
@@ -381,23 +388,23 @@ class McpDoor:
         Raises:
             LookupError: the workspace or the session does not exist.
         """
-        return (await self._served_for(workspace_id, session_id))[2]
+        return (await self._served_for(workspace_id, session_id, account))[2]
 
     async def _served_for(
-        self, workspace_id: str, session_id: str | None
+        self, workspace_id: str, session_id: str | None, account: str | None
     ) -> tuple[
         WorkspaceEntry, SessionState, DaemonToolOperations, MirageMcpServer
     ]:
-        for key, (entry, held, _, _) in list(self._served.items()):
+        for key, (cached, held, _, _) in list(self._served.items()):
             if (
                 key[0] not in self._registry
-                or self._registry.get(key[0]) is not entry
-                or all(s is not held for s in entry.runner.ws.list_sessions())
+                or self._registry.get(key[0]) is not cached
+                or all(s is not held for s in cached.runner.ws.list_sessions())
             ):
                 del self._served[key]
-        if workspace_id not in self._registry:
+        entry = self._registry.visible(workspace_id, account)
+        if entry is None:
             raise LookupError("workspace not found")
-        entry = self._registry.get(workspace_id)
         ws = entry.runner.ws
         await entry.runner.call(ws.ensure_sessions_loaded())
         session_id = session_id or ws.default_session_id
@@ -435,6 +442,7 @@ class McpDoor:
         served = await self._served_for(
             request.path_params["workspace_id"],
             request.query_params.get("session_id"),
+            request.state.account,
         )
         return served[3]
 

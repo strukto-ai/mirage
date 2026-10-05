@@ -22,7 +22,11 @@ from mirage.concurrency.limiter import run_blocking
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.ssh.codex import serve_codex
 from mirage.server.ssh.config import SSHConfig
-from mirage.server.ssh.constants import CODEX_SUBSYSTEM
+from mirage.server.ssh.constants import (
+    CODEX_SUBSYSTEM,
+    KEEPALIVE_COUNT_MAX,
+    KEEPALIVE_INTERVAL_SECONDS,
+)
 from mirage.server.ssh.keys import load_host_key
 from mirage.server.ssh.session import handle_process
 from mirage.server.ssh.sftp import MirageSFTPServer
@@ -125,6 +129,8 @@ async def start_ssh_server(
         process_factory=functools.partial(serve_channel, registry),
         sftp_factory=functools.partial(MirageSFTPServer, registry),
         allow_scp=True,
+        keepalive_interval=KEEPALIVE_INTERVAL_SECONDS,
+        keepalive_count_max=KEEPALIVE_COUNT_MAX,
         max_line_length=MAX_TERMINAL_LINE,
         agent_forwarding=False,
         gss_host=None,

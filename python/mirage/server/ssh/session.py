@@ -24,7 +24,7 @@ from asyncssh.connection import SSHConnection
 
 from mirage import Workspace
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
-from mirage.server.ssh.constants import PROFILE_OPTION
+from mirage.server.ssh.constants import ACCOUNT_OPTION, PROFILE_OPTION
 from mirage.server.ssh.stream import (
     ChannelInput,
     ChannelOutput,
@@ -90,6 +90,30 @@ def login_env(process: asyncssh.SSHServerProcess[str]) -> dict[str, str]:
     return env
 
 
+def _key_option(conn: SSHConnection, option: str, what: str) -> str | None:
+    """The one value the login's authorized key gives ``option``.
+
+    Args:
+        conn (SSHConnection): the authenticated login's connection.
+        option (str): the authorized_keys option to read.
+        what (str): what the value names, for the refusal.
+
+    Raises:
+        TypeError: ``conn`` is not the server side of a connection.
+        ValueError: the option is bare, empty or given more than once.
+    """
+    if not isinstance(conn, asyncssh.SSHServerConnection):
+        raise TypeError("a key's option is read off a server connection")
+    values = conn.get_key_option(option)
+    if values is None:
+        return None
+    names = values if isinstance(values, list) else [values]
+    name = names[0] if len(names) == 1 else None
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"{option} must name exactly one {what}")
+    return name
+
+
 def key_profile(conn: SSHConnection) -> str | None:
     """The profile the login's authorized key is bound to, if any.
 
@@ -99,21 +123,43 @@ def key_profile(conn: SSHConnection) -> str | None:
 
     Args:
         conn (SSHConnection): the authenticated login's connection.
-
-    Raises:
-        TypeError: ``conn`` is not the server side of a connection.
-        ValueError: the option is bare, empty or given more than once.
     """
-    if not isinstance(conn, asyncssh.SSHServerConnection):
-        raise TypeError("a key's profile is read off a server connection")
-    values = conn.get_key_option(PROFILE_OPTION)
-    if values is None:
+    return _key_option(conn, PROFILE_OPTION, "profile")
+
+
+def key_account(conn: SSHConnection) -> str | None:
+    """The account the login's authorized key belongs to, if any.
+
+    The key's line in authorized_keys names it with
+    ``mirage-account="<name>"``; the account may open only the
+    workspaces it owns. A key without the option has no account.
+
+    Args:
+        conn (SSHConnection): the authenticated login's connection.
+    """
+    return _key_option(conn, ACCOUNT_OPTION, "account")
+
+
+def login_entry(
+    registry: WorkspaceRegistry, conn: SSHConnection, workspace_id: str
+) -> WorkspaceEntry | None:
+    """The workspace a login may open, else None.
+
+    One rule for every channel kind: the key's account must be allowed
+    the workspace its username names. A key whose account option is
+    malformed opens nothing.
+
+    Args:
+        registry (WorkspaceRegistry): the daemon's workspaces.
+        conn (SSHConnection): the authenticated login's connection.
+        workspace_id (str): the workspace the username names.
+    """
+    try:
+        account = key_account(conn)
+    except ValueError as exc:
+        logger.warning("ssh: refusing %s: %s", workspace_id, exc)
         return None
-    names = values if isinstance(values, list) else [values]
-    name = names[0] if len(names) == 1 else None
-    if not isinstance(name, str) or not name:
-        raise ValueError(f"{PROFILE_OPTION} must name exactly one profile")
-    return name
+    return registry.visible(workspace_id, account)
 
 
 async def open_session(
@@ -390,11 +436,13 @@ async def handle_process(
         )
         process.exit(1)
         return
-    if workspace_id not in registry:
+    entry = login_entry(
+        registry, process.channel.get_connection(), workspace_id
+    )
+    if entry is None:
         process.stderr.write(f"mirage: no such workspace: {workspace_id}\n")
         process.exit(1)
         return
-    entry = registry.get(workspace_id)
     session_id = new_session_id()
     runner = entry.runner
     try:

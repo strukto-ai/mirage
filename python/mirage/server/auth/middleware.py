@@ -29,8 +29,24 @@ HEALTH_PATHS: frozenset[str] = frozenset({"/v1/health"})
 _JWT_SHAPE = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 
 
+def _admit(scope: Scope, account: str | None) -> None:
+    """Record who the request runs as, read by routes as
+    ``request.state.account``.
+
+    Args:
+        scope (Scope): the request scope.
+        account (str | None): the JWT's ``sub``; None when the mode
+            names no account (local or shared token), which may use
+            every workspace.
+    """
+    scope.setdefault("state", {})["account"] = account
+
+
 class AuthMiddleware:
     """ASGI middleware enforcing the daemon's auth mode.
+
+    Every admitted request carries its account in the scope state:
+    the JWT's ``sub`` in jwt mode, None otherwise.
 
     Args:
         app (ASGIApp): downstream ASGI app.
@@ -52,6 +68,7 @@ class AuthMiddleware:
             return
         cfg = self.config
         if cfg.mode == AuthMode.LOCAL and cfg.local_token is None:
+            _admit(scope, None)
             await self.app(scope, receive, send)
             return
 
@@ -74,11 +91,12 @@ class AuthMiddleware:
                 )
                 return
             try:
-                verify_jwt(token, self.config.jwt)
+                claims = verify_jwt(token, self.config.jwt)
             except JWTVerificationError as e:
                 logger.debug("JWT rejected: %s", e)
                 await self._unauthorized(scope, receive, send, str(e))
                 return
+            _admit(scope, claims["sub"])
             await self.app(scope, receive, send)
             return
 
@@ -90,6 +108,7 @@ class AuthMiddleware:
         if expected is None or not hmac.compare_digest(token, expected):
             await self._unauthorized(scope, receive, send, "bearer mismatch")
             return
+        _admit(scope, None)
         await self.app(scope, receive, send)
 
     @staticmethod

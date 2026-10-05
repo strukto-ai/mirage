@@ -54,7 +54,7 @@ export async function verifyJwt(token: string, cfg: JWTConfig): Promise<JWTPaylo
     const key = await loadKey(cfg)
     const verifyOpts: Parameters<typeof jwtVerify>[2] = {
       algorithms: [cfg.algorithm],
-      requiredClaims: ['exp'],
+      requiredClaims: ['exp', 'sub'],
       clockTolerance: cfg.clockSkewSeconds,
     }
     if (cfg.issuer !== undefined) verifyOpts.issuer = cfg.issuer
@@ -64,6 +64,9 @@ export async function verifyJwt(token: string, cfg: JWTConfig): Promise<JWTPaylo
   } catch (e) {
     if (e instanceof JWTVerificationError) throw e
     throw new JWTVerificationError(`JWT rejected: ${String(e)}`)
+  }
+  if (typeof payload.sub !== 'string' || payload.sub === '') {
+    throw new JWTVerificationError('JWT sub must name an account')
   }
   if (cfg.authorizedParties.length > 0) {
     const azp = payload.azp as string | undefined
