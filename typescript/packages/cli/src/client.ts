@@ -23,6 +23,7 @@ import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/d
 import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
+import { LoginError, freshToken, readLogin } from './credentials.ts'
 import { isLocalUrl, type DaemonSettings } from './settings.ts'
 
 const requireFromHere = createRequire(import.meta.url)
@@ -36,14 +37,50 @@ export class DaemonUnreachable extends Error {
 
 export class DaemonClient {
   readonly settings: DaemonSettings
+  private refreshing: Promise<string> | undefined
+  /** The last login token this client sent. */
+  held = ''
 
   constructor(settings: DaemonSettings) {
     this.settings = settings
   }
 
-  private headers(extra?: Record<string, string>): Record<string, string> {
+  /**
+   * The bearer token to send: the settings' own, else the login's,
+   * refreshed when it is about to end; empty when there is none. The client
+   * stays bound to the login it started with. That login is read from its
+   * file each time, so a refresh made by another process is shared, while
+   * `mirage logout` or a new login stops this one; requests sent at once
+   * share one read, so they refresh it once. The token sent is kept as
+   * `held`. Throws `LoginError` when the login ended or changed, or cannot
+   * give a token.
+   */
+  async token(): Promise<string> {
+    const login = this.settings.login
+    if (this.settings.authToken !== '' || login === undefined) {
+      this.held = this.settings.authToken
+      return this.held
+    }
+    this.refreshing ??= (async () => {
+      const stored = readLogin()
+      if (stored?.url !== login.url) {
+        throw new LoginError(`not logged in to ${login.url} any more; run \`mirage login\``)
+      }
+      if (stored.logged_in_at !== login.logged_in_at) {
+        throw new LoginError(`the login to ${login.url} changed; run the command again`)
+      }
+      this.held = await freshToken(stored)
+      return this.held
+    })().finally(() => {
+      this.refreshing = undefined
+    })
+    return this.refreshing
+  }
+
+  private async headers(extra?: Record<string, string>): Promise<Record<string, string>> {
     const h: Record<string, string> = { ...extra }
-    if (this.settings.authToken !== '') h.Authorization = `Bearer ${this.settings.authToken}`
+    const token = await this.token()
+    if (token !== '') h.Authorization = `Bearer ${token}`
     return h
   }
 
@@ -54,7 +91,7 @@ export class DaemonClient {
   ): Promise<Response> {
     const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...rest } = init
     const headers: Record<string, string> = {
-      ...this.headers(),
+      ...(await this.headers()),
       ...((rest.headers ?? {}) as Record<string, string>),
     }
     if (rest.body !== undefined && headers['Content-Type'] === undefined) {
@@ -105,7 +142,9 @@ export class DaemonClient {
     }
     return fetch(this.settings.url + path, {
       method,
-      headers: this.headers({ 'Content-Type': `multipart/form-data; boundary=${boundary}` }),
+      headers: await this.headers({
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      }),
       body: ReadableStream.from(parts()),
       duplex: 'half',
       ...(signal !== undefined ? { signal } : {}),
@@ -113,13 +152,14 @@ export class DaemonClient {
   }
 
   async isReachable(timeoutMs = 500): Promise<boolean> {
+    const headers = await this.headers()
     const ctrl = new AbortController()
     const t = setTimeout(() => {
       ctrl.abort()
     }, timeoutMs)
     try {
       const r = await fetch(this.settings.url + '/v1/health', {
-        headers: this.headers(),
+        headers,
         signal: ctrl.signal,
       })
       return r.status === 200

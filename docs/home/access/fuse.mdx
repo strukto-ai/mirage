@@ -68,7 +68,13 @@ fusermount3 -u ~/mnt/demo        # on macOS: umount ~/mnt/demo
 
 [sshfs](https://github.com/libfuse/sshfs) mounts the workspace over SFTP, so the server needs nothing more than [SSH turned on](/home/access/ssh#turn-it-on) and your key authorized. On Linux install it with `apt install sshfs`; on macOS install macFUSE and SSHFS from [macfuse.github.io](https://macfuse.github.io).
 
+A hosted server can be reached through its HTTPS port instead, logged in by the CLI's token rather than a key ([Over HTTPS](/home/access/ssh#over-https)):
+
+```bash
+sshfs -o ProxyCommand="mirage ssh-proxy %r" -o direct_io demo@mirage:/ ~/mnt/demo
+```
+
 - **Keep `-o direct_io`.** Files from API-backed mounts, such as Linear, Slack or Trello, have no size until they are read, so they list as 0 bytes. Without `direct_io` the kernel trusts that size and they read as empty; with it they read in full.
-- **One session for the whole mount.** The mount is one SFTP channel, so it runs as one fresh session under the key's [profile](/home/access/ssh#bind-a-key-to-a-profile), closed when you unmount. In `jwt` mode the key needs [`mirage-account`](/home/access/ssh#bind-a-key-to-an-account) and opens only that account's workspaces.
+- **One session for the whole mount.** The mount is one SFTP channel, so it runs as one fresh session under the key's [profile](/home/access/ssh#bind-a-key-to-a-profile), closed when you unmount. In `jwt` mode the key needs [`mirage-account`](/home/access/ssh#bind-a-key-to-an-account) and opens only that account's workspaces; through `mirage ssh-proxy` the token's account does.
 - A write to a `READ` mount fails with "Permission denied", since SFTP has no read-only error.
 - Every file operation is a round trip to the server.

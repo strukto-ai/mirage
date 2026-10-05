@@ -34,8 +34,12 @@ from mirage.types import JsonValue
 class SSHConfig:
     """Where the daemon's SSH door listens and whom it lets in.
 
+    The HTTPS route carries SSH whatever the port says; the TCP door
+    opens only with a port.
+
     Args:
-        port (int): TCP port; 0 asks the OS for a free one.
+        port (int | None): TCP port; 0 asks the OS for a free one, None
+            keeps the TCP door shut.
         host (str): interface to bind.
         host_key_file (Path): the server's private host key, minted on
             first start and kept, so clients' known_hosts stay valid.
@@ -44,7 +48,7 @@ class SSHConfig:
             needs no restart.
     """
 
-    port: int
+    port: int | None
     host: str
     host_key_file: Path
     authorized_keys_file: Path
@@ -91,13 +95,13 @@ def resolve_ssh_config(
     env: Mapping[str, str] | None = None,
     table: Mapping[str, JsonValue] | None = None,
     home: Path | None = None,
-) -> SSHConfig | None:
-    """Resolve the SSH door's settings, or None when it is off.
+) -> SSHConfig:
+    """Resolve the SSH settings.
 
     Per key the environment variable wins over the ``[daemon]`` table
-    in ``config.toml``, which wins over the default. The door is off
-    unless a port is set, so a daemon nobody configured for SSH never
-    listens on a second port.
+    in ``config.toml``, which wins over the default. The TCP door is
+    off unless a port is set, so a daemon nobody configured for SSH
+    never listens on a second port.
 
     Args:
         env (Mapping[str, str] | None): environment to read. Defaults
@@ -110,8 +114,8 @@ def resolve_ssh_config(
             key paths live under. Defaults to ``mirage_home()``.
 
     Returns:
-        SSHConfig | None: the resolved settings, or None when no port
-            is configured.
+        SSHConfig: the resolved settings, with no port when the TCP
+            door is off.
 
     Raises:
         SSHConfigError: the port is not an integer in range.
@@ -120,13 +124,11 @@ def resolve_ssh_config(
         table = read_daemon_table(mirage_home()) if env is None else {}
     e = env if env is not None else os.environ
     raw_port = _setting("ssh_port", e, table)
-    if not raw_port:
-        return None
     ssh_dir = default_ssh_dir(home)
     host_key = _setting("ssh_host_key_file", e, table)
     authorized = _setting("ssh_authorized_keys", e, table)
     return SSHConfig(
-        port=_parse_port(raw_port),
+        port=_parse_port(raw_port) if raw_port else None,
         host=_setting("ssh_host", e, table) or DEFAULT_SSH_HOST,
         host_key_file=(
             Path(host_key).expanduser()

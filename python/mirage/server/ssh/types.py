@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
-from typing import Protocol
+import socket
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import Any, Protocol
 
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.ssh.config import SSHConfig
@@ -30,3 +31,17 @@ class SSHListener(Protocol):
 
 
 StartSSH = Callable[[WorkspaceRegistry, SSHConfig], Awaitable[SSHListener]]
+
+
+class SSHTunnel(Protocol):
+    """One SSH connection the HTTPS route carries, once its login is in."""
+
+    def close(self) -> None: ...
+
+    async def wait_closed(self) -> None: ...
+
+
+ServeTunnel = Callable[
+    [WorkspaceRegistry, SSHConfig, socket.socket, str, str | None],
+    Coroutine[Any, Any, SSHTunnel],
+]

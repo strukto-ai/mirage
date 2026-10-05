@@ -199,6 +199,67 @@
    "typescript_only": {
     "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable."
    }
+  },
+  "cli/ssh": {
+   "python_only": {
+    "ssh_proxy_cmd": "Typer commands are module functions; commander registers the same command inline in registerSshProxyCommand."
+   },
+   "typescript_only": {
+    "registerSshProxyCommand": "commander registers a command through a function; Typer's is the module function ssh_proxy_cmd."
+   }
+  },
+  "server/routers/ssh": {
+   "python_only": {
+    "ssh_tunnel": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSshRoutes."
+   },
+   "typescript_only": {
+    "SshParams": "Fastify types a route's path parameters with an interface; FastAPI reads them from the handler's arguments.",
+    "SshRoutesDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
+    "registerSshRoutes": "Fastify registers routes through a function; FastAPI's route is the module function ssh_tunnel."
+   }
+  },
+  "server/ssh/constants": {
+   "python_only": {
+    "TUNNEL_CHUNK": "Python's route reads the SSH server's side of a socket pair in chunks; TypeScript pipes a ws stream, which chunks for itself.",
+    "TUNNEL_MODULE": "Python loads asyncssh's module by path, so a server without the ssh extra starts; TypeScript imports the module dynamically by its literal path."
+   }
+  },
+  "server/ssh/server": {
+   "typescript_only": {
+    "Admit": "ssh2 takes a login decision as a callback, typed here; asyncssh asks a server object (MirageSSHServer, TunnelSSHServer).",
+    "admitTunnel": "ssh2 admits a tunneled login through a callback; asyncssh's twin is the TunnelSSHServer class in session."
+   }
+  },
+  "server/ssh/session": {
+   "python_only": {
+    "TunnelSSHServer": "asyncssh admits a login through a server object, and key_account reads the tunnel's account off it; ssh2's twin is the admitTunnel callback in server."
+   }
+  },
+  "server/ssh/types": {
+   "python_only": {
+    "SSHTunnel": "Python types the connection its lazily loaded tunnel returns; TypeScript's serveTunnel resolves when the connection ends.",
+    "ServeTunnel": "Python types serve_tunnel for the route that loads it by path; TypeScript imports it and keeps its own signature."
+   }
+  },
+  "cli/login": {
+   "python_only": {
+    "login_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "logout_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "whoami_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing."
+   },
+   "typescript_only": {
+    "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd."
+   }
+  },
+  "server/routers/oauth": {
+   "python_only": {
+    "protected_resource": "FastAPI routes are module functions; Fastify registers the same handler inline in registerOAuthRoutes."
+   },
+   "typescript_only": {
+    "OAuthDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
+    "registerOAuthRoutes": "Fastify registers routes through a function; FastAPI's route is the module function protected_resource."
+   }
   }
  }
 }

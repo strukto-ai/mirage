@@ -22,11 +22,13 @@ export const ENV_AUTH_MODE = 'MIRAGE_AUTH_MODE'
 export const ENV_AUTH_TOKEN = 'MIRAGE_AUTH_TOKEN'
 export const ENV_JWT_PUBKEY = 'MIRAGE_JWT_PUBKEY'
 export const ENV_JWT_PUBKEY_FILE = 'MIRAGE_JWT_PUBKEY_FILE'
+export const ENV_JWT_JWKS_URL = 'MIRAGE_JWT_JWKS_URL'
 export const ENV_JWT_ALG = 'MIRAGE_JWT_ALG'
 export const ENV_JWT_ISSUER = 'MIRAGE_JWT_ISSUER'
 export const ENV_JWT_AUDIENCE = 'MIRAGE_JWT_AUDIENCE'
 export const ENV_JWT_AUTHORIZED_PARTIES = 'MIRAGE_JWT_AUTHORIZED_PARTIES'
 export const ENV_JWT_CLOCK_SKEW = 'MIRAGE_JWT_CLOCK_SKEW_SECONDS'
+export const ENV_LOGIN_CLIENT_ID = 'MIRAGE_LOGIN_CLIENT_ID'
 
 export const AuthMode = {
   Local: 'local',
@@ -37,14 +39,27 @@ export type AuthMode = (typeof AuthMode)[keyof typeof AuthMode]
 
 const VALID_MODES: readonly AuthMode[] = Object.values(AuthMode)
 const DEFAULT_CLOCK_SKEW_SECONDS = 5
+export const PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource'
+export const AUTHORIZATION_SERVER_PATH = '/.well-known/oauth-authorization-server'
 
+/**
+ * How the server checks a JWT: the one accepted algorithm; the issuer's
+ * public key (PEM), or the URL where it publishes its keys; the required
+ * `iss`; the audiences a token with `aud` must name one of; the parties a
+ * token without `aud` must carry as its `azp`; the leeway on `exp`; and
+ * the issuer's OAuth client that `mirage login` signs in through,
+ * published at `/.well-known/oauth-protected-resource` (absent publishes
+ * no login).
+ */
 export interface JWTConfig {
-  readonly key: string
   readonly algorithm: string
+  readonly key?: string
+  readonly jwksUrl?: string
   readonly issuer?: string
-  readonly audience?: string
+  readonly audiences: readonly string[]
   readonly authorizedParties: readonly string[]
   readonly clockSkewSeconds: number
+  readonly loginClientId?: string
 }
 
 export interface AuthConfig {
@@ -66,8 +81,10 @@ const CONFIG_ENV_KEYS: Record<string, string> = {
   jwt_issuer: ENV_JWT_ISSUER,
   jwt_audience: ENV_JWT_AUDIENCE,
   jwt_pubkey_file: ENV_JWT_PUBKEY_FILE,
+  jwt_jwks_url: ENV_JWT_JWKS_URL,
   jwt_clock_skew: ENV_JWT_CLOCK_SKEW,
   jwt_authorized_parties: ENV_JWT_AUTHORIZED_PARTIES,
+  login_client_id: ENV_LOGIN_CLIENT_ID,
 }
 
 function mergeConfigTable(
@@ -105,12 +122,12 @@ export function resolveLocalToken(opts?: ResolveOptions): string | undefined {
   return readTokenFile(pickTokenFile(opts))
 }
 
-function readJwtKey(env: Record<string, string | undefined>): string {
+function readJwtKey(env: Record<string, string | undefined>): string | undefined {
   const inline = (env[ENV_JWT_PUBKEY] ?? '').trim()
   if (inline.length > 0) return inline
   const path = (env[ENV_JWT_PUBKEY_FILE] ?? '').trim()
   if (path.length > 0) return readFileSync(path, 'utf-8')
-  throw new Error(`mode=jwt requires ${ENV_JWT_PUBKEY} or ${ENV_JWT_PUBKEY_FILE}`)
+  return undefined
 }
 
 function parseCsv(value: string): string[] {
@@ -133,6 +150,10 @@ export function resolveAuthConfig(opts?: ResolveOptions): AuthConfig {
     )
   }
   const mode: AuthMode = raw
+  const loginClientId = (env[ENV_LOGIN_CLIENT_ID] ?? '').trim() || undefined
+  if (loginClientId !== undefined && mode !== AuthMode.Jwt) {
+    throw new Error(`${ENV_LOGIN_CLIENT_ID} requires mode=jwt`)
+  }
   if (mode === AuthMode.Local) {
     const localToken = resolveLocalToken(opts)
     return localToken === undefined ? { mode } : { mode, localToken }
@@ -145,22 +166,35 @@ export function resolveAuthConfig(opts?: ResolveOptions): AuthConfig {
     return { mode, bearerToken: token }
   }
   const key = readJwtKey(env)
+  const jwksUrl = (env[ENV_JWT_JWKS_URL] ?? '').trim() || undefined
+  if ((key === undefined) === (jwksUrl === undefined)) {
+    throw new Error(
+      `mode=jwt requires one of ${ENV_JWT_PUBKEY}, ${ENV_JWT_PUBKEY_FILE} or ${ENV_JWT_JWKS_URL}`,
+    )
+  }
   const alg = (env[ENV_JWT_ALG] ?? '').trim()
   if (!alg) {
     throw new Error(`mode=jwt requires ${ENV_JWT_ALG} (e.g. RS256)`)
   }
   const issuer = (env[ENV_JWT_ISSUER] ?? '').trim() || undefined
-  const audience = (env[ENV_JWT_AUDIENCE] ?? '').trim() || undefined
+  const audiences = parseCsv(env[ENV_JWT_AUDIENCE] ?? '')
   const azp = parseCsv(env[ENV_JWT_AUTHORIZED_PARTIES] ?? '')
   const skewRaw = (env[ENV_JWT_CLOCK_SKEW] ?? '').trim()
   const skew = skewRaw.length > 0 ? Number.parseInt(skewRaw, 10) : DEFAULT_CLOCK_SKEW_SECONDS
+  if (loginClientId !== undefined && (issuer === undefined || !audiences.includes(loginClientId))) {
+    throw new Error(
+      `${ENV_LOGIN_CLIENT_ID} requires ${ENV_JWT_ISSUER}, and ${ENV_JWT_AUDIENCE} must list it`,
+    )
+  }
   const jwt: JWTConfig = {
-    key,
     algorithm: alg,
+    audiences,
     authorizedParties: azp,
     clockSkewSeconds: skew,
+    ...(key !== undefined ? { key } : {}),
+    ...(jwksUrl !== undefined ? { jwksUrl } : {}),
     ...(issuer !== undefined ? { issuer } : {}),
-    ...(audience !== undefined ? { audience } : {}),
+    ...(loginClientId !== undefined ? { loginClientId } : {}),
   }
   return { mode: AuthMode.Jwt, jwt }
 }
