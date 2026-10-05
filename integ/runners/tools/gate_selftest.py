@@ -1531,8 +1531,9 @@ def selftest_shard() -> None:
     by_id = {target["id"]: target for target in manifest["targets"]}
     skip = {"nextcloud", "notion"}
     for host in ("python", "typescript"):
+        seconds = shard.target_seconds(shard.SECONDS, host)
         items = shard.work_items(
-            manifest, ["core", "http"], host, skip, counts
+            manifest, ["core", "http"], host, skip, counts, seconds
         )
         ran = [target_id for ids, _ in items for target_id in ids]
         want = sorted(
@@ -1575,13 +1576,38 @@ def selftest_shard() -> None:
             shard.idle_facets(manifest, ["core", "htpp"], items) == ["htpp"],
             f"{shard.idle_facets(manifest, ['core', 'htpp'], items)}",
         )
+        check(
+            f"shard ({host}): the seconds table names only targets it splits",
+            set(seconds) <= set(want),
+            f"{sorted(set(seconds) - set(want))}",
+        )
+        check(
+            f"shard ({host}): a measured target weighs its seconds",
+            all(
+                weight == seconds[ids[0]]
+                for ids, weight in items
+                if len(ids) == 1 and ids[0] in seconds
+            ),
+            f"{[(ids, w) for ids, w in items if ids[0] in seconds][:3]}",
+        )
+        unmeasured = shard.work_items(
+            manifest, ["core", "http"], host, skip, counts, {}
+        )
+        check(
+            f"shard ({host}): with no seconds a target weighs its cases",
+            all(
+                weight == sum(counts[i] for i in ids)
+                for ids, weight in unmeasured
+            ),
+            f"{unmeasured[:3]}",
+        )
     check(
         "shard: a browser-only target is not split onto the python host",
         "opfs"
         not in [
             target_id
             for ids, _ in shard.work_items(
-                manifest, ["core"], "python", set(), counts
+                manifest, ["core"], "python", set(), counts, {}
             )
             for target_id in ids
         ],

@@ -31,6 +31,7 @@ from mirage.shell.constants import (
     FD_STDERR,
     FD_STDIN,
     FD_STDOUT,
+    OUTPUT_ONLY_BUILTINS,
 )
 from mirage.shell.descriptors import (
     ENCLOSING,
@@ -284,7 +285,11 @@ async def handle_redirect(
     command before it runs. A ``>>`` target is opened then too, created
     when it is missing, so ``ls >> out`` lists ``out``. A simple command
     opens its targets only once dispatch admits it, so a command the gate
-    refuses leaves them as they were. Two opens stay out of bash's order:
+    refuses leaves them as they were. A builtin that touches no file of
+    its own (``echo``, ``printf``, ``:``) cannot tell, so its targets are
+    opened by the write of its output, one write per target, and one that
+    cannot be opened fails that write with the open's error, the output
+    dropped. Two opens stay out of bash's order:
     an input that cannot be opened stops the line before any target is
     opened, where bash has emptied the ones written before it, because
     the gate has not judged the line yet; and an input that reaches a
@@ -455,11 +460,14 @@ async def handle_redirect(
     opened: set[int] = set()
     failure: list[tuple[PathSpec, OSError]] = []
 
-    async def open_targets() -> bool:
+    async def open_targets(name: str = "", args: tuple[str, ...] = ()) -> bool:
         """Open the statement's write targets, as bash's opens do before
         the command runs: a ``>`` one emptied, a ``>>`` one created when
         it is missing; False, the failure kept, when one cannot be
-        opened."""
+        opened. An output-only builtin's targets wait for the write of
+        its output instead (``_output_only``)."""
+        if _output_only(name, args):
+            return True
         while opening:
             file = opening.pop(0)
             try:
@@ -688,6 +696,25 @@ async def handle_redirect(
             command="redirect", exit_code=io.exit_code, refused=refused
         ),
     )
+
+
+def _output_only(name: str, args: tuple[str, ...]) -> bool:
+    """Whether an admitted command reads and writes no file of its own.
+
+    Its write targets can then be opened by the write of its output: no
+    read it makes can see a target emptied early, and a target that
+    cannot be opened fails that write with the error the open would have
+    met, the output dropped and the status 1, which is what bash shows
+    for a command it never ran. ``printf -v`` assigns a variable a
+    refused open must stop, so an option ahead of the format opens first.
+
+    Args:
+        name (str): the admitted command's name.
+        args (tuple[str, ...]): its expanded arguments.
+    """
+    if name not in OUTPUT_ONLY_BUILTINS:
+        return False
+    return name != "printf" or not args or not args[0].startswith("-")
 
 
 def _descriptor_output(

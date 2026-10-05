@@ -22,7 +22,8 @@
     "integ/crossmount/cat/read_failure.json": "These cases write their own fixtures in seed/read_failure.json. Databricks, databricks-prefix and sharepoint-prefix do not support this printf redirection fixture; all 19 writable targets run both setup and assertions.",
     "integ/crossmount/sort/read_failure.json": "These cases write their own fixtures in seed/read_failure.json. Databricks, databricks-prefix and sharepoint-prefix do not support this printf redirection fixture; all 19 writable targets run both setup and assertions.",
     "integ/crossmount/wc/read_failure.json": "These cases write their own fixtures in seed/read_failure.json. Databricks, databricks-prefix and sharepoint-prefix do not support this printf redirection fixture; all 19 writable targets run both setup and assertions.",
-    "integ/crossmount/sed/read_failure.json": "These cases write their own fixtures in seed/read_failure.json. Databricks, databricks-prefix and sharepoint-prefix do not support this printf redirection fixture; all 19 writable targets run both setup and assertions."
+    "integ/crossmount/sed/read_failure.json": "These cases write their own fixtures in seed/read_failure.json. Databricks, databricks-prefix and sharepoint-prefix do not support this printf redirection fixture; all 19 writable targets run both setup and assertions.",
+    "integ/bash/redirect/append_mtime.json": "The case sets an mtime with touch -d first and checks a `>>` that writes nothing keeps it; the list is touch/d.json's, the backends that support setting one."
   },
   "entries": {
     "integ/bash/control/scope.json :: ctl_for_long_word_list_leaves_last_value": {

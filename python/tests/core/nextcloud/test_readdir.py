@@ -70,6 +70,23 @@ async def test_readdir_missing_path_is_enoent(make_acc):
 
 
 @pytest.mark.asyncio
+async def test_readdir_missing_path_stats_each_component_once(make_acc):
+    acc = make_acc({"data/a.txt": b"a"})
+    fake = acc._fake
+    asked: list[str] = []
+    real_stat = fake.stat
+
+    async def _counted(key):
+        asked.append(key)
+        return await real_stat(key)
+
+    fake.stat = _counted
+    with pytest.raises(FileNotFoundError):
+        await readdir(acc, PathSpec.from_str_path("/data/never"))
+    assert asked == ["data/never", "data"]
+
+
+@pytest.mark.asyncio
 async def test_readdir_missing_nested_path_is_enoent(make_acc):
     acc = make_acc({"data/a.txt": b"a"})
     with pytest.raises(FileNotFoundError):

@@ -29,6 +29,9 @@ export async function appendBytes(
   const p = norm(path.mountPath)
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
+  // Appending nothing opens the file (`true >> f`): it creates a missing one
+  // and leaves an existing one as it was, modification time included.
+  if (data.byteLength === 0 && accessor.store.files.has(p)) return
   const existing = accessor.store.files.get(p)
   if (existing) {
     const combined = new Uint8Array(existing.byteLength + data.byteLength)

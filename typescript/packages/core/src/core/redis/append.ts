@@ -31,6 +31,9 @@ export async function appendBytes(
   const store = accessor.store
   await checkDestParents(store, path, p)
   await checkWriteTarget(store, path, p)
+  // Appending nothing opens the file (`true >> f`): it creates a missing one
+  // and leaves an existing one as it was, modification time included.
+  if (data.byteLength === 0 && (await store.hasFile(p))) return
   const existing = await store.getFile(p)
   if (existing !== null) {
     const merged = new Uint8Array(existing.byteLength + data.byteLength)

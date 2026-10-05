@@ -20,7 +20,14 @@ import type { ByteSource } from '../../io/types.ts'
 import { DeviceInput, IOResult, materialize } from '../../io/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../shell/constants.ts'
+import {
+  FD_BOTH,
+  FD_CLOSE,
+  FD_STDERR,
+  FD_STDIN,
+  FD_STDOUT,
+  OUTPUT_ONLY_BUILTINS,
+} from '../../shell/constants.ts'
 import {
   ENCLOSING,
   FileDescription,
@@ -172,7 +179,10 @@ export class JobRoute extends JobOutput {
  * runs. A `>>` target is opened then too, created when it is missing, so
  * `ls >> out` lists `out`. A simple command opens its targets only once
  * dispatch admits it, so a command the gate refuses leaves them as they were.
- * Two opens stay out of bash's order: an input that cannot be opened stops the
+ * A builtin that touches no file of its own (`echo`, `printf`, `:`) cannot
+ * tell, so its targets are opened by the write of its output, one write per
+ * target, and one that cannot be opened fails that write with the open's
+ * error, the output dropped. Two opens stay out of bash's order: an input that cannot be opened stops the
  * line before any target is opened, where bash has emptied the ones written
  * before it, because the gate has not judged the line yet; and an input that
  * reaches a `>` target only through a symlink is read before the target is
@@ -338,8 +348,10 @@ export async function handleRedirect(
   const failure: [PathSpec, unknown][] = []
   // Open the statement's write targets, as bash's opens do before the command
   // runs: a `>` one emptied, a `>>` one created when it is missing; false, the
-  // failure kept, when one cannot be opened.
-  const openTargets = async (): Promise<boolean> => {
+  // failure kept, when one cannot be opened. An output-only builtin's targets
+  // wait for the write of its output instead (`outputOnly`).
+  const openTargets = async (name = '', args: readonly string[] = []): Promise<boolean> => {
+    if (outputOnly(name, args)) return true
     for (let file = opening.shift(); file !== undefined; file = opening.shift()) {
       try {
         await createFile(dispatch, session, file.scope, new Uint8Array(), file.append)
@@ -537,6 +549,21 @@ export async function handleRedirect(
   }
   if (unwound !== null) throw await carried(unwound, stdout, new IOResult({ stderr: io.stderr }))
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]
+}
+
+/**
+ * Whether an admitted command reads and writes no file of its own.
+ *
+ * Its write targets can then be opened by the write of its output: no read it
+ * makes can see a target emptied early, and a target that cannot be opened
+ * fails that write with the error the open would have met, the output dropped
+ * and the status 1, which is what bash shows for a command it never ran.
+ * `printf -v` assigns a variable a refused open must stop, so an option ahead
+ * of the format opens first. Mirrors Python's `_output_only`.
+ */
+function outputOnly(name: string, args: readonly string[]): boolean {
+  if (!OUTPUT_ONLY_BUILTINS.has(name)) return false
+  return name !== 'printf' || args.length === 0 || !(args[0] ?? '').startsWith('-')
 }
 
 function descriptorOutput(descriptor: Descriptor): FdDest {

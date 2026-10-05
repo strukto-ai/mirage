@@ -373,7 +373,9 @@ async def listing_error(
     That premise is exactly what a flat store breaks: ram and redis rename
     without creating the destination's ancestors, so they can hold
     ``/missing/a.txt`` with ``/missing`` absent, where resolution stops and
-    the answer is ENOENT. Those call ``readdir_error`` directly.
+    the answer is ENOENT. Those call ``readdir_error`` directly. The walk
+    ends at the listed path itself, which the first probe has already
+    found is not a file, so it is not asked again.
     Mirrors TS ``listingError``.
 
     Args:
@@ -385,9 +387,16 @@ async def listing_error(
         is_dir (Callable[[str], Awaitable[bool]]): Probe reporting whether a
             mount-local path exists as a directory.
     """
-    if key.strip("/") and await is_file(key):
+    leaf = key.strip("/")
+    if not leaf:
+        return await readdir_error(path, key, is_file, is_dir)
+    if await is_file(key):
         return enotdir(path)
-    return await readdir_error(path, key, is_file, is_dir)
+
+    async def is_file_above(component: str) -> bool:
+        return component.strip("/") != leaf and await is_file(component)
+
+    return await readdir_error(path, key, is_file_above, is_dir)
 
 
 def enotsup(

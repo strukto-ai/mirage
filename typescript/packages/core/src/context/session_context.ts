@@ -443,8 +443,12 @@ export function walkProbeFor(virtual: string): WalkProbe | null {
   return best
 }
 
-/** Opens a statement's write targets as bash does before the command runs; false when one cannot be opened. */
-export type RedirectOpener = () => Promise<boolean>
+/**
+ * Opens a statement's write targets as bash does before the command runs,
+ * given the admitted command's name and arguments; false when one cannot be
+ * opened.
+ */
+export type RedirectOpener = (name: string, args: readonly string[]) => Promise<boolean>
 
 const redirectStorage = createAsyncContext<[object, readonly PathSpec[], RedirectOpener | null]>()
 
@@ -460,8 +464,8 @@ const redirectStorage = createAsyncContext<[object, readonly PathSpec[], Redirec
  * statement's targets.
  *
  * The opener empties the targets bash opens for writing before the command
- * runs; dispatch calls it once the line is admitted, so a command the gate
- * refuses leaves its targets as they were.
+ * runs; dispatch calls it with the command's name and arguments once the line
+ * is admitted, so a command the gate refuses leaves its targets as they were.
  */
 export function runWithRedirectPaths<T>(
   node: object,

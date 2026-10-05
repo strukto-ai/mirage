@@ -646,7 +646,7 @@ async function runArgv(
   // bash opens a command's write targets before it runs, so `cat f > f`
   // reads an emptied file; here that waits for the admission above,
   // because a command the gate refuses must leave its targets alone.
-  if (opener !== null && !(await opener())) {
+  if (opener !== null && !(await opener(name, argv.args))) {
     return [null, new IOResult({ exitCode: 1 }), new ExecutionNode({ exitCode: 1 })]
   }
 

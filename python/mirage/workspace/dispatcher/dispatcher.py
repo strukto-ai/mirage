@@ -131,6 +131,19 @@ def _served(report: OpReport | None, result: Any) -> None:
         )
 
 
+def _appends_nothing(op: str, kwargs: dict[str, Any]) -> bool:
+    """Whether a completed write op was an append of no bytes.
+
+    That is an open for appending (``true >> f``): it may create the
+    file, but it leaves an existing one's times as they were.
+
+    Args:
+        op (str): the write op that ran.
+        kwargs (dict[str, Any]): its kwargs; an append's ``data``.
+    """
+    return op == "append" and not kwargs.get("data")
+
+
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
     """Drop listing entries the current session's spec hides.
 
@@ -761,8 +774,13 @@ class Dispatcher:
             kwargs (dict[str, Any]): the op's kwargs; a rename's ``dst``
                 is the moved name.
         """
-        observed = time.time() if op in STAMP_WRITE_OPS else None
-        await self.invalidate_after_write(mount, path, observed=observed)
+        opened = _appends_nothing(op, kwargs)
+        observed = (
+            time.time() if op in STAMP_WRITE_OPS and not opened else None
+        )
+        await self.invalidate_after_write(
+            mount, path, observed=observed, times=not opened
+        )
         if op in ("unlink", "rmdir"):
             # The name no longer holds that file, so what was set on
             # it (overlay mode and owner, extended attributes) goes
@@ -1662,9 +1680,24 @@ class Dispatcher:
         return manager
 
     async def invalidate_after_write(
-        self, mount: MountEntry, path: PathSpec, observed: float | None = None
+        self,
+        mount: MountEntry,
+        path: PathSpec,
+        observed: float | None = None,
+        times: bool = True,
     ) -> None:
-        await self._namespace.clear_times(path.virtual, observed=observed)
+        """Drop what a write to ``path`` made stale above the store.
+
+        Args:
+            mount (MountEntry): the mount the write ran on.
+            path (PathSpec): the path it wrote.
+            observed (float | None): epoch seconds of a content write to
+                record, None for a removal.
+            times (bool): drop the overlay times a content write moves;
+                False for an open that wrote nothing.
+        """
+        if times:
+            await self._namespace.clear_times(path.virtual, observed=observed)
         manager = self._manager_for(mount)
         await manager.invalidate_after_write(path)
         await manager.invalidate_ancestors(path)

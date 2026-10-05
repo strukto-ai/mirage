@@ -30,6 +30,10 @@ async def append_bytes(
     p = norm(path)
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
+    # Appending nothing opens the file (`true >> f`): it creates a missing
+    # one and leaves an existing one as it was, modification time included.
+    if not data and p in store.files:
+        return
     if p in store.files:
         store.files[p] += data
     else:

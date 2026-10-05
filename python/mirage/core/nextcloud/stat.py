@@ -44,30 +44,22 @@ async def stat(
     if parent_listing.entries is not None:
         raise enoent(path)
     op = accessor.operator()
-    key = stripped
     try:
-        md = await op.stat(key)
-    except NotFound:
-        md = None
-    if md is not None and md.mode != EntryMode.Dir:
-        modified = md.last_modified.isoformat() if md.last_modified else None
+        md = await op.stat(stripped)
+    except NotFound as exc:
+        raise enoent(path) from exc
+    if md.mode == EntryMode.Dir:
         return FileStat(
-            name=stripped.rsplit("/", 1)[-1],
-            size=md.content_length,
-            modified=modified,
-            type=FileType.FILE,
-            content=content_type_for_path(raw),
-            fingerprint=md.etag,
-            extra={"etag": md.etag} if md.etag else {},
+            name=stripped.rsplit("/", 1)[-1] or "/",
+            type=FileType.DIRECTORY,
         )
-    try:
-        md_dir = await op.stat(key + "/")
-        if md_dir and md_dir.mode == EntryMode.Dir:
-            return FileStat(
-                name=stripped.rsplit("/", 1)[-1] or "/",
-                type=FileType.DIRECTORY,
-            )
-    except NotFound:
-        # NotFound maps to the canonical ENOENT raised below
-        pass
-    raise enoent(path)
+    modified = md.last_modified.isoformat() if md.last_modified else None
+    return FileStat(
+        name=stripped.rsplit("/", 1)[-1],
+        size=md.content_length,
+        modified=modified,
+        type=FileType.FILE,
+        content=content_type_for_path(raw),
+        fingerprint=md.etag,
+        extra={"etag": md.etag} if md.etag else {},
+    )

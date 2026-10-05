@@ -29,7 +29,9 @@ async function fileLevel(op: Operator, key: string): Promise<string | null> {
  * opendal's `createDir` is MKCOL over every missing level, so a bare mkdir
  * looks its parent up first and refuses a missing one, as mkdir(2) does; only
  * `-p` materializes a chain, and only it walks the ancestor listings. With
- * `parents`, a file in the way is named rather than the operand.
+ * `parents`, a file in the way is named rather than the operand. Both doors
+ * refuse a taken name before calling here (`refuseTaken`), so the create is
+ * not looked up again.
  */
 export async function mkdir(
   accessor: NextcloudAccessor,
@@ -64,11 +66,4 @@ export async function mkdir(
   }
   await invalidateAfterWrite(path)
   if (parents) await invalidateAncestors(path)
-  let taken = false
-  try {
-    taken = !(await op.stat(key)).isDirectory()
-  } catch (error) {
-    if (!isNotFound(error)) throw error
-  }
-  if (taken) throw eexist(path)
 }

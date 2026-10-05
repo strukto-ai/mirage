@@ -631,7 +631,7 @@ async def _run_argv(
     # bash opens a command's write targets before it runs, so `cat f > f`
     # reads an emptied file; here that waits for the admission above,
     # because a command the gate refuses must leave its targets alone.
-    if opener is not None and not await opener():
+    if opener is not None and not await opener(name, tuple(argv.args)):
         return None, IOResult(exit_code=1), ExecutionNode(exit_code=1)
 
     # ── run ────────────────────────────────────
