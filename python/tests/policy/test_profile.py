@@ -2391,7 +2391,7 @@ async def test_a_create_through_the_command_dispatcher_meets_the_rules():
             for name in ("", "open", "sec")
         )
         assert await _line(ws, "unzip -q -d /data/uz /other/z.zip", "g") == (
-            50,
+            2,
             "",
             refused,
         )

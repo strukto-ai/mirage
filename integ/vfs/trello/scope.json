@@ -77,6 +77,19 @@
         "stdout": "brd_ops\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tr_scope_card_writes_denied",
+      "seq": 939006,
+      "targets": [
+        "trello-scoped"
+      ],
+      "command": "trello card comment --card_id crd_search --text hi; echo rc=$?; trello card comment-update --card_id crd_search --comment_id act_x --text hi; echo rc=$?; trello card assign --card_id crd_search --member_id mem_sam; echo rc=$?; trello card label --card_id crd_search --label_id lbl_bug; echo rc=$?; trello card unlabel --card_id crd_search --label_id lbl_bug; echo rc=$?; trello card move --card_id crd_search --list_id lst_doing; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "trello card comment: card crd_search is outside this mount's scope\ntrello card comment-update: card crd_search is outside this mount's scope\ntrello card assign: card crd_search is outside this mount's scope\ntrello card label: card crd_search is outside this mount's scope\ntrello card unlabel: card crd_search is outside this mount's scope\ntrello card move: card crd_search is outside this mount's scope\n"
+      }
     }
   ]
 }

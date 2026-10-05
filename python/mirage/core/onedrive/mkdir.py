@@ -16,54 +16,72 @@ import posixpath
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
-from mirage.core.msgraph.client import GraphError
-from mirage.core.msgraph.drive import create_child_folder
+from mirage.core.msgraph.drive import FolderTarget, create_child_folder
 from mirage.core.onedrive.client import full_item_url, item_url
 from mirage.types import PathSpec
+from mirage.utils.errors import enotdir
+from mirage.utils.key_prefix import mount_prefix_of
 
 
-async def _create_root(accessor: OneDriveAccessor) -> None:
+async def _create_root(accessor: OneDriveAccessor, root: str) -> None:
     """Create the mount's ``key_prefix`` folders, one level at a time.
 
     The mount root exists from the agent's side because it is mounted, but
     on the drive it is a folder chain nothing has created until the first
     write. A file upload creates its parents; a folder create does not,
-    so mkdir has to.
+    so mkdir has to. The prefix is hidden, so a file in it is named as
+    ``root``: the mount root is then not a directory.
 
     Args:
         accessor (OneDriveAccessor): the mount's accessor.
+        root (str): the path a refusal in the prefix names.
     """
     parent = ""
     for name in (accessor.config.key_prefix or "").strip("/").split("/"):
+        level = f"{parent}/{name}" if parent else name
+        try:
+            await create_child_folder(
+                accessor.config,
+                full_item_url(accessor.config, parent, action="/children"),
+                name,
+                FolderTarget(
+                    item=full_item_url(accessor.config, level),
+                    parent=full_item_url(accessor.config, parent),
+                    virtual=root,
+                ),
+                session=accessor.pool,
+            )
+        except FileExistsError as exc:
+            raise enotdir(root) from exc
+        parent = level
+
+
+async def _create_dir(
+    accessor: OneDriveAccessor, path: str, virtual: str, root: str
+) -> None:
+    config = accessor.config
+    parent = posixpath.dirname(path)
+
+    async def create() -> None:
         await create_child_folder(
-            accessor.config,
-            full_item_url(accessor.config, parent, action="/children"),
-            name,
+            config,
+            item_url(config, parent, action="/children"),
+            posixpath.basename(path),
+            FolderTarget(
+                item=item_url(config, path),
+                parent=item_url(config, parent),
+                virtual=virtual,
+            ),
             session=accessor.pool,
         )
-        parent = f"{parent}/{name}" if parent else name
 
-
-async def _create_dir(accessor: OneDriveAccessor, path: str) -> None:
-    parent = posixpath.dirname(path)
-    url = item_url(accessor.config, parent, action="/children")
-    name = posixpath.basename(path)
     try:
-        await create_child_folder(
-            accessor.config, url, name, session=accessor.pool
-        )
-    except GraphError as exc:
-        missing_root = (
-            exc.status == 404
-            and not parent
-            and (accessor.config.key_prefix or "").strip("/")
-        )
-        if not missing_root:
+        await create()
+    except FileNotFoundError:
+        if parent or not (config.key_prefix or "").strip("/"):
             raise
-        await _create_root(accessor)
-        await create_child_folder(
-            accessor.config, url, name, session=accessor.pool
-        )
+        await _create_root(accessor, root)
+        await create()
 
 
 async def mkdir(
@@ -73,11 +91,21 @@ async def mkdir(
     if not key:
         return
     if parents:
+        prefix = mount_prefix_of(path.virtual, path.vfs_path).rstrip("/")
         parts = key.split("/")
         for i in range(len(parts)):
-            await _create_dir(accessor, "/".join(parts[: i + 1]))
+            level = "/".join(parts[: i + 1])
+            virtual = f"{prefix}/{level}"
+            try:
+                await _create_dir(accessor, level, virtual, prefix or "/")
+            except FileExistsError as exc:
+                # `mkdir -p` passes only a directory at the operand and
+                # names the file it stops at above it, as GNU does.
+                if i == len(parts) - 1:
+                    raise
+                raise enotdir(virtual) from exc
     else:
-        await _create_dir(accessor, key)
+        await _create_dir(accessor, key, path.virtual, path.virtual)
     await invalidate_after_write(path)
     if parents:
         await invalidate_ancestors(path)

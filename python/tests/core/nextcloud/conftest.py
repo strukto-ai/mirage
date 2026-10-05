@@ -94,6 +94,10 @@ class FakeAsyncOperator:
             raise NotFound("path not found", key)
         if k in self.files:
             return self.metas[k]
+        if k + "/" in self.dirs or any(
+            f.startswith(k + "/") for f in self.files
+        ):
+            return _FakeMetadata(content_length=0, mode=EntryMode.Dir)
         raise NotFound("path not found", key)
 
     async def write(self, key: str, data: bytes) -> None:

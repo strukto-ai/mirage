@@ -103,6 +103,19 @@
         "stdout": "1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mdb_rg_glob_operand_scans_each_collection",
+      "seq": 620069,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "rg -c ada /mongodb/mirage_integ/collections/*/documents.jsonl; rg ada /mongodb/*/collections/authors/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mongodb/mirage_integ/collections/authors/documents.jsonl:1\n/mongodb/mirage_integ/collections/books/documents.jsonl:2\n{\"_id\": 1, \"name\": \"ada\", \"books\": 2}\n",
+        "stderr": ""
+      }
     }
   ]
 }

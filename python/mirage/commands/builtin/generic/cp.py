@@ -1053,36 +1053,42 @@ def transfer_line(
 
 async def _tree_lines(
     strategy: NativeCopy,
+    stat: StatFn,
     src: PathSpec,
     target: PathSpec,
     src_base: str,
     dst_base: str,
 ) -> list[str]:
-    """GNU ``-v`` lines for a natively copied tree, parents first.
+    """GNU ``-v`` lines for a tree about to be copied natively, parents first.
 
-    GNU ``cp -rv`` reports directories as well as files, including the
-    source root itself. Deliberate divergence: GNU's sibling order follows
-    readdir, which no backend can reproduce, so entries are sorted
-    lexicographically instead. That keeps every parent ahead of its
-    children (GNU's only load-bearing ordering guarantee) and is stable
-    across backends.
+    GNU ``cp -rv`` reports every file and every directory it creates,
+    including the source root itself; a directory already at the
+    destination is merged into without a line. Read before the copy, so
+    the destination still shows which directories exist. Deliberate
+    divergence: GNU's sibling order follows readdir, which no backend can
+    reproduce, so entries are sorted lexicographically instead. That keeps
+    every parent ahead of its children (GNU's only load-bearing ordering
+    guarantee) and is stable across backends.
 
     Args:
         strategy (NativeCopy): Native copy capability.
+        stat (StatFn): Stats a destination directory.
         src (PathSpec): Source root.
         target (PathSpec): Destination root.
         src_base (str): Source root's mount path, no trailing slash.
         dst_base (str): Destination root's mount path, no trailing slash.
     """
-    dirs = await strategy.find(src, type="d")
+    dirs = {src_base, *await strategy.find(src, type="d")}
     files = await strategy.find(src, type="f")
     lines: list[str] = []
-    for entry_mount in sorted({src_base, *dirs, *files}):
+    for entry_mount in sorted({*dirs, *files}):
         entry = spelled_from(mounted_path(src, entry_mount), src)
         entry_dst = spelled_from(
             mounted_path(target, dst_base + entry_mount[len(src_base) :]),
             target,
         )
+        if entry_mount in dirs and await is_directory(stat, entry_dst):
+            continue
         lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
     return lines
 
@@ -1135,8 +1141,9 @@ async def _mirror_dirs(
         errors (list[str]): Collected stderr lines, appended in place.
         into_itself (bool): Whether the destination lies inside the
             source; its subtree is then left out, as the file pass does.
-        lines (list[str] | None): Verbose sink for the directory entries
-            GNU also reports; None keeps them silent.
+        lines (list[str] | None): Verbose sink for the directories this
+            creates, which GNU also reports; one already at the
+            destination is merged into silently. None keeps them silent.
 
     Returns:
         bool: False when a directory could not be created, so the caller
@@ -1159,9 +1166,6 @@ async def _mirror_dirs(
             mounted_path(target, dst_base + entry_mount[len(src_base) :]),
             target,
         )
-        if lines is not None:
-            entry = spelled_from(mounted_path(src, entry_mount), src)
-            lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
         if await is_directory(stat, entry_dst):
             continue
         try:
@@ -1173,6 +1177,9 @@ async def _mirror_dirs(
             )
             return False
         writes[entry_dst.mount_path] = b""
+        if lines is not None:
+            entry = spelled_from(mounted_path(src, entry_mount), src)
+            lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
     return True
 
 
@@ -1692,18 +1699,18 @@ async def cp(
                 and not per_entry_native
                 and not into_itself
             ):
+                if flags.verbose:
+                    lines.extend(
+                        await _tree_lines(
+                            strategy, stat, src, target, src_base, dst_base
+                        )
+                    )
                 await strategy.dir_copy(src, target)
                 for entry_mount in await strategy.find(src, type="f"):
                     entry_dst = mounted_path(
                         target, dst_base + entry_mount[len(src_base) :]
                     )
                     writes[entry_dst.mount_path] = b""
-                if flags.verbose:
-                    lines.extend(
-                        await _tree_lines(
-                            strategy, src, target, src_base, dst_base
-                        )
-                    )
                 if copies is not None:
                     await copy_tree_links(
                         copies,
