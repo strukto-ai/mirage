@@ -25,13 +25,15 @@ const home = mkdtempSync(join(tmpdir(), 'mirage-ssh-config-'))
 
 describe('resolveSSHConfig', () => {
   it('keeps the door shut without a port', () => {
-    expect(resolveSSHConfig({ env: {}, table: {}, home })).toBeNull()
+    const shut = resolveSSHConfig({ env: {}, table: {}, home })
+    expect(shut.port).toBeNull()
+    expect(shut.hostKeyFile).toBe(join(home, 'ssh', 'host_ed25519_key'))
     expect(
       resolveSSHConfig({
         env: { MIRAGE_SSH_HOST: '0.0.0.0' },
         table: { ssh_host: '0.0.0.0' },
         home,
-      }),
+      }).port,
     ).toBeNull()
   })
 
@@ -50,9 +52,9 @@ describe('resolveSSHConfig', () => {
       table: { ssh_port: '2200', ssh_host: '0.0.0.0', ssh_authorized_keys: '/etc/keys' },
       home,
     })
-    expect(cfg?.port).toBe(2200)
-    expect(cfg?.host).toBe('0.0.0.0')
-    expect(cfg?.authorizedKeysFile).toBe('/etc/keys')
+    expect(cfg.port).toBe(2200)
+    expect(cfg.host).toBe('0.0.0.0')
+    expect(cfg.authorizedKeysFile).toBe('/etc/keys')
   })
 
   it('lets env win over the table', () => {
@@ -61,7 +63,7 @@ describe('resolveSSHConfig', () => {
       table: { ssh_port: '2200', ssh_host: '0.0.0.0' },
       home,
     })
-    expect([cfg?.port, cfg?.host]).toEqual([2300, '10.0.0.1'])
+    expect([cfg.port, cfg.host]).toEqual([2300, '10.0.0.1'])
   })
 
   it('expands the home directory in key paths', () => {
@@ -70,7 +72,7 @@ describe('resolveSSHConfig', () => {
       table: {},
       home,
     })
-    expect(cfg?.hostKeyFile).toBe(join(homedir(), 'k'))
+    expect(cfg.hostKeyFile).toBe(join(homedir(), 'k'))
   })
 
   it.each(['ssh', '22.5', '0', '65536', '-1'])('refuses port %s by name', (raw) => {
@@ -86,7 +88,7 @@ describe('resolveSSHConfig', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-ssh-home-'))
     writeFileSync(join(dir, 'config.toml'), '[daemon]\nssh_port = 2222\n')
     const env = { MIRAGE_HOME: dir }
-    expect(resolveSSHConfig({ env })).toBeNull()
+    expect(resolveSSHConfig({ env }).port).toBeNull()
   })
 })
 

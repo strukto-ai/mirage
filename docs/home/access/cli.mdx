@@ -63,7 +63,7 @@ mirage workspace delete demo
 
 ### `mirage mcp`
 
-`mirage mcp [CONFIG] [-w ID] [-s SESSION]` serves a session's [MCP](/home/access/mcp) tools on stdio. `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc).
+`mirage mcp [CONFIG] [-w ID] [-s SESSION]` serves a session's [MCP](/home/access/mcp) tools on stdio. `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc). `mirage ssh-proxy ID` carries [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`.
 
 With `-w`, it serves a workspace the server already holds. Otherwise it creates one from `CONFIG`, from `MIRAGE_MCP_CONFIG` (`MIRAGE_RPC_CONFIG`) or `MIRAGE_CONFIG`, or from a `workspace.yaml` found walking up from the working directory. It deletes that workspace when the client disconnects, unless the config names a `workspace_id`.
 
@@ -122,6 +122,27 @@ The server the CLI starts. It exits 30 seconds after its last workspace is delet
 | `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Workspaces are lost. |
 | `mirage daemon kill` | Kill it. A last resort. |
 
+## Log in
+
+A server in `jwt` mode, such as a hosted one, needs a login. Point the CLI at it and log in once:
+
+```bash
+mirage config set url https://mirage.example.com
+mirage login
+```
+
+`mirage login` asks the server where to sign in, opens your browser there, and waits. If you are already signed in, the browser comes straight back. The CLI then keeps the tokens in `~/.mirage/login.json`, readable only by you. A machine with no browser can use `mirage login --token TOKEN` instead, which keeps a token you paste once the server accepts it; `--token -` reads it from stdin, so it stays out of your shell history.
+
+| Command | Does |
+| --- | --- |
+| `mirage login [--token TOKEN]` | Log in to the server `url` points at. |
+| `mirage whoami` | Show the account and the date to log in again by. |
+| `mirage logout` | Forget the login. |
+
+- Every command sends the login's token, `ssh-proxy` included, but only to the server it was made for. `MIRAGE_TOKEN` or `auth_token` wins over it.
+- The CLI refreshes the token when it ends, and asks you to log in again 30 days after you signed in. A running `mcp` or `rpc` relay asks for it on every request, so it keeps working past a refresh.
+- A server that publishes no login, such as the one the CLI starts on your machine, needs none, and `mirage login` says so.
+
 ## Config
 
 `mirage config set|get|unset|list` edits `~/.mirage/config.toml`. An environment variable wins over the file. Changes apply on the next start.
@@ -130,11 +151,12 @@ The server the CLI starts. It exits 30 seconds after its last workspace is delet
 | --- | --- | --- |
 | `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:8765` |
 | `port` | `MIRAGE_DAEMON_PORT` | the `url`'s port |
-| `auth_token` | `MIRAGE_TOKEN` | `~/.mirage/auth_token`, for a local `url` only |
+| `auth_token` | `MIRAGE_TOKEN` | your [login](#log-in) for this `url`, else `~/.mirage/auth_token` for a local `url` |
 | `auth_mode` | `MIRAGE_AUTH_MODE` | `local` |
 | `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#settings) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Auth](/home/access/http#auth) |
+| `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [CLI login](/home/access/http#cli-login) |
 
 `MIRAGE_HOME` moves everything under `~/.mirage`.

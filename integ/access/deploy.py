@@ -36,7 +36,7 @@ from pathlib import Path
 
 import boto3
 import httpx
-from issuer import ACCOUNT, AUTHORIZED_PARTY, ISSUER, Issuer
+from issuer import ACCOUNT, AUTHORIZED_PARTY, CLIENT_ID, Issuer
 from moto.server import ThreadedMotoServer
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -164,13 +164,14 @@ class Deployment:
         if self.name == "token":
             env |= {"MIRAGE_AUTH_MODE": "token", "MIRAGE_AUTH_TOKEN": TOKEN}
         if self.name == "jwt":
-            (self.root / "issuer.pem").write_text(self.issuer.public_pem)
             env |= {
                 "MIRAGE_AUTH_MODE": "jwt",
                 "MIRAGE_JWT_ALG": "RS256",
-                "MIRAGE_JWT_PUBKEY_FILE": str(self.root / "issuer.pem"),
-                "MIRAGE_JWT_ISSUER": ISSUER,
+                "MIRAGE_JWT_JWKS_URL": self.issuer.jwks_url,
+                "MIRAGE_JWT_ISSUER": self.issuer.url,
+                "MIRAGE_JWT_AUDIENCE": CLIENT_ID,
                 "MIRAGE_JWT_AUTHORIZED_PARTIES": AUTHORIZED_PARTY,
+                "MIRAGE_LOGIN_CLIENT_ID": CLIENT_ID,
             }
         return env
 

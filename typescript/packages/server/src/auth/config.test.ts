@@ -105,6 +105,65 @@ describe('resolveAuthConfig', () => {
     ).toThrow(/MIRAGE_JWT_PUBKEY/)
   })
 
+  it('jwt mode takes a key set url', () => {
+    const cfg = resolveAuthConfig({
+      env: {
+        MIRAGE_AUTH_MODE: 'jwt',
+        MIRAGE_JWT_ALG: 'RS256',
+        MIRAGE_JWT_JWKS_URL: 'https://clerk.example/.well-known/jwks.json',
+        MIRAGE_JWT_AUDIENCE: 'web, cli',
+      },
+      tokenFile: join(dir, 'missing'),
+    })
+    expect(cfg.jwt?.key).toBeUndefined()
+    expect(cfg.jwt?.jwksUrl).toBe('https://clerk.example/.well-known/jwks.json')
+    expect(cfg.jwt?.audiences).toEqual(['web', 'cli'])
+  })
+
+  const clerkJwt = {
+    MIRAGE_AUTH_MODE: 'jwt',
+    MIRAGE_JWT_ALG: 'RS256',
+    MIRAGE_JWT_JWKS_URL: 'https://clerk.example/.well-known/jwks.json',
+    MIRAGE_JWT_ISSUER: 'https://clerk.example',
+    MIRAGE_JWT_AUDIENCE: 'client_cli',
+  }
+
+  it('publishes a login client with jwt', () => {
+    const cfg = resolveAuthConfig({
+      env: { ...clerkJwt, MIRAGE_LOGIN_CLIENT_ID: 'client_cli' },
+      tokenFile: join(dir, 'missing'),
+    })
+    expect(cfg.jwt?.loginClientId).toBe('client_cli')
+  })
+
+  it.each<[string, Record<string, string>]>([
+    ['token', { MIRAGE_AUTH_MODE: 'token', MIRAGE_AUTH_TOKEN: 't' }],
+    ['local', { MIRAGE_AUTH_MODE: 'local' }],
+    ['no issuer', { ...clerkJwt, MIRAGE_JWT_ISSUER: '' }],
+    ['not an audience', { ...clerkJwt, MIRAGE_JWT_AUDIENCE: 'client_web' }],
+  ])('a login client needs jwt, an issuer and its audience (%s)', (_name, env) => {
+    expect(() =>
+      resolveAuthConfig({
+        env: { ...env, MIRAGE_LOGIN_CLIENT_ID: 'client_cli' },
+        tokenFile: join(dir, 'missing'),
+      }),
+    ).toThrow(/MIRAGE_LOGIN_CLIENT_ID requires/)
+  })
+
+  it('jwt mode takes one key source', () => {
+    expect(() =>
+      resolveAuthConfig({
+        env: {
+          MIRAGE_AUTH_MODE: 'jwt',
+          MIRAGE_JWT_ALG: 'RS256',
+          MIRAGE_JWT_PUBKEY: '-----BEGIN',
+          MIRAGE_JWT_JWKS_URL: 'https://clerk.example/jwks.json',
+        },
+        tokenFile: join(dir, 'missing'),
+      }),
+    ).toThrow(/MIRAGE_JWT_JWKS_URL/)
+  })
+
   it('jwt mode requires alg', () => {
     expect(() =>
       resolveAuthConfig({
@@ -132,7 +191,7 @@ describe('resolveAuthConfig', () => {
     expect(cfg.jwt?.key).toContain('FAKE')
     expect(cfg.jwt?.algorithm).toBe('RS256')
     expect(cfg.jwt?.issuer).toBe('https://issuer.example')
-    expect(cfg.jwt?.audience).toBe('mirage-daemon')
+    expect(cfg.jwt?.audiences).toEqual(['mirage-daemon'])
     expect(cfg.jwt?.authorizedParties).toEqual(['https://app.example', 'https://other.example'])
     expect(cfg.jwt?.clockSkewSeconds).toBe(12)
   })
@@ -199,7 +258,7 @@ describe('resolveAuthConfig config table', () => {
     expect(cfg.jwt?.key).toBe('KEYDATA')
     expect(cfg.jwt?.algorithm).toBe('RS256')
     expect(cfg.jwt?.issuer).toBe('https://issuer')
-    expect(cfg.jwt?.audience).toBe('aud')
+    expect(cfg.jwt?.audiences).toEqual(['aud'])
     expect(cfg.jwt?.authorizedParties).toEqual(['a', 'b'])
     expect(cfg.jwt?.clockSkewSeconds).toBe(9)
   })

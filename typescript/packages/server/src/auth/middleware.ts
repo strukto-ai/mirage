@@ -14,9 +14,10 @@
 
 import { timingSafeEqual } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { createRemoteJWKSet } from 'jose'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 
-import { AuthMode, type AuthConfig } from './config.ts'
+import { AuthMode, PROTECTED_RESOURCE_PATH, type AuthConfig } from './config.ts'
 import { JWTVerificationError, verifyJwt } from './jwt.ts'
 
 declare module 'fastify' {
@@ -31,7 +32,7 @@ declare module 'fastify' {
 }
 
 const BEARER_PREFIX = 'Bearer '
-const HEALTH_PATHS = new Set(['/v1/health'])
+const PUBLIC_PATHS = new Set(['/v1/health', PROTECTED_RESOURCE_PATH])
 const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 const AUTH_RATE_LIMIT_POINTS = 2000
 const AUTH_RATE_LIMIT_WINDOW_SECONDS = 60
@@ -65,12 +66,16 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
     )
     return
   }
+  // The issuer's published keys, cached and fetched again for a key id
+  // they do not hold, so a key rotation needs no restart.
+  const keySet =
+    config.jwt?.jwksUrl !== undefined ? createRemoteJWKSet(new URL(config.jwt.jwksUrl)) : undefined
   const limiter = new RateLimiterMemory({
     points: AUTH_RATE_LIMIT_POINTS,
     duration: AUTH_RATE_LIMIT_WINDOW_SECONDS,
   })
   app.addHook('onRequest', async (req, reply) => {
-    if (HEALTH_PATHS.has(req.url)) return
+    if (PUBLIC_PATHS.has(req.url)) return
     try {
       await limiter.consume(req.ip)
     } catch (e) {
@@ -84,7 +89,7 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
     }
   })
   app.addHook('onRequest', async (req, reply) => {
-    if (HEALTH_PATHS.has(req.url)) return
+    if (PUBLIC_PATHS.has(req.url)) return
     const token = extractBearer(req)
     if (token === undefined) {
       await unauthorized(reply, 'missing bearer token')
@@ -96,7 +101,7 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
         return
       }
       try {
-        const claims = await verifyJwt(token, config.jwt)
+        const claims = await verifyJwt(token, config.jwt, keySet)
         // verifyJwt refuses a token without one; null would be refused
         // too, since jwt mode requires an account.
         req.account = claims.sub ?? null

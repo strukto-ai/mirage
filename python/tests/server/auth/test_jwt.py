@@ -52,7 +52,7 @@ def _make_cfg(rsa_keys: KeyPair, **overrides) -> JWTConfig:
         key=rsa_keys.public_pem.decode(),
         algorithm="RS256",
         issuer=None,
-        audience=None,
+        audiences=(),
         authorized_parties=(),
         clock_skew_seconds=5,
     )
@@ -143,7 +143,7 @@ def test_verify_jwt_rejects_wrong_issuer(rsa_keys):
 
 @pytest.mark.no_host_override
 def test_verify_jwt_rejects_wrong_audience(rsa_keys):
-    cfg = _make_cfg(rsa_keys, audience="mirage-daemon")
+    cfg = _make_cfg(rsa_keys, audiences=("mirage-daemon",))
     token = _sign(
         rsa_keys,
         {
@@ -152,6 +152,58 @@ def test_verify_jwt_rejects_wrong_audience(rsa_keys):
             "aud": "something-else",
         },
     )
+    with pytest.raises(JWTVerificationError):
+        verify_jwt(token, cfg)
+
+
+@pytest.mark.no_host_override
+def test_verify_jwt_accepts_an_aud_among_the_audiences(rsa_keys):
+    cfg = _make_cfg(rsa_keys, audiences=("web", "cli"))
+    for aud in ("cli", ["other", "cli"]):
+        token = _sign(
+            rsa_keys, {"sub": "x", "exp": int(time.time()) + 60, "aud": aud}
+        )
+        assert verify_jwt(token, cfg)["sub"] == "x"
+
+
+@pytest.mark.no_host_override
+def test_verify_jwt_rejects_an_aud_when_no_audience_is_configured(rsa_keys):
+    token = _sign(
+        rsa_keys, {"sub": "x", "exp": int(time.time()) + 60, "aud": "cli"}
+    )
+    with pytest.raises(JWTVerificationError):
+        verify_jwt(token, _make_cfg(rsa_keys))
+
+
+@pytest.mark.no_host_override
+def test_verify_jwt_takes_session_and_oauth_tokens_on_one_server(rsa_keys):
+    # An app's session token names its origin in azp and has no aud; an
+    # OAuth client's access token names the client in aud.
+    cfg = _make_cfg(
+        rsa_keys,
+        audiences=("client_cli",),
+        authorized_parties=("https://app.example",),
+    )
+    now = int(time.time())
+    session = _sign(
+        rsa_keys, {"sub": "x", "exp": now + 60, "azp": "https://app.example"}
+    )
+    oauth = _sign(rsa_keys, {"sub": "x", "exp": now + 60, "aud": "client_cli"})
+    stray = _sign(
+        rsa_keys, {"sub": "x", "exp": now + 60, "azp": "https://evil.example"}
+    )
+    assert verify_jwt(session, cfg)["sub"] == "x"
+    assert verify_jwt(oauth, cfg)["sub"] == "x"
+    with pytest.raises(JWTVerificationError):
+        verify_jwt(stray, cfg)
+
+
+@pytest.mark.no_host_override
+def test_verify_jwt_needs_an_aud_when_only_audiences_are_configured(
+    rsa_keys,
+):
+    cfg = _make_cfg(rsa_keys, audiences=("client_cli",))
+    token = _sign(rsa_keys, {"sub": "x", "exp": int(time.time()) + 60})
     with pytest.raises(JWTVerificationError):
         verify_jwt(token, cfg)
 

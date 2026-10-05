@@ -96,6 +96,37 @@ def test_resolve_auth_config_jwt_mode_requires_key(tmp_path):
 
 
 @pytest.mark.no_host_override
+def test_resolve_auth_config_jwt_mode_takes_a_key_set_url(tmp_path):
+    cfg = resolve_auth_config(
+        env={
+            "MIRAGE_AUTH_MODE": "jwt",
+            "MIRAGE_JWT_ALG": "RS256",
+            "MIRAGE_JWT_JWKS_URL": "https://clerk.example/.well-known/jwks.json",
+            "MIRAGE_JWT_AUDIENCE": "web, cli",
+        },
+        token_file=tmp_path / "missing",
+    )
+    assert cfg.jwt is not None
+    assert cfg.jwt.key is None
+    assert cfg.jwt.jwks_url == "https://clerk.example/.well-known/jwks.json"
+    assert cfg.jwt.audiences == ("web", "cli")
+
+
+@pytest.mark.no_host_override
+def test_resolve_auth_config_jwt_mode_takes_one_key_source(tmp_path):
+    with pytest.raises(RuntimeError, match="MIRAGE_JWT_JWKS_URL"):
+        resolve_auth_config(
+            env={
+                "MIRAGE_AUTH_MODE": "jwt",
+                "MIRAGE_JWT_ALG": "RS256",
+                "MIRAGE_JWT_PUBKEY": "-----BEGIN",
+                "MIRAGE_JWT_JWKS_URL": "https://clerk.example/jwks.json",
+            },
+            token_file=tmp_path / "missing",
+        )
+
+
+@pytest.mark.no_host_override
 def test_resolve_auth_config_jwt_mode_requires_alg(tmp_path):
     with pytest.raises(RuntimeError, match="MIRAGE_JWT_ALG"):
         resolve_auth_config(
@@ -126,7 +157,7 @@ def test_resolve_auth_config_jwt_mode_inline_key(tmp_path):
     assert "FAKE" in cfg.jwt.key
     assert cfg.jwt.algorithm == "RS256"
     assert cfg.jwt.issuer == "https://issuer.example"
-    assert cfg.jwt.audience == "mirage-daemon"
+    assert cfg.jwt.audiences == ("mirage-daemon",)
     assert cfg.jwt.authorized_parties == (
         "https://app.example",
         "https://other.example",
@@ -199,7 +230,7 @@ def test_jwt_settings_from_config_table(tmp_path):
     assert cfg.jwt.key == "KEYDATA"
     assert cfg.jwt.algorithm == "RS256"
     assert cfg.jwt.issuer == "https://issuer"
-    assert cfg.jwt.audience == "aud"
+    assert cfg.jwt.audiences == ("aud",)
     assert cfg.jwt.authorized_parties == ("a", "b")
     assert cfg.jwt.clock_skew_seconds == 9
 
@@ -224,3 +255,41 @@ def test_secret_keys_have_no_config_key():
     assert "MIRAGE_AUTH_TOKEN" not in ALLOWED_KEYS
     assert "auth_mode" in ALLOWED_KEYS
     assert "jwt_alg" in ALLOWED_KEYS
+
+
+CLERK_JWT = {
+    "MIRAGE_AUTH_MODE": "jwt",
+    "MIRAGE_JWT_ALG": "RS256",
+    "MIRAGE_JWT_JWKS_URL": "https://clerk.example/.well-known/jwks.json",
+    "MIRAGE_JWT_ISSUER": "https://clerk.example",
+    "MIRAGE_JWT_AUDIENCE": "client_cli",
+}
+
+
+@pytest.mark.no_host_override
+def test_a_login_client_is_published_with_jwt(tmp_path):
+    cfg = resolve_auth_config(
+        env={**CLERK_JWT, "MIRAGE_LOGIN_CLIENT_ID": "client_cli"},
+        token_file=tmp_path / "missing",
+    )
+    assert cfg.jwt is not None
+    assert cfg.jwt.login_client_id == "client_cli"
+
+
+@pytest.mark.no_host_override
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"MIRAGE_AUTH_MODE": "token", "MIRAGE_AUTH_TOKEN": "t"},
+        {"MIRAGE_AUTH_MODE": "local"},
+        {**CLERK_JWT, "MIRAGE_JWT_ISSUER": ""},
+        {**CLERK_JWT, "MIRAGE_JWT_AUDIENCE": "client_web"},
+    ],
+    ids=["token", "local", "no_issuer", "not_an_audience"],
+)
+def test_a_login_client_needs_jwt_an_issuer_and_its_audience(tmp_path, env):
+    with pytest.raises(RuntimeError, match="MIRAGE_LOGIN_CLIENT_ID requires"):
+        resolve_auth_config(
+            env={**env, "MIRAGE_LOGIN_CLIENT_ID": "client_cli"},
+            token_file=tmp_path / "missing",
+        )

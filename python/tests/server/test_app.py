@@ -98,7 +98,7 @@ def _ssh_config(tmp_path, key: asyncssh.SSHKey) -> SSHConfig:
 
 def test_build_app_keeps_the_ssh_door_shut_by_default(tmp_path):
     app = build_app(pid_file=tmp_path / "daemon.pid")
-    assert app.state.ssh_config is None
+    assert app.state.ssh_config.port is None
 
 
 @pytest.mark.asyncio
