@@ -15,6 +15,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 
 import { quoteText } from '../quote.ts'
 import { SortKeyError } from './errors.ts'
+import { STRTOD, strtodDouble } from './utils/strtod.ts'
 
 // sort.c's `unit_order`: the suffixes -h ranks, lowercase only for k.
 const UNIT_ORDERS: Record<string, number> = {
@@ -399,59 +400,11 @@ function isPrintingCharacter(char: string): boolean {
   return code > 31 && code !== 127
 }
 
-// glibc strtold's reading of a leading number in the C locale: blanks, a
-// sign, then a hex float, a decimal float, inf or nan. The rest of the field
-// is ignored, as GNU sort -g ignores it.
-const LEADING_FLOAT = new RegExp(
-  '^[ \\t\\n\\v\\f\\r]*([+-]?)(?:' +
-    '(0[xX](?:[0-9a-fA-F]+(?:\\.[0-9a-fA-F]*)?|\\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?)' +
-    '|((?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)' +
-    '|([iI][nN][fF](?:[iI][nN][iI][tT][yY])?)' +
-    '|([nN][aA][nN](?:\\([0-9A-Za-z_]*\\))?))',
-)
-
-// A hex float such as 0x1.8p3, rounded once from its exact mantissa to the
-// nearest double, ties to even, as Python's float.fromhex rounds it.
-function hexFloat(text: string): number {
-  const [mantissa = '', power = '0'] = text.slice(2).split(/[pP]/)
-  const [whole = '', fraction = ''] = mantissa.split('.')
-  const digits = BigInt('0x' + (whole + fraction || '0'))
-  if (digits === 0n) return 0
-  const bits = digits.toString(2).length
-  let exponent = Number(power) - 4 * fraction.length
-  const lead = bits - 1 + exponent
-  if (lead > 1023) return Infinity
-  // The bits a double keeps at this magnitude: 53, fewer once subnormal.
-  const kept = Math.min(53, lead + 1075)
-  if (kept < 0) return 0
-  let keptDigits = digits
-  if (bits > kept) {
-    const drop = BigInt(bits - kept)
-    keptDigits = digits >> drop
-    const rest = digits - (keptDigits << drop)
-    const half = 1n << (drop - 1n)
-    if (rest > half || (rest === half && (keptDigits & 1n) === 1n)) keptDigits += 1n
-    exponent += bits - kept
-  }
-  // The kept digits times a power of two is a double, so scaling in steps
-  // the range holds is exact: no step overflows or underflows on its own.
-  let value = Number(keptDigits)
-  for (; exponent > 1023; exponent -= 1023) value *= 2 ** 1023
-  for (; exponent < -1022; exponent += 1022) value *= 2 ** -1022
-  return value * 2 ** exponent
-}
-
-// The number strtold reads at the start of a field, null for none.
+// The number strtold reads at the start of a field, null for none. The rest
+// of the field is ignored, as GNU sort -g ignores it.
 function parseGeneralFloat(field: string): number | null {
-  const found = LEADING_FLOAT.exec(field)
-  if (found === null) return null
-  const [, sign, hexa, decimal, inf, nan] = found
-  if (nan !== undefined) return Number.NaN
-  let value: number
-  if (inf !== undefined) value = Infinity
-  else if (hexa !== undefined) value = hexFloat(hexa)
-  else value = Number(decimal)
-  return sign === '-' ? -value : value
+  const found = STRTOD.exec(field)
+  return found === null ? null : strtodDouble(found)
 }
 
 function transform(field: string, mods: KeyMods): SortKey {

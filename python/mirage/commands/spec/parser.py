@@ -640,6 +640,7 @@ def parse_command(
         in_order_operands = False
         spelled_words: frozenset[str] = frozenset()
         letter_options = False
+        negative_numbers = False
         whole_words = False
         own_loop = False
         synonyms: dict[str, str] = {}
@@ -681,6 +682,9 @@ def parse_command(
             else frozenset()
         )
         letter_options = builtin and cmd_name in constants.LETTER_OPTIONS
+        negative_numbers = (
+            builtin and cmd_name in constants.NEGATIVE_NUMBER_OPERANDS
+        )
         whole_words = builtin and cmd_name in constants.WHOLE_WORD_LONG_OPTIONS
         own_loop = builtin and cmd_name in constants.OWN_OPTION_LOOP
         synonyms = {
@@ -896,6 +900,11 @@ def parse_command(
             and len(tok) > 1
             and (not letter_options or constants.DASH_LETTER.match(tok))
         ):
+            if negative_numbers and constants.NEGATIVE_NUMBER.match(tok):
+                record_operand(tok)
+                end_of_flags = True
+                i += 1
+                continue
             if cs.numeric_dest is not None and NUMERIC_SHORT.match(tok):
                 flags[cs.numeric_dest] = tok[1:]
                 i += 1
@@ -1005,9 +1014,7 @@ def parse_command(
 
             if lenient_dash_operands or (
                 NUMERIC_SHORT.match(tok)
-                and (
-                    not is_builtin_grammar(cmd_name, spec) or cmd_name == "seq"
-                )
+                and not is_builtin_grammar(cmd_name, spec)
             ):
                 record_operand(tok)
             elif tok in cs.value_spellings or (
