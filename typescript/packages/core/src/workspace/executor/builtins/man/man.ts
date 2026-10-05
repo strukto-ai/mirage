@@ -26,6 +26,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { ManEntry } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Shell builtins the manual documents through a spec of another name.
 const SHELL_BUILTIN_MAN: Readonly<Record<string, string>> = Object.freeze({
@@ -178,11 +179,10 @@ function cliMan(
   registry: MountRegistry,
   session: SessionState,
 ): Result {
-  const enc = new TextEncoder()
   const head = install.name
   const entry = renderCliEntry(head, verbs, install.spec, session)
   if (entry === null) {
-    const err = enc.encode(`man: no entry for ${[head, ...verbs].join(' ')}\n`)
+    const err = encodeText(`man: no entry for ${[head, ...verbs].join(' ')}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -193,18 +193,17 @@ function cliMan(
   const command = verbs.length === 0 ? commandEntry(head, registry) : null
   if (command !== null) sections.push(renderPage(command))
   return [
-    enc.encode(sections.join('\n')),
+    encodeText(sections.join('\n')),
     new IOResult(),
     new ExecutionNode({ command: cmdStr, exitCode: 0 }),
   ]
 }
 
 export function handleMan(args: string[], registry: MountRegistry, session: SessionState): Result {
-  const enc = new TextEncoder()
   const name = args[0]
   if (name === undefined) {
     return [
-      enc.encode(renderManIndex(registry, session)),
+      encodeText(renderManIndex(registry, session)),
       new IOResult(),
       new ExecutionNode({ command: 'man', exitCode: 0 }),
     ]
@@ -218,14 +217,14 @@ export function handleMan(args: string[], registry: MountRegistry, session: Sess
   if (install !== null && visible) return cliMan(install, args.slice(1), cmdStr, registry, session)
   const entry = visible ? (commandEntry(name, registry) ?? builtinEntry(name)) : null
   if (entry === null) {
-    const err = enc.encode(`man: no entry for ${name}\n`)
+    const err = encodeText(`man: no entry for ${name}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
       new ExecutionNode({ command: cmdStr, exitCode: 1, stderr: err }),
     ]
   }
-  const out = enc.encode(renderPage(entry))
+  const out = encodeText(renderPage(entry))
   return [out, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
 }
 

@@ -165,7 +165,8 @@ export interface InputPipe {
  * output pipe is open, since the pipe's command runs when it is closed
  * and what it prints comes first; running any command (a new pipe,
  * `system()`) flushes it, as mawk flushes before it forks. `argv` is the
- * operands as typed, ARGV[1] onward.
+ * operands as typed, ARGV[1] onward; `environ` is the exported environment,
+ * which ENVIRON holds, and writing ENVIRON reaches no command.
  */
 export class Interpreter {
   private readonly program: Program
@@ -201,6 +202,7 @@ export class Interpreter {
     host: AwkHost,
     argv: readonly string[] = [],
     assignments: Readonly<Record<string, string>> = {},
+    environ: Readonly<Record<string, string>> = {},
   ) {
     this.program = program
     this.host = host
@@ -210,6 +212,10 @@ export class Interpreter {
     argv.forEach((operand, position) => table.set(String(position + 1), strnum(operand)))
     this.tables.set('ARGV', table)
     this.globals.set('ARGC', num(argv.length + 1))
+    this.tables.set(
+      'ENVIRON',
+      new Map(Object.entries(environ).map(([name, value]) => [name, strnum(value)])),
+    )
   }
 
   special(name: string): string {

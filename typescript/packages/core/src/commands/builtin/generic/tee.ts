@@ -30,8 +30,7 @@ import { readStdinAsync } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 export interface TeeFlags {
   append: boolean
@@ -64,7 +63,7 @@ export async function teeGeneric(
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(opts.flags)
   const stdinData = await readStdinAsync(opts.stdin)
-  const raw: Uint8Array = stdinData ?? ENC.encode(texts.join(' '))
+  const raw: Uint8Array = stdinData ?? encodeText(texts.join(' '))
   if (paths.length === 0) return [raw, new IOResult()]
   return writeOutput(paths, raw, parsed, stream, write, append, stat)
 }
@@ -209,7 +208,7 @@ export async function writeOutput(
           refusal = err
         }
       }
-      const stderr = ENC.encode(errorLine(failed, refusal))
+      const stderr = encodeText(errorLine(failed, refusal))
       return [null, new IOResult({ exitCode: 1, stderr, writes, cache })]
     }
   }
@@ -242,7 +241,7 @@ export async function writeOutput(
     if (data !== null && !cache.includes(path.mountPath)) cache.push(path.mountPath)
   }
   if (errors.length > 0) {
-    return [raw, new IOResult({ exitCode: 1, stderr: ENC.encode(errors.join('')), writes, cache })]
+    return [raw, new IOResult({ exitCode: 1, stderr: encodeText(errors.join('')), writes, cache })]
   }
   return [raw, new IOResult({ writes, cache })]
 }

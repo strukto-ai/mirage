@@ -22,6 +22,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { finish, result } from '../shared.ts'
 import type { Result } from '../types.ts'
 import { SETFATTR_USAGE, attrError, attrOperands, attrUsageRefusal } from './xattr.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 const HEX = /^[0-9a-fA-F]*$/
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
@@ -45,7 +46,7 @@ export function decodeValue(text: string): Uint8Array | null {
     if (digits.length % 4 !== 0 || !BASE64.test(digits)) return null
     return decodeBase64(digits)
   }
-  let raw = new TextEncoder().encode(text)
+  let raw = encodeText(text)
   if (raw.length >= 2 && raw[0] === 0x22 && raw[raw.length - 1] === 0x22) {
     raw = raw.subarray(1, -1)
   }
@@ -55,7 +56,7 @@ export function decodeValue(text: string): Uint8Array | null {
     if (byte === 0x5c) {
       const digits = raw.subarray(i + 1, i + 4)
       if (digits.length === 3 && digits.every((b) => b >= 0x30 && b <= 0x37)) {
-        out.push(parseInt(new TextDecoder().decode(digits), 8) & 0xff)
+        out.push(parseInt(decodeText(digits), 8) & 0xff)
         i += 3
         continue
       }

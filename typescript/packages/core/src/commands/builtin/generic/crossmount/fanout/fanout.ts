@@ -12,13 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { combinedExit } from './exit.ts'
-import { duTotal } from './du.ts'
 import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
-import { mergeOperandIos, runOperands, runSeparator } from '../utils.ts'
-import { labelFlags } from '../../rg.ts'
+import { mergeOperandIos, runOperands, streamOperands } from '../utils.ts'
 import { FlagView, flagOccurrences } from '../../../../spec/flag_view.ts'
 import { type FlagValue } from '../../../../spec/types.ts'
 import { specOf } from '../../../../spec/builtins.ts'
@@ -47,7 +43,7 @@ export function joinRuns(runs: readonly Uint8Array[], separator: string): Uint8A
 // natively once per operand on the operand's owning mount (globs expand
 // inside that native run), and the outputs combine in operand order.
 // Filename-keyed commands stay correct because every native run is forced to
-// name its files (grep `-H`, head/tail `-v`); `du -c` re-totals across
+// name its files (head/tail `-v`); `du -c` re-totals across
 // runs.
 export async function runFanout(
   cmdName: Cmd,
@@ -56,12 +52,8 @@ export async function runFanout(
   flagKwargs: Record<string, FlagValue>,
   runSingle: RunSingle,
 ): Promise<CrossResult> {
-  let flags = { ...flagKwargs }
+  const flags = { ...flagKwargs }
   flagOccurrences(flags).push(...flagOccurrences(flagKwargs))
-  if (cmdName === Cmd.GREP && !new FlagView(flags, specOf(Cmd.GREP)).asBool('h')) {
-    flags.H = true
-  }
-  if (cmdName === Cmd.RG) flags = labelFlags(flags)
   // head pairs -q/--quiet and -v/--verbose (canonical dests), tail declares
   // them short-only.
   const quietKey = cmdName === Cmd.HEAD ? 'quiet' : 'q'
@@ -72,41 +64,21 @@ export async function runFanout(
   ) {
     flags[verboseKey] = true
   }
-  const duC = cmdName === Cmd.DU && new FlagView(flagKwargs, specOf(Cmd.DU)).asBool('c')
-  const duHuman = duC && new FlagView(flagKwargs, specOf(Cmd.DU)).asBool('h')
-  if (duHuman) {
-    flags.h = false
+  if (![Cmd.FIND, Cmd.RM, Cmd.RMDIR, Cmd.UNLINK, Cmd.TOUCH, Cmd.MKDIR].includes(cmdName)) {
+    const separator =
+      (cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) &&
+      new FlagView(flags, specOf(cmdName)).asBool(verboseKey)
+        ? '\n'
+        : ''
+    return streamOperands(runSingle, cmdName, scopes, textArgs, flags, separator)
   }
+  const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags)
+  const exitCode = Math.max(0, ...results.map((r) => r.io.exitCode))
 
-  const quiet =
-    (cmdName === Cmd.GREP && new FlagView(flags, specOf(Cmd.GREP)).asBool('q')) ||
-    (cmdName === Cmd.RG && new FlagView(flags, specOf(Cmd.RG)).asBool('quiet'))
-  const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags, quiet)
-  const errored = results.map((r) => r.io.exitCode !== 0 && r.io.stderr !== null)
-  const exitCode = combinedExit(
-    cmdName,
-    results.map((r) => r.io.exitCode),
-    errored,
-    quiet,
+  const body = joinRuns(
+    results.map((r) => r.data),
+    '',
   )
-
-  const runs = results.map((r) => r.data)
-  let body: ByteSource | null
-  if (duC) {
-    body = duTotal(results, duHuman)
-  } else if (
-    (cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) &&
-    new FlagView(flags, specOf(cmdName)).asBool(verboseKey)
-  ) {
-    // Blank line between per-operand blocks, like one native run separates
-    // its own file blocks.
-    body = joinRuns(runs, '\n')
-  } else {
-    // grep and ripgrep set one file's context off from the next file's (and
-    // ripgrep one --heading group from the next), as one native run
-    // separates its own files.
-    body = joinRuns(runs, runSeparator(cmdName, flags))
-  }
 
   const io = await mergeOperandIos(results, exitCode)
   return [body, io]

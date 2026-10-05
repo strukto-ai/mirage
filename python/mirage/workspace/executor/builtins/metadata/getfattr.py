@@ -20,6 +20,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_to_kwargs
 from mirage.errors import FsCondition, classify
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, word_text
 from mirage.workspace.executor.builtins.metadata.xattr import (
     GETFATTR_USAGE,
@@ -53,13 +54,13 @@ def encode_value(value: bytes, encoding: str | None) -> bytes:
         unprintable = sum(1 for b in body if not 0x20 <= b <= 0x7E)
         encoding = "text" if len(body) >= unprintable * 8 else "base64"
     if encoding == "hex":
-        return b"0x" + value.hex().encode()
+        return b"0x" + encode_text(value.hex())
     if encoding == "base64":
         return b"0s" + base64.b64encode(value)
     out = bytearray(b'"')
     for byte in body:
         if byte in (0, 0x0A, 0x0D):
-            out += f"\\{byte:03o}".encode()
+            out += encode_text(f"\\{byte:03o}")
         elif byte in (0x22, 0x5C):
             out += bytes((0x5C, byte))
         else:
@@ -254,7 +255,7 @@ async def _file_block(
     missing = False
     for attr in names:
         if not dump and not only_values:
-            block += attr.encode() + b"\n"
+            block += encode_text(attr) + b"\n"
             continue
         try:
             value, _ = await dispatch(
@@ -270,8 +271,11 @@ async def _file_block(
             out += value
         else:
             block += (
-                attr.encode() + b"=" + encode_value(value, encoding) + b"\n"
+                encode_text(attr)
+                + b"="
+                + encode_value(value, encoding)
+                + b"\n"
             )
     if block:
-        out += f"# file: {header}\n".encode() + block + b"\n"
+        out += encode_text(f"# file: {header}\n") + block + b"\n"
     return bytes(out), missing

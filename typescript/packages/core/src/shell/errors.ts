@@ -13,6 +13,7 @@
 
 import type { ByteSource } from '../io/types.ts'
 import type { ArithWrite } from './types.ts'
+import { encodeText } from './bytes.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // A bash arithmetic syntax or evaluation error. Mirrors Python's
@@ -99,7 +100,7 @@ export class DiscardSignal extends ExitSignal {
  */
 export class UnboundVariable extends ExitSignal {
   constructor(name: string) {
-    super(127, new TextEncoder().encode(`bash: ${name}: unbound variable\n`), null, 1)
+    super(127, encodeText(`bash: ${name}: unbound variable\n`), null, 1)
     this.name = 'UnboundVariable'
   }
 }
@@ -123,7 +124,7 @@ export class BadSubstitution extends DiscardSignal {
   /** Name the word being expanded, unless a boundary already has. */
   within(word: string, fixed = false): this {
     if (!this.fixed) {
-      this.stderr = new TextEncoder().encode(`bash: ${word}: bad substitution\n`)
+      this.stderr = encodeText(`bash: ${word}: bad substitution\n`)
       this.fixed = fixed
     }
     return this

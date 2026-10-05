@@ -23,6 +23,7 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import { resolvePathStat } from '../../../mount/namespace/probe.ts'
 import { toScope } from '../scope.ts'
 import type { Result } from '../types.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * A diagnostic from a shell that never got as far as running.
@@ -37,7 +38,7 @@ export function scriptError(
   code: number,
   command?: string,
 ): Result {
-  const err = new TextEncoder().encode(`${prefix}: ${message}\n`)
+  const err = encodeText(`${prefix}: ${message}\n`)
   return [
     null,
     new IOResult({ exitCode: code, stderr: err }),
@@ -82,7 +83,7 @@ export async function readScriptText(
   path: string,
   cwd: string,
 ): Promise<string> {
-  return new TextDecoder().decode(await readScriptBytes(dispatch, path, cwd))
+  return decodeText(await readScriptBytes(dispatch, path, cwd))
 }
 
 /**

@@ -206,6 +206,17 @@ def _reader_lines(text: str) -> list[str]:
     return out
 
 
+def _case_mapped(text: str, upper: bool) -> str:
+    """``text`` with its ASCII letters mapped, as the C locale maps them.
+
+    Args:
+        text (str): a byte view.
+        upper (bool): map to upper case rather than lower.
+    """
+    raw = from_byte_view(text)
+    return byte_view(raw.upper() if upper else raw.lower())
+
+
 def _apply_repl(m: "re.Match[str]", repl: str) -> str:
     """Expand a GNU sed replacement against a match.
 
@@ -213,31 +224,65 @@ def _apply_repl(m: "re.Match[str]", repl: str) -> str:
     literal ``&``, ``\\n``/``\\t`` are newline/tab, and ``\\X`` is a
     literal X.
 
+    ``\\U`` and ``\\L`` map everything after them to upper or lower case
+    until ``\\E`` or the other one; ``\\u`` and ``\\l`` map only the next
+    character, and one that lands on an empty group passes to what
+    directly follows the group. Every case escape drops a one-shot still
+    waiting, written before it or carried to it, so the later of two
+    one-shots wins: GNU sed 4.9's ``setup_replacement`` cuts the
+    replacement at each escape and ``append_replacement`` hands a carried
+    one-shot to the next piece only. The C locale maps ASCII letters only,
+    so a byte above 0x7f is written as it is; GNU 4.9 writes 0xff for it,
+    which is not copied.
+
     Args:
         m (re.Match): The regex match for the current substitution.
         repl (str): The sed replacement template.
     """
     out: list[str] = []
+    sticky: bool | None = None
+    pending: bool | None = None
+    carried: bool | None = None
+
+    def emit(piece: str, group: bool = False) -> None:
+        nonlocal pending, carried
+        first = pending if pending is not None else carried
+        own = pending is not None
+        pending = carried = None
+        if not piece:
+            if group and own:
+                carried = first
+            return
+        if first is not None:
+            out.append(_case_mapped(piece[0], first))
+            piece = piece[1:]
+        out.append(piece if sticky is None else _case_mapped(piece, sticky))
+
     i = 0
     while i < len(repl):
         ch = repl[i]
         if ch == "\\" and i + 1 < len(repl):
             nxt = repl[i + 1]
             if nxt in "0123456789":
-                grp = m.group(int(nxt))
-                out.append(grp if grp is not None else "")
+                emit(m.group(int(nxt)) or "", group=True)
+            elif nxt in "ULE":
+                sticky = None if nxt == "E" else nxt == "U"
+                pending = carried = None
+            elif nxt in "ul":
+                pending = nxt == "u"
+                carried = None
             elif nxt == "n":
-                out.append("\n")
+                emit("\n")
             elif nxt == "t":
-                out.append("\t")
+                emit("\t")
             else:
-                out.append(nxt)
+                emit(nxt)
             i += 2
         elif ch == "&":
-            out.append(m.group(0))
+            emit(m.group(0), group=True)
             i += 1
         else:
-            out.append(ch)
+            emit(ch)
             i += 1
     return "".join(out)
 

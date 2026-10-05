@@ -38,7 +38,7 @@ import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
 import { abortable, mergeSignals } from '../../abort.ts'
 import { ExecutionNode } from '../../types.ts'
-import { strategyFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
+import { aggregateFor, strategyFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../../commands/builtin/generic/crossmount/types.ts'
 import { Strategy } from '../../../commands/builtin/generic/crossmount/types.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
@@ -87,6 +87,7 @@ import { findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
 import type { Result } from './types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 // One handler per JOB_BUILTINS member; lookup already narrowed the name.
 const JOB_HANDLERS: Record<
@@ -301,7 +302,7 @@ export async function handleCommand(
   // dispatch chokepoint) stay ahead of this so
   // protective refusals keep their specific messages.
   if (lookup(cmdName, session, registry) === Consumer.UNKNOWN) {
-    const errBytes = new TextEncoder().encode(`${cmdName}: command not found\n`)
+    const errBytes = encodeText(`${cmdName}: command not found\n`)
     return [
       null,
       new IOResult({ exitCode: 127, stderr: errBytes }),
@@ -399,7 +400,7 @@ export async function handleCommand(
       findExpr = parseFindExpression(findExprTokens)
     } catch (err) {
       if (err instanceof FindParseError) {
-        const errBytes = new TextEncoder().encode(`${err.message}\n`)
+        const errBytes = encodeText(`${err.message}\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -444,7 +445,7 @@ export async function handleCommand(
     // two things by mount count -- `cat --vers=x /ram/a` was
     // `option '--version' doesn't allow an argument` and the two-mount line
     // was `unrecognized option '--vers=x'`.
-    const sharedSpec = SPECS[cmdName]
+    const sharedSpec = SPECS[cmdName] ?? cmdMount?.specFor(cmdName) ?? undefined
     const csParsed =
       prepared ??
       parseFlags(
@@ -517,7 +518,7 @@ export async function handleCommand(
       registry,
       session.cwd,
       csNs,
-      csStat,
+      sessionView(session, registry.policies),
       mergeSignals(signal, session.abortSignal),
       dispatch,
     )
@@ -534,6 +535,7 @@ export async function handleCommand(
       sessionView(session, registry.policies),
       session.cwd,
       spelledWords(parts.slice(1)),
+      aggregateFor(cmdName, csScopes, registry),
     )
     const csExec = new ExecutionNode({
       command: cmdStr,
@@ -560,9 +562,7 @@ export async function handleCommand(
       csExec.stderr = await materialize(csIo.stderr)
     }
     if (csParsed.warnings.length > 0) {
-      const csWarn = new TextEncoder().encode(
-        csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''),
-      )
+      const csWarn = encodeText(csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       const csExisting = await materialize(csIo.stderr)
       csIo.stderr = concat([csWarn, csExisting])
       csExec.stderr = concat([csWarn, csExec.stderr])
@@ -604,7 +604,7 @@ export async function handleCommand(
     }
     if (mountPrefixes.size > 1) {
       const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
-      const err = new TextEncoder().encode(
+      const err = encodeText(
         `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
       )
       return [
@@ -620,7 +620,7 @@ export async function handleCommand(
     mount = await registry.resolveMount(cmdName, routingScopes, session.cwd)
   } catch (err) {
     if (err instanceof MountCommandUnsupported) {
-      const errBytes = new TextEncoder().encode(`${err.message}\n`)
+      const errBytes = encodeText(`${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -630,7 +630,7 @@ export async function handleCommand(
     throw err
   }
   if (mount === null) {
-    const err = new TextEncoder().encode(`${cmdName}: command not found`)
+    const err = encodeText(`${cmdName}: command not found`)
     return [
       null,
       new IOResult({ exitCode: 127, stderr: err }),
@@ -670,7 +670,7 @@ export async function handleCommand(
   }
   const warnBytes =
     parseWarnings.length > 0
-      ? new TextEncoder().encode(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
+      ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       : null
 
   const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch)
@@ -687,9 +687,27 @@ export async function handleCommand(
       cmdStr,
       stdin,
       singleNs,
-      singleStat,
+      sessionView(session, registry.policies),
       mergeSignals(signal, session.abortSignal),
       dispatch,
+      (name, ps, ts, fk, opts) =>
+        runOnMount(
+          {
+            registry,
+            session,
+            dispatch,
+            ...(namespace !== undefined ? { namespace } : {}),
+            ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
+            ...(routingDecision !== undefined ? { routingDecision } : {}),
+            ...(executeFn !== undefined ? { executeFn } : {}),
+            ...(signal !== undefined ? { signal } : {}),
+          },
+          name,
+          ps,
+          ts,
+          fk,
+          { ...opts, argv: spelledWords(parts.slice(1)) },
+        ),
     )
     let fanOut = fanOut0
     if (cmdName === 'find') {

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { byteView, textView } from '../../../shell/bytes.ts'
+import { byteView, decodeText, encodeText, textView } from '../../../shell/bytes.ts'
 import { compilePosixRegex } from '../../../utils/posix.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -202,7 +202,7 @@ export async function zgrepGeneric(
       door,
     })
     const data = await materialize(body)
-    errors += await io.stderrStr()
+    errors += decodeText(await io.materializeStderr())
     failed ||= io.exitCode === 1
     if (pattern === null) {
       if (filesWithoutMatch) allResults.push(p.rawPath)
@@ -233,7 +233,7 @@ export async function zgrepGeneric(
   // gzip's failure is exit 2 even beside a match, -q included (zgrep 1.13
   // takes the more serious status of gzip's and grep's per file).
   const exitCode = failed ? 2 : anyMatch ? 0 : 1
-  const stderr = errors === '' ? null : ENC.encode(errors)
+  const stderr = errors === '' ? null : encodeText(errors)
   // Under -m0, GNU still prints -L's operands even with -q.
   if ((quiet && maxCount !== 0) || allResults.length === 0)
     return [null, new IOResult({ exitCode, stderr })]

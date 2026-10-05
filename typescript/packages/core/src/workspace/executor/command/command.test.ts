@@ -234,18 +234,4 @@ describe('door options route nothing', () => {
     expect([r.exitCode, decode(r.stdout), decode(r.stderr)]).toEqual([0, out, ''])
     await ws.close()
   })
-
-  it('still refuses positional operands on two mounts', async () => {
-    const ws = new Workspace(
-      { '/data/': new RAMVFS(), '/work/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    await ws.shell('echo 1 > /work/t.json; echo 2 > /data/d.json')
-    const r = await ws.shell('jq . /work/t.json /data/d.json')
-    expect(r.exitCode).toBe(1)
-    expect(decode(r.stderr)).toBe(
-      'jq: paths span multiple mounts (/data/, /work/), cross-mount not supported\n',
-    )
-    await ws.close()
-  })
 })

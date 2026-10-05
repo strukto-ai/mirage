@@ -71,7 +71,7 @@ ws.list_sessions() -> list[SessionState]
 await ws.close_session(session_id) -> None
 ```
 
-List the sessions, or close one and end its jobs. The default session cannot be closed.
+List the sessions, or close one: its lines are cancelled and its jobs end. The default session cannot be closed.
 
 <Expandable title="SessionState">
   <ResponseField name="session_id" type="str" />
@@ -88,6 +88,20 @@ print([s.session_id for s in ws.list_sessions()])
 await ws.close_session("agent")
 ```
 
+### ws.cancel, ws.kill
+
+```python
+await ws.cancel(session_id=None) -> int
+await ws.kill(session_id=None) -> int
+```
+
+Stop a session's work, or every session's with no id, and leave the sessions open. `cancel` cancels the running and queued lines, whichever way they came in, and returns once they have ended; each ends with `MirageAbortError`. `kill` kills the background jobs (`cmd &`) and the processes runtimes started. Each answers how many it stopped.
+
+```python
+await ws.cancel("agent")
+await ws.kill()
+```
+
 ### ws.snapshot, Workspace.load
 
 ```python
@@ -95,7 +109,7 @@ await ws.snapshot(target, *, compress=None, s3=None) -> int
 await Workspace.load(source, *, s3=None, ...) -> Workspace
 ```
 
-Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. See [Snapshots](/home/snapshot) for what a tar holds.
+Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole. See [Snapshots](/home/snapshot) for what a tar holds.
 
 ```python
 await ws.snapshot("run.tar")

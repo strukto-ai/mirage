@@ -15,6 +15,7 @@
 import re
 from collections.abc import Iterator
 
+from mirage.shell.bytes import decode_text
 from mirage.shell.parse.constants import (
     ARITH_OPEN_TOKEN,
     ARITH_TEST_OPERATORS,
@@ -32,7 +33,7 @@ def _collect_names(node: TSNodeLike, out: set[str]) -> None:
     if node.type == "variable_name":
         text = node.text
         if text:
-            out.add(text.decode())
+            out.add(decode_text(text))
         return
     if node.type in DECLARING_NODES:
         for child in node.children:
@@ -110,11 +111,11 @@ def command_words(node: TSNodeLike) -> frozenset[str]:
         if n.type == "command_name":
             text = n.text
             if text:
-                out.add(text.decode())
+                out.add(decode_text(text))
         elif n.type in DECLARING_NODES and n.children:
             text = n.children[0].text
             if text:
-                out.add(text.decode())
+                out.add(decode_text(text))
     return frozenset(out)
 
 
@@ -130,17 +131,17 @@ def literal_text(node: TSNodeLike) -> str | None:
     """
     if node.type in ("word", "number"):
         text = node.text
-        return text.decode() if text else None
+        return decode_text(text) if text else None
     if node.type == "raw_string":
         text = node.text
-        return text.decode()[1:-1] if text else None
+        return decode_text(text)[1:-1] if text else None
     if node.type == "string":
         named = node.named_children
         if not named:
             return ""
         if len(named) == 1 and named[0].type == "string_content":
             text = named[0].text
-            return text.decode() if text else ""
+            return decode_text(text) if text else ""
     return None
 
 
@@ -222,7 +223,7 @@ def _arith_region_names(region: TSNodeLike, out: set[str]) -> None:
         if n.type in ("variable_name", "word"):
             text = n.text
             if text:
-                out.update(identifier_names(text.decode()))
+                out.update(identifier_names(decode_text(text)))
 
 
 def _substring_arith_names(expansion: TSNodeLike, out: set[str]) -> None:
@@ -266,7 +267,7 @@ def _test_arith_names(test: TSNodeLike, out: set[str]) -> None:
         if operator is None:
             continue
         text = operator.text
-        if not text or text.decode() not in ARITH_TEST_OPERATORS:
+        if not text or decode_text(text) not in ARITH_TEST_OPERATORS:
             continue
         for child in n.named_children:
             if child.id != operator.id:
@@ -348,5 +349,5 @@ def assignment_values(
         value_node = n.child_by_field_name("value")
         literal = "" if value_node is None else literal_text(value_node)
         reads = referenced_names(n) if literal is None else frozenset()
-        out.append((text.decode(), literal, reads))
+        out.append((decode_text(text), literal, reads))
     return tuple(out)

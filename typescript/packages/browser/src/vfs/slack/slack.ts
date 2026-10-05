@@ -16,6 +16,8 @@ import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { SlackAccessor } from '@struktoai/mirage-core/accessor/slack'
 
 import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
+import { IO } from '@struktoai/mirage-core/commands/builtin/slack/io'
+import { DEFAULT_MAX_DU_ENTRIES } from '@struktoai/mirage-core/commands/builtin/generic/du'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { BrowserSlackTransport } from '@struktoai/mirage-core/core/slack/client_browser'
 
@@ -40,6 +42,8 @@ export class SlackVFS extends BaseVFS {
   // (users.list is payload-identical to users.info, verified live), and
   // file blobs carry Slack's upload byte count.
   override readonly sizesAlwaysKnown: boolean = true
+  override readonly maxDuEntries: number | null =
+    IO.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : IO.maxDuEntries
   override readonly prompt: string
   override readonly writePrompt: string = WRITE_PROMPT
   readonly config: SlackConfig

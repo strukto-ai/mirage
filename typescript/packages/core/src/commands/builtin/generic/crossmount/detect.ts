@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { AggregateFn } from '../../../config.ts'
 import type { MountRegistry } from '../../../../workspace/mount/registry.ts'
 import type { PathSpec } from '../../../../types.ts'
 import {
@@ -24,9 +25,9 @@ import { Strategy } from './types.ts'
 
 // Pick the combine strategy for one cross-mount command invocation.
 export function strategyFor(cmdName: string): Strategy {
-  if (RELAY_COMMANDS.has(cmdName)) return Strategy.RELAY
   if (STREAM_COMMANDS.has(cmdName)) return Strategy.STREAM
   if (FANOUT_COMMANDS.has(cmdName)) return Strategy.FANOUT
+  if (RELAY_COMMANDS.has(cmdName)) return Strategy.RELAY
   throw new Error(`Unsupported cross-mount command: ${cmdName}`)
 }
 
@@ -36,7 +37,11 @@ export function isCrossMount(
   registry: MountRegistry,
   flagScopes: readonly PathSpec[] = [],
 ): boolean {
-  if (!CROSS_MOUNT_COMMANDS.has(cmdName) || scopes.length < 2) return false
+  if (
+    scopes.length < 2 ||
+    (!CROSS_MOUNT_COMMANDS.has(cmdName) && aggregateFor(cmdName, scopes, registry) === null)
+  )
+    return false
   const mounts = new Set<string>()
   for (const s of scopes) {
     // a scope outside any mount cannot make the command cross-mount
@@ -57,4 +62,21 @@ export function isCrossMount(
         (s) => !landing.has(s.virtual) && registry.descendantMounts(s.virtual).length > 0,
       ))
   )
+}
+
+/** Resolve an existing shared reducer; known families own flag-aware reduction. */
+export function aggregateFor(
+  cmdName: string,
+  scopes: readonly PathSpec[],
+  registry: MountRegistry,
+): AggregateFn | null {
+  if (CROSS_MOUNT_COMMANDS.has(cmdName)) return null
+  let aggregate: AggregateFn | null = null
+  for (const scope of scopes) {
+    const handler = registry.tryMountFor(scope.virtual)?.resolveCommand(cmdName)
+    if (handler?.aggregate == null) return null
+    if (aggregate !== null && aggregate !== handler.aggregate) return null
+    aggregate = handler.aggregate
+  }
+  return aggregate
 }

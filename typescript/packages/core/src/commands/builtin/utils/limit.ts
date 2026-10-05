@@ -100,13 +100,26 @@ async function* withTimeout(
   const iterable = ensureStream(src)
   const iterator = iterable[Symbol.asyncIterator]()
   const deadline = performance.now() + seconds * 1000
-  for (;;) {
-    const remaining = deadline - performance.now()
-    if (remaining <= 0) throw new CommandTimeoutError(command, seconds)
-    const next = await withDeadline(iterator.next(), remaining)
-    if (next === TIMED_OUT) throw new CommandTimeoutError(command, seconds)
-    if (next.done === true) return
-    yield next.value
+  let pulling = false
+  try {
+    for (;;) {
+      const remaining = deadline - performance.now()
+      if (remaining <= 0) throw new CommandTimeoutError(command, seconds)
+      pulling = true
+      const next = await withDeadline(iterator.next(), remaining)
+      if (next === TIMED_OUT) throw new CommandTimeoutError(command, seconds)
+      pulling = false
+      if (next.done === true) return
+      yield next.value
+    }
+  } finally {
+    const closing = iterator.return?.()
+    if (closing !== undefined) {
+      // A deadline can win while next() is still pending; return is then
+      // queued behind that pull and cannot delay the timeout itself.
+      if (pulling) void closing.catch(() => undefined)
+      else await closing
+    }
   }
 }
 

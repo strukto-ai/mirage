@@ -19,6 +19,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 
+from mirage.shell.bytes import decode_text
 from mirage.shell.constants import (
     FD_BOTH,
     FD_CLOSE,
@@ -50,7 +51,7 @@ from mirage.utils.path import expand_tilde
 
 def get_text(node: TSNodeLike) -> str:
     """Get the text content of a node."""
-    return (node.text or b"").decode()
+    return decode_text(node.text or b"")
 
 
 def source_parts(node: TSNodeLike) -> Iterator[str | TSNodeLike]:
@@ -70,9 +71,11 @@ def source_parts(node: TSNodeLike) -> Iterator[str | TSNodeLike]:
     end = node.start_byte
     for child in node.children:
         if child.start_byte > end:
-            yield source[
-                end - node.start_byte : child.start_byte - node.start_byte
-            ].decode()
+            yield decode_text(
+                source[
+                    end - node.start_byte : child.start_byte - node.start_byte
+                ]
+            )
         end = child.end_byte
         yield child
 
@@ -120,7 +123,7 @@ def get_command_name(node: TSNodeLike) -> str:
     """Get the command name string."""
     for c in node.named_children:
         if c.type == NT.COMMAND_NAME:
-            return (c.text or b"").decode()
+            return decode_text(c.text or b"")
     return ""
 
 
@@ -548,7 +551,7 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
     if document is not None:
         return Redirect(
             fd=0 if fd is None else fd,
-            target=document.body.decode(),
+            target=decode_text(document.body),
             target_node=target_node,
             kind=RedirectKind.HEREDOC,
             expand_vars=not document.quoted,
@@ -887,7 +890,7 @@ def get_unset_args(node: TSNodeLike) -> list[str]:
     if not operands:
         return []
     start = operands[0].start_byte - node.start_byte
-    text = (node.text or b"")[start:].decode()
+    text = decode_text((node.text or b"")[start:])
     try:
         return shlex.split(text)
     except ValueError:
@@ -1005,7 +1008,7 @@ def input_substitution_redirect(node: TSNodeLike) -> Redirect | None:
 
 
 def get_process_sub_body(node: TSNodeLike) -> str:
-    text = (getattr(node, "source_text", node.text) or b"").decode()
+    text = decode_text(getattr(node, "source_text", node.text) or b"")
     if text.startswith(("<(", ">(")) and text.endswith(")"):
         return text[2:-1]
     return text

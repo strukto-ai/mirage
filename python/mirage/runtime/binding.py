@@ -82,6 +82,11 @@ def capture_binding(
             visible_descendants=scope.wrap(mounts.visible_descendants),
             is_root=scope.wrap(mounts.is_root),
             root_of=scope.wrap(mounts.root_of),
+            max_du_entries=(
+                scope.wrap(mounts.max_du_entries)
+                if mounts.max_du_entries is not None
+                else None
+            ),
         )
     view = replace(
         view,

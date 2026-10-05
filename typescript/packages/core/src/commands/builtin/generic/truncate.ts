@@ -16,6 +16,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { sizeSuffixes } from '../utils/size_suffix.ts'
 import { absentDestStrerror } from '../utils/paths.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 // GNU truncate's letter set differs from split's and od's: lowercase
 // g/k/m/t are accepted, b is not (pinned against coreutils 9.7).
@@ -83,7 +84,6 @@ function parseSize(value: string, current: number): number {
 // "Is a directory" and nothing is created. The size is read first here only
 // because a relative spec needs it, so for a slashed operand a stat that
 // misses is not the verdict; the truncate op answers, as the open would.
-const ENC = new TextEncoder()
 
 export interface TruncateFlags {
   readonly size: string
@@ -129,7 +129,7 @@ export async function truncateGeneric(
   const err = errors.join('')
   return [
     null,
-    new IOResult({ exitCode: err === '' ? 0 : 1, stderr: err === '' ? null : ENC.encode(err) }),
+    new IOResult({ exitCode: err === '' ? 0 : 1, stderr: err === '' ? null : encodeText(err) }),
   ]
 }
 

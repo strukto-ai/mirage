@@ -24,7 +24,11 @@ from mirage.utils.errors import enotdir
 
 
 async def _create_dir(
-    accessor: SharePointAccessor, drive_id: str, path: str, virtual: str
+    accessor: SharePointAccessor,
+    drive_id: str,
+    path: str,
+    virtual: str,
+    exist_ok: bool,
 ) -> None:
     config = accessor.config
     parent = posixpath.dirname(path)
@@ -38,6 +42,7 @@ async def _create_dir(
             virtual=virtual,
         ),
         session=accessor.pool,
+        exist_ok=exist_ok,
     )
 
 
@@ -55,7 +60,8 @@ async def _create_chain(
         drive_id (str): the drive the path lives in.
         item_path (str): the drive-relative path, key_prefix included.
         path (PathSpec): the operand.
-        parents (bool): name a file in the way rather than the operand.
+        parents (bool): ``-p``: a folder at the operand passes, and a
+            file in the way is named rather than the operand.
     """
     parts = item_path.split("/")
     shown = path.virtual.rstrip("/")
@@ -63,7 +69,11 @@ async def _create_chain(
     for i in range(len(parts)):
         try:
             await _create_dir(
-                accessor, drive_id, "/".join(parts[: i + 1]), path.virtual
+                accessor,
+                drive_id,
+                "/".join(parts[: i + 1]),
+                path.virtual,
+                exist_ok=parents or i < len(parts) - 1,
             )
         except FileExistsError as exc:
             above = len(parts) - 1 - i
@@ -105,7 +115,9 @@ async def mkdir(
         await _create_chain(accessor, drive_id, item_path, path, parents=True)
     else:
         try:
-            await _create_dir(accessor, drive_id, item_path, path.virtual)
+            await _create_dir(
+                accessor, drive_id, item_path, path.virtual, exist_ok=False
+            )
         except FileNotFoundError:
             prefix = _scoped_prefix(accessor)
             if not prefix or posixpath.dirname(item_path) != prefix:

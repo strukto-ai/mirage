@@ -16,6 +16,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.workspace.executor.builtins.shared import (
     is_valid_name,
@@ -46,12 +47,12 @@ async def _getopts_finish(
     # OPTIND refuses here too.
     try:
         if not is_valid_name(name):
-            stderr = (
+            stderr = encode_text(
                 f"bash: getopts: `{name}': not a valid identifier\n"
-            ).encode()
+            )
             exit_code = 1
         elif name in session.readonly_vars:
-            stderr = f"bash: {name}: readonly variable\n".encode()
+            stderr = encode_text(f"bash: {name}: readonly variable\n")
             exit_code = 1
         else:
             await view.set(name, opt_value)
@@ -61,10 +62,10 @@ async def _getopts_finish(
             await view.set("OPTARG", optarg)
         await view.set("OPTIND", str(new_optind))
     except ReadonlyVariableError as exc:
-        stderr = f"bash: {exc.name}: readonly variable\n".encode()
+        stderr = encode_text(f"bash: {exc.name}: readonly variable\n")
         exit_code = 1
     except PolicyDenied as exc:
-        stderr = f"{exc.strerror}\n".encode()
+        stderr = encode_text(f"{exc.strerror}\n")
         exit_code = 1
     session._getopts_pos = new_pos
     session._getopts_optind = new_optind
@@ -160,7 +161,9 @@ async def handle_getopts(
                 session, view, name, "?", letter, after_optind, after_pos, 0
             )
         err = (
-            f"bash: illegal option -- {letter}\n".encode() if verbose else b""
+            encode_text(f"bash: illegal option -- {letter}\n")
+            if verbose
+            else b""
         )
         return await _getopts_finish(
             session, view, name, "?", None, after_optind, after_pos, 0, err
@@ -188,7 +191,7 @@ async def handle_getopts(
             session, view, name, ":", letter, optind + 1, 0, 0
         )
     err = (
-        f"bash: option requires an argument -- {letter}\n".encode()
+        encode_text(f"bash: option requires an argument -- {letter}\n")
         if verbose
         else b""
     )

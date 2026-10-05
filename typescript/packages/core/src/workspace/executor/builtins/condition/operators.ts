@@ -29,6 +29,7 @@ import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from
 import { CondError } from './types.ts'
 import type { CondContext } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 /** Resolve a file operand to an addressable scope. */
 function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
@@ -90,7 +91,7 @@ export async function applyUnary(
       // bash aborts the line on `[[ -v a[1/0] ]]` with `1/0: division by
       // 0`, a test's grammar error being the only other thing that ends it.
       if (err instanceof ArithError) {
-        throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+        throw new ExitSignal(1, encodeText(`bash: ${err.message}\n`), null, 1)
       }
       throw err
     }

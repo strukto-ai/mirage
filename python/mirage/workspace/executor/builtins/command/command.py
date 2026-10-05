@@ -16,6 +16,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.join import shell_join
 from mirage.utils.quote import single_quote
@@ -78,7 +79,7 @@ def _probe(
         else:
             line = name
         out_lines.append(f"{line}\n")
-    out = "".join(out_lines).encode() if out_lines else None
+    out = encode_text("".join(out_lines)) if out_lines else None
     # The status and the diagnostics are independent: bash prints
     # `command: nope: not found` for a missing name and still exits 0
     # when another name resolved.

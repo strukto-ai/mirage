@@ -21,6 +21,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.builtins.man.types import ManEntry
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -259,7 +260,7 @@ def _cli_man(
     entry = _render_cli_entry(head, verbs, install.spec, session)
     if entry is None:
         typed = " ".join([head, *verbs])
-        err = f"man: no entry for {typed}\n".encode()
+        err = encode_text(f"man: no entry for {typed}\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
@@ -269,7 +270,7 @@ def _cli_man(
     command = _command_entry(head, registry) if not verbs else None
     if command is not None:
         sections.append(_render_page(command))
-    out = "\n".join(sections).encode()
+    out = encode_text("\n".join(sections))
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 
 
@@ -279,7 +280,7 @@ async def handle_man(
     session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     if not args:
-        out = _render_man_index(registry, session).encode()
+        out = encode_text(_render_man_index(registry, session))
         return out, IOResult(), ExecutionNode(command="man", exit_code=0)
     name = args[0]
     cmd_str = "man " + " ".join(args)
@@ -293,13 +294,13 @@ async def handle_man(
     if command_visible(name, session):
         entry = _command_entry(name, registry) or _builtin_entry(name)
     if entry is None:
-        err = f"man: no entry for {name}\n".encode()
+        err = encode_text(f"man: no entry for {name}\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
             ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
         )
-    out = _render_page(entry).encode()
+    out = encode_text(_render_page(entry))
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 
 

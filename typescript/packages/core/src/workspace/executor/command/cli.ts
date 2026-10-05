@@ -42,6 +42,7 @@ import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { optionError, parseFlags } from './flags.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 // A textual rest operand is a CLI node's pass-through form: parsed under
 // unknownIsOperand, it takes the undeclared dashed tokens the node does not
@@ -267,7 +268,7 @@ export async function handleCli(
   )
   const { paths, texts, flagKwargs, warnings } = parsed
   if (mirageHelp && flagKwargs.help === true) {
-    const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec, [], style))
+    const helpText = encodeText(renderHelp(prog, parseSpec, [], style))
     return [helpText, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
 
@@ -362,7 +363,7 @@ export async function handleCli(
     if (runtime === null) {
       // The interpreter is missing, not the command: 127 like an
       // interpreter command no runtime entry captures.
-      const stderr = new TextEncoder().encode(`${refused ?? ''}\n`)
+      const stderr = encodeText(`${refused ?? ''}\n`)
       return [
         null,
         new IOResult({ exitCode: 127, stderr }),
@@ -406,7 +407,7 @@ export async function handleCli(
     // Leaf-raised usage errors (a malformed --json) keep the bare
     // message and exit 2, matching the refusal branch above.
     if (err instanceof UsageError) {
-      const stderr = new TextEncoder().encode(`${err.message}\n`)
+      const stderr = encodeText(`${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: err.exitCode, stderr }),
@@ -444,7 +445,7 @@ export async function handleCli(
     // serving its pre-write bytes.
     if (leaf.write && dropCaches !== null) await dropCaches()
     const message = err instanceof Error ? err.message : String(err)
-    const stderr = new TextEncoder().encode(`${prog}: ${message}\n`)
+    const stderr = encodeText(`${prog}: ${message}\n`)
     return [
       err instanceof PartialOutputError ? err.stdout : null,
       new IOResult({ exitCode: 1, stderr }),
@@ -461,7 +462,7 @@ export async function handleCli(
   io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 
   if (warnings.length > 0) {
-    const warn = new TextEncoder().encode(warnings.map((w) => `${prog}: ${w}\n`).join(''))
+    const warn = encodeText(warnings.map((w) => `${prog}: ${w}\n`).join(''))
     const existing = await materialize(io.stderr)
     io.stderr = concat([warn, existing])
   }

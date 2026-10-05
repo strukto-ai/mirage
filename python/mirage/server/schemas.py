@@ -99,3 +99,11 @@ class LoadWorkspaceRequest(BaseModel):
 class DeleteWorkspaceResponse(BaseModel):
     id: str
     closed_at: float
+
+
+class CancelLinesResponse(BaseModel):
+    canceled: int
+
+
+class KillJobsResponse(BaseModel):
+    killed: int

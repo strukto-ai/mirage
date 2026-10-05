@@ -20,6 +20,7 @@ import { PWD_OPTIONS, PWD_USAGE } from './constants.ts'
 import { type DirArgs, splitModeOptions } from './dirs.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Print the working directory, logical by default and physical under -P
 // (or `set -P`). GNU ignores every operand: `pwd extra` still prints the
@@ -30,7 +31,7 @@ export function handlePwd(operands: DirArgs, session: SessionState): Result {
   if (bad !== null) {
     // The program (`env pwd`) keeps its bare voice.
     const voice = isProgramInvocation(session) ? '' : 'bash: '
-    const err = new TextEncoder().encode(`${voice}pwd: -${bad}: invalid option\n${PWD_USAGE}`)
+    const err = encodeText(`${voice}pwd: -${bad}: invalid option\n${PWD_USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -38,7 +39,7 @@ export function handlePwd(operands: DirArgs, session: SessionState): Result {
     ]
   }
   const cwd = physical ? session.cwd : logicalCwd(session)
-  const out = new TextEncoder().encode(`${cwd}\n`)
+  const out = encodeText(`${cwd}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'pwd', exitCode: 0 })]
 }
 

@@ -34,6 +34,7 @@ import {
   ok,
   operandText,
   readonlyRefusal,
+  recordDelimiter,
   refusal,
   splitFlags,
   splitValueFlags,
@@ -209,4 +210,17 @@ describe('builtins/shared: the session helpers', () => {
     expect(isCountWord('x')).toBe(false)
     expect(isCountWord('-')).toBe(false)
   })
+})
+
+// bash 5.2 stops `read -d` and `mapfile -d` at the first byte of the argument,
+// not its first character. Mirrors test_shared.py.
+it.each([
+  [null, 10],
+  ['', 0],
+  [':', 0x3a],
+  ['ab', 0x61],
+  [String.fromCharCode(0xdcff), 0xff],
+  [String.fromCharCode(0xe9), 0xc3],
+])('record delimiter of %j is its first byte', (text, delimiter) => {
+  expect(recordDelimiter(text)).toBe(delimiter)
 })

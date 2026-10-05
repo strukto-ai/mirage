@@ -124,6 +124,8 @@ from mirage.vfs.wasabi import WasabiConfig, WasabiVFS
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.workspace.types import VFSMount
 
+from .commands import CLI as COMMAND_CLI
+from .commands import CommandService
 from .secrets import build_secrets_env
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -2403,7 +2405,13 @@ Service = (
 def build_ram(
     mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
-    return RAMVFS(), _noop
+    return (
+        CommandService(
+            metadata_only=mount.get("backend") == "metadata-service"
+        )
+        if mount.get("backend") in ("command-service", "metadata-service")
+        else RAMVFS()
+    ), _noop
 
 
 def build_disk(
@@ -2961,6 +2969,8 @@ def cli_install(
             target that needs none.
         cli_name (str): the head word the target declared.
     """
+    if cli_name == "scope-probe":
+        return COMMAND_CLI, None
     if service is None:
         return cli_spec_for(cli_name), None
     # Widen the assert when another service grows a CLI.

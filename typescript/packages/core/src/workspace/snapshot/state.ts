@@ -57,7 +57,8 @@ import {
   RAMConsoleStore,
   exitOutcome,
 } from '../../shell/console/index.ts'
-import { type ReadSpec, DEFAULT_READ_SPEC, MountMode } from '../../types.ts'
+import { type ReadSpec, DEFAULT_READ_SPEC, MountMode, VFSName } from '../../types.ts'
+import { readFileBytes } from './fs.ts'
 import { resolveReadSpec } from '../mount/read_policy.ts'
 import { Mount } from '../mount/spec.ts'
 import { VERSION } from '../../version.ts'
@@ -506,8 +507,14 @@ export async function applyStateDict(
       continue
     }
     if (vfsStateRequiresOverride(m.vfs_state)) continue
+    // A disk restored into a fresh RAM mount (`restoresAsFreshRAM`) takes
+    // the disk's state in RAM's shape.
+    const vfsState =
+      m.vfs_state.type === VFSName.DISK && mount.vfs.name !== VFSName.DISK
+        ? await diskStateAsRam(m.vfs_state as unknown as Record<string, unknown>)
+        : m.vfs_state
     // No cast, for the same reason as toStateDict above.
-    await Promise.resolve(mount.vfs.loadState(m.vfs_state as RAMVFSState))
+    await Promise.resolve(mount.vfs.loadState(vfsState as RAMVFSState))
   }
   await restoreSessions(ws, state, sessions)
   // The env template is constructor state the rebuilt workspace was
@@ -670,4 +677,28 @@ function restoreJobs(ws: Workspace, state: WorkspaceStateDict): void {
       }),
     )
   }
+}
+
+/**
+ * A disk mount's state as a RAM mount takes it: absolute keys, every
+ * parent directory, each mode as an attribute, and bytes for each file
+ * the disk state names by host path.
+ */
+async function diskStateAsRam(vfsState: Record<string, unknown>): Promise<RAMVFSState> {
+  const files: Record<string, Uint8Array> = {}
+  const attrs: Record<string, { mode: number }> = {}
+  const dirs = new Set<string>(['/'])
+  const modes = (vfsState.modes as Record<string, number> | undefined) ?? {}
+  for (const [rel, data] of Object.entries(
+    (vfsState.files as Record<string, Uint8Array | string> | undefined) ?? {},
+  )) {
+    const key = `/${rel}`
+    files[key] = typeof data === 'string' ? await readFileBytes(data) : data
+    const mode = modes[rel]
+    if (mode !== undefined) attrs[key] = { mode }
+    for (let at = key.lastIndexOf('/'); at > 0; at = key.lastIndexOf('/', at - 1)) {
+      dirs.add(key.slice(0, at))
+    }
+  }
+  return { type: VFSName.RAM, files, dirs: [...dirs], attrs }
 }

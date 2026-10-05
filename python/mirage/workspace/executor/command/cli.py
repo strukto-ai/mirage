@@ -52,6 +52,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
+from mirage.shell.bytes import encode_text
 from mirage.types import Limit, PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
@@ -376,7 +377,7 @@ async def handle_cli(
         abbreviations=abbreviations,
     )
     if mirage_help and parsed.flag_kwargs.get("help") is True:
-        help_text = render_help(prog, parse_spec, style=style).encode()
+        help_text = encode_text(render_help(prog, parse_spec, style=style))
         return (
             help_text,
             IOResult(),
@@ -479,7 +480,7 @@ async def handle_cli(
         if runtime is None:
             # The interpreter is missing, not the command: 127 like an
             # interpreter command no runtime entry captures (run_code).
-            sel_stderr = f"{refused}\n".encode()
+            sel_stderr = encode_text(f"{refused}\n")
             sel_io = IOResult(exit_code=127, stderr=sel_stderr)
             return (
                 None,
@@ -514,7 +515,7 @@ async def handle_cli(
     except UsageError as exc:
         # Leaf-raised usage errors (a malformed --json) keep the bare
         # message and exit 2, matching the refusal branch above.
-        usage_stderr = f"{exc}\n".encode()
+        usage_stderr = encode_text(f"{exc}\n")
         usage_io = IOResult(exit_code=exc.exit_code, stderr=usage_stderr)
         return (
             None,
@@ -542,7 +543,7 @@ async def handle_cli(
         # serving its pre-write bytes.
         if leaf.write and drop_caches is not None:
             await drop_caches()
-        err_stderr = f"{prog}: {exc}\n".encode()
+        err_stderr = encode_text(f"{prog}: {exc}\n")
         err_io = IOResult(exit_code=1, stderr=err_stderr)
         printed = exc.stdout if isinstance(exc, PartialOutputError) else None
         return (
@@ -564,7 +565,7 @@ async def handle_cli(
     io.producer = Producer(command=prog, declared=leaf.limit)
 
     if parsed.warnings:
-        warn = "".join(f"{prog}: {w}\n" for w in parsed.warnings).encode()
+        warn = encode_text("".join(f"{prog}: {w}\n" for w in parsed.warnings))
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn + existing
 

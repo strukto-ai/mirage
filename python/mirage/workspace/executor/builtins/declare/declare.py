@@ -19,6 +19,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import build_assoc_literal, build_indexed_literal
+from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, DiscardSignal
 from mirage.shell.printer import function_text
 from mirage.shell.variable import ShellValue, VarAttr, attr_letters
@@ -138,7 +139,7 @@ async def store_staged_arrays(
         if view.is_readonly(name):
             if fatal:
                 raise DiscardSignal(
-                    f"bash: {name}: readonly variable\n".encode()
+                    encode_text(f"bash: {name}: readonly variable\n")
                 )
             return readonly_refusal(cmd, name)
         note_local_array(session, name)
@@ -303,7 +304,7 @@ def identifier_failure(
         cmd (str): builtin name for the node.
         errors (list[str]): the refusal lines, in operand order.
     """
-    err = ("\n".join(errors) + "\n").encode()
+    err = encode_text("\n".join(errors) + "\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -412,11 +413,11 @@ async def handle_declare_print(
             errors.append(f"bash: declare: {name}: not found")
         else:
             lines.append(line)
-    out = (("\n".join(lines) + "\n") if lines else "").encode()
+    out = encode_text(("\n".join(lines) + "\n") if lines else "")
     code = 1 if errors else 0
     if not errors:
         return out, IOResult(), ExecutionNode(command="declare", exit_code=0)
-    err = ("\n".join(errors) + "\n").encode()
+    err = encode_text("\n".join(errors) + "\n")
     return (
         out,
         IOResult(exit_code=code, stderr=err),
@@ -457,7 +458,7 @@ def handle_declare_functions(
             lines.append(name if names else f"declare -f {name}")
         else:
             lines.append(function_text(name, session.functions[name]))
-    out = (("\n".join(lines) + "\n") if lines else "").encode()
+    out = encode_text(("\n".join(lines) + "\n") if lines else "")
     code = 1 if missing else 0
     return (
         out,
@@ -481,7 +482,7 @@ def readonly_functions(
             for name in sorted(session.readonly_functions)
             if name in session.functions
         ]
-        out = (("\n".join(lines) + "\n") if lines else "").encode()
+        out = encode_text(("\n".join(lines) + "\n") if lines else "")
         return out, IOResult(), ExecutionNode(command="readonly", exit_code=0)
     errors: list[str] = []
     for name in names:
@@ -490,7 +491,7 @@ def readonly_functions(
             continue
         session.readonly_functions.add(name)
     if errors:
-        err = ("\n".join(errors) + "\n").encode()
+        err = encode_text("\n".join(errors) + "\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),

@@ -22,7 +22,9 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.server.ssh import stream
 from mirage.server.ssh.session import ends_shell, login_env
 from tests.server.ssh.conftest import (
+    WORKSPACE_ID,
     bind_key,
+    ram_workspace,
     start_harness,
     stop_harness,
     vault_workspace,
@@ -334,6 +336,42 @@ async def test_a_key_bound_to_a_profile_runs_under_it(tmp_path):
     assert open_read.stdout == "token\n"
     assert sealed.exit_status == 1
     assert "the vault is sealed" in sealed.stderr
+
+
+@pytest.mark.asyncio
+async def test_a_key_bound_to_an_account_opens_only_its_workspaces(tmp_path):
+    harness = await start_harness(tmp_path)
+    harness.registry.add(ram_workspace(), "mine", owner="alice")
+    alice = bind_key(harness, 'mirage-account="alice"')
+    try:
+        async with harness.connect("mine", key=alice) as conn:
+            own = await conn.run("echo mine")
+        async with harness.connect(key=alice) as conn:
+            other = await conn.run("echo never")
+            async with conn.start_sftp_client() as sftp:
+                with pytest.raises(asyncssh.SFTPNoSuchFile):
+                    await sftp.listdir("/")
+        async with harness.connect("mine") as conn:
+            admin = await conn.run("echo admin")
+    finally:
+        await stop_harness(harness)
+    assert own.stdout == "mine\n"
+    assert other.exit_status == 1
+    assert other.stderr == f"mirage: no such workspace: {WORKSPACE_ID}\n"
+    assert admin.stdout == "admin\n"
+
+
+@pytest.mark.asyncio
+async def test_required_accounts_refuse_a_key_without_one(tmp_path):
+    harness = await start_harness(tmp_path)
+    harness.registry.accounts_required = True
+    try:
+        async with harness.connect() as conn:
+            result = await conn.run("echo never")
+    finally:
+        await stop_harness(harness)
+    assert result.exit_status == 1
+    assert result.stderr == f"mirage: no such workspace: {WORKSPACE_ID}\n"
 
 
 @pytest.mark.asyncio

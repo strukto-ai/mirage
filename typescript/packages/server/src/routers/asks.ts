@@ -78,7 +78,7 @@ export function registerAsksRoutes(app: FastifyInstance, deps: AsksRoutesDeps): 
       // all=true. The ledger already serves both views from one store,
       // so the door only picks which query to run.
       const { wsId } = req.params
-      if (!deps.registry.has(wsId)) {
+      if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
       const ws = deps.registry.get(wsId).runner.ws
@@ -105,7 +105,7 @@ export function registerAsksRoutes(app: FastifyInstance, deps: AsksRoutesDeps): 
       // so an operator retrying a click reads "already answered", not
       // "not found".
       const { wsId, askId } = req.params
-      if (!deps.registry.has(wsId)) {
+      if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
       // Fastify's generic type does not validate at runtime: a POST

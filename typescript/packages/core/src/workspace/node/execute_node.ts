@@ -110,6 +110,7 @@ import type { JobConsole } from '../../shell/console/index.ts'
 import { drained, type ExecuteNodeOpts, runStatement } from '../executor/jobs.ts'
 import { endShell } from '../executor/traps.ts'
 import { concat } from '../../io/cachable_iterator.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.PROGRAM,
@@ -883,7 +884,7 @@ function diagnosticStderr(node: TSNodeLike, session: SessionState): Uint8Array {
     : ''
   const prefix = builtin === '' ? 'bash: ' : `bash: ${builtin}: `
   const parts = session.diagnostics.map((message) =>
-    typeof message === 'string' ? new TextEncoder().encode(prefix + message + '\n') : message,
+    typeof message === 'string' ? encodeText(prefix + message + '\n') : message,
   )
   const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
   let offset = 0
@@ -1202,7 +1203,7 @@ async function executeNodeBody(
       })
     } catch (error) {
       if ((error as { code?: unknown }).code === 'EAGAIN')
-        throw new ExitSignal(FORK_FAILED_STATUS, new TextEncoder().encode(FORK_FAILED))
+        throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
     childSession.processId = process.info.pid
@@ -1251,7 +1252,7 @@ async function executeNodeBody(
         ensureVarVisible(session, name)
       } catch (err) {
         if (!(err instanceof PolicyDenied)) throw err
-        const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
+        const errBytes = encodeText(`bash: ${err.message}\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1259,7 +1260,7 @@ async function executeNodeBody(
         ]
       }
       if (session.readonlyVars.has(name)) {
-        const errBytes = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        const errBytes = encodeText(`bash: ${name}: readonly variable\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1280,7 +1281,7 @@ async function executeNodeBody(
       reader.settle()
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
-      const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
+      const errBytes = encodeText(`bash: ${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1288,7 +1289,7 @@ async function executeNodeBody(
       ]
     }
     if (error !== null) {
-      const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${error.message}\n`)
+      const errBytes = encodeText(`bash: ((: ${expr}: ${error.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -1391,7 +1392,7 @@ async function executeNodeBody(
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
     const [variable, values, body] = getForParts(node)
     if (!isValidName(variable)) {
-      const err = new TextEncoder().encode(`bash: \`${variable}': not a valid identifier\n`)
+      const err = encodeText(`bash: \`${variable}': not a valid identifier\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -1535,7 +1536,7 @@ async function executeNodeBody(
       // `readonly -f f` froze the body: either definition syntax refuses
       // with `f: readonly function`, exit 1, and the old body stays,
       // pinned on 5.2.37.
-      const err = new TextEncoder().encode(`bash: ${name}: readonly function\n`)
+      const err = encodeText(`bash: ${name}: readonly function\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -1622,9 +1623,7 @@ async function executeNodeBody(
   // Constructs the parser accepts but the executor cannot honor (e.g.
   // C-style `for ((;;))`). Mirrors the unsupported-builtin diagnostic
   // so agents see a capability gap, not a crash.
-  const unsupportedErr = new TextEncoder().encode(
-    `mirage: unsupported shell construct: ${node.type}\n`,
-  )
+  const unsupportedErr = encodeText(`mirage: unsupported shell construct: ${node.type}\n`)
   return [
     null,
     new IOResult({ exitCode: 2, stderr: unsupportedErr }),

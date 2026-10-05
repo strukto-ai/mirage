@@ -443,6 +443,21 @@ class HttpSteps:
     async def session_delete(self, wid: str, session: str) -> None:
         await self._ok("DELETE", f"/v1/workspaces/{wid}/sessions/{session}")
 
+    def _scope(self, wid: str, session: str | None) -> str:
+        base = f"/v1/workspaces/{wid}"
+        return base if session is None else f"{base}/sessions/{session}"
+
+    async def cancel_lines(self, wid: str, session: str | None) -> int:
+        reply = await self._ok("POST", f"{self._scope(wid, session)}/cancel")
+        return reply["canceled"]
+
+    async def kill_jobs(self, wid: str, session: str | None) -> int:
+        reply = await self._ok("POST", f"{self._scope(wid, session)}/kill")
+        return reply["killed"]
+
+    async def close_workspace(self, wid: str) -> None:
+        await self._ok("POST", f"/v1/workspaces/{wid}/close")
+
     async def snapshot(self, wid: str, name: str) -> None:
         reply = await self.http.get(f"/v1/workspaces/{wid}/snapshot")
         reply.raise_for_status()
@@ -606,6 +621,27 @@ class CliSteps:
     async def session_delete(self, wid: str, session: str) -> None:
         await self._json("session", "delete", wid, session)
 
+    async def cancel_lines(self, wid: str, session: str | None) -> int:
+        args = (
+            ("workspace", wid)
+            if session is None
+            else ("session", wid, session)
+        )
+        reply = await self._json(args[0], "cancel", *args[1:])
+        return reply["canceled"]
+
+    async def kill_jobs(self, wid: str, session: str | None) -> int:
+        args = (
+            ("workspace", wid)
+            if session is None
+            else ("session", wid, session)
+        )
+        reply = await self._json(args[0], "kill", *args[1:])
+        return reply["killed"]
+
+    async def close_workspace(self, wid: str) -> None:
+        await self._json("workspace", "close", wid)
+
     async def snapshot(self, wid: str, name: str) -> None:
         await self._json(
             "workspace", "snapshot", wid, str(self.snapshots / name)
@@ -726,6 +762,15 @@ class InAppSteps:
     async def session_delete(self, wid: str, session: str) -> None:
         await self.workspaces[wid].close_session(session)
 
+    async def cancel_lines(self, wid: str, session: str | None) -> int:
+        return await self.workspaces[wid].cancel(session)
+
+    async def kill_jobs(self, wid: str, session: str | None) -> int:
+        return await self.workspaces[wid].kill(session)
+
+    async def close_workspace(self, wid: str) -> None:
+        await self.workspaces.pop(wid).close()
+
     async def snapshot(self, wid: str, name: str) -> None:
         await self.workspaces[wid].snapshot(str(self.scratch / name))
 
@@ -833,6 +878,15 @@ async def run_steps(
             elif kind == "session_delete":
                 await steps.session_delete(wid, step["session"])
                 answer = {"text": "deleted"}
+            elif kind == "cancel_lines":
+                canceled = await steps.cancel_lines(wid, step.get("session"))
+                answer = {"text": str(canceled)}
+            elif kind == "kill_jobs":
+                killed = await steps.kill_jobs(wid, step.get("session"))
+                answer = {"text": str(killed)}
+            elif kind == "close_workspace":
+                await steps.close_workspace(wid)
+                answer = {"text": "closed"}
             elif kind == "snapshot":
                 await steps.snapshot(wid, prefix + step["name"])
                 answer = {"text": "saved"}

@@ -42,6 +42,7 @@ import { buildFileCache } from './cache.ts'
 import { rejectConfigScript } from './guard.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
 import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
+import { makeStagingDir, removeDir } from '../snapshot/fs.ts'
 import {
   applyStateDict,
   buildMountArgs,
@@ -51,7 +52,7 @@ import {
 } from '../snapshot/state.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { resolveGlobs } from '../expand/globs.ts'
-import { normMountPrefix } from '../snapshot/utils.ts'
+import { QUIESCE_SECONDS, normMountPrefix } from '../snapshot/utils.ts'
 import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
 import type { FileEvent } from '../../types.ts'
 import {
@@ -87,7 +88,7 @@ import {
   runAsProgram,
 } from '../../context/session_context.ts'
 import { namespaceViewOf } from '../mount/namespace/view.ts'
-import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { asyncContextIsolatesTasks, createAsyncContext } from '../../utils/async_context.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { enoent } from '../../utils/errors.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
@@ -134,9 +135,18 @@ import { MirageToolOperations } from '../tools/tool_operations.ts'
 import type { ExecuteOptions, ExecuteResult, MountSpec, WorkspaceOptions } from './types.ts'
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
+
+// The stop of the top-level line this context runs in, so a line that
+// cancels its own session does not wait on itself.
+const LINE_STOP = createAsyncContext<AbortController>()
+
+// Set inside a write the capture gate let through, so the ops it runs
+// itself are not held behind it.
+const WRITE_HELD = createAsyncContext<boolean>()
 
 export class Workspace {
   private readonly runtimeBinding: WorkspaceBinding
@@ -170,6 +180,17 @@ export class Workspace {
   private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
   private readonly lineLock = new KeyLock()
+  private readonly lines = new Map<
+    AbortController,
+    { sessionId: string | undefined; ended: Promise<void> }
+  >()
+  private admitting: Promise<void> = Promise.resolve()
+  private captures: Promise<void> = Promise.resolve()
+  private capturing = false
+  private readonly admitted = new Set<AbortController>()
+  private writes = 0
+  private writesIdle: Promise<void> = Promise.resolve()
+  private settleWrites: () => void = () => undefined
   private readonly closers: (() => Promise<void>)[] = []
   private closing: Promise<void> | null = null
   private stateDropped = false
@@ -399,6 +420,7 @@ export class Workspace {
       this.opsRegistry,
       this.registry.policies,
       this.drift,
+      (write) => this.admitWrite(write),
     )
     this.registry.setReconciler(this.dispatcher.reconciler)
     this.registry.setOpStat((mount, path) => this.dispatcher.opStat(mount, path))
@@ -1054,7 +1076,9 @@ export class Workspace {
   async closeSession(sessionId: string): Promise<void> {
     // The manager refuses the default and an unknown id first; a session
     // that did close takes its jobs with it, so a later session reusing
-    // the id inherits nothing.
+    // the id inherits nothing. Its lines are cancelled first, as a hangup
+    // ends a terminal's foreground job.
+    if (sessionId !== this.defaultSessionId) await this.cancel(sessionId)
     await this.sessionManager.close(sessionId)
     await this.jobTable.closeSession(sessionId)
     this.toolTables.delete(sessionId)
@@ -1549,7 +1573,151 @@ export class Workspace {
     // internal dispatch path stays open, which is what the journal replay
     // uses.
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    return this.executeInternal(command, options)
+    // A top-level line also answers the workspace's own stop, set by
+    // `cancel`; nested lines take the internal path and inherit it. It is
+    // listed before it waits out a capture, so `cancel` reaches it queued;
+    // a capture waits only for the lines it let in.
+    const stop = new AbortController()
+    let settle = (): void => undefined
+    const ended = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    this.lines.set(stop, { sessionId: options.sessionId, ended })
+    const signal =
+      options.signal === undefined ? stop.signal : AbortSignal.any([options.signal, stop.signal])
+    try {
+      while (this.capturing) await abortable(this.admitting, signal)
+      this.admitted.add(stop)
+      return await LINE_STOP.run(stop, () => this.executeInternal(command, { ...options, signal }))
+    } finally {
+      this.lines.delete(stop)
+      this.admitted.delete(stop)
+      settle()
+    }
+  }
+
+  /**
+   * Cancel the top-level lines running or queued in a session, or in
+   * every session when `sessionId` is undefined. What Ctrl-C does to a
+   * foreground line, for every door at once: HTTP jobs, SSH and codex
+   * lines and SDK callers alike reject with the abort error, their `$?`
+   * left as they found it. Resolves once those lines have ended, so the
+   * session is quiet; a line cancelling its own session is stopped but
+   * not waited for. Returns how many lines were cancelled.
+   */
+  async cancel(sessionId?: string): Promise<number> {
+    const own = LINE_STOP.getStore()
+    const hit = [...this.lines].filter(
+      ([, line]) =>
+        sessionId === undefined || (line.sessionId ?? this.defaultSessionId) === sessionId,
+    )
+    const cancelled = hit.filter(([stop]) => !stop.signal.aborted).length
+    for (const [stop] of hit) stop.abort()
+    await Promise.all(hit.filter(([stop]) => stop !== own).map(([, line]) => line.ended))
+    return cancelled
+  }
+
+  /**
+   * Run `capture` while new top-level lines wait and the running ones have
+   * ended. A capture (a snapshot, a copy, a clone) reads disk files after
+   * its state names them, so what it reads is the revision the lines left.
+   * Lines still running after `seconds` reject it with EBUSY; cancel them
+   * first to capture at once. The caller's own line is not waited for, and
+   * captures take turns.
+   */
+  async quiesced<T>(capture: () => Promise<T>, seconds = QUIESCE_SECONDS): Promise<T> {
+    const previous = this.captures
+    let finished = (): void => undefined
+    this.captures = new Promise<void>((resolve) => {
+      finished = resolve
+    })
+    await previous
+    let reopen = (): void => undefined
+    this.admitting = new Promise<void>((resolve) => {
+      reopen = resolve
+    })
+    this.capturing = true
+    try {
+      const own = LINE_STOP.getStore()
+      const waited = ([stop]: [AbortController, unknown]): boolean =>
+        stop !== own && this.admitted.has(stop)
+      const running = [...this.lines].filter(waited).map(([, line]) => line.ended)
+      if (this.writes > 0) running.push(this.writesIdle)
+      if (running.length > 0) {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const late = new Promise<true>((resolve) => {
+          timer = setTimeout(() => {
+            resolve(true)
+          }, seconds * 1000)
+        })
+        const busy = await Promise.race([Promise.all(running).then(() => false), late])
+        clearTimeout(timer)
+        if (busy) {
+          const pending = [...this.lines].filter(waited).length + (this.writes > 0 ? 1 : 0)
+          throw Object.assign(
+            new Error(`workspace busy: ${String(pending)} line(s) or write(s) still running`),
+            { code: 'EBUSY' },
+          )
+        }
+      }
+      return await capture()
+    } finally {
+      this.capturing = false
+      reopen()
+      finished()
+    }
+  }
+
+  /**
+   * Hold a write while a capture reads, unless its line is waited for. A
+   * write from a running top-level line passes: the capture waits for that
+   * line. Any other (a door's file op, SFTP, FUSE, a background job) waits
+   * for the capture to finish, and counts as under way until it ends, so a
+   * capture that starts waits it out.
+   */
+  private async admitWrite<T>(write: () => Promise<T>): Promise<T> {
+    // Without task-isolated context a running line's write looks like
+    // anyone's, and holding it would stall the capture waiting on that
+    // line; such hosts have no SFTP or FUSE door to hold, so writes pass.
+    if (!asyncContextIsolatesTasks) return write()
+    const line = LINE_STOP.getStore()
+    if (WRITE_HELD.getStore() === true || (line !== undefined && this.admitted.has(line))) {
+      return write()
+    }
+    while (this.capturing) await this.admitting
+    if (this.writes++ === 0) {
+      this.writesIdle = new Promise<void>((resolve) => {
+        this.settleWrites = resolve
+      })
+    }
+    try {
+      return await WRITE_HELD.run(true, write)
+    } finally {
+      if (--this.writes === 0) this.settleWrites()
+    }
+  }
+
+  /**
+   * Kill the background jobs and runners a session started, or every
+   * session's when `sessionId` is undefined: what `kill` does to
+   * `cmd &` jobs, leaving the session open. Runners outside the job list
+   * (a runtime's spawned process) are stopped too. Returns how many jobs
+   * and runners were stopped.
+   */
+  async kill(sessionId?: string): Promise<number> {
+    const jobs =
+      sessionId === undefined
+        ? this.jobTable.allRunningJobs()
+        : this.jobTable.runningJobs(sessionId)
+    let killed = 0
+    for (const job of jobs) {
+      if (await this.jobTable.kill(job.id, job.sessionId)) killed += 1
+    }
+    for (const runner of this.processes.live()) {
+      if (sessionId !== undefined && runner.info.sessionId !== sessionId) continue
+      if (runner.terminate()) killed += 1
+    }
+    return killed
   }
 
   private async executeInternal(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
@@ -1652,7 +1820,7 @@ export class Workspace {
       return {
         value: null,
         stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(`python3: ${msg}\n`),
+        stderr: encodeText(`python3: ${msg}\n`),
         exitCode: unavailable ? 127 : 1,
         status: 'complete',
       }
@@ -1669,7 +1837,7 @@ export class Workspace {
   snapshot(target: string, options?: { s3?: S3Config }): Promise<number>
   async snapshot(target?: string, options: { s3?: S3Config } = {}): Promise<Uint8Array | number> {
     const tar = await writeSnapshot(this, target, options)
-    return target === undefined ? tar : tar.byteLength
+    return target === undefined || typeof tar === 'number' ? tar : tar.byteLength
   }
 
   /**
@@ -1684,8 +1852,18 @@ export class Workspace {
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const { s3, ...rest } = options
-    const state = (await readSnapshot(source, s3 !== undefined ? { s3 } : {})) as WorkspaceStateDict
-    return this.fromState(state, rest, overrides, cliOverrides)
+    // A tar file's disk mount files are staged on disk, not held in
+    // memory, until the restored mounts have copied them in.
+    const staging = typeof source === 'string' && s3 === undefined ? await makeStagingDir() : null
+    try {
+      const state = (await readSnapshot(source, {
+        ...(s3 !== undefined ? { s3 } : {}),
+        ...(staging !== null ? { staging } : {}),
+      })) as WorkspaceStateDict
+      return await this.fromState(state, rest, overrides, cliOverrides)
+    } finally {
+      if (staging !== null) await removeDir(staging)
+    }
   }
 
   static async fromState<T extends typeof Workspace>(
@@ -1747,6 +1925,10 @@ export class Workspace {
   }
 
   async copy(options: WorkspaceOptions = {}): Promise<this> {
+    return this.quiesced(() => this.copyQuiesced(options))
+  }
+
+  private async copyQuiesced(options: WorkspaceOptions): Promise<this> {
     // Mirrors Python's Workspace.copy(): remote-backed mounts (Redis, S3,
     // GDrive — with redacted config) are reused; local mounts (RAM, Disk)
     // are reconstructed from snapshot state. Uses _fromState directly (no tar

@@ -29,7 +29,7 @@ describe('strategyFor — mirrors tests/commands/builtin/generic/crossmount/test
   it('assigns every command to exactly one strategy', () => {
     const names = [...STREAM_COMMANDS, ...FANOUT_COMMANDS, ...RELAY_COMMANDS]
     expect(new Set(names).size).toBe(names.length)
-    expect(new Set(names)).toEqual(new Set(Object.values(Cmd)))
+    for (const name of Object.values(Cmd)) expect(names).toContain(name)
     expect(CROSS_MOUNT_COMMANDS).toEqual(new Set(names))
   })
 

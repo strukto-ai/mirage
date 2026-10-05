@@ -22,8 +22,8 @@ import { isStdin, resolveSource, stdinStat, stdinStream } from '../utils/stream.
 import { splitReadable } from '../utils/operands.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
-const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 async function* base64EncodeStream(
@@ -34,7 +34,7 @@ async function* base64EncodeStream(
   const encoded = encodeBase64(buf)
   if (encoded === '') return
   if (wrap !== null && wrap === 0) {
-    yield ENC.encode(encoded + '\n')
+    yield encodeText(encoded + '\n')
     return
   }
   const lineLen = wrap ?? 76
@@ -42,7 +42,7 @@ async function* base64EncodeStream(
   for (let i = 0; i < encoded.length; i += lineLen) {
     lines.push(encoded.slice(i, i + lineLen))
   }
-  yield ENC.encode(lines.join('\n') + '\n')
+  yield encodeText(lines.join('\n') + '\n')
 }
 
 async function* base64DecodeStream(
@@ -70,7 +70,7 @@ export async function base64Generic(
   if (paths.length > 1) throw extraOperandError(CommandName.BASE64, paths[1]?.rawPath ?? '')
   if (paths.length === 1) {
     const [, err] = await splitReadable(paths, stdinStat(stat), 'base64')
-    if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err) })]
+    if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: encodeText(err) })]
   }
   const decode = fl.asBool('D') || fl.asBool('decode')
   const wrapValue = fl.asStr('wrap')

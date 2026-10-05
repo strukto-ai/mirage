@@ -28,8 +28,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 const NL = 0x0a
 
@@ -161,7 +160,7 @@ async function* headMulti(
     if (p === undefined) continue
     if (showHeaders) {
       const prefix = i > 0 ? '\n' : ''
-      yield ENC.encode(`${prefix}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
+      yield encodeText(`${prefix}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
     }
     // A directory opened: its header prints and its read fails.
     if (unread.has(p.virtual)) continue
@@ -181,14 +180,14 @@ export async function headGeneric(
   stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   }
   if (paths.length > 0) {
     const showHeaders = (parsed.verbose || paths.length > 1) && !parsed.quiet
     const [opened, unread, err] = await splitOpened(paths, stat, 'head')
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
-      stderr: err === '' ? null : ENC.encode(err),
+      stderr: err === '' ? null : encodeText(err),
     })
     if (opened.length === 0) return [null, io]
     const sourceFor = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
@@ -216,10 +215,10 @@ export async function headGeneric(
     const source = resolveSource(opts.stdin)
     const body = headStream(source, parsed.lines, parsed.bytesMode, parsed.zeroTerminated)
     // -v heads a stdin nobody named with the name it gives `-`.
-    const header = ENC.encode(`==> ${STDIN_HEADER_NAME} <==\n`)
+    const header = encodeText(`==> ${STDIN_HEADER_NAME} <==\n`)
     return [parsed.verbose && !parsed.quiet ? asyncChain([header, body]) : body, new IOResult()]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${msg}\n`) })]
   }
 }

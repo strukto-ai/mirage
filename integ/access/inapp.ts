@@ -223,6 +223,16 @@ async function steps(
       } else if (kind === 'session_delete') {
         await get(wid).closeSession(step.session as string)
         answers.push({ text: 'deleted' })
+      } else if (kind === 'cancel_lines') {
+        const session = typeof step.session === 'string' ? step.session : undefined
+        answers.push({ text: String(await get(wid).cancel(session)) })
+      } else if (kind === 'kill_jobs') {
+        const session = typeof step.session === 'string' ? step.session : undefined
+        answers.push({ text: String(await get(wid).kill(session)) })
+      } else if (kind === 'close_workspace') {
+        await get(wid).close()
+        workspaces.delete(wid)
+        answers.push({ text: 'closed' })
       } else if (kind === 'snapshot') {
         await get(wid).snapshot(join(scratch, prefix + (step.name as string)))
         answers.push({ text: 'saved' })

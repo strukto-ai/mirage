@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 ISSUER = "https://clerk.mirage.test"
 AUTHORIZED_PARTY = "https://app.mirage.test"
+ACCOUNT = "user_alice"
 LIFETIME = 60
 
 
@@ -63,7 +64,7 @@ class Issuer:
             .decode()
         )
 
-    def claims(self, sub: str = "user_alice") -> dict[str, str | int]:
+    def claims(self, sub: str = ACCOUNT) -> dict[str, str | int]:
         """The claims of a fresh session token.
 
         Args:
@@ -83,7 +84,7 @@ class Issuer:
             "exp": now + LIFETIME,
         }
 
-    def token(self, sub: str = "user_alice") -> str:
+    def token(self, sub: str = ACCOUNT) -> str:
         """A valid token, minted now so it never expires mid-run.
 
         Args:

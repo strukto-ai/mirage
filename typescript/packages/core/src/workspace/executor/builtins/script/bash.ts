@@ -28,6 +28,7 @@ import { readScriptFile, scriptError } from './script.ts'
 import type { BashArgs } from './types.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { clearExitTrap, finishShell } from '../../traps.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 
 function bashArgs(partial: Partial<BashArgs>): BashArgs {
   return {
@@ -148,7 +149,7 @@ export async function handleBash(
   if (script === null && stdin !== null) {
     const data = await materialize(stdin)
     if (data.length > 0) {
-      script = new TextDecoder().decode(data)
+      script = decodeText(data)
       stdin = null
     }
   }

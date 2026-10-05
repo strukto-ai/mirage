@@ -25,6 +25,7 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.spec.flag_view import FlagView
 from mirage.policy import PolicyDenied
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import format_fs_error, fs_strerror, walk_refusal
 from mirage.utils.path import CycleError
@@ -161,7 +162,7 @@ def permission_error(
         exc (PermissionError): the raised refusal.
     """
     if isinstance(exc, PolicyDenied):
-        return format_fs_error(cmd, exc, [path]).decode()
+        return decode_text(format_fs_error(cmd, exc, [path]))
     return f"{cmd}: {action} '{path.raw_path}': {fs_strerror(exc)}\n"
 
 
@@ -580,7 +581,7 @@ async def change_owner(
     quiet = fl.as_bool("silent") or fl.as_bool("quiet")
     return result(
         cmd,
-        out="".join(out).encode() or None,
+        out=encode_text("".join(out)) or None,
         exit_code=1 if errors else 0,
         stderr=None if quiet else "".join(errors),
     )

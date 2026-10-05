@@ -28,6 +28,7 @@ from mirage.shell.array import (
     build_assoc_literal,
     build_indexed_literal,
 )
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, DiscardSignal, ExitSignal
 from mirage.shell.helpers import get_text
@@ -59,7 +60,9 @@ def _arith_fatal(exc: ArithError) -> ExitSignal:
     Args:
         exc (ArithError): the evaluator's refusal, subscript leading.
     """
-    return ExitSignal(1, stderr=f"bash: {exc}\n".encode(), contained_code=1)
+    return ExitSignal(
+        1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
+    )
 
 
 async def _fatal_index(
@@ -116,13 +119,13 @@ async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
     try:
         await view.set(key, value)
     except PolicyDenied as exc:
-        raise DiscardSignal(f"{exc.strerror}\n".encode()) from exc
+        raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ArithError as exc:
         # The `-i` coercion refused the text. GNU ends the shell with 1
         # the way a subscript that does not evaluate does, voicing the
         # evaluator's own message after the offending value:
         # `bash: 1+: syntax error: ...`.
-        err = f"bash: {exc}\n".encode()
+        err = encode_text(f"bash: {exc}\n")
         raise ExitSignal(1, stderr=err, contained_code=1) from exc
 
 
@@ -261,7 +264,7 @@ async def execute_assignment(
         # A bare assignment to a readonly variable is a
         # variable-assignment error: the rest of the line is discarded
         # (builtins like `export` merely fail with 1 and continue).
-        raise DiscardSignal(f"bash: {key}: readonly variable\n".encode())
+        raise DiscardSignal(encode_text(f"bash: {key}: readonly variable\n"))
     val_nodes = [
         c
         for c in node.named_children
@@ -280,14 +283,14 @@ async def execute_assignment(
             built, bad_words = build_assoc_literal(amap, items, append)
             await _assign_var(view, key, built)
             if bad_words:
-                err = (
+                err = encode_text(
                     "\n".join(
                         f"bash: {key}: '{word}': must use subscript when "
                         "assigning associative array"
                         for word in bad_words
                     )
                     + "\n"
-                ).encode()
+                )
                 return (
                     None,
                     IOResult(exit_code=1, stderr=err),
@@ -341,7 +344,7 @@ async def execute_assignment(
             # the expanded text.
             name_text = text.partition("=")[0].removesuffix("+")
             raise DiscardSignal(
-                f"bash: {name_text}: bad array subscript\n".encode()
+                encode_text(f"bash: {name_text}: bad array subscript\n")
             )
         if amap is not None:
             # The subscript is the key: no arithmetic, `m[1+1]`
@@ -370,7 +373,7 @@ async def execute_assignment(
             # Same fatal shape as the empty subscript above.
             name_text = text.partition("=")[0].removesuffix("+")
             raise DiscardSignal(
-                f"bash: {name_text}: bad array subscript\n".encode()
+                encode_text(f"bash: {name_text}: bad array subscript\n")
             )
         array_set(arr, idx, array_get(arr, idx) + val if append else val)
         await _assign_var(view, key, arr)

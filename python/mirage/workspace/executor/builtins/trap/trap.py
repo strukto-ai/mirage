@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.workspace.executor.builtins.shared import builtin_error, result
 from mirage.workspace.executor.builtins.timeout.constants import SIGNAL_NAMES
 from mirage.workspace.executor.builtins.trap.constants import (
@@ -92,7 +93,7 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
             else:
                 message = builtin_error("trap", f"-{flag}: invalid option")
                 return result(
-                    "trap", exit_code=2, stderr=message.decode() + USAGE
+                    "trap", exit_code=2, stderr=decode_text(message) + USAGE
                 )
     errors: list[str] = []
     if printing or not words:
@@ -101,15 +102,17 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
             event = event_of(spec)
             if event is None:
                 errors.append(
-                    builtin_error(
-                        "trap", f"{spec}: invalid signal specification"
-                    ).decode()
+                    decode_text(
+                        builtin_error(
+                            "trap", f"{spec}: invalid signal specification"
+                        )
+                    )
                 )
             elif event is TrapEvent.EXIT and session.exit_trap is not None:
                 out.append(listing(session.exit_trap))
         return result(
             "trap",
-            out="".join(out).encode() or None,
+            out=encode_text("".join(out)) or None,
             exit_code=1 if errors else 0,
             stderr="".join(errors) or None,
         )
@@ -123,9 +126,11 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
         event = event_of(spec)
         if event is None:
             errors.append(
-                builtin_error(
-                    "trap", f"{spec}: invalid signal specification"
-                ).decode()
+                decode_text(
+                    builtin_error(
+                        "trap", f"{spec}: invalid signal specification"
+                    )
+                )
             )
         elif event is TrapEvent.EXIT:
             session.exit_trap = None if action == "-" else action

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
+import type { PathSpec, FileStat } from '../../../../types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 
 // How a cross-mount command combines per-mount work.
@@ -85,6 +85,7 @@ export type { DispatchFn } from '../../../../runtime/types.ts'
 export type CrossResult = [ByteSource | null, IOResult]
 
 interface RunSingleOpts {
+  signal?: AbortSignal
   stdin?: ByteSource | null
   resolveHint?: PathSpec | null
 }
@@ -101,4 +102,12 @@ export interface OperandRun {
   scope: PathSpec
   data: Uint8Array
   io: IOResult
+}
+
+export interface OwnedScope {
+  path: PathSpec
+  walked: boolean
+  stat?: FileStat
+  diagnostic?: string
+  error?: Error
 }

@@ -238,6 +238,22 @@ does not silently skip them. Each run uses a unique S3 bucket and Redis key
 prefix; the bucket and Slack fixture are cleaned up, while Redis keys are
 discarded with the service container.
 
+The `command-service` core target exercises ordinary VFS command registration
+with a backend that refuses dispatcher byte reads. Search must reach its
+registered `grep`/`rg` handlers, including filters, depth, sorting and links.
+The target combines nested service mounts, a regular RAM mount, a child that
+serves metadata without search commands, and hidden descendants.
+`crossmount/service/native.json` also covers repeated operands, quiet stopping,
+errors, an existing custom aggregate registration, and one CLI invocation
+through dispatch doors. A barrier proves native read preparation is bounded to
+four invocations; stream cases check partial failures, timeout cleanup and early
+pipe closure. Mutation commands and shared stdin retain serial execution.
+The program cases cover automatically wired generics and output paths across
+mounts, including compression, truncation and splitting. Both core shards
+discover this target from the manifest; the shared parity job also compares it
+and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
+filters cover these modules and cases.
+
 ## Running locally
 
 The `unix/cp` and `unix/mv` cases use GNU coreutils 9.7 as their transfer

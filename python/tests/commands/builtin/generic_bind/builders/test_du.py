@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
+from mirage.ops.types import MountView
 from mirage.types import FileStat, FileType, PathSpec
 
 TREE = {
@@ -76,11 +77,28 @@ async def _run(ops: CommandIO, path: str, **flags) -> tuple[str, int, str]:
 
 def test_walk_budget_stops_once_spent():
     budget = WalkBudget(2)
-    assert [budget.spend() for _ in range(3)] == [True, True, False]
+    assert [budget.spend("/d") for _ in range(3)] == [True, True, False]
     assert budget.hit is True
     unbounded = WalkBudget(None)
-    assert all(unbounded.spend() for _ in range(100))
+    assert all(unbounded.spend("/d") for _ in range(100))
     assert unbounded.hit is False
+
+
+def test_walk_budget_with_no_cap_charges_each_mount_its_own():
+    caps = {"/a/": None, "/a/b/": 1}
+    mounts = MountView(
+        descendants=lambda p: [],
+        visible_descendants=lambda p: [],
+        is_root=lambda p: p.rstrip("/") + "/" in caps,
+        root_of=lambda p: "/a/b/" if p.startswith("/a/b") else "/a/",
+        max_du_entries=lambda p: caps[
+            "/a/b/" if p.startswith("/a/b") else "/a/"
+        ],
+    )
+    budget = WalkBudget(None, mounts=mounts)
+    assert all(budget.spend("/a") for _ in range(100))
+    assert [budget.spend("/a/b") for _ in range(2)] == [True, False]
+    assert budget.hit is True
 
 
 @pytest.mark.asyncio

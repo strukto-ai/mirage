@@ -33,6 +33,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { SHOPT_DEFAULTS } from '../../shell/constants.ts'
 import type { SessionState } from '../session/session.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 // How deep a `**` descends. bash has no cap, but every level here is
 // one listing per directory, so an accidental `**` over a large tree is
@@ -510,7 +511,7 @@ export async function resolveGlobs(
           // reads it as no entity name.
           if (opts.failglob) {
             const word = unmarkGlobs(typed.rawPath)
-            throw new DiscardSignal(new TextEncoder().encode(`bash: no match: ${word}\n`))
+            throw new DiscardSignal(encodeText(`bash: no match: ${word}\n`))
           }
           if (!opts.nullglob) {
             result.push(

@@ -132,3 +132,26 @@ describe('splitManifestAndBlobs', () => {
     expect(blobs[String(ref)]).toEqual(new TextEncoder().encode('hi'))
   })
 })
+
+describe('splitManifestAndBlobs mount files', () => {
+  it('stashes OPFS bytes as blobs that restore as bytes', async () => {
+    const state = makeState()
+    const bytes = new TextEncoder().encode('opfs body')
+    state[StateKey.MOUNTS] = [
+      {
+        [MountKey.INDEX]: 0,
+        [MountKey.PREFIX]: '/o/',
+        [MountKey.VFS_STATE]: { type: 'opfs', files: { '/a.txt': bytes }, dirs: ['/'] },
+      },
+    ]
+    const [manifest, blobs] = splitManifestAndBlobs(state)
+    const mounts = manifest[StateKey.MOUNTS] as AnyDict[]
+    const files = (mounts[0]?.[MountKey.VFS_STATE] as AnyDict).files as Record<string, AnyDict>
+    const ref = files['/a.txt']?.[BLOB_REF_KEY] as string
+    expect(blobs[ref]).toBe(bytes)
+    const restored = (await readSnapshotTar(await writeSnapshotTar(manifest, blobs))) as AnyDict
+    const back = ((restored[StateKey.MOUNTS] as AnyDict[])[0]?.[MountKey.VFS_STATE] as AnyDict)
+      .files as Record<string, Uint8Array>
+    expect(new TextDecoder().decode(back['/a.txt'])).toBe('opfs body')
+  })
+})

@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Cmd } from './types.ts'
+import { BUILDERS } from '../../generic_bind/builders/index.ts'
+
+export const DISPATCH_BUILDERS = new Map(BUILDERS.map((b) => [b.name, b]))
 
 export const STREAM_COMMANDS: ReadonlySet<string> = new Set([Cmd.CAT, Cmd.NL, Cmd.CUT])
 // The stream commands that read their input as lines: GNU ends a file's
@@ -24,7 +27,6 @@ export const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
   Cmd.REV,
   Cmd.HEAD,
   Cmd.TAIL,
-  Cmd.DU,
   Cmd.FILE,
   Cmd.MD5,
   Cmd.MD5SUM,
@@ -42,28 +44,20 @@ export const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
   Cmd.TOUCH,
   Cmd.MKDIR,
 ])
-export const RELAY_COMMANDS: ReadonlySet<string> = new Set([
+export const RELAY_COMMANDS = new Set<string>([
   Cmd.CP,
   Cmd.MV,
   Cmd.TEE,
-  Cmd.DIFF,
-  Cmd.CMP,
-  Cmd.PASTE,
-  Cmd.COMM,
-  Cmd.JOIN,
   Cmd.TAR,
   Cmd.UNZIP,
   Cmd.ZIP,
   Cmd.LS,
-  Cmd.SORT,
-  Cmd.WC,
-  Cmd.AWK,
   Cmd.SED,
-  Cmd.REALPATH,
-  Cmd.GREP,
-  Cmd.RG,
+  ...[...DISPATCH_BUILDERS.keys()].filter(
+    (name) => !STREAM_COMMANDS.has(name) && !FANOUT_COMMANDS.has(name),
+  ),
 ])
-export const CROSS_MOUNT_COMMANDS: ReadonlySet<string> = new Set([
+export const CROSS_MOUNT_COMMANDS = new Set([
   ...STREAM_COMMANDS,
   ...FANOUT_COMMANDS,
   ...RELAY_COMMANDS,
