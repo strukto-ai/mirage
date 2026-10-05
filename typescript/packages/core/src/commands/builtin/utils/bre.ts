@@ -682,10 +682,15 @@ export function translateEre(
   return [source, groups, [...translator.warnings]]
 }
 
-export function compileBre(pattern: string): [RegExp, number] {
+/**
+ * Translate a POSIX BRE and compile it, anchored at the start (`y`) with `.`
+ * matching a newline (`s`, glibc's `RE_DOT_NEWLINE`). `utf8` means the subject
+ * is text under a UTF-8 locale. Mirrors Python's `compile_bre`.
+ */
+export function compileBre(pattern: string, utf8 = false): [RegExp, number] {
   const [source, groups] = translateBre(pattern)
   try {
-    return [new RegExp(source, 'sy'), groups]
+    return [compilePosixRegex(source, 'sy', utf8), groups]
   } catch (err) {
     throw new BreError(INVALID_PATTERN, { cause: err })
   }

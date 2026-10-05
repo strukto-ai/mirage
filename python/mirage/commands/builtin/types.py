@@ -87,12 +87,15 @@ class GrepSearchOptions:
         fixed_string (bool): -F; a plain resource query is literal text.
         whole_word (bool): -w.
         syntax (RegexSyntax): the pattern's dialect.
+        utf8 (bool): grep runs under a UTF-8 locale, so a line is
+            matched as text rather than as its bytes.
     """
 
     ignore_case: bool = False
     fixed_string: bool = True
     whole_word: bool = False
     syntax: RegexSyntax = RegexSyntax.EXTENDED
+    utf8: bool = False
 
 
 @dataclass(frozen=True, slots=True)

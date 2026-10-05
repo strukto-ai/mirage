@@ -1,0 +1,30 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs"
+  ],
+  "cases": [
+    {
+      "id": "diff_u_header_carries_the_mtime",
+      "seq": 1320200,
+      "command": "( printf 'x\\ny\\n' > /data/dh_a; printf 'x\\nz\\n' > /data/dh_b; touch -t 202601020304.05 /data/dh_a; touch -t 202601020304.06 /data/dh_b; diff -u /data/dh_a /data/dh_b; s=$?; diff -uN /data/dh_a /data/dh_missing | head -2; diff -U0 --new-file /data/dh_missing /data/dh_b | head -2; rm /data/dh_a /data/dh_b; exit $s )",
+      "expect": {
+        "exit": 1,
+        "stdout": "--- /data/dh_a\t2026-01-02 03:04:05.000000000 +0000\n+++ /data/dh_b\t2026-01-02 03:04:06.000000000 +0000\n@@ -1,2 +1,2 @@\n x\n-y\n+z\n--- /data/dh_a\t2026-01-02 03:04:05.000000000 +0000\n+++ /data/dh_missing\t1970-01-01 00:00:00.000000000 +0000\n--- /data/dh_missing\t1970-01-01 00:00:00.000000000 +0000\n+++ /data/dh_b\t2026-01-02 03:04:06.000000000 +0000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "diff_ru_header_quotes_a_name",
+      "seq": 1320201,
+      "command": "( mkdir -p '/data/dh d1' '/data/dh d2'; printf 'a\\n' > '/data/dh d1/f g'; printf 'b\\n' > '/data/dh d2/f g'; touch -t 202601020304.05 '/data/dh d1/f g' '/data/dh d2/f g'; diff -ru '/data/dh d1' '/data/dh d2'; s=$?; rm -r '/data/dh d1' '/data/dh d2'; exit $s )",
+      "expect": {
+        "exit": 1,
+        "stdout": "diff -ru \"/data/dh d1/f g\" \"/data/dh d2/f g\"\n--- \"/data/dh d1/f g\"\t2026-01-02 03:04:05.000000000 +0000\n+++ \"/data/dh d2/f g\"\t2026-01-02 03:04:05.000000000 +0000\n@@ -1 +1 @@\n-a\n+b\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

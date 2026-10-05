@@ -51,7 +51,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.usage import usage_hint
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.shell.bytes import byte_view
+from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import WALK_ERRORS, fs_strerror, walk_refusal
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -229,15 +229,17 @@ async def grep_generic(
         texts, fl, read_bytes, GREP_NO_PATTERN, "file"
     )
     f = parse_flags(fl, never_match)
+    utf8 = utf8_locale(opts.env)
     pat = (
         re.compile(NEVER_MATCH)
         if never_match
         else compile_pattern(
-            byte_view(pattern),
+            byte_view(pattern, utf8),
             f.ignore_case,
             f.fixed_string,
             f.whole_word,
             f.syntax,
+            utf8,
         )
     )
     warning = (
@@ -255,6 +257,7 @@ async def grep_generic(
             "(standard input)",
             f.with_filename and not f.no_filename,
             io,
+            utf8=utf8,
         ), io
 
     mounts = opts.ns.mounts if opts.ns is not None else None
@@ -304,6 +307,7 @@ async def grep_generic(
             operand_label(p, "(standard input)"),
             f.with_filename and not f.no_filename,
             io,
+            utf8=utf8,
         ), io
     warnings: list[str] = []
     diagnostics: list[bytes] = [warning] if warning else []
@@ -388,6 +392,7 @@ async def grep_generic(
                     show,
                     file_io,
                     printed,
+                    utf8,
                 )
             ) as output:
                 async for chunk in output:

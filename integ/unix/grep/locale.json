@@ -1,0 +1,98 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "grep_locale_utf8_bracket_matches_a_character",
+      "seq": 14480000,
+      "command": "( printf '%s\\n' '规定：x' | grep -c '[；]'; export LC_ALL=C.UTF-8; printf '%s\\n' '规定：x' | grep -c '[；]' )",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_locale_utf8_dot_matches_a_character",
+      "seq": 14480001,
+      "command": "( printf '规定\\n' | grep -o '^.' | od -An -tx1; export LC_ALL=C.UTF-8; printf '规定\\n' | grep -o '^.' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " e8 0a\n e8 a7 84 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_locale_utf8_negated_brackets_keep_whole_characters",
+      "seq": 14480002,
+      "command": "( export LC_ALL=C.UTF-8; printf '%s\\n' '依据《合同法》第五十六条规定：“无效的合同”；其后。' | grep -oE '《[^》]+》[^。；]*' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "《合同法》第五十六条规定：“无效的合同”\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_locale_precedence",
+      "seq": 14480003,
+      "command": "( printf 'é\\n' | grep -c '^.$'; LC_ALL=C.UTF-8; printf 'é\\n' | grep -c '^.$'; export LANG=C.UTF-8; printf 'é\\n' | grep -c '^.$'; printf 'é\\n' | LC_ALL=C grep -c '^.$'; printf 'é\\n' | LC_ALL= grep -c '^.$'; export LC_CTYPE=C; printf 'é\\n' | grep -c '^.$'; printf 'é\\n' | LC_ALL=POSIX LC_CTYPE=C.utf8 grep -c '^.$'; printf 'é\\n' | LC_CTYPE=C.utf8 grep -c '^.$' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n1\n0\n1\n0\n0\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_locale_utf8_invalid_byte_is_binary_output",
+      "seq": 14480004,
+      "command": "( export LC_ALL=C.UTF-8; printf 'a1\\na\\377\\na2\\n' | grep a; printf 'a1\\na\\377\\na2\\n' | grep -c a; printf 'a1\\na\\377\\na2\\n' | grep -I a; printf 'a\\377b\\n' | grep -c 'a.b'; printf 'a\\377b\\n' | grep -c 'a[^x]b'; printf 'a\\377b\\n' | grep -a 'a' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": "a1\na2\n3\na1\na2\n0\n0\n 61 ff 62 0a\n",
+        "stderr": "grep: (standard input): binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_locale_utf8_offsets_count_bytes",
+      "seq": 14480005,
+      "command": "( export LC_ALL=C.UTF-8; printf 'é\\nxéa\\n' | grep -b a; printf 'éaéa\\n' | grep -bo a )",
+      "expect": {
+        "exit": 0,
+        "stdout": "3:xéa\n2:a\n5:a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_locale_utf8_perl_and_fixed",
+      "seq": 14480006,
+      "command": "( export LC_ALL=C.UTF-8; printf 'éa\\n' | grep -oP '^.' | od -An -tx1; printf 'a\\377b\\n' | grep -cP 'a.b'; printf 'éa\\n' | grep -oF 'é' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c3 a9 0a\n0\n c3 a9 0a\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -45,7 +45,7 @@ _RANGE_ACTIVE = 1
 _RANGE_CLOSED = 2
 
 
-def list_line(text: str, width: int) -> str:
+def list_line(text: str, width: int, utf8: bool = False) -> str:
     """Render a pattern space the way GNU's ``l`` (do_list) does.
 
     A printable ASCII byte is itself and a backslash is doubled; ``\\a \\b
@@ -59,11 +59,12 @@ def list_line(text: str, width: int) -> str:
     Args:
         text (str): the pattern space.
         width (int): the line length.
+        utf8 (bool): the pattern space is text under a UTF-8 locale.
     """
     out: list[str] = []
     col = 0
     for ch in text:
-        for byte in from_byte_view(ch):
+        for byte in from_byte_view(ch, utf8):
             if 0x20 <= byte < 0x7F:
                 piece = "\\\\" if byte == 0x5C else chr(byte)
             else:
@@ -157,6 +158,7 @@ class SedRunOptions:
     line_length: int = SED_LINE_LENGTH
     files: Mapping[str, SedFileContent] = field(default_factory=dict)
     reader_files: Mapping[str, SedFileContent] = field(default_factory=dict)
+    utf8: bool = False
 
 
 class SedPanic(Exception):
@@ -206,18 +208,19 @@ def _reader_lines(text: str) -> list[str]:
     return out
 
 
-def _case_mapped(text: str, upper: bool) -> str:
+def _case_mapped(text: str, upper: bool, utf8: bool = False) -> str:
     """``text`` with its ASCII letters mapped, as the C locale maps them.
 
     Args:
         text (str): a byte view.
         upper (bool): map to upper case rather than lower.
+        utf8 (bool): ``text`` is the text itself, under a UTF-8 locale.
     """
-    raw = from_byte_view(text)
-    return byte_view(raw.upper() if upper else raw.lower())
+    raw = from_byte_view(text, utf8)
+    return byte_view(raw.upper() if upper else raw.lower(), utf8)
 
 
-def _apply_repl(m: "re.Match[str]", repl: str) -> str:
+def _apply_repl(m: "re.Match[str]", repl: str, utf8: bool = False) -> str:
     """Expand a GNU sed replacement against a match.
 
     ``&`` is the whole match, ``\\1``..``\\9`` are groups, ``\\&`` is a
@@ -238,6 +241,8 @@ def _apply_repl(m: "re.Match[str]", repl: str) -> str:
     Args:
         m (re.Match): The regex match for the current substitution.
         repl (str): The sed replacement template.
+        utf8 (bool): the match is text under a UTF-8 locale; the case
+            escapes still map ASCII letters only.
     """
     out: list[str] = []
     sticky: bool | None = None
@@ -254,9 +259,11 @@ def _apply_repl(m: "re.Match[str]", repl: str) -> str:
                 carried = first
             return
         if first is not None:
-            out.append(_case_mapped(piece[0], first))
+            out.append(_case_mapped(piece[0], first, utf8))
             piece = piece[1:]
-        out.append(piece if sticky is None else _case_mapped(piece, sticky))
+        out.append(
+            piece if sticky is None else _case_mapped(piece, sticky, utf8)
+        )
 
     i = 0
     while i < len(repl):
@@ -335,9 +342,9 @@ class SedMachine:
 
     def stderr(self) -> str:
         """What the program wrote to /dev/stderr, then the error lines."""
-        return text_view("".join(self._special_err.chunks)) + "".join(
-            self.stderr_lines
-        )
+        return text_view(
+            "".join(self._special_err.chunks), self.opts.utf8
+        ) + "".join(self.stderr_lines)
 
     def exit_code(self) -> int:
         """The exit status GNU would end with after the runs so far."""
@@ -468,7 +475,9 @@ class SedMachine:
         key = (use, global_)
         hit = self._compiled.get(key)
         if hit is None:
-            hit = compile_posix_regex(use.source, sed_regex_flags(use))
+            hit = compile_posix_regex(
+                use.source, sed_regex_flags(use), self.opts.utf8
+            )
             self._compiled[key] = hit
         return hit
 
@@ -609,7 +618,7 @@ class SedMachine:
             if not hit:
                 return m.group(0)
             done = True
-            return _apply_repl(m, sub.replacement)
+            return _apply_repl(m, sub.replacement, self.opts.utf8)
 
         result = scan.sub(replace, self._pattern)
         if not done:
@@ -677,7 +686,7 @@ class SedMachine:
                     self.opts.line_length if cmd.int_arg == -1 else cmd.int_arg
                 )
                 self._main.flush_newline()
-                self._main.raw(list_line(self._pattern, width))
+                self._main.raw(list_line(self._pattern, width, self.opts.utf8))
             elif c == "L":
                 # GNU 4.9 still compiles the removed `L` and then has no
                 # case for it: an internal error the moment it runs.
@@ -751,7 +760,9 @@ class SedMachine:
                 self._main.raw(f"{self._line_number}\n")
             elif c == "F":
                 self._main.flush_newline()
-                self._main.raw(byte_view(f"{self._file_name}\n"))
+                self._main.raw(
+                    byte_view(f"{self._file_name}\n", self.opts.utf8)
+                )
             pc += 1
         if not self.no_default_output:
             self._main.line(self._pattern, self._chomped)

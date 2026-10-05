@@ -16,7 +16,7 @@ import { compilePosixRegex } from '../../utils/posix.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { closeQuietly } from '../../io/stream.ts'
 import { prefixOf } from './grep_offsets.ts'
-import { byteView, fromByteView } from '../../shell/bytes.ts'
+import { byteView, encodeText, fromByteView } from '../../shell/bytes.ts'
 import { requiredNeedles } from './grep_prefilter.ts'
 import type { RegexSyntax } from './types.ts'
 import { matchStart, matchText } from './utils/pcre.ts'
@@ -100,6 +100,17 @@ function binaryNotice(io: IOResult, path: string): void {
   io.stderr = err
 }
 
+/** Whether every byte of `data` belongs to a UTF-8 character. */
+function validUtf8(data: Uint8Array): boolean {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(data)
+    return true
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error
+    return false
+  }
+}
+
 /**
  * One output line, prefix fields in GNU's fixed order: filename, then line
  * number, then byte offset, whatever order the flags were given in. `offset`
@@ -126,6 +137,13 @@ function outputLine(
   return out
 }
 
+/**
+ * Scan one input, yielding grep's output for it. Under a UTF-8 locale
+ * (`utf8`) a line is matched as text, and a line or match to print that holds
+ * a byte no character owns is binary output: GNU leaves it out and ends with
+ * the binary-file notice, as it does for a NUL, but goes on printing the lines
+ * after it.
+ */
 export async function* grepInput(
   source: AsyncIterable<Uint8Array>,
   pat: RegExp,
@@ -138,6 +156,7 @@ export async function* grepInput(
   // groups within one input.
   afterOutput = false,
   signal?: AbortSignal,
+  utf8 = false,
 ): AsyncIterable<Uint8Array> {
   const budget = new YieldBudget(signal)
   io.exitCode = 1
@@ -187,7 +206,7 @@ export async function* grepInput(
       number += 1
       const lineStart = bytePos
       bytePos += raw.length + 1
-      const line = byteView(raw)
+      const line = byteView(raw, utf8)
       let hit = pat.test(line) !== f.invert
       if (f.maxCount !== null && count >= f.maxCount) hit = false
       if (hit) {
@@ -227,16 +246,17 @@ export async function* grepInput(
               const pending = budget.run()
               if (pending !== undefined) await pending
               const text = matchText(m)
+              const start = matchStart(m)
               if (text !== '')
                 chunks.push(
                   outputLine(
-                    fromByteView(text),
+                    fromByteView(text, utf8),
                     number,
                     true,
                     path,
                     showFilename,
                     f,
-                    lineStart + matchStart(m),
+                    lineStart + (utf8 ? encodeText(line.slice(0, start)).length : start),
                   ),
                 )
             }
@@ -265,7 +285,7 @@ export async function* grepInput(
         notified = true
       }
       for (const chunk of chunks) {
-        if (f.binaryMode !== 'text' && binary.nul) {
+        if (f.binaryMode !== 'text' && (binary.nul || (utf8 && !validUtf8(chunk)))) {
           if (f.binaryMode === 'binary' && !notified) {
             binaryNotice(io, path)
             notified = true
