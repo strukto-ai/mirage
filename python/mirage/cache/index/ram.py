@@ -20,7 +20,8 @@ from mirage.cache.index.config import (
     ListResult,
     LookupResult,
     LookupStatus,
-    ResourceType,
+    is_file_kind,
+    is_folder_kind,
 )
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.lock import KeyLockMixin
@@ -181,7 +182,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                     if (
                         key not in rows
                         or (
-                            rows[key].resource_type == ResourceType.FILE
+                            is_file_kind(rows[key].resource_type)
                             and (
                                 buried.get(key, False)
                                 or key in self._children
@@ -222,10 +223,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         folder = (
             buried_folder
             or key in self._children
-            or (
-                entry is not None
-                and entry.resource_type == ResourceType.FOLDER
-            )
+            or (entry is not None and is_folder_kind(entry.resource_type))
         )
         if folder:
             self._drop_prefix(key, excluded=excluded)
@@ -273,7 +271,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
     def _is_folder(self, key: str) -> bool:
         entry = self._entries.get(key)
-        return entry is not None and entry.resource_type == ResourceType.FOLDER
+        return entry is not None and is_folder_kind(entry.resource_type)
 
     def _drop_prefix(
         self,
@@ -330,10 +328,12 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
 
 class ListingCheckStore(RAMIndexCacheStore):
-    """The empty, throwaway store the listing gate stats a version through.
+    """The empty, throwaway store a ``read: fresh`` check stats through.
 
-    A root stat asks the backend for its head only through this store.
-    Through any other index it names no version and reads nothing, so a
-    getattr of the root never sends a request or reads the index; the gate
-    passes this store to say a request is what it wants.
+    The listing gate and the read probe pass it to say a request is what
+    they want. A root stat asks the backend for its head only through this
+    store. Through any other index it names no version and reads nothing,
+    so a getattr of the root never sends a request or reads the index. A
+    backend that lists a parent to answer a miss may ask for the one path
+    instead, since the store is dropped right after.
     """

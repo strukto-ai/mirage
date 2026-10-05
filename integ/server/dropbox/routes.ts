@@ -33,6 +33,7 @@ import {
   apiError,
   basename,
   entryFor,
+  headerJson,
   malformed,
   deletedEntry,
   matchTag,
@@ -177,10 +178,18 @@ async function getMetadata(ctx: Ctx<C>): Promise<Reply> {
 // twin served 206/416 here and this one served 200 with the whole file, so a
 // windowed read was a full transfer on the TypeScript host and the push-down
 // was never exercised. rangeReply is the kit's, so neither can drift again.
+// Dropbox-API-Result carries the file's metadata, content_hash included, on
+// a full download and on a ranged one (206), as the real service sends it;
+// a read stamps that hash.
 async function download(ctx: Ctx<C>): Promise<Reply> {
   const item = await fileAt(ctx.db, ctx.tenant, argPath(ctx))
   if (item === null) return apiError('path/not_found/...')
-  return rangeReply(ctx.headers, item.content ?? new Uint8Array(0))
+  const reply = rangeReply(ctx.headers, item.content ?? new Uint8Array(0))
+  if (reply.status === 416) return reply
+  return {
+    ...reply,
+    headers: { ...reply.headers, 'Dropbox-API-Result': headerJson(entryFor(item)) },
+  }
 }
 
 async function upload(ctx: Ctx<C>): Promise<Reply> {
