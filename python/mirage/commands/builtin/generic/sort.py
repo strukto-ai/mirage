@@ -253,7 +253,7 @@ def _config(parsed: SortFlags) -> SortConfig:
     )
 
 
-def _refusal(exc: ValueError) -> IOResult:
+def _refusal_of(exc: ValueError) -> IOResult:
     if isinstance(exc, UsageError):
         # Already GNU-worded and carrying its own code: gnulib's argmatch
         # dies with EXIT_FAILURE, so `--check=x` is 1 where sort's other
@@ -416,7 +416,7 @@ async def sort(
         )
         cfg = _config(parsed)
     except (UsageError, SortKeyError, ValueError) as exc:
-        return b"", _refusal(exc)
+        return b"", _refusal_of(exc)
 
     refusal = operand_refusal(paths, parsed)
     if refusal is not None:

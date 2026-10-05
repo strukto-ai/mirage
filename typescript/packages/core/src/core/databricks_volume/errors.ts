@@ -26,38 +26,6 @@ export class DatabricksVolumeApiError extends Error {
 
 const NOT_FOUND_CODES = new Set(['RESOURCE_DOES_NOT_EXIST', 'NOT_FOUND'])
 
-// Messages are the bare path, mirroring Python's builtin OSError subclasses
-// (FileNotFoundError(path), NotADirectoryError(path), ...).
-export function notFoundError(path: string): Error {
-  const e = new Error(path) as Error & { code: string }
-  e.code = 'ENOENT'
-  return e
-}
-
-export function notADirectoryError(path: string): Error {
-  const e = new Error(path) as Error & { code: string }
-  e.code = 'ENOTDIR'
-  return e
-}
-
-export function alreadyExistsError(path: string): Error {
-  const e = new Error(path) as Error & { code: string }
-  e.code = 'EEXIST'
-  return e
-}
-
-export function isADirectoryError(path: string): Error {
-  const e = new Error(path) as Error & { code: string }
-  e.code = 'EISDIR'
-  return e
-}
-
-export function notEmptyError(path: string): Error {
-  const e = new Error(path) as Error & { code: string }
-  e.code = 'ENOTEMPTY'
-  return e
-}
-
 export function isNotFound(exc: unknown): boolean {
   if (!(exc instanceof Error)) return false
   const statusCode = (exc as { statusCode?: unknown }).statusCode

@@ -1,3 +1,7 @@
+import type { Accessor } from '../accessor/base.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
+import type { PathSpec } from '../types.ts'
+import { ancestorEntry, resolveEntry, type ReaddirFn } from './hierarchy/probe.ts'
 import type { ScopeMatch } from './hierarchy/scope.ts'
 import { enoent } from '../utils/errors.ts'
 
@@ -82,4 +86,26 @@ export function guardDay(
 ): Promise<void> {
   accessor.timeRange.requireDay(match.slots.day ?? '', virtual)
   return Promise.resolve()
+}
+
+/**
+ * The channel a day's chat.jsonl reads, proven by the listing.
+ *
+ * The typed `name__id` dirname is only trusted once the listing proves it,
+ * so a fabricated channel id is ENOENT rather than a raw API error. A sealed
+ * day lists nothing but the file still reads through the channel,
+ * reproducing the API's own answer for the fetch. Mirrors Python's
+ * `day_channel_id`.
+ */
+export async function dayChannelId<A extends Accessor>(
+  readdir: ReaddirFn<A>,
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<string> {
+  const entry = await resolveEntry(readdir, accessor, path, index)
+  if (entry !== null) return entry.id.split(':', 1)[0] ?? ''
+  const channel = await ancestorEntry(readdir, accessor, path, index, 2)
+  if (channel === null) throw enoent(path)
+  return channel.id
 }

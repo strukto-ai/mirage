@@ -14,7 +14,7 @@
 
 import type { DispatchFn } from '../runtime/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
-import type { SessionState, StatusWriter } from './session/session.ts'
+import type { SessionState } from './session/session.ts'
 
 /**
  * One running line: its signal and the sessions its statements stamp
@@ -228,4 +228,16 @@ export async function joinOrAbort<T>(
       clearTimeout(timer)
     }
   }
+}
+
+/**
+ * Opaque per-line identity for status writes, minted once per
+ * `execute()` and carried on the line's abort frame so every statement
+ * it runs stamps the same one.
+ */
+export type StatusWriter = symbol
+
+/** A fresh line identity. */
+export function newStatusWriter(): StatusWriter {
+  return Symbol('line')
 }

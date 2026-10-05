@@ -16,7 +16,6 @@ export {
   type Builder,
   type BuilderFn,
   type CommandIO,
-  makeResolveGlob,
   overlaidStat,
   rangeOf,
   resolveGlobOf,

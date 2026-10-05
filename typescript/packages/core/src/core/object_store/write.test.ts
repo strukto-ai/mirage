@@ -156,6 +156,17 @@ describe('object_store write', () => {
     expect(store.puts).toEqual([])
   })
 
+  // A rewrite replaces the marker's metadata and, in a versioned bucket,
+  // adds a version; a directory only a key implies still gets a marker.
+  it('mkdir -p keeps an existing marker', async () => {
+    const store = new FakeStore({ 'a/': '', 'imp/x.txt': 'x' })
+    const mkdir = makeMkdir(makeDriver(store))
+    await managed(() => mkdir(accessor, spec('/a'), true))
+    expect(store.puts).toEqual([])
+    await managed(() => mkdir(accessor, spec('/imp'), true))
+    expect(store.puts.map(([key]) => key)).toEqual(['imp/'])
+  })
+
   it('mkdir refuses a missing parent without parents', async () => {
     // mkdir(2) makes one directory under one that exists; only `-p` makes
     // the chain, so a guest's os.mkdir under a missing parent is ENOENT

@@ -14,6 +14,7 @@
 
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
+import { wrapCachableStreams } from '../../../io/stream.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { ReaddirPath, StatPath } from '../../../ops/types.ts'
@@ -279,14 +280,13 @@ export async function runOnMount(
       limitOverride,
       ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
     })
-    const stdout = initialStdout
     const prefix = rstripSlash(mount.prefix)
     if (prefix !== '') {
       io.reads = prefixKeys(io.reads, prefix)
       io.writes = prefixKeys(io.writes, prefix)
       io.cache = io.cache.map((p) => prefix + p)
     }
-    return [stdout, io]
+    return wrapCachableStreams(initialStdout, io)
   } catch (err) {
     // Command-owned usage errors (extra operands, missing patterns) become
     // this command's IOResult so the rest of the line keeps running, like a

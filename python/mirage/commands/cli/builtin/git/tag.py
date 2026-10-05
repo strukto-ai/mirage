@@ -87,7 +87,6 @@ from mirage.io.types import ByteSource, IOResult
 # git's own formats for a tag listing: the name, or under -n<num> the
 # name padded to 15 columns and that many lines of the message.
 NAME_FORMAT = "%(refname:lstrip=2)"
-LINES_FORMAT = "%(align:15)%(refname:lstrip=2)%(end) %(contents:lines={})"
 UTC = 0
 
 
@@ -112,6 +111,10 @@ class TagFlags:
     message: str | None
     force: bool
     lines: int | None
+
+
+def lines_format(lines: int) -> str:
+    return f"%(align:15)%(refname:lstrip=2)%(end) %(contents:lines={lines})"
 
 
 def parse_flags(fl: FlagView) -> TagFlags:
@@ -302,9 +305,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             template = fl.as_str("format")
             if template is None:
                 template = (
-                    LINES_FORMAT.format(flags.lines)
-                    if flags.lines
-                    else NAME_FORMAT
+                    lines_format(flags.lines) if flags.lines else NAME_FORMAT
                 )
             fmt = listing_format(template)
             icase = fl.as_bool("ignore_case")

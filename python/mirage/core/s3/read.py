@@ -28,7 +28,7 @@ from mirage.utils.errors import enoent
 from mirage.utils.ranges import range_header
 
 
-def _fp_rev_from_response(
+def _fp_rev_from_s3_response(
     resp: dict[str, Any],
 ) -> tuple[str | None, str | None]:
     """Extract ``(fingerprint, revision)`` from a boto GET response.
@@ -87,7 +87,7 @@ async def read_bytes(
         resp = await client.get_object(**kwargs)
         async with closing_body(resp["Body"]) as body:
             data = await body.read()
-        fingerprint, revision = _fp_rev_from_response(resp)
+        fingerprint, revision = _fp_rev_from_s3_response(resp)
         record(
             "read",
             virtual,

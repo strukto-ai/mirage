@@ -18,7 +18,7 @@ import logging
 from mirage.commands.config import ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -350,7 +350,7 @@ async def run_on_mount(
         # and the TypeScript executor.
         logger.debug("%s failed", cmd_name, exc_info=True)
         return None, IOResult(
-            exit_code=read_fail_exit(cmd_name, exc),
+            exit_code=read_fail_exit_code(cmd_name, exc),
             stderr=format_fs_error(cmd_name, exc, paths),
         )
 

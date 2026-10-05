@@ -16,7 +16,7 @@ import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { withPathGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { IO } from './io.ts'
-import { ensureLiveTree } from '../../../core/github/tree.ts'
+import { ensureTree } from '../../../core/github/tree.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -68,8 +68,7 @@ async function duCommand(
   // after du has validated its flags: an invalid line must cost no fetch.
   // Once per line, so one du reads one tree.
   let probe: Promise<void> | undefined
-  const live = (): Promise<void> =>
-    (probe ??= ensureLiveTree(accessor, idx, opts.mountPrefix ?? ''))
+  const live = (): Promise<void> => (probe ??= ensureTree(accessor, idx, opts.mountPrefix ?? ''))
   const budget = new WalkBudget(IO.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
   return duGeneric(
     paths,

@@ -257,6 +257,15 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
         pfx = kp.apply_dir(driver.key_prefix_of(accessor), path)
         if pfx:
             async with driver.connect(accessor) as conn:
+                if (
+                    row is not None
+                    and await driver.head(conn, pfx) is not None
+                ):
+                    # `-p` on a directory that holds its marker leaves the
+                    # marker as it is: a rewrite replaces its metadata and,
+                    # in a versioned bucket, adds a version. A directory
+                    # only a key below implies still gets one.
+                    return
                 await driver.put(conn, pfx, b"")
             await invalidate_after_write(path_spec)
             if parents:

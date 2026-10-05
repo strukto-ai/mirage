@@ -30,7 +30,7 @@ import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import {
-  syntaxErrorMessage,
+  syntaxErrorResult,
   findSyntaxError,
   findUnterminatedBacktick,
   type ShellParser,
@@ -65,7 +65,8 @@ import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
-import { type SessionState, type StatusWriter, newStatusWriter } from '../session/session.ts'
+import { type SessionState } from '../session/session.ts'
+import { type StatusWriter, newStatusWriter } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
@@ -123,11 +124,6 @@ export interface ExecuteEnv {
  */
 interface NestedRefusal {
   latest: Refusal | null
-}
-
-function syntaxErrorResult(offending: string, root: TSNodeLike): ExecuteResult {
-  const errMsg = syntaxErrorMessage(offending, root)
-  return new ExecuteResult(new Uint8Array(), encodeText(errMsg), 2)
 }
 
 /**
@@ -415,14 +411,16 @@ async function runPreparedLine(
                 expandingAliases(effectiveSession),
               ) ?? findUnterminatedBacktick(root.text))
             : null
-        if (offending !== null)
+        if (offending !== null) {
+          const io = syntaxErrorResult(offending, root)
           return answerLine(
             env,
             command,
             options,
             targetSession,
-            syntaxErrorResult(offending, root),
+            new ExecuteResult(new Uint8Array(), await materialize(io.stderr), io.exitCode),
           )
+        }
         const rootNode = root as unknown as TSNodeLike
         let routingDecision: RouteDecision | null
         try {

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { StreamTail, TailBuffer, tailCap } from './text.ts'
+import { StreamTail, TailBuffer } from './text.ts'
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
 
@@ -65,12 +65,6 @@ describe('TailBuffer', () => {
     const buffer = new TailBuffer(3)
     buffer.append(bytes('aaaé'))
     expect(buffer.take()).toBe('aé')
-  })
-
-  it('agrees with tailCap on the same input', () => {
-    const buffer = new TailBuffer(5)
-    buffer.append(bytes('hello world'))
-    expect(buffer.take()).toBe(tailCap('hello world', 5).text)
   })
 })
 

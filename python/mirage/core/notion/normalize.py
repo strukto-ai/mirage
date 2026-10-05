@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.core.notion.pathing import extract_title, page_dirname
+from mirage.core.notion.pathing import format_segment
 from mirage.core.notion.render import blocks_to_markdown
 from mirage.core.render.json import json_bytes
 
@@ -78,7 +78,7 @@ def normalize_row(page: dict[str, Any]) -> dict[str, Any]:
     return {
         "page_id": fields.pop("page_id"),
         "title": fields.pop("title"),
-        "path": f"{page_dirname(page)}/page.json",
+        "path": f"{page_segment_name(page)}/page.json",
         **fields,
     }
 
@@ -119,3 +119,54 @@ def normalize_data_source(data_source: dict[str, Any]) -> dict[str, Any]:
 
 def to_json_bytes(obj: dict[str, Any] | list[Any]) -> bytes:
     return json_bytes(obj)
+
+
+def page_segment_name(page: dict[str, Any]) -> str:
+    return format_segment(extract_title(page), page["id"])
+
+
+def database_segment_name(database: dict[str, Any]) -> str:
+    return format_segment(extract_database_title(database), database["id"])
+
+
+def data_source_segment_name(data_source: dict[str, Any]) -> str:
+    return format_segment(
+        extract_data_source_title(data_source), data_source["id"]
+    )
+
+
+def extract_data_source_title(data_source: dict[str, Any]) -> str:
+    """Read a data source's label from either shape it arrives in.
+
+    The data source object carries rich-text ``title``; the stubs listed
+    under a database's ``data_sources`` carry a plain ``name``. Both name
+    the same thing, so both must render the same directory.
+
+    Args:
+        data_source (dict[str, Any]): a data source object or stub.
+
+    Returns:
+        str: the plain-text label, empty when neither field is present.
+    """
+    name = data_source.get("name")
+    if isinstance(name, str):
+        return name
+    return extract_database_title(data_source)
+
+
+def extract_title(page: dict[str, Any]) -> str:
+    props = page.get("properties", {})
+    if not isinstance(props, dict):
+        return ""
+    for prop in props.values():
+        if not isinstance(prop, dict):
+            continue
+        if prop.get("type") == "title":
+            title_items = prop.get("title", [])
+            return "".join(item.get("plain_text", "") for item in title_items)
+    return ""
+
+
+def extract_database_title(database: dict[str, Any]) -> str:
+    title_items = database.get("title", [])
+    return "".join(item.get("plain_text", "") for item in title_items)

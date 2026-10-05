@@ -18,10 +18,11 @@ import { FileType, type PathSpec } from '../../types.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
-import { isNotFound, notADirectoryError, notEmptyError, notFoundError } from './errors.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
+import { enoent, enotdir, enotempty } from '../../utils/errors.ts'
 
 export async function rmdir(
   accessor: DatabricksVolumeAccessor,
@@ -31,23 +32,23 @@ export async function rmdir(
   const p = ensurePathSpec(path)
   const fileStat = await stat(accessor, p, index)
   if (fileStat.type !== FileType.DIRECTORY) {
-    throw notADirectoryError(p.virtual)
+    throw enotdir(p.virtual)
   }
   const remotePath = backendPath(accessor.config, p)
   let entries
   try {
     entries = await listDirectoryContents(accessor, remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(p.virtual)
+    if (isNotFound(exc)) throw enoent(p.virtual)
     throw exc
   }
   if (entries.length > 0) {
-    throw notEmptyError(p.virtual)
+    throw enotempty(p.virtual)
   }
   try {
     await dbxFetch(accessor, 'DELETE', 'directories', remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(p.virtual)
+    if (isNotFound(exc)) throw enoent(p.virtual)
     throw exc
   }
   await invalidateAfterUnlink(p)

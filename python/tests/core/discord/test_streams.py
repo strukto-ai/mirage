@@ -12,16 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.guilds import list_guilds_stream
-from mirage.core.discord.history import (
-    date_to_snowflake,
-    stream_messages_for_day,
-)
+from mirage.core.discord.history import snowflake_at, stream_messages_for_day
 from mirage.core.discord.members import list_members_stream
 from mirage.core.discord.search import search_guild_stream
 from mirage.core.time_range import TimeRange
@@ -63,7 +61,9 @@ async def test_list_members_stream_walks_user_ids(config):
 
 @pytest.mark.asyncio
 async def test_stream_messages_for_day_filters_by_date(config):
-    before_int = int(date_to_snowflake("2024-01-16"))
+    before_int = snowflake_at(
+        datetime(2024, 1, 16, tzinfo=timezone.utc).timestamp()
+    )
     in_range = [{"id": str(before_int - 1000), "content": "ok"}]
     out_of_range = [{"id": str(before_int + 1000), "content": "next-day"}]
     with patch(

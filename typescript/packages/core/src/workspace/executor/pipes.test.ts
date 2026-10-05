@@ -20,7 +20,7 @@ import { NodeType as NT } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import type { ExecuteNodeFn } from './jobs.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
 import { handleConnection, handlePipe, handleSubshell } from './pipes.ts'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 

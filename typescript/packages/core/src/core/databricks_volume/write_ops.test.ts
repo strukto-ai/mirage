@@ -94,15 +94,6 @@ describe('create', () => {
 })
 
 describe('mkdir', () => {
-  it('rejects existing targets without parents', async () => {
-    const { fetch } = routedFetch(() => new Response(null, { status: 200 }))
-    vi.stubGlobal('fetch', fetch)
-    const err = (await mkdir(makeAccessor(), spec('/volume/exists')).catch(
-      (e: unknown) => e,
-    )) as Error & { code?: string }
-    expect(err.code).toBe('EEXIST')
-  })
-
   it('names the operand when the parent is missing', async () => {
     const { fetch, calls } = routedFetch(() => notFoundResponse())
     vi.stubGlobal('fetch', fetch)

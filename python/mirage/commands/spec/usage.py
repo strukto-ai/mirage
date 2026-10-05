@@ -80,7 +80,7 @@ def _read_fail_code(cmd_name: str, is_dir: bool) -> int:
     return READ_FAIL_EXIT.get(cmd_name, 1)
 
 
-def read_fail_exit(cmd_name: str, exc: BaseException) -> int:
+def read_fail_exit_code(cmd_name: str, exc: BaseException) -> int:
     """The exit code for a command that could not read an operand.
 
     Read off the command, not off the errno, because that is how GNU's
@@ -123,7 +123,7 @@ def _line_read_fail_code(cmd_name: str, line: str) -> int | None:
     return None
 
 
-def read_fail_exit_line(cmd_name: str, rendered: bytes) -> int:
+def read_fail_exit_code_from_line(cmd_name: str, rendered: bytes) -> int:
     """The same code, for a read failure known only as a rendered line.
 
     The cross-mount stream path fetches each operand with a native ``cat``

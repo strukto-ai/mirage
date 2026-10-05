@@ -18,7 +18,7 @@ from mirage.utils.sanitize import (
     ESCAPE_LEAD,
     NAME_MAX_BYTES,
     SAFE_SLASH,
-    byte_len,
+    byte_length,
     is_blank,
     path_safe_name,
     sanitize_label,
@@ -99,7 +99,7 @@ def test_sanitize_label_honors_the_byte_ceiling_within_the_char_budget():
     label = "\U00010400" * 120
     result = sanitize_label(label, fallback="X", max_len=100)
     assert len(result) < 100
-    assert byte_len(result) <= NAME_MAX_BYTES
+    assert byte_length(result) <= NAME_MAX_BYTES
     assert result.endswith("...")
     assert "\ufffd" not in result
 
@@ -110,7 +110,7 @@ def test_sanitize_label_byte_budget_is_the_callers_remaining_room():
     result = sanitize_label(
         "会" * 200, fallback="X", max_len=100, max_bytes=60
     )
-    assert byte_len(result) <= 60
+    assert byte_length(result) <= 60
     assert result.endswith("...")
     assert "\ufffd" not in result
 

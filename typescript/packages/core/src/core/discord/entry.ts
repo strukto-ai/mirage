@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IndexEntry } from '../../cache/index/config.ts'
+import { epochToIso } from '../../utils/dates.ts'
 import { makeIdName } from '../../utils/naming.ts'
+import { DISCORD_EPOCH } from './history.ts'
 
 export const DiscordResourceType = Object.freeze({
   GUILD: 'discord/guild',
@@ -77,4 +79,25 @@ export const DiscordIndexEntry = {
       extra: { channel_id: channelId },
     })
   },
+}
+
+export function snowflakeToDate(snowflake: string): string {
+  if (snowflake === '') return ''
+  const ms = (BigInt(snowflake) >> 22n) + DISCORD_EPOCH
+  const d = new Date(Number(ms))
+  const yyyy = d.getUTCFullYear().toString().padStart(4, '0')
+  const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
+  const dd = d.getUTCDate().toString().padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+export function snowflakeToIso(snowflake: string): string | null {
+  if (snowflake === '') return null
+  let ms: bigint
+  try {
+    ms = (BigInt(snowflake) >> 22n) + DISCORD_EPOCH
+  } catch {
+    return null
+  }
+  return epochToIso(Number(ms / 1000n))
 }

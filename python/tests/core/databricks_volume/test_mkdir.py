@@ -62,17 +62,6 @@ async def test_mkdir_parents_creates_chain(
 
 
 @pytest.mark.asyncio
-async def test_mkdir_existing_target_fails(
-    accessor, files, remote_root, index
-):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/exists")
-
-    with pytest.raises(FileExistsError):
-        await mkdir(accessor, _path("/dbx/exists"), index=index)
-
-
-@pytest.mark.asyncio
 async def test_mkdir_parent_is_file_fails(accessor, files, remote_root, index):
     _seed_directory(files, remote_root)
     files.metadata[f"{remote_root}/file.txt"] = SimpleNamespace(

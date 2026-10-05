@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { isMissingPath } from '../../../../utils/errors.ts'
-import { isUnclassified, type RuntimeVFS, type VFSEntry, type VFSStat } from '../../../vfs.ts'
+import { isUnclassified, type RuntimeVFS } from '../../../vfs.ts'
+import type { VFSEntry, VFSStat } from '../../../types.ts'
 
 export interface FSLike {
   mkdirTree(path: string): void

@@ -107,10 +107,3 @@ class ScriptKey(StrEnum):
     SOURCE = "source"
     LANGUAGE = "language"
     MODULE = "module"
-
-
-class SessionKey(StrEnum):
-    SESSION_ID = "session_id"
-    CWD = "cwd"
-    ENV = "env"
-    LAST_EXIT_CODE = "last_exit_code"

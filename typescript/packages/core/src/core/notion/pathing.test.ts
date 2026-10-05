@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { formatSegment, parseSegment, sanitizeName, stripDashes } from './pathing.ts'
+import { parseIdName } from '../../utils/naming.ts'
+import { formatSegment, sanitizeName, stripDashes } from './pathing.ts'
 import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
 
 describe('sanitizeName', () => {
@@ -59,39 +60,16 @@ describe('formatSegment', () => {
   })
 })
 
-describe('parseSegment', () => {
-  it('splits into title and id', () => {
-    expect(parseSegment('My_Page__aaaa1111-2222-3333-4444-555566667777')).toEqual({
-      title: 'My_Page',
-      id: 'aaaa1111-2222-3333-4444-555566667777',
-    })
-  })
-  it('splits on the LAST __ separator', () => {
-    expect(parseSegment('Page__with__multiple__sep__aaaa1111-2222-3333-4444-555566667777')).toEqual(
-      {
-        title: 'Page__with__multiple__sep',
-        id: 'aaaa1111-2222-3333-4444-555566667777',
-      },
-    )
-  })
-  it('throws on segment without a separator', () => {
-    expect(() => parseSegment('no-id')).toThrow(/no-id/)
-  })
-  it('throws when the id part is empty', () => {
-    expect(() => parseSegment('Page__')).toThrow(/__/)
-  })
-})
-
-describe('formatSegment / parseSegment round-trip', () => {
+describe('formatSegment round-trip', () => {
   it('round-trips a sanitized title', () => {
     const page = { id: 'aaaa1111-2222-3333-4444-555566667777', title: 'My_Page' }
-    expect(parseSegment(formatSegment(page))).toEqual(page)
+    expect(parseIdName(formatSegment(page))).toEqual([page.title, page.id])
   })
   it('round-trips a title containing double underscore in the middle', () => {
-    expect(parseSegment('a__b__aaaa1111-2222-3333-4444-555566667777')).toEqual({
-      title: 'a__b',
-      id: 'aaaa1111-2222-3333-4444-555566667777',
-    })
+    expect(parseIdName('a__b__aaaa1111-2222-3333-4444-555566667777')).toEqual([
+      'a__b',
+      'aaaa1111-2222-3333-4444-555566667777',
+    ])
   })
 })
 
@@ -103,7 +81,7 @@ describe('formatSegment byte budget', () => {
     const name = formatSegment({ id: OBJ_ID, title: CJK_TITLE })
 
     expect(byteLength(name)).toBeLessThanOrEqual(NAME_MAX_BYTES)
-    expect(parseSegment(name).id).toBe(OBJ_ID)
+    expect(parseIdName(name)[1]).toBe(OBJ_ID)
     expect(name).not.toContain('\uFFFD')
   })
 })

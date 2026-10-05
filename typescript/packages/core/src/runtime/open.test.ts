@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseMode, type OpenMode } from './handles/mode.ts'
 import { applyOpen, type OpenSurface } from './open.ts'
-import type { VFSEntry, VFSStat } from './vfs.ts'
+import type { VFSEntry, VFSStat } from './types.ts'
 
 const F = '/data/f'
 // C fopen's "wx", what a QuickJS guest opens with: exclusive creation

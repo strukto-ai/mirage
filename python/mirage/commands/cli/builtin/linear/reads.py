@@ -77,7 +77,7 @@ async def _project_issue_rows(
     return rows
 
 
-async def _run_team_list(
+async def _team_list(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     teams = await list_teams(config)
@@ -86,14 +86,14 @@ async def _run_team_list(
     return to_json_bytes([normalize_team(team) for team in teams])
 
 
-async def _run_team_get(
+async def _team_get(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, first_text(texts, "team key"))
     return to_json_bytes(normalize_team(team))
 
 
-async def _run_team_members(
+async def _team_members(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, first_text(texts, "team key"))
@@ -101,7 +101,7 @@ async def _run_team_members(
     return to_json_bytes([normalize_user(user) for user in users])
 
 
-async def _run_issue_list(
+async def _issue_list(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -109,7 +109,7 @@ async def _run_issue_list(
     return to_json_bytes([normalize_issue(issue) for issue in issues])
 
 
-async def _run_issue_get(
+async def _issue_get(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     issue_id = await resolve_issue(config, first_text(texts, "issue key"))
@@ -117,7 +117,7 @@ async def _run_issue_get(
     return to_json_bytes(normalize_issue(issue))
 
 
-async def _run_project_list(
+async def _project_list(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -137,7 +137,7 @@ async def _run_project_list(
     return to_json_bytes(payload)
 
 
-async def _run_project_get(
+async def _project_get(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -158,7 +158,7 @@ async def _run_project_get(
     raise FileNotFoundError(project_id)
 
 
-async def _run_cycle_list(
+async def _cycle_list(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -168,7 +168,7 @@ async def _run_cycle_list(
     )
 
 
-async def _run_cycle_current(
+async def _cycle_current(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -179,7 +179,7 @@ async def _run_cycle_current(
     return to_json_bytes(normalize_cycle(current, team_id=team["id"]))
 
 
-async def _run_cycle_get(
+async def _cycle_get(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -191,7 +191,7 @@ async def _run_cycle_get(
     raise FileNotFoundError(cycle_id)
 
 
-async def _run_label_list(
+async def _label_list(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -199,7 +199,7 @@ async def _run_label_list(
     return to_json_bytes([normalize_label(label) for label in labels])
 
 
-async def _run_comment_list(
+async def _comment_list(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     issue_id = await resolve_issue(config, first_text(texts, "issue key"))
@@ -228,14 +228,14 @@ async def _all_users(config: LinearConfig) -> list[dict[str, JsonValue]]:
     return users
 
 
-async def _run_user_list(
+async def _user_list(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     users = await _all_users(config)
     return to_json_bytes([normalize_user(user) for user in users])
 
 
-async def _run_user_get(
+async def _user_get(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     email = first_text(texts, "user email")
@@ -245,7 +245,7 @@ async def _run_user_get(
     raise FileNotFoundError(email)
 
 
-async def _run_document_list(
+async def _document_list(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -255,7 +255,7 @@ async def _run_document_list(
     )
 
 
-async def _run_document_get(
+async def _document_get(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
@@ -267,7 +267,7 @@ async def _run_document_get(
     raise FileNotFoundError(document_id)
 
 
-async def _run_search(
+async def _search(
     config: LinearConfig, texts: tuple[str, ...], fl: FlagView
 ) -> bytes:
     query = fl.as_str("query") or (texts[0] if texts else None)
@@ -288,20 +288,20 @@ async def _dispatch(
     return yield_bytes(data), IOResult()
 
 
-team_list = functools.partial(_dispatch, _run_team_list)
-team_get = functools.partial(_dispatch, _run_team_get)
-team_members = functools.partial(_dispatch, _run_team_members)
-issue_list = functools.partial(_dispatch, _run_issue_list)
-issue_get = functools.partial(_dispatch, _run_issue_get)
-project_list = functools.partial(_dispatch, _run_project_list)
-project_get = functools.partial(_dispatch, _run_project_get)
-cycle_list = functools.partial(_dispatch, _run_cycle_list)
-cycle_current = functools.partial(_dispatch, _run_cycle_current)
-cycle_get = functools.partial(_dispatch, _run_cycle_get)
-label_list = functools.partial(_dispatch, _run_label_list)
-comment_list = functools.partial(_dispatch, _run_comment_list)
-user_list = functools.partial(_dispatch, _run_user_list)
-user_get = functools.partial(_dispatch, _run_user_get)
-document_list = functools.partial(_dispatch, _run_document_list)
-document_get = functools.partial(_dispatch, _run_document_get)
-search = functools.partial(_dispatch, _run_search)
+team_list = functools.partial(_dispatch, _team_list)
+team_get = functools.partial(_dispatch, _team_get)
+team_members = functools.partial(_dispatch, _team_members)
+issue_list = functools.partial(_dispatch, _issue_list)
+issue_get = functools.partial(_dispatch, _issue_get)
+project_list = functools.partial(_dispatch, _project_list)
+project_get = functools.partial(_dispatch, _project_get)
+cycle_list = functools.partial(_dispatch, _cycle_list)
+cycle_current = functools.partial(_dispatch, _cycle_current)
+cycle_get = functools.partial(_dispatch, _cycle_get)
+label_list = functools.partial(_dispatch, _label_list)
+comment_list = functools.partial(_dispatch, _comment_list)
+user_list = functools.partial(_dispatch, _user_list)
+user_get = functools.partial(_dispatch, _user_get)
+document_list = functools.partial(_dispatch, _document_list)
+document_get = functools.partial(_dispatch, _document_get)
+search = functools.partial(_dispatch, _search)

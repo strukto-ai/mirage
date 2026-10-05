@@ -48,6 +48,7 @@ import type { HiddenPaths, HiddenVars, ShowEntry, ShownPaths } from '../../types
 import { type JobOutput, Terminal } from '../../shell/console/index.ts'
 import type { JobWaits } from '../../shell/job_table/index.ts'
 import type { MountMode } from '../../types.ts'
+import type { StatusWriter } from '../abort.ts'
 
 /**
  * What a child shell gets its own copy of, and the parent gets back
@@ -385,18 +386,6 @@ function copyVars(vars: Record<string, ShellVar>): Record<string, ShellVar> {
     else out[name] = v
   }
   return out
-}
-
-/**
- * Opaque per-line identity for status writes, minted once per
- * `execute()` and carried on the line's abort frame so every statement
- * it runs stamps the same one.
- */
-export type StatusWriter = symbol
-
-/** A fresh line identity. */
-export function newStatusWriter(): StatusWriter {
-  return Symbol('line')
 }
 
 export class SessionState {

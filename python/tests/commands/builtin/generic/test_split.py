@@ -36,7 +36,7 @@ _TRY = "\nTry 'split --help' for more information."
 _ALPHA_SUFFIXES = split_generic._ALPHA_SUFFIXES
 _HEX_SUFFIXES = split_generic._HEX_SUFFIXES
 _NUMERIC_SUFFIXES = split_generic._NUMERIC_SUFFIXES
-_suffix_name = split_generic._suffix_name
+_suffix_namer = split_generic._suffix_namer
 
 
 def test_bytes_accepts_gnu_suffixes():
@@ -160,27 +160,27 @@ def test_suffix_names_auto_lengthen_like_gnu():
     # GNU reserves the last alphabet character as a growth prefix:
     # aa..yz then zaaa.., 00..89 then 9000.., 00..ef then f000.. (pinned
     # against coreutils 9.7). Index 676 must never wrap back onto aa.
-    assert _suffix_name(650, _ALPHA_SUFFIXES, True, 2, 0) == "zaaa"
-    assert _suffix_name(90, _NUMERIC_SUFFIXES, True, 2, 0) == "9000"
-    assert _suffix_name(240, _HEX_SUFFIXES, True, 2, 0) == "f000"
+    assert _suffix_namer(650, _ALPHA_SUFFIXES, True, 2, 0) == "zaaa"
+    assert _suffix_namer(90, _NUMERIC_SUFFIXES, True, 2, 0) == "9000"
+    assert _suffix_namer(240, _HEX_SUFFIXES, True, 2, 0) == "f000"
 
 
 def test_suffix_names_exhaust_fixed_widths():
     # An explicit -a width or an explicit start value pins the width;
     # GNU keeps the chunks already written and fails on the next name.
-    assert _suffix_name(675, _ALPHA_SUFFIXES, False, 2, 0) == "zz"
+    assert _suffix_namer(675, _ALPHA_SUFFIXES, False, 2, 0) == "zz"
     with pytest.raises(UsageError) as exc:
-        _suffix_name(676, _ALPHA_SUFFIXES, False, 2, 0)
+        _suffix_namer(676, _ALPHA_SUFFIXES, False, 2, 0)
     assert str(exc.value) == "split: output file suffixes exhausted"
     assert exc.value.exit_code == 1
-    assert _suffix_name(1, _NUMERIC_SUFFIXES, False, 2, 98) == "99"
+    assert _suffix_namer(1, _NUMERIC_SUFFIXES, False, 2, 98) == "99"
     with pytest.raises(UsageError):
-        _suffix_name(2, _NUMERIC_SUFFIXES, False, 2, 98)
+        _suffix_namer(2, _NUMERIC_SUFFIXES, False, 2, 98)
     # Deliberate divergence: GNU 9.7 with --hex-suffixes=f0 walks past its
     # alphabet into non-hex names; mirage exhausts cleanly at the width.
-    assert _suffix_name(15, _HEX_SUFFIXES, False, 2, 0xF0) == "ff"
+    assert _suffix_namer(15, _HEX_SUFFIXES, False, 2, 0xF0) == "ff"
     with pytest.raises(UsageError):
-        _suffix_name(16, _HEX_SUFFIXES, False, 2, 0xF0)
+        _suffix_namer(16, _HEX_SUFFIXES, False, 2, 0xF0)
 
 
 def test_suffix_length_overflows_past_uintmax():

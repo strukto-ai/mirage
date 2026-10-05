@@ -19,11 +19,11 @@ import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { OnePasswordConfig } from './config.ts'
 import {
   TOKEN_VAR,
-  fetchOnePassword,
+  fetchOnepassword,
   fieldsFromItem,
   findItemId,
   findVaultId,
-  onePasswordClient,
+  onepasswordClient,
   parseOpRef,
 } from './onepassword.ts'
 import { VERSION } from '../version.ts'
@@ -165,7 +165,7 @@ describe('fieldsFromItem', () => {
   })
 })
 
-describe('fetchOnePassword', () => {
+describe('fetchOnepassword', () => {
   beforeEach(() => {
     state.auths = []
     state.vaults = [{ id: 'v1', title: 'mirage' }]
@@ -190,7 +190,7 @@ describe('fetchOnePassword', () => {
   })
 
   it('reads every field of an item ref on one get', async () => {
-    const secret = await fetchOnePassword(config, 'op://mirage/aws')
+    const secret = await fetchOnepassword(config, 'op://mirage/aws')
     expect(secret.fields).toEqual({ access_key_id: 'AKIA', secret_access_key: 'shh' })
     expect(secret.expiresAt).toBeUndefined()
     expect(state.gets).toEqual([['v1', 'i1']])
@@ -198,14 +198,14 @@ describe('fetchOnePassword', () => {
   })
 
   it('matches a vault and an item by id', async () => {
-    const secret = await fetchOnePassword(config, 'op://v1/i1')
+    const secret = await fetchOnepassword(config, 'op://v1/i1')
     expect(secret.fields).toEqual({ access_key_id: 'AKIA', secret_access_key: 'shh' })
   })
 
   it('resolves a field ref without listing anything', async () => {
     const ref = 'op://mirage/tok/credential'
     state.values = { [ref]: 'shh' }
-    const secret = await fetchOnePassword(config, ref)
+    const secret = await fetchOnepassword(config, ref)
     expect(secret.fields).toEqual({ credential: 'shh' })
     expect(state.resolved).toEqual([ref])
     expect(state.vaultCalls).toBe(0)
@@ -214,21 +214,21 @@ describe('fetchOnePassword', () => {
 
   it('refuses an unknown vault', async () => {
     state.vaults = [{ id: 'v1', title: 'other' }]
-    await expect(fetchOnePassword(config, 'op://mirage/aws')).rejects.toThrow(
+    await expect(fetchOnepassword(config, 'op://mirage/aws')).rejects.toThrow(
       /vault 'mirage' not found/,
     )
   })
 
   it('refuses an unknown item', async () => {
     state.overviews = { v1: [{ id: 'i1', title: 'other' }] }
-    await expect(fetchOnePassword(config, 'op://mirage/aws')).rejects.toThrow(
+    await expect(fetchOnepassword(config, 'op://mirage/aws')).rejects.toThrow(
       /item 'aws' not found/,
     )
   })
 
   it('uses the configured token over the env one', async () => {
     process.env[TOKEN_VAR] = 'ops_from_env'
-    await onePasswordClient(config)
+    await onepasswordClient(config)
     expect(state.auths).toEqual([
       { auth: 'ops_test', integrationName: 'mirage', integrationVersion: VERSION },
     ])
@@ -236,7 +236,7 @@ describe('fetchOnePassword', () => {
 
   it('falls back to the env token', async () => {
     process.env[TOKEN_VAR] = 'ops_from_env'
-    await onePasswordClient(OnePasswordConfig.parse({}))
+    await onepasswordClient(OnePasswordConfig.parse({}))
     expect(state.auths).toEqual([
       { auth: 'ops_from_env', integrationName: 'mirage', integrationVersion: VERSION },
     ])
@@ -244,8 +244,8 @@ describe('fetchOnePassword', () => {
 
   it('refuses a missing token before loading the SDK', async () => {
     Reflect.deleteProperty(process.env, TOKEN_VAR)
-    await expect(onePasswordClient(OnePasswordConfig.parse({}))).rejects.toThrow(SecretsError)
-    await expect(onePasswordClient(OnePasswordConfig.parse({}))).rejects.toThrow(TOKEN_VAR)
+    await expect(onepasswordClient(OnePasswordConfig.parse({}))).rejects.toThrow(SecretsError)
+    await expect(onepasswordClient(OnePasswordConfig.parse({}))).rejects.toThrow(TOKEN_VAR)
     expect(state.auths).toEqual([])
   })
 })

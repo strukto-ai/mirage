@@ -61,7 +61,7 @@ def _suffix_error(value: str, junk: str) -> UsageError:
     )
 
 
-def _missing_i_error(value: str) -> UsageError:
+def _missing_i_suffix_error(value: str) -> UsageError:
     """GNU's ``--from=iec-i`` complaint that the ``i`` is absent, exit 2.
 
     It answers for every field whose unit letter is not followed by an
@@ -103,7 +103,7 @@ def _scale_of(value: str, suffix: str, from_mode: str) -> tuple[int, int]:
     tail = suffix[1:]
     if from_mode == "iec-i":
         if tail[:1] != "i":
-            raise _missing_i_error(value)
+            raise _missing_i_suffix_error(value)
         if tail[1:]:
             raise _suffix_error(value, tail[1:])
         return 1024, exponent

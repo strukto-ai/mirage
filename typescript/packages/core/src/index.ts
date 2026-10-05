@@ -90,7 +90,7 @@ export type { RuntimeEntry } from './runtime/base.ts'
 export { EvalError } from './runtime/errors.ts'
 export { EVALUATOR, LINE_EXECUTOR, PROCESS_EXECUTOR } from './runtime/mixin.ts'
 export type { Evaluator, LineExecutor, ProcessExecutor } from './runtime/mixin.ts'
-export { ScriptSource } from './runtime/routing/index.ts'
+export { ScriptSource } from './runtime/types.ts'
 export { buildRuntime } from './runtime/table.ts'
 export type {
   EvalResult,

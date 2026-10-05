@@ -14,7 +14,7 @@
 
 from mirage.core.hierarchy.codec import PATH_SAFE
 from mirage.core.qdrant.naming import group_name, point_id_from_stem, row_stem
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 from mirage.vfs.qdrant.config import QdrantConfig
 
 
@@ -61,7 +61,7 @@ def test_row_stem_reserves_room_for_every_enabled_suffix():
     )
     stem = row_stem({"id": 17, "title": "界" * 200}, config)
     for suffix in (".json", ".txt", ".very-long-extension"):
-        assert byte_len(f"{stem}{suffix}") <= NAME_MAX_BYTES
+        assert byte_length(f"{stem}{suffix}") <= NAME_MAX_BYTES
     assert point_id_from_stem(stem, config) == "17"
 
 
@@ -120,7 +120,7 @@ def test_a_basename_past_name_max_is_cut_and_keeps_its_identity():
     assert long_a == "r" * 221 + "__ba0797292207781661c03dea74339808"
     assert long_b != long_a
     wide = group_name(f"s3://docs/{'界' * 100}", basename=True)
-    assert byte_len(wide) <= NAME_MAX_BYTES
+    assert byte_length(wide) <= NAME_MAX_BYTES
     assert "\ufffd" not in wide
     assert wide.endswith("__51d13188e994b54376bb4693d036cf61")
     assert group_name(f"s3://docs/{'r' * 255}", basename=True) == "r" * 255

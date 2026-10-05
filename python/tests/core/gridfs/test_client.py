@@ -17,7 +17,7 @@ import re
 from mirage.core.gridfs.client import (
     _key,
     _prefix,
-    _strip_prefix,
+    _strip_key_prefix,
     prefix_query,
 )
 from mirage.vfs.gridfs.config import GridFSConfig
@@ -51,7 +51,7 @@ def test_prefix_dir_form():
 def test_strip_prefix_roundtrip():
     config = _config("team/reports")
     key = _key("/sub/a.txt", config)
-    assert _strip_prefix(key, config) == "sub/a.txt"
+    assert _strip_key_prefix(key, config) == "sub/a.txt"
 
 
 def test_prefix_query_empty_matches_everything():

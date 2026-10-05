@@ -19,7 +19,6 @@ from mirage.cache.context import invalidate_after_write
 from mirage.core.gdrive.resolve import (
     eacces_on_denied,
     node_from_item,
-    resolve_key,
     resolve_parent,
     resolve_segment,
     root_context,
@@ -40,9 +39,6 @@ async def mkdir(
             return
         raise FileExistsError(virtual)
     if not parents:
-        node = await resolve_key(accessor, key)
-        if node is not None:
-            raise FileExistsError(virtual)
         parent_id, _ = await resolve_parent(accessor, path)
         await create_folder(token_manager, posixpath.basename(key), parent_id)
         await invalidate_after_write(path)

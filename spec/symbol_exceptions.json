@@ -1,6 +1,11 @@
 {
- "baseline": 4754,
+ "baseline": 4488,
  "modules": {
+  "ops/registry": {
+   "typescript_only": {
+    "OpsRegistry": "Python keeps each mount's op table on its Mount (`Mount._ops`, `register_op`, the filetype-then-VFS cascade); TypeScript holds one OpsRegistry on the Workspace and scopes entries per VFS. Same lookup, held in a different place."
+   }
+  },
   "ops/generic/factory": {
    "python_only": {
     "_make_pwrite": "Python builds every emitted op through a named `_make_*` closure builder; TypeScript writes the same closure inline in makeGenericOps, as it does for the module's older builders.",
@@ -9,15 +14,7 @@
   },
   "core/github/tree": {
    "python_only": {
-    "fetch_head": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "_head_of": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureLiveTree."
-   }
-  },
-  "core/github/client": {
-   "typescript_only": {
-    "fetchHead": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "headOf": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts."
+    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureTree."
    }
   },
   "core/hf_hub/client": {

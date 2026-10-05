@@ -19,12 +19,12 @@ import { FileType, type PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
-import { isADirectoryError } from './errors.ts'
 import { backendPath } from './path.ts'
 import { readBytes } from './read.ts'
 import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
 import { writeBytes } from './write.ts'
+import { eisdir } from '../../utils/errors.ts'
 
 async function uploadBytes(
   accessor: DatabricksVolumeAccessor,
@@ -79,7 +79,7 @@ export async function copy(
   // so a missing source or `cp` of a directory still raises.
   const samePath = backendPath(accessor.config, s) === backendPath(accessor.config, d)
   if (srcStat.type === FileType.DIRECTORY) {
-    if (!recursive) throw isADirectoryError(s.virtual)
+    if (!recursive) throw eisdir(s.virtual)
     if (samePath) return
     const remoteSrc = backendPath(accessor.config, s)
     const remoteDst = backendPath(accessor.config, d)

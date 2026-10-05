@@ -102,3 +102,20 @@ def _parse_address_list(raw: str) -> list[dict[str, str]]:
     if not raw:
         return []
     return [_parse_address(a.strip()) for a in raw.split(",")]
+
+
+def parse_with_payloads(raw: bytes) -> list[dict[str, Any]]:
+    msg = BytesParser(policy=policy.default).parsebytes(raw)
+    attachments: list[dict[str, Any]] = []
+    if msg.is_multipart():
+        for part in msg.walk():
+            disposition = str(part.get("Content-Disposition", ""))
+            if "attachment" in disposition:
+                payload = part.get_payload(decode=True) or b""
+                attachments.append(
+                    {
+                        "filename": part.get_filename() or "unnamed",
+                        "payload": payload,
+                    }
+                )
+    return attachments

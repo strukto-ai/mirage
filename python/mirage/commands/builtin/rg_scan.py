@@ -20,7 +20,7 @@ from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.rg_filetypes import FileTypes
 from mirage.commands.builtin.rg_glob import Overrides, Verdict, walk_candidate
 from mirage.commands.builtin.utils.links import LinkDoor
-from mirage.commands.builtin.utils.types import AsyncReaddir, AsyncStat
+from mirage.commands.builtin.utils.types import AsyncReaddirFn, AsyncStatFn
 from mirage.commands.resolve import get_extension
 from mirage.errors.classify import classify
 from mirage.errors.posix import linux_errno
@@ -220,8 +220,8 @@ def on_other_mount(root_of: MountRoot, home: str, path: str) -> bool:
 
 
 async def walk_haystacks(
-    readdir_fn: AsyncReaddir,
-    stat_fn: AsyncStat,
+    readdir_fn: AsyncReaddirFn,
+    stat_fn: AsyncStatFn,
     root: str,
     shown_root: str,
     cwd: str,
@@ -242,8 +242,8 @@ async def walk_haystacks(
     above it is reported in ripgrep's words and skipped.
 
     Args:
-        readdir_fn (AsyncReaddir): directory reader.
-        stat_fn (AsyncStat): stat reader.
+        readdir_fn (AsyncReaddirFn): directory reader.
+        stat_fn (AsyncStatFn): stat reader.
         root (str): the operand's virtual path.
         shown_root (str): the operand as typed, which every printed path
             below it starts with; empty for the implicit cwd, whose
@@ -288,8 +288,8 @@ class _Walker:
     """What one operand's walk reads with and keeps, for every level.
 
     Args:
-        readdir_fn (AsyncReaddir): the operand's directory reader.
-        stat_fn (AsyncStat): the operand's stat reader.
+        readdir_fn (AsyncReaddirFn): the operand's directory reader.
+        stat_fn (AsyncStatFn): the operand's stat reader.
         cwd (str): the root the globs are matched from.
         walk (WalkFilter): what the walk keeps.
         sort_by_name (bool): each directory's entries in name order.
@@ -301,8 +301,8 @@ class _Walker:
         parallel (bool): ripgrep would walk with its parallel walker.
     """
 
-    readdir_fn: AsyncReaddir
-    stat_fn: AsyncStat
+    readdir_fn: AsyncReaddirFn
+    stat_fn: AsyncStatFn
     cwd: str
     walk: WalkFilter
     sort_by_name: bool

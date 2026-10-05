@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Ops } from '../../ops/ops.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import { isEacces } from '../../utils/errors.ts'
 import { gnuDirname } from '../../utils/path.ts'
 import type { Session, SessionExecuteOptions } from '../workspace/handle.ts'
 import type { ExecuteResult } from '../workspace/types.ts'
@@ -63,6 +65,29 @@ async function ensureParents(vfs: Ops, path: string): Promise<void> {
     await vfs.mkdir(parent)
   } catch (err) {
     if (!(await vfs.exists(parent))) throw err
+  }
+}
+
+/**
+ * Whether a path a read just failed on is absent, which picks the
+ * failure's wording. A probe the workspace refuses means the path is
+ * there: a hidden one answers absent, never refused. A probe that fails
+ * for any other filesystem reason proves nothing either way. In both
+ * cases the read's own error stands rather than the probe's.
+ */
+async function missing(vfs: Ops, path: string): Promise<boolean> {
+  try {
+    return !(await vfs.exists(path))
+  } catch (err) {
+    // An errno-stamped error is the TypeScript shape of Python's OSError;
+    // anything else (an unknown session) is not a probe answer.
+    if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
+    // A policy refusal is routine (the policy that refused the read refuses
+    // the probe too); any other failure, a backend EACCES included, warns.
+    if (!(err instanceof PolicyDenied)) {
+      console.warn(`exists probe failed for ${path}: ${String(err)}`)
+    }
+    return false
   }
 }
 
@@ -152,7 +177,7 @@ export class MirageToolOperations {
     path: string,
     err: unknown,
   ): Promise<ToolResult> {
-    if (!(await versions.vfs.exists(path))) {
+    if (await missing(versions.vfs, path)) {
       return errorResult(`Error: file '${path}' not found`)
     }
     return errorResult(`Error: ${errorMessage(err)}`)
@@ -182,7 +207,14 @@ export class MirageToolOperations {
    */
   async write(path: string, content: string): Promise<ToolResult> {
     const versions = await this.versions()
-    if ((await versions.vfs.exists(path)) && !versions.hasRead(path)) {
+    let present: boolean
+    try {
+      present = await versions.vfs.exists(path)
+    } catch (err) {
+      if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
+      return errorResult(`Error: ${errorMessage(err)}`)
+    }
+    if (present && !versions.hasRead(path)) {
       return errorResult(`Error: file '${path}' exists; read all of it before overwriting it`)
     }
     try {
@@ -206,7 +238,7 @@ export class MirageToolOperations {
       content = decode(await versions.readForEdit(path))
     } catch (err) {
       if (err instanceof StaleMirageFileError) return errorResult(`Error: ${err.message}`)
-      if (!(await versions.vfs.exists(path))) {
+      if (await missing(versions.vfs, path)) {
         return errorResult(`Error: file '${path}' not found`)
       }
       return errorResult(`Error: ${errorMessage(err)}`)
@@ -273,7 +305,9 @@ export class MirageToolOperations {
    * pattern is expanded by `Session.glob`, the shell's own resolver:
    * `**` matches any number of directories, and a relative pattern is
    * matched under `path`. A symlink to a file counts; a dangling one does
-   * not.
+   * not, nor does a match the workspace refuses to stat, since nothing
+   * says what it is. Any other failure propagates rather than pass for a
+   * short list.
    */
   async glob(pattern: string, path = '/'): Promise<ToolResult> {
     const full =
@@ -282,10 +316,20 @@ export class MirageToolOperations {
         : path.endsWith('/')
           ? `${path}${pattern}`
           : `${path}/${pattern}`
-    const matches = await this.session.glob(full)
+    let matches: string[]
+    try {
+      matches = await this.session.glob(full)
+    } catch (err) {
+      if (!isEacces(err)) throw err
+      matches = []
+    }
     const files: string[] = []
     for (const match of matches) {
-      if (await this.session.vfs.isFile(match)) files.push(match)
+      try {
+        if (await this.session.vfs.isFile(match)) files.push(match)
+      } catch (err) {
+        if (!isEacces(err)) throw err
+      }
     }
     return textResult(files.map((match) => `${match}\n`).join(''))
   }

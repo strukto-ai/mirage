@@ -19,7 +19,6 @@ from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import parent_path
 from mirage.core.databricks_volume.errors import is_not_found
-from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
 from mirage.types import FileType, PathSpec
@@ -45,8 +44,6 @@ async def mkdir(
         await invalidate_after_write(path)
         await invalidate_ancestors(path)
         return
-    if await exists(accessor, path):
-        raise FileExistsError(path.virtual)
     try:
         parent_stat = await stat(accessor, parent_path(path), index)
     except FileNotFoundError as exc:

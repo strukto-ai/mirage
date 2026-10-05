@@ -126,44 +126,6 @@ export function absPath(arg: string | PathSpec, cwd: string): string {
   return resolvePath(arg, cwd)
 }
 
-function allKnown(chars: string, known: string): boolean {
-  for (const c of chars) if (!known.includes(c)) return false
-  return true
-}
-
-/**
- * Split leading single-letter flags, permissively.
- *
- * A token containing any unknown letter is kept as an operand instead of
- * erroring (`ln`/`readlink` behavior).
- *
- * @param args - args after the command name.
- * @param known - accepted single-letter flags.
- * @returns [flags, operands].
- */
-export function splitFlags(
-  args: (string | PathSpec)[],
-  known: string,
-): [Set<string>, (string | PathSpec)[]] {
-  const flags = new Set<string>()
-  const operands: (string | PathSpec)[] = []
-  let parsing = true
-  for (const arg of args) {
-    const s = operandText(arg)
-    if (parsing && s === '--') {
-      parsing = false
-      continue
-    }
-    if (parsing && s !== '-' && s.length >= 2 && s.startsWith('-') && allKnown(s.slice(1), known)) {
-      for (const c of s.slice(1)) flags.add(c)
-      continue
-    }
-    parsing = false
-    operands.push(arg)
-  }
-  return [flags, operands]
-}
-
 export interface SplitValueFlags {
   flags: Set<string>
   values: Map<string, string>

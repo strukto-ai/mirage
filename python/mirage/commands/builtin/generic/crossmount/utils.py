@@ -41,7 +41,7 @@ from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks as byte_chunks
 from mirage.io.stream import discard_streams, ensure_stream, materialize
@@ -137,7 +137,7 @@ async def run_operands(
             # a lazy operand that fails here is the same failure the
             # single-mount run reports eagerly, and it must answer the
             # same number.
-            io.exit_code = read_fail_exit(cmd_name, exc)
+            io.exit_code = read_fail_exit_code(cmd_name, exc)
         results.append(OperandRun(scope, b"".join(chunks), io))
     return results
 
@@ -216,7 +216,7 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
     )
 
 
-def transfer_links(
+def transfer_links_of(
     links: LinkView, dispatch: DispatchFn, cwd: str
 ) -> TransferLinks:
     """Namespace links with the dispatcher primitives shared by cp and mv.
@@ -310,7 +310,7 @@ async def stream_operands(
                     branch.stderr = existing + encode_text(
                         fs_error_line(cmd_name, scope, exc)
                     )
-                    branch.exit_code = read_fail_exit(cmd_name, exc)
+                    branch.exit_code = read_fail_exit_code(cmd_name, exc)
                 io.reads.update(branch.reads)
                 io.writes.update(branch.writes)
                 io.cache.extend(branch.cache)

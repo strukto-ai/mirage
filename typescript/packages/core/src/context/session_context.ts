@@ -326,19 +326,6 @@ export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): 
 }
 
 /**
- * Unbind the op policies for the duration of `fn`: a delegated
- * sub-command whose door the caller has already cleared.
- *
- * find's `-delete` admits each removal itself, in find's own refusal
- * voice, and then delegates the mutation to `rm`; without the
- * suspension the delegated slot would admit the same deletion a second
- * time, so a counting or budget policy would see one removal twice.
- */
-export function runWithSuspendedOpPolicies<T>(fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(opPoliciesStorage.run(null, fn))
-}
-
-/**
  * The policies bound to the running command, null outside one.
  *
  * The newest live armed set. On an isolating runtime the live set is

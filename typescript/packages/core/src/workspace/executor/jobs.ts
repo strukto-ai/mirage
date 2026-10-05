@@ -40,34 +40,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { inheritExitTrap } from './traps.ts'
 import { encodeText } from '../../shell/bytes.ts'
-
-/** Per-call overrides a caller can layer onto the walker's deps. */
-export interface ExecuteNodeOpts {
-  /** @internal Scheduling scope; background jobs create their own. */
-  executionScope?: ExecutionScope
-  sink?: JobConsole
-  signal?: AbortSignal
-  /** The hand-off the subtree runs on: a background job's own. */
-  handed?: HandOff
-  /**
-   * The node is the whole of a child shell (a background job), which runs
-   * its EXIT action when the node ends.
-   */
-  endsShell?: boolean
-  /**
-   * False leaves what expanding the node printed to the caller, which
-   * routes it around the node's redirects.
-   */
-  ownDiagnostics?: boolean
-}
-
-export type ExecuteNodeFn = (
-  node: TSNodeLike,
-  session: SessionState,
-  stdin: ByteSource | null,
-  callStack: CallStack | null,
-  opts?: ExecuteNodeOpts,
-) => Promise<[ByteSource | null, IOResult, ExecutionNode]>
+import type { ExecuteNodeOpts, ExecuteNodeFn } from './command/types.ts'
 
 export type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
 

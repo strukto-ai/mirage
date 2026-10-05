@@ -21,7 +21,7 @@ DEFAULT_TEMPLATE = "tmp.XXXXXXXXXX"
 ATTEMPTS = 100
 
 
-def _rand_suffix(length: int) -> str:
+def _random_suffix(length: int) -> str:
     return "".join(random.choices(_ALPHABET, k=length))
 
 
@@ -172,7 +172,9 @@ async def mktemp(
 
     def draw() -> str:
         return (
-            template[: end - x_count] + _rand_suffix(x_count) + template[end:]
+            template[: end - x_count]
+            + _random_suffix(x_count)
+            + template[end:]
         )
 
     async def create(path: PathSpec) -> None:

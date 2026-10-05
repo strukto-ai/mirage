@@ -20,7 +20,7 @@ from yarl import URL
 
 from mirage.core.dropbox.client import (
     DropboxTokenManager,
-    _token_url,
+    _token_url_of,
     dropbox_download,
 )
 from mirage.core.dropbox.constants import (
@@ -48,14 +48,15 @@ def test_endpoint_override_serves_api_and_content_from_one_origin():
     assert tm.api_base == "http://127.0.0.1:9999/2"
     assert tm.content_base == "http://127.0.0.1:9999/2"
     assert (
-        _token_url(make_config(endpoint="http://127.0.0.1:9999/"))
+        _token_url_of(make_config(endpoint="http://127.0.0.1:9999/"))
         == "http://127.0.0.1:9999/oauth2/token"
     )
 
 
 def test_token_url_defaults_to_production():
     assert (
-        _token_url(make_config()) == "https://api.dropboxapi.com/oauth2/token"
+        _token_url_of(make_config())
+        == "https://api.dropboxapi.com/oauth2/token"
     )
 
 

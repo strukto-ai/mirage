@@ -42,9 +42,6 @@ function requirePeer(source: string, peer: string): void {
   }
 }
 
-/** The builtin source names this module registers, sorted. */
-export const BUILTIN_SOURCE_NAMES = ['1password', 'aws-sm', 'dotenv', 'env'] as const
-
 // Builtin fetchers load lazily: each registered fetch dynamically
 // imports its module on first use, so a source's SDK loads only when a
 // workspace actually uses it (Python spells the same table as import
@@ -64,7 +61,7 @@ registerSecrets('aws-sm', AWSSMConfig, async (config, ref) =>
 registerSecrets(
   '1password',
   OnePasswordConfig,
-  async (config, ref) => (await import('./onepassword.ts')).fetchOnePassword(config, ref),
+  async (config, ref) => (await import('./onepassword.ts')).fetchOnepassword(config, ref),
   // The SDK still loads lazily; this only asks the resolver whether it
   // is installed, so a workspace that declares the source learns at
   // construction and one that does not pays nothing. Python's own

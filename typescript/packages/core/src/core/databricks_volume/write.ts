@@ -19,8 +19,9 @@ import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
-import { isNotFound, notADirectoryError, notFoundError } from './errors.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
+import { enoent, enotdir } from '../../utils/errors.ts'
 
 async function ensureParentDirectory(
   accessor: DatabricksVolumeAccessor,
@@ -36,10 +37,10 @@ async function ensureParentDirectory(
   try {
     await dbxFetch(accessor, 'HEAD', 'files', remoteParent)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(virtualTarget)
+    if (isNotFound(exc)) throw enoent(virtualTarget)
     throw exc
   }
-  throw notADirectoryError(virtualTarget)
+  throw enotdir(virtualTarget)
 }
 
 export async function writeBytes(
@@ -60,7 +61,7 @@ export async function writeBytes(
       body: data,
     })
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(p.virtual)
+    if (isNotFound(exc)) throw enoent(p.virtual)
     throw exc
   }
   record('write', p.virtual, VFSName.DATABRICKS_VOLUME, data.byteLength, timer)

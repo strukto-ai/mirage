@@ -618,7 +618,7 @@ def _wanted(
     return frozenset((wanted & pending.keys()) - masked)
 
 
-def _pending(session: SessionState) -> dict[str, ManagedRef]:
+def _pending_of(session: SessionState) -> dict[str, ManagedRef]:
     """The session's unfetched managed names, hidden ones excluded.
 
     A hidden name never fetches at all: the snapshot filters it and
@@ -666,7 +666,7 @@ def fill_names(
         writes_gated (bool): a policy hooks ``pre_session``, so no
             assignment or unset is trusted to land (``masked_names``).
     """
-    pending = _pending(session)
+    pending = _pending_of(session)
     if not pending:
         return frozenset()
     if whole:
@@ -713,7 +713,7 @@ async def fill_env(
     """
     if not names:
         return
-    pending = _pending(session)
+    pending = _pending_of(session)
     records = {name: session.vars[name] for name in pending}
     groups: dict[tuple[str, str], list[str]] = {}
     for name in sorted(names & pending.keys()):
