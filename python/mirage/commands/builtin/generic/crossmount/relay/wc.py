@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic.crossmount.constants import (
 from mirage.commands.builtin.generic.crossmount.types import (
     Cmd,
     CrossResult,
+    OperandRun,
     RunSingle,
 )
 from mirage.commands.builtin.generic.crossmount.utils import (
@@ -78,6 +79,43 @@ async def operand_size(
     return info.size if info.size is not None else max(counts)
 
 
+async def recount(
+    run: OperandRun,
+    flags: dict[str, FlagValue],
+    dispatch: DispatchFn,
+    cwd: str,
+    ns: NamespaceView | None,
+    stdin: ByteSource | None,
+) -> OperandRun:
+    """The run as counted, recounting it through the dispatcher if needed.
+
+    A mount's wc that succeeds without counts (one not built on the
+    generic) leaves its operand to the generic over the dispatcher, and
+    only that operand: the others keep what their own mount counted.
+
+    Args:
+        run (OperandRun): One operand's run on its own mount.
+        flags (dict[str, FlagValue]): The flags every run takes.
+        dispatch (DispatchFn): Workspace operation dispatcher.
+        cwd (str): The session's working directory.
+        ns (NamespaceView | None): Mount ownership and link facts.
+        stdin (ByteSource | None): The command's input.
+    """
+    if run.io.counted_runs is not None or run.io.exit_code != 0:
+        return run
+    _, io = await run_dispatch(
+        DISPATCH_BUILDERS[Cmd.WC],
+        [run.scope],
+        [],
+        flags,
+        dispatch,
+        cwd,
+        ns,
+        stdin,
+    )
+    return OperandRun(run.scope, b"", io)
+
+
 async def run_wc(
     scopes: list[PathSpec],
     flag_kwargs: dict[str, FlagValue],
@@ -94,8 +132,8 @@ async def run_wc(
     and reading mounts stream. Only the layout spans the line: the counts
     each run reports (``IOResult.counted_runs``) go through the generic's
     formatter with GNU's column width, and no mount's output text is
-    read back. A run that succeeds without counts (a wc not built on the
-    generic) leaves the line to one dispatcher pass.
+    read back. A run that succeeds without counts is recounted on its
+    own (``recount``).
 
     Args:
         scopes (list[PathSpec]): Expanded operands in command-line order.
@@ -116,20 +154,11 @@ async def run_wc(
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     columns = [c for c in COLUMNS if getattr(flags, c)]
     columns = columns or ["lines", "words", "bytes_"]
-    runs = await run_operands(
-        run_single, Cmd.WC, scopes, [], {**flag_kwargs, "total": "never"}
-    )
-    if any(r.io.counted_runs is None and r.io.exit_code == 0 for r in runs):
-        return await run_dispatch(
-            DISPATCH_BUILDERS[Cmd.WC],
-            scopes,
-            [],
-            flag_kwargs,
-            dispatch,
-            cwd,
-            ns,
-            stdin,
-        )
+    each = {**flag_kwargs, "total": "never"}
+    runs = [
+        await recount(run, each, dispatch, cwd, ns, stdin)
+        for run in await run_operands(run_single, Cmd.WC, scopes, [], each)
+    ]
     rows: list[tuple[WCCounts, str | None]] = []
     sizes: list[int | None] = []
     totals = WCCounts()

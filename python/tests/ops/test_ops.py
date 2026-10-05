@@ -175,7 +175,7 @@ class TestRename:
             run(ops.read("/data/dir/old.txt"))
 
     def test_rename_across_mounts_refuses_exdev(self):
-        # A mount is a filesystem boundary; the facade refuses before
+        # A mount is a filesystem boundary; the door refuses before
         # any backend is touched, so a kernel-facing caller (a
         # whole-workspace FUSE mount) falls back to copy+unlink instead
         # of writing one backend's path into another's key space.
@@ -186,12 +186,14 @@ class TestRename:
         assert exc.value.errno == errno.EXDEV
         assert run(ops.read("/a/x.txt")) == b"body"
 
-    def test_rename_to_an_unmounted_path_refuses_exdev(self):
+    def test_rename_into_a_missing_directory_is_enoent(self):
+        # rename(2) resolves the destination's directory before it
+        # compares filesystems, so a missing one is ENOENT, not EXDEV.
         ops = _two_mount_ops()
         run(ops.write("/a/x.txt", b"body"))
         with pytest.raises(OSError) as exc:
             run(ops.rename("/a/x.txt", "/elsewhere/x.txt"))
-        assert exc.value.errno == errno.EXDEV
+        assert exc.value.errno == errno.ENOENT
 
 
 class UngrantedRemote(RAMVFS):

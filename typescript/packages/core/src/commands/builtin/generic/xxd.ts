@@ -15,6 +15,7 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
+import { concat } from '../../../io/cachable_iterator.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { fsErrorLine, isEnoent, isFsError } from '../../../utils/errors.ts'
@@ -188,28 +189,44 @@ async function* xxdReverseStream(
 }
 
 /**
- * Revert a hexdump into a file's bytes, as xxd writes into OUTFILE. Each
- * run lands at its offset and the bytes around it stay, so the file grows
- * only where a run reaches past its end, padded with NUL. Mirrors Python's
- * _patched.
+ * Revert a hexdump into the stretches xxd writes into OUTFILE. Each run lands
+ * at its offset, or where the last one ended; runs that meet join one
+ * stretch, so a whole dump is one write at 0. Mirrors Python's
+ * _reverse_segments.
  */
-async function patched(
-  source: AsyncIterable<Uint8Array>,
-  existing: Uint8Array,
-): Promise<Uint8Array> {
-  let buf = existing.slice()
+async function reverseSegments(source: AsyncIterable<Uint8Array>): Promise<[number, Uint8Array][]> {
+  const segments: { start: number; end: number; parts: Uint8Array[] }[] = []
   let position = 0
   for await (const [offset, data] of reverseRuns(source)) {
     if (data.byteLength === 0) continue
     if (offset !== null) position = offset
-    const end = position + data.byteLength
+    const last = segments.at(-1)
+    if (last?.end === position) {
+      last.parts.push(data)
+      last.end += data.byteLength
+    } else {
+      segments.push({ start: position, end: position + data.byteLength, parts: [data] })
+    }
+    position += data.byteLength
+  }
+  return segments.map(({ start, parts }): [number, Uint8Array] => [start, concat(parts)])
+}
+
+/**
+ * A file's bytes with the stretches written into it, as pwrite does: the
+ * bytes around each stretch stay, and the file grows only where one reaches
+ * past its end, padded with NUL. Mirrors Python's _patched.
+ */
+function patched(existing: Uint8Array, segments: [number, Uint8Array][]): Uint8Array {
+  let buf = existing.slice()
+  for (const [start, data] of segments) {
+    const end = start + data.byteLength
     if (end > buf.byteLength) {
       const grown = new Uint8Array(end)
       grown.set(buf, 0)
       buf = grown
     }
-    buf.set(data, position)
-    position = end
+    buf.set(data, start)
   }
   return buf
 }
@@ -242,8 +259,8 @@ async function* applyLimits(
 void padLeft
 
 /**
- * Write the dump (or with -r the bytes) to OUTFILE. Mirrors Python's
- * _write_output.
+ * Write the dump (or with -r the bytes) to OUTFILE, reading INFILE first, as
+ * xxd opens it first. Mirrors Python's _write_output.
  */
 async function writeOutput(
   paths: PathSpec[],
@@ -251,6 +268,7 @@ async function writeOutput(
   cache: string[],
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null,
   writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null,
+  pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
   render: () => AsyncIterable<Uint8Array> | null,
 ): Promise<CommandFnResult> {
   const [input, target] = paths
@@ -260,21 +278,37 @@ async function writeOutput(
     new IOResult({ stderr: ENC.encode(fsErrorLine('xxd', p, err)), exitCode }),
   ]
   const dump = render()
-  let existing: Uint8Array = new Uint8Array(0)
-  if (dump === null && readBytes !== null) {
+  let segments: [number, Uint8Array][] = []
+  let data: Uint8Array = new Uint8Array(0)
+  try {
+    if (dump === null) segments = await reverseSegments(source)
+    else data = await materialize(dump)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return failed(input, err, readFailExitCode('xxd', err))
+  }
+  if (dump === null && pwriteBytes !== null) {
     try {
-      existing = await readBytes(target)
+      const stretches: [number, Uint8Array][] = segments.length > 0 ? segments : [[0, data]]
+      for (const [start, chunk] of stretches) {
+        await pwriteBytes(target, chunk, start)
+      }
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      return failed(target, err, OPEN_OUTPUT_EXIT)
+    }
+    // The stretches are not the file, so the cache drops what it holds.
+    return [null, new IOResult({ writes: { [target.mountPath]: new Uint8Array(0) }, cache })]
+  }
+  if (dump === null) {
+    let existing: Uint8Array = new Uint8Array(0)
+    try {
+      if (readBytes !== null) existing = await readBytes(target)
     } catch (err) {
       if (!isFsError(err)) throw err
       if (!isEnoent(err)) return failed(target, err, OPEN_OUTPUT_EXIT)
     }
-  }
-  let data: Uint8Array
-  try {
-    data = dump === null ? await patched(source, existing) : await materialize(dump)
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    return failed(input, err, readFailExitCode('xxd', err))
+    data = patched(existing, segments)
   }
   if (writeBytes === null) {
     return [
@@ -300,7 +334,9 @@ async function writeOutput(
 /**
  * xxd over INFILE (or stdin) to OUTFILE (or stdout). A dump replaces
  * OUTFILE; -r writes into it at the dump's offsets and keeps the bytes around
- * them, as xxd does. Deliberate divergence: xxd opens OUTFILE before it
+ * them, as xxd does, through pwrite where the backend has one, so the stored
+ * bytes are what it writes into and no gap is held here. Deliberate
+ * divergence: xxd opens OUTFILE before it
  * reads, so an INFILE that is OUTFILE reads empty and a directory INFILE
  * leaves an empty OUTFILE behind; this reads first and writes once. Mirrors
  * Python's xxd.
@@ -311,6 +347,7 @@ export async function xxdGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
   writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null = null,
+  pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
   const fl = new FlagView(opts.flags, specOf('xxd'))
@@ -343,7 +380,7 @@ export async function xxdGeneric(
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {
-    return writeOutput(paths, source, cache, readBytes, writeBytes, render)
+    return writeOutput(paths, source, cache, readBytes, writeBytes, pwriteBytes, render)
   }
   const io = new IOResult({ cache })
   return [render() ?? xxdReverseStream(source, io), io]

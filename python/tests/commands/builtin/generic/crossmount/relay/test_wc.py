@@ -149,17 +149,25 @@ async def _uncounted(accessor, paths, texts, opts):
     return b"777 " + paths[0].raw_path.encode() + b"\n", IOResult()
 
 
+@command("wc", vfs="ram", spec=SPECS["wc"])
+async def _row_count(accessor, paths, texts, opts):
+    return b"", IOResult(counted_runs=[CountedRun((42,), paths[0].raw_path)])
+
+
 @pytest.mark.asyncio
-async def test_a_wc_without_counts_keeps_the_one_pass():
+async def test_a_wc_without_counts_is_recounted_alone():
+    # /b's wc renders text only, so its operand is recounted through the
+    # dispatcher; /a's own count (a row count it never read for) stays.
     first, second = RAMVFS(), RAMVFS()
     first.load_state({"files": {"/x": b"a\nb\n"}})
     second.load_state({"files": {"/y": b"c\n"}})
     ws = Workspace({"/a": first, "/b": second}, mode=MountMode.WRITE)
+    ws.mount("/a").register_fns([_row_count])
     ws.mount("/b").register_fns([_uncounted])
     try:
         result = await ws.shell("wc -l /a/x /b/y")
         assert (await result.materialize_stdout()) == (
-            b"2 /a/x\n1 /b/y\n3 total\n"
+            b"42 /a/x\n1 /b/y\n43 total\n"
         )
         assert result.exit_code == 0
     finally:

@@ -43,6 +43,7 @@ async def xxd(
         bound_op(ops.read_stream, accessor, opts.index),
         bound_op(ops.read_bytes, accessor, opts.index),
         partial(ops.require(Operation.WRITE), accessor),
+        partial(ops.pwrite, accessor) if ops.pwrite is not None else None,
     )
 
 

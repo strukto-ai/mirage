@@ -118,6 +118,13 @@ def dispatch_io(
         if reads is not None:
             reads.reads.pop(path.virtual, None)
 
+    async def pwrite(
+        accessor: Accessor, path: PathSpec, data: bytes, offset: int
+    ) -> None:
+        await dispatch("pwrite", path, data=data, offset=offset)
+        if reads is not None:
+            reads.reads.pop(path.virtual, None)
+
     async def unlink(accessor: Accessor, path: PathSpec) -> None:
         await dispatch("unlink", path)
         if reads is not None:
@@ -145,6 +152,7 @@ def dispatch_io(
         # serving it, at that mount's cap (see WalkBudget).
         max_du_entries=None,
         write=write,
+        pwrite=pwrite,
         unlink=unlink,
         mkdir=mkdir,
         truncate=truncate,

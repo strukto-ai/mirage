@@ -173,27 +173,47 @@ async def _xxd_reverse_stream(
         position += len(data)
 
 
-async def _patched(source: AsyncIterator[bytes], existing: bytes) -> bytes:
-    """Revert a hexdump into a file's bytes, as xxd writes into OUTFILE.
+async def _reverse_segments(
+    source: AsyncIterator[bytes],
+) -> list[tuple[int, bytes]]:
+    """Revert a hexdump into the stretches xxd writes into OUTFILE.
 
-    Each run lands at its offset and the bytes around it stay, so the
-    file grows only where a run reaches past its end, padded with NUL.
+    Each run lands at its offset, or where the last one ended; runs that
+    meet join one stretch, so a whole dump is one write at 0.
 
     Args:
         source (AsyncIterator[bytes]): The hexdump.
-        existing (bytes): OUTFILE's bytes, empty when it does not exist.
     """
-    buf = bytearray(existing)
+    segments: list[tuple[int, bytearray]] = []
     position = 0
     async for offset, data in _reverse_runs(source):
         if not data:
             continue
         if offset is not None:
             position = offset
-        if position > len(buf):
-            buf.extend(bytes(position - len(buf)))
-        buf[position : position + len(data)] = data
+        if segments and segments[-1][0] + len(segments[-1][1]) == position:
+            segments[-1][1].extend(data)
+        else:
+            segments.append((position, bytearray(data)))
         position += len(data)
+    return [(start, bytes(data)) for start, data in segments]
+
+
+def _patched(existing: bytes, segments: list[tuple[int, bytes]]) -> bytes:
+    """A file's bytes with the stretches written into it, as pwrite does.
+
+    The bytes around each stretch stay, and the file grows only where one
+    reaches past its end, padded with NUL.
+
+    Args:
+        existing (bytes): OUTFILE's bytes, empty when it does not exist.
+        segments (list[tuple[int, bytes]]): The stretches, in order.
+    """
+    buf = bytearray(existing)
+    for start, data in segments:
+        if start > len(buf):
+            buf.extend(bytes(start - len(buf)))
+        buf[start : start + len(data)] = data
     return bytes(buf)
 
 
@@ -225,6 +245,7 @@ async def xxd(
     read_stream: Callable[..., AsyncIterator[bytes]],
     read_bytes: ReadBytesFn | None = None,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
+    pwrite_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
     reverse: bool = False,
     plain: bool = False,
@@ -237,7 +258,9 @@ async def xxd(
     """xxd over INFILE (or stdin) to OUTFILE (or stdout).
 
     A dump replaces OUTFILE; ``-r`` writes into it at the dump's offsets
-    and keeps the bytes around them, as xxd does. Deliberate divergence:
+    and keeps the bytes around them, as xxd does, through ``pwrite`` where
+    the backend has one, so the stored bytes are what it writes into and
+    no gap is held here. Deliberate divergence:
     xxd opens OUTFILE before it reads, so an INFILE that is OUTFILE reads
     empty and a directory INFILE leaves an empty OUTFILE behind; this
     reads first and writes once.
@@ -245,8 +268,10 @@ async def xxd(
     Args:
         paths (list[PathSpec]): INFILE and OUTFILE, either one ``-``.
         read_stream (Callable): reads INFILE.
-        read_bytes (ReadBytesFn | None): reads OUTFILE for ``-r``.
+        read_bytes (ReadBytesFn | None): reads OUTFILE for ``-r`` when
+            there is no ``pwrite_bytes``.
         write_bytes (Callable | None): writes OUTFILE.
+        pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
         stdin (ByteSource | None): standard input.
     """
     if len(paths) > 2:
@@ -274,6 +299,7 @@ async def xxd(
             cache,
             read_bytes,
             write_bytes,
+            pwrite_bytes,
             reverse=reverse,
             plain=plain,
             uppercase=uppercase,
@@ -296,6 +322,7 @@ async def _write_output(
     cache: list[str],
     read_bytes: ReadBytesFn | None,
     write_bytes: Callable[..., Awaitable[None]] | None,
+    pwrite_bytes: Callable[..., Awaitable[None]] | None,
     *,
     reverse: bool,
     plain: bool,
@@ -305,12 +332,15 @@ async def _write_output(
 ) -> tuple[ByteSource | None, IOResult]:
     """Write the dump (or with ``-r`` the bytes) to OUTFILE.
 
+    INFILE is read first, as xxd opens it first.
+
     Args:
         paths (list[PathSpec]): INFILE and OUTFILE.
         source (AsyncIterator[bytes]): INFILE's bytes, limits applied.
         cache (list[str]): Paths worth caching so far.
         read_bytes (ReadBytesFn | None): reads OUTFILE for ``-r``.
         write_bytes (Callable | None): writes OUTFILE.
+        pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
         reverse (bool): revert a dump instead of making one.
         plain (bool): plain hexdump style.
         uppercase (bool): uppercase hex digits.
@@ -318,20 +348,11 @@ async def _write_output(
         group (int): octets per group.
     """
     target = paths[1]
-    existing = b""
-    if reverse and read_bytes is not None:
-        try:
-            existing = await read_bytes(target)
-        except FileNotFoundError:
-            existing = b""
-        except FS_ERRORS as exc:
-            return None, IOResult(
-                stderr=fs_error_line("xxd", target, exc).encode(),
-                exit_code=OPEN_OUTPUT_EXIT,
-            )
+    segments: list[tuple[int, bytes]] = []
+    data = b""
     try:
         if reverse:
-            data = await _patched(source, existing)
+            segments = await _reverse_segments(source)
         elif plain:
             data = await materialize(
                 _xxd_plain_stream(source, uppercase=uppercase)
@@ -347,6 +368,28 @@ async def _write_output(
             stderr=fs_error_line("xxd", paths[0], exc).encode(),
             exit_code=read_fail_exit_code("xxd", exc),
         )
+    if reverse and pwrite_bytes is not None:
+        try:
+            for start, chunk in segments or [(0, b"")]:
+                await pwrite_bytes(target, chunk, start)
+        except FS_ERRORS as exc:
+            return None, IOResult(
+                stderr=fs_error_line("xxd", target, exc).encode(),
+                exit_code=OPEN_OUTPUT_EXIT,
+            )
+        # The stretches are not the file, so the cache drops what it holds.
+        return None, IOResult(writes={target.mount_path: b""}, cache=cache)
+    if reverse:
+        try:
+            existing = await read_bytes(target) if read_bytes else b""
+        except FileNotFoundError:
+            existing = b""
+        except FS_ERRORS as exc:
+            return None, IOResult(
+                stderr=fs_error_line("xxd", target, exc).encode(),
+                exit_code=OPEN_OUTPUT_EXIT,
+            )
+        data = _patched(existing, segments)
     if write_bytes is None:
         return None, IOResult(
             stderr=b"xxd: output is not writable on this backend\n",
@@ -407,6 +450,7 @@ async def xxd_generic(
     read_stream: ReadStreamFn,
     read_bytes: ReadBytesFn | None = None,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
+    pwrite_bytes: Callable[..., Awaitable[None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(opts.flags)
     return await xxd(
@@ -414,6 +458,7 @@ async def xxd_generic(
         read_stream=read_stream,
         read_bytes=read_bytes,
         write_bytes=write_bytes,
+        pwrite_bytes=pwrite_bytes,
         stdin=opts.stdin,
         reverse=parsed.reverse,
         plain=parsed.plain,

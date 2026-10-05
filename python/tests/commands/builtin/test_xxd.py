@@ -14,6 +14,7 @@
 
 import asyncio
 
+from mirage.ops.registry import op
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -96,3 +97,29 @@ def test_xxd_reverse_stream_fills_forward_and_refuses_backward():
     assert asyncio.run(io.stderr_str()) == (
         "xxd: Sorry, cannot seek backwards.\n"
     )
+
+
+@op("read", vfs="ram", filetype=".tally")
+async def _rendered(accessor, path, **kwargs):
+    return b"RENDERED"
+
+
+def test_xxd_reverse_across_mounts_writes_into_the_stored_bytes():
+    # The OUTFILE's mount renders .tally reads; -r writes into what the
+    # store holds, never into a rendering of it.
+    async def run():
+        source, target = RAMVFS(), RAMVFS()
+        ws = Workspace({"/a": source, "/b": target}, mode=MountMode.WRITE)
+        ws.mount("/b").register_fns([_rendered])
+        await ws.shell("printf ABCDEFGH > /b/out.tally")
+        await ws.shell("printf '00000004: 6869  hi\\n' > /a/dump")
+        io = await ws.shell("xxd -r /a/dump /b/out.tally")
+        stored, _ = await ws.dispatch(
+            "read", PathSpec.from_str_path("/b/out.tally"), filetype=None
+        )
+        await ws.close()
+        return io.exit_code, stored
+
+    exit_code, stored = asyncio.run(run())
+    assert exit_code == 0
+    assert stored == b"ABCDhiGH"

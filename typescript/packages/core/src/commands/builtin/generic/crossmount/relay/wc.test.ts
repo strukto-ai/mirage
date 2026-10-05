@@ -151,7 +151,15 @@ const uncounted: CommandFn = (_accessor, paths) => [
   new IOResult(),
 ]
 
-it('keeps the one pass for a wc without counts', async () => {
+const rowCount: CommandFn = (_accessor, paths) => [
+  new Uint8Array(0),
+  new IOResult({ countedRuns: [{ values: [42], label: paths[0]?.rawPath ?? null }] }),
+]
+
+it('recounts a wc without counts alone', async () => {
+  // /b's wc renders text only, so its operand is recounted through the
+  // dispatcher; /a's own count (a row count it never read for) stays.
+  // Mirrors Python's test_a_wc_without_counts_is_recounted_alone.
   const first = new RAMVFS()
   const second = new RAMVFS()
   first.loadState({ type: 'ram', files: { '/x': ENC.encode('a\nb\n') } })
@@ -162,11 +170,13 @@ it('keeps the one pass for a wc without counts', async () => {
   )
   const spec = SPECS.wc
   if (spec === undefined) throw new Error('Missing spec: wc')
+  for (const cmd of command({ name: 'wc', vfs: 'ram', spec, fn: rowCount }))
+    ws.registry.mountFor('/a/x').register(cmd)
   for (const cmd of command({ name: 'wc', vfs: 'ram', spec, fn: uncounted }))
     ws.registry.mountFor('/b/y').register(cmd)
   try {
     const result = await ws.shell('wc -l /a/x /b/y')
-    expect(DEC.decode(result.stdout)).toBe('2 /a/x\n1 /b/y\n3 total\n')
+    expect(DEC.decode(result.stdout)).toBe('42 /a/x\n1 /b/y\n43 total\n')
     expect(result.exitCode).toBe(0)
   } finally {
     await ws.close()

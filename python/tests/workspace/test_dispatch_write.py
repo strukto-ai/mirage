@@ -88,3 +88,39 @@ def test_dispatch_rename_across_mounts_is_exdev(src):
         assert (await ws.shell("cat /b/y.txt")).exit_code != 0
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "dst,code",
+    [
+        ("/nope/y.txt", errno.ENOENT),
+        ("/b/f/y.txt", errno.ENOTDIR),
+        ("/x/y.txt", errno.EXDEV),
+    ],
+)
+def test_dispatch_rename_across_mounts_resolves_the_parent_first(dst, code):
+    # Mirrors the TypeScript dispatcher test. rename(2) resolves the
+    # destination's directory before it compares filesystems: a missing
+    # one is ENOENT and one through a file ENOTDIR; /x, which the namespace
+    # holds above the /x/m mount, is there, so the answer is EXDEV.
+    ws = Workspace(
+        {
+            "/a": (RAMVFS(), MountMode.WRITE),
+            "/b": (RAMVFS(), MountMode.WRITE),
+            "/x/m": (RAMVFS(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+    )
+
+    async def run() -> None:
+        await ws.shell("echo moved-bytes > /a/x.txt; echo f > /b/f")
+        with pytest.raises(OSError) as exc:
+            await ws.dispatch(
+                "rename",
+                PathSpec.from_str_path("/a/x.txt"),
+                dst=PathSpec.from_str_path(dst),
+            )
+        assert exc.value.errno == code
+        assert (await ws.shell("cat /a/x.txt")).stdout == b"moved-bytes\n"
+
+    asyncio.run(run())

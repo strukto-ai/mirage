@@ -56,6 +56,36 @@ describe('dispatch applies limits on the executing mount', () => {
 })
 
 describe('dispatch rename across mounts', () => {
+  it.each([
+    ['/nope/y.txt', 'ENOENT'],
+    ['/b/f/y.txt', 'ENOTDIR'],
+    ['/x/y.txt', 'EXDEV'],
+  ])(
+    'resolves the parent of %s first: %s',
+    async (dst, code) => {
+      // Mirrors Python's test_dispatch_rename_across_mounts_resolves_the_parent_first.
+      // rename(2) resolves the destination's directory before it compares
+      // filesystems: a missing one is ENOENT and one through a file ENOTDIR;
+      // /x, which the namespace holds above the /x/m mount, is there, so the
+      // answer is EXDEV.
+      const parser = await getTestParser()
+      const ws = new Workspace(
+        { '/a': new RAMVFS(), '/b': new RAMVFS(), '/x/m': new RAMVFS() },
+        { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+      )
+      try {
+        await ws.shell('echo moved-bytes > /a/x.txt; echo f > /b/f')
+        await expect(
+          ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath(dst)]),
+        ).rejects.toMatchObject({ code })
+        expect(DEC.decode((await ws.shell('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
+      } finally {
+        await ws.close()
+      }
+    },
+    30_000,
+  )
+
   it.each(['/a/x.txt', '/a/missing.txt'])(
     'answers EXDEV and moves nothing: %s',
     async (src) => {

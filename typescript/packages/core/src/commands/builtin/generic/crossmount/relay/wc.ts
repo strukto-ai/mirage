@@ -21,7 +21,13 @@ import { runDispatch } from '../../../generic_bind/dispatch.ts'
 import { isStdin } from '../../../utils/stream.ts'
 import { formatCountRows, numberWidth, parseFlags, type WcRow } from '../../wc.ts'
 import { DISPATCH_BUILDERS } from '../constants.ts'
-import { Cmd, type CrossResult, type DispatchFn, type RunSingle } from '../types.ts'
+import {
+  Cmd,
+  type CrossResult,
+  type DispatchFn,
+  type OperandRun,
+  type RunSingle,
+} from '../types.ts'
 import { mergeOperandIos, runOperands, statOp } from '../utils.ts'
 
 const ENC = new TextEncoder()
@@ -57,14 +63,36 @@ async function operandSize(
 }
 
 /**
+ * The run as counted, recounting it through the dispatcher if needed. A
+ * mount's wc that succeeds without counts (one not built on the generic)
+ * leaves its operand to the generic over the dispatcher, and only that
+ * operand: the others keep what their own mount counted. Mirrors Python's
+ * recount.
+ */
+export async function recount(
+  run: OperandRun,
+  bag: Record<string, FlagValue>,
+  dispatch: DispatchFn,
+  cwd: string,
+  ns: NamespaceView | undefined,
+  stdin: ByteSource | null,
+): Promise<OperandRun> {
+  if (run.io.countedRuns !== null || run.io.exitCode !== 0) return run
+  const builder = DISPATCH_BUILDERS.get(Cmd.WC)
+  if (builder === undefined) throw new Error('No dispatch builder for wc')
+  const [, io] = await runDispatch(builder, [run.scope], [], bag, dispatch, cwd, ns, stdin)
+  return { scope: run.scope, data: new Uint8Array(0), io }
+}
+
+/**
  * Count each operand on its own mount and lay the rows out together. Each
  * operand runs through its owning mount's wc, so a mount that counts without
  * reading its file (a database row count) still does, and reading mounts
  * stream. Only the layout spans the line: the counts each run reports
  * (`IOResult.countedRuns`) go through the generic's formatter with GNU's
  * column width, and no mount's output text is read back. A run that succeeds
- * without counts (a wc not built on the generic) leaves the line to one
- * dispatcher pass. Mirrors Python's run_wc.
+ * without counts is recounted on its own (`recount`). Mirrors Python's
+ * run_wc.
  */
 export async function runWc(
   scopes: PathSpec[],
@@ -81,11 +109,10 @@ export async function runWc(
   }
   const asked = COLUMNS.filter((c) => parsed[c])
   const columns: readonly Column[] = asked.length > 0 ? asked : ['lines', 'words', 'bytes']
-  const runs = await runOperands(runSingle, Cmd.WC, scopes, [], { ...flagKwargs, total: 'never' })
-  if (runs.some((run) => run.io.countedRuns === null && run.io.exitCode === 0)) {
-    const builder = DISPATCH_BUILDERS.get(Cmd.WC)
-    if (builder === undefined) throw new Error('No dispatch builder for wc')
-    return runDispatch(builder, scopes, [], flagKwargs, dispatch, cwd, ns, stdin)
+  const each = { ...flagKwargs, total: 'never' }
+  const runs: OperandRun[] = []
+  for (const run of await runOperands(runSingle, Cmd.WC, scopes, [], each)) {
+    runs.push(await recount(run, each, dispatch, cwd, ns, stdin))
   }
   const rows: WcRow[] = []
   const sizes: (number | null)[] = []

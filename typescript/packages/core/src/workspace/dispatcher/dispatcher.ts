@@ -420,13 +420,19 @@ export class Dispatcher {
       // A mount is a filesystem boundary: rename(2) moves a name within one
       // and answers EXDEV across two, before any permission is weighed, so
       // `mv` falls back to copy and unlink instead of the source's backend
-      // taking the destination for one of its keys.
+      // taking the destination for one of its keys. It resolves both parent
+      // directories first, so a missing one is ENOENT (ENOTDIR through a
+      // file) ahead of EXDEV.
       if (
         opName === 'rename' &&
         dstArg instanceof PathSpec &&
         this.namespace.tryMountFor(dstArg.virtual) !== resolvedOwner
       ) {
-        throw exdev(p)
+        throw (
+          (await this.parentRefusal(p, issuer)) ??
+          (await this.parentRefusal(dstArg, issuer)) ??
+          exdev(p)
+        )
       }
       // Admission policies fire at the door, before the warm-cache early
       // return below: a cached read must be refused exactly like a cold

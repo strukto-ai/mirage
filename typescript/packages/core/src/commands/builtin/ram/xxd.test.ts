@@ -16,7 +16,10 @@ import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { PathSpec } from '../../../types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
+import { OpsRegistry } from '../../../ops/registry.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 const RAM_XXD = RAM_COMMANDS.filter((c) => c.name === 'xxd' && c.filetype == null)
 
 const ENC = new TextEncoder()
@@ -98,5 +101,38 @@ describe('xxd', () => {
     expect(r.exitCode).toBe(0)
     const text = r.out
     expect(text.includes('AB') || text.includes('CD')).toBe(true)
+  })
+})
+
+describe('xxd -r across mounts', () => {
+  it('writes into the stored bytes of a rendered OUTFILE', async () => {
+    // The OUTFILE's mount renders .tally reads; -r writes into what the
+    // store holds, never into a rendering of it. Mirrors Python's
+    // test_xxd_reverse_across_mounts_writes_into_the_stored_bytes.
+    const source = new RAMVFS()
+    const target = new RAMVFS()
+    const registry = new OpsRegistry()
+    registry.registerVfs(source)
+    registry.registerVfs(target)
+    registry.register({
+      name: 'read',
+      vfs: 'ram',
+      filetype: '.tally',
+      write: false,
+      fn: () => Promise.resolve(ENC.encode('RENDERED')),
+    })
+    const ws = new Workspace(
+      { '/a': source, '/b': target },
+      { mode: MountMode.WRITE, ops: registry, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.shell('printf ABCDEFGH > /b/out.tally')
+      await ws.shell("printf '00000004: 6869  hi\\n' > /a/dump")
+      const result = await ws.shell('xxd -r /a/dump /b/out.tally')
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(target.store.files.get('/out.tally'))).toBe('ABCDhiGH')
+    } finally {
+      await ws.close()
+    }
   })
 })
