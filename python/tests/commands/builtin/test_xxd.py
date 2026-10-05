@@ -123,3 +123,25 @@ def test_xxd_reverse_across_mounts_writes_into_the_stored_bytes():
     exit_code, stored = asyncio.run(run())
     assert exit_code == 0
     assert stored == b"ABCDhiGH"
+
+
+class _CachingRAM(RAMVFS):
+    caches_reads = True
+
+
+def test_xxd_reverse_into_its_own_input_reads_back_patched():
+    # INFILE is OUTFILE on a caching mount: the cache must not keep the
+    # write's marker as the file, so the next read sees the store.
+    async def run():
+        ws = Workspace({"/data": _CachingRAM()}, mode=MountMode.WRITE)
+        await ws.shell("printf '00000000: 4142  AB\\n' > /data/d")
+        await ws.shell("cat /data/d")
+        io = await ws.shell("xxd -r /data/d /data/d")
+        cat = await ws.shell("cat /data/d")
+        out = await cat.materialize_stdout()
+        await ws.close()
+        return io.exit_code, out
+
+    exit_code, out = asyncio.run(run())
+    assert exit_code == 0
+    assert out == b"AB000000: 4142  AB\n"

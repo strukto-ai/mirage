@@ -297,8 +297,10 @@ async function writeOutput(
       if (!isFsError(err)) throw err
       return failed(target, err, OPEN_OUTPUT_EXIT)
     }
-    // The stretches are not the file, so the cache drops what it holds.
-    return [null, new IOResult({ writes: { [target.mountPath]: new Uint8Array(0) }, cache })]
+    // The stretches are not the file, so the cache drops what it holds, even
+    // when OUTFILE is INFILE too.
+    const kept = cache.filter((path) => path !== target.mountPath)
+    return [null, new IOResult({ writes: { [target.mountPath]: new Uint8Array(0) }, cache: kept })]
   }
   if (dump === null) {
     let existing: Uint8Array = new Uint8Array(0)
@@ -358,7 +360,7 @@ export async function xxdGeneric(
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     source = stream(first)
-    if (!isStdin(first)) cache.push(first.virtual)
+    if (!isStdin(first)) cache.push(first.mountPath)
   } else {
     source = resolveSource(opts.stdin)
   }
