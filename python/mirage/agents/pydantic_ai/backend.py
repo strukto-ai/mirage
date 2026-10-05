@@ -207,14 +207,17 @@ class MirageWorkspaceBackend:
     async def remove(self, path: str) -> None:
         session = await self._session()
         root = session.state.cwd
-        path = posixpath.normpath(posixpath.join(root, path))
-        parent = await self.realpath(posixpath.dirname(path))
-        target = posixpath.join(parent, posixpath.basename(path))
+        vfs = session.vfs
+        path = posixpath.join(root, path)
+        head, name = posixpath.split(path.rstrip("/") or "/")
+        if name in (".", ".."):
+            raise ValueError("refusing to remove '.' or '..'")
+        await vfs.stat(path, nofollow=True)
+        target = posixpath.join(await self.realpath(head), name)
         if target == root or root.startswith(target.rstrip("/") + "/"):
             raise ValueError(
                 "refusing to remove the working directory or an ancestor"
             )
-        vfs = session.vfs
         for doomed, is_dir in await _doomed(self._ws, vfs, target):
             if is_dir:
                 await vfs.rmdir(doomed)

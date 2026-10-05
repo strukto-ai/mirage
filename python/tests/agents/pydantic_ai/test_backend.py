@@ -206,3 +206,25 @@ async def test_a_link_loop_is_eloop(workspace):
     with pytest.raises(OSError) as raised:
         await MirageWorkspaceBackend(workspace).realpath("/a/x")
     assert raised.value.errno == errno.ELOOP
+
+
+@pytest.mark.anyio
+async def test_remove_asks_the_door_about_the_path_as_given():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"guarded": {"paths": {"hide": ["/alias/inner"]}}},
+    )
+    await ws.shell("mkdir -p /data/inner /a/b; echo f > /file; echo y > /a/f")
+    await ws.vfs.symlink("/alias", "/data")
+    await ws.vfs.symlink("/lnk", "/a/b")
+    ws.create_session("agent", profile="guarded")
+    backend = MirageWorkspaceBackend(ws, "agent")
+    for path in ("/alias/inner", "/missing/../file"):
+        with pytest.raises(FileNotFoundError):
+            await backend.remove(path)
+    assert await ws.vfs.exists("/data/inner")
+    assert await ws.vfs.exists("/file")
+    await backend.remove("/lnk/../f")
+    assert not await ws.vfs.exists("/a/f")
+    assert await ws.vfs.exists("/file")
