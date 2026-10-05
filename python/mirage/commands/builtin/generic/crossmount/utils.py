@@ -255,6 +255,17 @@ async def stream_operands(
     while the current stream is consumed; their streams are not pulled ahead.
     Closing or cancelling the consumer cancels preparations and discards every
     opened stream, including one that finished preparing during cancellation.
+    The returned result settles as the stream drains, as any lazy command's
+    does: its exit code is final once the stream is exhausted.
+
+    Args:
+        run_single (RunSingle): Executor-injected single-mount runner.
+        cmd_name (str): Command to run for every operand.
+        scopes (list[PathSpec]): Path operands in command-line order.
+        texts (list[str]): Positional text operands shared by every run.
+        flags (dict[str, FlagValue]): Flags shared by every run.
+        separator (bytes): What sets one operand's output off from the
+            next's (head and tail headers).
     """
     io = IOResult()
 
@@ -296,8 +307,8 @@ async def stream_operands(
                             yield data
                 except FS_ERRORS as exc:
                     existing = await materialize(branch.stderr)
-                    branch.stderr = (
-                        existing + fs_error_line(cmd_name, scope, exc).encode()
+                    branch.stderr = existing + encode_text(
+                        fs_error_line(cmd_name, scope, exc)
                     )
                     branch.exit_code = read_fail_exit(cmd_name, exc)
                 io.reads.update(branch.reads)

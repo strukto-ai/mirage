@@ -20,17 +20,38 @@ import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../utils/errors.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { NamespaceView } from '../../../ops/types.ts'
-import { stripSlash } from '../../../utils/slash.ts'
+import type { LinkView, MountView, NamespaceView } from '../../../ops/types.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { Builder, CommandIO } from './adapter.ts'
 
-/** Use the workspace's policy-checked operations as a generic IO adapter. */
-export function dispatchIO(dispatch: DispatchFn, reads?: IOResult): CommandIO {
+/** Use the workspace's policy-checked operations as a generic IO adapter.
+ * A listing answers the way a backend's does, which is what every generic is
+ * written against: no backend stores a link, and the generics merge the
+ * namespace's own from `ns.links`, so the door's copy would be a second row
+ * (find) or a followed stat (ls). With `bound` (a walk kept on one
+ * filesystem, `du -x`) a listing also leaves out the roots of the mounts
+ * below it, which the walk must neither list nor stat. Mirrors Python's
+ * dispatch_io. */
+export function dispatchIO(
+  dispatch: DispatchFn,
+  reads?: IOResult,
+  links?: LinkView,
+  bound?: MountView,
+): CommandIO {
   return {
-    readdir: async (_accessor, path) => (await dispatch('readdir', path))[0] as string[],
+    readdir: async (_accessor, path) => {
+      let entries = (await dispatch('readdir', path))[0] as string[]
+      if (links !== undefined)
+        entries = entries.filter((e) => links.statAt(rstripSlash(e)) === null)
+      if (bound !== undefined) {
+        const owner = bound.rootOf(path.virtual)
+        entries = entries.filter((e) => bound.rootOf(rstripSlash(e)) === owner)
+      }
+      return entries
+    },
     stat: async (_accessor, path) =>
       (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat,
     readBytes: async (_accessor, path) => {
@@ -49,6 +70,9 @@ export function dispatchIO(dispatch: DispatchFn, reads?: IOResult): CommandIO {
       yield* chunks((await dispatch('read', path))[0] as ByteSource)
     },
     isMounted: () => true,
+    // No cap of its own: a du walk charges each entry to the mount serving
+    // it, at that mount's cap (see WalkBudget).
+    maxDuEntries: null,
     unlink: async (_accessor, path) => {
       await dispatch('unlink', path)
       if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
@@ -100,7 +124,7 @@ export async function runDispatch(
         }
   const reads = new IOResult()
   const result = await builder.fn(
-    dispatchIO(dispatch, reads),
+    dispatchIO(dispatch, reads, ns?.links, bounded ? ns?.mounts : undefined),
     new NOOPAccessor(),
     paths.map(
       (p) =>

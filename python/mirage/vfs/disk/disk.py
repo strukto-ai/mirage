@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.commands.builtin.disk import COMMANDS as DISK_COMMANDS
+from mirage.commands.builtin.disk.io import IO
 from mirage.commands.config import RegisteredCommand, registered_commands
 from mirage.core.disk.utils import resolve_inside_sync, walk_entries
 from mirage.core.disk.watch import build_delta_hook
@@ -41,6 +42,7 @@ class DiskVFS(BaseVFS):
     name: str = VFSName.DISK
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
+    max_du_entries: int | None = IO.max_du_entries
     accessor: DiskAccessor
     index_ttl: float = 60
     prompt: str = PROMPT

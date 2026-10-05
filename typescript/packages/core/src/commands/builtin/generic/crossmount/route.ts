@@ -28,6 +28,7 @@ import { runSearch } from './search.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { readFailExitCode } from '../../../spec/usage.ts'
 import { UsageError } from '../../../errors.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Run a command whose path operands span mounts. Every command combines
 // per-mount work under one of three strategies (see Strategy): STREAM merges
@@ -118,7 +119,7 @@ export async function handleCrossMount(
         null,
         new IOResult({
           exitCode: err.exitCode,
-          stderr: new TextEncoder().encode(`${err.message}\n`),
+          stderr: encodeText(`${err.message}\n`),
         }),
       ]
     }

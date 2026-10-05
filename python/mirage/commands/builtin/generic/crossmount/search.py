@@ -61,6 +61,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import fs_error_line
 
@@ -275,7 +276,7 @@ async def run_search(
                     b"",
                     IOResult(
                         exit_code=2,
-                        stderr=message.encode()
+                        stderr=encode_text(message)
                         if rg is None or not rg.no_messages
                         else None,
                     ),

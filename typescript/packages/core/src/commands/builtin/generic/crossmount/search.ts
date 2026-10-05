@@ -44,6 +44,7 @@ import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { walkErrorLine } from '../../rg_scan.ts'
 import { LinkDoor } from '../../utils/links.ts'
 import { fsErrorLine } from '../../../../utils/errors.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 function admitGrep(flags: FlagSet, path: PathSpec, stat: FileStat): boolean {
   if (stat.type === FileType.DIRECTORY) return dirAdmitted(path.virtual, flags.filters)
@@ -193,7 +194,7 @@ export async function runSearch(
         data: new Uint8Array(),
         io: new IOResult({
           exitCode: 2,
-          stderr: rg?.noMessages ? null : new TextEncoder().encode(message),
+          stderr: rg?.noMessages ? null : encodeText(message),
         }),
       })
       continue

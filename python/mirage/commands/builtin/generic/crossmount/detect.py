@@ -76,6 +76,11 @@ def aggregate_for(
 
     Different reducers cannot safely compose one invocation. Known command
     families retain their flag-aware reduction instead.
+
+    Args:
+        cmd_name (str): Command name.
+        scopes (list[PathSpec]): Path operands in command-line order.
+        registry (MountRegistry): Registry resolving each operand's mount.
     """
     if cmd_name in CROSS_MOUNT_COMMANDS:
         return None

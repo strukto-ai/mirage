@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { pathAllowed } from '../../context/session_context.ts'
 import { DISPATCH_BUILDERS } from '../../commands/builtin/generic/crossmount/constants.ts'
 import { handleCrossMount } from '../../commands/builtin/generic/crossmount/route.ts'
 import { walksMounts } from '../../commands/builtin/generic/crossmount/search.ts'
 import type { RunSingle, DispatchFn } from '../../commands/builtin/generic/crossmount/types.ts'
 import { runDispatch } from '../../commands/builtin/generic_bind/dispatch.ts'
-import { UsageError } from '../../commands/errors.ts'
+import { CommandTimeoutError, UsageError } from '../../commands/errors.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
@@ -25,7 +26,8 @@ import type { NamespaceView, SessionView } from '../../ops/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { formatFsError, isFsError } from '../../utils/errors.ts'
+import { stripSlash } from '../../utils/slash.ts'
+import { formatFsError } from '../../utils/errors.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
@@ -103,23 +105,32 @@ export async function fanOutTraversal(
       )
     }
   } catch (err) {
+    if (err instanceof CommandTimeoutError || (err instanceof Error && err.name === 'AbortError'))
+      throw err
+    stdout = null
     if (err instanceof UsageError) {
-      stdout = null
       io = new IOResult({
         exitCode: err.exitCode,
         stderr: encodeText(`${err.message}\n`),
       })
-    } else if (isFsError(err)) {
-      stdout = null
+    } else {
+      // A backend failure anywhere in the walk (a 5xx from a nested mount)
+      // is this command's result, in its voice, as the single-mount door
+      // reports it; the rest of the line still runs.
       io = new IOResult({
         exitCode: readFailExitCode(cmdName, err),
         stderr: formatFsError(cmdName, err, paths),
       })
-    } else throw err
+    }
   }
+  // Only the mounts the walk can reach bound its output: a hidden one never
+  // contributes a row, so its stricter limit must not apply.
   const prefixes = new Set([primaryMount.prefix])
-  for (const path of paths)
-    for (const mount of registry.descendantMounts(path.virtual)) prefixes.add(mount.prefix)
+  for (const path of paths) {
+    if (path.walkError !== null) continue
+    for (const mount of registry.descendantMounts(path.virtual))
+      if (pathAllowed('/' + stripSlash(mount.prefix))) prefixes.add(mount.prefix)
+  }
   io.producer = {
     command: cmdName,
     prefixes: [...prefixes].sort(compareCodePoints),

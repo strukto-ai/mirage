@@ -37,6 +37,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error
 
@@ -86,6 +87,9 @@ async def handle_cross_mount(
         cwd (str): The session's working directory, which a typed
             operand resolves against (cp's link sources).
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
+        aggregate (AggregateFn | None): The reducer every operand's mount
+            registered for a custom command, which then runs once per
+            operand and reduces the outputs.
     """
     native = run_single
     input_source = resolve_source(stdin)
@@ -153,7 +157,7 @@ async def handle_cross_mount(
         # operand) is its result, and the rest of the line runs, as the
         # single-mount path answers it.
         return None, IOResult(
-            exit_code=exc.exit_code, stderr=f"{exc}\n".encode()
+            exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
         )
     except FS_ERRORS as exc:
         return None, IOResult(

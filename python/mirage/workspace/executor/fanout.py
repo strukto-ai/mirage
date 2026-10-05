@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
 from mirage.commands.builtin.generic.crossmount.constants import (
     DISPATCH_BUILDERS,
 )
@@ -19,9 +21,10 @@ from mirage.commands.builtin.generic.crossmount.route import handle_cross_mount
 from mirage.commands.builtin.generic.crossmount.search import walks_mounts
 from mirage.commands.builtin.generic.crossmount.types import RunSingle
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
-from mirage.commands.errors import UsageError
+from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit
+from mirage.context import path_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -29,13 +32,15 @@ from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
-from mirage.utils.errors import FS_ERRORS, format_fs_error
+from mirage.utils.errors import format_fs_error
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
     MountRegistry,
 )
 from mirage.workspace.types import ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 _TRAVERSAL_CMDS = frozenset({"find", "du"})
 
@@ -91,6 +96,22 @@ async def _fan_out_traversal(
 
     No output is inspected to recover paths or repair depth and totals.
     Each generic sees the mounted tree through the same dispatcher.
+
+    Args:
+        cmd_name (str): find, du, ls or a recursive grep/rg.
+        paths (list[PathSpec]): Operands in command-line order.
+        texts (list[str]): Positional text operands.
+        flag_kwargs (dict[str, FlagValue]): Parsed flags.
+        registry (MountRegistry): Registry holding the mount table.
+        primary_mount (MountEntry): The mount serving the operands.
+        cwd (str): Session working directory.
+        cmd_str (str): The command as typed, for the execution record.
+        stdin (ByteSource | None): Standard input for the command.
+        ns (NamespaceView | None): Name-plane facts.
+        session_view (SessionView | None): The session plane's door.
+        dispatch (DispatchFn | None): Workspace operation dispatcher.
+        native (RunSingle | None): Single-mount runner for the native
+            search a scope delegates to.
     """
     if dispatch is None or native is None:
         raise ValueError("traversal requires dispatcher and native execution")
@@ -124,7 +145,13 @@ async def _fan_out_traversal(
             None,
             IOResult(exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")),
         )
-    except FS_ERRORS as exc:
+    except CommandTimeoutError:
+        raise
+    except Exception as exc:
+        # A backend failure anywhere in the walk (a 5xx from a nested
+        # mount) is this command's result, in its voice, as the
+        # single-mount door reports it; the rest of the line still runs.
+        logger.debug("%s traversal failed", cmd_name, exc_info=True)
         stdout, io = (
             None,
             IOResult(
@@ -132,11 +159,16 @@ async def _fan_out_traversal(
                 stderr=format_fs_error(cmd_name, exc, paths),
             ),
         )
+    # Only the mounts the walk can reach bound its output: a hidden one
+    # never contributes a row, so its stricter limit must not apply.
     prefixes = {primary_mount.prefix}
     for path in paths:
-        prefixes.update(
-            m.prefix for m in registry.descendant_mounts(path.virtual)
-        )
+        if path.walk_error is None:
+            prefixes.update(
+                m.prefix
+                for m in registry.descendant_mounts(path.virtual)
+                if path_allowed("/" + m.prefix.strip("/"))
+            )
     io.producer = Producer(command=cmd_name, prefixes=tuple(sorted(prefixes)))
     return (
         stdout,

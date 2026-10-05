@@ -71,6 +71,9 @@ export function captureBinding(
             visibleDescendants: scope.wrap(mounts.visibleDescendants.bind(mounts)),
             isRoot: scope.wrap(mounts.isRoot.bind(mounts)),
             rootOf: scope.wrap(mounts.rootOf.bind(mounts)),
+            ...(mounts.maxDuEntries === undefined
+              ? {}
+              : { maxDuEntries: scope.wrap(mounts.maxDuEntries.bind(mounts)) }),
           },
         }),
     ...(source.statOverlay === undefined ? {} : { statOverlay: scope.wrap(source.statOverlay) }),

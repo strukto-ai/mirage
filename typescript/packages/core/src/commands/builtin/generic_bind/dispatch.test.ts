@@ -17,7 +17,9 @@ import { commandStarted, runInCommandScope } from '../../../cache/index/scope.ts
 import { IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
-import { MountMode } from '../../../types.ts'
+import { MountMode, type PathSpec } from '../../../types.ts'
+import type { RegisteredOp } from '../../../ops/registry.ts'
+import { eacces } from '../../../utils/errors.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -79,3 +81,65 @@ it.each([false, true])(
     }
   },
 )
+
+class Uncapped extends RAMVFS {
+  override readonly maxDuEntries = null
+}
+
+class Capped extends RAMVFS {
+  override readonly maxDuEntries = 2
+}
+
+it('charges each mount its own cap in a du walk', async () => {
+  const enc = new TextEncoder()
+  const outer = new Uncapped()
+  const inner = new Capped()
+  for (let i = 0; i < 4; i++) outer.store.files.set(`/f${String(i)}`, enc.encode('x'))
+  for (let i = 0; i < 3; i++) inner.store.files.set(`/g${String(i)}`, enc.encode('y'))
+  const ws = new Workspace(
+    { '/a': outer, '/a/b': inner },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    const result = await ws.shell('du -a /a')
+    const rows = new TextDecoder().decode(result.stdout).split('\n')
+    expect(rows.filter((r) => r.includes('/a/f'))).toEqual(
+      [0, 1, 2, 3].map((i) => `1\t/a/f${String(i)}`),
+    )
+    expect(rows.filter((r) => r.includes('/a/b/g'))).toHaveLength(2)
+    expect(new TextDecoder().decode(result.stderr)).toBe(
+      'du: walk stopped early: the reported sizes are incomplete\n',
+    )
+    expect(result.exitCode).toBe(1)
+  } finally {
+    await ws.close()
+  }
+})
+
+class RefusedListing extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    return super
+      .ops()
+      .map((ro) =>
+        ro.name === 'readdir'
+          ? { ...ro, fn: (_a: unknown, path: PathSpec) => Promise.reject(eacces(path)) }
+          : ro,
+      )
+  }
+}
+
+it('du -x never lists a mount below the operand', async () => {
+  const ws = new Workspace(
+    { '/a': new RAMVFS(), '/a/b': new RefusedListing(), '/c': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    await ws.shell('echo aa > /a/f; echo d > /c/h')
+    const result = await ws.shell('du -x /a /c')
+    expect(new TextDecoder().decode(result.stdout)).toBe('3\t/a\n2\t/c\n')
+    expect(new TextDecoder().decode(result.stderr)).toBe('')
+    expect(result.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+})

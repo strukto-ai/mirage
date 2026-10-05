@@ -25,7 +25,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import ensure_stream, materialize
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import NamespaceView
+from mirage.ops.types import LinkView, MountView, NamespaceView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import eisdir
@@ -40,20 +40,43 @@ def _none_below(path: str) -> list[str]:
 
 
 def dispatch_io(
-    dispatch: DispatchFn, reads: IOResult | None = None
+    dispatch: DispatchFn,
+    reads: IOResult | None = None,
+    links: LinkView | None = None,
+    bound: MountView | None = None,
 ) -> CommandIO:
     """Bind a generic's IO to workspace operations.
+
+    A listing here answers the way a backend's does, which is what every
+    generic is written against: no backend stores a link, and the
+    generics merge the namespace's own from ``ns.links``, so the door's
+    copy would be a second row (find) or a followed stat (ls).
 
     Args:
         dispatch (DispatchFn): policy-checked operation dispatcher.
         reads (IOResult | None): Optional ledger for byte reads and cache entries.
+        links (LinkView | None): the namespace's symlinks, left out of
+            every listing.
+        bound (MountView | None): set for a walk kept on one filesystem
+            (``du -x``): a listing then leaves out the roots of the
+            mounts below it, which the walk must neither list nor stat.
     """
 
     async def readdir(
         accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> list[str]:
         data, _ = await dispatch("readdir", path)
-        return cast(list[str], data)
+        entries = cast(list[str], data)
+        if links is not None:
+            entries = [
+                e for e in entries if links.stat_at(e.rstrip("/")) is None
+            ]
+        if bound is not None:
+            owner = bound.root_of(path.virtual)
+            entries = [
+                e for e in entries if bound.root_of(e.rstrip("/")) == owner
+            ]
+        return entries
 
     async def stat(
         accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
@@ -118,6 +141,9 @@ def dispatch_io(
         read_bytes=read_bytes,
         read_stream=read_stream,
         is_mounted=_mounted,
+        # No cap of its own: a du walk charges each entry to the mount
+        # serving it, at that mount's cap (see WalkBudget).
+        max_du_entries=None,
         write=write,
         unlink=unlink,
         mkdir=mkdir,
@@ -152,7 +178,7 @@ async def run_dispatch(
         ns (NamespaceView | None): name-plane facts. The dispatcher lists
             the mounts below a directory itself, so no descendant is left
             to avoid; where each mount begins stays for
-            ``--one-file-system``.
+            ``--one-file-system``, and each mount's du budget for a walk.
         stdin (ByteSource | None): the command's input.
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
     """
@@ -173,8 +199,14 @@ async def run_dispatch(
         argv=argv,
     )
     reads = IOResult()
+    io_ops = dispatch_io(
+        dispatch,
+        reads,
+        ns.links if ns is not None else None,
+        ns.mounts if ns is not None and bounded else None,
+    )
     result = await builder.fn(
-        dispatch_io(dispatch, reads),
+        io_ops,
         NOOPAccessor(),
         [replace(p, vfs_path=p.virtual.strip("/")) for p in paths],
         texts,
