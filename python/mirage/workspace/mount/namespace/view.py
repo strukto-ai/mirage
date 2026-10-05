@@ -133,6 +133,17 @@ def mount_root_of(registry: MountRegistry, virtual: str) -> str:
     return mount.prefix if mount is not None else "/"
 
 
+def mount_max_du_entries(registry: MountRegistry, virtual: str) -> int | None:
+    """The du walk budget of the mount serving a virtual path.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        virtual (str): absolute virtual path.
+    """
+    mount = registry.try_mount_for(virtual)
+    return mount.vfs.max_du_entries if mount is not None else None
+
+
 def mount_view(registry: MountRegistry) -> MountView:
     """The mount-boundary facts on offer to every command.
 
@@ -150,6 +161,7 @@ def mount_view(registry: MountRegistry) -> MountView:
         ),
         is_root=registry.is_mount_root,
         root_of=functools.partial(mount_root_of, registry),
+        max_du_entries=functools.partial(mount_max_du_entries, registry),
     )
 
 

@@ -12,167 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFailExitCode } from '../../commands/spec/usage.ts'
-import { formatFsError, fsStrerror, isFsError } from '../../utils/errors.ts'
 import { pathAllowed } from '../../context/session_context.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
+import { DISPATCH_BUILDERS } from '../../commands/builtin/generic/crossmount/constants.ts'
+import { handleCrossMount } from '../../commands/builtin/generic/crossmount/route.ts'
+import { walksMounts } from '../../commands/builtin/generic/crossmount/search.ts'
+import type { RunSingle, DispatchFn } from '../../commands/builtin/generic/crossmount/types.ts'
+import { runDispatch } from '../../commands/builtin/generic_bind/dispatch.ts'
+import { CommandTimeoutError, UsageError } from '../../commands/errors.ts'
+import type { FlagValue } from '../../commands/spec/types.ts'
+import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import type { NamespaceView, SessionView } from '../../ops/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import type { PathSpec } from '../../types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { stripSlash } from '../../utils/slash.ts'
+import { formatFsError } from '../../utils/errors.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
-import { parent, respellOne } from '../../utils/path.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import {
-  bindTree,
-  dropPruned,
-  keep,
-  settlePrunes,
-  type FindEntry,
-  type PredNode,
-} from '../../commands/builtin/find_eval.ts'
-import { parseFindExpression, type FindExpr } from '../../commands/builtin/find_parse.ts'
-import { CommandTimeoutError, FindParseError, UsageError } from '../../commands/errors.ts'
-import type { FlagValue } from '../../commands/spec/types.ts'
-import type { Cmd, DispatchFn, RunSingle } from '../../commands/builtin/generic/crossmount/types.ts'
-import { runSeparator } from '../../commands/builtin/generic/crossmount/utils.ts'
-import { DISPATCH_BUILDERS } from '../../commands/builtin/generic/crossmount/relay/relay.ts'
-import { runDispatch } from '../../commands/builtin/generic_bind/dispatch.ts'
-import type { NamespaceView, StatPath } from '../../ops/types.ts'
-import { inMtimeWindow } from '../../utils/dates.ts'
-import { modifiedTs } from '../../core/generic/find.ts'
-import { combinedExit } from '../../commands/builtin/generic/crossmount/fanout/exit.ts'
-import { joinRuns, runFanout } from '../../commands/builtin/generic/crossmount/fanout/fanout.ts'
-import { mergeDuBlocks } from '../../commands/builtin/generic/crossmount/fanout/du.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
-import { filenameMode } from '../../commands/builtin/generic/grep.ts'
-import { labelFlags, walksDescendantMounts } from '../../commands/builtin/generic/rg.ts'
-import { FlagView, flagOccurrences } from '../../commands/spec/flag_view.ts'
-import { specOf } from '../../commands/spec/builtins.ts'
-import { decodeText, encodeText } from '../../shell/bytes.ts'
 
-type Result = [ByteSource | null, IOResult, ExecutionNode]
-
-// `tree` is deliberately absent: its output is one document (root line,
-// drawing, summary), so a second per-mount block would print a second of
-// each. It crosses the boundary inside the generic instead.
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
-
-function pathSegments(path: string): string[] {
-  return path.split('/').filter((s) => s !== '')
-}
-
-function depthFlagValue(raw: FlagValue | null): number | null {
-  const one = Array.isArray(raw) ? (raw[0] ?? null) : raw
-  if (one === null || typeof one === 'boolean') return null
-  const n = Number(one)
-  return Number.isNaN(n) ? null : n
-}
-
-// The descendant mount roots that are directories.
-//
-// A mount root is not always one: `/.bash_history` is a whole mount serving a
-// single file. du's merge has to tell them apart because a directory with no
-// content still earns GNU's `0` row while a file only shows under `-a`, and
-// rendered du output cannot say which it was looking at. Without a dispatcher
-// the question cannot be asked, and the merge falls back to inferring from the
-// row shape. A root that refuses the stat is left to that inference too: the
-// mount's own run already reported it.
-async function mountDirs(
-  descendants: readonly MountEntry[],
-  statPath: StatPath | null,
-): Promise<string[]> {
-  if (statPath === null) return []
-  const out: string[] = []
-  for (const m of descendants) {
-    const root = rstripSlash(m.prefix) || '/'
-    let stat
-    try {
-      stat = await statPath(root)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      console.warn(`du: mount root ${root} refused stat: ${String(err)}`)
-      continue
-    }
-    if (stat !== null && stat.type === FileType.DIRECTORY) out.push(root)
-  }
-  return out
-}
-
-// The `0` rows of per-mount du blocks that are empty directories. Rendered du
-// output prints an empty directory and an empty file the same way, and only
-// the directory keeps its row without `-a`, so the merge asks the dispatcher
-// which each lone zero row is. The caller asks only when the answer changes
-// what prints. A row that refuses the stat comes back with its error rather
-// than aborting the merge, and gets no row, the way the walk treats a refused
-// stat.
-async function emptyDirs(
-  blocks: readonly Uint8Array[],
-  statPath: StatPath | null,
-): Promise<[string[], [string, unknown][]]> {
-  if (statPath === null) return [[], []]
-  const rows = blocks.flatMap((data) =>
-    decodeText(data)
-      .split('\n')
-      .filter((line) => line.startsWith('0\t') && line.length > 2)
-      .map((line) => line.slice(2)),
-  )
-  const out: string[] = []
-  const refused: [string, unknown][] = []
-  for (const row of rows) {
-    if (rows.some((other) => other.startsWith(rstripSlash(row) + '/'))) continue
-    let stat
-    try {
-      stat = await statPath(row)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      refused.push([row, err])
-      continue
-    }
-    if (stat !== null && stat.type === FileType.DIRECTORY) out.push(row)
-  }
-  return [out, refused]
-}
-
-/**
- * Descendant mounts the current session may see.
- *
- * A fan-out rooted above a session boundary must not walk into an
- * ungranted mount: enumerating it through the raw registry is exactly
- * how `grep -r x /` leaked a walled-off mount's contents. The filter
- * matches the door's structure merge, so the fan-out stays an
- * unobservable optimization.
- */
-function allowedDescendants(registry: MountRegistry, path: string): MountEntry[] {
-  return registry.descendantMounts(path).filter((m) => pathAllowed('/' + stripSlash(m.prefix)))
-}
-
-// The descendants `ls -R` should render a block for.
-//
-// A mount root is not always a directory (`/.bash_history` is a whole
-// mount serving one file), and GNU lists a file that happens to be a
-// mountpoint as an ordinary row of its parent with no block of its own —
-// pinned on coreutils 9.7 over a `mount --bind` of one file onto another.
-// The parent's listing already carries that row, because ls stats every
-// child mount through this same dispatcher, so a sub-run would print the
-// name a second time.
-//
-// Only a *confirmed* non-directory is dropped: a root the dispatcher
-// cannot stat keeps its block rather than vanishing on a failed probe, and
-// without a dispatcher at all the question cannot be asked and every
-// descendant stands.
-async function lsBlockMounts(
-  descendants: readonly MountEntry[],
-  statPath: StatPath | null,
-): Promise<MountEntry[]> {
-  if (statPath === null) return [...descendants]
-  const kept: MountEntry[] = []
-  for (const m of descendants) {
-    const stat = await statPath(rstripSlash(m.prefix) || '/')
-    if (stat === null || stat.type === FileType.DIRECTORY) kept.push(m)
-  }
-  return kept
-}
 
 export function shouldFanOut(
   cmdName: string,
@@ -186,249 +46,13 @@ export function shouldFanOut(
     return false
   if (cmdName === 'du') return flagKwargs.one_file_system !== true
   if (TRAVERSAL_CMDS.has(cmdName)) return true
-  if (cmdName === 'grep') {
-    return flagKwargs.r === true || flagKwargs.R === true || flagKwargs.recursive === true
-  }
-  // ripgrep recurses directories by default.
-  if (cmdName === 'rg') return walksDescendantMounts(flagKwargs)
   if (cmdName === 'ls') {
     return flagKwargs.recursive === true
   }
-  return false
+  return walksMounts(cmdName, flagKwargs)
 }
 
-function adjustDepthFlags(
-  flagKwargs: Record<string, FlagValue>,
-  parentPath: string,
-  mountPrefix: string,
-): Record<string, FlagValue> | null {
-  const parentDepth = pathSegments(parentPath).length
-  const mountDepth = pathSegments(mountPrefix).length
-  const delta = mountDepth - parentDepth
-  const out: Record<string, FlagValue> = { ...flagKwargs }
-  flagOccurrences(out).push(...flagOccurrences(flagKwargs))
-  const first = (v: FlagValue): FlagValue => (Array.isArray(v) ? (v[0] ?? '') : v)
-  if ('maxdepth' in out) {
-    const orig = Number(first(out.maxdepth))
-    if (!Number.isNaN(orig)) {
-      const md = orig - delta
-      if (md < 0) return null
-      out.maxdepth = String(md)
-    }
-  }
-  if ('mindepth' in out) {
-    const orig = Number(first(out.mindepth))
-    if (!Number.isNaN(orig)) {
-      out.mindepth = String(Math.max(0, orig - delta))
-    }
-  }
-  return out
-}
-
-function adjustDepthTexts(
-  texts: readonly string[],
-  parentPath: string,
-  mountPrefix: string,
-): string[] {
-  const delta = pathSegments(mountPrefix).length - pathSegments(parentPath).length
-  const out = [...texts]
-  if (delta === 0) return out
-  let i = 0
-  while (i < out.length - 1) {
-    const tok = out[i]
-    if (tok === '-maxdepth' || tok === '-mindepth') {
-      const val = Number(out[i + 1])
-      if (!Number.isNaN(val)) {
-        out[i + 1] = tok === '-maxdepth' ? String(val - delta) : String(Math.max(0, val - delta))
-      }
-      i += 2
-      continue
-    }
-    i += 1
-  }
-  return out
-}
-
-function dirEntry(path: string, depth: number, mtime: number | null = null): FindEntry {
-  const segs = pathSegments(path)
-  return { key: path, name: segs[segs.length - 1] ?? path, kind: 'd', depth, mtime }
-}
-
-// Whether the fan-out's own evaluation pruned a directory above `path`. A
-// descendant mount is walked by its own find, which never learns what the
-// walk above it skipped, so the fan-out asks the ledger before walking it.
-function prunedAway(path: string, tree: PredNode | null): boolean {
-  return tree !== null && dropPruned([path], tree).length === 0
-}
-
-// Entries print in the operand's typed spelling (`raw`) like every
-// other line of the walk. The namespace-only ancestors between the
-// start and each mount root (`/ghost` above a mount at `/ghost/deep`)
-// get a row too: no backend walk covers them, yet `ls` lists them
-// through the door's structure merge, so find must agree.
-//
-// The start point is evaluated first, for its ledger alone: a `-prune`
-// reaching it or a namespace-only ancestor is recorded on the tree, which
-// skips the candidates beneath before they are statted and comes back with
-// the entries so the caller can hold the descendant mounts to it, since
-// each of those is walked on its own and never learns what the walk above
-// it skipped (`find /data -type d -prune` is one row). The tree is null
-// when the expression does not parse.
-async function synthesizeFindMountEntries(
-  targetPath: string,
-  descendants: readonly MountEntry[],
-  texts: readonly string[],
-  raw: string,
-  statPath: StatPath | null,
-): Promise<[PathSpec[], PredNode | null]> {
-  let expr: FindExpr
-  try {
-    expr = parseFindExpression([...texts])
-  } catch (err) {
-    if (err instanceof FindParseError) return [[], null]
-    throw err
-  }
-  const tree = bindTree(expr.tree, '', targetPath, raw)
-  const maxDepth = expr.maxDepth
-  const minDepth = expr.minDepth ?? 0
-  const parentDepth = pathSegments(targetPath).length
-  const parentBase = rstripSlash(targetPath)
-  const windowed = expr.mtimeMin !== null || expr.mtimeMax !== null
-  const learned = new Map<string, number | null>()
-  // Fetched ahead of the tree, so a time test answers on the entry itself
-  // and a -prune after it fires only where GNU's would.
-  const mtimeOf = async (path: string): Promise<number | null> => {
-    if (!windowed || statPath === null) return null
-    const st = await statPath(path)
-    const mtime = st === null ? null : modifiedTs(st.modified)
-    learned.set(path, mtime)
-    return mtime
-  }
-  const start = parentBase || '/'
-  keep(dirEntry(start, 0, await mtimeOf(start)), tree, minDepth)
-  const seen = new Set<string>()
-  const kept: string[] = []
-  for (const m of descendants) {
-    const prefixNoSlash = rstripSlash(m.prefix)
-    const ancestors: string[] = []
-    let parent = prefixNoSlash.slice(0, prefixNoSlash.lastIndexOf('/'))
-    while (parent !== '' && parent !== parentBase) {
-      ancestors.push(parent)
-      parent = parent.slice(0, parent.lastIndexOf('/'))
-    }
-    for (const candidate of [...ancestors.reverse(), prefixNoSlash]) {
-      if (seen.has(candidate)) continue
-      seen.add(candidate)
-      const depth = pathSegments(candidate).length - parentDepth
-      if (maxDepth !== null && depth > maxDepth) continue
-      // GNU never visits it, so it is neither statted nor judged: a backend
-      // that refuses the probe must not fail the line.
-      if (prunedAway(candidate, tree)) continue
-      const mtime = await mtimeOf(candidate)
-      if (!keep(dirEntry(candidate, depth, mtime), tree, minDepth)) continue
-      // The flat window (-newermt, -newer) also holds the candidate the way
-      // the generic holds every real row, a future cutoff excluding the
-      // mount points too.
-      if (windowed && statPath !== null && !inMtimeWindow(mtime, expr.mtimeMin, expr.mtimeMax)) {
-        continue
-      }
-      kept.push(candidate)
-    }
-  }
-  settlePrunes(tree, learned)
-  const out = dropPruned(kept, tree).map(
-    (candidate) =>
-      new PathSpec({
-        virtual: candidate,
-        directory: candidate,
-        vfsPath: '',
-        resolved: true,
-        rawPath: respellOne(candidate, targetPath, raw),
-      }),
-  )
-  return [out, tree]
-}
-
-// Drop whole `ls -R` groups whose header names a nested mount.
-//
-// `ls -R` renders `PATH:`, then that directory's bare names, with a blank
-// line between groups. Reading a path off every line drops the header and
-// keeps the names, so a shadowed directory's entries land at the end of
-// the previous group, which is how `leftover.txt` came to be listed as a
-// child of `/base`.
-function dropShadowedLsGroups(text: string, descendantPrefixes: readonly string[]): string[] {
-  const kept: string[] = []
-  let skipping = false
-  for (const line of text.split('\n')) {
-    const header = line.endsWith(':') ? line.slice(0, -1) : null
-    if (header?.startsWith('/') === true) {
-      skipping = descendantPrefixes.some((pre) => header === pre || header.startsWith(pre + '/'))
-      if (skipping) {
-        // The blank line ahead of a dropped group would otherwise be left
-        // dangling at the end of the block.
-        if (kept.at(-1) === '') kept.pop()
-        continue
-      }
-    } else if (skipping) {
-      continue
-    }
-    kept.push(line)
-  }
-  while (kept.at(-1) === '') kept.pop()
-  return kept
-}
-
-// Drop lines whose path falls under any descendant mount prefix.
-//
-// `du` renders SIZE\tPATH, so its path is everything after the first
-// tab; `ls -R` renders groups and is filtered a group at a time; for the
-// path-first formats (find, grep) the path is the start of the line up to
-// the first tab or colon. Lines whose path does not start with `/` are
-// passed through.
-export async function filterUnderPrefixes(
-  stdout: ByteSource,
-  descendantPrefixes: readonly string[],
-  cmdName: string,
-): Promise<Uint8Array> {
-  const data = await materialize(stdout)
-  const text = decodeText(data)
-  if (cmdName === 'ls') {
-    const grouped = dropShadowedLsGroups(text, descendantPrefixes)
-    if (grouped.length === 0) return new Uint8Array()
-    return encodeText(grouped.join('\n') + '\n')
-  }
-  const outLines: string[] = []
-  for (const line of text.split('\n')) {
-    if (line === '') continue
-    let path = line
-    if (cmdName === 'du') {
-      const tab = line.indexOf('\t')
-      path = tab >= 0 ? line.slice(tab + 1) : line
-    } else {
-      for (const sep of ['\t', ':']) {
-        const idx = path.indexOf(sep)
-        if (idx >= 0) {
-          path = path.slice(0, idx)
-          break
-        }
-      }
-    }
-    if (path.startsWith('/')) {
-      let shadowed = false
-      for (const pre of descendantPrefixes) {
-        if (path === pre || path.startsWith(pre + '/')) {
-          shadowed = true
-          break
-        }
-      }
-      if (shadowed) continue
-    }
-    outLines.push(line)
-  }
-  if (outLines.length === 0) return new Uint8Array()
-  return encodeText(outLines.join('\n') + '\n')
-}
-
+/** Native content search or one metadata traversal over the mounted tree. */
 export async function fanOutTraversal(
   cmdName: string,
   paths: readonly PathSpec[],
@@ -439,26 +63,23 @@ export async function fanOutTraversal(
   cwd: string,
   cmdStr: string,
   stdin: ByteSource | null,
-  // The name plane's facts, offered whole to every sub-run. The mount
-  // boundaries, because a rollup total cannot be repaired by line
-  // filtering: du must exclude a shadowed subtree while it is
-  // accounting, not after it has rendered. The symlinks, for the same
-  // reason the single-mount path offers them: a sub-run that never
-  // receives them reports a tree with every link missing, and a nested
-  // mount is not a reason for `find` to stop seeing one.
   ns?: NamespaceView,
-  statPath: StatPath | null = null,
+  sessionView?: SessionView,
   signal?: AbortSignal,
   dispatch?: DispatchFn,
-): Promise<Result> {
+  native?: RunSingle,
+): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   signal?.throwIfAborted()
-  const dispatchBuilder = DISPATCH_BUILDERS.get(cmdName as Cmd)
-  if (dispatchBuilder !== undefined && dispatch !== undefined) {
-    let stdout: ByteSource | null = null
-    let io = new IOResult()
-    try {
+  if (dispatch === undefined || native === undefined)
+    throw new Error('traversal requires dispatcher and native execution')
+  let stdout: ByteSource | null
+  let io: IOResult
+  try {
+    if (cmdName === 'find' || cmdName === 'du') {
+      const builder = DISPATCH_BUILDERS.get(cmdName)
+      if (builder === undefined) throw new Error(`No traversal builder for ${cmdName}`)
       ;[stdout, io] = await runDispatch(
-        dispatchBuilder,
+        builder,
         paths,
         texts,
         flagKwargs,
@@ -468,384 +89,70 @@ export async function fanOutTraversal(
         stdin,
         signal,
       )
-    } catch (err) {
-      if (!(err instanceof UsageError)) throw err
+    } else {
+      ;[stdout, io] = await handleCrossMount(
+        cmdName,
+        [...paths],
+        [...texts],
+        flagKwargs,
+        dispatch,
+        native,
+        stdin,
+        undefined,
+        ns,
+        sessionView,
+        cwd,
+      )
+    }
+  } catch (err) {
+    if (err instanceof CommandTimeoutError || (err instanceof Error && err.name === 'AbortError'))
+      throw err
+    stdout = null
+    if (err instanceof UsageError) {
       io = new IOResult({
         exitCode: err.exitCode,
         stderr: encodeText(`${err.message}\n`),
       })
-    }
-    io.producer = {
-      command: cmdName,
-      prefixes: [
-        ...new Set([
-          primaryMount.prefix,
-          ...paths
-            .filter((p) => p.walkError === null)
-            .flatMap((p) => allowedDescendants(registry, p.virtual).map((m) => m.prefix)),
-        ]),
-      ],
-      declared: null,
-    }
-    return [
-      stdout,
-      io,
-      new ExecutionNode({
-        command: cmdStr,
-        exitCode: io.exitCode,
-        stderr: await materialize(io.stderr),
-      }),
-    ]
-  }
-  if (paths.length > 1) {
-    const runSingle: RunSingle = (name, operands, words, flags, options) =>
-      primaryMount.executeCmd(name, operands, words, flags, {
-        stdin: options?.stdin ?? null,
-        cwd,
-        ...(signal === undefined ? {} : { signal }),
-        ...(ns === undefined ? {} : { ns }),
-        ...(statPath === null ? {} : { statPath }),
-        ...(dispatch === undefined ? {} : { dispatch }),
-      })
-    const runOperand = runWithFanout(runSingle, registry, cwd, ns, statPath, signal, dispatch)
-    const [stdout, io] = await runFanout(
-      cmdName as Cmd,
-      [...paths],
-      [...texts],
-      flagKwargs,
-      runOperand,
-    )
-    io.producer = {
-      command: cmdName,
-      prefixes: [
-        ...new Set([
-          primaryMount.prefix,
-          ...paths
-            .filter((p) => p.walkError === null)
-            .flatMap((p) => allowedDescendants(registry, p.virtual).map((m) => m.prefix)),
-        ]),
-      ],
-      declared: null,
-    }
-    return [
-      stdout,
-      io,
-      new ExecutionNode({
-        command: cmdStr,
-        exitCode: io.exitCode,
-        stderr: await materialize(io.stderr),
-      }),
-    ]
-  }
-  const targetPath = paths[0]?.virtual ?? cwd
-  let descendants = allowedDescendants(registry, targetPath)
-  if (cmdName === 'ls') descendants = await lsBlockMounts(descendants, statPath)
-  // The shadow filter keeps the raw list on purpose: a mount the
-  // session cannot see still shadows the primary backend's keys under
-  // its prefix, the walk just never descends into it.
-  const descendantPrefixes = registry.descendantMounts(targetPath).map((m) => rstripSlash(m.prefix))
-
-  // A nested mount's bytes belong to every directory above it, so du's
-  // blocks are folded into one tree rather than concatenated
-  // (`mergeDuBlocks`). The runs are asked for every row in absolute
-  // spelling and exact bytes, because the merge needs the leaves back: -a
-  // keeps the file rows, -s would collapse them, a depth limit would prune
-  // them, and humanized sizes cannot be re-summed. Every one of those is
-  // then applied once, centrally.
-  const duMerge = cmdName === 'du'
-  const duOpts = {
-    all: flagKwargs.a === true,
-    summarize: flagKwargs.s === true,
-    total: flagKwargs.c === true,
-    human: flagKwargs.h === true,
-    maxDepth: depthFlagValue(flagKwargs.max_depth ?? null),
-    separateDirs: flagKwargs.separate_dirs === true,
-  }
-  let flags = flagKwargs
-  if (duMerge) {
-    const rest = { ...flagKwargs }
-    delete rest.max_depth
-    flags = { ...rest, a: true, s: false, c: false, h: false, separate_dirs: false }
-  }
-
-  // -xdev keeps the walk on its start point's filesystem: the mount points
-  // right below it are entries, nothing under them is.
-  const xdev = cmdName === 'find' && (flagKwargs.xdev === true || flagKwargs.mount === true)
-  if (xdev)
-    descendants = descendants.filter(
-      (m) => registry.tryMountFor(parent(rstripSlash(m.prefix))) === primaryMount,
-    )
-  const synthesized =
-    cmdName === 'find'
-      ? await synthesizeFindMountEntries(
-          targetPath,
-          descendants,
-          texts,
-          paths[0]?.rawPath ?? targetPath,
-          statPath,
-        )
-      : null
-  const synthetic = synthesized?.[0] ?? []
-  const tree = synthesized?.[1] ?? null
-
-  const allStdout: Uint8Array[] = []
-  let findMatches: PathSpec[][] = []
-  let findMatchesComplete = true
-  let mergedIo = new IOResult()
-  const exitCodes: number[] = []
-  const errored: boolean[] = []
-
-  const mountsToRun: MountEntry[] = [primaryMount, ...(xdev ? [] : descendants)]
-  for (const mount of mountsToRun) {
-    signal?.throwIfAborted()
-    let subPaths: PathSpec[]
-    let subFlags: Record<string, FlagValue>
-    let subTexts: string[]
-    if (mount === primaryMount) {
-      // The du merge re-spells centrally, so the runs answer in absolute
-      // virtual paths: a relative operand would otherwise come back
-      // already spelled and could not be rebased onto the tree the
-      // rollup builds.
-      const head = paths[0]
-      subPaths =
-        duMerge && head !== undefined
-          ? [
-              new PathSpec({
-                virtual: head.virtual,
-                directory: head.directory,
-                vfsPath: head.vfsPath,
-                resolved: head.resolved,
-                rawPath: targetPath,
-              }),
-              ...paths.slice(1),
-            ]
-          : [...paths]
-      subFlags = { ...flags }
-      flagOccurrences(subFlags).push(...flagOccurrences(flags))
-      subTexts = [...texts]
     } else {
-      const mountRoot = rstripSlash(mount.prefix) || '/'
-      const adjusted = adjustDepthFlags(flags, targetPath, mount.prefix)
-      if (adjusted === null || prunedAway(mountRoot, tree)) continue
-      subFlags = adjusted
-      // A tree search labels every hit; a descendant mount whose root is a
-      // single file would otherwise drop the filename (grep/rg label only
-      // multi-file or -H runs).
-      if (cmdName === 'rg') {
-        subFlags = labelFlags(subFlags)
-      } else if (
-        cmdName === 'grep' &&
-        filenameMode(new FlagView(subFlags, specOf('grep'))) === null
-      ) {
-        subFlags = { ...subFlags, H: true }
-      }
-      subTexts = adjustDepthTexts(texts, targetPath, mount.prefix)
-      // The descendant operand keeps the traversal root's typed spelling
-      // (grep -r . -> ./ram/...; the synthetic bare no-operand form ->
-      // ram/...); an absolute root leaves it absolute, the pre-existing
-      // output shape.
-      subPaths = [
-        new PathSpec({
-          virtual: mountRoot,
-          directory: mountRoot,
-          vfsPath: mountKey(mountRoot, rstripSlash(mount.prefix)),
-          rawPath: duMerge
-            ? mountRoot
-            : respellOne(mountRoot, targetPath, paths[0]?.rawPath ?? targetPath),
-        }),
-      ]
-    }
-    // The child-mount names and the dispatcher-backed start-point stat.
-    // A start point only the namespace serves (a nested mount's
-    // ancestor) has no backend listing, so without them the primary run
-    // reports the operand missing.
-    signal?.throwIfAborted()
-    let ran: Awaited<ReturnType<typeof mount.executeCmd>>
-    try {
-      ran = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
-        stdin,
-        cwd,
-        ...(signal === undefined ? {} : { signal }),
-        ...(ns === undefined ? {} : { ns }),
-        ...(statPath !== null ? { statPath } : {}),
-        ...(dispatch === undefined ? {} : { dispatch }),
+      // A backend failure anywhere in the walk (a 5xx from a nested mount)
+      // is this command's result, in its voice, as the single-mount door
+      // reports it; the rest of the line still runs.
+      io = new IOResult({
+        exitCode: readFailExitCode(cmdName, err),
+        stderr: formatFsError(cmdName, err, paths),
       })
-    } catch (err) {
-      if (err instanceof CommandTimeoutError || (err instanceof Error && err.name === 'AbortError'))
-        throw err
-      // A usage error belongs to the line, not to one mount: the
-      // single-mount path reports it once as the command's result (#452),
-      // and so does the walk, rather than aborting the line.
-      if (err instanceof UsageError) {
-        const usage = encodeText(`${err.message}\n`)
-        return [
-          null,
-          new IOResult({ exitCode: err.exitCode, stderr: usage }),
-          new ExecutionNode({ command: cmdStr, stderr: usage, exitCode: err.exitCode }),
-        ]
-      }
-      // Any other failure is this mount's slice of the walk, in the
-      // command's voice, as the single-mount chokepoint reports it; the
-      // remaining mounts still run and the status carries it.
-      ran = [
-        null,
-        new IOResult({
-          exitCode: readFailExitCode(cmdName, err),
-          stderr: formatFsError(cmdName, err, subPaths),
-        }),
-      ]
-    }
-    const [stdout0, io] = ran
-    let stdout: ByteSource | null = stdout0
-    if (mount !== primaryMount && io.exitCode === 127) {
-      // A descendant that does not serve this command contributes
-      // nothing to the aggregate walk instead of failing it (du across
-      // a tree holding a view mount without a du op).
-      continue
-    }
-    if (cmdName === 'find' && io.matchedRuns !== null) {
-      await materialize(stdout)
-      if (mount === primaryMount) {
-        // One run per operand, minus the rows a descendant mount
-        // answers for.
-        for (const run of io.matchedRuns) {
-          findMatches.push(
-            run.filter(
-              (p) =>
-                !descendantPrefixes.some(
-                  (pre) => p.virtual === pre || p.virtual.startsWith(pre + '/'),
-                ),
-            ),
-          )
-        }
-      } else {
-        // A descendant walks under the first operand, so its rows join
-        // that operand's run.
-        const rows = io.matchedRuns.flat().filter((p) => p.virtual !== rstripSlash(mount.prefix))
-        const first = findMatches[0]
-        if (first === undefined) findMatches.push(rows)
-        else first.push(...rows)
-      }
-      stdout = null
-    } else if (
-      mount === primaryMount &&
-      descendantPrefixes.length > 0 &&
-      stdout !== null &&
-      cmdName !== 'grep' &&
-      cmdName !== 'rg'
-    ) {
-      // grep and rg never walk into a mount below their own
-      // (mountParentReaddir), so there is nothing of theirs to drop.
-      stdout = await filterUnderPrefixes(stdout, descendantPrefixes, cmdName)
-    }
-    if (stdout !== null) {
-      const data = await materialize(stdout)
-      if (data.length > 0) {
-        if (cmdName === 'find') findMatchesComplete = false
-        allStdout.push(data)
-      }
-    }
-    exitCodes.push(io.exitCode)
-    errored.push(io.exitCode !== 0 && io.stderr !== null)
-    mergedIo = await mergedIo.merge(io)
-  }
-  signal?.throwIfAborted()
-
-  let rows: PathSpec[] = []
-  if (cmdName === 'find') {
-    // The mount points a walk cannot see belong to the first operand's
-    // run, the one that holds them.
-    if (synthetic.length > 0) {
-      const first = findMatches[0]
-      if (first === undefined) findMatches.push(synthetic)
-      else first.push(...synthetic)
-    }
-    rows = findMatches.flat()
-    if (!findMatchesComplete && rows.length > 0) {
-      allStdout.push(encodeText(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n'))
     }
   }
-
-  let combined: ByteSource | null = null
-  if (duMerge && allStdout.length > 0) {
-    const dirs = await mountDirs(descendants, statPath)
-    if (!duOpts.all && !duOpts.summarize) {
-      const [empty, refused] = await emptyDirs(allStdout, statPath)
-      dirs.push(...empty)
-      if (refused.length > 0) {
-        const raw = paths[0]?.rawPath ?? targetPath
-        const notes = refused
-          .map(
-            ([row, err]) =>
-              `du: cannot access '${respellOne(row, targetPath, raw)}': ${fsStrerror(err) ?? ''}\n`,
-          )
-          .join('')
-        mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: encodeText(notes) }))
-        exitCodes.push(1)
-        errored.push(true)
-      }
-    }
-    combined = mergeDuBlocks(allStdout, targetPath, paths[0]?.rawPath ?? targetPath, {
-      ...duOpts,
-      dirs,
-    })
-  } else if (cmdName === 'find' && rows.length > 0 && findMatchesComplete) {
-    if (paths.length === 1) {
-      rows = [...new Map(rows.map((p) => [p.virtual, p])).values()].sort((a, b) =>
-        compareCodePoints(a.rawPath, b.rawPath),
-      )
-      findMatches = [rows]
-    }
-    combined = encodeText(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n')
-  } else if (allStdout.length > 0) {
-    // `ls -R` separates directory groups with a blank line, and a
-    // per-mount block is one more group; grep and rg put `--` between one
-    // file's context and the next file's; every other format is a plain
-    // line stream.
-    const sep = cmdName === 'ls' ? '\n' : runSeparator(cmdName, flagKwargs)
-    combined = joinRuns(allStdout, sep)
+  // Only the mounts the walk can reach bound its output: a hidden one never
+  // contributes a row, so its stricter limit must not apply.
+  const prefixes = new Set([primaryMount.prefix])
+  for (const path of paths) {
+    if (path.walkError !== null) continue
+    for (const mount of registry.descendantMounts(path.virtual))
+      if (pathAllowed('/' + stripSlash(mount.prefix))) prefixes.add(mount.prefix)
   }
-  const quiet =
-    (cmdName === 'grep' && new FlagView(flagKwargs, specOf('grep')).asBool('q')) ||
-    (cmdName === 'rg' && new FlagView(flagKwargs, specOf('rg')).asBool('quiet'))
-  const finalIoExit = combinedExit(cmdName as Cmd, exitCodes, errored, quiet)
-
-  if (cmdName === 'find') {
-    // The structured rows ride out for the command boundary, which
-    // applies find's actions once over every operand's matches.
-    mergedIo.matchedRuns = findMatchesComplete ? findMatches : null
-  }
-
-  mergedIo.exitCode = finalIoExit
-  mergedIo.producer = {
+  io.producer = {
     command: cmdName,
-    prefixes: mountsToRun.map((m) => m.prefix),
+    prefixes: [...prefixes].sort(compareCodePoints),
     declared: null,
   }
-  const stderrBytes = await materialize(mergedIo.stderr)
-  const exec = new ExecutionNode({
-    command: cmdStr,
-    stderr: stderrBytes,
-    exitCode: finalIoExit,
-  })
-  return [combined, mergedIo, exec]
+  return [
+    stdout,
+    io,
+    new ExecutionNode({
+      command: cmdStr,
+      exitCode: io.exitCode,
+      stderr: await materialize(io.stderr),
+    }),
+  ]
 }
 
-// One operand's native run, fanned out over the mounts nested in it.
-//
-// A line whose operands span mounts runs once per operand on the operand's
-// owning mount, and that runner is single-mount by construction: it never
-// descends into a mount nested *under* the operand. So `du /base /other`
-// reported the parent backend's keys shadowed by a mount at `/base/inner`
-// and none of that mount's own, while `du /base` on the same tree got both
-// right. Wrapping the per-operand runner is what makes the two agree, and
-// it is a pass-through for everything the traversal fan-out does not claim.
 export function runWithFanout(
   runSingle: RunSingle,
   registry: MountRegistry,
   cwd: string,
   ns: NamespaceView | undefined,
-  statPath: StatPath | null = null,
+  sessionView?: SessionView,
   signal?: AbortSignal,
   dispatch?: DispatchFn,
 ): RunSingle {
@@ -874,9 +181,10 @@ export function runWithFanout(
       cmdName,
       stdin,
       ns,
-      statPath,
+      sessionView,
       signal,
       dispatch,
+      runSingle,
     )
     return [stdout, io]
   }

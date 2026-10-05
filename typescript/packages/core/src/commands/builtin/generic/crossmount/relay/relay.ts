@@ -15,41 +15,27 @@
 import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { runAwk } from './awk.ts'
-import { runCmp } from './cmp.ts'
-import { runComm } from './comm.ts'
 import { runCp } from './cp.ts'
-import { runDiff } from './diff.ts'
-import { runJoin } from './join.ts'
 import { runLs } from './ls.ts'
 import { runMv } from './mv.ts'
-import { runPaste } from './paste.ts'
 import { runSed } from './sed.ts'
-import { runSort } from './sort.ts'
 import { runTar } from './tar.ts'
 import { runTee } from './tee.ts'
 import { runUnzip } from './unzip.ts'
 import { runWc } from './wc.ts'
 import { runZip } from './zip_cmd.ts'
-import { BUILDER as GREP_BUILDER } from '../../../generic_bind/builders/grep.ts'
-import { BUILDER as RG_BUILDER } from '../../../generic_bind/builders/rg.ts'
-import { BUILDER as REALPATH_BUILDER } from '../../../generic_bind/builders/realpath.ts'
+import { DISPATCH_BUILDERS } from '../constants.ts'
 import { runDispatch } from '../../../generic_bind/dispatch.ts'
-import { Cmd, type CrossResult, type DispatchFn, type RunSingle } from '../types.ts'
+import type { CrossResult, DispatchFn, RunSingle } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { NamespaceView, SessionView } from '../../../../../ops/types.ts'
-
-export const DISPATCH_BUILDERS = new Map([
-  [Cmd.GREP, GREP_BUILDER],
-  [Cmd.RG, RG_BUILDER],
-  [Cmd.REALPATH, REALPATH_BUILDER],
-])
 
 // Run a command whose work must see every operand at once. Pure wiring:
 // every operand is read or written through dispatch primitives on its owning
 // mount, and the shared generic does the work in its primitive mode, so
 // output matches the single-mount commands.
 export async function runRelay(
-  cmdName: Cmd,
+  cmdName: string,
   scopes: PathSpec[],
   textArgs: string[],
   flagKwargs: Record<string, FlagValue>,
@@ -76,24 +62,30 @@ export async function runRelay(
   cwd = '/',
   argv: readonly string[] = [],
 ): Promise<CrossResult> {
-  if (cmdName === Cmd.AWK) return runAwk(scopes, textArgs, flagKwargs, runSingle, stdin)
-  if (cmdName === Cmd.SED) return runSed(scopes, textArgs, flagKwargs, dispatch, stdin, cwd, argv)
-  if (cmdName === Cmd.WC) return runWc(scopes, flagKwargs, dispatch, runSingle)
-  if (cmdName === Cmd.SORT) return runSort(scopes, flagKwargs, dispatch, stdin)
-  if (cmdName === Cmd.LS) return runLs(scopes, flagKwargs, dispatch, ns, sessionView)
-  if (cmdName === Cmd.CP) return runCp(scopes, flagKwargs, dispatch, storageKey, ns, cwd, stdin)
-  if (cmdName === Cmd.MV) return runMv(scopes, flagKwargs, dispatch, storageKey, ns, stdin)
-  if (cmdName === Cmd.DIFF) return runDiff(scopes, flagKwargs, dispatch, stdin, argv)
-  if (cmdName === Cmd.PASTE) return runPaste(scopes, flagKwargs, dispatch, stdin)
-  if (cmdName === Cmd.COMM) return runComm(scopes, flagKwargs, dispatch, stdin)
-  if (cmdName === Cmd.JOIN) return runJoin(scopes, flagKwargs, dispatch, stdin)
-  if (cmdName === Cmd.TAR) return runTar(scopes, textArgs, flagKwargs, dispatch, ns, stdin)
-  if (cmdName === Cmd.TEE) return runTee(scopes, flagKwargs, dispatch, stdin)
-  if (cmdName === Cmd.UNZIP) return runUnzip(scopes, textArgs, flagKwargs, dispatch)
-  if (cmdName === Cmd.ZIP) return runZip(scopes, flagKwargs, dispatch, ns)
+  if (cmdName === 'awk') return runAwk(scopes, textArgs, flagKwargs, runSingle, stdin)
+  if (cmdName === 'sed') return runSed(scopes, textArgs, flagKwargs, dispatch, stdin, cwd, argv)
+  if (cmdName === 'wc') return runWc(scopes, flagKwargs, dispatch, runSingle)
+  if (cmdName === 'ls') return runLs(scopes, flagKwargs, dispatch, ns, sessionView)
+  if (cmdName === 'cp') return runCp(scopes, flagKwargs, dispatch, storageKey, ns, cwd, stdin)
+  if (cmdName === 'mv') return runMv(scopes, flagKwargs, dispatch, storageKey, ns, stdin)
+  if (cmdName === 'tar') return runTar(scopes, textArgs, flagKwargs, dispatch, ns, stdin)
+  if (cmdName === 'tee') return runTee(scopes, flagKwargs, dispatch, stdin)
+  if (cmdName === 'unzip') return runUnzip(scopes, textArgs, flagKwargs, dispatch)
+  if (cmdName === 'zip') return runZip(scopes, flagKwargs, dispatch, ns)
   const builder = DISPATCH_BUILDERS.get(cmdName)
   if (builder !== undefined) {
-    return runDispatch(builder, scopes, textArgs, flagKwargs, dispatch, cwd, ns, stdin)
+    return runDispatch(
+      builder,
+      scopes,
+      textArgs,
+      flagKwargs,
+      dispatch,
+      cwd,
+      ns,
+      stdin,
+      undefined,
+      argv,
+    )
   }
-  return runCmp(scopes, textArgs, flagKwargs, dispatch, stdin)
+  throw new Error(`No cross-mount composition for ${cmdName}`)
 }
