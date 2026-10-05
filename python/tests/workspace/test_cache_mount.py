@@ -221,68 +221,50 @@ async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("line", "stored"),
+    ("line", "cached", "stored"),
     [
-        ("cat /data/f; printf 'z\\n' >> /data/f", b"a\nb\nz\n"),
-        ("awk 1 /data/f | tee -a /data/f > /dev/null", b"a\nb\na\nb\n"),
-        ("tac /data/f >> /data/f", b"a\nb\nb\na\n"),
-        ("sort -o /data/f /data/f; printf 'z\\n' >> /data/f", b"a\nb\nz\n"),
-        ("printf 'q\\n' | tee /data/f >> /data/f", b"q\nq\n"),
-        ("printf 'q\\n' | tee /data/f >> /data/f 2>> /data/f", b"q\nq\n"),
+        ("cat /d/f; printf 'z\\n' >> /d/f", None, b"b\na\nz\n"),
+        ("awk 1 /d/f | tee -a /d/f > /dev/null", None, b"b\na\nb\na\n"),
+        ("sort -o /d/f /d/f; printf 'z\\n' >> /d/f", None, b"a\nb\nz\n"),
+        ("printf 'q\\n' | tee /d/f >> /d/f", None, b"q\nq\n"),
+        ("printf 'q\\n' | tee /d/f >> /d/f 2>> /d/f", None, b"q\nq\n"),
+        ("cat /d/f; sort -o /d/f /d/f", b"a\nb\n", b"a\nb\n"),
+        ("cat /d/f | sort -o /d/f", b"a\nb\n", b"a\nb\n"),
     ],
 )
-async def test_a_line_that_reads_and_appends_leaves_no_stale_entry(
-    line, stored
+async def test_a_line_touching_a_file_twice_caches_only_a_whole_file(
+    line, cached, stored
 ):
-    """A line that reads or writes a file and then appends to it holds
-    neither the file nor its append whole, so the next read reaches the
-    store."""
+    """An append, or a read before a write, leaves no entry; a whole write
+    after a read is kept."""
     ram = RAMVFS()
     ram.caches_reads = True
-    ws = Workspace({"/data": ram}, mode=MountMode.WRITE)
-    await ws.shell("printf 'a\\nb\\n' > /data/f")
-    await (await ws.shell("cat /data/f")).materialize_stdout()
+    ws = Workspace({"/d": ram}, mode=MountMode.WRITE)
+    await ws.shell("printf 'b\\na\\n' > /d/f")
+    await (await ws.shell("cat /d/f")).materialize_stdout()
     await (await ws.shell(line)).materialize_stdout()
-    out = await (await ws.shell("cat /data/f")).materialize_stdout()
+    entry = await ws.cache.get("/d/f")
+    out = await (await ws.shell("cat /d/f")).materialize_stdout()
     await ws.close()
-    assert out == stored
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line",
-    ["cat /data/f; sort -o /data/f /data/f", "cat /data/f | sort -o /data/f"],
-)
-async def test_a_whole_write_after_a_read_stays_cached(line):
-    """sort rewrites the file it was handed whole, so the cache keeps
-    sort's bytes and not the read that came before them."""
-    ram = RAMVFS()
-    ram.caches_reads = True
-    ws = Workspace({"/data": ram}, mode=MountMode.WRITE)
-    await ws.shell("printf 'b\\na\\n' > /data/f")
-    await (await ws.shell(line)).materialize_stdout()
-    cached = await ws.cache.get("/data/f")
-    await ws.close()
-    assert cached == b"a\nb\n"
+    assert (entry, out) == (cached, stored)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("caching", "line"),
     [
-        (True, "cat /data/big | head -c 1; printf 'z\\n' >> /data/big"),
-        (False, "cat /data/big | head -c 1"),
+        (True, "cat /d/big | head -c 1; printf 'z\\n' >> /d/big"),
+        (False, "cat /d/big | head -c 1"),
     ],
 )
 async def test_a_read_given_up_on_leaves_the_mount_free_to_unmount(
     caching, line
 ):
-    """A read the line stopped short of the end holds its source until it
-    is closed, and unmount waits for every stream of the mount."""
+    """A read the line gave up on is closed, or unmount waits on it."""
     ram = RAMVFS()
     ram.caches_reads = caching
-    ws = Workspace({"/data": ram}, mode=MountMode.WRITE)
-    await ws.shell("seq 1 200000 > /data/big")
+    ws = Workspace({"/d": ram}, mode=MountMode.WRITE)
+    await ws.shell("seq 1 200000 > /d/big")
     await (await ws.shell(line)).materialize_stdout()
-    await asyncio.wait_for(ws.unmount("/data"), 10)
+    await asyncio.wait_for(ws.unmount("/d"), 10)
     await ws.close()

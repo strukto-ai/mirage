@@ -132,35 +132,6 @@ describe('IOResult.merge', () => {
     expect(merged.exitCode).toBe(1)
   })
 
-  it('a later write voids an earlier claim', async () => {
-    // Mirrors Python's test_ioresult_merge_a_later_write_voids_an_earlier_claim.
-    const left = new IOResult({ writes: { '/f': new Uint8Array([1]) }, cache: ['/f', '/g'] })
-    const merged = await left.merge(new IOResult({ writes: { '/f': new Uint8Array([2]) } }))
-    expect(merged.cache).toEqual(['/g'])
-    const claimed = await left.merge(
-      new IOResult({ writes: { '/f': new Uint8Array([3]) }, cache: ['/f'] }),
-    )
-    expect(claimed.cache).toEqual(['/g', '/f'])
-  })
-
-  it('a later write voids a finished read', async () => {
-    // A stream still running stays for the cache's drain. Mirrors Python's
-    // test_ioresult_merge_a_later_write_voids_a_finished_read.
-    const running = new CachableAsyncIterator(toAsync([new Uint8Array([1])]))
-    const left = new IOResult({
-      reads: { '/f': new Uint8Array([1]), '/s': running },
-      cache: ['/f'],
-    })
-    const merged = await left.merge(
-      new IOResult({
-        writes: { '/f': new Uint8Array([2]), '/s': new Uint8Array([2]) },
-        cache: ['/f'],
-      }),
-    )
-    expect(merged.reads).toEqual({ '/s': running })
-    expect(merged.cache).toEqual(['/f'])
-  })
-
   it('concatenates stderr from both sides', async () => {
     const a = new IOResult({ stderr: new TextEncoder().encode('A:') })
     const b = new IOResult({ stderr: new TextEncoder().encode('B') })

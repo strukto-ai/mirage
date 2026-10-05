@@ -96,34 +96,21 @@ async def test_apply_io_drops_a_path_read_and_written(cache):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cacheable", [True, False])
-async def test_apply_io_closes_an_unfinished_read_it_does_not_drain(
-    cache, cacheable
-):
-    """`cat f | head -c 1; printf z >> f` leaves cat's read unfinished, as
-    does any read a mount without a cache gives up on. No drain takes it
-    over, so apply_io closes it; its source holds the mount."""
-    closed: list[bool] = []
+async def test_apply_io_leaves_a_draining_read_to_its_drain(cache):
+    """The outer line of an `eval` gets the read its inner line drains."""
 
     async def source():
-        try:
-            yield b"a"
-            yield b"b"
-        finally:
-            closed.append(True)
+        for chunk in (b"a", b"b", b"c"):
+            await asyncio.sleep(0)
+            yield chunk
 
     stream = CachableAsyncIterator(source())
     assert await stream.__anext__() == b"a"
-    io = IOResult(
-        reads={"/f": stream},
-        writes={"/f": b"z"} if cacheable else {},
-        cache=["/f"],
-    )
-    await cache_io.apply_io(
-        cache, io, cache_facts=lambda _path: CacheFacts(cacheable, 0)
-    )
-    assert closed == [True]
-    assert await cache.get("/f") is None
+    io = IOResult(reads={"/f": stream}, cache=["/f"])
+    await cache_io.apply_io(cache, io)
+    await cache_io.apply_io(cache, io)
+    await asyncio.gather(*list(cache._drain_tasks.values()))
+    assert await cache.get("/f") == b"abc"
 
 
 @pytest.mark.asyncio

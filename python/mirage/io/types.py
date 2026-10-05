@@ -272,10 +272,8 @@ class IOResult:
             sized_runs=other.sized_runs,
             counted_runs=other.counted_runs,
             stderr=merged_stderr,
-            # A later write of a path voids what the earlier side claimed
-            # of it, and the read, once it is over; a stream still
-            # running stays for the cache's drain to finish and close.
-            # The writer's own claim, if any, follows.
+            # A later write voids earlier claims on its path, and a read
+            # that is over; a running one stays for the drain to close.
             reads={
                 **{
                     p: v

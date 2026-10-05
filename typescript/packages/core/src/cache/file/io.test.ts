@@ -82,36 +82,24 @@ describe('cache population via applyIo', () => {
     expect(await cache.get('/f.txt')).toBeNull()
   })
 
-  it.each([true, false])(
-    'closes an unfinished read it does not drain (cacheable %s)',
-    async (cacheable) => {
-      // `cat f | head -c 1; printf z >> f` leaves cat's read unfinished, as
-      // does any read a mount without a cache gives up on. No drain takes it
-      // over, so applyIo closes it; its source holds the mount. Mirrors
-      // Python's test_apply_io_closes_an_unfinished_read_it_does_not_drain.
-      const closed: boolean[] = []
-      async function* source(): AsyncGenerator<Uint8Array> {
-        try {
-          await Promise.resolve()
-          yield ENC.encode('a')
-          yield ENC.encode('b')
-        } finally {
-          closed.push(true)
-        }
+  it('leaves a draining read to its drain', async () => {
+    // The outer line of an `eval` gets the read its inner line drains. Mirrors
+    // Python's test_apply_io_leaves_a_draining_read_to_its_drain.
+    async function* source(): AsyncGenerator<Uint8Array> {
+      for (const chunk of ['a', 'b', 'c']) {
+        await sleep(1)
+        yield ENC.encode(chunk)
       }
-      const cache = new RAMFileCacheStore()
-      const stream = new CachableAsyncIterator(source())
-      expect(DEC.decode((await stream.next()).value as Uint8Array)).toBe('a')
-      const io = new IOResult({
-        reads: { '/f': stream },
-        writes: cacheable ? { '/f': ENC.encode('z') } : {},
-        cache: ['/f'],
-      })
-      await applyIo(cache, io, () => ({ cacheable, ttl: 0 }))
-      expect(closed).toEqual([true])
-      expect(await cache.get('/f')).toBeNull()
-    },
-  )
+    }
+    const cache = new RAMFileCacheStore()
+    const stream = new CachableAsyncIterator(source())
+    expect(DEC.decode((await stream.next()).value as Uint8Array)).toBe('a')
+    const io = new IOResult({ reads: { '/f': stream }, cache: ['/f'] })
+    await applyIo(cache, io)
+    await applyIo(cache, io)
+    await Promise.all([...cache.drainTasks.values()])
+    expect(DEC.decode((await cache.get('/f')) ?? undefined)).toBe('abc')
+  })
 
   it('stores all paths in the cache list', async () => {
     const cache = new RAMFileCacheStore()

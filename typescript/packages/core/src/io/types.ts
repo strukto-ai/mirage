@@ -224,10 +224,8 @@ export class IOResult {
       sizedRuns: other.sizedRuns,
       countedRuns: other.countedRuns,
       stderr: mergedStderr,
-      // A later write of a path voids what the earlier side claimed of it,
-      // and the read, once it is over; a stream still running stays for the
-      // cache's drain to finish and close. The writer's own claim, if any,
-      // follows.
+      // A later write voids earlier claims on its path, and a read that is
+      // over; a running one stays for the drain to close.
       reads: {
         ...Object.fromEntries(
           Object.entries(this.reads).filter(([p, v]) => !(p in other.writes) || !settled(v)),

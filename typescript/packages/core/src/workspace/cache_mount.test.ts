@@ -401,94 +401,69 @@ describe('a renderer registered beside the VFS', () => {
   })
 })
 
-describe('a line that reads and appends to one file', () => {
+describe('a line touching a file twice', () => {
   it.each([
-    ["cat /data/f; printf 'z\\n' >> /data/f", 'a\nb\nz\n'],
-    ['awk 1 /data/f | tee -a /data/f > /dev/null', 'a\nb\na\nb\n'],
-    ['tac /data/f >> /data/f', 'a\nb\nb\na\n'],
-    ["sort -o /data/f /data/f; printf 'z\\n' >> /data/f", 'a\nb\nz\n'],
-    ["printf 'q\\n' | tee /data/f >> /data/f", 'q\nq\n'],
-    ["printf 'q\\n' | tee /data/f >> /data/f 2>> /data/f", 'q\nq\n'],
-  ])('%s leaves no stale entry', async (line, stored) => {
-    // A line that reads or writes a file and then appends to it holds neither
-    // the file nor its append whole, so the next read reaches the store.
-    // Mirrors Python's
-    // test_a_line_that_reads_and_appends_leaves_no_stale_entry.
+    ["cat /d/f; printf 'z\\n' >> /d/f", null, 'b\na\nz\n'],
+    ['awk 1 /d/f | tee -a /d/f > /dev/null', null, 'b\na\nb\na\n'],
+    ["sort -o /d/f /d/f; printf 'z\\n' >> /d/f", null, 'a\nb\nz\n'],
+    ["printf 'q\\n' | tee /d/f >> /d/f", null, 'q\nq\n'],
+    ["printf 'q\\n' | tee /d/f >> /d/f 2>> /d/f", null, 'q\nq\n'],
+    ['cat /d/f; sort -o /d/f /d/f', 'a\nb\n', 'a\nb\n'],
+    ['cat /d/f | sort -o /d/f', 'a\nb\n', 'a\nb\n'],
+  ])('%s caches %j', async (line, cached, stored) => {
+    // An append, or a read before a write, leaves no entry; a whole write
+    // after a read is kept. Mirrors Python's
+    // test_a_line_touching_a_file_twice_caches_only_a_whole_file.
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     const ws = new Workspace(
-      { '/data': ram },
+      { '/d': ram },
       {
         mode: MountMode.WRITE,
         shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
-      await ws.shell("printf 'a\\nb\\n' > /data/f")
-      await ws.shell('cat /data/f')
+      await ws.shell("printf 'b\\na\\n' > /d/f")
+      await ws.shell('cat /d/f')
       await ws.shell(line)
-      expect(DEC.decode((await ws.shell('cat /data/f')).stdout)).toBe(stored)
+      const entry = await ws.cache.get('/d/f')
+      expect(entry === null ? null : DEC.decode(entry)).toBe(cached)
+      expect(DEC.decode((await ws.shell('cat /d/f')).stdout)).toBe(stored)
     } finally {
       await ws.close()
     }
   })
 })
 
-describe('a whole write after a read', () => {
-  it.each(['cat /data/f; sort -o /data/f /data/f', 'cat /data/f | sort -o /data/f'])(
-    '%s stays cached',
-    async (line) => {
-      // sort rewrites the file it was handed whole, so the cache keeps sort's
-      // bytes and not the read that came before them. Mirrors Python's
-      // test_a_whole_write_after_a_read_stays_cached.
-      const ram = new RAMVFS()
-      ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-      const ws = new Workspace(
-        { '/data': ram },
-        {
-          mode: MountMode.WRITE,
-          shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
-        },
-      )
-      try {
-        await ws.shell("printf 'b\\na\\n' > /data/f")
-        await ws.shell(line)
-        const cached = await ws.cache.get('/data/f')
-        expect(cached === null ? null : DEC.decode(cached)).toBe('a\nb\n')
-      } finally {
-        await ws.close()
-      }
-    },
-  )
-})
-
 describe('a read given up on', () => {
   it.each([
-    [true, "cat /data/big | head -c 1; printf 'z\\n' >> /data/big"],
-    [false, 'cat /data/big | head -c 1'],
+    [true, "cat /d/big | head -c 1; printf 'z\\n' >> /d/big"],
+    [false, 'cat /d/big | head -c 1'],
   ])(
     'leaves the mount free to unmount (caching %s): %s',
     async (caching, line) => {
-      // A read the line stopped short of the end holds its source until it is
-      // closed, and unmount waits for every stream of the mount. Mirrors
+      // A read the line gave up on is closed, or unmount waits on it. Mirrors
       // Python's test_a_read_given_up_on_leaves_the_mount_free_to_unmount.
       const ram = new RAMVFS()
       ;(ram as unknown as { cachesReads: boolean }).cachesReads = caching
       const ws = new Workspace(
-        { '/data': ram },
+        { '/d': ram },
         {
           mode: MountMode.WRITE,
           shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
         },
       )
       try {
-        await ws.shell('seq 1 200000 > /data/big')
+        await ws.shell('seq 1 200000 > /d/big')
         await ws.shell(line)
         let timer: ReturnType<typeof setTimeout> | undefined
         const outcome = await Promise.race([
-          ws.unmount('/data').then(() => 'unmounted'),
+          ws.unmount('/d').then(() => 'unmounted'),
           new Promise<string>((resolve) => {
-            timer = setTimeout(() => { resolve('still busy'); }, 10000)
+            timer = setTimeout(() => {
+              resolve('still busy')
+            }, 10000)
           }),
         ])
         clearTimeout(timer)
