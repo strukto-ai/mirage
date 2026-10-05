@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_sha384sum_both_mounts",
+      "seq": 9900005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf abc > /data/xm_sha384sum && printf xyz > /data2/xm_sha384sum && sha384sum /data/xm_sha384sum /data2/xm_sha384sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7  /data/xm_sha384sum\nedcb0f4721e6578d900e4c24ad4b19e194ab6c87f8243bfc6b11754dd8b0bbde4f30b1d18197932b6376da004dcd97c4  /data2/xm_sha384sum\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_sha384sum_continues_after_missing",
+      "seq": 9900006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha384sum /data/xm_sha384sum_missing /data2/xm_sha384sum",
+      "expect": {
+        "exit": 1,
+        "stdout": "edcb0f4721e6578d900e4c24ad4b19e194ab6c87f8243bfc6b11754dd8b0bbde4f30b1d18197932b6376da004dcd97c4  /data2/xm_sha384sum\n",
+        "stderr": "sha384sum: /data/xm_sha384sum_missing: No such file or directory\n"
+      }
+    }
+  ]
+}

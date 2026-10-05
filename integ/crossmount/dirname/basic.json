@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_dirname_across_mounts",
+      "seq": 963203,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "dirname /data/xm_rt/a.txt /data2/xm_rt/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/xm_rt\n/data2/xm_rt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

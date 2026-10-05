@@ -40,7 +40,6 @@ from mirage.commands.builtin.generic.cp import (
     update_gates,
     update_mode,
     walk,
-    wrap_target_dir,
 )
 from mirage.commands.builtin.utils.backup import backup_control, sibling_path
 from mirage.commands.builtin.utils.constants import DEFAULT_BACKUP_SUFFIX
@@ -77,9 +76,7 @@ class MvFlags:
     update: str | None = None
     backup: str | None = None
     suffix: str = DEFAULT_BACKUP_SUFFIX
-    # Single-mount dispatch delivers the -t value as PathSpec; the
-    # cross-mount relay's string view is wrapped against the first source.
-    target_dir: PathSpec | str | None = None
+    target_dir: PathSpec | None = None
     no_target_dir: bool = False
     exchange: bool = False
     no_copy: bool = False
@@ -396,12 +393,7 @@ async def mv_generic(
     sources, dst = split_operands(
         "mv", paths, flags.target_dir, flags.no_target_dir
     )
-    if dst is None:
-        dst = (
-            flags.target_dir
-            if isinstance(flags.target_dir, PathSpec)
-            else wrap_target_dir(sources[0], str(flags.target_dir))
-        )
+    if flags.target_dir is not None:
         err = await target_dir_error("mv", stat, dst)
         if err is not None:
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)

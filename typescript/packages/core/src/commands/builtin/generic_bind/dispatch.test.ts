@@ -14,10 +14,12 @@
 
 import { expect, it } from 'vitest'
 import { commandStarted, runInCommandScope } from '../../../cache/index/scope.ts'
+import { command } from '../../config.ts'
+import { SPECS } from '../../spec/index.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
-import { MountMode, type PathSpec } from '../../../types.ts'
+import { FileType, MountMode, PathSpec } from '../../../types.ts'
 import type { RegisteredOp } from '../../../ops/registry.ts'
 import { eacces } from '../../../utils/errors.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -82,6 +84,35 @@ it.each([false, true])(
   },
 )
 
+it('lists nothing it read through the dispatcher for the file cache', async () => {
+  // The dispatcher's cold read keeps what the file cache may hold; listed
+  // again, a filetype renderer's output would be kept under the path.
+  const path = PathSpec.fromStrPath('/a/f.tally')
+  const dispatch = ((op: string) =>
+    Promise.resolve([
+      op === 'stat' ? { type: FileType.FILE } : new TextEncoder().encode('RENDERED'),
+      new IOResult(),
+    ])) as unknown as DispatchFn
+  const [, io] = await runDispatch(
+    {
+      name: 'cat',
+      fn: async (ops, accessor, paths) => {
+        const [operand] = paths
+        if (operand === undefined) throw new Error('no operand')
+        await ops.readBytes(accessor, operand)
+        return [null, new IOResult({ cache: [operand.mountPath] })]
+      },
+    },
+    [path],
+    [],
+    {},
+    dispatch,
+    '/',
+  )
+  expect(Object.keys(io.reads)).toEqual([path.virtual])
+  expect(io.cache).toEqual([])
+})
+
 class Uncapped extends RAMVFS {
   override readonly maxDuEntries = null
 }
@@ -91,6 +122,7 @@ class Capped extends RAMVFS {
 }
 
 it('charges each mount its own cap in a du walk', async () => {
+  // A du that reports no measurement leaves the line to this walk.
   const enc = new TextEncoder()
   const outer = new Uncapped()
   const inner = new Capped()
@@ -100,6 +132,15 @@ it('charges each mount its own cap in a du walk', async () => {
     { '/a': outer, '/a/b': inner },
     { mode: MountMode.WRITE, shellParser: await getTestParser() },
   )
+  const spec = SPECS.du
+  if (spec === undefined) throw new Error('Missing spec: du')
+  for (const cmd of command({
+    name: 'du',
+    vfs: 'ram',
+    spec,
+    fn: (_accessor, paths) => [enc.encode(`0\t${paths[0]?.rawPath ?? ''}\n`), new IOResult()],
+  }))
+    ws.registry.mountFor('/a/b/x').register(cmd)
   try {
     const result = await ws.shell('du -a /a')
     const rows = new TextDecoder().decode(result.stdout).split('\n')

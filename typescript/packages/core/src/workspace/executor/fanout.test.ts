@@ -79,3 +79,23 @@ it.each(['find /base', 'du /base', 'ls -R /base'])(
     }
   },
 )
+
+it.each([
+  ['find /base -type f', '/base/inner/g\n/base/top\n'],
+  ['du -s /base', '5\t/base\n'],
+  ['du -s /base/inner /other', '3\t/base/inner\n1\t/other\n'],
+])('walks a mount without its own walk through the ops: %s', async (line, expected) => {
+  const ws = new Workspace(
+    { '/base': new RAMVFS(), '/base/inner': new RAMVFS(), '/other': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    await ws.shell('printf ab > /base/top; printf abc > /base/inner/g; printf a > /other/h')
+    ws.registry.mountFor('/base/inner/').unregister(['find', 'du'])
+    const result = await ws.shell(line)
+    expect(new TextDecoder().decode(result.stdout)).toBe(expected)
+    expect(result.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+})

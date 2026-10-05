@@ -22,11 +22,10 @@ from mirage.commands.builtin.generic.crossmount import (
     handle_cross_mount,
     is_cross_mount,
 )
-from mirage.commands.builtin.generic.crossmount.detect import (
-    aggregate_for,
-    strategy_for,
+from mirage.commands.builtin.generic.crossmount.constants import (
+    RELAY_COMMANDS,
 )
-from mirage.commands.builtin.generic.crossmount.types import Strategy
+from mirage.commands.builtin.generic.crossmount.detect import aggregate_for
 from mirage.commands.builtin.generic.program import (
     PROGRAM_FILE_COMMANDS,
     prepare_program,
@@ -479,7 +478,6 @@ async def handle_command(
             else None,
             cmd_name,
             session.cwd,
-            str_flag_paths=cmd_name not in ("tar", "diff"),
         )
         cross_texts = (
             find_expr_tokens
@@ -496,19 +494,20 @@ async def handle_command(
                     command=cmd_str, exit_code=code, stderr=refusal_msg
                 ),
             )
-        # sort's output flag, cp/mv's -t and diff's -X route to their
-        # owning mount but are not inputs. Use the parser's operands so
+        # A path option's value (sort -o, cp -t, csplit -f) routes to its
+        # owning mount but is not an input. Use the parser's operands so
         # aliases and repeated paths keep their positions instead of
-        # subtracting matching path strings afterward.
+        # subtracting matching path strings afterward. find's expression
+        # is not the spec's grammar, so its start points are the words
+        # classified as paths.
         cross_scopes = (
-            cross_parsed.paths
-            if cmd_name in ("sort", "cp", "mv", "diff")
-            else path_scopes
+            path_scopes if cmd_name == "find" else cross_parsed.paths
         )
         cross_flags = cross_parsed.flag_kwargs
-        if strategy_for(cmd_name) is Strategy.RELAY:
-            # STREAM and FANOUT run each operand natively on its mount, which
-            # expands the operand's glob. RELAY sees every operand at once
+        if cmd_name in RELAY_COMMANDS:
+            # STREAM and FANOUT (and a custom command's reducer) run each
+            # operand natively on its mount, which expands the operand's
+            # glob. RELAY sees every operand at once
             # (wc's layout, cp's sources), so its glob operands must expand
             # here; an unmatched glob stays the literal word, like bash.
             # One operand at a time, so join's option loop sees each match

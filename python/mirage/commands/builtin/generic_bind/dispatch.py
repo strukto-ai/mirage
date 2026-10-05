@@ -21,7 +21,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import ensure_stream, materialize
 from mirage.io.types import ByteSource, IOResult
@@ -190,8 +190,21 @@ async def run_dispatch(
             ns.mounts, descendants=_none_below, visible_descendants=_none_below
         )
         ns = replace(ns, mounts=mounts)
+    # The dispatcher keys every path by its whole virtual path, a path
+    # option's value as well as an operand.
+    rebased = FlagBag(flag_kwargs)
+    for key, value in rebased.items():
+        if isinstance(value, PathSpec):
+            rebased[key] = replace(value, vfs_path=value.virtual.strip("/"))
+        elif isinstance(value, list):
+            rebased[key] = [
+                replace(item, vfs_path=item.virtual.strip("/"))
+                if isinstance(item, PathSpec)
+                else item
+                for item in value
+            ]
     opts = CommandOpts(
-        flags=flag_kwargs,
+        flags=rebased,
         stdin=stdin,
         cwd=PathSpec(virtual=cwd, directory=cwd, vfs_path=cwd.strip("/")),
         ns=ns,
@@ -216,4 +229,10 @@ async def run_dispatch(
         return None, IOResult()
     stdout, io = result
     body = await materialize(stdout)
-    return body, await reads.merge(io)
+    merged = await reads.merge(io)
+    # Every read went through the dispatcher, whose cold read keeps what
+    # the file cache may hold; listing a read path again would keep a
+    # filetype renderer's output there, which cat would then print. A
+    # written path stays listed.
+    merged.cache = [p for p in merged.cache if p not in merged.reads]
+    return body, merged

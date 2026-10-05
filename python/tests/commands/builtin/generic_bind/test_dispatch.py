@@ -18,6 +18,8 @@ from mirage.cache.index.scope import command_scope, command_started
 from mirage.commands.builtin.generic.du import TRUNCATED_NOTE
 from mirage.commands.builtin.generic_bind.adapter import Builder
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
+from mirage.commands.config import command
+from mirage.commands.spec import SPECS
 from mirage.io import IOResult
 from mirage.ops.registry import op as register_op
 from mirage.types import MountMode
@@ -88,12 +90,19 @@ class _Capped(RAMVFS):
     max_du_entries = 2
 
 
+@command("du", vfs="ram", spec=SPECS["du"])
+async def _unmeasured_du(accessor, paths, texts, opts):
+    return b"0\t" + paths[0].raw_path.encode() + b"\n", IOResult()
+
+
 @pytest.mark.asyncio
 async def test_du_walk_charges_each_mount_its_own_cap():
+    # A du that reports no measurement leaves the line to this walk.
     outer, inner = _Uncapped(), _Capped()
     outer.load_state({"files": {f"/f{i}": b"x" for i in range(4)}})
     inner.load_state({"files": {f"/g{i}": b"y" for i in range(3)}})
     ws = Workspace({"/a": outer, "/a/b": inner}, mode=MountMode.WRITE)
+    ws.mount("/a/b").register_fns([_unmeasured_du])
     try:
         result = await ws.shell("du -a /a")
         rows = (await result.materialize_stdout()).decode().splitlines()

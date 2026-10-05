@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_auto_gzip_roundtrip",
+      "seq": 963005,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf a > /data/xm_gzk; printf b > /data2/xm_gzk; gzip -k /data/xm_gzk /data2/xm_gzk; zcat /data/xm_gzk.gz /data2/xm_gzk.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab",
+        "stderr": ""
+      }
+    }
+  ]
+}

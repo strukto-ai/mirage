@@ -439,7 +439,10 @@ async def test_no_target_dir_refuses_dir_dest_for_file():
 async def test_target_dir_missing_fails_whole_command():
     files = {"/a.txt": b"AAA"}
     _, io = await _run(
-        files, set(), ["/a.txt"], flags=MvFlags(target_dir="/nosuch")
+        files,
+        set(),
+        ["/a.txt"],
+        flags=MvFlags(target_dir=PathSpec.from_str_path("/nosuch")),
     )
     assert io.exit_code == 1
     assert io.stderr == (

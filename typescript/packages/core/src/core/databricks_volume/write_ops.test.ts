@@ -90,6 +90,17 @@ describe('create', () => {
 })
 
 describe('mkdir', () => {
+  it('names the operand when the parent is missing', async () => {
+    const { fetch, calls } = routedFetch(() => notFoundResponse())
+    vi.stubGlobal('fetch', fetch)
+    const err = (await mkdir(makeAccessor(), spec('/volume/missing/child')).catch(
+      (e: unknown) => e,
+    )) as Error & { code?: string }
+    expect(err.code).toBe('ENOENT')
+    expect(err.message).toBe('/volume/missing/child')
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+
   it('creates directories via PUT when parents=true', async () => {
     const { fetch, calls } = routedFetch(() => new Response(null, { status: 200 }))
     vi.stubGlobal('fetch', fetch)

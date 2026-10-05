@@ -101,6 +101,33 @@ describe('du', () => {
     expect(DEC.decode(out.stderr).includes('incomplete')).toBe(cut)
   })
 
+  it('reports what it measured unless it only summed', async () => {
+    const [size, entries] = backend({ '/dir/a.txt': 2, '/dir/s/b': 3 })
+    const paths = [spec('/m/dir', 'dir')]
+    const out = await du(
+      paths,
+      flags(),
+      size,
+      entries,
+      [],
+      undefined,
+      null,
+      null,
+      undefined,
+      () => ['/m/dir/e'],
+    )
+    expect(out.runs).toEqual([
+      {
+        leaves: [
+          ['/m/dir/a.txt', 2],
+          ['/m/dir/s/b', 3],
+        ],
+        directories: ['/m/dir/e'],
+      },
+    ])
+    expect((await du(paths, flags({ s: true }), size, entries)).runs).toBeNull()
+  })
+
   it('rolls up under a root mount', () => {
     const entries: [string, number][] = [
       ['/a.txt', 2],

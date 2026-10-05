@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_iconv_across_mounts",
+      "seq": 963207,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf 'caf\\351\\n' > /data/xm_rt_ic; printf 'na\\357ve\\n' > /data2/xm_rt_ic; iconv -f ISO-8859-1 -t UTF-8 -o /data2/xm_rt_ic.out /data/xm_rt_ic /data2/xm_rt_ic; cat /data2/xm_rt_ic.out; rm /data/xm_rt_ic /data2/xm_rt_ic /data2/xm_rt_ic.out",
+      "expect": {
+        "exit": 0,
+        "stdout": "café\nnaïve\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

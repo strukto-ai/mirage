@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xrf_wc",
+      "seq": 963105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc -l /data/xrf.txt /data2/xrf_nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "2 /data/xrf.txt\n2 total\n",
+        "stderr": "wc: /data2/xrf_nope.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

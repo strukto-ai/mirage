@@ -36,7 +36,6 @@ from mirage.commands.builtin.utils.paths import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
 from mirage.context import path_allowed
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -65,7 +64,7 @@ from mirage.utils.errors import (
     DotWalkMissing,
     fs_strerror,
 )
-from mirage.utils.key_prefix import mounted_path, rekey
+from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote_always
 
@@ -81,9 +80,7 @@ class CpFlags:
     update: str | None = None
     backup: str | None = None
     suffix: str = DEFAULT_BACKUP_SUFFIX
-    # Single-mount dispatch delivers the -t value as PathSpec; the
-    # cross-mount relay's string view is wrapped against the first source.
-    target_dir: PathSpec | str | None = None
+    target_dir: PathSpec | None = None
     no_target_dir: bool = False
     dereference: CopyDeref = CopyDeref.ALWAYS
 
@@ -261,18 +258,15 @@ def suffix_flag(fl: FlagView) -> str | None:
     return fl.as_str("suffix") or None
 
 
-def target_flags(
-    cmd_name: str, fl: FlagView
-) -> tuple[PathSpec | str | None, bool]:
+def target_flags(cmd_name: str, fl: FlagView) -> tuple[PathSpec | None, bool]:
     """Resolve ``-t``/``--target-directory`` and ``-T``, rejecting both.
 
     Args:
         cmd_name (str): Command name for the conflict error.
         fl (FlagView): Parsed flag view.
     """
-    target_dir: FlagValue | None = fl.raw("target_directory")
-    if not isinstance(target_dir, (PathSpec, str)):
-        target_dir = None
+    raw = fl.raw("target_directory")
+    target_dir = raw if isinstance(raw, PathSpec) else None
     no_target = fl.as_bool("no_target_directory")
     if target_dir is not None and no_target:
         raise UsageError(
@@ -582,26 +576,25 @@ async def copy_tree_links(
 def split_operands(
     cmd_name: str,
     paths: list[PathSpec],
-    target_dir: PathSpec | str | None,
+    target_dir: PathSpec | None,
     no_target_dir: bool,
-) -> tuple[list[PathSpec], PathSpec | None]:
+) -> tuple[list[PathSpec], PathSpec]:
     """Split operands into sources and destination, GNU arity errors.
 
-    With ``-t`` every operand is a source and the returned destination is
-    None (the caller wraps the target-directory string itself). ``-T``
-    requires exactly two operands.
+    With ``-t`` every operand is a source and the target directory is
+    the destination. ``-T`` requires exactly two operands.
 
     Args:
         cmd_name (str): Command name for the usage errors.
         paths (list[PathSpec]): Positional path operands.
-        target_dir (str | None): ``--target-directory`` value.
+        target_dir (PathSpec | None): ``--target-directory`` value.
         no_target_dir (bool): ``-T``.
     """
     hint = f"Try '{cmd_name} --help' for more information."
     if not paths:
         raise UsageError(f"{cmd_name}: missing file operand\n{hint}", 1)
     if target_dir is not None:
-        return list(paths), None
+        return list(paths), target_dir
     if len(paths) == 1:
         raise UsageError(
             f"{cmd_name}: missing destination file operand after "
@@ -611,18 +604,6 @@ def split_operands(
     if no_target_dir and len(paths) > 2:
         raise extra_operand_error(cmd_name, paths[2].raw_path)
     return list(paths[:-1]), paths[-1]
-
-
-def wrap_target_dir(ref: PathSpec, virtual: str) -> PathSpec:
-    """Build the ``-t`` directory PathSpec from a same-mount reference.
-
-    Args:
-        ref (PathSpec): Any operand on the destination's mount.
-        virtual (str): Resolved virtual path of the target directory.
-    """
-    return PathSpec.from_str_path(
-        virtual, rekey(ref.virtual, ref.vfs_path, virtual)
-    )
 
 
 async def target_dir_error(
@@ -1449,12 +1430,7 @@ async def cp_generic(
     sources, dst = split_operands(
         "cp", paths, flags.target_dir, flags.no_target_dir
     )
-    if dst is None:
-        dst = (
-            flags.target_dir
-            if isinstance(flags.target_dir, PathSpec)
-            else wrap_target_dir(sources[0], str(flags.target_dir))
-        )
+    if flags.target_dir is not None:
         err = await target_dir_error("cp", stat, dst)
         if err is not None:
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)

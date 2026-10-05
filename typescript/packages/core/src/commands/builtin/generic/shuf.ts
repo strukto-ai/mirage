@@ -309,8 +309,8 @@ export function parseFlags(bag: Record<string, FlagValue>): ShufFlags | string {
   let inputRangeRaw: string | null = null
   let outputRaw: string | null = null
   // -o is PATH-typed, so its values are the words as typed, read off the
-  // PathSpecs, which is what GNU compares two -o by. A line parsed for a
-  // cross-mount strategy carries resolved strings, compared as they are.
+  // PathSpecs, which is what GNU compares two -o by; a bag parsed without
+  // the executor carries the words themselves.
   const typed = fl.typedOrder('head_count', 'input_range', 'output').flatMap((dest) => {
     const specs = dest === 'output' ? fl.asPaths(dest) : []
     const words = specs.length > 0 ? specs.map((p) => p.rawPath) : fl.asList(dest)

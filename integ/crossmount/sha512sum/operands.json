@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_sha512sum_both_mounts",
+      "seq": 9900007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf abc > /data/xm_sha512sum && printf xyz > /data2/xm_sha512sum && sha512sum /data/xm_sha512sum /data2/xm_sha512sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f  /data/xm_sha512sum\n4a3ed8147e37876adc8f76328e5abcc1b470e6acfc18efea0135f983604953a58e183c1a6086e91ba3e821d926f5fdeb37761c7ca0328a963f5e92870675b728  /data2/xm_sha512sum\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_sha512sum_continues_after_missing",
+      "seq": 9900008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha512sum /data/xm_sha512sum_missing /data2/xm_sha512sum",
+      "expect": {
+        "exit": 1,
+        "stdout": "4a3ed8147e37876adc8f76328e5abcc1b470e6acfc18efea0135f983604953a58e183c1a6086e91ba3e821d926f5fdeb37761c7ca0328a963f5e92870675b728  /data2/xm_sha512sum\n",
+        "stderr": "sha512sum: /data/xm_sha512sum_missing: No such file or directory\n"
+      }
+    }
+  ]
+}

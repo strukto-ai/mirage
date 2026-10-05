@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_auto_uniq_output_mount",
+      "seq": 963001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\na\\nb\\n' > /data/xm_uniq; uniq /data/xm_uniq /data2/xm_uniq; cat /data2/xm_uniq",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

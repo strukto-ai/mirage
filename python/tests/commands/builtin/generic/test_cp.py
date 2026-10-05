@@ -382,7 +382,10 @@ async def test_recursive_merge_backs_up_per_entry():
 async def test_target_dir_not_a_directory():
     files = {"/a.txt": b"AAA", "/f.txt": b"F"}
     _, io = await _run(
-        files, set(), ["/a.txt"], flags=CpFlags(target_dir="/f.txt")
+        files,
+        set(),
+        ["/a.txt"],
+        flags=CpFlags(target_dir=PathSpec.from_str_path("/f.txt")),
     )
     assert io.exit_code == 1
     assert io.stderr == b"cp: target directory '/f.txt': Not a directory\n"

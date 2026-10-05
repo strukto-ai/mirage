@@ -86,6 +86,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     mount.retiring = False
     mount.ensure_ready = AsyncMock()
     mount.vfs.caches_reads = True
+    mount.has_filetype_op = MagicMock(return_value=False)
     mount.execute_op = AsyncMock(return_value=b"cold")
     namespace.try_mount_for = MagicMock(return_value=mount)
     namespace.registry.policies = policies
@@ -1110,13 +1111,23 @@ class _CachingRAM(RAMVFS):
     caches_reads = True
 
 
-def _counted_workspace(race: bool = False) -> tuple[Workspace, list[str]]:
-    """A caching mount whose ``.count`` reads render ``BODY``, one tally per
-    fetch; with ``race`` the first fetch is overtaken by a write."""
+def _counted_workspace(
+    race: bool = False, filetype: str | None = None
+) -> tuple[Workspace, list[str]]:
+    """A caching mount whose reads answer ``BODY``, one tally per fetch.
+
+    The counted read replaces the mount's plain read, or with
+    ``filetype`` renders only that extension; with ``race`` the first
+    fetch is overtaken by a write.
+
+    Args:
+        race (bool): overtake the first fetch with a write.
+        filetype (str | None): the extension the counted read renders.
+    """
     fetched: list[str] = []
     ws = Workspace({"/data/": _CachingRAM()}, mode=MountMode.WRITE)
 
-    @register_op("read", vfs="ram", filetype=".count")
+    @register_op("read", vfs="ram", filetype=filetype)
     async def counted(accessor, path: PathSpec, **kwargs) -> bytes:
         fetched.append(path.virtual)
         if race and len(fetched) == 1:
@@ -1130,10 +1141,10 @@ def _counted_workspace(race: bool = False) -> tuple[Workspace, list[str]]:
 
 
 @pytest.mark.asyncio
-async def test_ranges_of_a_render_come_from_one_kept_read():
-    # A render has no remote range: the read op would fetch the whole
-    # file and slice it for every range, so the first range keeps the
-    # file and the rest, and the whole read, are served from it.
+async def test_ranges_of_an_unranged_read_come_from_one_kept_read():
+    # A read op with no remote range would fetch the whole file and
+    # slice it for every range, so the first range keeps the file and
+    # the rest, and the whole read, are served from it.
     ws, fetched = _counted_workspace()
     await ws.vfs.write("/data/f.count", b"STORED")
     assert await ws.vfs.read("/data/f.count", 0, 2) == b"BO"
@@ -1147,7 +1158,7 @@ async def test_ranges_of_a_render_come_from_one_kept_read():
 async def test_raw_and_natively_ranged_reads_keep_nothing():
     # A raw read is not the rendering the cache holds under the same key,
     # and a store that serves a range itself moved only that range.
-    ws, fetched = _counted_workspace()
+    ws, fetched = _counted_workspace(filetype=".count")
     await ws.vfs.write("/data/f.count", b"STORED")
     await ws.vfs.write("/data/f.txt", b"0123456789")
     assert await ws.vfs.read("/data/f.count", raw=True) == b"STORED"
@@ -1166,6 +1177,82 @@ async def test_a_write_racing_the_fetch_keeps_the_read_out_of_the_cache():
     await ws.vfs.read("/data/f.count")
     await ws.vfs.read("/data/f.count")
     assert len(fetched) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_render_is_neither_kept_nor_served_to_a_command():
+    # The file cache holds what commands read under the path alone, so a
+    # kept render would be what cat prints, and a kept cat what the
+    # renderer read returns.
+    ws, fetched = _counted_workspace(filetype=".count")
+    await ws.vfs.write("/data/f.count", b"STORED")
+    assert await ws.vfs.read("/data/f.count") == b"BODY"
+    assert not await ws.cache.exists("/data/f.count")
+    out = await ws.shell("cat /data/f.count")
+    assert await out.stdout_str() == "STORED"
+    assert await ws.vfs.read("/data/f.count", 0, 2) == b"BO"
+    assert await ws.vfs.read("/data/f.count") == b"BODY"
+    assert fetched == ["/data/f.count"] * 3
+
+
+@pytest.mark.asyncio
+async def test_a_ranged_render_reaches_the_renderer_as_its_range():
+    # A render is never kept, so filling the whole file for a range would
+    # only render more than the read asked for.
+    ws, _ = _counted_workspace()
+    windows: list[tuple[int | None, int | None]] = []
+
+    @register_op("read", vfs="ram", filetype=".count")
+    async def windowed(accessor, path: PathSpec, **kwargs) -> bytes:
+        windows.append((kwargs.get("offset"), kwargs.get("size")))
+        return b"RE"
+
+    ws.mount("/data/").register_fns([windowed])
+    await ws.vfs.write("/data/f.count", b"STORED")
+    assert await ws.vfs.read("/data/f.count", 0, 2) == b"RE"
+    assert windows == [(0, 2)]
+
+
+@register_op("read", vfs="ram", filetype=".count")
+async def _render_count(accessor, path: PathSpec, **kwargs) -> bytes:
+    return b"RENDER"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "window, rendered",
+    [((), b"RENDER"), ((0, 2), b"RE")],
+    ids=["whole", "ranged"],
+)
+async def test_a_renderer_registered_after_the_probe_is_not_kept(
+    window, rendered
+):
+    # The fill is chosen after the probe, but the op is resolved only
+    # once the mount is ready; a renderer landing in between runs, and
+    # its rendering must not become what cat reads. A ranged read on a
+    # store with no native range fills the whole file too.
+    ws, _ = _counted_workspace()
+    await ws.vfs.write("/data/f.count", b"STORED")
+    mount = ws.mount("/data/")
+    probe, ready = ws.cache.get, mount.ensure_ready
+    probed = False
+
+    async def probe_once(path, *args, **kwargs):
+        nonlocal probed
+        probed = True
+        return await probe(path, *args, **kwargs)
+
+    async def register_after_probe():
+        if probed and not mount.has_filetype_op("read", ".count"):
+            mount.register_fns([_render_count])
+        await ready()
+
+    ws.cache.get = probe_once
+    mount.ensure_ready = register_after_probe
+    assert await ws.vfs.read("/data/f.count", *window) == rendered
+    assert not await ws.cache.exists("/data/f.count")
+    out = await ws.shell("cat /data/f.count")
+    assert await out.stdout_str() == "STORED"
 
 
 class _RefusingGate:

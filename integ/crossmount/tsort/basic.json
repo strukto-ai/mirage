@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_tsort_across_mounts",
+      "seq": 963216,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf 'a b\\nb c\\n' > /data/xm_rt_ts; tsort /data/xm_rt_ts > /data2/xm_rt_ts; cat /data2/xm_rt_ts; rm /data/xm_rt_ts /data2/xm_rt_ts",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
