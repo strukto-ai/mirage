@@ -1,10 +1,5 @@
 import re
 
-# What each `.` and negated bracket checks first under a UTF-8 locale: a
-# byte that is no part of a character rides the text as its surrogate
-# escape, and glibc matches it with neither.
-RAW_BYTE_GUARD = "(?![\\udc80-\\udcff])"
-
 # Character classes use the C locale in both runtimes.
 POSIX_CLASSES = {
     "alpha": "A-Za-z",
@@ -86,6 +81,12 @@ def class_characters(name: str) -> str | None:
         return None
     pattern = re.compile("[" + POSIX_CLASSES[name] + "]")
     return "".join(chr(n) for n in range(128) if pattern.fullmatch(chr(n)))
+
+
+# What each `.` and negated bracket checks first under a UTF-8 locale: a
+# byte that is no part of a character rides the text as its surrogate
+# escape, and glibc matches it with neither.
+RAW_BYTE_GUARD = "(?![\\udc80-\\udcff])"
 
 
 def bracket_end(source: str, start: int) -> int:
