@@ -14,6 +14,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { defaultTokenFile, readTokenFile } from '@struktoai/mirage-server/auth/storage'
 import {
@@ -93,7 +94,7 @@ export function loadDaemonSettings(options: LoadOptions = {}): DaemonSettings {
   }
   if (settings.authToken === '') {
     const login = readLogin(loginPath(env))
-    if (login !== null && login.url === settings.url.replace(/\/+$/, '')) {
+    if (login !== null && login.url === rstripSlash(settings.url)) {
       settings.login = login
       return settings
     }

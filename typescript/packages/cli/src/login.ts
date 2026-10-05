@@ -17,6 +17,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Command } from 'commander'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import {
   AUTHORIZATION_SERVER_PATH,
   PROTECTED_RESOURCE_PATH,
@@ -50,7 +51,7 @@ function noLogin(url: string): string {
 /** Where an issuer publishes its endpoints (RFC 8414). */
 export function metadataUrl(issuer: string): string {
   const parts = new URL(issuer)
-  return `${parts.protocol}//${parts.host}${AUTHORIZATION_SERVER_PATH}${parts.pathname.replace(/\/+$/, '')}`
+  return `${parts.protocol}//${parts.host}${AUTHORIZATION_SERVER_PATH}${rstripSlash(parts.pathname)}`
 }
 
 async function getJson(url: string): Promise<Record<string, unknown>> {
@@ -259,7 +260,7 @@ export function registerLoginCommands(program: Command): void {
     .description('Log in to the server the CLI points at.')
     .option('--token <token>', 'Keep this token instead of using the browser')
     .action(async (opts: { token?: string }) => {
-      const url = loadDaemonSettings().url.replace(/\/+$/, '')
+      const url = rstripSlash(loadDaemonSettings().url)
       const login =
         opts.token !== undefined && opts.token !== ''
           ? await tokenLogin(url, opts.token)
@@ -284,7 +285,7 @@ export function registerLoginCommands(program: Command): void {
     .command('whoami')
     .description('Print who the login is for, and when to log in again.')
     .action(() => {
-      const url = loadDaemonSettings().url.replace(/\/+$/, '')
+      const url = rstripSlash(loadDaemonSettings().url)
       const login = readLogin()
       if (login?.url !== url) fail(`not logged in to ${url}`)
       const account = tokenClaims(login.access_token).sub
