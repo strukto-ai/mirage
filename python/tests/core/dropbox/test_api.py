@@ -184,27 +184,35 @@ async def test_search_files_flags_the_match_ceiling(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "reply",
-    [None, {}, {"metadata": None}, {"metadata": "b"}, {"metadata": []}, ["b"]],
-    ids=["empty", "no-metadata", "null", "string", "array", "list-reply"],
+    ("reply", "entry"),
+    [
+        (
+            {"metadata": {".tag": "file", "name": "b"}},
+            {".tag": "file", "name": "b"},
+        ),
+        (None, {}),
+        ({}, {}),
+        ({"metadata": None}, {}),
+        ({"metadata": "b"}, {}),
+        ({"metadata": []}, {}),
+        (["b"], {}),
+    ],
+    ids=[
+        "entry",
+        "empty",
+        "no-metadata",
+        "null",
+        "string",
+        "array",
+        "list-reply",
+    ],
 )
-async def test_move_path_reads_only_an_object_as_the_moved_entry(reply):
+async def test_move_path_reads_only_an_object_as_the_moved_entry(reply, entry):
     # Anything but an object names no kind, so the rename keeps its subtree
     # drop; the transport reads an empty body as None.
     with patch(
         "mirage.core.dropbox.api.dropbox_rpc",
         new_callable=AsyncMock,
         return_value=reply,
-    ):
-        assert await move_path(TM, "/a", "/b") == {}
-
-
-@pytest.mark.asyncio
-async def test_move_path_answers_the_moved_entry():
-    entry = {".tag": "file", "name": "b"}
-    with patch(
-        "mirage.core.dropbox.api.dropbox_rpc",
-        new_callable=AsyncMock,
-        return_value={"metadata": entry},
     ):
         assert await move_path(TM, "/a", "/b") == entry

@@ -38,10 +38,6 @@ class CacheInvalidator(Protocol):
 
     async def invalidate_subtree(self, path: PathSpec) -> None: ...
 
-    async def invalidate_after_move(
-        self, path: PathSpec, folder: bool
-    ) -> None: ...
-
     async def invalidate_ancestors(self, path: PathSpec) -> None: ...
 
     async def cached_bytes(self, path: PathSpec) -> bytes | None: ...
@@ -152,9 +148,10 @@ async def invalidate_after_move(path: PathSpec, folder: bool) -> None:
         path (PathSpec): one end of the rename.
         folder (bool): whether that end may hold a subtree.
     """
-    manager = _active.get()
-    if manager is not None:
-        await manager.invalidate_after_move(path, folder)
+    if folder:
+        await invalidate_subtree(path)
+    else:
+        await invalidate_after_unlink(path)
 
 
 async def evict_after(

@@ -31,10 +31,8 @@ class _Moves:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    async def invalidate_after_move(
-        self, path: PathSpec, folder: bool
-    ) -> None:
-        self.calls.append(("subtree" if folder else "unlink", path.virtual))
+    async def invalidate_after_unlink(self, path: PathSpec) -> None:
+        self.calls.append(("unlink", path.virtual))
 
     async def invalidate_subtree(self, path: PathSpec) -> None:
         self.calls.append(("subtree", path.virtual))
@@ -175,9 +173,12 @@ async def test_rename_conflict_probe_is_bounded_to_one_entry(dropbox_accessor):
     assert rpc.deleted == []
 
 
-async def _moved(
-    *replies, existing: str | None = "folder"
-) -> list[tuple[str, str]]:
+_CONFLICT_FOLDER = DropboxApiError("conflict", 409, "to/conflict/folder/...")
+_CONFLICT_OTHER = DropboxApiError("conflict", 409, "to/conflict/other/...")
+_CONFLICT_FILE = DropboxApiError("conflict", 409, "to/conflict/file/...")
+
+
+async def _moved(*replies, existing: str | None) -> list[tuple[str, str]]:
     moves = _Moves()
     prev = push_cache_manager(moves)
     try:
@@ -212,114 +213,37 @@ async def _moved(
     return moves.calls
 
 
+_FILE = {".tag": "file", "name": "b"}
+
+
 @pytest.mark.asyncio
-async def test_a_renamed_file_drops_no_subtree():
-    # move_v2 answers with the moved entry's metadata: a file tag means
-    # nothing was cached beneath either name.
-    assert await _moved({".tag": "file", "name": "b"}) == [
-        ("unlink", "/a"),
-        ("unlink", "/b"),
+@pytest.mark.parametrize(
+    ("replies", "existing", "drops"),
+    [
+        ([_FILE], "folder", ("unlink", "unlink")),
+        ([{".tag": "folder", "name": "b"}], "folder", ("subtree", "subtree")),
+        ([{}], "folder", ("subtree", "subtree")),
+        ([_CONFLICT_FOLDER, _FILE], "folder", ("unlink", "subtree")),
+        ([_CONFLICT_OTHER, _FILE], None, ("unlink", "subtree")),
+        ([_CONFLICT_FILE, _FILE], "file", ("unlink", "unlink")),
+    ],
+    ids=[
+        "file",
+        "folder",
+        "no-tag",
+        "file-over-empty-folder",
+        "file-over-no-kind",
+        "file-over-file",
+    ],
+)
+async def test_only_a_moved_file_narrows_and_only_onto_a_file(
+    replies, existing, drops
+):
+    # move_v2 answers with the moved entry's metadata; only a file tag
+    # spares the subtree. A destination the move replaced keeps its
+    # subtree unless that was positively a file: its name may still have
+    # cached children removed outside mirage.
+    assert await _moved(*replies, existing=existing) == [
+        (drops[0], "/a"),
+        (drops[1], "/b"),
     ]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("reply", [{".tag": "folder", "name": "b"}, {}])
-async def test_a_renamed_folder_or_an_unnamed_item_drops_both_subtrees(reply):
-    # Only a positive file tag narrows: a reply that names no type leaves
-    # both ends dropping their subtrees.
-    assert await _moved(reply) == [("subtree", "/a"), ("subtree", "/b")]
-
-
-@pytest.mark.asyncio
-async def test_a_file_replacing_an_empty_folder_drops_its_subtree():
-    # The rename deleted the folder at dst, so whatever is still cached
-    # under that name (children removed outside mirage, say) goes too.
-    conflict = DropboxApiError("conflict", 409, "to/conflict/folder/...")
-    assert await _moved(conflict, {".tag": "file", "name": "b"}) == [
-        ("unlink", "/a"),
-        ("subtree", "/b"),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_a_file_replacing_an_entry_of_no_known_kind_drops_its_subtree():
-    # Only a positive file tag on what was replaced keeps dst narrow.
-    conflict = DropboxApiError("conflict", 409, "to/conflict/other/...")
-    assert await _moved(
-        conflict, {".tag": "file", "name": "b"}, existing=None
-    ) == [("unlink", "/a"), ("subtree", "/b")]
-
-
-@pytest.mark.asyncio
-async def test_a_file_replacing_a_file_drops_no_subtree():
-    conflict = DropboxApiError("conflict", 409, "to/conflict/file/...")
-    assert await _moved(
-        conflict, {".tag": "file", "name": "b"}, existing="file"
-    ) == [("unlink", "/a"), ("unlink", "/b")]
-
-
-@pytest.mark.asyncio
-async def test_a_file_named_by_the_move_reply_drops_no_subtree(
-    dropbox_accessor,
-):
-    # Through the real move_path: the kind comes from the move_v2 reply's
-    # metadata, which a stub of move_path itself would never parse.
-    rpc = FakeDropboxRpc(moved={".tag": "file", "name": "b.txt"})
-    moves = _Moves()
-    prev = push_cache_manager(moves)
-    try:
-        with patch("mirage.core.dropbox.api.dropbox_rpc", new=rpc):
-            await rename(
-                dropbox_accessor,
-                PathSpec.from_str_path("/a.txt"),
-                PathSpec.from_str_path("/b.txt"),
-            )
-    finally:
-        push_cache_manager(prev)
-    assert moves.calls == [("unlink", "/a.txt"), ("unlink", "/b.txt")]
-
-
-@pytest.mark.asyncio
-async def test_an_empty_move_reply_still_completes_the_rename(
-    dropbox_accessor,
-):
-    # The transport reads an empty successful body as None. The move has
-    # already happened, so the rename must finish and evict, taking the
-    # subtree because the reply named no kind.
-    moves = _Moves()
-    prev = push_cache_manager(moves)
-    try:
-        with patch(
-            "mirage.core.dropbox.api.dropbox_rpc", new=FakeDropboxRpc()
-        ):
-            await rename(
-                dropbox_accessor,
-                PathSpec.from_str_path("/a.txt"),
-                PathSpec.from_str_path("/b.txt"),
-            )
-    finally:
-        push_cache_manager(prev)
-    assert moves.calls == [("subtree", "/a.txt"), ("subtree", "/b.txt")]
-
-
-@pytest.mark.asyncio
-async def test_a_move_reply_whose_metadata_is_not_an_object_drops_both_subtrees(
-    dropbox_accessor,
-):
-    # Only an object can name a kind; anything else in `metadata` is read
-    # as no kind, so both ends keep the subtree drop.
-    moves = _Moves()
-    prev = push_cache_manager(moves)
-    try:
-        with patch(
-            "mirage.core.dropbox.api.dropbox_rpc",
-            new=FakeDropboxRpc(moved="b"),
-        ):
-            await rename(
-                dropbox_accessor,
-                PathSpec.from_str_path("/a.txt"),
-                PathSpec.from_str_path("/b.txt"),
-            )
-    finally:
-        push_cache_manager(prev)
-    assert moves.calls == [("subtree", "/a.txt"), ("subtree", "/b.txt")]

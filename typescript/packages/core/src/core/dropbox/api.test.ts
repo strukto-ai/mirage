@@ -143,22 +143,18 @@ describe('continueFolder', () => {
 })
 
 describe('movePath', () => {
+  const entry = { '.tag': 'file', name: 'b' }
   it.each([
-    ['an empty body', null],
-    ['no metadata', {}],
-    ['null metadata', { metadata: null }],
-    ['string metadata', { metadata: 'b' }],
-    ['array metadata', { metadata: [] }],
-  ])('reads %s as no moved entry', async (_label, reply) => {
+    ['the moved entry', { metadata: entry }, entry],
+    ['an empty body', null, {}],
+    ['no metadata', {}, {}],
+    ['null metadata', { metadata: null }, {}],
+    ['string metadata', { metadata: 'b' }, {}],
+    ['array metadata', { metadata: [] }, {}],
+  ])('reads %s', async (_label, reply, moved) => {
     // Anything but an object names no kind, so the rename keeps its
     // subtree drop; the transport reads an empty body as null.
     rpc.mockResolvedValueOnce(reply)
-    expect(await movePath(TM, '/a', '/b')).toEqual({})
-  })
-
-  it('answers the moved entry', async () => {
-    const entry = { '.tag': 'file', name: 'b' }
-    rpc.mockResolvedValueOnce({ metadata: entry })
-    expect(await movePath(TM, '/a', '/b')).toEqual(entry)
+    expect(await movePath(TM, '/a', '/b')).toEqual(moved)
   })
 })

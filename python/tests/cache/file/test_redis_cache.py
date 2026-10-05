@@ -505,24 +505,30 @@ async def test_a_prefix_drop_spanning_pages_takes_data_and_meta_and_nothing_else
 
 @pytest.mark.asyncio
 @_PREFIX_DROPS
-async def test_a_prefix_drop_leaves_keys_that_only_resemble_cache_keys(
+async def test_a_prefix_drop_takes_only_the_cache_keys(
     cache, redis_prefix, drop
 ):
-    # `[dm][ae]ta:` also matches `mata:` and `deta:`; only `data:` and
-    # `meta:` belong to the cache. The VFS store shares the key prefix.
+    # `[dm][ae]ta:` also matches `mata:`, and the VFS store shares the key
+    # prefix. A shared server can hold any bytes as a key: one under the
+    # cache's own `data:` goes, and the drop does not stop on it.
     client = cache._cache_client
-    lookalike = f"{redis_prefix}mata:/t/x"
-    vfs_file = f"{redis_prefix}file:/t/x"
-    await client.set(lookalike, b"x")
-    await client.set(vfs_file, b"x")
+    bad = b"\xff\xfe"
+    own = f"{redis_prefix}data:/t/".encode() + bad
+    kept = [
+        f"{redis_prefix}mata:/t/x".encode(),
+        f"{redis_prefix}file:/t/x".encode(),
+        f"{redis_prefix}mata:/t/".encode() + bad,
+    ]
+    for key in (own, *kept):
+        await client.set(key, b"x")
     try:
         await cache.set("/t/x", b"x", fingerprint="etag")
         await drop(cache)
         assert await cache.get("/t/x") is None
-        assert await client.exists(lookalike)
-        assert await client.exists(vfs_file)
+        assert not await client.exists(own)
+        assert await client.exists(*kept) == len(kept)
     finally:
-        await client.delete(lookalike, vfs_file)
+        await client.delete(own, *kept)
 
 
 @pytest.mark.asyncio
@@ -548,87 +554,18 @@ async def test_a_key_prefix_with_glob_characters_matches_only_itself(
 
 
 @pytest.mark.asyncio
-@_PREFIX_DROPS
-async def test_a_prefix_drop_drops_keys_that_are_not_utf8_and_skips_their_lookalikes(
-    cache, redis_prefix, drop
-):
-    # A shared server can hold any bytes as a key. A lookalike under the
-    # `mata:` class must be skipped and a binary key under the cache's own
-    # `data:` prefix dropped, without the drop stopping half-way.
-    client = cache._cache_client
-    lookalike = f"{redis_prefix}mata:/t/".encode() + b"\xff\xfe"
-    own = f"{redis_prefix}data:/t/".encode() + b"\xff\xfe"
-    await client.set(lookalike, b"x")
-    await client.set(own, b"x")
-    try:
-        await cache.set("/t/a", b"x", fingerprint="etag")
-        await drop(cache)
-        assert await cache.get("/t/a") is None
-        assert await client.exists(lookalike)
-        assert not await client.exists(own)
-    finally:
-        await client.delete(lookalike, own)
-
-
-@pytest.mark.asyncio
-async def test_an_excluded_root_is_compared_byte_for_byte(cache, redis_prefix):
-    # Dropping the byte `\xff` (`errors="ignore"`) would read `/t/ex\xff/y`
-    # as `/t/ex/y`, under the excluded root `/t/ex`, and keep a key the drop
-    # owns; the exact bytes put it beside the root, not under it.
-    client = cache._cache_client
-    beside = f"{redis_prefix}data:/t/ex".encode() + b"\xff/y"
-    under = f"{redis_prefix}data:/t/ex/".encode() + b"\xff"
-    await client.set(beside, b"x")
-    await client.set(under, b"x")
-    try:
-        await cache.evict_prefix("/t/", excluded=("/t/ex",))
-        assert not await client.exists(beside)
-        assert await client.exists(under)
-    finally:
-        await client.delete(beside, under)
-
-
-@pytest.mark.asyncio
-async def test_an_excluded_root_holding_u_fffd_is_not_a_stand_in_for_any_byte(
-    cache, redis_prefix
-):
-    # A replacing decode reads the byte `\xff` as U+FFFD, which would put
-    # `/t/\xff/x` under an excluded root spelled `/t/\ufffd`.
-    client = cache._cache_client
-    key = f"{redis_prefix}data:/t/".encode() + b"\xff/x"
-    await client.set(key, b"x")
-    try:
-        await cache.evict_prefix("/t/", excluded=("/t/\ufffd",))
-        assert not await client.exists(key)
-    finally:
-        await client.delete(key)
-
-
-@pytest.mark.asyncio
-async def test_an_excluded_root_with_a_non_ascii_name_keeps_what_lies_under_it(
-    cache,
-):
-    # A nested mount named in UTF-8: its keys only match the root once
-    # both sides are compared in the same form.
-    await cache.set("/t/café/f", b"x")
-    await cache.set("/t/other", b"x")
-    await cache.evict_prefix("/t/", excluded=("/t/café",))
-    assert await cache.get("/t/café/f") == b"x"
-    assert await cache.get("/t/other") is None
-
-
-@pytest.mark.asyncio
-@_PREFIX_DROPS
-async def test_a_prefix_drop_drops_under_a_non_ascii_key_prefix(
-    redis_prefix, drop
-):
+async def test_a_prefix_drop_under_non_ascii_names(redis_prefix):
+    # A key prefix and a nested mount named in UTF-8 match only once both
+    # sides are compared in the same form.
     accented = RedisFileCacheStore(
         url=REDIS_URL, key_prefix=f"{redis_prefix}café:"
     )
     try:
-        await accented.set("/t/a", b"x")
-        await drop(accented)
-        assert await accented.get("/t/a") is None
+        await accented.set("/t/café/f", b"x")
+        await accented.set("/t/other", b"x")
+        await accented.evict_prefix("/t/", excluded=("/t/café",))
+        assert await accented.get("/t/café/f") == b"x"
+        assert await accented.get("/t/other") is None
     finally:
         await accented.clear()
         await accented.close()

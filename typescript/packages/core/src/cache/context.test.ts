@@ -65,10 +65,6 @@ class FakeManager {
     return Promise.resolve()
   }
 
-  invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
-    return folder ? this.invalidateSubtree(path) : this.invalidateAfterUnlink(path)
-  }
-
   invalidateSubtree(path: string | PathSpec): Promise<void> {
     this.subtrees.push(path as string)
     return Promise.resolve()

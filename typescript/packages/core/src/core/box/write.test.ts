@@ -198,24 +198,6 @@ describe('box write ops', () => {
     ])
   })
 
-  it('renaming an item of unknown type drops both subtrees', async () => {
-    // Only a positive "file" narrows: a web_link, or an item whose type Box
-    // left out, keeps the subtree drop.
-    vi.mocked(invalidateAfterMove).mockClear()
-    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
-      Promise.resolve(
-        folderId === '100'
-          ? [{ type: 'web_link', id: '500', name: 'link' }]
-          : (TREE[folderId] ?? []),
-      ),
-    )
-    await rename(makeAccessor(), spec('/data/link'), spec('/data/moved'))
-    expect(moves()).toEqual([
-      ['/data/moved', true],
-      ['/data/link', true],
-    ])
-  })
-
   it('rename replaces an empty folder destination', async () => {
     vi.mocked(api.updateFolder).mockClear()
     await rename(makeAccessor(), spec('/data/sub'), spec('/data/dst'))

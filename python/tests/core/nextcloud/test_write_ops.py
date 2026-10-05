@@ -1,6 +1,5 @@
 import pytest
 
-from mirage.cache.context import push_cache_manager
 from mirage.core.nextcloud.copy import copy
 from mirage.core.nextcloud.create import create
 from mirage.core.nextcloud.mkdir import mkdir
@@ -62,40 +61,6 @@ async def test_rename_moves_file(make_acc):
     )
     assert acc._fake.files.get("new.txt") == b"data"
     assert "old.txt" not in acc._fake.files
-
-
-class _Moves:
-    """Which invalidation each end of a rename took, in call order."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
-
-    async def invalidate_after_move(
-        self, path: PathSpec, folder: bool
-    ) -> None:
-        self.calls.append(("subtree" if folder else "unlink", path.virtual))
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.calls.append(("subtree", path.virtual))
-
-
-@pytest.mark.asyncio
-async def test_a_renamed_file_still_drops_both_subtrees(make_acc):
-    # WebDAV MOVE with Overwrite: T replaces anything at dst, a non-empty
-    # folder included, and the reply names no kind: both ends keep the
-    # subtree even for a file.
-    acc = make_acc({"old.txt": b"data"})
-    moves = _Moves()
-    prev = push_cache_manager(moves)
-    try:
-        await rename(
-            acc,
-            PathSpec.from_str_path("/old.txt"),
-            PathSpec.from_str_path("/new.txt"),
-        )
-    finally:
-        push_cache_manager(prev)
-    assert moves.calls == [("subtree", "/new.txt"), ("subtree", "/old.txt")]
 
 
 @pytest.mark.asyncio

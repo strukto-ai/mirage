@@ -47,13 +47,14 @@ describe('SharePoint rename', () => {
   })
 })
 
+const FILE = { id: '1', file: {} }
 const CONFLICT = { error: { code: 'nameAlreadyExists', message: 'x' } }
 
 function recorder(): [CacheInvalidator, string[]] {
   const seen: string[] = []
   const manager = {
-    invalidateAfterMove: (path: PathSpec, folder: boolean) => {
-      seen.push(`${folder ? 'subtree' : 'unlink'} ${path.virtual}`)
+    invalidateAfterUnlink: (path: PathSpec) => {
+      seen.push(`unlink ${path.virtual}`)
       return Promise.resolve()
     },
     invalidateSubtree: (path: PathSpec) => {
@@ -98,53 +99,36 @@ async function moved(dst: string): Promise<string[]> {
   return seen
 }
 
+// The conflict path: dst is fetched, emptied if a folder, and deleted.
+function replaced(destination: unknown): Record<string, Response[]> {
+  return {
+    PATCH: [json(CONFLICT, 409), json(FILE)],
+    GET: [json(destination), json({ value: [] })],
+    DELETE: [new Response(null, { status: 204 })],
+  }
+}
+
 describe('SharePoint rename invalidation', () => {
   const at = (name: string): string => `/sp/Team/Documents/${name}`
 
-  it('a renamed file drops no subtree', async () => {
-    // The PATCH reply names what moved: a file facet means nothing was
-    // cached beneath either name.
-    graph({ PATCH: [json({ id: '1', file: {} })] })
-    expect(await moved('b')).toEqual([`unlink ${at('b')}`, `unlink ${at('a')}`])
-  })
-
   it.each([
-    ['a folder', { id: '1', folder: { childCount: 2 } }],
-    ['an unnamed item', { id: '1' }],
-  ])('%s drops both subtrees', async (_label, reply) => {
-    // Only a positive file facet narrows: a reply that names no type
-    // leaves both ends dropping their subtrees.
-    graph({ PATCH: [json(reply)] })
-    expect(await moved('b')).toEqual([`subtree ${at('b')}`, `subtree ${at('a')}`])
-  })
-
-  it('a file replacing an empty folder drops its subtree', async () => {
-    // The rename deleted the folder at dst, so whatever is still cached
-    // under that name (children removed outside mirage, say) goes too.
-    graph({
-      PATCH: [json(CONFLICT, 409), json({ id: '1', file: {} })],
-      GET: [json({ id: '2', name: 'dst', folder: {} }), json({ value: [] })],
-      DELETE: [new Response(null, { status: 204 })],
-    })
-    expect(await moved('dst')).toEqual([`subtree ${at('dst')}`, `unlink ${at('a')}`])
-  })
-
-  it('a file replacing an item of no known kind drops its subtree', async () => {
-    // Only a positive file facet on what was replaced keeps dst narrow.
-    graph({
-      PATCH: [json(CONFLICT, 409), json({ id: '1', file: {} })],
-      GET: [json({ id: '2', name: 'dst' })],
-      DELETE: [new Response(null, { status: 204 })],
-    })
-    expect(await moved('dst')).toEqual([`subtree ${at('dst')}`, `unlink ${at('a')}`])
-  })
-
-  it('a file replacing a file drops no subtree', async () => {
-    graph({
-      PATCH: [json(CONFLICT, 409), json({ id: '1', file: {} })],
-      GET: [json({ id: '2', name: 'dst', file: {} })],
-      DELETE: [new Response(null, { status: 204 })],
-    })
-    expect(await moved('dst')).toEqual([`unlink ${at('dst')}`, `unlink ${at('a')}`])
+    ['a file', () => ({ PATCH: [json(FILE)] }), [`unlink ${at('b')}`, `unlink ${at('a')}`]],
+    [
+      'a folder',
+      () => ({ PATCH: [json({ id: '1', folder: { childCount: 2 } })] }),
+      [`subtree ${at('b')}`, `subtree ${at('a')}`],
+    ],
+    [
+      'a file over an empty folder',
+      () => replaced({ id: '2', folder: {} }),
+      [`subtree ${at('b')}`, `unlink ${at('a')}`],
+    ],
+  ])('%s', async (_label, replies, drops) => {
+    // The PATCH reply names what moved: only a file facet spares the
+    // subtree. A destination the move replaced keeps its subtree unless
+    // that was positively a file: its name may still have cached children
+    // removed outside mirage.
+    graph(replies())
+    expect(await moved('b')).toEqual(drops)
   })
 })

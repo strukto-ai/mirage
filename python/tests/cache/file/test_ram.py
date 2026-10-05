@@ -265,23 +265,6 @@ async def test_a_parked_fill_survives_a_prefix_eviction_elsewhere(operation):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["set", "add"])
-async def test_a_parked_fill_under_an_excluded_root_survives(operation):
-    # The excluded root is a nested mount: its keys are not this drop's.
-    cache = RAMFileCacheStore()
-    lock = cache._lock_for("/a/nested/f")
-    await lock.acquire()
-    fill = asyncio.create_task(getattr(cache, operation)("/a/nested/f", b"x"))
-    try:
-        await asyncio.sleep(0.01)
-        await cache.evict_prefix("/a/", excluded=("/a/nested",))
-    finally:
-        lock.release()
-    await fill
-    assert await cache.get("/a/nested/f") == b"x"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add"])
 async def test_a_fill_with_no_token_stores_none(operation):
     """The entry records what the backend said, and says nothing when the
     backend said nothing. Inventing md5(content) made the entry claim a

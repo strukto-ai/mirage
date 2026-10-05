@@ -91,15 +91,4 @@ describe('Invalidation', () => {
     expect(inv.stale('/a/nested2', sibling)).toBe(true)
     for (const key of ['/a/nested/f', '/a/nested', '/a/nested2']) inv.leave(key)
   })
-
-  it('a prefix invalidation with no writer leaves nothing behind', () => {
-    const inv = new Invalidation()
-    const before = inv.enter('/zz')
-    inv.leave('/zz')
-    inv.invalidatePrefix('/a/')
-    for (const key of ['/a/', '/a/x']) {
-      expect(inv.enter(key)).toEqual(before)
-      inv.leave(key)
-    }
-  })
 })

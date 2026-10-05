@@ -68,14 +68,6 @@ export class FakeNextcloudOperator {
     return Promise.resolve()
   }
 
-  rename(from: string, to: string): Promise<void> {
-    const data = this.files.get(from)
-    if (data === undefined) return Promise.reject(new Error(`NotFound: ${from}`))
-    this.files.delete(from)
-    this.files.set(to, data)
-    return Promise.resolve()
-  }
-
   removeAll(prefix: string): Promise<void> {
     const stem = rstripSlash(prefix)
     for (const key of [...this.files.keys()]) {

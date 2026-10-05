@@ -49,10 +49,6 @@ class RecordingInvalidator implements CacheInvalidator {
     return Promise.resolve()
   }
 
-  invalidateAfterMove(): Promise<void> {
-    return Promise.resolve()
-  }
-
   invalidateSubtree(): Promise<void> {
     return Promise.resolve()
   }

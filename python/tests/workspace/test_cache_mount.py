@@ -278,7 +278,7 @@ def _count_drops(ws: Workspace, path: str) -> list[str]:
         path (str): any path on the mount whose index to watch.
     """
     drops: list[str] = []
-    cache = ws._cache
+    cache = ws.cache
     index = ws._namespace.try_mount_for(path).index_store
     real_evict = cache.evict_prefix
     real_invalidate = index.invalidate_prefix
@@ -306,16 +306,16 @@ async def test_mv_of_a_file_keeps_every_other_cached_read():
     ws = Workspace({"/m/": ram}, mode=MountMode.WRITE)
     await ws.shell("echo f > /m/f && mkdir /m/dir && echo x > /m/dir/x")
     await (await ws.shell("cat /m/dir/x")).stdout_str()
-    assert await ws._cache.exists("/m/dir/x")
+    assert await ws.cache.exists("/m/dir/x")
     drops = _count_drops(ws, "/m/f")
     await ws.shell("mv /m/f /m/g")
     # The spies are what tell narrowed from not: a file has nothing cached
     # beneath it, so the old subtree drop removed no body either. The warm
     # read surviving guards the other way, against a drop wider than /m/f.
     assert drops == []
-    assert await ws._cache.exists("/m/dir/x")
+    assert await ws.cache.exists("/m/dir/x")
     assert await (await ws.shell("cat /m/g")).stdout_str() == "f\n"
     await ws.shell("mv /m/dir /m/dir2")
-    assert not await ws._cache.exists("/m/dir/x")
+    assert not await ws.cache.exists("/m/dir/x")
     assert (await ws.shell("cat /m/dir/x")).exit_code != 0
     assert await (await ws.shell("cat /m/dir2/x")).stdout_str() == "x\n"

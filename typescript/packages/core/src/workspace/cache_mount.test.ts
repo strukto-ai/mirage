@@ -476,12 +476,6 @@ describe('a read given up on', () => {
   )
 })
 
-// RAM serves reads itself and keeps no file cache by default, which would
-// make every body assertion below hold vacuously.
-class CachingRAMVFS extends RAMVFS {
-  override readonly cachesReads: boolean = true
-}
-
 // Record every prefix walk of the file cache and the mount's index.
 function countDrops(ws: Workspace, path: string): string[] {
   const drops: string[] = []
@@ -507,14 +501,15 @@ describe('mv and the caches', () => {
     // `mv` of a plain file has nothing beneath it, so the backend's rename
     // walks neither store, and the warm read of another folder survives. A
     // folder `mv` still takes its subtree under the old name.
+    const ram = new RAMVFS()
+    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     const ws = new Workspace(
-      { '/m/': new CachingRAMVFS() },
+      { '/m/': ram },
       {
         mode: MountMode.WRITE,
         shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
-    const dec = new TextDecoder()
     try {
       await ws.shell('echo f > /m/f && mkdir /m/dir && echo x > /m/dir/x')
       await ws.shell('cat /m/dir/x')
@@ -526,11 +521,11 @@ describe('mv and the caches', () => {
       // read surviving guards the other way, against a drop wider than /m/f.
       expect(drops).toEqual([])
       expect(await ws.cache.exists('/m/dir/x')).toBe(true)
-      expect(dec.decode((await ws.shell('cat /m/g')).stdout)).toBe('f\n')
+      expect(DEC.decode((await ws.shell('cat /m/g')).stdout)).toBe('f\n')
       await ws.shell('mv /m/dir /m/dir2')
       expect(await ws.cache.exists('/m/dir/x')).toBe(false)
       expect((await ws.shell('cat /m/dir/x')).exitCode).not.toBe(0)
-      expect(dec.decode((await ws.shell('cat /m/dir2/x')).stdout)).toBe('x\n')
+      expect(DEC.decode((await ws.shell('cat /m/dir2/x')).stdout)).toBe('x\n')
     } finally {
       await ws.close()
     }

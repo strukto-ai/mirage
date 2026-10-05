@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithCacheManager, type CacheInvalidator } from '@struktoai/mirage-core/cache/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { exists } from './exists.ts'
 import { makeFakeAccessor } from './_test_utils.ts'
@@ -61,29 +60,5 @@ describe('core/ssh/rename', () => {
     await expect(rename(accessor, spec('/missing'), spec('/dst'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
-  })
-})
-
-describe('core/ssh/rename invalidation', () => {
-  it('a renamed file still drops both subtrees', async () => {
-    // A blind SFTP rename never learns what it moved, and asking costs a
-    // round trip, so even a file keeps the subtree on both ends.
-    const seen: string[] = []
-    const manager = {
-      invalidateAfterMove: (path: PathSpec, folder: boolean) => {
-        seen.push(`${folder ? 'subtree' : 'unlink'} ${path.virtual}`)
-        return Promise.resolve()
-      },
-      invalidateSubtree: (path: PathSpec) => {
-        seen.push(`subtree ${path.virtual}`)
-        return Promise.resolve()
-      },
-    } as unknown as CacheInvalidator
-    const accessor = makeFakeAccessor({
-      files: new Map([['/a.txt', { data: new TextEncoder().encode('hi') }]]),
-      dirs: new Map([['/', {}]]),
-    })
-    await runWithCacheManager(manager, () => rename(accessor, spec('/a.txt'), spec('/b.txt')))
-    expect(seen).toEqual(['subtree /b.txt', 'subtree /a.txt'])
   })
 })

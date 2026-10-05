@@ -19,6 +19,7 @@ import pytest
 from mirage.cache.context import push_cache_manager
 from mirage.core.gdrive.rename import rename
 from mirage.types import PathSpec
+from tests.core.object_store.conftest import FakeManager
 
 DOC_MIME = "application/vnd.google-apps.document"
 
@@ -27,32 +28,8 @@ def spec(virtual: str) -> PathSpec:
     return PathSpec.from_str_path(virtual)
 
 
-class _FakeManager:
-    def __init__(self) -> None:
-        self.writes: list[str] = []
-        self.unlinks: list[str] = []
-        self.subtrees: list[str] = []
-
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        self.writes.append(path.virtual)
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        self.unlinks.append(path.virtual)
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.subtrees.append(path.virtual)
-
-    async def invalidate_after_move(
-        self, path: PathSpec, folder: bool
-    ) -> None:
-        if folder:
-            await self.invalidate_subtree(path)
-        else:
-            await self.invalidate_after_unlink(path)
-
-
-async def _managed(accessor, src: str, dst: str) -> _FakeManager:
-    manager = _FakeManager()
+async def _managed(accessor, src: str, dst: str) -> FakeManager:
+    manager = FakeManager()
     prev = push_cache_manager(manager)
     try:
         await rename(accessor, spec(src), spec(dst))

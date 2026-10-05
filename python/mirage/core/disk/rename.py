@@ -45,10 +45,14 @@ async def rename(
 ) -> None:
     root = accessor.root
     src = await resolve_inside(root, src_spec)
+    dst = await resolve_inside(root, dst_spec)
     # The kernel refuses a file over a directory and a directory over a
     # file, so the source's kind holds for both ends: a folder's subtree
     # is stale under both names, a file has nothing beneath either.
+    # Classified before the rename, while the source is still there;
+    # evicted after it, so a listing read in between cannot refill the
+    # pre-rename view.
     folder = await _holds_subtree(src)
+    await aiofiles.os.rename(src, dst)
     await invalidate_after_move(src_spec, folder)
     await invalidate_after_move(dst_spec, folder)
-    await aiofiles.os.rename(src, await resolve_inside(root, dst_spec))

@@ -21,10 +21,8 @@ class _Moves:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    async def invalidate_after_move(
-        self, path: PathSpec, folder: bool
-    ) -> None:
-        self.calls.append(("subtree" if folder else "unlink", path.virtual))
+    async def invalidate_after_unlink(self, path: PathSpec) -> None:
+        self.calls.append(("unlink", path.virtual))
 
     async def invalidate_subtree(self, path: PathSpec) -> None:
         self.calls.append(("subtree", path.virtual))
@@ -140,104 +138,26 @@ async def test_rename_conflict_keeps_error_for_nonempty_dir():
             )
 
 
-async def _moved(reply: dict) -> list[tuple[str, str]]:
-    moves = _Moves()
-    prev = push_cache_manager(moves)
-    try:
-        with aioresponses() as m:
-            m.patch(_BASE + "/root:/a", status=200, payload=reply)
-            await rename(
-                _accessor(),
-                PathSpec.from_str_path("/a"),
-                PathSpec.from_str_path("/b"),
-            )
-    finally:
-        push_cache_manager(prev)
-    return moves.calls
-
-
-@pytest.mark.asyncio
-async def test_a_renamed_file_drops_no_subtree():
-    # The PATCH reply names what moved: a file facet means nothing was
-    # cached beneath either name.
-    assert await _moved({"id": "1", "file": {}}) == [
-        ("unlink", "/b"),
-        ("unlink", "/a"),
-    ]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "reply", [{"id": "1", "folder": {"childCount": 2}}, {"id": "1"}]
-)
-async def test_a_renamed_folder_or_an_unnamed_item_drops_both_subtrees(reply):
-    # Only a positive file facet narrows: a reply that names no type
-    # leaves both ends dropping their subtrees.
-    assert await _moved(reply) == [("subtree", "/b"), ("subtree", "/a")]
-
-
-async def _replaced(dst_item: dict[str, Any]) -> list[tuple[str, str]]:
-    """Rename a file onto `dst` through the conflict path and return the
-    invalidations it made.
+async def _moved(
+    reply: dict[str, Any], dst_item: dict[str, Any] | None
+) -> list[tuple[str, str]]:
+    """Rename a to b and return the invalidation each end took.
 
     Args:
-        dst_item (dict[str, Any]): what the conflict GET answers for dst.
+        reply (dict[str, Any]): the successful PATCH's mock arguments.
+        dst_item (dict[str, Any] | None): with one, the first PATCH
+            conflicts and the GET of b answers this.
     """
     moves = _Moves()
     prev = push_cache_manager(moves)
     try:
         with aioresponses() as m:
-            m.patch(_BASE + "/root:/a", status=409, payload=_CONFLICT)
-            m.get(_BASE + "/root:/dst", payload=dst_item)
-            m.get(_BASE + "/root:/dst:/children", payload={"value": []})
-            m.delete(_BASE + "/root:/dst", status=204)
-            m.patch(
-                _BASE + "/root:/a", status=200, payload={"id": "1", "file": {}}
-            )
-            await rename(
-                _accessor(),
-                PathSpec.from_str_path("/a"),
-                PathSpec.from_str_path("/dst"),
-            )
-    finally:
-        push_cache_manager(prev)
-    return moves.calls
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("dst_item", "dst_drop"),
-    [
-        ({"id": "2", "name": "dst", "folder": {}}, "subtree"),
-        ({"id": "2", "name": "dst"}, "subtree"),
-        ({"id": "2", "name": "dst", "file": {}}, "unlink"),
-    ],
-    ids=["empty-folder", "no-kind", "file"],
-)
-async def test_a_file_replacing_anything_but_a_file_drops_its_subtree(
-    dst_item, dst_drop
-):
-    # The rename deleted whatever was at dst. Unless it was positively a
-    # file, its name may still have cached children (removed outside
-    # mirage, say), so dst takes the subtree; a replaced file stays narrow.
-    assert await _replaced(dst_item) == [(dst_drop, "/dst"), ("unlink", "/a")]
-
-
-@pytest.mark.asyncio
-async def test_a_null_move_reply_still_completes_the_rename():
-    # A literal `null` body parses to None. The move has already happened,
-    # so the rename must finish and evict, taking the subtree because the
-    # reply named no kind.
-    moves = _Moves()
-    prev = push_cache_manager(moves)
-    try:
-        with aioresponses() as m:
-            m.patch(
-                _BASE + "/root:/a",
-                status=200,
-                body="null",
-                content_type="application/json",
-            )
+            if dst_item is not None:
+                m.patch(_BASE + "/root:/a", status=409, payload=_CONFLICT)
+                m.get(_BASE + "/root:/b", payload=dst_item)
+                m.get(_BASE + "/root:/b:/children", payload={"value": []})
+                m.delete(_BASE + "/root:/b", status=204)
+            m.patch(_BASE + "/root:/a", status=200, **reply)
             await rename(
                 _accessor(),
                 PathSpec.from_str_path("/a"),
@@ -245,4 +165,50 @@ async def test_a_null_move_reply_still_completes_the_rename():
             )
     finally:
         push_cache_manager(prev)
-    assert moves.calls == [("subtree", "/b"), ("subtree", "/a")]
+    return moves.calls
+
+
+_FILE = {"payload": {"id": "1", "file": {}}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply", "dst_item", "drops"),
+    [
+        (_FILE, None, ("unlink", "unlink")),
+        (
+            {"payload": {"id": "1", "folder": {"childCount": 2}}},
+            None,
+            ("subtree", "subtree"),
+        ),
+        ({"payload": {"id": "1"}}, None, ("subtree", "subtree")),
+        (
+            {"body": "null", "content_type": "application/json"},
+            None,
+            ("subtree", "subtree"),
+        ),
+        (_FILE, {"id": "2", "folder": {}}, ("subtree", "unlink")),
+        (_FILE, {"id": "2"}, ("subtree", "unlink")),
+        (_FILE, {"id": "2", "file": {}}, ("unlink", "unlink")),
+    ],
+    ids=[
+        "file",
+        "folder",
+        "no-kind",
+        "null-reply",
+        "over-empty-folder",
+        "over-no-kind",
+        "over-file",
+    ],
+)
+async def test_only_a_moved_file_narrows_and_only_onto_a_file(
+    reply, dst_item, drops
+):
+    # The PATCH reply names what moved: only a file facet spares the
+    # subtree. A destination the move replaced keeps its subtree unless
+    # that was positively a file: its name may still have cached children
+    # removed outside mirage.
+    assert await _moved(reply, dst_item) == [
+        (drops[0], "/b"),
+        (drops[1], "/a"),
+    ]

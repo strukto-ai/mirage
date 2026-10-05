@@ -292,59 +292,21 @@ async def test_rename_moves_file(root_accessor):
 
 
 @pytest.mark.asyncio
-async def test_renaming_a_file_drops_no_subtree(root_accessor):
-    src, dst = _spec("/data/a.txt"), _spec("/data/b.txt")
-    with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-        patch("mirage.core.box.rename.update_file", new_callable=AsyncMock),
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ) as moved,
-    ):
-        await rename(root_accessor, src, dst)
-    assert [c.args for c in moved.await_args_list] == [
-        (dst, False),
-        (src, False),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_renaming_a_folder_drops_both_subtrees(root_accessor):
-    src, dst = _spec("/data/sub"), _spec("/data/moved")
-    with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-        patch("mirage.core.box.rename.update_folder", new_callable=AsyncMock),
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ) as moved,
-    ):
-        await rename(root_accessor, src, dst)
-    assert [c.args for c in moved.await_args_list] == [
-        (dst, True),
-        (src, True),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_renaming_an_item_of_unknown_type_drops_both_subtrees(
-    root_accessor,
+@pytest.mark.parametrize(
+    ("src", "dst", "update", "folder"),
+    [
+        ("/data/a.txt", "/data/b.txt", "update_file", False),
+        ("/data/sub", "/data/moved", "update_folder", True),
+    ],
+    ids=["file", "folder"],
+)
+async def test_only_a_renamed_file_drops_no_subtree(
+    root_accessor, src, dst, update, folder
 ):
-    # Only a positive "file" narrows: a web_link, or an item whose type
-    # Box left out, keeps the subtree drop.
-    tree = {
-        **_TREE,
-        "100": [{"id": "500", "name": "link", "type": "web_link"}],
-    }
-
-    async def listing(_tm, folder_id, limit=1000):
-        return tree.get(folder_id, [])
-
-    src, dst = _spec("/data/link"), _spec("/data/moved")
+    src, dst = _spec(src), _spec(dst)
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=listing),
-        patch("mirage.core.box.rename.update_file", new_callable=AsyncMock),
+        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch(f"mirage.core.box.rename.{update}", new_callable=AsyncMock),
         patch(
             "mirage.core.box.rename.invalidate_after_move",
             new_callable=AsyncMock,
@@ -352,8 +314,8 @@ async def test_renaming_an_item_of_unknown_type_drops_both_subtrees(
     ):
         await rename(root_accessor, src, dst)
     assert [c.args for c in moved.await_args_list] == [
-        (dst, True),
-        (src, True),
+        (dst, folder),
+        (src, folder),
     ]
 
 

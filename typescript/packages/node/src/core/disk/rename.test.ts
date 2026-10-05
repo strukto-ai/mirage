@@ -49,10 +49,6 @@ class FakeManager {
     return Promise.resolve()
   }
 
-  invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
-    return folder ? this.invalidateSubtree(path) : this.invalidateAfterUnlink(path)
-  }
-
   invalidateSubtree(path: string | PathSpec): Promise<void> {
     this.subtrees.push(typeof path === 'string' ? path : path.mountPath)
     return Promise.resolve()
@@ -106,33 +102,25 @@ describe('core/disk/rename', () => {
     expect(manager.writes).toEqual([])
     expect(await readFile(join(root, 'dst', 'f.txt'), 'utf-8')).toBe('x')
   })
-  it('a file evicts no subtree', async () => {
+
+  it('a file evicts no subtree once the rename has landed', async () => {
     // A regular file has nothing beneath it: both ends take the unlink
-    // flavor, which still drops the destination's own listing.
+    // flavor, which still drops the destination's own listing. Evicting
+    // first left a window in which a concurrent listing of the parent
+    // re-cached the pre-rename view, with nothing evicting it after.
     await writeFile(join(root, 'a.txt'), 'A')
+    const landed: boolean[] = []
     const manager = new FakeManager()
+    const record = manager.invalidateAfterUnlink.bind(manager)
+    manager.invalidateAfterUnlink = (path) => {
+      landed.push(existsSync(join(root, 'b.txt')))
+      return record(path)
+    }
     await runWithCacheManager(manager, async () => {
       await rename(accessor, spec('/a.txt'), spec('/b.txt'))
     })
     expect(manager.subtrees).toEqual([])
     expect(manager.unlinks).toEqual(['/a.txt', '/b.txt'])
-    expect(await readFile(join(root, 'b.txt'), 'utf-8')).toBe('A')
-  })
-
-  it('evicts once the rename has landed', async () => {
-    // Evicting first left a window in which a concurrent listing of the
-    // parent re-cached the pre-rename view, with nothing evicting it after.
-    await writeFile(join(root, 'a.txt'), 'A')
-    const landed: boolean[] = []
-    const manager = new FakeManager()
-    const real = manager.invalidateAfterMove.bind(manager)
-    manager.invalidateAfterMove = (path, folder) => {
-      landed.push(existsSync(join(root, 'b.txt')))
-      return real(path, folder)
-    }
-    await runWithCacheManager(manager, async () => {
-      await rename(accessor, spec('/a.txt'), spec('/b.txt'))
-    })
     expect(landed).toEqual([true, true])
   })
 })

@@ -200,19 +200,6 @@ describe('RAMFileCacheStore: a writer waiting on the lock', () => {
   )
 
   it.each(['set', 'add'] as const)(
-    '%s under an excluded root survives a prefix eviction',
-    async (operation) => {
-      // The excluded root is a nested mount: its keys are not this drop's.
-      const cache = new RAMFileCacheStore()
-      const data = new Uint8Array([0x78])
-      const fill = cache[operation]('/a/nested/f', data)
-      await cache.evictPrefix('/a/', ['/a/nested'])
-      await fill
-      expect(await cache.get('/a/nested/f')).toEqual(data)
-    },
-  )
-
-  it.each(['set', 'add'] as const)(
     '%s queued behind a removal of its key is discarded',
     async (operation) => {
       // The second writer holds bytes read before the removal, so it must

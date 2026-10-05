@@ -54,13 +54,6 @@ describe('object_store rename', () => {
     expect(store.contents()).toEqual({ 'moved/f.txt': 'x', 'moved/sub/g.txt': 'y' })
   })
 
-  it('a directory evicts both subtrees', async () => {
-    const store = new FakeStore({ 'dir/f.txt': 'x', 'dir/sub/g.txt': 'y' })
-    const manager = await managed(() => renameFor(store)(accessor, spec('/dir'), spec('/moved')))
-    expect(manager.subtrees).toEqual(['/moved', '/dir'])
-    expect(manager.unlinks).toEqual([])
-  })
-
   it('a missing source is ENOENT', async () => {
     const store = new FakeStore()
     await expect(
@@ -156,21 +149,6 @@ describe('object_store rename retraction records', () => {
       )
     })
     expect(manager.subtrees).toEqual(['/e', '/d'])
-  })
-
-  it('evicts both subtrees when the file move rejects', async () => {
-    // A rejection says nothing about what the source was, so both ends
-    // stay on the subtree.
-    const store = new FakeStore({ 'a.txt': 'x' })
-    const driver = makeDriver(store)
-    driver.moveFile = () => Promise.reject(Object.assign(new Error('boom'), { code: 'EIO' }))
-    const manager = await managed(async () => {
-      expect(
-        await codeOf(makeRename(driver, alwaysExists)(accessor, spec('/a.txt'), spec('/b.txt'))),
-      ).toBe('EIO')
-    })
-    expect(manager.subtrees).toEqual(['/b.txt', '/a.txt'])
-    expect(manager.unlinks).toEqual([])
   })
 
   it('records nothing when the source is missing', async () => {

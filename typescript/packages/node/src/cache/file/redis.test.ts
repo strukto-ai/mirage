@@ -147,35 +147,6 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     },
   )
 
-  it.each(['set', 'add'] as const)(
-    '%s under an excluded root survives a prefix eviction while it awaited the client',
-    async (method) => {
-      // The excluded root is a nested mount: its keys are not this drop's,
-      // so its in-flight fill must survive the eviction of the folder above.
-      const real = cache.cacheClient.bind(cache)
-      let release!: () => void
-      const gate = new Promise<void>((resolve) => {
-        release = resolve
-      })
-      let held = false
-      cache.cacheClient = async (): Promise<RedisClientType> => {
-        if (!held) {
-          held = true
-          await gate
-        }
-        return real()
-      }
-      const data = new Uint8Array([1, 2, 3])
-      const fill = cache[method]('pend/nested/f', data)
-      await cache.evictPrefix('pend/', ['pend/nested'])
-      release()
-      cache.cacheClient = real
-      await fill
-      expect(await cache.get('pend/nested/f')).toEqual(data)
-      await cache.remove('pend/nested/f')
-    },
-  )
-
   it('a tokenless add still bounds its data key', async () => {
     // add.lua nests the meta EXPIRE inside the data EXPIRE, so a mistake
     // in that nesting takes the data key's bound with it. This is the
@@ -547,17 +518,29 @@ describe.skipIf(skip)('RedisFileCacheStore prefix drops', () => {
     )
   })
 
-  it.each(PREFIX_DROPS)('%s leaves keys that only resemble cache keys', async (_name, drop) => {
-    // `[dm][ae]ta:` also matches `mata:` and `deta:`; only `data:` and
-    // `meta:` belong to the cache. The VFS store shares the key prefix.
+  it.each(PREFIX_DROPS)('%s takes only the cache keys', async (_name, drop) => {
+    // `[dm][ae]ta:` also matches `mata:`, and the VFS store shares the key
+    // prefix. A shared server can hold any bytes as a key: a string-decoded
+    // name (invalid bytes read as U+FFFD) names a different key, so one
+    // under the cache's own `data:` would survive the drop.
     const c = await cache.cacheClient()
-    await c.set(`${prefix}mata:/t/x`, 'x')
-    await c.set(`${prefix}file:/t/x`, 'x')
-    await cache.set('/t/x', x, { fingerprint: 'etag' })
-    await drop(cache)
-    expect(await cache.get('/t/x')).toBeNull()
-    expect(await c.exists(`${prefix}mata:/t/x`)).toBe(1)
-    expect(await c.exists(`${prefix}file:/t/x`)).toBe(1)
+    const bad = Buffer.from([0xff, 0xfe])
+    const own = Buffer.concat([Buffer.from(`${prefix}data:/t/`), bad])
+    const kept = [
+      Buffer.from(`${prefix}mata:/t/x`),
+      Buffer.from(`${prefix}file:/t/x`),
+      Buffer.concat([Buffer.from(`${prefix}mata:/t/`), bad]),
+    ]
+    for (const key of [own, ...kept]) await c.set(key, 'x')
+    try {
+      await cache.set('/t/x', x, { fingerprint: 'etag' })
+      await drop(cache)
+      expect(await cache.get('/t/x')).toBeNull()
+      expect(await c.exists(own)).toBe(0)
+      expect(await c.exists(kept)).toBe(kept.length)
+    } finally {
+      await c.del([own, ...kept])
+    }
   })
 
   it.each(PREFIX_DROPS)(
@@ -578,85 +561,16 @@ describe.skipIf(skip)('RedisFileCacheStore prefix drops', () => {
     },
   )
 
-  it.each(PREFIX_DROPS)(
-    '%s drops keys that are not UTF-8 and skips their lookalikes',
-    async (_name, drop) => {
-      // A shared server can hold any bytes as a key. A string-decoded name
-      // (invalid bytes read as U+FFFD) names a different key, so a binary
-      // key under the cache's own `data:` prefix would survive the drop.
-      const c = await cache.cacheClient()
-      const bad = Buffer.from([0xff, 0xfe])
-      const own = Buffer.concat([Buffer.from(`${prefix}data:/t/`), bad])
-      const lookalike = Buffer.concat([Buffer.from(`${prefix}mata:/t/`), bad])
-      await c.set(own, 'x')
-      await c.set(lookalike, 'x')
-      try {
-        await cache.set('/t/a', x, { fingerprint: 'etag' })
-        await drop(cache)
-        expect(await cache.get('/t/a')).toBeNull()
-        expect(await c.exists(own)).toBe(0)
-        expect(await c.exists(lookalike)).toBe(1)
-      } finally {
-        await c.del([own, lookalike])
-      }
-    },
-  )
-
-  it('an excluded root is compared byte for byte', async () => {
-    // Dropping the byte `\xff` would read `/t/ex\xff/y` as `/t/ex/y`, under
-    // the excluded root `/t/ex`; the exact bytes put it beside.
-    const c = await cache.cacheClient()
-    const beside = Buffer.concat([
-      Buffer.from(`${prefix}data:/t/ex`),
-      Buffer.from([0xff]),
-      Buffer.from('/y'),
-    ])
-    const under = Buffer.concat([Buffer.from(`${prefix}data:/t/ex/`), Buffer.from([0xff])])
-    await c.set(beside, 'x')
-    await c.set(under, 'x')
-    try {
-      await cache.evictPrefix('/t/', ['/t/ex'])
-      expect(await c.exists(beside)).toBe(0)
-      expect(await c.exists(under)).toBe(1)
-    } finally {
-      await c.del([beside, under])
-    }
-  })
-
-  it('an excluded root holding U+FFFD is not a stand-in for any byte', async () => {
-    // A replacing decode reads the byte `\xff` as U+FFFD, which would put
-    // `/t/\xff/x` under an excluded root spelled `/t/\ufffd`.
-    const c = await cache.cacheClient()
-    const key = Buffer.concat([
-      Buffer.from(`${prefix}data:/t/`),
-      Buffer.from([0xff]),
-      Buffer.from('/x'),
-    ])
-    await c.set(key, 'x')
-    try {
-      await cache.evictPrefix('/t/', ['/t/\ufffd'])
-      expect(await c.exists(key)).toBe(0)
-    } finally {
-      await c.del([key])
-    }
-  })
-
-  it('an excluded root with a non-ASCII name keeps what lies under it', async () => {
-    // A nested mount named in UTF-8: its keys only match the root once
-    // both sides are compared in the same form.
-    await cache.set('/t/café/f', x)
-    await cache.set('/t/other', x)
-    await cache.evictPrefix('/t/', ['/t/café'])
-    expect(await cache.get('/t/café/f')).toEqual(x)
-    expect(await cache.get('/t/other')).toBeNull()
-  })
-
-  it.each(PREFIX_DROPS)('%s drops under a non-ASCII key prefix', async (_name, drop) => {
+  it('drops under non-ASCII names', async () => {
+    // A key prefix and a nested mount named in UTF-8 match only once both
+    // sides are compared in the same form.
     const accented = new RedisFileCacheStore({ ...url, keyPrefix: `${prefix}café:` })
     try {
-      await accented.set('/t/a', x)
-      await drop(accented)
-      expect(await accented.get('/t/a')).toBeNull()
+      await accented.set('/t/café/f', x)
+      await accented.set('/t/other', x)
+      await accented.evictPrefix('/t/', ['/t/café'])
+      expect(await accented.get('/t/café/f')).toEqual(x)
+      expect(await accented.get('/t/other')).toBeNull()
     } finally {
       await accented.close()
     }

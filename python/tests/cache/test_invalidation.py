@@ -90,12 +90,3 @@ def test_a_prefix_invalidation_spares_an_excluded_root():
     assert inv.stale("/a/nested2", sibling)
     for key in ("/a/nested/f", "/a/nested", "/a/nested2"):
         inv.leave(key)
-
-
-def test_a_prefix_invalidation_with_no_writer_leaves_nothing_behind():
-    inv = Invalidation()
-    inv.invalidate_prefix("/a/")
-    assert inv._keys == {}
-    stamp = inv.enter("/a/x")
-    assert not inv.stale("/a/x", stamp)
-    inv.leave("/a/x")

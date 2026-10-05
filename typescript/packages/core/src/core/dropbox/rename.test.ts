@@ -62,8 +62,8 @@ describe('dropbox rename conflict probe', () => {
 function recorder(): [CacheInvalidator, string[]] {
   const seen: string[] = []
   const manager = {
-    invalidateAfterMove: (path: PathSpec, folder: boolean) => {
-      seen.push(`${folder ? 'subtree' : 'unlink'} ${path.virtual}`)
+    invalidateAfterUnlink: (path: PathSpec) => {
+      seen.push(`unlink ${path.virtual}`)
       return Promise.resolve()
     },
     invalidateSubtree: (path: PathSpec) => {
@@ -82,56 +82,40 @@ async function moved(fake: FakeDropboxRpc): Promise<string[]> {
   return seen
 }
 
+const conflict = (kind: string): DropboxApiError =>
+  new DropboxApiError('conflict', 409, `to/conflict/${kind}/...`)
+
 describe('dropbox rename invalidation', () => {
-  it('a renamed file drops no subtree', async () => {
-    // move_v2 answers with the moved entry's metadata: a file tag means
-    // nothing was cached beneath either name.
-    expect(await moved(new FakeDropboxRpc({ moved: fileEntry('b') }))).toEqual([
-      'unlink /a',
-      'unlink /b',
-    ])
-  })
-
   it.each([
-    ['a folder', folderEntry('b')],
-    ['an item with no type', { name: 'b' } as DropboxEntry],
-    ['an empty reply', null],
-  ])('%s drops both subtrees', async (_label, entry) => {
-    // Only a positive file tag narrows: a reply that names no type, or an
-    // empty body after a move that worked, leaves both ends dropping their
-    // subtrees.
-    expect(await moved(new FakeDropboxRpc({ moved: entry }))).toEqual(['subtree /a', 'subtree /b'])
-  })
-
-  it('a file replacing an empty folder drops its subtree', async () => {
-    // The rename deleted the folder at dst, so whatever is still cached
-    // under that name (children removed outside mirage, say) goes too.
-    const fake = new FakeDropboxRpc({
-      metadata: folderEntry('b'),
-      moveErrors: [new DropboxApiError('conflict', 409, 'to/conflict/folder/...')],
-      moved: fileEntry('b'),
-    })
-    expect(await moved(fake)).toEqual(['unlink /a', 'subtree /b'])
-    expect(fake.deleted).toEqual(['/b'])
-  })
-
-  it('a file replacing an entry of no known kind drops its subtree', async () => {
-    // Only a positive file tag on what was replaced keeps dst narrow.
-    const fake = new FakeDropboxRpc({
-      metadata: { name: 'b' } as DropboxEntry,
-      moveErrors: [new DropboxApiError('conflict', 409, 'to/conflict/other/...')],
-      moved: fileEntry('b'),
-    })
-    expect(await moved(fake)).toEqual(['unlink /a', 'subtree /b'])
-  })
-
-  it('a file replacing a file drops no subtree', async () => {
-    const fake = new FakeDropboxRpc({
-      metadata: fileEntry('b'),
-      moveErrors: [new DropboxApiError('conflict', 409, 'to/conflict/file/...')],
-      moved: fileEntry('b'),
-    })
-    expect(await moved(fake)).toEqual(['unlink /a', 'unlink /b'])
-    expect(fake.deleted).toEqual(['/b'])
+    ['a file', {}, ['unlink /a', 'unlink /b']],
+    ['a folder', { moved: folderEntry('b') }, ['subtree /a', 'subtree /b']],
+    [
+      'an item with no type',
+      { moved: { name: 'b' } as DropboxEntry },
+      ['subtree /a', 'subtree /b'],
+    ],
+    ['an empty reply', { moved: null }, ['subtree /a', 'subtree /b']],
+    [
+      'a file over an empty folder',
+      { metadata: folderEntry('b'), moveErrors: [conflict('folder')] },
+      ['unlink /a', 'subtree /b'],
+    ],
+    [
+      'a file over an entry of no known kind',
+      { metadata: { name: 'b' } as DropboxEntry, moveErrors: [conflict('other')] },
+      ['unlink /a', 'subtree /b'],
+    ],
+    [
+      'a file over a file',
+      { metadata: fileEntry('b'), moveErrors: [conflict('file')] },
+      ['unlink /a', 'unlink /b'],
+    ],
+  ])('%s', async (_label, opts, drops) => {
+    // move_v2 answers with the moved entry's metadata; only a file tag
+    // spares the subtree. A destination the move replaced keeps its
+    // subtree unless that was positively a file: its name may still have
+    // cached children removed outside mirage.
+    const fake = new FakeDropboxRpc({ moved: fileEntry('b'), ...opts })
+    expect(await moved(fake)).toEqual(drops)
   })
 })
