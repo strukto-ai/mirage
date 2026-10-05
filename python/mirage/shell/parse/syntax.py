@@ -16,7 +16,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from itertools import chain
 
 from mirage.io import IOResult
-from mirage.shell.bytes import decode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.constants import (
     BASH_KEYWORDS,
     CASE_TERMINATORS,
@@ -425,18 +425,13 @@ def syntax_error_result(
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
     """
     quote = find_unterminated_quote(node) if node is not None else None
-    if quote is not None:
-        return IOResult(
-            exit_code=2,
-            stderr=(
-                "mirage: unexpected EOF while looking for matching "
-                f"`{quote}'\n"
-            ).encode(),
-        )
     snippet = offending.strip()
-    err = (
-        f"mirage: syntax error near '{snippet}'\n".encode()
-        if snippet
-        else b"mirage: syntax error in command\n"
-    )
-    return IOResult(exit_code=2, stderr=err)
+    if quote is not None:
+        message = (
+            f"mirage: unexpected EOF while looking for matching `{quote}'\n"
+        )
+    elif snippet:
+        message = f"mirage: syntax error near '{snippet}'\n"
+    else:
+        message = "mirage: syntax error in command\n"
+    return IOResult(exit_code=2, stderr=encode_text(message))
