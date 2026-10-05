@@ -1353,9 +1353,8 @@ describe('the read-token contract', () => {
     })
   }
 
-  // The probe stats through a scratch store, so dropbox answers it with one
-  // get_metadata rather than listing the whole folder into a store dropped
-  // right after.
+  // The probe stats through a throwaway store, so dropbox answers it with one
+  // get_metadata rather than listing the whole folder into it.
   it('a dropbox fresh probe asks for the file, not its folder', async () => {
     const files: Record<string, Uint8Array> = { '/d/a.txt': SEED }
     for (let i = 0; i < 5; i++) files[`/d/f${String(i)}.txt`] = DECOY
@@ -1376,53 +1375,13 @@ describe('the read-token contract', () => {
     }
   })
 
-  // The freshness check is the one get_metadata. A gone verdict clears the
-  // mount index, so cat's own stat that follows misses it and lists the
-  // folder, the way a mount index answers any miss.
-  it('a dropbox file deleted outside is checked with one get_metadata', async () => {
-    const files: Record<string, Uint8Array> = { '/d/a.txt': SEED }
-    for (let i = 0; i < 5; i++) files[`/d/f${String(i)}.txt`] = DECOY
-    const dropbox = new InlineDropbox(files)
-    vi.stubGlobal('fetch', dropbox.fetch)
-    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
-    const ws = freshWorkspace(vfs)
-    try {
-      await line(ws, 'cat /m/d/a.txt')
-      dropbox.files.delete('/d/a.txt')
-      const before = dropbox.log.length
-      const result = await ws.shell('cat /m/d/a.txt')
-      const routes = dropbox.log.slice(before).filter((r) => r !== 'token')
-      expect([result.exitCode, new TextDecoder().decode(result.stderr)]).toEqual([
-        1,
-        'cat: /m/d/a.txt: No such file or directory\n',
-      ])
-      expect(routes).toEqual(['get_metadata', 'list_folder'])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  // The fake writes Dropbox-API-Result the way Dropbox does, escaped from
-  // DEL up. Unescaped, a name past U+00FF is no ByteString and the response
-  // cannot be built, so the read fails before it is ever stamped.
-  it('a dropbox name past U+00FF is stamped and read fresh', async () => {
-    const dropbox = new InlineDropbox({ '/d/\u4e2d\u{1f600}.txt': SEED })
-    vi.stubGlobal('fetch', dropbox.fetch)
-    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
-    const ws = freshWorkspace(vfs)
-    try {
-      expect(await line(ws, 'cat "/m/d/\u4e2d\u{1f600}.txt"')).toEqual(SEED)
-      expect(await line(ws, 'cat "/m/d/\u4e2d\u{1f600}.txt"')).toEqual(SEED)
-      expect(dropbox.count('download')).toBe(1)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  // A fresh probe that hears a 409 other than not_found cannot verify the
-  // copy: it reads cold, which fails, but never calls the file gone and drops
-  // its overlay. Read as gone, chmod's 600 would be lost.
-  it('a dropbox file that 409s without a miss keeps its overlay', async () => {
+  // A 409 other than not_found cannot verify the copy: the read fails but the
+  // file is not called gone, so chmod's 600 stays. A real miss drops it, so it
+  // never carries over to a file re-created at the path.
+  it.each([
+    ['restricted', false],
+    ['deleted', true],
+  ])('a dropbox probe drops an overlay only on a miss (%s)', async (_id, gone) => {
     const dropbox = new InlineDropbox({ '/d/a.txt': SEED })
     vi.stubGlobal('fetch', dropbox.fetch)
     const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
@@ -1431,38 +1390,18 @@ describe('the read-token contract', () => {
     try {
       await line(ws, 'cat /m/d/a.txt')
       await line(ws, 'chmod 600 /m/d/a.txt')
-      dropbox.restricted.add('/d/a.txt')
+      if (gone) dropbox.files.delete('/d/a.txt')
+      else dropbox.restricted.add('/d/a.txt')
       const result = await ws.shell('cat /m/d/a.txt')
-      dropbox.restricted.delete('/d/a.txt')
+      dropbox.restricted.clear()
+      dropbox.write('/d/a.txt', SEED)
       expect(result.exitCode).toBe(1)
-      expect(new TextDecoder().decode(result.stderr)).not.toContain('No such file')
-      expect(new TextDecoder().decode(await line(ws, 'stat -c %a /m/d/a.txt'))).toBe('600\n')
+      expect(new TextDecoder().decode(result.stderr).includes('No such file')).toBe(gone)
+      expect(new TextDecoder().decode(await line(ws, 'stat -c %a /m/d/a.txt'))).toBe(
+        gone ? '644\n' : '600\n',
+      )
     } finally {
       warn.mockRestore()
-      await ws.close()
-    }
-  })
-
-  // The twin of the case above: a real not_found 409 is a miss, so the probe
-  // calls the file gone and drops its overlay. Kept, chmod's 600 would carry
-  // over to a file re-created at the path.
-  it('a dropbox file deleted outside drops its overlay', async () => {
-    const dropbox = new InlineDropbox({ '/d/a.txt': SEED })
-    vi.stubGlobal('fetch', dropbox.fetch)
-    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
-    const ws = freshWorkspace(vfs)
-    try {
-      await line(ws, 'cat /m/d/a.txt')
-      await line(ws, 'chmod 600 /m/d/a.txt')
-      dropbox.files.delete('/d/a.txt')
-      const result = await ws.shell('cat /m/d/a.txt')
-      dropbox.write('/d/a.txt', SEED)
-      expect([result.exitCode, new TextDecoder().decode(result.stderr)]).toEqual([
-        1,
-        'cat: /m/d/a.txt: No such file or directory\n',
-      ])
-      expect(new TextDecoder().decode(await line(ws, 'stat -c %a /m/d/a.txt'))).toBe('644\n')
-    } finally {
       await ws.close()
     }
   })

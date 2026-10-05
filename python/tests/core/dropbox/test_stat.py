@@ -16,7 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index import NULL_INDEX
+from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.read import read
 from mirage.core.dropbox.readdir import readdir
@@ -59,26 +60,14 @@ async def _meta_500(_tm, _endpoint, _body):
     raise DropboxApiError("boom", 500)
 
 
-async def _list_500(_tm, endpoint, _body):
-    if endpoint == "/files/list_folder":
-        raise DropboxApiError("boom", 500)
-    raise AssertionError(f"unexpected endpoint {endpoint}")
-
-
 async def _all_absent(_tm, _endpoint, _body):
     raise DropboxApiError("nf", 409, "path/not_found/...")
 
 
-async def _restricted(_tm, _endpoint, _body):
-    raise DropboxApiError("restricted", 409, "path/restricted_content/..")
-
-
-async def _server_error_naming_a_miss(_tm, _endpoint, _body):
-    raise DropboxApiError("relay", 502, "path/not_found/..")
-
-
-async def _not_folder(_tm, _endpoint, _body):
-    raise DropboxApiError("nf", 409, "path/not_folder/..")
+async def _list_500(_tm, endpoint, _body):
+    if endpoint == "/files/list_folder":
+        raise DropboxApiError("boom", 500)
+    raise AssertionError(f"unexpected endpoint {endpoint}")
 
 
 async def _under_file(_tm, endpoint, body):
@@ -94,12 +83,6 @@ async def _under_file(_tm, endpoint, body):
 @pytest.fixture
 def index():
     return RAMIndexCacheStore()
-
-
-@pytest.fixture
-def scratch():
-    # The throwaway store a fresh probe or the drift check stats through.
-    return RAMIndexCacheStore(scratch=True)
 
 
 @pytest.mark.asyncio
@@ -246,8 +229,7 @@ async def test_stat_entry_field_fallbacks(
     dropbox_accessor, entry, dropbox_id, size, modified, fingerprint
 ):
     # _stat_from_entry's fallbacks: server_modified→client_modified→"",
-    # id→path_display→name, no content_hash is no token (never the
-    # modified stamp, a different kind than a read records), and a
+    # id→path_display→name, no content_hash is no token, and a
     # non-int/absent size renders as None
     # (the unknown-size machinery, never a fabricated number).
     rpc = FakeDropboxRpc(metadata=entry)
@@ -260,17 +242,13 @@ async def test_stat_entry_field_fallbacks(
 
 
 @pytest.mark.asyncio
-async def test_stat_scratch_miss_asks_one_point_lookup(
-    dropbox_accessor, scratch
-):
-    # A fresh probe stats through a scratch store: one get_metadata, never a
-    # listing of the parent, whose size is the folder's.
-    rpc = FakeDropboxRpc(entries=[FILE_ENTRY], metadata=FILE_ENTRY)
+async def test_stat_populates_from_parent_listing(dropbox_accessor, index):
+    rpc = FakeDropboxRpc(entries=[FILE_ENTRY])
     with patch(RPC, new=rpc):
         out = await stat(
             dropbox_accessor,
             PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-            scratch,
+            index,
         )
     assert out.type == FileType.FILE
     assert out.name == "a.txt"
@@ -280,27 +258,8 @@ async def test_stat_scratch_miss_asks_one_point_lookup(
     assert out.fingerprint == "hash-a"
     assert out.extra["dropbox_id"] == "id:a"
     assert out.extra["resource_type"] == "dropbox/file"
-    assert rpc.list_requests == 0
-    assert rpc.metadata_paths == ["/a.txt"]
-
-
-@pytest.mark.asyncio
-async def test_stat_point_answer_in_another_case_is_enoent(
-    dropbox_accessor, scratch
-):
-    # get_metadata matches case-insensitively, where a listing's names are
-    # exact: a point answer naming the file in another case is not this
-    # path, as the listing would have said.
-    rpc = FakeDropboxRpc(metadata=FILE_ENTRY)
-    with patch(RPC, new=rpc):
-        with pytest.raises(FileNotFoundError) as excinfo:
-            await stat(
-                dropbox_accessor,
-                PathSpec(vfs_path="A.TXT", virtual="/A.TXT", directory="/"),
-                scratch,
-            )
-    assert str(excinfo.value) == "/A.TXT"
-    assert rpc.list_requests == 0
+    assert rpc.list_requests == 1
+    assert rpc.metadata_paths == []
 
 
 @pytest.mark.asyncio
@@ -313,7 +272,6 @@ async def test_stat_serves_index_hit_without_second_call(
     # the file and the folder came from the index.
     rpc = FakeDropboxRpc(entries=[FOLDER_ENTRY, FILE_ENTRY], metadata=None)
     with patch(RPC, new=rpc):
-        await readdir(dropbox_accessor, PathSpec.from_str_path("/"), index)
         file_out = await stat(
             dropbox_accessor,
             PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
@@ -328,15 +286,12 @@ async def test_stat_serves_index_hit_without_second_call(
     assert dir_out.type == FileType.DIRECTORY
     assert dir_out.extra["dropbox_id"] == "id:docs"
     assert rpc.list_requests == 1
-    assert rpc.metadata_paths == []
 
 
 @pytest.mark.asyncio
-async def test_stat_miss_in_a_cached_listing_is_enoent(
-    dropbox_accessor, index
-):
-    # A cached parent listing without the child answers ENOENT from the
-    # index, with no point lookup.
+async def test_stat_miss_after_populate_is_enoent(dropbox_accessor, index):
+    # The parent lists cleanly but does not contain the child: stat's own
+    # re-check-then-ENOENT, distinct from readdir's 409 mapping.
     other = {
         ".tag": "file",
         "id": "id:o",
@@ -346,7 +301,6 @@ async def test_stat_miss_in_a_cached_listing_is_enoent(
     }
     rpc = FakeDropboxRpc(entries=[other])
     with patch(RPC, new=rpc):
-        await readdir(dropbox_accessor, PathSpec.from_str_path("/"), index)
         with pytest.raises(FileNotFoundError) as excinfo:
             await stat(
                 dropbox_accessor,
@@ -357,14 +311,13 @@ async def test_stat_miss_in_a_cached_listing_is_enoent(
             )
     assert str(excinfo.value) == "/note.txt"
     assert rpc.list_requests == 1
-    assert rpc.metadata_paths == []
 
 
 @pytest.mark.asyncio
-async def test_stat_scratch_miss_under_mount_prefix(dropbox_accessor, scratch):
+async def test_stat_under_mount_prefix(dropbox_accessor, index):
     # Every other test runs on an unprefixed mount; this pins the prefix
-    # arithmetic (virtual_key and the Dropbox path asked for).
-    rpc = FakeDropboxRpc(metadata=FILE_ENTRY)
+    # arithmetic (virtual_key and the parent's vfs_path).
+    rpc = FakeDropboxRpc(entries=[FILE_ENTRY])
     with patch(RPC, new=rpc):
         out = await stat(
             dropbox_accessor,
@@ -373,20 +326,18 @@ async def test_stat_scratch_miss_under_mount_prefix(dropbox_accessor, scratch):
                 directory="/dropbox",
                 vfs_path=mount_key("/dropbox/a.txt", "/dropbox"),
             ),
-            scratch,
+            index,
         )
     assert out.type == FileType.FILE
     assert out.name == "a.txt"
     assert out.size == 5
-    assert rpc.metadata_paths == ["/a.txt"]
 
 
 @pytest.mark.asyncio
-async def test_stat_scratch_miss_under_a_missing_parent_names_the_child(
-    dropbox_accessor, scratch
-):
-    # The one lookup answers 409 because the parent is missing too; the
-    # ENOENT names the path asked for, not the parent.
+async def test_stat_failed_populate_is_enoent(dropbox_accessor, index):
+    # A genuinely missing parent (409 on the listing and on every ancestor
+    # probe) surfaces as ENOENT through readdir; stat swallows that and
+    # answers its own ENOENT naming the child, not the parent.
     with patch(RPC, new=_all_absent):
         with pytest.raises(FileNotFoundError) as excinfo:
             await stat(
@@ -396,62 +347,17 @@ async def test_stat_scratch_miss_under_a_missing_parent_names_the_child(
                     virtual="/ghost/missing.txt",
                     directory="/ghost",
                 ),
-                scratch,
+                index,
             )
     assert str(excinfo.value) == "/ghost/missing.txt"
 
 
 @pytest.mark.asyncio
-async def test_stat_scratch_409_that_is_not_a_miss_propagates(
-    dropbox_accessor, scratch
-):
-    # A restricted file exists: its 409 is no miss, so the fresh probe must
-    # not hear ENOENT and call it gone, dropping its overlay.
-    with patch(RPC, new=_restricted):
-        with pytest.raises(DropboxApiError) as excinfo:
-            await stat(
-                dropbox_accessor,
-                PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-                scratch,
-            )
-    assert excinfo.value.summary.startswith("path/restricted_content")
-
-
-@pytest.mark.asyncio
-async def test_stat_scratch_miss_needs_a_409(dropbox_accessor, scratch):
-    # Only a 409 carries Dropbox's verdict; a relay's 5xx whose body happens
-    # to read path/not_found is no evidence the file is gone.
-    with patch(RPC, new=_server_error_naming_a_miss):
-        with pytest.raises(DropboxApiError) as excinfo:
-            await stat(
-                dropbox_accessor,
-                PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-                scratch,
-            )
-    assert excinfo.value.status == 502
-
-
-@pytest.mark.asyncio
-async def test_stat_scratch_not_folder_is_a_miss(dropbox_accessor, scratch):
-    with patch(RPC, new=_not_folder):
-        with pytest.raises(FileNotFoundError):
-            await stat(
-                dropbox_accessor,
-                PathSpec(
-                    vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt"
-                ),
-                scratch,
-            )
-
-
-@pytest.mark.asyncio
-async def test_stat_scratch_lookup_server_error_propagates(
-    dropbox_accessor, scratch
-):
-    # A 5xx/429 from the point lookup is not absence: stat must let it
-    # surface rather than collapse it into a (destructively actionable)
-    # false ENOENT.
-    with patch(RPC, new=_meta_500):
+async def test_stat_populate_server_error_propagates(dropbox_accessor, index):
+    # A 5xx/429 while listing the parent is not absence: readdir re-raises
+    # it, and stat must let it surface rather than collapse it into a
+    # (destructively actionable) false ENOENT.
+    with patch(RPC, new=_list_500):
         with pytest.raises(DropboxApiError) as excinfo:
             await stat(
                 dropbox_accessor,
@@ -460,9 +366,24 @@ async def test_stat_scratch_lookup_server_error_propagates(
                     virtual="/ghost/missing.txt",
                     directory="/ghost",
                 ),
-                scratch,
+                index,
             )
     assert excinfo.value.status == 500
+
+
+@pytest.mark.asyncio
+async def test_stat_enotdir_from_populate_propagates(dropbox_accessor, index):
+    # A path under a file is ENOTDIR, not ENOENT: readdir's ancestor walk
+    # classifies it, and stat must let NotADirectoryError escape.
+    with patch(RPC, new=_under_file):
+        with pytest.raises(NotADirectoryError):
+            await stat(
+                dropbox_accessor,
+                PathSpec(
+                    vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt"
+                ),
+                index,
+            )
 
 
 @pytest.mark.asyncio
@@ -557,85 +478,56 @@ async def test_stat_size_matches_read_for_every_file(dropbox_accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_on_a_mount_index_lists_the_parent(dropbox_accessor, index):
-    # A mount's own index is not scratch: a cold miss lists the parent and
-    # keeps it, as before, so the next stat of it or a sibling is free.
+async def test_stat_through_a_check_store_asks_one_lookup(dropbox_accessor):
+    # A fresh check stats through a throwaway store: one get_metadata, not
+    # a listing of the parent into a store dropped right after.
     rpc = FakeDropboxRpc(entries=[FILE_ENTRY], metadata=FILE_ENTRY)
     with patch(RPC, new=rpc):
-        spec = PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/")
-        await stat(dropbox_accessor, spec, index)
-        await stat(dropbox_accessor, spec, index)
-    assert rpc.list_requests == 1
-    assert rpc.metadata_paths == []
+        out = await stat(
+            dropbox_accessor,
+            PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+            ListingCheckStore(),
+        )
+    assert out.fingerprint == "hash-a"
+    assert rpc.list_requests == 0
+    assert rpc.metadata_paths == ["/a.txt"]
 
 
 @pytest.mark.asyncio
-async def test_stat_failed_populate_is_enoent(dropbox_accessor, index):
-    # A genuinely missing parent (409 on the listing and on every ancestor
-    # probe) surfaces as ENOENT through readdir; stat swallows that and
-    # answers its own ENOENT naming the child, not the parent.
-    with patch(RPC, new=_all_absent):
-        with pytest.raises(FileNotFoundError) as excinfo:
-            await stat(
-                dropbox_accessor,
-                PathSpec(
-                    vfs_path="ghost/missing.txt",
-                    virtual="/ghost/missing.txt",
-                    directory="/ghost",
-                ),
-                index,
-            )
-    assert str(excinfo.value) == "/ghost/missing.txt"
-
-
-@pytest.mark.asyncio
-async def test_stat_populate_server_error_propagates(dropbox_accessor, index):
-    # A 5xx/429 while listing the parent is not absence: readdir re-raises
-    # it, and stat must let it surface rather than collapse it into a
-    # (destructively actionable) false ENOENT.
-    with patch(RPC, new=_list_500):
-        with pytest.raises(DropboxApiError) as excinfo:
-            await stat(
-                dropbox_accessor,
-                PathSpec(
-                    vfs_path="ghost/missing.txt",
-                    virtual="/ghost/missing.txt",
-                    directory="/ghost",
-                ),
-                index,
-            )
-    assert excinfo.value.status == 500
-
-
-@pytest.mark.asyncio
-async def test_stat_enotdir_from_populate_propagates(dropbox_accessor, index):
-    # A path under a file is ENOTDIR, not ENOENT: readdir's ancestor walk
-    # classifies it, and stat must let NotADirectoryError escape.
-    with patch(RPC, new=_under_file):
-        with pytest.raises(NotADirectoryError):
-            await stat(
-                dropbox_accessor,
-                PathSpec(
-                    vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt"
-                ),
-                index,
-            )
-
-
-@pytest.mark.asyncio
-async def test_stat_scratch_miss_is_one_lookup_even_under_a_file(
-    dropbox_accessor, scratch
+@pytest.mark.parametrize("check", [False, True], ids=["null", "check"])
+@pytest.mark.parametrize(
+    "status, summary, raised",
+    [
+        (409, "path/not_found/..", FileNotFoundError),
+        (409, "path/not_folder/..", FileNotFoundError),
+        (409, "path/restricted_content/..", DropboxApiError),
+        (502, "path/not_found/..", DropboxApiError),
+    ],
+    ids=["not-found", "not-folder", "restricted", "5xx"],
+)
+async def test_stat_from_api_reads_only_a_miss_as_enoent(
+    dropbox_accessor, check, status, summary, raised
 ):
-    # The probe's callers treat ENOENT and ENOTDIR alike, so a scratch miss
-    # asks nothing past the path itself, even when a parent is a file.
-    rpc = FakeDropboxRpc(metadata_by_path={"/a.txt": FILE_ENTRY})
+    # A restricted file exists, so a fresh probe must not hear ENOENT and
+    # drop its overlay; a 5xx body naming not_found is a relay's.
+    async def refuse(_tm, _endpoint, _body):
+        raise DropboxApiError("refused", status, summary)
+
+    with patch(RPC, new=refuse):
+        with pytest.raises(raised):
+            await stat(
+                dropbox_accessor,
+                PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+                ListingCheckStore() if check else NULL_INDEX,
+            )
+
+
+@pytest.mark.asyncio
+async def test_stat_from_api_answer_in_another_case_is_enoent(
+    dropbox_accessor,
+):
+    # get_metadata matches case-insensitively where a listing is exact.
+    rpc = FakeDropboxRpc(metadata=FILE_ENTRY)
     with patch(RPC, new=rpc):
         with pytest.raises(FileNotFoundError):
-            await stat(
-                dropbox_accessor,
-                PathSpec(
-                    vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt"
-                ),
-                scratch,
-            )
-    assert rpc.metadata_paths == ["/a.txt/x"]
+            await stat(dropbox_accessor, PathSpec.from_str_path("/A.TXT"))

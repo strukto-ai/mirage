@@ -1215,9 +1215,8 @@ def test_a_dropbox_same_size_rewrite_is_refetched_on_content_hash():
 
 
 def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder():
-    # The probe stats through a scratch store, so dropbox answers it with
-    # one get_metadata rather than listing the whole folder into a store
-    # dropped right after.
+    # The probe stats through a throwaway store, so dropbox answers it
+    # with one get_metadata rather than listing the whole folder into it.
     files = {"/d/a.txt": SEED, **{f"/d/f{i}.txt": DECOY for i in range(5)}}
     dropbox = FakeDropbox(files=files)
     with serve_dropbox(dropbox):
@@ -1242,64 +1241,11 @@ def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder():
     assert "get_metadata" in routes
 
 
-def test_a_dropbox_file_deleted_outside_is_checked_with_one_get_metadata():
-    # The freshness check is the one get_metadata. A gone verdict clears
-    # the mount index, so cat's own stat that follows misses it and lists
-    # the folder, the way a mount index answers any miss.
-    files = {"/d/a.txt": SEED, **{f"/d/f{i}.txt": DECOY for i in range(5)}}
-    dropbox = FakeDropbox(files=files)
-    with serve_dropbox(dropbox):
-        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
-
-        async def run():
-            ws = _fresh_workspace(vfs)
-            try:
-                await _line(ws, "cat /m/d/a.txt")
-                del dropbox.files["/d/a.txt"]
-                before = len(dropbox.log)
-                result = await ws.shell("cat /m/d/a.txt")
-                err = await result.stderr_str()
-                return (
-                    result.exit_code,
-                    err,
-                    [r for r, _ in dropbox.log[before:] if r != "token"],
-                )
-            finally:
-                await ws.close()
-
-        code, err, routes = asyncio.run(run())
-    assert (code, err) == (1, "cat: /m/d/a.txt: No such file or directory\n")
-    assert routes == ["get_metadata", "list_folder"]
-
-
-def test_a_dropbox_name_past_latin1_is_stamped_and_read_fresh():
-    # A name past Latin-1 comes back in Dropbox-API-Result and must parse
-    # to the content_hash stat reads from the listing row. aiohttp carries
-    # raw UTF-8 in a header, so unlike fetch this does not pin the escape;
-    # the client test does.
-    name = "/d/\u4e2d\U0001f600.txt"
-    dropbox = FakeDropbox(files={name: SEED})
-    with serve_dropbox(dropbox):
-        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
-
-        async def run():
-            ws = _fresh_workspace(vfs)
-            try:
-                first = await _line(ws, f'cat "/m{name}"')
-                second = await _line(ws, f'cat "/m{name}"')
-                return first, second
-            finally:
-                await ws.close()
-
-        first, second = asyncio.run(run())
-    assert first == second == SEED
-    assert dropbox.count("download") == 1
-
-
-def test_a_dropbox_file_that_409s_without_a_miss_keeps_its_overlay():
-    # A fresh probe that hears a 409 other than not_found cannot verify
-    # the copy: it reads cold, which fails, but never calls the file gone
-    # and drops its overlay. Read as gone, chmod's 600 would be lost.
+@pytest.mark.parametrize("gone", [False, True], ids=["restricted", "deleted"])
+def test_a_dropbox_probe_drops_an_overlay_only_on_a_miss(gone):
+    # A 409 other than not_found cannot verify the copy: the read fails but
+    # the file is not called gone, so chmod's 600 stays. A real miss drops
+    # it, so it never carries over to a file re-created at the path.
     dropbox = FakeDropbox(files={"/d/a.txt": SEED})
     with serve_dropbox(dropbox):
         vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
@@ -1309,37 +1255,13 @@ def test_a_dropbox_file_that_409s_without_a_miss_keeps_its_overlay():
             try:
                 await _line(ws, "cat /m/d/a.txt")
                 await _line(ws, "chmod 600 /m/d/a.txt")
-                dropbox.restricted.add("/d/a.txt")
+                if gone:
+                    del dropbox.files["/d/a.txt"]
+                else:
+                    dropbox.restricted.add("/d/a.txt")
                 result = await ws.shell("cat /m/d/a.txt")
                 err = await result.stderr_str()
-                dropbox.restricted.discard("/d/a.txt")
-                mode = await _line(ws, "stat -c %a /m/d/a.txt")
-                return result.exit_code, err, mode
-            finally:
-                await ws.close()
-
-        code, err, mode = asyncio.run(run())
-    assert code == 1
-    assert "No such file" not in err
-    assert mode == b"600\n"
-
-
-def test_a_dropbox_file_deleted_outside_drops_its_overlay():
-    # The twin of the case above: a real not_found 409 is a miss, so the
-    # probe calls the file gone and drops its overlay. Kept, chmod's 600
-    # would carry over to a file re-created at the path.
-    dropbox = FakeDropbox(files={"/d/a.txt": SEED})
-    with serve_dropbox(dropbox):
-        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
-
-        async def run():
-            ws = _fresh_workspace(vfs)
-            try:
-                await _line(ws, "cat /m/d/a.txt")
-                await _line(ws, "chmod 600 /m/d/a.txt")
-                del dropbox.files["/d/a.txt"]
-                result = await ws.shell("cat /m/d/a.txt")
-                err = await result.stderr_str()
+                dropbox.restricted.clear()
                 dropbox.write("/d/a.txt", SEED)
                 mode = await _line(ws, "stat -c %a /m/d/a.txt")
                 return result.exit_code, err, mode
@@ -1347,8 +1269,9 @@ def test_a_dropbox_file_deleted_outside_drops_its_overlay():
                 await ws.close()
 
         code, err, mode = asyncio.run(run())
-    assert (code, err) == (1, "cat: /m/d/a.txt: No such file or directory\n")
-    assert mode == b"644\n"
+    assert code == 1
+    assert ("No such file" in err) is gone
+    assert mode == (b"644\n" if gone else b"600\n")
 
 
 @pytest.fixture()

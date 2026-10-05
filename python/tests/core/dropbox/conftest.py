@@ -40,9 +40,6 @@ class FakeDropboxRpc:
     Args:
         entries (list[dict] | None): the folder's listing.
         metadata (dict | None): what ``/files/get_metadata`` answers.
-        metadata_by_path (dict[str, dict] | None): per-path answers to
-            ``/files/get_metadata``, a missing path a 409; overrides
-            ``metadata`` when given.
         move_errors (list[DropboxApiError | None] | None): one entry per
             ``/files/move_v2`` call; a ``DropboxApiError`` is raised.
     """
@@ -51,14 +48,10 @@ class FakeDropboxRpc:
         self,
         entries: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
-        metadata_by_path: dict[str, dict[str, Any]] | None = None,
         move_errors: list[DropboxApiError | None] | None = None,
     ) -> None:
         self.entries = list(entries or [])
         self.metadata = metadata
-        self.metadata_by_path = metadata_by_path
-        # Every path get_metadata was asked for, so a test can pin a point
-        # lookup against a listing.
         self.metadata_paths: list[str] = []
         self.move_errors = list(move_errors or [])
         # Every `limit` a caller asked for, so a test can pin that an
@@ -93,14 +86,9 @@ class FakeDropboxRpc:
             return self._page(self._cursors.pop(token), self._limits[token])
         if endpoint == "/files/get_metadata":
             self.metadata_paths.append(body["path"])
-            found = (
-                self.metadata
-                if self.metadata_by_path is None
-                else self.metadata_by_path.get(body["path"])
-            )
-            if found is None:
+            if self.metadata is None:
                 raise DropboxApiError("nf", 409, "path/not_found/...")
-            return found
+            return self.metadata
         if endpoint == "/files/delete_v2":
             self.deleted.append(body["path"])
             return {}

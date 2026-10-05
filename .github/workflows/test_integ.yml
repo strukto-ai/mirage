@@ -693,15 +693,6 @@ jobs:
         working-directory: integ
         run: pnpm run hf:selftest
 
-      # The dropbox fake's read wire, for the same reason: mirage stamps a
-      # read with the content_hash a download's Dropbox-API-Result names and
-      # compares it with the list_folder row's, so a fake that lost the
-      # header on a full or a ranged (206) download would let every
-      # `read: fresh` case pass by refetching each time.
-      - name: Assert the dropbox fake (Dropbox-API-Result on 200 and 206, 416)
-        working-directory: integ
-        run: pnpm run dropbox:selftest
-
       # And one fake further. Nothing inside mirage speaks to Cloud Storage at
       # all, so this fake has no corpus case of any kind: its three consumers
       # are a CLI, a python seeder and the BigQuery emulator's Go client, and

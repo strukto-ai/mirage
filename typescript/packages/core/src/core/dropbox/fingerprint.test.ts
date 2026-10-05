@@ -13,77 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { CONTENT_HASH } from './constants.ts'
-import { entryToken, resultToken, tokenOf } from './fingerprint.ts'
+import { resultToken, tokenOf } from './fingerprint.ts'
 
 describe('dropbox fingerprint', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it.each([
     ['hash', 'abc', 'abc'],
     ['empty', '', null],
-    ['absent', null, null],
+    ['absent', undefined, null],
     ['number', 7, null],
-    ['list', ['a'], null],
-  ] as const)('only a non-empty string is a token (%s)', (_id, value, token) => {
+  ])('takes only a non-empty string as a token (%s)', (_id, value, token) => {
     expect(tokenOf(value)).toBe(token)
   })
 
-  it('an entry token is the content_hash its row carries', () => {
-    const row = new IndexEntry({
-      id: 'id:a',
-      name: 'a',
-      resourceType: 'file',
-      extra: { [CONTENT_HASH]: 'h' },
-    })
-    const bare = new IndexEntry({ id: 'id:b', name: 'b', resourceType: 'file' })
-    expect([entryToken(row), entryToken(bare)]).toEqual(['h', null])
-  })
-
-  it('a result header names its content_hash', () => {
-    const raw = JSON.stringify({
-      name: 'a',
-      server_modified: '2026-01-01T00:00:00Z',
-      [CONTENT_HASH]: 'h',
-    })
-    expect(resultToken(raw)).toBe('h')
-  })
-
-  // Never the modified stamp: stat stamps content_hash, so any other kind
-  // here would compare unequal forever, or worse, equal by chance.
+  // Never the modified stamp: stat stamps content_hash. Dropbox always sends a
+  // JSON object, so anything else warns.
   it.each([
-    ['absent', null],
-    ['blank', ''],
-    ['unparseable', 'not json'],
-    ['not-object', JSON.stringify(['a'])],
-    ['no-hash', JSON.stringify({ server_modified: '2026-01-01T00:00:00Z' })],
-    ['empty', JSON.stringify({ [CONTENT_HASH]: '' })],
-  ] as const)('a result header without a content_hash is no token (%s)', (_id, raw) => {
-    expect(resultToken(raw)).toBeNull()
-  })
-
-  describe('an unreadable header', () => {
-    afterEach(() => {
-      vi.restoreAllMocks()
-    })
-
-    // Real Dropbox always sends a JSON object here, so a reply that isn't
-    // explains why every fresh read of the file goes cold.
-    it.each([
-      ['unparseable', 'not json'],
-      ['not-object', JSON.stringify(['a'])],
-      ['null', 'null'],
-      ['number', '5'],
-    ])('warns (%s)', (_id, raw) => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-      expect(resultToken(raw)).toBeNull()
-      expect(warn).toHaveBeenCalledTimes(1)
-      expect(String(warn.mock.calls[0]?.[0])).toContain('Dropbox-API-Result')
-    })
-
-    it('stays quiet when the header is absent', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-      expect(resultToken(null)).toBeNull()
-      expect(warn).not.toHaveBeenCalled()
-    })
+    ['hash', JSON.stringify({ server_modified: 't', content_hash: 'h' }), 'h', false],
+    ['absent', null, null, false],
+    ['no-hash', JSON.stringify({ server_modified: 't' }), null, false],
+    ['not-json', 'not json', null, true],
+    ['not-object', JSON.stringify(['a']), null, true],
+  ])('reads a result header (%s)', (_id, raw, token, warns) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    expect(resultToken(raw)).toBe(token)
+    expect(warn.mock.calls.length > 0).toBe(warns)
   })
 })

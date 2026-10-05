@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
-from mirage.core.dropbox.read import read, stream
+from mirage.core.dropbox.read import read, read_stream
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -190,6 +190,10 @@ async def test_read_missing_raises_enoent(index):
 
 
 DATA = b"0123456789"
+# A listing that lags the bytes: a read's token must come from its own
+# download, never from the row that resolved the entry.
+LAGGING = {"/a.txt": "stale"}
+A = PathSpec(virtual="/a.txt", directory="/", vfs_path="a.txt")
 
 
 def served_accessor(url: str) -> DropboxAccessor:
@@ -209,20 +213,13 @@ def served_accessor(url: str) -> DropboxAccessor:
 async def test_every_byte_read_records_the_content_hash(
     indexed, offset, size, expected
 ):
-    # A ranged read is answered 206 and still carries Dropbox-API-Result,
-    # so every read stamps the token stat answers, at no extra request.
-    with serve(FakeDropbox(files={"/a.txt": DATA})) as dropbox:
-        accessor = served_accessor(dropbox.url)
+    # A ranged read is answered 206 and still carries Dropbox-API-Result.
+    with serve(FakeDropbox(files={"/a.txt": DATA}, listed=LAGGING)) as fake:
+        accessor = served_accessor(fake.url)
         args = (RAMIndexCacheStore(),) if indexed else ()
         scope = RecordingScope()
         try:
-            data = await read(
-                accessor,
-                PathSpec(virtual="/a.txt", directory="/", vfs_path="a.txt"),
-                *args,
-                offset=offset,
-                size=size,
-            )
+            data = await read(accessor, A, *args, offset=offset, size=size)
         finally:
             scope.close()
             await accessor.close()
@@ -233,124 +230,40 @@ async def test_every_byte_read_records_the_content_hash(
 
 
 @pytest.mark.asyncio
-async def test_a_stream_records_the_content_hash():
-    with serve(FakeDropbox(files={"/a.txt": DATA})) as dropbox:
-        accessor = served_accessor(dropbox.url)
-        scope = RecordingScope()
+@pytest.mark.parametrize("recorded", [True, False], ids=["line", "bare"])
+async def test_a_stream_records_the_content_hash(recorded):
+    # Outside a shell line (FUSE, a programmatic read) there is no
+    # recorder, and the stream must still stream.
+    with serve(FakeDropbox(files={"/a.txt": DATA}, listed=LAGGING)) as fake:
+        accessor = served_accessor(fake.url)
+        scope = RecordingScope() if recorded else None
         try:
             chunks = [
-                c
-                async for c in stream(
-                    accessor,
-                    PathSpec(
-                        virtual="/a.txt", directory="/", vfs_path="a.txt"
-                    ),
-                    RAMIndexCacheStore(),
-                )
+                c async for c in read_stream(accessor, A, RAMIndexCacheStore())
             ]
         finally:
-            scope.close()
+            if scope is not None:
+                scope.close()
             await accessor.close()
     assert b"".join(chunks) == DATA
-    assert [(r.op, r.bytes, r.fingerprint) for r in scope.records] == [
-        ("read", len(DATA), content_hash(DATA))
-    ]
-
-
-@pytest.mark.asyncio
-async def test_a_stream_with_no_recorder_bound_still_streams():
-    # Outside a shell line (FUSE, a programmatic read) record_stream
-    # answers None; the stamp and the byte count must then do nothing.
-    with serve(FakeDropbox(files={"/a.txt": DATA})) as dropbox:
-        accessor = served_accessor(dropbox.url)
-        try:
-            chunks = [
-                c
-                async for c in stream(
-                    accessor,
-                    PathSpec(
-                        virtual="/a.txt", directory="/", vfs_path="a.txt"
-                    ),
-                    RAMIndexCacheStore(),
-                )
-            ]
-        finally:
-            await accessor.close()
-    assert b"".join(chunks) == DATA
+    if scope is not None:
+        assert [(r.op, r.bytes, r.fingerprint) for r in scope.records] == [
+            ("read", len(DATA), content_hash(DATA))
+        ]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "offset, size", [(0, None), (2, 3)], ids=["full", "ranged"]
+    "status, raised",
+    [(409, FileNotFoundError), (500, DropboxApiError)],
+    ids=["missing", "server-error"],
 )
-async def test_a_read_stamps_the_download_hash_not_the_listing_rows(
-    offset, size
-):
-    # The listing that resolved the entry may lag the bytes; the token
-    # must describe the bytes, so it comes from the download's own
-    # Dropbox-API-Result.
-    fake = FakeDropbox(files={"/a.txt": DATA}, listed={"/a.txt": "stale"})
-    with serve(fake) as dropbox:
-        accessor = served_accessor(dropbox.url)
-        scope = RecordingScope()
-        try:
-            await read(
-                accessor,
-                PathSpec(virtual="/a.txt", directory="/", vfs_path="a.txt"),
-                RAMIndexCacheStore(),
-                offset=offset,
-                size=size,
-            )
-        finally:
-            scope.close()
-            await accessor.close()
-    assert [r.fingerprint for r in scope.records] == [content_hash(DATA)]
-
-
-@pytest.mark.asyncio
-async def test_a_stream_stamps_the_download_hash_not_the_listing_rows():
-    fake = FakeDropbox(files={"/a.txt": DATA}, listed={"/a.txt": "stale"})
-    with serve(fake) as dropbox:
-        accessor = served_accessor(dropbox.url)
-        scope = RecordingScope()
-        try:
-            async for _ in stream(
-                accessor,
-                PathSpec(virtual="/a.txt", directory="/", vfs_path="a.txt"),
-                RAMIndexCacheStore(),
-            ):
-                pass
-        finally:
-            scope.close()
-            await accessor.close()
-    assert [r.fingerprint for r in scope.records] == [content_hash(DATA)]
-
-
-@pytest.mark.asyncio
-async def test_an_index_less_read_of_a_missing_path_is_enoent():
-    # The ops factory's emulated truncate reads with no index; the API's
-    # 409 for a missing path must read as ENOENT, not a raw API error.
-    with serve(FakeDropbox(files={})) as dropbox:
-        accessor = served_accessor(dropbox.url)
-        try:
-            with pytest.raises(FileNotFoundError):
-                await read(
-                    accessor,
-                    PathSpec(virtual="/nope", directory="/", vfs_path="nope"),
-                )
-        finally:
-            await accessor.close()
-
-
-@pytest.mark.asyncio
-async def test_an_index_less_server_error_is_not_absence():
+async def test_an_index_less_read_maps_only_a_409_to_enoent(status, raised):
+    # The ops factory's emulated truncate reads with no index.
     with patch(
         "mirage.core.dropbox.read.dropbox_download",
         new_callable=AsyncMock,
-        side_effect=DropboxApiError("boom", 500),
+        side_effect=DropboxApiError("refused", status),
     ):
-        with pytest.raises(DropboxApiError):
-            await read(
-                make_accessor(),
-                PathSpec(virtual="/a.txt", directory="/", vfs_path="a.txt"),
-            )
+        with pytest.raises(raised):
+            await read(make_accessor(), A)

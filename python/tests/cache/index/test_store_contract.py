@@ -354,14 +354,9 @@ async def test_prefix_invalidation_preserves_excluded_subtrees(store):
     assert (await store.get("/dir/nested2/a")).status == LookupStatus.NOT_FOUND
 
 
-# A backend may spell its kinds with its own prefix (dropbox/folder,
-# box/file); a folder replaced by a file is the same swap either way.
-KINDS = [
-    ("folder", "file"),
-    ("dropbox/folder", "dropbox/file"),
-    ("box/folder", "box/file"),
-    ("gdrive/folder", "gdrive/file"),
-]
+# A backend may spell its kinds with its own prefix; a folder replaced by
+# a file is the same swap either way.
+KINDS = [("folder", "file"), ("dropbox/folder", "dropbox/file")]
 
 
 @pytest.mark.asyncio

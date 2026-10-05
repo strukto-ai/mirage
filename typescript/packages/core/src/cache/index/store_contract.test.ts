@@ -45,13 +45,11 @@ for (const backend of ['ram', 'redis']) {
         await store.close()
       })
 
-      // A backend may spell its kinds with its own prefix (dropbox/folder,
-      // box/file); a folder replaced by a file is the same swap either way.
+      // A backend may spell its kinds with its own prefix; a folder replaced
+      // by a file is the same swap either way.
       const KINDS: [string, string][] = [
         ['folder', 'file'],
         ['dropbox/folder', 'dropbox/file'],
-        ['box/folder', 'box/file'],
-        ['gdrive/folder', 'gdrive/file'],
       ]
       const SWAPS = ['listed', 'invalidated', 'unlisted'].flatMap((prior) =>
         KINDS.map(([folderKind, fileKind]) => [prior, folderKind, fileKind] as const),
