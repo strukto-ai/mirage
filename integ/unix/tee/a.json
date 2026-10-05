@@ -95,6 +95,38 @@
       "flags": [
         "a"
       ]
+    },
+    {
+      "id": "tee_a_fed_by_a_reader_of_the_file",
+      "seq": 601056,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee7 && printf 'a\\nb\\n' > /data/ptee7/t.txt && x=$(awk 1 /data/ptee7/t.txt | tee -a /data/ptee7/t.txt) && cat /data/ptee7/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\na\nb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "a"
+      ]
     }
   ]
 }

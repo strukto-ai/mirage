@@ -82,9 +82,13 @@ describe('cache population via applyIo', () => {
     expect(await cache.get('/f.txt')).toBeNull()
   })
 
-  it('leaves a draining read to its drain', async () => {
-    // The outer line of an `eval` gets the read its inner line drains. Mirrors
-    // Python's test_apply_io_leaves_a_draining_read_to_its_drain.
+  it.each([
+    [{}, 'abc'],
+    [{ '/f': ENC.encode('z') }, null],
+  ])('leaves a read to its live drain (writes %j)', async (writes, cached) => {
+    // The outer line of an `eval` gets the read its inner line drains; a write
+    // there drops the drain, and the read is closed instead. Mirrors Python's
+    // test_apply_io_leaves_a_read_to_its_live_drain.
     async function* source(): AsyncGenerator<Uint8Array> {
       for (const chunk of ['a', 'b', 'c']) {
         await sleep(1)
@@ -94,11 +98,11 @@ describe('cache population via applyIo', () => {
     const cache = new RAMFileCacheStore()
     const stream = new CachableAsyncIterator(source())
     expect(DEC.decode((await stream.next()).value as Uint8Array)).toBe('a')
-    const io = new IOResult({ reads: { '/f': stream }, cache: ['/f'] })
-    await applyIo(cache, io)
-    await applyIo(cache, io)
+    await applyIo(cache, new IOResult({ reads: { '/f': stream }, cache: ['/f'] }))
+    await applyIo(cache, new IOResult({ reads: { '/f': stream }, writes, cache: ['/f'] }))
     await Promise.all([...cache.drainTasks.values()])
-    expect(DEC.decode((await cache.get('/f')) ?? undefined)).toBe('abc')
+    const entry = await cache.get('/f')
+    expect([entry === null ? null : DEC.decode(entry), stream.exhausted]).toEqual([cached, true])
   })
 
   it('stores all paths in the cache list', async () => {

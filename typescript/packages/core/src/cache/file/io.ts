@@ -134,8 +134,8 @@ async function setCachedLocked(
   await cache.set(path, data, { fingerprint, ttl })
 }
 
-// Reads a background drain owns; a nested line hands its outer line them too.
-const draining = new WeakSet<CachableAsyncIterator>()
+// The drain each read went to; a nested line hands its outer line them too.
+const draining = new WeakMap<CachableAsyncIterator, Promise<void>>()
 
 export async function applyIo(
   cache: FileCache,
@@ -167,7 +167,6 @@ export async function applyIo(
       } else {
         const tasks = cache.drainTasks
         if (tasks !== undefined && !tasks.has(path) && !(await cache.exists(path))) {
-          draining.add(source)
           const task: Promise<void> = backgroundDrain(
             cache,
             path,
@@ -179,6 +178,7 @@ export async function applyIo(
             records,
           )
           tasks.set(path, task)
+          draining.set(source, task)
           void task.finally(() => {
             if (tasks.get(path) === task) tasks.delete(path)
           })
@@ -195,9 +195,10 @@ export async function applyIo(
     await cache.remove(path)
   }
   // An unfinished read no drain owns is closed; unmount waits on it.
-  for (const source of Object.values(io.reads)) {
-    if (source instanceof CachableAsyncIterator && !source.exhausted && !draining.has(source))
-      await source.discard()
+  for (const [path, source] of Object.entries(io.reads)) {
+    if (!(source instanceof CachableAsyncIterator) || source.exhausted) continue
+    const owner = draining.get(source)
+    if (owner === undefined || cache.drainTasks?.get(path) !== owner) await source.discard()
   }
 }
 
@@ -235,7 +236,5 @@ async function backgroundDrain(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`background drain failed for ${path}: ${msg}`)
-  } finally {
-    draining.delete(it)
   }
 }

@@ -96,8 +96,12 @@ async def test_apply_io_drops_a_path_read_and_written(cache):
 
 
 @pytest.mark.asyncio
-async def test_apply_io_leaves_a_draining_read_to_its_drain(cache):
-    """The outer line of an `eval` gets the read its inner line drains."""
+@pytest.mark.parametrize(
+    ("writes", "cached"), [({}, b"abc"), ({"/f": b"z"}, None)]
+)
+async def test_apply_io_leaves_a_read_to_its_live_drain(cache, writes, cached):
+    """The outer line of an `eval` gets the read its inner line drains; a
+    write there cancels the drain, and the read is closed instead."""
 
     async def source():
         for chunk in (b"a", b"b", b"c"):
@@ -106,11 +110,13 @@ async def test_apply_io_leaves_a_draining_read_to_its_drain(cache):
 
     stream = CachableAsyncIterator(source())
     assert await stream.__anext__() == b"a"
-    io = IOResult(reads={"/f": stream}, cache=["/f"])
-    await cache_io.apply_io(cache, io)
-    await cache_io.apply_io(cache, io)
+    await cache_io.apply_io(
+        cache, IOResult(reads={"/f": stream}, cache=["/f"])
+    )
+    outer = IOResult(reads={"/f": stream}, writes=writes, cache=["/f"])
+    await cache_io.apply_io(cache, outer)
     await asyncio.gather(*list(cache._drain_tasks.values()))
-    assert await cache.get("/f") == b"abc"
+    assert (await cache.get("/f"), stream.exhausted) == (cached, True)
 
 
 @pytest.mark.asyncio
