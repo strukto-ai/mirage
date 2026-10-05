@@ -461,3 +461,42 @@ describe('a whole write after a read', () => {
     },
   )
 })
+
+describe('a read given up on', () => {
+  it.each([
+    [true, "cat /data/big | head -c 1; printf 'z\\n' >> /data/big"],
+    [false, 'cat /data/big | head -c 1'],
+  ])(
+    'leaves the mount free to unmount (caching %s): %s',
+    async (caching, line) => {
+      // A read the line stopped short of the end holds its source until it is
+      // closed, and unmount waits for every stream of the mount. Mirrors
+      // Python's test_a_read_given_up_on_leaves_the_mount_free_to_unmount.
+      const ram = new RAMVFS()
+      ;(ram as unknown as { cachesReads: boolean }).cachesReads = caching
+      const ws = new Workspace(
+        { '/data': ram },
+        {
+          mode: MountMode.WRITE,
+          shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+        },
+      )
+      try {
+        await ws.shell('seq 1 200000 > /data/big')
+        await ws.shell(line)
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const outcome = await Promise.race([
+          ws.unmount('/data').then(() => 'unmounted'),
+          new Promise<string>((resolve) => {
+            timer = setTimeout(() => { resolve('still busy'); }, 10000)
+          }),
+        ])
+        clearTimeout(timer)
+        expect(outcome).toBe('unmounted')
+      } finally {
+        await ws.close()
+      }
+    },
+    20000,
+  )
+})

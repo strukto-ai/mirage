@@ -144,6 +144,7 @@ export async function applyIo(
   // the write, and the write may be an append or a patch.
   const kept = io.cache.filter((p) => !(p in io.reads) || !(p in io.writes))
   const cacheSet = new Set(kept)
+  const draining = new Set<CachableAsyncIterator>()
   for (const path of kept) {
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
     // The token has to describe the bytes actually stored, so the lookup
@@ -179,6 +180,7 @@ export async function applyIo(
           void task.finally(() => {
             if (tasks.get(path) === task) tasks.delete(path)
           })
+          draining.add(source)
         }
       }
     } else {
@@ -190,6 +192,13 @@ export async function applyIo(
     if (cacheSet.has(path)) continue
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
     await cache.remove(path)
+  }
+  // A read left unfinished that no drain took over (its path is not cached,
+  // or is cached already) is closed here: its source holds the mount, and
+  // unmount waits for it. Mirrors Python's apply_io.
+  for (const source of Object.values(io.reads)) {
+    if (source instanceof CachableAsyncIterator && !source.exhausted && !draining.has(source))
+      await source.discard()
   }
 }
 

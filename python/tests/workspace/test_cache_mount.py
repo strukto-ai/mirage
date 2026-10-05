@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.commands.config import command
@@ -262,3 +264,25 @@ async def test_a_whole_write_after_a_read_stays_cached(line):
     cached = await ws.cache.get("/data/f")
     await ws.close()
     assert cached == b"a\nb\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("caching", "line"),
+    [
+        (True, "cat /data/big | head -c 1; printf 'z\\n' >> /data/big"),
+        (False, "cat /data/big | head -c 1"),
+    ],
+)
+async def test_a_read_given_up_on_leaves_the_mount_free_to_unmount(
+    caching, line
+):
+    """A read the line stopped short of the end holds its source until it
+    is closed, and unmount waits for every stream of the mount."""
+    ram = RAMVFS()
+    ram.caches_reads = caching
+    ws = Workspace({"/data": ram}, mode=MountMode.WRITE)
+    await ws.shell("seq 1 200000 > /data/big")
+    await (await ws.shell(line)).materialize_stdout()
+    await asyncio.wait_for(ws.unmount("/data"), 10)
+    await ws.close()

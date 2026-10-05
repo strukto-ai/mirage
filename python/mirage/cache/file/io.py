@@ -175,6 +175,7 @@ async def apply_io(
     # predates the write, and the write may be an append or a patch.
     kept = [p for p in io.cache if p not in io.reads or p not in io.writes]
     cache_set = set(kept)
+    draining: set[int] = set()
     for path in kept:
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
@@ -222,12 +223,23 @@ async def apply_io(
                     task.add_done_callback(
                         partial(_drop_drain_task, cache, path)
                     )
+                    draining.add(id(data))
     for path in io.writes:
         if path in cache_set:
             continue
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
         await cache.remove(path)
+    # A read left unfinished that no drain took over (its path is not
+    # cached, or is cached already) is closed here: its source holds the
+    # mount, and unmount waits for it.
+    for data in io.reads.values():
+        if (
+            isinstance(data, CachableAsyncIterator)
+            and not data.exhausted
+            and id(data) not in draining
+        ):
+            await data.discard()
 
 
 async def _background_drain(

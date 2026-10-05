@@ -82,6 +82,37 @@ describe('cache population via applyIo', () => {
     expect(await cache.get('/f.txt')).toBeNull()
   })
 
+  it.each([true, false])(
+    'closes an unfinished read it does not drain (cacheable %s)',
+    async (cacheable) => {
+      // `cat f | head -c 1; printf z >> f` leaves cat's read unfinished, as
+      // does any read a mount without a cache gives up on. No drain takes it
+      // over, so applyIo closes it; its source holds the mount. Mirrors
+      // Python's test_apply_io_closes_an_unfinished_read_it_does_not_drain.
+      const closed: boolean[] = []
+      async function* source(): AsyncGenerator<Uint8Array> {
+        try {
+          await Promise.resolve()
+          yield ENC.encode('a')
+          yield ENC.encode('b')
+        } finally {
+          closed.push(true)
+        }
+      }
+      const cache = new RAMFileCacheStore()
+      const stream = new CachableAsyncIterator(source())
+      expect(DEC.decode((await stream.next()).value as Uint8Array)).toBe('a')
+      const io = new IOResult({
+        reads: { '/f': stream },
+        writes: cacheable ? { '/f': ENC.encode('z') } : {},
+        cache: ['/f'],
+      })
+      await applyIo(cache, io, () => ({ cacheable, ttl: 0 }))
+      expect(closed).toEqual([true])
+      expect(await cache.get('/f')).toBeNull()
+    },
+  )
+
   it('stores all paths in the cache list', async () => {
     const cache = new RAMFileCacheStore()
     const io = new IOResult({
