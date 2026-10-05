@@ -58,7 +58,7 @@ async function put<A extends Accessor, C>(
 
 /** Build the whole-object write over one driver. */
 export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): WriteFn<A> {
-  return async function writeBytes(accessor, path, data) {
+  return async function write(accessor, path, data) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)

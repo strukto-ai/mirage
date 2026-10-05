@@ -45,6 +45,34 @@ async def test_cat_number_lines_chunked_one_byte_at_a_time():
 
 
 @pytest.mark.asyncio
+async def test_cat_generic_without_display_flags_streams_each_chunk():
+    """With no display flag cat passes chunks through as they come: the
+    first is handed out before the source is asked for the next."""
+    pulled: list[bytes] = []
+
+    async def stat(p: PathSpec) -> FileStat:
+        return FileStat(name=p.virtual, type=FileType.FILE)
+
+    async def read(p: PathSpec):
+        for chunk in (b"hel", b"lo\nwo", b"rld\n"):
+            pulled.append(chunk)
+            yield chunk
+
+    out, _ = await cat_generic(
+        [PathSpec.from_str_path("/a.txt")],
+        [],
+        CommandOpts(),
+        stat,
+        read,
+        local=False,
+    )
+    stream = aiter(out)
+    assert await anext(stream) == b"hel"
+    assert pulled == [b"hel"]
+    assert b"".join([chunk async for chunk in stream]) == b"lo\nworld\n"
+
+
+@pytest.mark.asyncio
 async def test_cat_generic_reports_a_refused_read_and_goes_on():
     """A table past its read cap stats fine and refuses the read; GNU cat
     reports the operand and prints the next one."""
