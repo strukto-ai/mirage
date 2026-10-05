@@ -24,7 +24,9 @@ from mirage.commands.builtin.generic.crossmount.find import (
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.io import IOResult
+from mirage.ops.registry import op
 from mirage.types import MountMode, PathSpec
+from mirage.utils.errors import eacces
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -43,6 +45,16 @@ def _rows_from_its_own_find(rows: bool = True):
         return body, IOResult(matched_runs=[found] if rows else None)
 
     return find
+
+
+@command("find", vfs="ram", spec=SPECS["find"])
+async def _refused(accessor, paths, texts, opts):
+    raise eacces(paths[0])
+
+
+@op("readdir", vfs="ram")
+async def _unlisted(accessor, path, **kwargs):
+    raise eacces(path)
 
 
 async def _workspace(*fns) -> Workspace:
@@ -122,5 +134,23 @@ async def test_a_find_without_rows_keeps_the_one_walk():
     try:
         result = await ws.shell("find /a -type f")
         assert await result.materialize_stdout() == b"/a/d/f\n/a/n/g\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fns,expected",
+    [([_refused], b"/a/n/own\n"), ([_refused, _unlisted], b"")],
+)
+async def test_a_mount_below_a_failed_part_counts_where_the_walk_reaches(
+    fns, expected
+):
+    ws = await _workspace(_rows_from_its_own_find())
+    ws.mount("/a").register_fns(fns)
+    try:
+        result = await ws.shell("find /a")
+        assert await result.materialize_stdout() == expected
+        assert result.exit_code == 1
     finally:
         await ws.close()

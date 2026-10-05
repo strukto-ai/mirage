@@ -19,6 +19,7 @@ import pytest
 from mirage.commands.builtin.generic.crossmount.scopes import (
     mount_starts,
     owned_scopes,
+    reached,
 )
 from mirage.ops.types import MountView, NamespaceView
 from mirage.types import FileStat, FileType, PathSpec
@@ -103,3 +104,25 @@ def test_mount_starts_are_the_operand_then_each_mount_below_it():
     refused = replace(operand, walk_error="ENOENT")
     assert mount_starts(refused, _ns()) == [refused]
     assert mount_starts(operand, None) == [operand]
+
+
+@pytest.mark.asyncio
+async def test_a_start_below_a_failed_part_counts_only_where_it_lists():
+    paths = [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/a/d")]
+    starts = [
+        (0, paths[0]),
+        (0, PathSpec.from_str_path("/a/m")),
+        (0, PathSpec.from_str_path("/a/d/g")),
+        (1, paths[1]),
+    ]
+    dispatch, listed = _dispatcher(refused="/a/d")
+    assert await reached(paths, starts, [False] * 4, dispatch) == [True] * 4
+    assert listed == []
+    failed = [True, False, False, True]
+    assert await reached(paths, starts, failed, dispatch) == [
+        True,
+        True,
+        False,
+        True,
+    ]
+    assert listed == ["/a"]

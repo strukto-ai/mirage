@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import AsyncIterator, Callable
 from typing import cast
 
@@ -22,6 +23,8 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS
 from mirage.utils.path import respell_one
+
+logger = logging.getLogger(__name__)
 
 
 async def owned_scopes(
@@ -103,3 +106,62 @@ def mount_starts(path: PathSpec, ns: NamespaceView | None) -> list[PathSpec]:
         )
         for root in ns.mounts.visible_descendants(path.virtual)
     ]
+
+
+async def reached(
+    paths: list[PathSpec],
+    starts: list[tuple[int, PathSpec]],
+    failed: list[bool],
+    dispatch: DispatchFn,
+) -> list[bool]:
+    """Which start points a walk from their operand reaches.
+
+    A walk that cannot read a directory never sees what lies inside it,
+    mounts included. A start below a part whose run failed therefore
+    counts only when every directory from that part down to it lists
+    through the dispatcher; every other start counts as it is.
+
+    Args:
+        paths (list[PathSpec]): Operands in command-line order.
+        starts (list[tuple[int, PathSpec]]): Each start point, with the
+            index of its operand.
+        failed (list[bool]): Whether each start point's run failed.
+        dispatch (DispatchFn): Workspace operations, for the listings.
+    """
+    broken = {
+        (index, start.virtual.rstrip("/") or "/")
+        for (index, start), bad in zip(starts, failed)
+        if bad
+    }
+    listed: dict[str, bool] = {}
+
+    async def lists(virtual: str) -> bool:
+        if virtual not in listed:
+            try:
+                await dispatch("readdir", PathSpec.from_str_path(virtual))
+            except Exception:
+                logger.debug("cannot list %s", virtual, exc_info=True)
+                listed[virtual] = False
+            else:
+                listed[virtual] = True
+        return listed[virtual]
+
+    found: list[bool] = []
+    for index, start in starts:
+        base = paths[index].virtual.rstrip("/")
+        parts = start.virtual[len(base) :].strip("/").split("/")[:-1]
+        trail = [base or "/"] + [
+            base + "/" + "/".join(parts[:end])
+            for end in range(1, len(parts) + 1)
+        ]
+        hit = next(
+            (i for i, d in enumerate(trail) if (index, d) in broken), None
+        )
+        reach = True
+        if start is not paths[index] and hit is not None:
+            for virtual in trail[hit:]:
+                reach = await lists(virtual)
+                if not reach:
+                    break
+        found.append(reach)
+    return found

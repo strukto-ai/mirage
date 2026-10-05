@@ -18,6 +18,7 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { isFsError } from '../../../../utils/errors.ts'
 import { respellOne } from '../../../../utils/path.ts'
+import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import { isStdin } from '../../utils/stream.ts'
 
 /** Lazily partition an operand into maximal scopes with one owner.
@@ -85,4 +86,56 @@ export function mountStarts(path: PathSpec, ns: NamespaceView | undefined): Path
         }),
     ),
   ]
+}
+
+/** Which start points a walk from their operand reaches.
+ * A walk that cannot read a directory never sees what lies inside it,
+ * mounts included. A start below a part whose run failed therefore counts
+ * only when every directory from that part down to it lists through the
+ * dispatcher; every other start counts as it is. */
+export async function reached(
+  paths: readonly PathSpec[],
+  starts: readonly (readonly [number, PathSpec])[],
+  failed: readonly boolean[],
+  dispatch: DispatchFn,
+): Promise<boolean[]> {
+  const key = (index: number, virtual: string): string =>
+    `${String(index)}\0${rstripSlash(virtual) || '/'}`
+  const broken = new Set(
+    starts.filter((_, i) => failed[i] === true).map(([index, start]) => key(index, start.virtual)),
+  )
+  const listed = new Map<string, boolean>()
+  const lists = async (virtual: string): Promise<boolean> => {
+    let known = listed.get(virtual)
+    if (known === undefined) {
+      try {
+        await dispatch('readdir', PathSpec.fromStrPath(virtual))
+        known = true
+      } catch {
+        known = false
+      }
+      listed.set(virtual, known)
+    }
+    return known
+  }
+  const found: boolean[] = []
+  for (const [index, start] of starts) {
+    const path = paths[index]
+    const base = rstripSlash(path?.virtual ?? '')
+    const parts = stripSlash(start.virtual.slice(base.length)).split('/').slice(0, -1)
+    const trail = [
+      base || '/',
+      ...parts.map((_, end) => `${base}/${parts.slice(0, end + 1).join('/')}`),
+    ]
+    const hit = trail.findIndex((d) => broken.has(key(index, d)))
+    let reach = true
+    if (start !== path && hit >= 0) {
+      for (const virtual of trail.slice(hit)) {
+        reach = await lists(virtual)
+        if (!reach) break
+      }
+    }
+    found.push(reach)
+  }
+  return found
 }

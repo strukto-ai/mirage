@@ -20,7 +20,7 @@ import {
 } from '../../constants.ts'
 import { parseFindExpression } from '../../find_parse.ts'
 import { DISPATCH_BUILDERS } from './constants.ts'
-import { mountStarts } from './scopes.ts'
+import { mountStarts, reached } from './scopes.ts'
 import type { CrossResult, RunSingle } from './types.ts'
 import { runDispatch } from '../../generic_bind/dispatch.ts'
 import { specOf } from '../../../spec/builtins.ts'
@@ -143,9 +143,10 @@ export function joints(path: PathSpec, starts: readonly PathSpec[]): PathSpec[] 
  * parent's shadowed keys stay out), and the rows merge in the walk's path
  * order, so the actions still run once over every mount's `matchedRuns`; a
  * mount whose find fails adds its diagnostic and status, as GNU's walk past
- * an unreadable directory does. An expression that looks across a boundary
- * (`WALK_WIDE`, `-L`), or a find that succeeds without structured rows, keeps
- * the one dispatcher walk.
+ * an unreadable directory does, and the mounts below it count only where the
+ * walk could still reach them (`reached`). An expression that looks across a
+ * boundary (`WALK_WIDE`, `-L`), or a find that succeeds without structured
+ * rows, keeps the one dispatcher walk.
  */
 export async function runFind(
   paths: readonly PathSpec[],
@@ -225,10 +226,19 @@ export async function runFind(
     (_, index) =>
       new Set(plan.filter((s) => s.index === index && s.alone).map((s) => s.start.virtual)),
   )
+  const kept = await reached(
+    paths,
+    plan.map((step) => [step.index, step.start] as const),
+    ios.map((io) => io.exitCode !== 0),
+    dispatch,
+  )
+  const done = plan.flatMap((step, i) => {
+    const io = ios[i]
+    return kept[i] === true && io !== undefined ? [{ step, io }] : []
+  })
   const runs: PathSpec[][] = paths.map(() => [])
   let merged = new IOResult()
-  for (const [i, step] of plan.entries()) {
-    const io = ios[i] ?? new IOResult()
+  for (const { step, io } of done) {
     const owner = mounts.rootOf(step.start.virtual)
     for (const run of io.matchedRuns ?? []) {
       for (const row of run) {
@@ -242,7 +252,7 @@ export async function runFind(
     merged = await merged.merge(io)
   }
   for (const rows of runs) rows.sort((a, b) => compareCodePoints(a.virtual, b.virtual))
-  merged.exitCode = Math.max(0, ...ios.map((io) => io.exitCode))
+  merged.exitCode = Math.max(0, ...done.map(({ io }) => io.exitCode))
   merged.matchedRuns = runs
   const body = new TextEncoder().encode(
     runs.flatMap((rows) => rows.map((row) => `${row.rawPath}\n`)).join(''),

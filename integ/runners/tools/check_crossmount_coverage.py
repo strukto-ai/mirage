@@ -13,11 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import argparse
-import ast
 import json
 import re
 import shlex
 from pathlib import Path
+
+from mirage.commands.builtin.generic.crossmount.constants import (
+    CROSS_MOUNT_COMMANDS,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 # The operators and keywords after which a shell word runs as a command.
@@ -35,26 +38,6 @@ NAMESPACE_COMMANDS = {
     "ln",
     "readlink",
 }
-
-
-def registered_commands(root: Path) -> set[str]:
-    """Read the command vocabulary without importing backend dependencies.
-
-    Args:
-        root (Path): Repository checkout.
-    """
-    source = (
-        root / "python/mirage/commands/builtin/generic/crossmount/types.py"
-    )
-    tree = ast.parse(source.read_text())
-    enum = next(
-        n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Cmd"
-    )
-    return {
-        n.value.value
-        for n in enum.body
-        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
-    }
 
 
 def invoked_commands(line: str) -> set[str]:
@@ -162,7 +145,7 @@ def main() -> None:
             {"targets": data.get("targets", []), **case}
             for case in data["cases"]
         )
-    commands = registered_commands(ROOT) | NAMESPACE_COMMANDS
+    commands = set(CROSS_MOUNT_COMMANDS) | NAMESPACE_COMMANDS
     errors = coverage_errors(commands, cases)
     if errors:
         raise SystemExit("\n".join(errors))

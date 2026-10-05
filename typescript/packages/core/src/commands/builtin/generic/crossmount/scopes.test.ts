@@ -18,7 +18,7 @@ import type { MountView, NamespaceView } from '../../../../ops/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../utils/errors.ts'
-import { mountStarts, ownedScopes } from './scopes.ts'
+import { mountStarts, ownedScopes, reached } from './scopes.ts'
 import type { OwnedScope } from './types.ts'
 
 const DIRS: Record<string, string[]> = {
@@ -106,4 +106,29 @@ it('starts at the operand, then at each mount below it', () => {
   })
   expect(mountStarts(refused, ns())).toEqual([refused])
   expect(mountStarts(operand, undefined)).toEqual([operand])
+})
+
+it('counts a start below a failed part only where it lists', async () => {
+  const paths = [PathSpec.fromStrPath('/a'), PathSpec.fromStrPath('/a/d')]
+  const starts = [
+    [0, paths[0]],
+    [0, PathSpec.fromStrPath('/a/m')],
+    [0, PathSpec.fromStrPath('/a/d/g')],
+    [1, paths[1]],
+  ] as [number, PathSpec][]
+  const [dispatch, listed] = dispatcher('/a/d')
+  expect(await reached(paths, starts, [false, false, false, false], dispatch)).toEqual([
+    true,
+    true,
+    true,
+    true,
+  ])
+  expect(listed).toEqual([])
+  expect(await reached(paths, starts, [true, false, false, true], dispatch)).toEqual([
+    true,
+    true,
+    false,
+    true,
+  ])
+  expect(listed).toEqual(['/a'])
 })

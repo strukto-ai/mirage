@@ -22,7 +22,10 @@ from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.generic.crossmount.constants import (
     DISPATCH_BUILDERS,
 )
-from mirage.commands.builtin.generic.crossmount.scopes import mount_starts
+from mirage.commands.builtin.generic.crossmount.scopes import (
+    mount_starts,
+    reached,
+)
 from mirage.commands.builtin.generic.crossmount.types import (
     CrossResult,
     RunSingle,
@@ -159,7 +162,8 @@ async def run_find(
     the rows merge in the walk's path order, so the actions still run
     once over every mount's ``matched_runs``; a mount whose find fails
     adds its diagnostic and status, as GNU's walk past an unreadable
-    directory does. An expression that looks across a boundary
+    directory does, and the mounts below it count only where the walk
+    could still reach them (``reached``). An expression that looks across a boundary
     (``WALK_WIDE``, ``-L``), or a find that succeeds without structured
     rows, keeps the one dispatcher walk.
 
@@ -246,9 +250,16 @@ async def run_find(
         {step[1].virtual for step in plan if step[0] == index and step[2]}
         for index in range(len(paths))
     ]
+    kept = await reached(
+        paths,
+        [(step[0], step[1]) for step in plan],
+        [io.exit_code != 0 for io in ios],
+        dispatch,
+    )
+    done = [(step, io) for step, io, keep in zip(plan, ios, kept) if keep]
     runs: list[list[PathSpec]] = [[] for _ in paths]
     merged = IOResult()
-    for (index, start, alone, _, _), io in zip(plan, ios):
+    for (index, start, alone, _, _), io in done:
         owner = mounts.root_of(start.virtual)
         runs[index].extend(
             row
@@ -264,7 +275,7 @@ async def run_find(
         merged = await merged.merge(io)
     for rows in runs:
         rows.sort(key=lambda row: row.virtual)
-    merged.exit_code = max((io.exit_code for io in ios), default=0)
+    merged.exit_code = max((io.exit_code for _, io in done), default=0)
     merged.matched_runs = runs
     body = b"".join(
         ((row.raw_path or row.virtual) + "\n").encode()

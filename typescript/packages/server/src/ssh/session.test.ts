@@ -358,6 +358,8 @@ describe('shell channels', () => {
     const client = await connect(h)
     const stream = await shell(client, null)
     const done = collect(stream)
+    stream.write('echo ready\n')
+    await readUntil(stream, 'ready\n')
     await h.registry.remove('demo')
     stream.write('echo hi\n')
     const run = await done

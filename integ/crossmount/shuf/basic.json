@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_shuf_across_mounts",
+      "seq": 963213,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf 'a\\n' > /data/xm_rt_sh; shuf -o /data2/xm_rt_sh /data/xm_rt_sh; cat /data2/xm_rt_sh; rm /data/xm_rt_sh /data2/xm_rt_sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -17,7 +17,9 @@ import { command, type CommandFn } from '../../../config.ts'
 import { SPECS } from '../../../spec/index.ts'
 import { duGeneric } from '../du.ts'
 import { IOResult } from '../../../../io/types.ts'
+import type { RegisteredOp } from '../../../../ops/registry.ts'
 import { FileStat, FileType, MountMode } from '../../../../types.ts'
+import { eacces } from '../../../../utils/errors.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
@@ -40,8 +42,24 @@ const unmeasured: CommandFn = (_accessor, paths) => [
   new IOResult(),
 ]
 
-async function workspace(fn: CommandFn): Promise<Workspace> {
-  const outer = new RAMVFS()
+const partlyMeasured: CommandFn = () => [
+  new Uint8Array(),
+  new IOResult({
+    stderr: ENC.encode("du: cannot read directory '/a/d': Permission denied\n"),
+    exitCode: 1,
+    sizedRuns: [{ leaves: [['/a/d/f', 5]], directories: ['/a/d'] }],
+  }),
+]
+
+class Unlisted extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    return super
+      .ops()
+      .map((ro) => (ro.name === 'readdir' ? { ...ro, fn: () => Promise.reject(eacces('/a')) } : ro))
+  }
+}
+
+async function workspace(fn: CommandFn, outer = new RAMVFS()): Promise<Workspace> {
   const inner = new RAMVFS()
   const other = new RAMVFS()
   outer.loadState({
@@ -91,3 +109,21 @@ it.each(['du -c /a', 'du -c /a/n /b'])(
     }
   },
 )
+
+it.each([
+  ['listed', new RAMVFS(), '1005\t/a\n'],
+  ['unlisted', new Unlisted(), '5\t/a\n'],
+])('counts a mount below a failed part where the walk reaches: %s', async (_, outer, expected) => {
+  const ws = await workspace(measured, outer)
+  const spec = SPECS.du
+  if (spec === undefined) throw new Error('Missing spec: du')
+  for (const cmd of command({ name: 'du', vfs: 'ram', spec, fn: partlyMeasured }))
+    ws.registry.mountFor('/a/x').register(cmd)
+  try {
+    const result = await ws.shell('du -s /a')
+    expect(DEC.decode(result.stdout)).toBe(expected)
+    expect(result.exitCode).toBe(1)
+  } finally {
+    await ws.close()
+  }
+})

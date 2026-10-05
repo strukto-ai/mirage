@@ -495,14 +495,14 @@ async def handle_command(
                     command=cmd_str, exit_code=code, stderr=refusal_msg
                 ),
             )
-        # sort's output flag, cp/mv's -t and diff's -X route to their
-        # owning mount but are not inputs. Use the parser's operands so
+        # A path option's value (sort -o, cp -t, csplit -f) routes to its
+        # owning mount but is not an input. Use the parser's operands so
         # aliases and repeated paths keep their positions instead of
-        # subtracting matching path strings afterward.
+        # subtracting matching path strings afterward. find's expression
+        # is not the spec's grammar, so its start points are the words
+        # classified as paths.
         cross_scopes = (
-            cross_parsed.paths
-            if cmd_name in ("sort", "cp", "mv", "diff")
-            else path_scopes
+            path_scopes if cmd_name == "find" else cross_parsed.paths
         )
         cross_flags = cross_parsed.flag_kwargs
         if cmd_name in RELAY_COMMANDS:

@@ -468,10 +468,11 @@ export async function handleCommand(
         new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
       ]
     }
-    // sort's output flag, cp/mv's -t and diff's -X own a mount for routing,
-    // but are not inputs. Parsed operands preserve aliases, order, and repeated path
-    // values.
-    let csScopes = ['sort', 'cp', 'mv', 'diff'].includes(cmdName) ? csParsed.paths : pathScopes
+    // A path option's value (sort -o, cp -t, csplit -f) routes to its owning
+    // mount but is not an input. Parsed operands preserve aliases, order, and
+    // repeated path values. find's expression is not the spec's grammar, so
+    // its start points are the words classified as paths.
+    let csScopes = cmdName === 'find' ? pathScopes : csParsed.paths
     if (RELAY_COMMANDS.has(cmdName)) {
       // STREAM and FANOUT (and a custom command's reducer) run each operand
       // natively on its mount, which expands the operand's glob. RELAY sees every operand at once (wc's

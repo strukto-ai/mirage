@@ -64,11 +64,12 @@ outside them fails explicitly rather than falling into one:
 | Namespace | chmod, chown, chgrp, getfattr, setfattr, ln, readlink                                                 | Answered above the backends, with no cross-mount implementation of its own.   |
 
 `runners/tools/check_crossmount_coverage.py --selftest` requires, for every
-command the `Cmd` vocabulary names plus the namespace commands, a success
-case in that command's folder that runs it with operands on both `/data`
-and `/data2`, asserts all three result channels, and targets RAM and disk;
-it also rejects duplicate IDs. It is a registration floor, not proof of
-every option or backend.
+command the routing table names (`CROSS_MOUNT_COMMANDS`, every generic
+builder included) plus the namespace commands, a success case in that
+command's folder that runs it with operands on both `/data` and `/data2`,
+asserts all three result channels, and targets RAM and disk; it also rejects
+duplicate IDs. It is a registration floor, not proof of every option or
+backend.
 
 ## Runs and tenants
 
@@ -222,10 +223,9 @@ errors, an existing custom aggregate registration, and one CLI invocation
 through dispatch doors. A barrier proves native read preparation is bounded to
 four invocations; stream cases check partial failures, timeout cleanup and early
 pipe closure. Mutation commands and shared stdin retain serial execution.
-The program cases cover automatically wired generics and output paths across
-mounts, including compression, truncation and splitting. Both core shards
-discover this target from the manifest; the shared parity job also compares it
-and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
+The program cases cover program files read across mounts (`grep -f`, `sed -f`,
+`awk -f`, `jq --rawfile`). Both core shards discover this target from the
+manifest; the shared parity job also compares it and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
 filters cover these modules and cases.
 
 ## Running locally

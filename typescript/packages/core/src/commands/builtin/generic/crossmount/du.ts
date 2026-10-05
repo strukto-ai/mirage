@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DISPATCH_BUILDERS } from './constants.ts'
-import { mountStarts } from './scopes.ts'
+import { mountStarts, reached } from './scopes.ts'
 import type { CrossResult, RunSingle } from './types.ts'
 import { du, parseFlags } from '../du.ts'
 import { runDispatch } from '../../generic_bind/dispatch.ts'
@@ -38,9 +38,10 @@ export const RENDERING: ReadonlySet<string> = new Set(['s', 'max_depth'])
  * time, and the measurements (`IOResult.sizedRuns`) render as one tree: a
  * directory's row counts the mounts inside it, and `-c` totals the line. No
  * mount's output text is read back. A mount whose du fails adds its
- * diagnostic and status; one that succeeds without a measurement (a du not
- * built on `duGeneric`) leaves the line to the one dispatcher walk. With
- * `nested`, `runSingle` answers only its own mount's part, so the mounts
+ * diagnostic and status, and the mounts below it count only where the walk
+ * could still reach them (`reached`); one that succeeds without a measurement
+ * (a du not built on `duGeneric`) leaves the line to the one dispatcher walk.
+ * With `nested`, `runSingle` answers only its own mount's part, so the mounts
  * below each operand are measured here unless `-x` keeps the walk on one
  * filesystem; otherwise each operand's run composes its own.
  */
@@ -91,12 +92,22 @@ export async function runDu(
     if (builder === undefined) throw new Error('No dispatch builder for du')
     return runDispatch(builder, paths, texts, bag, dispatch, cwd, ns, stdin, signal)
   }
+  const kept = await reached(
+    paths,
+    plan,
+    ios.map((io) => io.exitCode !== 0),
+    dispatch,
+  )
+  const done = plan.flatMap((step, i) => {
+    const io = ios[i]
+    return kept[i] === true && io !== undefined ? [{ step, io }] : []
+  })
   const leaves: (readonly [string, number])[][] = paths.map(() => [])
   const below: string[][] = paths.map(() => [])
   const present = paths.map(() => false)
   let merged = new IOResult()
-  for (const [i, [index, start]] of plan.entries()) {
-    const io = ios[i] ?? new IOResult()
+  for (const { step, io } of done) {
+    const [index, start] = step
     const owner = mounts?.rootOf(start.virtual)
     const owned = (virtual: string): boolean =>
       mounts === undefined || mounts.rootOf(virtual) === owner
@@ -147,7 +158,7 @@ export async function runDu(
     () => [...measured.values()].flatMap(([, dirs]) => dirs),
   )
   merged.stderr = new Uint8Array([...out.stderr, ...(await materialize(merged.stderr))])
-  merged.exitCode = Math.max(out.exitCode, ...ios.map((io) => io.exitCode))
+  merged.exitCode = Math.max(out.exitCode, ...done.map(({ io }) => io.exitCode))
   merged.sizedRuns = [...measured.values()].map(([found, dirs]): SizedRun => ({
     leaves: found,
     directories: dirs,

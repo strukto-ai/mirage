@@ -17,7 +17,10 @@ from dataclasses import replace
 from mirage.commands.builtin.generic.crossmount.constants import (
     DISPATCH_BUILDERS,
 )
-from mirage.commands.builtin.generic.crossmount.scopes import mount_starts
+from mirage.commands.builtin.generic.crossmount.scopes import (
+    mount_starts,
+    reached,
+)
 from mirage.commands.builtin.generic.crossmount.types import (
     CrossResult,
     RunSingle,
@@ -58,9 +61,10 @@ async def run_du(
     at a time, and the measurements (``IOResult.sized_runs``) render as
     one tree: a directory's row counts the mounts inside it, and ``-c``
     totals the line. No mount's output text is read back. A mount whose
-    du fails adds its diagnostic and status; one that succeeds without a
-    measurement (a du not built on ``du_generic``) leaves the line to
-    the one dispatcher walk.
+    du fails adds its diagnostic and status, and the mounts below it
+    count only where the walk could still reach them (``reached``); one
+    that succeeds without a measurement (a du not built on
+    ``du_generic``) leaves the line to the one dispatcher walk.
 
     Args:
         paths (list[PathSpec]): Operands in command-line order.
@@ -108,11 +112,15 @@ async def run_du(
             ns,
             stdin,
         )
+    kept = await reached(
+        paths, plan, [io.exit_code != 0 for io in ios], dispatch
+    )
+    done = [(step, io) for step, io, keep in zip(plan, ios, kept) if keep]
     leaves: list[list[tuple[str, int]]] = [[] for _ in paths]
     below: list[list[str]] = [[] for _ in paths]
     present = [False] * len(paths)
     merged = IOResult()
-    for (index, start), io in zip(plan, ios):
+    for (index, start), io in done:
         owner = mounts.root_of(start.virtual) if mounts else None
         found = [
             leaf
@@ -159,7 +167,7 @@ async def run_du(
         directories=lambda: [d for _, dirs in measured.values() for d in dirs],
     )
     merged.stderr = out.stderr + await materialize(merged.stderr)
-    merged.exit_code = max([out.exit_code, *(io.exit_code for io in ios)])
+    merged.exit_code = max([out.exit_code, *(io.exit_code for _, io in done)])
     merged.sized_runs = [
         SizedRun(tuple(measured[t][0]), tuple(measured[t][1])) for t in targets
     ]

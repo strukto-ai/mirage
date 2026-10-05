@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_auto_truncate",
+      "seq": 963006,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf abc > /data/xm_trunc; printf def > /data2/xm_trunc; truncate -s 2 /data/xm_trunc /data2/xm_trunc; cat /data/xm_trunc /data2/xm_trunc",
+      "expect": {
+        "exit": 0,
+        "stdout": "abde",
+        "stderr": ""
+      }
+    }
+  ]
+}

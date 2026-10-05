@@ -16,7 +16,9 @@ import { expect, it } from 'vitest'
 import { command } from '../../../config.ts'
 import { SPECS } from '../../../spec/index.ts'
 import { IOResult } from '../../../../io/types.ts'
+import type { RegisteredOp } from '../../../../ops/registry.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
+import { eacces } from '../../../../utils/errors.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
@@ -50,8 +52,26 @@ function rowsFromItsOwnFind(rows = true) {
   })
 }
 
-async function workspace(rows = true): Promise<Workspace> {
-  const outer = new RAMVFS()
+function refused() {
+  const spec = SPECS.find
+  if (spec === undefined) throw new Error('Missing spec: find')
+  return command({
+    name: 'find',
+    vfs: 'ram',
+    spec,
+    fn: (_accessor, paths) => Promise.reject(eacces(paths[0] ?? '/')),
+  })
+}
+
+class Unlisted extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    return super
+      .ops()
+      .map((ro) => (ro.name === 'readdir' ? { ...ro, fn: () => Promise.reject(eacces('/a')) } : ro))
+  }
+}
+
+async function workspace(rows = true, outer = new RAMVFS()): Promise<Workspace> {
   const inner = new RAMVFS()
   outer.loadState({
     type: 'ram',
@@ -125,6 +145,21 @@ it('keeps the one walk for a find without rows', async () => {
   const ws = await workspace(false)
   try {
     expect(DEC.decode((await ws.shell('find /a -type f')).stdout)).toBe('/a/d/f\n/a/n/g\n')
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([
+  ['listed', new RAMVFS(), '/a/n/own\n'],
+  ['unlisted', new Unlisted(), ''],
+])('counts a mount below a failed part where the walk reaches: %s', async (_, outer, expected) => {
+  const ws = await workspace(true, outer)
+  for (const cmd of refused()) ws.registry.mountFor('/a/x').register(cmd)
+  try {
+    const result = await ws.shell('find /a')
+    expect(DEC.decode(result.stdout)).toBe(expected)
+    expect(result.exitCode).toBe(1)
   } finally {
     await ws.close()
   }
