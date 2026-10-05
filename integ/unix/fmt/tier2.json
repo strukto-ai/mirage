@@ -5,7 +5,7 @@
       "seq": 910013,
       "targets": ["ram", "opfs", "disk"],
       "command": "printf 'one two three four\n' | fmt --width 12 --goal 8 --uniform-spacing",
-      "expect": { "exit": 0, "stdout": "one two\nthree\nfour\n", "stderr": "" },
+      "expect": { "exit": 0, "stdout": "one two\nthree four\n", "stderr": "" },
       "flags": ["width", "goal", "uniform-spacing"]
     },
     {
@@ -29,8 +29,77 @@
       "seq": 910016,
       "targets": ["ram", "opfs", "disk"],
       "command": "printf 'tag alpha beta\n  gamma delta\n' | fmt --tagged-paragraph --crown-margin --width 12",
-      "expect": { "exit": 0, "stdout": "tag alpha\n  beta gamma\n  delta\n", "stderr": "" },
+      "expect": { "exit": 0, "stdout": "tag alpha\n  beta\n  gamma\n  delta\n", "stderr": "" },
       "flags": ["tagged-paragraph", "crown-margin", "width"]
+    },
+    {
+      "id": "fmt_u_spaces_words_once_and_sentences_twice",
+      "seq": 16100119,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'one   two  three.  Four five.\\nsix   seven? eight\\n\\nnine.ten  eleven\\n' | fmt -u",
+      "expect": {
+        "exit": 0,
+        "stdout": "one two three.  Four five.  six seven? eight\n\nnine.ten eleven\n",
+        "stderr": ""
+      },
+      "flags": ["u"]
+    },
+    {
+      "id": "fmt_keeps_typed_spacing_and_joins_a_sentence_with_two",
+      "seq": 16100120,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'one   two  three.  Four five.\\nsix   seven? eight\\nend.\\nnext\\n' | fmt",
+      "expect": {
+        "exit": 0,
+        "stdout": "one   two  three.  Four five.  six   seven? eight end.  next\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "fmt_breaks_toward_the_goal_width",
+      "seq": 16100121,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'hello world\\nfoo bar\\nbaz\\n' | fmt -w 20; printf 'a b c d e f g h i j k l m n o p q r s t u v w x y z\\n' | fmt -w 30 -g 20",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello world foo\nbar baz\na b c d e f g h i j k\nl m n o p q r s t u v w x y z\n",
+        "stderr": ""
+      },
+      "flags": ["w", "g"]
+    },
+    {
+      "id": "fmt_keeps_blank_lines_and_splits_at_an_indent_change",
+      "seq": 16100122,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'a b\\n\\n\\n   \\none two\\n   three four\\n   five six\\n' | fmt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b\n\n\n\none two\n   three four five six\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "fmt_c_and_t_take_the_second_line_indent",
+      "seq": 16100123,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'one two\\n   three four\\n   five six\\nseven\\n' | fmt -c -w 12; printf 'one\\ntwo\\n\\none\\n    two\\nthree\\n' | fmt -t",
+      "expect": {
+        "exit": 0,
+        "stdout": "one two\n   three\n   four\n   five six\nseven\none\ntwo\n\none two\nthree\n",
+        "stderr": ""
+      },
+      "flags": ["c", "t", "w"]
+    },
+    {
+      "id": "fmt_p_formats_prefixed_lines_only",
+      "seq": 16100124,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf '# a b\\n# c d\\nplain  text\\n#\\n# e\\n' | fmt -p '#'",
+      "expect": { "exit": 0, "stdout": "# a b c d\nplain  text\n#\n# e\n", "stderr": "" },
+      "flags": ["p"]
     }
+  
   ]
 }
