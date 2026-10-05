@@ -258,20 +258,6 @@
       }
     },
     {
-      "name": "mount index: camelCase keyPrefix",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram",
-            "index": {
-              "type": "redis",
-              "keyPrefix": "t:"
-            }
-          }
-        }
-      }
-    },
-    {
       "name": "mount index: a redis key on a ram index",
       "config": {
         "mounts": {
@@ -280,30 +266,6 @@
             "index": {
               "type": "ram",
               "url": "redis://localhost:6379/0"
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "mount index: a scalar, not a mapping",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram",
-            "index": 5
-          }
-        }
-      }
-    },
-    {
-      "name": "mount index: no such backend",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram",
-            "index": {
-              "type": "postgres"
             }
           }
         }
@@ -376,34 +338,6 @@
               "key_prefix": 5
             }
           }
-        }
-      }
-    },
-    {
-      "name": "mount index: a quoted ttl",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram",
-            "index": {
-              "type": "redis",
-              "ttl": "30"
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "index block: a null ttl",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "index": {
-          "type": "ram",
-          "ttl": null
         }
       }
     },

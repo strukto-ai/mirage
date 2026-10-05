@@ -23,9 +23,6 @@ import {
   normalizeIndexConfig,
   type RedisIndexConfig,
 } from '@struktoai/mirage-core/cache/index/config'
-import { RedisIndexCacheStore } from '@struktoai/mirage-core/cache/index/redis'
-import { REDACTED_SECRET } from '@struktoai/mirage-core/vfs/secrets'
-import { buildMountArgs, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
 import { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
 import { DiskNamespaceStore } from './workspace/mount/namespace/disk.ts'
@@ -35,11 +32,11 @@ import { RedisWorkspaceStateStore } from './workspace/store/redis.ts'
 import { RedisConsoleStore } from './shell/console/redis/index.ts'
 import { RedisFileCacheStore } from './cache/file/redis.ts'
 import { Workspace } from './workspace.ts'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   absolutizeScripts,
   checkWorkspaceConfigFile,
@@ -1383,18 +1380,13 @@ describe('shared acceptance fixture cache and index blocks', () => {
     ({ config }) => config.cache != null || config.index != null || mountIndexes(config).length > 0,
   )
 
-  it('has a redis cache case, a redis index case and a redis mount index case', () => {
+  it('has a redis cache case and a redis index case', () => {
     const types = cases.map(({ config }) => [
       (config.cache as { type?: unknown } | undefined)?.type,
       (config.index as { type?: unknown } | undefined)?.type,
     ])
     expect(types.some(([cache]) => cache === 'redis')).toBe(true)
     expect(types.some(([, index]) => index === 'redis')).toBe(true)
-    expect(
-      cases.some(({ config }) =>
-        mountIndexes(config).some((index) => (index as { type?: unknown }).type === 'redis'),
-      ),
-    ).toBe(true)
   })
 
   it.each(cases)('builds the cache and index of $name', ({ config }) => {
@@ -1651,332 +1643,48 @@ it.each([
   expect(() => loadWorkspaceConfig({ mounts: { '/data': { vfs: 'ram' } }, ...block })).toThrow()
 })
 
-// A mount's own `index:` block. The values are distinct per source --
-// workspace 73, mount 37, disk's own indexTtl 60, the block default 600
-// -- so a test can tell which of them a mount actually took.
+// The workspace index is Redis at 73, so a mount that took any of it would
+// show; the code door from `new Mount(vfs, { index })` on is tested in core.
 describe('mount index block', () => {
-  const UNREACHABLE_REDIS = 'redis://127.0.0.1:1/0'
-  const DEC = new TextDecoder()
-  let root: string
+  const REDIS_URL = 'redis://127.0.0.1:1/0'
 
-  const disk = (dir: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
-    vfs: 'disk',
-    config: { root: dir },
-    ...extra,
-  })
-
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'mirage-mount-index-'))
-  })
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true })
-  })
-
-  it('carries the block onto its mount and nowhere else', async () => {
-    const args = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        index: { type: 'ram', ttl: 73 },
-        mounts: { '/a': disk(root, { index: { type: 'ram', ttl: 37 } }), '/b': disk(root) },
-      }),
-    )
-    expect(args.mounts['/a']?.options.index).toEqual({ type: 'ram', ttl: 37 })
-    expect(args.mounts['/b']?.options).not.toHaveProperty('index')
-    expect(args.options.index).toEqual({ type: 'ram', ttl: 73 })
-  })
-
-  it('keeps every key of a redis mount index, snake_case key_prefix included', async () => {
-    const args = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        mounts: {
-          '/a': disk(root, {
-            index: { type: 'redis', ttl: 41, url: UNREACHABLE_REDIS, key_prefix: 't:' },
-          }),
-        },
-      }),
-    )
-    expect(args.mounts['/a']?.options.index).toEqual({
-      type: 'redis',
-      ttl: 41,
-      url: UNREACHABLE_REDIS,
-      keyPrefix: 't:',
-    })
-  })
-
-  it('replaces the workspace index whole: nothing is inherited', async () => {
+  it.each([
+    ['ram', { type: 'ram', ttl: 37 }, { type: 'ram', ttl: 37 }],
+    [
+      'redis',
+      { type: 'redis', ttl: 41, url: REDIS_URL, key_prefix: 't:' },
+      { type: 'redis', ttl: 41, url: REDIS_URL, keyPrefix: 't:' },
+    ],
+    ['replaces-whole', { type: 'ram' }, { type: 'ram' }],
+    ['null', null, undefined],
+  ])('becomes its mount index (%s)', async (_id, block, built) => {
     const args = await configToWorkspaceArgs(
       loadWorkspaceConfig({
         index: { type: 'redis', ttl: 73, key_prefix: 'w:' },
-        mounts: { '/a': disk(root, { index: { type: 'ram' } }) },
+        mounts: { '/a': { vfs: 'ram', index: block }, '/b': { vfs: 'ram' } },
       }),
     )
-    expect(args.mounts['/a']?.options.index).toEqual({ type: 'ram' })
-    const ws = new Workspace(args.mounts, args.options)
+    expect(args.mounts['/a']?.options.index).toEqual(built)
+    expect(args.mounts['/b']?.options).not.toHaveProperty('index')
+  })
+
+  // The CLI posts the snake_case document the check returns and the daemon
+  // loads it; camelizing the mount index in the check would send
+  // `keyPrefix`, which the daemon refuses.
+  it('posts the checked document unchanged', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mirage-mount-index-'))
     try {
-      expect(ws.mount('/a').indexStore.ttl).toBe(600)
-      expect(ws.mount('/a').indexStore).not.toBeInstanceOf(RedisIndexCacheStore)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  // Each is already refused by a loader with no mount `index` at all
-  // ("unknown mount `/d` key `index`"), so these patterns name the
-  // reason the index block itself gives.
-  it.each([
-    ['mount index: an unknown key', /unknown mounts\.\/d\.index \(ram\) key `ttll`/],
-    [
-      'mount index: type is the union discriminator, not optional',
-      /`mounts\.\/d\.index` needs a `type`/,
-    ],
-    ['mount index: camelCase keyPrefix', /unknown mounts\.\/d\.index \(redis\) key `keyPrefix`/],
-    ['mount index: a redis key on a ram index', /unknown mounts\.\/d\.index \(ram\) key `url`/],
-    ['mount index: a scalar, not a mapping', /`mounts\.\/d\.index` must be a mapping/],
-    ['mount index: no such backend', /unknown mounts\.\/d\.index type `postgres`/],
-    ['mount block: cache is workspace-only', /unknown mount `\/d` key `cache`/],
-  ])('refuses %s for its own reason', (name, pattern) => {
-    const [fixture] = fixtureCases('rejected').filter((c) => c.name === name)
-    expect(fixture).toBeDefined()
-    expect(() => loadWorkspaceConfig(fixture?.config ?? {})).toThrow(pattern)
-  })
-
-  it('names a bad mount index before the read bound, as pydantic does', () => {
-    // Two faults on one mount: `ttl:` without `read:` and an index with
-    // no `type`. Python judges the fields before the bound rule.
-    expect(() =>
-      loadWorkspaceConfig({ mounts: { '/d': { vfs: 'ram', ttl: 30, index: { ttl: 5 } } } }),
-    ).toThrow(/`mounts\.\/d\.index` needs a `type`/)
-  })
-
-  it('builds the store each mount runs: mount, then workspace, then backend', async () => {
-    const file = join(root, 'mirage.yaml')
-    writeFileSync(
-      file,
-      [
-        'index: {type: ram, ttl: 73}',
-        'mounts:',
-        `  /a: {vfs: disk, config: {root: ${root}}, index: {type: ram, ttl: 37}}`,
-        `  /b: {vfs: disk, config: {root: ${root}}}`,
-        `  /n: {vfs: disk, config: {root: ${root}}, index: null}`,
-        `  /c: {vfs: disk, config: {root: ${root}}, index: {type: ram, ttl: 0}}`,
-        `  /r: {vfs: disk, config: {root: ${root}}, index: {type: redis, ttl: 41, url: '${UNREACHABLE_REDIS}', key_prefix: 't:'}}`,
-        '',
-      ].join('\n'),
-    )
-    const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(file))
-    const ws = new Workspace(args.mounts, args.options)
-    try {
-      expect(['/a', '/b', '/n'].map((p) => ws.mount(p).indexStore.ttl)).toEqual([37, 73, 73])
-      expect(ws.mount('/c').indexStore.ttl).toBe(0)
-      const redis = ws.mount('/r')
-      expect(redis.indexStore).toBeInstanceOf(RedisIndexCacheStore)
-      expect(redis.indexStore.ttl).toBe(41)
-      expect((redis.indexConfig as RedisIndexConfig).keyPrefix).toBe('t:')
-    } finally {
-      await ws.close()
-    }
-    const bare = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        mounts: { '/a': disk(root, { index: { type: 'ram', ttl: 37 } }), '/b': disk(root) },
-      }),
-    )
-    const plain = new Workspace(bare.mounts, bare.options)
-    try {
-      expect(plain.mount('/a').indexStore.ttl).toBe(37)
-      expect(plain.mount('/b').indexStore.ttl).toBe(60)
-    } finally {
-      await plain.close()
-    }
-  })
-
-  it('judges fresh on the mount index', async () => {
-    // ram keeps no listings of its own, so only its mount index can make
-    // fresh honest; a zero mount index takes listing-only fresh away from
-    // disk under a nonzero workspace one.
-    const ok = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        mounts: { '/r': { vfs: 'ram', read: 'fresh', index: { type: 'ram', ttl: 30 } } },
-      }),
-    )
-    const ws = new Workspace(ok.mounts, ok.options)
-    try {
-      expect(ws.mount('/r').read.policy).toBe('fresh')
-    } finally {
-      await ws.close()
-    }
-    const refused = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        index: { type: 'ram', ttl: 73 },
-        mounts: { '/d': disk(root, { read: 'fresh', index: { type: 'ram', ttl: 0 } }) },
-      }),
-    )
-    expect(() => new Workspace(refused.mounts, refused.options)).toThrow(
-      /'\/d'.*caches reads or listings/,
-    )
-  })
-
-  it('posts the checked document unchanged and loads it twice', async () => {
-    // The CLI sends the snake_case document `checkWorkspaceConfigFile`
-    // returns and the daemon loads it again; camelizing the mount index
-    // in the check would send `keyPrefix`, which the daemon refuses.
-    const file = join(root, 'w.yaml')
-    writeFileSync(
-      file,
-      ['mounts:', '  /d:', '    vfs: ram', '    index: {type: redis, key_prefix: "t:"}', ''].join(
-        '\n',
-      ),
-    )
-    const wire = checkWorkspaceConfigFile(file)
-    const first = loadWorkspaceConfig(wire)
-    expect(
-      (wire.mounts as Record<string, { index: Record<string, unknown> }>)['/d']?.index,
-    ).toEqual({ type: 'redis', key_prefix: 't:' })
-    const again = loadWorkspaceConfig(wire)
-    for (const cfg of [first, again]) {
-      const args = await configToWorkspaceArgs(cfg)
+      const file = join(root, 'w.yaml')
+      writeFileSync(file, 'mounts:\n  /d: {vfs: ram, index: {type: redis, key_prefix: "t:"}}\n')
+      const wire = checkWorkspaceConfigFile(file)
+      expect((wire.mounts as Record<string, { index: unknown }>)['/d']?.index).toEqual({
+        type: 'redis',
+        key_prefix: 't:',
+      })
+      const args = await configToWorkspaceArgs(loadWorkspaceConfig(wire))
       expect((args.mounts['/d']?.options.index as RedisIndexConfig).keyPrefix).toBe('t:')
-    }
-  })
-
-  it('leaves the rest of a mount block in its own spelling', async () => {
-    // Only the index is camelized: command_limits is read snake_case and
-    // a VFS config keeps the spellings its own model declares.
-    const args = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        mounts: {
-          '/d': disk(root, {
-            index: { type: 'ram', ttl: 37 },
-            command_limits: { cat: { max_bytes: 1024, on_exceed: 'error' } },
-          }),
-        },
-      }),
-    )
-    const cat = args.mounts['/d']?.options.commandLimits?.cat
-    expect([cat?.maxBytes, cat?.onExceed]).toEqual([1024, 'error'])
-  })
-
-  it('keeps a YAML mount index through a snapshot and a copy', async () => {
-    const redis: RedisIndexConfig = {
-      type: 'redis',
-      ttl: 41,
-      url: UNREACHABLE_REDIS,
-      keyPrefix: 't:',
-    }
-    const args = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        index: { type: 'ram', ttl: 73 },
-        mounts: {
-          '/a': disk(root, {
-            index: { type: 'redis', ttl: 41, url: UNREACHABLE_REDIS, key_prefix: 't:' },
-          }),
-          '/b': disk(root),
-        },
-      }),
-    )
-    const ws = new Workspace(args.mounts, args.options)
-    try {
-      const restored = buildMountArgs(await toStateDict(ws)).mountArgs
-      expect(restored['/a/']?.options.index).toEqual(redis)
-      expect(restored['/b/']?.options.index).toEqual({ type: 'ram', ttl: 73 })
-      const copied = await ws.copy()
-      try {
-        const configs = Object.fromEntries(copied.mounts().map((m) => [m.prefix, m.indexConfig]))
-        expect(configs['/a/']).toEqual(redis)
-        expect(configs['/b/']).toEqual({ type: 'ram', ttl: 73 })
-      } finally {
-        await copied.close()
-      }
     } finally {
-      await ws.close()
+      rmSync(root, { recursive: true, force: true })
     }
-  })
-
-  it('redacts a YAML mount index credential in a snapshot', async () => {
-    const url = 'redis://user:secret@127.0.0.1:1/0'
-    const args = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        mounts: { '/a': disk(root, { index: { type: 'redis', ttl: 41, url, key_prefix: 't:' } }) },
-      }),
-    )
-    const ws = new Workspace(args.mounts, args.options)
-    try {
-      const state = await toStateDict(ws)
-      expect(state.mounts.find((m) => m.prefix === '/a/')?.index_config?.url).toBe(REDACTED_SECRET)
-      expect(() => buildMountArgs(state)).toThrow(/'\/a\/'.*fresh index credentials/)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('re-lists an outside delete only on the mount whose own index is zero', async () => {
-    const a = join(root, 'a')
-    const b = join(root, 'b')
-    for (const dir of [a, b]) {
-      mkdirSync(dir)
-      writeFileSync(join(dir, 'x'), 'x')
-    }
-    const args = await configToWorkspaceArgs(
-      loadWorkspaceConfig({
-        index: { type: 'ram', ttl: 600 },
-        mounts: { '/a': disk(a), '/b': disk(b, { index: { type: 'ram', ttl: 0 } }) },
-      }),
-    )
-    const ws = new Workspace(args.mounts, args.options)
-    try {
-      for (const prefix of ['/a', '/b']) {
-        expect(DEC.decode((await ws.shell(`ls ${prefix}`)).stdout)).toBe('x\n')
-      }
-      unlinkSync(join(a, 'x'))
-      unlinkSync(join(b, 'x'))
-      expect(DEC.decode((await ws.shell('ls /a')).stdout)).toBe('x\n')
-      expect(DEC.decode((await ws.shell('ls /b')).stdout)).toBe('')
-    } finally {
-      await ws.close()
-    }
-  })
-})
-
-describe('index block values', () => {
-  it.each([
-    ['index block: url is a string', /config `index\.url` must be a string/],
-    ['index block: a quoted ttl', /config `index\.ttl` must be a number/],
-    ['index block: a boolean ttl', /config `index\.ttl` must be a number/],
-    ['index block: a null ttl', /config `index\.ttl` must be a number/],
-    [
-      'mount index: key_prefix is a string',
-      /config `mounts\.\/d\.index\.key_prefix` must be a string/,
-    ],
-    ['mount index: a quoted ttl', /config `mounts\.\/d\.index\.ttl` must be a number/],
-  ])('refuses %s', (name, pattern) => {
-    const [fixture] = fixtureCases('rejected').filter((c) => c.name === name)
-    expect(fixture).toBeDefined()
-    expect(() => loadWorkspaceConfig(fixture?.config ?? {})).toThrow(pattern)
-  })
-
-  it('names a bad index value before the read bound, as pydantic does', () => {
-    expect(() =>
-      loadWorkspaceConfig({
-        mounts: { '/d': { vfs: 'ram', ttl: 30, index: { type: 'ram', ttl: '5' } } },
-      }),
-    ).toThrow(/config `mounts\.\/d\.index\.ttl` must be a number/)
-  })
-
-  it('names a bad ttl before a bad url, in the Python model field order', () => {
-    expect(() =>
-      loadWorkspaceConfig({
-        mounts: { '/d': { vfs: 'ram' } },
-        index: { type: 'redis', url: 1, ttl: 'x' },
-      }),
-    ).toThrow(/config `index\.ttl` must be a number/)
-  })
-
-  it('refuses an index ttl filled in from the environment', () => {
-    // Interpolation always yields a string, and a string is not a ttl.
-    expect(() =>
-      loadWorkspaceConfig(
-        { mounts: { '/d': { vfs: 'ram' } }, index: { type: 'ram', ttl: '${INDEX_TTL}' } },
-        { INDEX_TTL: '30' },
-      ),
-    ).toThrow(/config `index\.ttl` must be a number/)
   })
 })

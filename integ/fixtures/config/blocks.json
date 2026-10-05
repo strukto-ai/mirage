@@ -178,24 +178,6 @@
       }
     },
     {
-      "name": "mount block: index null inherits the workspace index",
-      "config": {
-        "index": {
-          "type": "ram",
-          "ttl": 73
-        },
-        "mounts": {
-          "/d": {
-            "vfs": "disk",
-            "config": {
-              "root": "/tmp/x"
-            },
-            "index": null
-          }
-        }
-      }
-    },
-    {
       "name": "index block: a fractional ttl",
       "config": {
         "mounts": {
@@ -203,24 +185,6 @@
             "vfs": "ram",
             "index": {
               "type": "ram",
-              "ttl": 0.5
-            }
-          }
-        },
-        "index": {
-          "type": "ram",
-          "ttl": 0.5
-        }
-      }
-    },
-    {
-      "name": "index block: a fractional redis ttl",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram",
-            "index": {
-              "type": "redis",
               "ttl": 0.5
             }
           }

@@ -435,9 +435,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
     for (const [prefix, block] of Object.entries(raw.mounts)) {
       if (!isPlainObject(block)) throw new Error(`mount \`${prefix}\` must be a mapping`)
       rejectUnknownKeys(block, MOUNT_KEYS, `mount \`${prefix}\``)
-      // Ahead of the read rules, where Python's field validation runs
-      // ahead of the model validator carrying them: a mount with both a
-      // bad index and `ttl:` without `read:` names the index on both.
+      // Before the read rules, as pydantic checks fields before them.
       validateTypedBlock(block.index, INDEX_KEYS, `mounts.${prefix}.index`)
       validateIndexValues(block.index, `mounts.${prefix}.index`)
       validateReadBlock(prefix, block)

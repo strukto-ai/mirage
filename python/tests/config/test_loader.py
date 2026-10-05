@@ -1345,7 +1345,10 @@ def test_a_mount_index_block_becomes_its_mount_index(block, built):
     cfg = load_config(
         {
             "index": {"type": "redis", "ttl": 73, "key_prefix": "w:"},
-            "mounts": {"/a": {"vfs": "ram", "index": block}, "/b": {"vfs": "ram"}},
+            "mounts": {
+                "/a": {"vfs": "ram", "index": block},
+                "/b": {"vfs": "ram"},
+            },
         }
     )
     kwargs = cfg.to_workspace_kwargs()
