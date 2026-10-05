@@ -81,7 +81,8 @@ class DaemonClient:
                 token.
         """
         if self.settings.auth_token or self.settings.login is None:
-            return self.settings.auth_token
+            self.held = self.settings.auth_token
+            return self.held
         bound = self.settings.login
         with self._refreshing:
             login = read_login()

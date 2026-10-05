@@ -57,7 +57,10 @@ export class DaemonClient {
    */
   async token(): Promise<string> {
     const login = this.settings.login
-    if (this.settings.authToken !== '' || login === undefined) return this.settings.authToken
+    if (this.settings.authToken !== '' || login === undefined) {
+      this.held = this.settings.authToken
+      return this.held
+    }
     this.refreshing ??= (async () => {
       const stored = readLogin()
       if (stored?.url !== login.url) {

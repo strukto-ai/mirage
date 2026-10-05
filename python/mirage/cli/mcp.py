@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+import httpx
 import typer
 
 from mirage.cli.client import DaemonClient, DaemonUnreachable, make_client
@@ -115,6 +116,42 @@ def mcp_cmd(
     relay_workspace(path, workspace_id, session_id, "mcp", relay_stdio)
 
 
+def delete_workspace(client: DaemonClient, workspace_id: str) -> None:
+    """Delete a relay's temporary workspace on the relay's own server.
+
+    Sends the token the relay last used, so it works after the login
+    ended or changed and without a refresh; only when the server refuses
+    that token does it ask the login for a fresh one and try once more.
+    A delete that still fails is reported on stderr.
+
+    Args:
+        client (DaemonClient): the relay's client.
+        workspace_id (str): the workspace.
+    """
+    path = f"/v1/workspaces/{quote(workspace_id, safe='')}"
+
+    def attempt(bearer: str) -> httpx.Response:
+        settings = replace(client.settings, auth_token=bearer, login=None)
+        with DaemonClient(settings) as cleanup:
+            return cleanup.request("DELETE", path)
+
+    done = attempt(client.held)
+    if done.status_code == 401 and client.settings.login is not None:
+        try:
+            done = attempt(client.token())
+        except LoginError as e:
+            typer.echo(
+                f"could not delete workspace {workspace_id}: {e}", err=True
+            )
+            return
+    if done.status_code >= 400:
+        typer.echo(
+            f"could not delete workspace {workspace_id}: "
+            f"daemon error {done.status_code}",
+            err=True,
+        )
+
+
 def relay_workspace(
     path: Path | None,
     workspace_id: str | None,
@@ -126,9 +163,8 @@ def relay_workspace(
 
     The workspace is created from ``path``, or ``workspace_id`` names one
     the daemon holds; a created workspace with no ``workspace_id`` in its
-    config is deleted on the same server when the relay ends, with a
-    fresh token from its login, or the last token the relay sent when
-    that login ended or changed meanwhile. A named session must exist.
+    config is deleted when the relay ends (see ``delete_workspace``). A
+    named session must exist.
 
     Args:
         path (Path | None): the config to create the workspace from.
@@ -175,17 +211,4 @@ def relay_workspace(
         asyncio.run(relay(url, token))
     finally:
         if minted:
-            try:
-                bearer = client.token()
-            except LoginError:
-                bearer = client.held
-            with DaemonClient(
-                replace(client.settings, auth_token=bearer, login=None)
-            ) as cleanup:
-                done = cleanup.request("DELETE", workspace_path)
-            if done.status_code >= 400:
-                typer.echo(
-                    f"could not delete workspace {workspace_id}: "
-                    f"daemon error {done.status_code}",
-                    err=True,
-                )
+            delete_workspace(client, str(workspace_id))

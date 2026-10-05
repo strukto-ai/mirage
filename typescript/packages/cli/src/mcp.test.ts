@@ -124,12 +124,16 @@ describe('mirage mcp over stdio', () => {
   })
 })
 
-async function stubDaemon(): Promise<{ url: string; calls: string[]; close: () => Promise<void> }> {
+async function stubDaemon(
+  refused: readonly string[] = [],
+): Promise<{ url: string; calls: string[]; close: () => Promise<void> }> {
   const calls: string[] = []
   const stub = createHttpServer((req, res) => {
-    calls.push(`${req.method ?? ''} ${req.url ?? ''} ${req.headers.authorization ?? ''}`)
+    const sent = req.headers.authorization ?? ''
+    calls.push(`${req.method ?? ''} ${req.url ?? ''} ${sent}`)
     const refresh = req.url === '/oauth/token'
-    res.writeHead(req.method === 'POST' && !refresh ? 201 : 200, {
+    const refuse = req.method === 'DELETE' && refused.includes(sent)
+    res.writeHead(refuse ? 401 : req.method === 'POST' && !refresh ? 201 : 200, {
       'content-type': 'application/json',
     })
     res.end(
@@ -205,7 +209,7 @@ describe('relayWorkspace', () => {
   })
 
   it('refreshes an ended token to delete its workspace', async () => {
-    const daemon = await stubDaemon()
+    const daemon = await stubDaemon(['Bearer from-login'])
     try {
       const login = loggedIn(daemon.url, {
         refresh_token: 'r1',
@@ -221,5 +225,24 @@ describe('relayWorkspace', () => {
       await daemon.close()
     }
     expect(daemon.calls).toContain('DELETE /v1/workspaces/minted Bearer fresh')
+  })
+
+  it('deletes its workspace without waiting on a refresh', async () => {
+    const daemon = await stubDaemon()
+    try {
+      const login = loggedIn(daemon.url, {
+        refresh_token: 'r1',
+        expires_at: Date.now() / 1000 + 3600,
+        client_id: 'client_cli',
+        token_endpoint: 'http://127.0.0.1:1/oauth/token',
+      })
+      await relayWorkspace(writeConfig(), undefined, undefined, 'mcp', async (_url, token) => {
+        expect(await token()).toBe('from-login')
+        writeLogin({ ...login, expires_at: Date.now() / 1000 + 10 })
+      })
+    } finally {
+      await daemon.close()
+    }
+    expect(daemon.calls).toContain('DELETE /v1/workspaces/minted Bearer from-login')
   })
 })

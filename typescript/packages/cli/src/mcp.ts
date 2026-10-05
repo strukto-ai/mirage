@@ -90,12 +90,42 @@ async function runMcp(config: string | undefined, options: McpCommandOptions): P
 }
 
 /**
+ * Delete a relay's temporary workspace on the relay's own server. Sends the
+ * token the relay last used, so it works after the login ended or changed
+ * and without a refresh; only when the server refuses that token does it
+ * ask the login for a fresh one and try once more. A delete that still
+ * fails is reported on stderr.
+ */
+async function deleteWorkspace(client: DaemonClient, workspaceId: string): Promise<void> {
+  const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}`
+  const { url, idleGraceSeconds } = client.settings
+  const attempt = (bearer: string): Promise<Response> =>
+    makeClient({ url, idleGraceSeconds, authToken: bearer }).request('DELETE', path)
+  let done = await attempt(client.held)
+  if (done.status === 401 && client.settings.login !== undefined) {
+    let fresh: string
+    try {
+      fresh = await client.token()
+    } catch (error) {
+      if (!(error instanceof LoginError)) throw error
+      process.stderr.write(`could not delete workspace ${workspaceId}: ${error.message}\n`)
+      return
+    }
+    done = await attempt(fresh)
+  }
+  if (!done.ok) {
+    process.stderr.write(
+      `could not delete workspace ${workspaceId}: daemon error ${String(done.status)}\n`,
+    )
+  }
+}
+
+/**
  * Relay this process's stdio to one of a workspace's endpoints. The
  * workspace is created from `path`, or `workspace` names one the daemon
  * holds; a created workspace with no `workspace_id` in its config is
- * deleted on the same server when the relay ends, with a fresh token from
- * its login, or the last token the relay sent when that login ended or
- * changed meanwhile. A named session must exist.
+ * deleted when the relay ends (see `deleteWorkspace`). A named session
+ * must exist.
  */
 export async function relayWorkspace(
   path: string | undefined,
@@ -138,20 +168,7 @@ export async function relayWorkspace(
     }
     if (refusal === undefined) await relay(url, () => client.token())
   } finally {
-    if (minted) {
-      const bearer = await client.token().catch((error: unknown) => {
-        if (error instanceof LoginError) return client.held
-        throw error
-      })
-      const { url: server, idleGraceSeconds } = client.settings
-      const cleanup = makeClient({ url: server, idleGraceSeconds, authToken: bearer })
-      const done = await cleanup.request('DELETE', workspacePath)
-      if (!done.ok) {
-        process.stderr.write(
-          `could not delete workspace ${workspaceId}: daemon error ${String(done.status)}\n`,
-        )
-      }
-    }
+    if (minted) await deleteWorkspace(client, workspaceId)
   }
   if (refusal !== undefined) fail(refusal, 2)
 }

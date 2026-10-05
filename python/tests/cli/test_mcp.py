@@ -139,9 +139,12 @@ def test_a_refused_session_check_deletes_the_workspace(tree, tmp_path):
 
 
 @contextmanager
-def stub_daemon() -> Iterator[tuple[str, list[str]]]:
+def stub_daemon(
+    refused: frozenset[str] = frozenset(),
+) -> Iterator[tuple[str, list[str]]]:
     """A daemon that makes every workspace ``minted``; it records each
-    request with the bearer it carried."""
+    request with the bearer it carried, and refuses a delete sent with a
+    bearer in ``refused``."""
     calls: list[str] = []
 
     class Daemon(BaseHTTPRequestHandler):
@@ -150,6 +153,8 @@ def stub_daemon() -> Iterator[tuple[str, list[str]]]:
             calls.append(f"{self.command} {self.path} {sent}")
             self.rfile.read(int(self.headers.get("Content-Length") or 0))
             status = 201 if self.command == "POST" else 200
+            if self.command == "DELETE" and sent in refused:
+                status = 401
             data = json.dumps({"id": "minted"}).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -222,7 +227,7 @@ def test_a_relay_refreshes_an_ended_token_to_delete_its_workspace(
         )
 
     monkeypatch.setattr(credentials.httpx, "post", post)
-    with stub_daemon() as (url, calls):
+    with stub_daemon(frozenset({"Bearer from-login"})) as (url, calls):
         login = _logged_in(
             url,
             monkeypatch,
@@ -240,3 +245,30 @@ def test_a_relay_refreshes_an_ended_token_to_delete_its_workspace(
 
         relay_workspace(tree / "workspace.yaml", None, None, "mcp", relay)
     assert "DELETE /v1/workspaces/minted Bearer fresh" in calls
+
+
+def test_a_relay_deletes_its_workspace_without_waiting_on_a_refresh(
+    tree, tmp_path, monkeypatch
+):
+    def post(url, data, timeout):
+        raise httpx.ConnectError("issuer down")
+
+    monkeypatch.setattr(credentials.httpx, "post", post)
+    with stub_daemon() as (url, calls):
+        login = _logged_in(
+            url,
+            monkeypatch,
+            tmp_path,
+            refresh_token="r1",
+            expires_at=time.time() + 3600,
+            client_id="client_cli",
+            token_endpoint="https://clerk.example.com/oauth/token",
+        )
+
+        async def relay(endpoint: str, token) -> None:
+            assert token() == "from-login"
+            login.expires_at = time.time() + 10
+            write_login(login)
+
+        relay_workspace(tree / "workspace.yaml", None, None, "mcp", relay)
+    assert "DELETE /v1/workspaces/minted Bearer from-login" in calls
