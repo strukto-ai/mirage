@@ -117,7 +117,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'hit\\n' > /data/xm_cmp; mkdir -p /data2/xm_cmp_dir; ln -s /data2/xm_cmp_dir /data2/xm_cmp_link; cmp /data/xm_cmp /data2/xm_cmp_link",
+      "command": "printf 'hit\\n' > /data/xm_cmp; mkdir -p /data2/xm_cmp_dir; printf k > /data2/xm_cmp_dir/k; ln -s /data2/xm_cmp_dir /data2/xm_cmp_link; cmp /data/xm_cmp /data2/xm_cmp_link",
       "expect": {
         "exit": 2,
         "stdout": "",
