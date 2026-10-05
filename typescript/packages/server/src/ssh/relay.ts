@@ -32,20 +32,10 @@ export class TunnelRefused extends Error {
  */
 export async function relaySsh(url: string, headers: Record<string, string>): Promise<void> {
   const ws = new WebSocket(url, { headers, perMessageDeflate: false })
-  await new Promise<void>((resolve, reject) => {
-    ws.once('open', () => {
-      resolve()
-    })
-    ws.once('unexpected-response', (req, res) => {
-      let body = ''
-      res.on('data', (chunk: Buffer) => (body += chunk.toString()))
-      res.on('end', () => {
-        req.destroy()
-        reject(new TunnelRefused(`the server refused: ${String(res.statusCode)} ${body.trim()}`))
-      })
-    })
-    ws.once('error', reject)
-  })
+  // Listen before the upgrade settles: the server's first frame, its SSH
+  // banner, can arrive in the same read as the 101, and ws emits it on a
+  // tick that runs before an `await` on 'open' resumes, so a listener
+  // added after that await drops the banner and ssh hangs up.
   const closed = new Promise<void>((resolve) => {
     ws.once('close', () => {
       resolve()
@@ -61,6 +51,20 @@ export async function relaySsh(url: string, headers: Record<string, string>): Pr
         ws.resume()
       })
     }
+  })
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => {
+      resolve()
+    })
+    ws.once('unexpected-response', (req, res) => {
+      let body = ''
+      res.on('data', (chunk: Buffer) => (body += chunk.toString()))
+      res.on('end', () => {
+        req.destroy()
+        reject(new TunnelRefused(`the server refused: ${String(res.statusCode)} ${body.trim()}`))
+      })
+    })
+    ws.once('error', reject)
   })
   const forward = (chunk: Buffer): void => {
     process.stdin.pause()
