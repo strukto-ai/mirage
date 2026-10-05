@@ -55,6 +55,7 @@ class DaemonClient:
         self.settings = settings
         self._client = httpx.Client(base_url=settings.url, timeout=60.0)
         self._refreshing = threading.Lock()
+        self.held = ""
 
     def __enter__(self) -> "DaemonClient":
         return self
@@ -66,26 +67,35 @@ class DaemonClient:
         """The bearer token to send: the settings' own, else the
         login's, refreshed when it is about to end.
 
-        The login is read from its file each time, so a process that
-        outlives ``mirage logout`` stops sending it, and one caller at a
-        time reads it, so requests sent at once refresh it once.
+        The client stays bound to the login it started with. That login
+        is read from its file each time, so a refresh made by another
+        process is shared, while ``mirage logout`` or a new login stops
+        this one; one caller at a time reads it, so requests sent at once
+        refresh it once. The token sent is kept as ``held``.
 
         Returns:
             str: the token; empty when there is none.
 
         Raises:
-            LoginError: the login was removed, or cannot give a token.
+            LoginError: the login ended or changed, or cannot give a
+                token.
         """
         if self.settings.auth_token or self.settings.login is None:
             return self.settings.auth_token
-        url = self.settings.login.url
+        bound = self.settings.login
         with self._refreshing:
             login = read_login()
-            if login is None or login.url != url:
+            if login is None or login.url != bound.url:
                 raise LoginError(
-                    f"not logged in to {url} any more; run `mirage login`"
+                    f"not logged in to {bound.url} any more; "
+                    "run `mirage login`"
                 )
-            return fresh_token(login)
+            if login.logged_in_at != bound.logged_in_at:
+                raise LoginError(
+                    f"the login to {bound.url} changed; run the command again"
+                )
+            self.held = fresh_token(login)
+            return self.held
 
     def _headers(self) -> dict[str, str]:
         token = self.token()

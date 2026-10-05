@@ -124,7 +124,9 @@ def relay_workspace(
 
     The workspace is created from ``path``, or ``workspace_id`` names one
     the daemon holds; a created workspace with no ``workspace_id`` in its
-    config is deleted when the relay ends. A named session must exist.
+    config is deleted when the relay ends, with the last token the relay
+    sent, so a login that ended or changed meanwhile still removes it. A
+    named session must exist.
 
     Args:
         path (Path | None): the config to create the workspace from.
@@ -171,5 +173,7 @@ def relay_workspace(
         asyncio.run(relay(url, token))
     finally:
         if minted:
-            with make_client() as client:
-                client.request("DELETE", workspace_path)
+            with make_client() as cleanup:
+                if client.held:
+                    cleanup.settings.auth_token = client.held
+                cleanup.request("DELETE", workspace_path)

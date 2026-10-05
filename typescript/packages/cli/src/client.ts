@@ -38,6 +38,8 @@ export class DaemonUnreachable extends Error {
 export class DaemonClient {
   readonly settings: DaemonSettings
   private refreshing: Promise<string> | undefined
+  /** The last login token this client sent. */
+  held = ''
 
   constructor(settings: DaemonSettings) {
     this.settings = settings
@@ -45,11 +47,13 @@ export class DaemonClient {
 
   /**
    * The bearer token to send: the settings' own, else the login's,
-   * refreshed when it is about to end; empty when there is none. The login
-   * is read from its file each time, so a process that outlives `mirage
-   * logout` stops sending it, and requests sent at once share one read, so
-   * they refresh it once. Throws `LoginError` when the login was removed
-   * or cannot give a token.
+   * refreshed when it is about to end; empty when there is none. The client
+   * stays bound to the login it started with. That login is read from its
+   * file each time, so a refresh made by another process is shared, while
+   * `mirage logout` or a new login stops this one; requests sent at once
+   * share one read, so they refresh it once. The token sent is kept as
+   * `held`. Throws `LoginError` when the login ended or changed, or cannot
+   * give a token.
    */
   async token(): Promise<string> {
     const login = this.settings.login
@@ -59,7 +63,11 @@ export class DaemonClient {
       if (stored?.url !== login.url) {
         throw new LoginError(`not logged in to ${login.url} any more; run \`mirage login\``)
       }
-      return freshToken(stored)
+      if (stored.logged_in_at !== login.logged_in_at) {
+        throw new LoginError(`the login to ${login.url} changed; run the command again`)
+      }
+      this.held = await freshToken(stored)
+      return this.held
     })().finally(() => {
       this.refreshing = undefined
     })

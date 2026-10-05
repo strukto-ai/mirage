@@ -131,4 +131,14 @@ describe('DaemonClient token', () => {
     expect(fetched).not.toHaveBeenCalled()
     expect(readLogin()).toBeNull()
   })
+
+  it('stops when a new login replaces the one it is bound to', async () => {
+    const first = { ...login, access_token: 'alice', logged_in_at: Date.now() / 1000 - 60 }
+    writeLogin(first)
+    const running = client(first)
+    expect(await running.token()).toBe('alice')
+    expect(running.held).toBe('alice')
+    writeLogin({ ...first, access_token: 'bob', logged_in_at: Date.now() / 1000 })
+    await expect(running.token()).rejects.toThrow(/changed/)
+  })
 })

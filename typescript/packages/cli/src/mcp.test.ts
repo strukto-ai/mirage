@@ -19,9 +19,10 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readLogin, removeLogin, writeLogin } from './credentials.ts'
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
-import { resolveMcpConfig } from './mcp.ts'
+import { relayWorkspace, resolveMcpConfig } from './mcp.ts'
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'bin', 'mirage.js')
 const tempDirs: string[] = []
@@ -120,5 +121,41 @@ describe('mirage mcp over stdio', () => {
     const child = spawn(process.execPath, [BIN, 'mcp', writeConfig(), '-w', 'ws_1'])
     const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
     expect(code).toBe(2)
+  })
+})
+
+describe('relayWorkspace', () => {
+  it('deletes its workspace with its own token after its login ended', async () => {
+    const calls: string[] = []
+    const stub = createHttpServer((req, res) => {
+      calls.push(`${req.method ?? ''} ${req.url ?? ''} ${req.headers.authorization ?? ''}`)
+      res.writeHead(req.method === 'POST' ? 201 : 200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ id: 'minted' }))
+    })
+    await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${String((stub.address() as AddressInfo).port)}`
+    vi.stubEnv('MIRAGE_HOME', mkTempDir())
+    vi.stubEnv(ENV_DAEMON_URL, url)
+    vi.stubEnv(ENV_TOKEN, undefined)
+    writeLogin({
+      url,
+      access_token: 'from-login',
+      logged_in_at: Date.now() / 1000,
+      refresh_token: null,
+      expires_at: null,
+      client_id: null,
+      token_endpoint: null,
+    })
+    try {
+      await relayWorkspace(writeConfig(), undefined, undefined, 'mcp', async (_url, token) => {
+        expect(await token()).toBe('from-login')
+        removeLogin()
+      })
+    } finally {
+      vi.unstubAllEnvs()
+      await new Promise((resolve) => stub.close(resolve))
+    }
+    expect(calls).toContain('DELETE /v1/workspaces/minted Bearer from-login')
+    expect(readLogin()).toBeNull()
   })
 })

@@ -92,7 +92,9 @@ async function runMcp(config: string | undefined, options: McpCommandOptions): P
  * Relay this process's stdio to one of a workspace's endpoints. The
  * workspace is created from `path`, or `workspace` names one the daemon
  * holds; a created workspace with no `workspace_id` in its config is
- * deleted when the relay ends. A named session must exist.
+ * deleted when the relay ends, with the last token the relay sent, so a
+ * login that ended or changed meanwhile still removes it. A named session
+ * must exist.
  */
 export async function relayWorkspace(
   path: string | undefined,
@@ -135,7 +137,11 @@ export async function relayWorkspace(
     }
     if (refusal === undefined) await relay(url, () => client.token())
   } finally {
-    if (minted) await client.request('DELETE', workspacePath)
+    if (minted) {
+      const cleanup =
+        client.held !== '' ? makeClient({ ...client.settings, authToken: client.held }) : client
+      await cleanup.request('DELETE', workspacePath)
+    }
   }
   if (refusal !== undefined) fail(refusal, 2)
 }

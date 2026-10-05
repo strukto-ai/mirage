@@ -1,13 +1,15 @@
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import typer.main
 from typer.testing import CliRunner
 
+from mirage.cli.credentials import Login, remove_login, write_login
 from mirage.cli.main import app
-from mirage.cli.mcp import MCP_ENV_NAMES, resolve_mcp_config
+from mirage.cli.mcp import MCP_ENV_NAMES, relay_workspace, resolve_mcp_config
 
 MINIMAL = "mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n"
 
@@ -130,3 +132,48 @@ def test_a_refused_session_check_deletes_the_workspace(tree, tmp_path):
     assert result.exit_code == 2
     assert "daemon error 500: sessions on fire" in result.output
     assert "DELETE /v1/workspaces/minted" in calls
+
+
+def test_a_relay_that_outlives_its_login_still_deletes_its_workspace(
+    tree, tmp_path, monkeypatch
+):
+    calls: list[str] = []
+
+    class Daemon(BaseHTTPRequestHandler):
+        def answer(self) -> None:
+            sent = self.headers.get("Authorization", "")
+            calls.append(f"{self.command} {self.path} {sent}")
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            status = 201 if self.command == "POST" else 200
+            data = json.dumps({"id": "minted"}).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        do_GET = do_POST = do_DELETE = answer
+
+        def log_message(self, format: str, *args: str) -> None:
+            pass
+
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), Daemon)
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{stub.server_port}"
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.setenv("MIRAGE_DAEMON_URL", url)
+    monkeypatch.delenv("MIRAGE_TOKEN", raising=False)
+    write_login(
+        Login(url=url, access_token="from-login", logged_in_at=time.time())
+    )
+
+    async def relay(endpoint: str, token) -> None:
+        assert token() == "from-login"
+        remove_login()
+
+    try:
+        relay_workspace(tree / "workspace.yaml", None, None, "mcp", relay)
+    finally:
+        stub.shutdown()
+        stub.server_close()
+    assert "DELETE /v1/workspaces/minted Bearer from-login" in calls
