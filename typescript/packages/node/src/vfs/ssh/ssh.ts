@@ -21,6 +21,8 @@ import { VFSName } from '@struktoai/mirage-core/types'
 
 import { SSHAccessor } from '../../accessor/ssh.ts'
 import { SSH_COMMANDS } from '../../commands/builtin/ssh/index.ts'
+import { IO } from '../../commands/builtin/ssh/io.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '@struktoai/mirage-core/commands/builtin/generic/du'
 
 import { SSH_OPS } from '../../ops/ssh/index.ts'
 import { type SSHConfig, type SSHConfigRedacted, redactSshConfig } from './config.ts'
@@ -39,6 +41,8 @@ export class SSHVFS extends BaseVFS {
   // SFTP stat/readdir report the remote inode's exact byte size for every
   // file; reads are the same raw bytes.
   override readonly sizesAlwaysKnown: boolean = true
+  override readonly maxDuEntries: number | null =
+    IO.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : IO.maxDuEntries
   override readonly indexTtl: number = 60
   override readonly prompt = PROMPT
   readonly config: SSHConfig

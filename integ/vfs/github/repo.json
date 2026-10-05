@@ -302,6 +302,71 @@
         "stdout": "rc=0\n0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "github_du_sums_the_live_tree",
+      "seq": 530034,
+      "targets": [
+        "github"
+      ],
+      "command": "du -a /repo/docs; du -s /repo/src; du /repo/README.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "77\t/repo/docs/architecture.md\n77\t/repo/docs/contributing.md\n73\t/repo/docs/release.md\n227\t/repo/docs\n14364\t/repo/src\n62\t/repo/README.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_find_missing_start_and_pattern_operand",
+      "seq": 530035,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo/nope; echo rc=$?; find /repo/docs/*.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/repo/docs/architecture.md\n/repo/docs/contributing.md\n/repo/docs/release.md\n",
+        "stderr": "find: '/repo/nope': No such file or directory\n"
+      }
+    },
+    {
+      "id": "github_grep_single_file_flags",
+      "seq": 530036,
+      "targets": [
+        "github"
+      ],
+      "command": "grep Fixture /repo/README.md; grep -n Fixture /repo/README.md; grep -i FIXTURE /repo/README.md; grep -v Fixture /repo/README.md; grep -c Fixture /repo/README.md; grep zzz /repo/README.md; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "Fixture repository for the fake GitHub API server.\n3:Fixture repository for the fake GitHub API server.\nFixture repository for the fake GitHub API server.\n# repo-v1\n\n1\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_rg_no_filename_and_single_file",
+      "seq": 530037,
+      "targets": [
+        "github"
+      ],
+      "command": "rg -Iw compaction /repo; rg -w compaction /repo/src/store/step_5.py",
+      "expect": {
+        "exit": 0,
+        "stdout": "# wombat compaction pass\n# wombat compaction pass\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_sed_i_is_refused_on_a_read_only_mount",
+      "seq": 530038,
+      "targets": [
+        "github"
+      ],
+      "command": "sed -i s/x/y/ /repo/README.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: -i not supported on this backend: Permission denied\n"
+      }
     }
   ]
 }

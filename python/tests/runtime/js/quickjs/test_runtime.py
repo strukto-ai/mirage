@@ -193,15 +193,16 @@ def test_quickjs_exit_code_and_error():
 
 
 @live
-def test_quickjs_host_fs_invisible():
+@pytest.mark.parametrize(
+    "path", ["/etc/passwd", "/data/in.txt"], ids=["host-file", "mount-path"]
+)
+def test_quickjs_without_dispatch_opens_nothing(path):
+    # No dispatch: the sandbox filesystem is empty, so neither a host
+    # path nor a mount path opens (std.open returns null rather than a
+    # handle).
     rt = QuickJsRuntime()
-    # No dispatch: the sandbox filesystem is empty, so a host path cannot
-    # be opened (std.open returns null rather than a handle).
-    result = asyncio.run(
-        rt.run(
-            RunArgs(code="console.log(std.open('/etc/passwd', 'r') === null)")
-        )
-    )
+    code = f"console.log(std.open('{path}', 'r') === null)"
+    result = asyncio.run(rt.run(RunArgs(code=code)))
     assert result.exit_code == 0
     assert result.stdout == b"true\n"
 
@@ -247,18 +248,6 @@ def test_quickjs_reuses_compiled_module():
     root = _home_dir()
     assert root is not None
     assert (Path(root) / "qjs-wasi.cwasm").is_file()
-
-
-@live
-def test_quickjs_without_dispatch_sees_no_mounts():
-    rt = QuickJsRuntime()
-    result = asyncio.run(
-        rt.run(
-            RunArgs(code="console.log(std.open('/data/in.txt', 'r') === null)")
-        )
-    )
-    assert result.exit_code == 0
-    assert result.stdout == b"true\n"
 
 
 @live

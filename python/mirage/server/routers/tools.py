@@ -83,7 +83,9 @@ async def call_tool(
             detail=f"Invalid arguments for tool {name}: {exc.message}",
         ) from exc
     try:
-        tools = await request.app.state.mcp.tools(workspace_id, session_id)
+        tools = await request.app.state.mcp.tools(
+            workspace_id, session_id, request.state.account
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=exc.args[0]) from exc
     try:

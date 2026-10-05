@@ -40,7 +40,8 @@ import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import type { SessionState } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
-import { type ExecuteNodeFn, handleBackground, pump } from './jobs.ts'
+import { handleBackground, pump } from './jobs.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
 import { endShell, inheritExitTrap, runExitTrap } from './traps.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { Decisions } from '../../policy/decisions.ts'
@@ -54,6 +55,7 @@ import { runWithSession } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, makeAbortError, mergeSignals } from '../abort.ts'
 import { concat } from '../../io/cachable_iterator.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -176,7 +178,7 @@ export async function handlePipe(
       })
     } catch (error) {
       if ((error as { code?: unknown }).code === 'EAGAIN')
-        throw new ExitSignal(FORK_FAILED_STATUS, new TextEncoder().encode(FORK_FAILED))
+        throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
     child.processId = process.info.pid

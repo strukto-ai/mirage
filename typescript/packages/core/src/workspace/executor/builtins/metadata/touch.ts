@@ -41,6 +41,7 @@ import {
   setattrVia,
 } from './metadata.ts'
 import type { Result } from '../types.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 
 // GNU touch's --time words, aliases of one value together. Mirrors
 // Python's TIME_GROUPS.
@@ -73,7 +74,7 @@ export async function handleTouch(
         undefined,
         match.kind,
       )
-      return fail('touch', new TextDecoder().decode(message), code)
+      return fail('touch', decodeText(message), code)
     }
     time = match.word
   }

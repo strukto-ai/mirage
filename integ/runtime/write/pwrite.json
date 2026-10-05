@@ -89,15 +89,13 @@
             "js": "const f = std.open('/data/digits.txt', 'r+')\nf.seek(12, 0)\nf.puts('Z')\nf.close()\nconsole.log(JSON.stringify(std.open('/data/digits.txt', 'r').readAsString()))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "b'0123456789\\x00\\x00Z'\n"
-          },
-          "expect_on": {
-            "quickjs": {
-              "stdout": "\"0123456789\\u0000\\u0000Z\"\n"
+            "python": {
+              "exit": 0,
+              "stdout": "b'0123456789\\x00\\x00Z'\n"
             },
-            "quickjs@typescript": {
-              "stdout": "\"0123456789\"\n"
+            "js": {
+              "exit": 0,
+              "stdout": "\"0123456789\\u0000\\u0000Z\"\n"
             }
           }
         }

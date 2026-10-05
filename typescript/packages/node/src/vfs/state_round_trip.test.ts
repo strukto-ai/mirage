@@ -79,8 +79,25 @@ describe('Disk state round-trip', () => {
     expect(state.type).toBe('disk')
     expect(state).not.toHaveProperty('needsOverride')
     expect(state).not.toHaveProperty('redactedFields')
-    expect(state.files['a.txt']).toBeInstanceOf(Uint8Array)
-    expect(state.files['sub/b.txt']).toBeInstanceOf(Uint8Array)
+    // By reference: each file is its host path, read by the consumer.
+    expect(state.files['a.txt']).toBe(join(src, 'a.txt'))
+    expect(state.files['sub/b.txt']).toBe(join(src, 'sub', 'b.txt'))
+  })
+
+  it('loadState copies paths, writes bytes and leaves the same file alone', async () => {
+    const src = join(root, 'src')
+    mkdirSync(src)
+    writeFileSync(join(src, 'a.txt'), 'from a path')
+    const dst = join(root, 'dst')
+    await new DiskVFS({ root: dst }).loadState({
+      type: 'disk',
+      files: { 'a.txt': join(src, 'a.txt'), 'b.txt': new TextEncoder().encode('bytes') },
+    })
+    expect(readFileSync(join(dst, 'a.txt'), 'utf8')).toBe('from a path')
+    expect(readFileSync(join(dst, 'b.txt'), 'utf8')).toBe('bytes')
+    const same = new DiskVFS({ root: src })
+    await same.loadState(await same.getState())
+    expect(readFileSync(join(src, 'a.txt'), 'utf8')).toBe('from a path')
   })
 
   it('round-trips files via load_state', async () => {
@@ -296,5 +313,31 @@ describe('snapshotting a database mount', () => {
     expect(JSON.stringify(state).includes('PGSECRET')).toBe(false)
     expect(vfsStateRequiresOverride(mount?.vfs_state)).toBe(true)
     await ws.close()
+  })
+})
+
+describe('Disk snapshot through a file', () => {
+  let root: string
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mirage-disk-snapshot-'))
+  })
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('streams the tar out and stages the files back in', async () => {
+    const src = join(root, 'src')
+    mkdirSync(src)
+    const ws = new Workspace({ '/data': new DiskVFS({ root: src }) }, { mode: MountMode.WRITE })
+    await ws.shell('echo kept > /data/f.txt')
+    const tar = join(root, 'ws.tar')
+    expect(await ws.snapshot(tar)).toBeGreaterThan(0)
+    const loaded = await Workspace.load(tar)
+    try {
+      expect((await loaded.shell('cat /data/f.txt')).stdoutText).toBe('kept\n')
+    } finally {
+      await loaded.close()
+      await ws.close()
+    }
   })
 })

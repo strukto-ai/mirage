@@ -77,6 +77,45 @@
         "stdout": "/knowledge/CHANGELOG.md\n/knowledge/guides/auth\n/knowledge/guides/quickstart\n/knowledge/policies/privacy\n/knowledge/policies/refunds\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "df_find_file_missing_and_maxdepth",
+      "seq": 580010,
+      "targets": [
+        "dify"
+      ],
+      "command": "find /knowledge/guides/quickstart; echo rc=$?; find /knowledge/missing.md; echo rc=$?; find /knowledge/guides -maxdepth 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/quickstart\nrc=0\nrc=1\n/knowledge/guides\n",
+        "stderr": "find: '/knowledge/missing.md': No such file or directory\n"
+      }
+    },
+    {
+      "id": "df_find_glob_operands",
+      "seq": 580011,
+      "targets": [
+        "dify"
+      ],
+      "command": "find /knowledge/guides/*; find /knowledge/*/quick*",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth\n/knowledge/guides/quickstart\n/knowledge/guides/quickstart\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "df_find_without_a_start_path_prints_dot_rows",
+      "seq": 580012,
+      "targets": [
+        "dify"
+      ],
+      "command": "(cd /knowledge/guides && find; find -name 'quick*')",
+      "expect": {
+        "exit": 0,
+        "stdout": ".\n./auth\n./quickstart\n./quickstart\n",
+        "stderr": ""
+      }
     }
   ]
 }

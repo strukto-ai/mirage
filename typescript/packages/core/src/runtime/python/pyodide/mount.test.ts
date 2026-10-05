@@ -167,7 +167,7 @@ describe('PyodideRuntime mount visibility', () => {
     const dispatch: BridgeDispatchFn = (op) => {
       if (op === 'stat')
         return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
-      if (op === 'write') return Promise.reject(new Error('mount is read-only'))
+      if (op === 'create') return Promise.reject(new Error('mount is read-only'))
       if (op === 'read') return Promise.resolve(new Uint8Array())
       return Promise.resolve([])
     }
@@ -181,7 +181,7 @@ describe('PyodideRuntime mount visibility', () => {
     })
     expect(result.exitCode).toBe(1)
     const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
-    expect(stderr).toContain('failed to write /ram/out.txt')
+    expect(stderr).toContain('failed to create /ram/out.txt')
     expect(stderr).toContain('mount is read-only')
     await rt.close()
   }, 60_000)
@@ -205,7 +205,7 @@ describe('PyodideRuntime mount visibility', () => {
       attempted.push(`${op} ${path}`)
       if (op === 'stat')
         return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
-      if (op === 'write') return Promise.reject(new Error('backend hiccup'))
+      if (op === 'create') return Promise.reject(new Error('backend hiccup'))
       if (op === 'read') return Promise.resolve(new Uint8Array())
       if (op === 'readdir') return Promise.resolve([])
       return Promise.resolve(undefined)
@@ -226,7 +226,7 @@ describe('PyodideRuntime mount visibility', () => {
     // replaying it could move a stale backend copy onto the destination.
     expect(attempted.filter((c) => c.startsWith('rename'))).toHaveLength(0)
     const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
-    expect(stderr).toContain('failed to write /ram/tmp.txt')
+    expect(stderr).toContain('failed to create /ram/tmp.txt')
     expect(stderr).toContain('backend hiccup')
     expect(result.exitCode).toBe(1)
     await rt.close()

@@ -18,6 +18,7 @@ from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
     camel,
     csv_values,
+    gh_bool,
     json_fields,
     list_limit,
     repo_for,
@@ -244,7 +245,7 @@ async def view_cmd(
         row,
         fl,
         comments_text(comments or [])
-        if fl.as_bool("comments")
+        if gh_bool(fl, "comments")
         else _view_text(row),
         ISSUE_FIELDS,
     )
@@ -362,7 +363,7 @@ async def comment_cmd(
 async def comments_for(
     inv: CLIInvocation[GhConfig], fl: FlagView, ref: RepoRef, number: int
 ) -> list[dict[str, Any]] | None:
-    if not fl.as_bool("comments"):
+    if not gh_bool(fl, "comments"):
         return None
     rows = await issue_comments(inv.config, ref, number)
     for row in rows:

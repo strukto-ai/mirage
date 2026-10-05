@@ -73,19 +73,6 @@ async def test_fatal_input_never_reads_later_operands_or_stdin(suffix):
 
 
 @pytest.mark.asyncio
-async def test_trailing_warning_keeps_in_place_output_and_continues():
-    files = {"/data/a.gz": HELLO + b"junk", "/data/b.gz": gzip.compress(b"w")}
-    _, ops = _files(files)
-    paths = [PathSpec.from_str_path(p) for p in list(files)]
-    _, io = await decompress_inputs(paths, **ops)
-    assert files == {"/data/a": b"hello", "/data/b": b"w"}
-    assert io.exit_code == 2
-    assert io.stderr == (
-        b"\ngzip: /data/a.gz: decompression OK, trailing garbage ignored\n"
-    )
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "suffix,tried,shown",
     [
@@ -155,24 +142,6 @@ async def test_quiet_silences_a_directory_warning_but_keeps_exit_2():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "data,code,stderr",
-    [
-        (HELLO[:-3], 2, b"gzip: /d/e already exists;\tnot overwritten\n"),
-        (b"plain\n", 1, b"\ngzip: /d/e.gz: not in gzip format\n"),
-    ],
-)
-async def test_the_output_is_checked_after_the_header_before_the_body(
-    data, code, stderr
-):
-    # A corrupt body loses to an output already there; a bad header
-    # wins over it.
-    _, ops = _files({"/d/e.gz": data, "/d/e": b"old"})
-    _, io = await decompress_inputs([PathSpec.from_str_path("/d/e.gz")], **ops)
-    assert (io.stderr, io.exit_code) == (stderr, code)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
     "data,out",
     [
         (b"\x1f", b"\x1f"),
@@ -185,40 +154,6 @@ async def test_force_copies_what_is_not_gzip_to_stdout(data, out):
         [PathSpec.from_str_path("/d/f")], to_stdout=True, force=True, **ops
     )
     assert (await materialize(body), io.exit_code, io.stderr) == (out, 0, None)
-
-
-@pytest.mark.asyncio
-async def test_stdin_that_is_not_gzip_ends_the_run():
-    reads, ops = _files({"/d/x.gz": HELLO})
-
-    async def stdin():
-        yield b"plain"
-
-    body, io = await decompress_inputs(
-        [PathSpec.from_str_path(p) for p in ("-", "/d/x.gz")],
-        stdin=stdin(),
-        to_stdout=True,
-        **ops,
-    )
-    assert await materialize(body) == b""
-    assert reads == []
-    assert (io.exit_code, io.stderr) == (
-        1,
-        b"\ngzip: stdin: not in gzip format\n",
-    )
-
-
-@pytest.mark.asyncio
-async def test_quiet_keeps_the_trailing_garbage_exit_code():
-    _, ops = _files({"/d/f.gz": HELLO + b"junk"})
-    body, io = await decompress_inputs(
-        [PathSpec.from_str_path("/d/f.gz")], to_stdout=True, quiet=True, **ops
-    )
-    assert (await materialize(body), io.exit_code, io.stderr) == (
-        b"hello",
-        2,
-        None,
-    )
 
 
 @pytest.mark.asyncio

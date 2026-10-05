@@ -20,7 +20,8 @@ import type { PathSpec } from '../../types.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
-import { fetchHead, GitHubApiError } from './client.ts'
+import { GitHubApiError } from './client.ts'
+import { fetchHead } from './tree.ts'
 import { locate, lookupRetrying, pointLookup } from './lookup.ts'
 
 // Render one tree row as a FileStat, the same from either route.

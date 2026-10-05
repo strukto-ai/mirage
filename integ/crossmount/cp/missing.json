@@ -30,6 +30,40 @@
         "stdout": "",
         "stderr": "cp: cannot stat '/data/xm2_cnope.txt': No such file or directory\n"
       }
+    },
+    {
+      "id": "xm_cp_omits_a_directory_without_r",
+      "seq": 15800037,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xm2_cpd && printf k > /data/xm2_cpd/k && cp /data/xm2_cpd /data2/xm2_cpd; echo rc=$?; rm -r /data/xm2_cpd",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "cp: -r not specified; omitting directory '/data/xm2_cpd'\n"
+      }
     }
   ]
 }

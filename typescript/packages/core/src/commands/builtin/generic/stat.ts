@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { operandStat } from '../utils/operands.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
@@ -31,12 +32,11 @@ import { fsErrorLine, fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import { contentSize, deviceRdev, isDir } from '../../../utils/stat_view.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { lsModeString } from '../utils/formatting.ts'
+import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError } from '../../spec/usage.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 const TYPE_LABELS: Partial<Record<FileType, string>> = {
   [FileType.DIRECTORY]: 'directory',
@@ -147,7 +147,7 @@ function needsEscape(char: string): boolean {
 function escapeChar(char: string): string {
   const named = ESCAPE_NAMES[char]
   if (named !== undefined) return named
-  return Array.from(ENC.encode(char), (byte) => '\\' + byte.toString(8).padStart(3, '0')).join('')
+  return Array.from(encodeText(char), (byte) => '\\' + byte.toString(8).padStart(3, '0')).join('')
 }
 
 // Whether a name holding an apostrophe still fits in double quotes. GNU only
@@ -406,16 +406,11 @@ function formatStat(fmt: string, s: FileStat, name: string, identity: Identity |
 
 // The fraction of a second as the backend spelled it, so both hosts print
 // the digits the stamp carries rather than what their clock type keeps.
-const FRACTION = /\d\d:\d\d:\d\d\.(\d+)/
 
 /** A known timestamp in GNU's layout, in UTC, or '-' when unknown. A naive
  * stamp is UTC, as everywhere else a backend time is read. */
 function statTime(value: string | null): string {
-  const seconds = isoTimestamp(value)
-  if (seconds === null || value === null) return '-'
-  const whole = new Date(Math.floor(seconds) * 1000).toISOString().slice(0, 19).replace('T', ' ')
-  const fraction = (FRACTION.exec(value)?.[1] ?? '').padEnd(9, '0').slice(0, 9)
-  return `${whole}.${fraction} +0000`
+  return isoTimestamp(value) === null ? '-' : fullIsoTime(value)
 }
 
 /** GNU coreutils 9.7's default layout, with unknown fields marked. A VFS has
@@ -479,7 +474,7 @@ async function fileSystems(
   }
   const io = new IOResult({
     exitCode: err === '' ? 0 : 1,
-    stderr: err === '' ? null : ENC.encode(err),
+    stderr: err === '' ? null : encodeText(err),
   })
   if (lines.length === 0) return [null, io]
   return [formatRecords(lines), io]
@@ -494,15 +489,30 @@ async function dispatchedStatfs(
   return result
 }
 
+interface StatFlags {
+  readonly format: string | null
+  readonly fileSystem: boolean
+  readonly deref: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): StatFlags {
+  const fl = new FlagView(bag, specOf('stat'))
+  return {
+    format: fl.asStr('format') ?? null,
+    fileSystem: fl.asBool('file_system'),
+    deref: fl.asBool('dereference'),
+  }
+}
+
 export async function statGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('stat'))
+  const parsed = parseFlags(opts.flags)
   if (paths.length === 0) throw missingOperandError('stat', null)
-  const fmt = fl.asStr('format') ?? null
-  if (fl.asBool('file_system')) {
+  const fmt = parsed.format
+  if (parsed.fileSystem) {
     const dispatch = opts.dispatch
     const probe = (p: PathSpec): Promise<FileStat> =>
       operandStat(p, stat, opts.statPath, opts.ns?.mounts, opts.ns?.links)
@@ -512,7 +522,7 @@ export async function statGeneric(
   }
   const lines: string[] = []
   let err = ''
-  const links = fl.asBool('dereference') ? null : (opts.ns?.links ?? null)
+  const links = parsed.deref ? null : (opts.ns?.links ?? null)
   const identity = identityOf(opts)
   for (const p of paths) {
     // GNU stat lstats: a symlink operand reports the link itself, not
@@ -544,7 +554,7 @@ export async function statGeneric(
   }
   const io = new IOResult({
     exitCode: err === '' ? 0 : 1,
-    stderr: err === '' ? null : ENC.encode(err),
+    stderr: err === '' ? null : encodeText(err),
   })
   if (lines.length === 0) return [null, io]
   const out: ByteSource = formatRecords(lines)

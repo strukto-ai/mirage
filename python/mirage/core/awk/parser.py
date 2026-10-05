@@ -62,6 +62,7 @@ from mirage.core.awk.nodes import (
     While,
 )
 from mirage.core.awk.regex import compile_ere
+from mirage.shell.bytes import byte_view
 
 P_ASSIGN = 1
 P_TERNARY = 2
@@ -689,7 +690,7 @@ def parse(src: str) -> Program:
     Returns:
         Program: rules in source order plus function definitions.
     """
-    return Parser(tokenize(src)).parse_program()
+    return Parser(tokenize(byte_view(src))).parse_program()
 
 
 __all__ = ["Parser", "parse"]

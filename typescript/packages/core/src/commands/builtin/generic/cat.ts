@@ -27,8 +27,8 @@ import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { truncateStream } from '../utils/limit.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
-const ENC = new TextEncoder()
 const NL = 0x0a
 
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -38,16 +38,16 @@ function formatLineNo(n: number): string {
   return String(n).padStart(6, ' ')
 }
 
-interface CatDisplay {
-  numberLines: boolean
-  numberNonblank: boolean
-  showEnds: boolean
-  showTabs: boolean
-  showNonprinting: boolean
-  squeezeBlank: boolean
+interface CatFlags {
+  readonly numberLines: boolean
+  readonly numberNonblank: boolean
+  readonly showEnds: boolean
+  readonly showTabs: boolean
+  readonly showNonprinting: boolean
+  readonly squeezeBlank: boolean
 }
 
-function parseFlags(bag: Record<string, FlagValue>): CatDisplay {
+function parseFlags(bag: Record<string, FlagValue>): CatFlags {
   const fl = new FlagView(bag, specOf('cat'))
   const showAll = fl.asBool('show_all')
   return {
@@ -105,7 +105,7 @@ async function* reported(
     yield* source
   } catch (err) {
     if (!isFsError(err)) throw err
-    io.stderr = concat([await materialize(io.stderr), ENC.encode(fsErrorLine('cat', path, err))])
+    io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine('cat', path, err))])
     io.exitCode = 1
   }
 }
@@ -113,7 +113,7 @@ async function* reported(
 /** Line-process a stream for GNU cat's display flags (-n -E -T -v -s). */
 async function* displayLines(
   source: AsyncIterable<Uint8Array>,
-  display: CatDisplay,
+  display: CatFlags,
 ): AsyncIterable<Uint8Array> {
   let lineNo = 0
   let buf = new Uint8Array(0)
@@ -139,16 +139,16 @@ async function* displayLines(
         (!display.numberNonblank && display.numberLines) ||
         (display.numberNonblank && line.byteLength > 0)
       if (shouldNumber) lineNo += 1
-      if (shouldNumber) yield ENC.encode(`${formatLineNo(lineNo)}\t`)
+      if (shouldNumber) yield encodeText(`${formatLineNo(lineNo)}\t`)
       if (transform) line = visible(line, display.showTabs, display.showNonprinting)
       yield line
-      yield ENC.encode(display.showEnds ? '$\n' : '\n')
+      yield encodeText(display.showEnds ? '$\n' : '\n')
     }
   }
   if (buf.byteLength > 0) {
     const shouldNumber = display.numberLines || display.numberNonblank
     if (shouldNumber) lineNo += 1
-    if (shouldNumber) yield ENC.encode(`${formatLineNo(lineNo)}\t`)
+    if (shouldNumber) yield encodeText(`${formatLineNo(lineNo)}\t`)
     yield transform ? visible(buf, display.showTabs, display.showNonprinting) : buf
   }
 }
@@ -163,7 +163,6 @@ export async function catGeneric(
   stat = stdinStat(stat)
   stream = stdinStream(stream, opts.stdin)
   const display = parseFlags(opts.flags)
-  if (display.numberNonblank) display.numberLines = false
   const wantsDisplay = Object.values(display).some(Boolean)
   if (paths.length > 0) {
     const stats = new Map<string, FileStat>()
@@ -173,7 +172,7 @@ export async function catGeneric(
       return row
     }
     const [readable, err] = await splitReadable(paths, rememberStat, 'cat')
-    const errBytes = err === '' ? null : ENC.encode(err)
+    const errBytes = err === '' ? null : encodeText(err)
     if (readable.length === 0) {
       return [null, new IOResult({ exitCode: err === '' ? 0 : 1, stderr: errBytes })]
     }
@@ -209,6 +208,6 @@ export async function catGeneric(
     return [out, new IOResult()]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${msg}\n`) })]
   }
 }

@@ -33,6 +33,7 @@ from mirage.policy import (
 )
 from mirage.policy.match import Outcome, decide, has_rules
 from mirage.shell import parse
+from mirage.shell.bytes import decode_text
 from mirage.shell.helpers import (
     get_parts,
     get_text,
@@ -99,7 +100,7 @@ def _unreadable(raw: str) -> Explanation:
         outcome=Outcome.DENY,
         reason=reason,
         exit_code=code,
-        stderr=err.decode(),
+        stderr=decode_text(err),
         refusal=refusal_of(deny),
     )
 
@@ -125,7 +126,7 @@ def _from_refusal(
         outcome=Outcome.DENY,
         source="commands.allow",
         exit_code=refusal.exit_code,
-        stderr=refusal.stderr.decode() if missing is None else missing,
+        stderr=decode_text(refusal.stderr) if missing is None else missing,
         refusal=refusal.refusal,
     )
 
@@ -185,7 +186,7 @@ def _explained(
         matched_path=base.matched_path,
         paths=base.paths,
         exit_code=code,
-        stderr=err.decode(),
+        stderr=decode_text(err),
         refusal=refusal_of(action),
     )
 

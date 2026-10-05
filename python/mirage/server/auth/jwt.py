@@ -26,33 +26,44 @@ class JWTVerificationError(Exception):
     pass
 
 
-def verify_jwt(token: str, cfg: JWTConfig) -> dict[str, Any]:
+def verify_jwt(
+    token: str, cfg: JWTConfig, key: Any | None = None
+) -> dict[str, Any]:
     """Verify a JWT against ``cfg`` and return its claims on success.
 
     Performs signature verification, algorithm pinning, mandatory
-    ``exp`` check, and (when configured) ``iss``/``aud``/``azp``
-    checks. ``typ`` header, if present, must be ``"JWT"``.
+    ``exp`` and ``sub`` (the account the token speaks for) checks, and
+    (when configured) an ``iss`` check. A token with ``aud`` must name
+    one of the configured audiences; one without must carry an ``azp``
+    in the authorized parties when any are configured, and is refused
+    when only audiences are. So one server takes both an app's session
+    tokens (``azp``, no ``aud``) and an OAuth client's access tokens
+    (``aud``). ``typ`` header, if present, must be ``"JWT"``.
 
     Args:
         token (str): the raw bearer value (already stripped of any
             ``Bearer `` prefix).
         cfg (JWTConfig): verification parameters.
+        key (Any | None): the key to check the signature with; None
+            uses ``cfg.key``.
 
     Returns:
         dict[str, Any]: validated claims.
 
     Raises:
         JWTVerificationError: any failure (signature, algorithm,
-            ``exp``, ``iss``, ``aud``, ``azp``, ``typ``).
+            ``exp``, ``sub``, ``iss``, ``aud``, ``azp``, ``typ``).
     """
+    chosen = key if key is not None else cfg.key
+    if chosen is None:
+        raise JWTVerificationError("no JWT key configured")
     try:
         claims = pyjwt.decode(
             token,
-            cfg.key,
+            chosen,
             algorithms=[cfg.algorithm],
-            audience=cfg.audience,
             issuer=cfg.issuer,
-            options={"require": ["exp"]},
+            options={"require": ["exp", "sub"], "verify_aud": False},
             leeway=cfg.clock_skew_seconds,
         )
     except pyjwt.PyJWTError as e:
@@ -66,10 +77,22 @@ def verify_jwt(token: str, cfg: JWTConfig) -> dict[str, Any]:
         raise JWTVerificationError(
             f"JWT typ header must be 'JWT' when present, got {typ!r}"
         )
-    if cfg.authorized_parties:
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub:
+        raise JWTVerificationError("JWT sub must name an account")
+    aud = claims.get("aud")
+    if aud is not None:
+        named = [aud] if isinstance(aud, str) else aud
+        if not isinstance(named, list) or not any(
+            a in cfg.audiences for a in named
+        ):
+            raise JWTVerificationError(f"JWT aud {aud!r} not in audiences")
+    elif cfg.authorized_parties:
         azp = claims.get("azp")
         if azp not in cfg.authorized_parties:
             raise JWTVerificationError(
                 f"JWT azp {azp!r} not in authorized_parties"
             )
+    elif cfg.audiences:
+        raise JWTVerificationError("JWT has no aud")
     return claims

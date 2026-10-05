@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { specOf } from '../../../../spec/builtins.ts'
-import { FlagView } from '../../../../spec/flag_view.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import { unzipGeneric } from '../../unzip.ts'
@@ -34,13 +32,8 @@ export async function runUnzip(
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
-  const fl = new FlagView(flagKwargs, specOf('unzip'))
-  // Scopes arrive in line order and include the -d flag's value, so the
-  // archive is the first scope that is not the destination.
-  const dest = fl.asStr('d')
-  const operands = scopes.filter((s) => s.virtual !== dest)
   const result = await unzipGeneric(
-    operands.length > 0 ? operands : scopes,
+    scopes,
     textArgs,
     crossOpts(flagKwargs),
     streamOp(dispatch),

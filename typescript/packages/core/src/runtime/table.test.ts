@@ -60,19 +60,26 @@ describe('runtime table', () => {
     expect(buildRuntime(DEFAULT_PYTHON)).toBeInstanceOf(PythonRuntime)
   })
 
-  it('buildRuntime fails loud on unknown names', () => {
-    expect(() => buildRuntime('ghost')).toThrow(/unknown runtime: 'ghost'/)
+  it.each<[string, new (...args: never[]) => Runtime]>([
+    ['pyodide', PyodideRuntime],
+    ['monty', MontyRuntime],
+  ])('buildRuntime builds %s by name', (name, kind) => {
+    expect(buildRuntime(name)).toBeInstanceOf(kind)
+  })
+
+  it.each<[string, RegExp]>([
+    ['ghost', /unknown runtime: 'ghost'/],
+    ['docker', /unknown runtime/],
+    ['wasi', /Python-only/],
+    ['local', /mirage-node/],
+  ])('buildRuntime refuses %s, naming why', (name, refusal) => {
+    expect(() => buildRuntime(name)).toThrow(refusal)
   })
 
   it('buildRuntime builds the workspace runtime by name', () => {
     expect(buildRuntime('workspace')).toBeInstanceOf(WorkspaceRuntime)
     const restricted = buildRuntime('workspace', { captures: ['grep', 'cat'] })
     expect([...restricted.captures]).toEqual(['grep', 'cat'])
-  })
-
-  it("buildRuntime hints the right home for 'wasi' and 'local'", () => {
-    expect(() => buildRuntime('wasi')).toThrow(/Python-only/)
-    expect(() => buildRuntime('local')).toThrow(/mirage-node/)
   })
 })
 
@@ -159,15 +166,12 @@ describe('runtimeBindingsFor', () => {
     expect(bindings).toEqual({ python3: fake, 'made-up': fake })
   })
 
-  it('rejects the workspace name', () => {
-    expect(() =>
-      runtimeBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], 'workspace'),
-    ).toThrow(/not a runtime you can select/)
-  })
-
-  it('unknown names list the workspace entries', () => {
-    expect(() => runtimeBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], 'nope')).toThrow(
-      /unknown runtime: 'nope' \(workspace runtimes: 'fake', 'workspace'\)/,
+  it.each<[string, RegExp]>([
+    ['workspace', /not a runtime you can select/],
+    ['nope', /unknown runtime: 'nope' \(workspace runtimes: 'fake', 'workspace'\)/],
+  ])('refuses %s, naming why', (name, refusal) => {
+    expect(() => runtimeBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], name)).toThrow(
+      refusal,
     )
   })
 })

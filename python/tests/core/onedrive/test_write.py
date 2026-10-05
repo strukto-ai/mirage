@@ -3,7 +3,7 @@ from aioresponses import CallbackResult, aioresponses
 
 import mirage.core.msgraph.drive as drive_ops
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.core.onedrive.write import write_bytes
+from mirage.core.onedrive.write import write
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
@@ -27,7 +27,7 @@ async def test_write_small_file_puts_content():
 
     with aioresponses() as m:
         m.put(_CONTENT, callback=_cb)
-        result = await write_bytes(
+        result = await write(
             _accessor(), PathSpec.from_str_path("/Docs/a.txt"), b"hello"
         )
     assert result is None
@@ -53,7 +53,7 @@ async def test_write_large_file_uses_upload_session(monkeypatch):
         m.post(_SESSION, payload={"uploadUrl": upload_url})
         m.put(upload_url, callback=_chunk_cb)
         m.put(upload_url, callback=_final_cb)
-        await write_bytes(
+        await write(
             _accessor(), PathSpec.from_str_path("/Docs/a.txt"), b"abcdef"
         )
     assert ranges == ["bytes 0-3/6", "bytes 4-5/6"]
@@ -73,7 +73,7 @@ async def test_upload_session_requests_replace(monkeypatch):
     with aioresponses() as m:
         m.post(_SESSION, callback=_session_cb)
         m.put(upload_url, status=201, payload={"id": "X"})
-        await write_bytes(
+        await write(
             _accessor(), PathSpec.from_str_path("/Docs/a.txt"), b"abcdef"
         )
     behavior = captured["item"]["@microsoft.graph.conflictBehavior"]
@@ -101,7 +101,7 @@ async def test_upload_resumes_from_next_expected_ranges(monkeypatch):
         m.post(_SESSION, payload={"uploadUrl": upload_url})
         m.put(upload_url, callback=_chunk_cb)
         m.put(upload_url, callback=_final_cb)
-        await write_bytes(
+        await write(
             _accessor(), PathSpec.from_str_path("/Docs/a.txt"), b"abcdef"
         )
     assert ranges == ["bytes 0-3/6", "bytes 2-5/6"]
@@ -121,7 +121,7 @@ async def test_write_records_the_virtual_path():
                 status=201,
                 payload={"id": "X"},
             )
-            await write_bytes(_accessor(), spec, b"hello")
+            await write(_accessor(), spec, b"hello")
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]

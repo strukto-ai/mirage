@@ -47,7 +47,7 @@ async def test_grep_emits_token_hint_on_forbidden():
             new=AsyncMock(return_value=paths),
         ),
         patch(
-            "mirage.commands.builtin.discord.grep.generic_grep",
+            "mirage.commands.builtin.discord.grep.grep_generic",
             new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
         ),
     ):
@@ -75,7 +75,7 @@ async def test_rg_emits_warning_on_rate_limit():
             new=AsyncMock(return_value=paths),
         ),
         patch(
-            "mirage.commands.builtin.discord.rg.generic_rg",
+            "mirage.commands.builtin.discord.rg.rg_generic",
             new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
         ),
     ):

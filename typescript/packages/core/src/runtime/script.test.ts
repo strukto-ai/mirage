@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { CommandTimeoutError } from '../commands/errors.ts'
 import { EvalError } from './errors.ts'
 import { EVALUATOR, isEvaluator, type Evaluator } from './mixin.ts'
-import { ScriptSource } from './routing/types.ts'
+import { ScriptSource } from './types.ts'
 import { CTX_GLOBAL, evalWithCtx, scriptEngine } from './script.ts'
 import type { EvalResult, EvalValue } from './types.ts'
 
@@ -70,19 +70,11 @@ describe('scriptEngine', () => {
     expect(isEvaluator(engine)).toBe(true)
   })
 
-  it('refuses a runtime that cannot evaluate', () => {
-    expect(() => scriptEngine(new ScriptSource('...', 'js'), 'workspace')).toThrow(
-      /cannot evaluate one/,
-    )
-  })
-
-  it('refuses an unknown runtime', () => {
-    expect(() => scriptEngine(new ScriptSource('...', 'js'), 'nope')).toThrow(/unknown runtime/)
-  })
-
-  it('refuses a runtime of the wrong language', () => {
-    expect(() => scriptEngine(new ScriptSource('...', 'python'), 'quickjs')).toThrow(
-      /python, but names runtime/,
-    )
+  it.each<[string, 'js' | 'python', string, RegExp]>([
+    ['one that cannot evaluate', 'js', 'workspace', /cannot evaluate one/],
+    ['an unknown one', 'js', 'nope', /unknown runtime/],
+    ['one of the wrong language', 'python', 'quickjs', /python, but names runtime/],
+  ])('refuses a runtime: %s', (_name, language, runtime, refusal) => {
+    expect(() => scriptEngine(new ScriptSource('...', language), runtime)).toThrow(refusal)
   })
 })

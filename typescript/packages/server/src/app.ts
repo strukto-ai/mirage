@@ -14,10 +14,11 @@
 
 import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
-import { WorkspaceRegistry } from './registry.ts'
+import { DiskRecordClient } from '@struktoai/mirage-node'
+import { OWNERS_PREFIX, WorkspaceRegistry } from './registry.ts'
 import { JobTable } from './jobs.ts'
 import type { AuthConfig } from './auth/index.ts'
-import { registerAuth, resolveAuthConfig } from './auth/index.ts'
+import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
 import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
 import { registerMcpRoutes } from './mcp/http.ts'
 import { registerRpcRoutes } from './rpc/http.ts'
@@ -26,13 +27,16 @@ import { registerShellRoutes } from './routers/shell.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerHealthRoutes } from './routers/health.ts'
 import { registerJobsRoutes } from './routers/jobs.ts'
+import { registerOAuthRoutes } from './routers/oauth.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
+import { registerSshRoutes } from './routers/ssh.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
 import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
 import { mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { resolveSSHConfig, type SSHConfig } from './ssh/config.ts'
 import type { SSHDoor } from './ssh/types.ts'
+import websocket from '@fastify/websocket'
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
@@ -48,12 +52,12 @@ export interface BuildAppOptions {
   stateRoot?: string
   pidFile?: string
   /**
-   * The SSH door, opened when the app is ready and closed with it.
-   * Undefined resolves it from the `MIRAGE_SSH_*` env vars and the
-   * `ssh_*` config keys; it stays shut unless a port is set, and null
-   * keeps it shut regardless.
+   * The SSH settings: the TCP door opens when the app is ready and closes
+   * with it, and the HTTPS route carries SSH either way. Undefined resolves
+   * them from the `MIRAGE_SSH_*` env vars and the `ssh_*` config keys; the
+   * TCP door stays shut unless a port is set.
    */
-  sshConfig?: SSHConfig | null
+  sshConfig?: SSHConfig
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -66,14 +70,17 @@ export function buildApp(options: BuildAppOptions = {}) {
   validateDaemonTable(readDaemonTable(mirageHome()))
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
+  const authConfig = options.authConfig ?? resolveAuthConfig()
+  const stateRoot = stateRootPath(options.stateRoot)
   const registry = new WorkspaceRegistry({
     ...(options.idleGraceSeconds !== undefined
       ? { idleGraceSeconds: options.idleGraceSeconds }
       : {}),
     onIdleExit: exitFn,
+    accountsRequired: authConfig.mode === AuthMode.Jwt,
+    owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
   })
   const jobs = new JobTable()
-  const stateRoot = stateRootPath(options.stateRoot)
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })
   void app.register(rateLimit, {
@@ -94,26 +101,31 @@ export function buildApp(options: BuildAppOptions = {}) {
       done()
     })
   }
-  const authConfig = options.authConfig ?? resolveAuthConfig()
   registerAuth(app, authConfig)
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
   })
   registerHealthRoutes(app, { registry, startedAt, exit: exitFn })
+  registerOAuthRoutes(app, { auth: authConfig })
   registerWorkspacesRoutes(app, { registry, stateRoot, snapshotStore: options.snapshotStore })
   registerSessionsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
   registerShellRoutes(app, { registry, jobs })
-  registerJobsRoutes(app, { jobs })
+  registerJobsRoutes(app, { jobs, registry })
   const mcp = registerMcpRoutes(app, registry, jobs)
   registerRpcRoutes(app, registry, jobs, mcp)
   registerToolsRoutes(app, { mcp })
   const ssh: SSHDoor = {
-    config: options.sshConfig !== undefined ? options.sshConfig : resolveSSHConfig(),
+    config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,
   }
+  void app.register(websocket)
+  void app.register((scope, _opts, done) => {
+    registerSshRoutes(scope, { registry, ssh })
+    done()
+  })
   const sshConfig = ssh.config
-  if (sshConfig !== null) {
+  if (sshConfig.port !== null) {
     // A configured door that cannot open (the port is taken, ssh2 is
     // missing) fails the start rather than leaving the daemon up without
     // the door its config asked for. Loaded on demand so a daemon with no

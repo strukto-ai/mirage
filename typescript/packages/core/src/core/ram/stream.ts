@@ -19,7 +19,10 @@ import { norm } from '../../utils/path.ts'
 import { lookupError } from './dest.ts'
 
 // eslint-disable-next-line @typescript-eslint/require-await
-export async function* stream(accessor: RAMAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
+export async function* readStream(
+  accessor: RAMAccessor,
+  path: PathSpec,
+): AsyncIterable<Uint8Array> {
   const p = norm(path.mountPath)
   const data = accessor.store.files.get(p)
   if (data === undefined) throw lookupError(accessor, path, p)

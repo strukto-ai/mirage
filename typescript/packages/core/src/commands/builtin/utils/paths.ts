@@ -24,7 +24,7 @@ import {
   operandSpelling,
   type FsError,
 } from '../../../utils/errors.ts'
-import { rekey, respelled } from '../../../utils/key_prefix.ts'
+import { mountKey, rekey, respelled } from '../../../utils/key_prefix.ts'
 import {
   CycleError,
   dotPrefixes,
@@ -256,4 +256,37 @@ export async function dotRefusal(
     if (exists && !isDir) return creates ? eexist(path) : dotWalkError(path, 'ENOTDIR')
   }
   return null
+}
+
+// True when any operand still carries a glob to expand. Backend push-down
+// branches read paths[0] directly to build SQL, so they must not run before
+// glob expansion: a pattern segment would be taken for a literal entity
+// name, and tables/*/rows.jsonl would query a relation actually called "*".
+export function hasUnresolvedGlob(paths: PathSpec[]): boolean {
+  return paths.some((p) => p.pattern !== null && p.pattern !== '')
+}
+
+// Resolve a script operand (absolute or cwd-relative) to a fully-resolved
+// PathSpec, the way python3/js locate a mounted script before running it.
+// The spelling as typed rides along in rawPath, which is the name an
+// interpreter gives its program.
+export function resolveScript(name: string, cwd: string): PathSpec {
+  const path = resolvePath(name, cwd)
+  const lastSlash = path.lastIndexOf('/')
+  const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
+  return new PathSpec({
+    vfsPath: stripSlash(path),
+    virtual: path,
+    directory,
+    resolved: true,
+    rawPath: name,
+  })
+}
+
+// Default a command's path operands the way the shell would: explicit
+// operands pass through, otherwise the session cwd becomes the single
+// operand (keyed against the mount prefix when the caller knows it).
+export function defaultPaths(paths: PathSpec[], cwd: string, mountPrefix = ''): PathSpec[] {
+  if (paths.length > 0) return paths
+  return [PathSpec.fromStrPath(cwd, mountKey(cwd, mountPrefix))]
 }

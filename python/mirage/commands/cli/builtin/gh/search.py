@@ -5,6 +5,7 @@ from typing import Any
 
 from mirage.commands.cli.builtin.gh.accessor import (
     csv_values,
+    gh_bool,
     json_fields,
     text_out,
     typed_out,
@@ -38,8 +39,7 @@ def _quote(value: str) -> str:
 
 
 def _boolean(fl: FlagView, name: str) -> bool:
-    name = name.replace("-", "_")
-    return fl.as_bool(name) or fl.as_str(name) == "true"
+    return gh_bool(fl, name.replace("-", "_"))
 
 
 def _query(kind: str, words: tuple[str, ...], fl: FlagView) -> str:

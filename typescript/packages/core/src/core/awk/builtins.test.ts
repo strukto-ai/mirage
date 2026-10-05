@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { byteView } from '../../shell/bytes.ts'
 import {
   matchPosition,
   nextRandom,
@@ -46,9 +47,9 @@ describe('awk substr', () => {
     expect(substr('hello world', start, length)).toBe(expected)
   })
 
-  it('counts characters, not code units', () => {
-    expect(substr('héllo', 2, 2)).toBe('él')
-    expect(substr('a😀b', 2, 1)).toBe('😀')
+  it('counts the bytes of a byte view', () => {
+    expect(substr(byteView('héllo'), 2, 2)).toBe(byteView('é'))
+    expect(substr(byteView('a😀b'), 2, 4)).toBe(byteView('😀'))
   })
 })
 

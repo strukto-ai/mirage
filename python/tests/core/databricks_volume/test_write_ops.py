@@ -16,7 +16,7 @@ import pytest
 
 from mirage.core.databricks_volume.create import create
 from mirage.core.databricks_volume.unlink import unlink
-from mirage.core.databricks_volume.write import write_bytes
+from mirage.core.databricks_volume.write import write
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -59,7 +59,7 @@ def _seed_file(files, path: str, data: bytes) -> None:
 async def test_write_new_file(accessor, files, remote_root, index):
     _seed_directory(files, remote_root)
 
-    await write_bytes(accessor, _path("/dbx/new.txt"), b"hello", index)
+    await write(accessor, _path("/dbx/new.txt"), b"hello", index)
 
     assert files.downloads[f"{remote_root}/new.txt"] == b"hello"
     assert files.upload_calls == [(f"{remote_root}/new.txt", b"hello", True)]
@@ -72,7 +72,7 @@ async def test_write_overwrites_existing_file(
     _seed_directory(files, remote_root)
     _seed_file(files, f"{remote_root}/new.txt", b"old")
 
-    await write_bytes(accessor, _path("/dbx/new.txt"), b"new", index)
+    await write(accessor, _path("/dbx/new.txt"), b"new", index)
 
     assert files.downloads[f"{remote_root}/new.txt"] == b"new"
     assert files.metadata[f"{remote_root}/new.txt"].content_length == 3
@@ -85,7 +85,7 @@ async def test_write_fails_when_parent_is_missing(
     _seed_directory(files, remote_root)
 
     with pytest.raises(FileNotFoundError):
-        await write_bytes(accessor, _path("/dbx/missing/new.txt"), b"x", index)
+        await write(accessor, _path("/dbx/missing/new.txt"), b"x", index)
 
 
 @pytest.mark.asyncio
@@ -96,9 +96,7 @@ async def test_write_fails_when_parent_is_file(
     _seed_file(files, f"{remote_root}/parent.txt", b"file")
 
     with pytest.raises(NotADirectoryError):
-        await write_bytes(
-            accessor, _path("/dbx/parent.txt/new.txt"), b"x", index
-        )
+        await write(accessor, _path("/dbx/parent.txt/new.txt"), b"x", index)
 
 
 @pytest.mark.asyncio
@@ -160,7 +158,7 @@ async def test_file_mutation_paths_cannot_escape_root(
     escaping = _path("/dbx/../escape.txt")
 
     with pytest.raises(ValueError):
-        await write_bytes(accessor, escaping, b"x", index)
+        await write(accessor, escaping, b"x", index)
     with pytest.raises(ValueError):
         await create(accessor, escaping, index)
     with pytest.raises(ValueError):

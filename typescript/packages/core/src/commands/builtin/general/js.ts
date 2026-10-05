@@ -21,7 +21,7 @@ import type { ExecutionNode } from '../../../workspace/types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { resolveScript } from '../utils/operands.ts'
+import { resolveScript } from '../utils/paths.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { makeInterpreterHandler, runtimeVersion, STDIN_OPERAND } from './interpreter.ts'
 
@@ -76,7 +76,7 @@ export async function handleJs(
   )
 }
 
-async function jsCommand(
+async function js(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -189,12 +189,12 @@ export const GENERAL_JS = command({
   name: 'js',
   vfs: null,
   spec: specOf('js'),
-  fn: jsCommand,
+  fn: js,
 })
 
 export const GENERAL_NODE = command({
   name: 'node',
   vfs: null,
   spec: specOf('node'),
-  fn: jsCommand,
+  fn: js,
 })

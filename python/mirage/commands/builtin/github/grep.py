@@ -14,8 +14,7 @@
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
-from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.generic.grep import labelled
+from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
@@ -66,7 +65,7 @@ async def grep(
     if used_search:
         opts = labelled(opts)
 
-    return await generic_grep(
+    return await grep_generic(
         resolved,
         texts,
         opts,

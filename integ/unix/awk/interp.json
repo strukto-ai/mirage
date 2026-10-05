@@ -1217,10 +1217,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'héllo\\nnaïve\\n' | awk '{print length($1), toupper($1), substr($1,2,2), index($1,\"l\")}'",
+      "command": "( export LC_ALL=C; printf 'héllo\\nnaïve\\n' | awk '{print length($1), toupper($1), substr($1,2,2), index($1,\"l\")}' ) | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "5 HÉLLO él 3\n5 NAÏVE aï 0\n",
+        "stdout": " 36 20 48 c3 a9 4c 4c 4f 20 c3 a9 20 34 0a 36 20\n 4e 41 c3 af 56 45 20 61 c3 20 30 0a\n",
         "stderr": ""
       }
     },
@@ -1697,6 +1697,40 @@
       "expect": {
         "exit": 0,
         "stdout": "1 1 x\n1 2 x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_interp_environ",
+      "seq": 991250,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export AWKN=010; AWKY=1; awk 'BEGIN{print ENVIRON[\"AWKN\"]+0, (ENVIRON[\"AWKN\"]==10), (\"AWKY\" in ENVIRON)}'; AWKV=inline awk 'BEGIN{print ENVIRON[\"AWKV\"]}'; export AWKZ=1; awk 'BEGIN{ENVIRON[\"AWKZ\"]=2; system(\"echo $AWKZ\"); print ENVIRON[\"AWKZ\"]}' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "10 1 0\ninline\n1\n2\n",
         "stderr": ""
       }
     }

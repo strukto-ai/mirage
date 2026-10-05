@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fromByteView } from '../../shell/bytes.ts'
 import { GetlineKind, RedirKind } from './nodes.ts'
 
 import {
-  charLength,
   indexOf,
   matchPosition,
   nextRandom,
@@ -117,8 +117,6 @@ const MAX_CALL_DEPTH = 100
 
 const PLAIN_PRINT: Print = { type: 'Print', args: [], redirect: null }
 
-const ENC = new TextEncoder()
-
 class NextRecord extends Error {}
 
 class NextFileSignal extends Error {}
@@ -167,7 +165,8 @@ export interface InputPipe {
  * output pipe is open, since the pipe's command runs when it is closed
  * and what it prints comes first; running any command (a new pipe,
  * `system()`) flushes it, as mawk flushes before it forks. `argv` is the
- * operands as typed, ARGV[1] onward.
+ * operands as typed, ARGV[1] onward; `environ` is the exported environment,
+ * which ENVIRON holds, and writing ENVIRON reaches no command.
  */
 export class Interpreter {
   private readonly program: Program
@@ -203,6 +202,7 @@ export class Interpreter {
     host: AwkHost,
     argv: readonly string[] = [],
     assignments: Readonly<Record<string, string>> = {},
+    environ: Readonly<Record<string, string>> = {},
   ) {
     this.program = program
     this.host = host
@@ -212,6 +212,10 @@ export class Interpreter {
     argv.forEach((operand, position) => table.set(String(position + 1), strnum(operand)))
     this.tables.set('ARGV', table)
     this.globals.set('ARGC', num(argv.length + 1))
+    this.tables.set(
+      'ENVIRON',
+      new Map(Object.entries(environ).map(([name, value]) => [name, strnum(value)])),
+    )
   }
 
   special(name: string): string {
@@ -683,8 +687,10 @@ export class Interpreter {
       const span = args.length > 2 ? await this.numArg(args, 2) : null
       return text(substr(subject, start, span))
     }
-    if (name === 'toupper') return text((await this.strArg(args, 0)).toUpperCase())
-    if (name === 'tolower') return text((await this.strArg(args, 0)).toLowerCase())
+    if (name === 'toupper')
+      return text((await this.strArg(args, 0)).replace(/[a-z]/g, (ch) => ch.toUpperCase()))
+    if (name === 'tolower')
+      return text((await this.strArg(args, 0)).replace(/[A-Z]/g, (ch) => ch.toLowerCase()))
     if (name === 'sprintf') {
       const fmt = await this.strArg(args, 0)
       const rest: Value[] = []
@@ -710,14 +716,14 @@ export class Interpreter {
 
   private async builtinLength(args: readonly Expr[]): Promise<Value> {
     const target = args[0]
-    if (target === undefined) return num(charLength(this.ensureRecord()))
+    if (target === undefined) return num(this.ensureRecord().length)
     if (target.type === 'Var') {
       const frame = this.frame()
       const known = frame?.params.has(target.name) === true ? frame.tables : this.tables
       const array = known.get(target.name)
       if (array !== undefined) return num(array.size)
     }
-    return num(charLength(toStr(await this.eval(target), this.convfmt())))
+    return num(toStr(await this.eval(target), this.convfmt()).length)
   }
 
   private async builtinSub(node: BuiltinCall, globally: boolean): Promise<Value> {
@@ -800,8 +806,8 @@ export class Interpreter {
    * once held, later text waits behind it.
    */
   private stdout(body: string): void {
-    if (this.outPipes.size > 0 || this.held.length > 0) this.held.push(ENC.encode(body))
-    else this.out.push(ENC.encode(body))
+    if (this.outPipes.size > 0 || this.held.length > 0) this.held.push(fromByteView(body))
+    else this.out.push(fromByteView(body))
   }
 
   /** Let held standard output go, as a flush of stdout does. */
@@ -870,7 +876,7 @@ export class Interpreter {
       return
     }
     if (name === STDERR_NAME) {
-      this.err.push(ENC.encode(body))
+      this.err.push(fromByteView(body))
       return
     }
     let pending = this.outFiles.get(name)
@@ -887,7 +893,7 @@ export class Interpreter {
     const body = (this.outPipes.get(command) ?? []).join('')
     this.outPipes.delete(command)
     await this.flushFiles()
-    const run = await this.host.run(command, ENC.encode(body))
+    const run = await this.host.run(command, fromByteView(body))
     this.out.push(run.stdout)
     this.err.push(run.stderr)
     return run.status
@@ -1172,12 +1178,12 @@ export class Interpreter {
    * file that could not be written now.
    */
   async salvage(failure: Error): Promise<[Uint8Array, Uint8Array]> {
-    this.err.push(ENC.encode(`${failure.message}\n`))
+    this.err.push(fromByteView(`${failure.message}\n`))
     try {
       await this.flushFiles()
     } catch (err) {
       if (!(err instanceof AwkRuntimeError)) throw err
-      this.err.push(ENC.encode(`${err.message}\n`))
+      this.err.push(fromByteView(`${err.message}\n`))
     }
     this.release()
     return this.take()

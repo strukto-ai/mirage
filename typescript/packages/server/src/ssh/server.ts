@@ -13,13 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { access, readFile } from 'node:fs/promises'
-import type { AddressInfo } from 'node:net'
+import type { AddressInfo, Socket } from 'node:net'
+import type { Duplex } from 'node:stream'
 import type * as Ssh2Mod from 'ssh2'
-import type { AuthContext, Connection, ParsedKey, PseudoTtyInfo, ServerChannel } from 'ssh2'
+import type {
+  AuthContext,
+  Connection,
+  ParsedKey,
+  PseudoTtyInfo,
+  ServerChannel,
+  ServerConfig,
+} from 'ssh2'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { SSHConfig } from './config.ts'
 import { serveCodex } from './codex.ts'
-import { CODEX_SUBSYSTEM, PROFILE_OPTION } from './constants.ts'
+import {
+  ACCOUNT_OPTION,
+  CODEX_SUBSYSTEM,
+  KEEPALIVE_COUNT_MAX,
+  KEEPALIVE_INTERVAL_SECONDS,
+  PROFILE_OPTION,
+} from './constants.ts'
 import { SSHConfigError } from './errors.ts'
 import { loadHostKey } from './keys.ts'
 import {
@@ -50,11 +64,13 @@ async function loadSsh2(): Promise<typeof Ssh2Mod> {
   return mod.default ?? mod
 }
 
-/** A key allowed to log in, with the profile its line binds it to. */
+/** A key allowed to log in, with the profile and account its line binds it to. */
 export interface AuthorizedKey {
   key: ParsedKey
   /** The line's `mirage-profile` values; empty when it has none. */
   profile: readonly string[]
+  /** The line's `mirage-account` values; empty when it has none. */
+  account: readonly string[]
 }
 
 interface KeyOption {
@@ -65,10 +81,10 @@ interface KeyOption {
 /**
  * The public keys allowed to log in, read fresh for every attempt so a key
  * added or revoked takes effect on the next login. A line that cannot be
- * read is skipped with a warning. `mirage-profile` is the one OpenSSH-style
- * key option this door reads; a line carrying any other (`command=`,
- * `from=`, ...) is skipped too, since the door does not honor it and so
- * will not accept the key as if it were absent.
+ * read is skipped with a warning. `mirage-profile` and `mirage-account`
+ * are the OpenSSH-style key options this door reads; a line carrying any
+ * other (`command=`, `from=`, ...) is skipped too, since the door does not
+ * honor it and so will not accept the key as if it were absent.
  */
 export async function readAuthorizedKeys(
   path: string,
@@ -97,24 +113,26 @@ export async function readAuthorizedKeys(
 }
 
 /**
- * One authorized_keys line as its key and `mirage-profile` values. A line
- * ssh2 reads as it stands carries no options; otherwise its leading
- * options field is split off the way OpenSSH reads it.
+ * One authorized_keys line as its key and its `mirage-profile` and
+ * `mirage-account` values. A line ssh2 reads as it stands carries no
+ * options; otherwise its leading options field is split off the way
+ * OpenSSH reads it.
  */
 function authorizedKey(line: string, utils: typeof Ssh2Mod.utils): AuthorizedKey | Error {
   const plain = utils.parseKey(line)
-  if (!(plain instanceof Error)) return { key: plain, profile: [] }
+  if (!(plain instanceof Error)) return { key: plain, profile: [], account: [] }
   const split = splitOptions(line)
   if (split === null) return plain
   const profile: string[] = []
+  const account: string[] = []
   for (const option of split.options) {
-    if (option.name.toLowerCase() !== PROFILE_OPTION) {
-      return new Error(`unsupported key option ${option.name}`)
-    }
-    profile.push(option.value ?? '')
+    const name = option.name.toLowerCase()
+    if (name === PROFILE_OPTION) profile.push(option.value ?? '')
+    else if (name === ACCOUNT_OPTION) account.push(option.value ?? '')
+    else return new Error(`unsupported key option ${option.name}`)
   }
   const key = utils.parseKey(split.rest)
-  return key instanceof Error ? key : { key, profile }
+  return key instanceof Error ? key : { key, profile, account }
 }
 
 /**
@@ -184,22 +202,41 @@ async function authenticate(
   return match
 }
 
+/** Decides a login: the profile and account it runs as, or null once refused. */
+type Admit = (ctx: AuthContext) => Promise<Pick<AuthorizedKey, 'profile' | 'account'> | null>
+
+/**
+ * Admit a login the HTTPS route already authenticated: its token was checked
+ * and its account allowed the workspace the URL names, so it needs no key,
+ * may only name that workspace, and runs as that account.
+ */
+function admitTunnel(workspaceId: string, account: string | null): Admit {
+  return (ctx) => {
+    if (ctx.username !== workspaceId) {
+      ctx.reject([])
+      return Promise.resolve(null)
+    }
+    return Promise.resolve({ profile: [], account: account === null ? [] : [account] })
+  }
+}
+
 function serveConnection(
   client: Connection,
   registry: WorkspaceRegistry,
-  config: SSHConfig,
-  utils: typeof Ssh2Mod.utils,
+  admit: Admit,
   peer: Endpoint,
   local: Endpoint,
 ): void {
   let username = ''
   let profile: readonly string[] = []
+  let account: readonly string[] = []
   client.on('authentication', (ctx) => {
-    void authenticate(ctx, config.authorizedKeysFile, utils)
+    void admit(ctx)
       .then((match) => {
         if (match !== null) {
           username = ctx.username
           profile = match.profile
+          account = match.account
           ctx.accept()
         }
       })
@@ -214,7 +251,7 @@ function serveConnection(
       let term: string | null = null
       let shell: ShellChannel | null = null
       const start = (channel: ServerChannel, command: string | null): void => {
-        const request: ChannelRequest = { username, profile, command, term, peer, local }
+        const request: ChannelRequest = { username, profile, account, command, term, peer, local }
         void handleChannel(registry, channel, request, (s) => {
           shell = s
         })
@@ -237,7 +274,7 @@ function serveConnection(
         start(acceptExec(), info.command)
       })
       session.on('sftp', (acceptSftp) => {
-        serveSFTP(registry, username, profile, acceptSftp())
+        serveSFTP(registry, username, profile, account, acceptSftp())
       })
       session.on('subsystem', (acceptSubsystem, _reject, info) => {
         const channel = acceptSubsystem()
@@ -248,6 +285,7 @@ function serveConnection(
         const request: ChannelRequest = {
           username,
           profile,
+          account,
           command: null,
           term: null,
           peer,
@@ -264,6 +302,18 @@ function serveConnection(
   })
 }
 
+/** What every SSH connection the daemon serves runs with. */
+async function serverOptions(
+  config: SSHConfig,
+  utils: typeof Ssh2Mod.utils,
+): Promise<ServerConfig> {
+  return {
+    hostKeys: [await loadHostKey(config.hostKeyFile, utils)],
+    keepaliveInterval: KEEPALIVE_INTERVAL_SECONDS * 1000,
+    keepaliveCountMax: KEEPALIVE_COUNT_MAX,
+  }
+}
+
 /**
  * Listen for SSH, serving the daemon's workspaces.
  *
@@ -277,6 +327,8 @@ export async function startSSHServer(
   registry: WorkspaceRegistry,
   config: SSHConfig,
 ): Promise<SSHListener> {
+  const listenPort = config.port
+  if (listenPort === null) throw new Error('the SSH door needs ssh_port')
   const ssh2 = await loadSsh2()
   try {
     await access(config.authorizedKeysFile)
@@ -286,23 +338,20 @@ export async function startSSHServer(
       `ssh: ${config.authorizedKeysFile} does not exist; every login will be refused until it holds a public key`,
     )
   }
-  const hostKey = await loadHostKey(config.hostKeyFile, ssh2.utils)
   const clients = new Set<Connection>()
-  let port = config.port
-  const server = new ssh2.Server({ hostKeys: [hostKey] }, (client, info) => {
+  let port = listenPort
+  const server = new ssh2.Server(await serverOptions(config, ssh2.utils), (client, info) => {
     clients.add(client)
     client.on('close', () => {
       clients.delete(client)
     })
     const peer = { address: info.ip, port: info.port }
-    serveConnection(client, registry, config, ssh2.utils, peer, {
-      address: config.host,
-      port,
-    })
+    const admit: Admit = (ctx) => authenticate(ctx, config.authorizedKeysFile, ssh2.utils)
+    serveConnection(client, registry, admit, peer, { address: config.host, port })
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(config.port, config.host, () => {
+    server.listen(listenPort, config.host, () => {
       server.off('error', reject)
       resolve()
     })
@@ -319,4 +368,30 @@ export async function startSSHServer(
       })
     },
   }
+}
+
+/**
+ * Serve one SSH connection the HTTPS route carries over `stream`. The route
+ * has checked the caller's token and that its account may use
+ * `workspaceId`, so the login needs no key: it may only name that
+ * workspace, and runs as that account. Resolves once the connection ends.
+ */
+export async function serveTunnel(
+  registry: WorkspaceRegistry,
+  config: SSHConfig,
+  stream: Duplex,
+  workspaceId: string,
+  account: string | null,
+  peer: Endpoint,
+  local: Endpoint,
+): Promise<void> {
+  const ssh2 = await loadSsh2()
+  const ended = new Promise<void>((resolve) => {
+    stream.once('close', resolve)
+  })
+  const server = new ssh2.Server(await serverOptions(config, ssh2.utils), (client) => {
+    serveConnection(client, registry, admitTunnel(workspaceId, account), peer, local)
+  })
+  server.injectSocket(stream as Socket)
+  await ended
 }

@@ -23,7 +23,7 @@ import { IO } from './io.ts'
 import { GITHUB_DU } from './du.ts'
 
 vi.mock('../../../core/github/tree.ts', () => ({
-  ensureLiveTree: vi.fn().mockResolvedValue(undefined),
+  ensureTree: vi.fn().mockResolvedValue(undefined),
 }))
 
 afterEach(() => vi.restoreAllMocks())

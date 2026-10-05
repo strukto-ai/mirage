@@ -35,8 +35,6 @@ from starlette.routing import Route
 from starlette.types import Message, Receive, Scope, Send
 
 from mirage import __version__
-from mirage.agents.io_text import io_to_str
-from mirage.agents.tool_operations import MirageToolOperations, ToolResult
 from mirage.server.inflight import InFlight, rpc_messages
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.jobs import JobStatus, JobTable
@@ -45,6 +43,12 @@ from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.tools.io_text import io_to_str
+from mirage.workspace.tools.tool_operations import (
+    MirageToolOperations,
+    ToolResult,
+)
+from mirage.workspace.workspace import Session
 
 MCP_PATH = "/v1/workspaces/{workspace_id}/mcp"
 
@@ -57,7 +61,9 @@ class DaemonToolOperations(MirageToolOperations):
     ``/v1/jobs``, can be cancelled there, and is recorded like any other.
     A caller cancelled while it waits (an MCP client's cancel) cancels
     the job too.
-    The other tools run on the workspace's own loop.
+    The other tools run on the workspace's own loop through the
+    session's own table (``session.tools``), so a read through any door
+    guards a write through another.
 
     Args:
         entry (WorkspaceEntry): the workspace the tools act on.
@@ -68,10 +74,10 @@ class DaemonToolOperations(MirageToolOperations):
     def __init__(
         self, entry: WorkspaceEntry, jobs: JobTable, session_id: str
     ) -> None:
-        super().__init__(entry.runner.ws, True, session_id)
+        super().__init__(Session(entry.runner.ws, session_id))
         self._entry = entry
         self._jobs = jobs
-        self._session = session_id
+        self._session_id = session_id
 
     async def shell(self, command: str) -> ToolResult:
         """Run a command line as a job of the daemon.
@@ -87,7 +93,7 @@ class DaemonToolOperations(MirageToolOperations):
 
         async def run_line(scope: ExecutionScope) -> JsonValue:
             io = await runner.ws.shell(
-                command, session_id=self._session, execution_scope=scope
+                command, session_id=self._session_id, execution_scope=scope
             )
             payload = await io_result_to_dict(io)
             answers.append(ToolResult(io_to_str(io), io.exit_code != 0))
@@ -100,7 +106,7 @@ class DaemonToolOperations(MirageToolOperations):
             workspace_id=self._entry.id,
             command=command,
             factory=run,
-            session_id=self._session,
+            session_id=self._session_id,
         )
         try:
             job = await self._jobs.wait(job.id)
@@ -128,7 +134,11 @@ class DaemonToolOperations(MirageToolOperations):
         """
         if name == "shell":
             return await super().call(name, arguments)
-        return await self._entry.runner.call(super().call(name, arguments))
+
+        async def on_loop() -> ToolResult:
+            return await self._session.tools.call(name, arguments)
+
+        return await self._entry.runner.call(on_loop())
 
 
 class McpDoor:
@@ -204,7 +214,9 @@ class McpDoor:
         workspace_id = request.path_params["workspace_id"]
         try:
             served = await self._served_for(
-                workspace_id, request.query_params.get("session_id")
+                workspace_id,
+                request.query_params.get("session_id"),
+                request.state.account,
             )
         except LookupError as exc:
             response = JSONResponse({"detail": exc.args[0]}, status_code=404)
@@ -351,7 +363,10 @@ class McpDoor:
         await self._task
 
     async def tools(
-        self, workspace_id: str, session_id: str | None = None
+        self,
+        workspace_id: str,
+        session_id: str | None,
+        account: str | None,
     ) -> DaemonToolOperations:
         """The tool table a workspace session is served by.
 
@@ -364,6 +379,8 @@ class McpDoor:
             workspace_id (str): the workspace.
             session_id (str | None): the session; None is the
                 workspace's default.
+            account (str | None): the caller's account; another
+                account's workspace is not found.
 
         Returns:
             DaemonToolOperations: the table.
@@ -371,23 +388,23 @@ class McpDoor:
         Raises:
             LookupError: the workspace or the session does not exist.
         """
-        return (await self._served_for(workspace_id, session_id))[2]
+        return (await self._served_for(workspace_id, session_id, account))[2]
 
     async def _served_for(
-        self, workspace_id: str, session_id: str | None
+        self, workspace_id: str, session_id: str | None, account: str | None
     ) -> tuple[
         WorkspaceEntry, SessionState, DaemonToolOperations, MirageMcpServer
     ]:
-        for key, (entry, held, _, _) in list(self._served.items()):
+        for key, (cached, held, _, _) in list(self._served.items()):
             if (
                 key[0] not in self._registry
-                or self._registry.get(key[0]) is not entry
-                or all(s is not held for s in entry.runner.ws.list_sessions())
+                or self._registry.get(key[0]) is not cached
+                or all(s is not held for s in cached.runner.ws.list_sessions())
             ):
                 del self._served[key]
-        if workspace_id not in self._registry:
+        entry = self._registry.visible(workspace_id, account)
+        if entry is None:
             raise LookupError("workspace not found")
-        entry = self._registry.get(workspace_id)
         ws = entry.runner.ws
         await entry.runner.call(ws.ensure_sessions_loaded())
         session_id = session_id or ws.default_session_id
@@ -425,6 +442,7 @@ class McpDoor:
         served = await self._served_for(
             request.path_params["workspace_id"],
             request.query_params.get("session_id"),
+            request.state.account,
         )
         return served[3]
 

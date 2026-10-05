@@ -48,13 +48,14 @@ async function callTool(
   input: JsonSchemaType,
   args: unknown,
   sessionId: string | null,
+  account: string | null,
 ): Promise<{ status: number; body: ToolResponse | { detail: string } }> {
   const checked = await fromJsonSchema(input)['~standard'].validate(args)
   if (checked.issues !== undefined) {
     const why = checked.issues.map((issue) => issue.message).join('; ')
     return { status: 400, body: { detail: `Invalid arguments for tool ${name}: ${why}` } }
   }
-  const tools = await mcp.tools(workspaceId, sessionId)
+  const tools = await mcp.tools(workspaceId, sessionId, account)
   if (typeof tools === 'string') return { status: 404, body: { detail: tools } }
   try {
     const result = await tools.call(name, args as Record<string, unknown>)
@@ -88,6 +89,7 @@ export function registerToolsRoutes(app: FastifyInstance, deps: ToolsRoutesDeps)
           input,
           req.body,
           req.query.session_id ?? null,
+          req.account,
         )
         return reply.status(status).send(body)
       },

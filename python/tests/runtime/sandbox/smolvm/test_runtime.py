@@ -60,47 +60,21 @@ async def test_connect_probes_the_users_machine_state():
 
 
 @pytest.mark.asyncio
-async def test_connect_fails_loud_on_a_stopped_machine():
-    runtime = FakeSmolvmRuntime(state="stopped", config={"machine": "vm"})
-    with pytest.raises(RuntimeError, match="not running"):
-        await runtime.connect()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("state", "hint"),
+    ("fake", "refusal"),
     [
-        ("unreachable", "guest agent is not answering"),
-        ("frozen", "frozen fork base"),
-        ("created", "never been started"),
+        ({"state": "stopped"}, "not running"),
+        ({"state": "unreachable"}, "guest agent is not answering"),
+        ({"state": "frozen"}, "frozen fork base"),
+        ({"state": "created"}, "never been started"),
+        ({"state": "quiesced"}, r"state: quiesced"),
+        ({"status_code": 1}, "machine 'vm' not found"),
+        ({"status_stdout": b"not json"}, "unreadable json"),
     ],
 )
-async def test_connect_names_why_a_state_cannot_take_a_line(state, hint):
-    runtime = FakeSmolvmRuntime(state=state, config={"machine": "vm"})
-    with pytest.raises(RuntimeError, match=hint):
-        await runtime.connect()
-
-
-@pytest.mark.asyncio
-async def test_connect_reports_an_unknown_state_verbatim():
-    runtime = FakeSmolvmRuntime(state="quiesced", config={"machine": "vm"})
-    with pytest.raises(RuntimeError, match=r"state: quiesced"):
-        await runtime.connect()
-
-
-@pytest.mark.asyncio
-async def test_connect_fails_loud_when_the_cli_errors():
-    runtime = FakeSmolvmRuntime(status_code=1, config={"machine": "vm"})
-    with pytest.raises(RuntimeError, match="machine 'vm' not found"):
-        await runtime.connect()
-
-
-@pytest.mark.asyncio
-async def test_connect_fails_loud_on_unreadable_json():
-    runtime = FakeSmolvmRuntime(
-        status_stdout=b"not json", config={"machine": "vm"}
-    )
-    with pytest.raises(RuntimeError, match="unreadable json"):
+async def test_connect_names_why_the_machine_cannot_take_a_line(fake, refusal):
+    runtime = FakeSmolvmRuntime(**fake, config={"machine": "vm"})
+    with pytest.raises(RuntimeError, match=refusal):
         await runtime.connect()
 
 

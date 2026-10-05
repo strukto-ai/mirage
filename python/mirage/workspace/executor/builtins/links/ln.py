@@ -39,6 +39,7 @@ from mirage.commands.spec.usage import (
 from mirage.context import path_allowed
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec, word_text
 from mirage.utils.errors import FS_ERRORS, DotWalkLoop, fs_strerror
 from mirage.utils.path import CycleError, dotted_spelling
@@ -152,20 +153,20 @@ def option_refusal(parsed: ParsedArgs) -> tuple[str, int] | None:
     ):
         token, candidates = parsed.ambiguous_options[0]
         msg, code = ambiguous_option_error("ln", token, candidates)
-        return msg.decode(), code
+        return decode_text(msg), code
     if parsed.invalid_options:
         if parsed.option_error_kinds[:1] == ["unexpected_value"]:
             msg, code = unexpected_value_error("ln", parsed.invalid_options[0])
         else:
             msg, code = unknown_option_error("ln", parsed.invalid_options[0])
-        return msg.decode(), code
+        return decode_text(msg), code
     if parsed.ambiguous_options:
         token, candidates = parsed.ambiguous_options[0]
         msg, code = ambiguous_option_error("ln", token, candidates)
-        return msg.decode(), code
+        return decode_text(msg), code
     if parsed.needs_value_options:
         msg, code = missing_value_error("ln", parsed.needs_value_options[0])
-        return msg.decode(), code
+        return decode_text(msg), code
     return None
 
 
@@ -934,7 +935,7 @@ async def handle_ln(
         )
     return result(
         "ln",
-        out="".join(out).encode() or None,
+        out=encode_text("".join(out)) or None,
         exit_code=1 if errors else 0,
         stderr="".join(errors) or None,
     )

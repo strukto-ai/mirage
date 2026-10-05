@@ -63,6 +63,40 @@
         "stdout": "rc=1\nrc=1\n",
         "stderr": "cp: missing file operand\nTry 'cp --help' for more information.\ncp: missing destination file operand after '/data/a.txt'\nTry 'cp --help' for more information.\n"
       }
+    },
+    {
+      "id": "cp_omits_a_directory_without_r",
+      "seq": 15800038,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp /data/sub /data/cpnr; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "cp: -r not specified; omitting directory '/data/sub'\n"
+      }
     }
   ]
 }

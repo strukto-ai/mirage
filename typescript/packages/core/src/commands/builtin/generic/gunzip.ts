@@ -14,12 +14,34 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
 import type { StatFn } from './archive/walk.ts'
 import { linkDoor } from '../utils/links.ts'
 import { decompressInputs } from './decompress.ts'
+
+interface GunzipFlags {
+  readonly keep: boolean
+  readonly force: boolean
+  readonly toStdout: boolean
+  readonly testOnly: boolean
+  readonly quiet: boolean
+  readonly suffix: string
+}
+
+function parseFlags(bag: Record<string, FlagValue>): GunzipFlags {
+  const fl = new FlagView(bag, specOf('gunzip'))
+  return {
+    keep: fl.asBool('k'),
+    force: fl.asBool('f'),
+    toStdout: fl.asBool('c'),
+    testOnly: fl.asBool('t'),
+    quiet: fl.asBool('q'),
+    suffix: fl.asStr('S') ?? GZIP_SUFFIX,
+  }
+}
 
 export async function gunzipGeneric(
   paths: PathSpec[],
@@ -29,15 +51,9 @@ export async function gunzipGeneric(
   unlink: (p: PathSpec) => Promise<void>,
   stat?: StatFn,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('gunzip'))
   return decompressInputs(paths, stream, {
     stdin: opts.stdin,
-    keep: fl.asBool('k'),
-    force: fl.asBool('f'),
-    quiet: fl.asBool('q'),
-    suffix: fl.asStr('S') ?? GZIP_SUFFIX,
-    toStdout: fl.asBool('c'),
-    testOnly: fl.asBool('t'),
+    ...parseFlags(opts.flags),
     write,
     unlink,
     ...(stat !== undefined ? { stat } : {}),

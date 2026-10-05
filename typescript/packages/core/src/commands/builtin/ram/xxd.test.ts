@@ -16,7 +16,10 @@ import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { PathSpec } from '../../../types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
+import { OpsRegistry } from '../../../ops/registry.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 const RAM_XXD = RAM_COMMANDS.filter((c) => c.name === 'xxd' && c.filetype == null)
 
 const ENC = new TextEncoder()
@@ -63,11 +66,96 @@ describe('xxd', () => {
     expect(DEC.decode(r.outBytes)).toBe('AB')
   })
 
+  it('replaces OUTFILE with the dump', async () => {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/in', ENC.encode('hi\n'))
+    vfs.store.files.set('/out', ENC.encode('old old old\n'))
+    const r = await runXxd(vfs, [PathSpec.fromStrPath('/in'), PathSpec.fromStrPath('/out')])
+    expect(r.exitCode).toBe(0)
+    expect(r.out).toBe('')
+    expect(DEC.decode(vfs.store.files.get('/out'))).toBe(
+      '00000000: 6869 0a                                  hi.\n',
+    )
+  })
+
+  it('-r writes into OUTFILE at its offsets', async () => {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/out', ENC.encode('ABCDEFGH'))
+    const paths = [PathSpec.fromStrPath('-'), PathSpec.fromStrPath('/out')]
+    const r = await runXxd(vfs, paths, { r: true }, ENC.encode('00000004: 6869  hi\n'))
+    expect(r.exitCode).toBe(0)
+    expect(DEC.decode(vfs.store.files.get('/out'))).toBe('ABCDhiGH')
+  })
+
+  it('-r on a stream fills forward and refuses a backward seek', async () => {
+    const vfs = new RAMVFS()
+    const dump = ENC.encode('00000002: 6869  hi\n00000000: 4142  AB\n')
+    const r = await runXxd(vfs, [], { r: true }, dump)
+    expect([...r.outBytes]).toEqual([0, 0, 0x68, 0x69])
+    expect(r.exitCode).toBe(5)
+  })
+
   it('-u uppercase', async () => {
     const vfs = new RAMVFS()
     const r = await runXxd(vfs, [], { u: true }, new Uint8Array([0xab, 0xcd]))
     expect(r.exitCode).toBe(0)
     const text = r.out
     expect(text.includes('AB') || text.includes('CD')).toBe(true)
+  })
+})
+
+describe('xxd -r into its own input', () => {
+  it('reads back patched on a caching mount', async () => {
+    // INFILE is OUTFILE on a caching mount: the cache must not keep the
+    // write's marker as the file, so the next read sees the store. Mirrors
+    // Python's test_xxd_reverse_into_its_own_input_reads_back_patched.
+    const ram = new RAMVFS()
+    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
+    const ws = new Workspace(
+      { '/data': ram },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.shell("printf '00000000: 4142  AB\\n' > /data/d")
+      await ws.shell('cat /data/d')
+      const result = await ws.shell('xxd -r /data/d /data/d')
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('cat /data/d')).stdout)).toBe('AB000000: 4142  AB\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('xxd -r across mounts', () => {
+  it('writes into the stored bytes of a rendered OUTFILE', async () => {
+    // The OUTFILE's mount renders .tally reads; -r writes into what the
+    // store holds, never into a rendering of it. Mirrors Python's
+    // test_xxd_reverse_across_mounts_writes_into_the_stored_bytes.
+    const source = new RAMVFS()
+    const target = new RAMVFS()
+    const registry = new OpsRegistry()
+    registry.registerVfs(source)
+    registry.registerVfs(target)
+    registry.register({
+      name: 'read',
+      vfs: 'ram',
+      filetype: '.tally',
+      write: false,
+      fn: () => Promise.resolve(ENC.encode('RENDERED')),
+    })
+    const ws = new Workspace(
+      { '/a': source, '/b': target },
+      { mode: MountMode.WRITE, ops: registry, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.shell('printf ABCDEFGH > /b/out.tally')
+      await ws.shell("printf '00000004: 6869  hi\\n' > /a/dump")
+      const result = await ws.shell('xxd -r /a/dump /b/out.tally')
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(target.store.files.get('/out.tally'))).toBe('ABCDhiGH')
+    } finally {
+      await ws.close()
+    }
   })
 })

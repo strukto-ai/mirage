@@ -892,11 +892,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep  needle /data/cfgbi/binary.txt; echo rc=$?; grep -I needle /data/cfgbi/binary.txt; echo rc=$?; grep --binary-files=without-match needle /data/cfgbi/binary.txt; echo rc=$?; grep --binary-files=binary needle /data/cfgbi/binary.txt; echo rc=$?; grep -n needle /data/cfgbi/binary.txt; echo rc=$?; grep -c needle /data/cfgbi/binary.txt; echo rc=$?; grep -l needle /data/cfgbi/binary.txt; echo rc=$?; grep -q needle /data/cfgbi/binary.txt; echo rc=$?; grep -qc needle /data/cfgbi/binary.txt; echo rc=$?; grep -lc needle /data/cfgbi/binary.txt; echo rc=$?; grep -Ic needle /data/cfgbi/binary.txt; echo rc=$?; grep -Il needle /data/cfgbi/binary.txt; echo rc=$?; grep -Iq needle /data/cfgbi/binary.txt; echo rc=$?; grep -v needle /data/cfgbi/binary.txt; echo rc=$?; grep -o needle /data/cfgbi/binary.txt; echo rc=$?; grep -on needle /data/cfgbi/binary.txt; echo rc=$?; grep -aon needle /data/cfgbi/binary.txt; echo rc=$?; grep -In needle /data/cfgbi/binary.txt; echo rc=$?; grep -m 0 needle /data/cfgbi/binary.txt; echo rc=$?; grep -m 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -B 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -C 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -a -I needle /data/cfgbi/binary.txt; echo rc=$?; rm -rf /data/cfgbi",
+      "command": "( export LC_ALL=C; mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep  needle /data/cfgbi/binary.txt; echo rc=$?; grep -I needle /data/cfgbi/binary.txt; echo rc=$?; grep --binary-files=without-match needle /data/cfgbi/binary.txt; echo rc=$?; grep --binary-files=binary needle /data/cfgbi/binary.txt; echo rc=$?; grep -n needle /data/cfgbi/binary.txt; echo rc=$?; grep -c needle /data/cfgbi/binary.txt; echo rc=$?; grep -l needle /data/cfgbi/binary.txt; echo rc=$?; grep -q needle /data/cfgbi/binary.txt; echo rc=$?; grep -qc needle /data/cfgbi/binary.txt; echo rc=$?; grep -lc needle /data/cfgbi/binary.txt; echo rc=$?; grep -Ic needle /data/cfgbi/binary.txt; echo rc=$?; grep -Il needle /data/cfgbi/binary.txt; echo rc=$?; grep -Iq needle /data/cfgbi/binary.txt; echo rc=$?; grep -v needle /data/cfgbi/binary.txt; echo rc=$?; grep -o needle /data/cfgbi/binary.txt; echo rc=$?; grep -on needle /data/cfgbi/binary.txt; echo rc=$?; grep -aon needle /data/cfgbi/binary.txt; echo rc=$?; grep -In needle /data/cfgbi/binary.txt; echo rc=$?; grep -m 0 needle /data/cfgbi/binary.txt; echo rc=$?; grep -m 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -B 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -C 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -a -I needle /data/cfgbi/binary.txt; echo rc=$?; rm -rf /data/cfgbi ) | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "needle next\nrc=0\nneedle next\nrc=0\nneedle next\nrc=0\nneedle next\nrc=0\n3:needle next\nrc=0\n2\nrc=0\n/data/cfgbi/binary.txt\nrc=0\nrc=0\nrc=0\n/data/cfgbi/binary.txt\nrc=0\n2\nrc=0\n/data/cfgbi/binary.txt\nrc=0\nrc=0\nbefore\nrc=0\nneedle\nneedle\nrc=0\n2:needle\n3:needle\nrc=0\n2:needle\n3:needle\nrc=0\n3:needle next\nrc=0\nrc=1\nrc=0\nbefore\nneedle next\nrc=0\nbefore\nneedle next\nrc=0\nneedle next\nrc=0\n",
-        "stderr": "grep: /data/cfgbi/binary.txt: binary file matches\ngrep: /data/cfgbi/binary.txt: binary file matches\ngrep: /data/cfgbi/binary.txt: binary file matches\ngrep: /data/cfgbi/binary.txt: binary file matches\ngrep: /data/cfgbi/binary.txt: binary file matches\ngrep: /data/cfgbi/binary.txt: binary file matches\n"
+        "stdout": " 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64\n 6c 65 20 6e 65 78 74 0a 72 63 3d 30 0a 6e 65 65\n 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64 6c 65 20\n 6e 65 78 74 0a 72 63 3d 30 0a 6e 65 65 64 6c 65\n ff 74 61 69 6c 0a 6e 65 65 64 6c 65 20 6e 65 78\n 74 0a 72 63 3d 30 0a 6e 65 65 64 6c 65 ff 74 61\n 69 6c 0a 6e 65 65 64 6c 65 20 6e 65 78 74 0a 72\n 63 3d 30 0a 32 3a 6e 65 65 64 6c 65 ff 74 61 69\n 6c 0a 33 3a 6e 65 65 64 6c 65 20 6e 65 78 74 0a\n 72 63 3d 30 0a 32 0a 72 63 3d 30 0a 2f 64 61 74\n 61 2f 63 66 67 62 69 2f 62 69 6e 61 72 79 2e 74\n 78 74 0a 72 63 3d 30 0a 72 63 3d 30 0a 72 63 3d\n 30 0a 2f 64 61 74 61 2f 63 66 67 62 69 2f 62 69\n 6e 61 72 79 2e 74 78 74 0a 72 63 3d 30 0a 32 0a\n 72 63 3d 30 0a 2f 64 61 74 61 2f 63 66 67 62 69\n 2f 62 69 6e 61 72 79 2e 74 78 74 0a 72 63 3d 30\n 0a 72 63 3d 30 0a 62 65 66 6f 72 65 0a 72 63 3d\n 30 0a 6e 65 65 64 6c 65 0a 6e 65 65 64 6c 65 0a\n 72 63 3d 30 0a 32 3a 6e 65 65 64 6c 65 0a 33 3a\n 6e 65 65 64 6c 65 0a 72 63 3d 30 0a 32 3a 6e 65\n 65 64 6c 65 0a 33 3a 6e 65 65 64 6c 65 0a 72 63\n 3d 30 0a 32 3a 6e 65 65 64 6c 65 ff 74 61 69 6c\n 0a 33 3a 6e 65 65 64 6c 65 20 6e 65 78 74 0a 72\n 63 3d 30 0a 72 63 3d 31 0a 6e 65 65 64 6c 65 ff\n 74 61 69 6c 0a 72 63 3d 30 0a 62 65 66 6f 72 65\n 0a 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65\n 64 6c 65 20 6e 65 78 74 0a 72 63 3d 30 0a 62 65\n 66 6f 72 65 0a 6e 65 65 64 6c 65 ff 74 61 69 6c\n 0a 6e 65 65 64 6c 65 20 6e 65 78 74 0a 72 63 3d\n 30 0a 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65\n 65 64 6c 65 20 6e 65 78 74 0a 72 63 3d 30 0a\n",
+        "stderr": ""
       }
     },
     {
@@ -960,13 +960,12 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep -A 1 needle /data/cfgbi/binary.txt; echo rc=$?; rm -rf /data/cfgbi",
+      "command": "( export LC_ALL=C; mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep -A 1 needle /data/cfgbi/binary.txt; echo rc=$?; rm -rf /data/cfgbi ) | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "needle next\nrc=0\n",
-        "stderr": "grep: /data/cfgbi/binary.txt: binary file matches\n"
-      },
-      "note": "GNU grep 3.11 with -A and a selected malformed UTF-8 line emits unrelated preceding text and a group separator. Mirage retains only requested context and suppresses the malformed line."
+        "stdout": " 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64\n 6c 65 20 6e 65 78 74 0a 72 63 3d 30 0a\n",
+        "stderr": ""
+      }
     },
     {
       "id": "grep_binary_stdin_forms",
@@ -995,10 +994,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'needle\\000tail\\n' | grep needle; echo rc=$?; printf 'needle\\000tail\\n' | grep -I needle; echo rc=$?; printf 'needle\\000tail\\n' | grep -an needle; echo rc=$?; printf 'needle\\000tail\\n' | grep -l needle; echo rc=$?; printf 'needle\\000tail\\n' | grep -H needle; echo rc=$?; printf 'é needle 😀\\n' | grep -n needle; echo rc=$?; printf 'needle\\377tail\\n' | grep -ao 'needle.*'; echo rc=$?; printf 'needle\\000needle\\n' | grep -c needle; echo rc=$?; printf 'needle\\000tail\\n' | grep 'needle$'; echo rc=$?; printf 'needle\\000tail\\n' | grep -aIa needle; echo rc=$?",
+      "command": "( export LC_ALL=C; printf 'needle\\000tail\\n' | grep needle; echo rc=$?; printf 'needle\\000tail\\n' | grep -I needle; echo rc=$?; printf 'needle\\000tail\\n' | grep -an needle; echo rc=$?; printf 'needle\\000tail\\n' | grep -l needle; echo rc=$?; printf 'needle\\000tail\\n' | grep -H needle; echo rc=$?; printf 'é needle 😀\\n' | grep -n needle; echo rc=$?; printf 'needle\\377tail\\n' | grep -ao 'needle.*'; echo rc=$?; printf 'needle\\000needle\\n' | grep -c needle; echo rc=$?; printf 'needle\\000tail\\n' | grep 'needle$'; echo rc=$?; printf 'needle\\000tail\\n' | grep -aIa needle; echo rc=$? ) | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "rc=0\nrc=1\n1:needle\u0000tail\nrc=0\n(standard input)\nrc=0\nrc=0\n1:é needle 😀\nrc=0\nneedle\nrc=0\n2\nrc=0\nrc=0\nneedle\u0000tail\nrc=0\n",
+        "stdout": " 72 63 3d 30 0a 72 63 3d 31 0a 31 3a 6e 65 65 64\n 6c 65 00 74 61 69 6c 0a 72 63 3d 30 0a 28 73 74\n 61 6e 64 61 72 64 20 69 6e 70 75 74 29 0a 72 63\n 3d 30 0a 72 63 3d 30 0a 31 3a c3 a9 20 6e 65 65\n 64 6c 65 20 f0 9f 98 80 0a 72 63 3d 30 0a 6e 65\n 65 64 6c 65 ff 74 61 69 6c 0a 72 63 3d 30 0a 32\n 0a 72 63 3d 30 0a 72 63 3d 30 0a 6e 65 65 64 6c\n 65 00 74 61 69 6c 0a 72 63 3d 30 0a\n",
         "stderr": "grep: (standard input): binary file matches\ngrep: (standard input): binary file matches\ngrep: (standard input): binary file matches\n"
       }
     },

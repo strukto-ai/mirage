@@ -112,7 +112,9 @@ async def _cancel_and_join(task: "asyncio.Task[Any]") -> None:
 
 
 async def run_cancellable(
-    coro: Coroutine[Any, Any, _T], cancel: asyncio.Event | None
+    coro: Coroutine[Any, Any, _T],
+    cancel: asyncio.Event | None,
+    stop: asyncio.Event | None = None,
 ) -> _T:
     """Run ``coro`` as a task the caller's event can cancel, and join it.
 
@@ -147,27 +149,32 @@ async def run_cancellable(
     silent: it is logged as a warning every
     ``ABORT_STALL_WARN_SECONDS`` until the task ends.
 
-    With ``cancel=None`` the line runs inline, so external cancellation
+    With neither event the line runs inline, so external cancellation
     is plain asyncio: one delivery, at the await the line is in, and no
     grace for the epilogue.
 
     Args:
         coro (Coroutine): the work to run, a whole line or a subtree.
-        cancel (asyncio.Event | None): the caller's abort event; None
-            runs ``coro`` inline.
+        cancel (asyncio.Event | None): the caller's abort event.
+        stop (asyncio.Event | None): the workspace's own abort for this
+            line (``Workspace.cancel``), honored the same way.
     """
-    if cancel is None:
+    events = [e for e in (cancel, stop) if e is not None]
+    if not events:
         return await coro
     task = asyncio.ensure_future(coro)
-    waiter = asyncio.create_task(cancel.wait())
+    waiters = [asyncio.create_task(e.wait()) for e in events]
     try:
-        await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
-        if cancel.is_set():
+        await asyncio.wait(
+            {task, *waiters}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if any(e.is_set() for e in events):
             await _cancel_and_join(task)
             raise MirageAbortError()
         return await task
     finally:
-        waiter.cancel()
+        for waiter in waiters:
+            waiter.cancel()
         if not task.done():
             await _cancel_and_join(task)
-        await asyncio.gather(task, waiter, return_exceptions=True)
+        await asyncio.gather(task, *waiters, return_exceptions=True)

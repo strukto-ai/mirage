@@ -19,7 +19,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
@@ -96,12 +96,35 @@ function isSorted(lines: readonly string[]): boolean {
   return true
 }
 
+interface CommFlags {
+  readonly suppress1: boolean
+  readonly suppress2: boolean
+  readonly suppress3: boolean
+  readonly checkOrder: boolean
+  readonly outputDelimiter: string
+  readonly total: boolean
+  readonly zeroTerminated: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): CommFlags {
+  const fl = new FlagView(bag, specOf('comm'))
+  return {
+    suppress1: fl.asBool('args_1'),
+    suppress2: fl.asBool('2'),
+    suppress3: fl.asBool('3'),
+    checkOrder: fl.asBool('check_order'),
+    outputDelimiter: fl.asStr('output_delimiter') ?? '\t',
+    total: fl.asBool('total'),
+    zeroTerminated: fl.asBool('zero_terminated'),
+  }
+}
+
 export async function commGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('comm'))
+  const parsed = parseFlags(opts.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.COMM, paths[2]?.rawPath ?? '')
   if (paths.length < 2) throw missingOperandError(CommandName.COMM, paths[0]?.rawPath ?? null)
   const p1 = paths[0]
@@ -110,27 +133,23 @@ export async function commGeneric(
   const stream = stdinStream(read, opts.stdin)
   const data1 = DEC.decode(await materialize(stream(p1)))
   const data2 = DEC.decode(await materialize(stream(p2)))
-  const zeroTerminated = fl.asBool('zero_terminated')
+  const zeroTerminated = parsed.zeroTerminated
   const lines1 = zeroTerminated ? data1.replace(/\0$/, '').split('\0') : splitLines(data1)
   const lines2 = zeroTerminated ? data2.replace(/\0$/, '').split('\0') : splitLines(data2)
   let stderr = ''
-  if (fl.asBool('check_order')) {
+  if (parsed.checkOrder) {
     if (!isSorted(lines1)) stderr = 'comm: file 1 is not in sorted order\n'
     else if (!isSorted(lines2)) stderr = 'comm: file 2 is not in sorted order\n'
   }
-  const suppress1 = fl.asBool('args_1')
-  const suppress2 = fl.asBool('2')
-  const suppress3 = fl.asBool('3')
   const merged = commMerge(lines1, lines2)
-  const delimiter = fl.asStr('output_delimiter') ?? '\t'
   const output = formatComm(
     merged,
-    suppress1,
-    suppress2,
-    suppress3,
-    delimiter,
+    parsed.suppress1,
+    parsed.suppress2,
+    parsed.suppress3,
+    parsed.outputDelimiter,
     zeroTerminated ? '\0' : '\n',
-    fl.asBool('total'),
+    parsed.total,
   )
   const result: ByteSource = ENC.encode(output)
   return [

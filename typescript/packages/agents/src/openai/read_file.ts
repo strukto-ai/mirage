@@ -6,7 +6,7 @@ import {
   type ToolOutputText,
 } from '@openai/agents'
 import { z } from 'zod'
-import { readWorkspaceFile } from '../read_file.ts'
+import { readWorkspaceFile } from '@struktoai/mirage-core/workspace/tools/read_file'
 
 export type MirageReadFileOutput = ToolOutputText | ToolOutputImage | ToolOutputFileContent
 

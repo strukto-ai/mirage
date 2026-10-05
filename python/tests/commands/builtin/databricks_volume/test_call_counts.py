@@ -5,12 +5,13 @@ import pytest
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.generic.find import parse_find_args, walk_find
+from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.core.databricks_volume.stat import stat
+from mirage.core.generic.find import walk_find
 from mirage.types import LsSortBy, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.databricks_volume import DatabricksVolumeConfig
@@ -137,7 +138,7 @@ async def test_tree_one_list_per_directory_without_metadata():
         "/volume/sub", mount_key("/volume/sub", "/volume")
     )
     await generic_tree(
-        path,
+        [path],
         readdir=_ls_readdir(accessor),
         stat=_ls_stat(accessor),
         index=index,

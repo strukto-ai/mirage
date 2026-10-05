@@ -47,7 +47,7 @@ import {
   toStateDict,
 } from './snapshot/state.ts'
 import type { MountSnapshot } from './snapshot/types.ts'
-import { ScriptSource } from '../runtime/routing/types.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
 

@@ -13,18 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { treeGeneric } from '../../generic/tree.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const tree: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return treeGeneric(
+    resolved,
+    opts,
+    (p) => ops.readdir(accessor, p, idx),
+    (p) => ops.stat(accessor, p, idx),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'tree',
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return treeGeneric(
-      resolved,
-      opts,
-      (p) => ops.readdir(accessor, p, idx),
-      (p) => ops.stat(accessor, p, idx),
-    )
-  },
+  fn: tree,
 }

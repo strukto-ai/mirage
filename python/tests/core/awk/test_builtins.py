@@ -19,6 +19,7 @@ from mirage.core.awk.builtins import (
 )
 from mirage.core.awk.errors import AwkRuntimeError, AwkSyntaxError
 from mirage.core.awk.value import num, strnum, text
+from mirage.shell.bytes import byte_view
 
 
 @pytest.mark.parametrize(
@@ -39,9 +40,9 @@ def test_substr(start, length, expected):
     assert substr("hello world", start, length) == expected
 
 
-def test_substr_counts_characters_not_bytes():
-    assert substr("héllo", 2, 2) == "él"
-    assert substr("a😀b", 2, 1) == "😀"
+def test_substr_counts_the_bytes_of_a_byte_view():
+    assert substr(byte_view("héllo"), 2, 2) == byte_view("é")
+    assert substr(byte_view("a😀b"), 2, 4) == byte_view("😀")
 
 
 @pytest.mark.parametrize(

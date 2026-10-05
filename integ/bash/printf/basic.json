@@ -1954,6 +1954,37 @@
       }
     },
     {
+      "id": "printf_v_stores_a_utf8_byte_run_as_its_character",
+      "seq": 501070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf -v x '\\xc3\\xa9'; [ \"$x\" = é ] && echo same; printf -v y '%b' '\\xc3\\xa9\\xff'; printf '%s' \"$y\" | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n c3 a9 ff\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "echo_hex_escape_is_a_byte",
       "seq": 501063,
       "targets": [

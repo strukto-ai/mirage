@@ -31,6 +31,7 @@ from mirage.commands.builtin.utils.types import HostRegex
 from mirage.commands.builtin.utils.wrap import call_read_bytes
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
+from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.posix import compile_posix_regex
@@ -131,7 +132,7 @@ def merge_pattern_list(
     """
     parts: list[str] = [] if pattern is None else pattern.split("\n")
     if file_data:
-        text = file_data.decode(errors="replace")
+        text = decode_text(file_data)
         if text.endswith("\n"):
             text = text[:-1]
         parts.extend(text.split("\n"))
@@ -362,6 +363,7 @@ def compile_pattern(
     fixed_string: bool = False,
     whole_word: bool = False,
     syntax: RegexSyntax = RegexSyntax.EXTENDED,
+    utf8: bool = False,
 ) -> re.Pattern[str]:
     """Compile a pattern list into one matcher.
 
@@ -371,6 +373,7 @@ def compile_pattern(
         fixed_string (bool): True if -F flag is set.
         whole_word (bool): True if -w flag is set.
         syntax (RegexSyntax): the dialect the patterns are written in.
+        utf8 (bool): the lines are text under a UTF-8 locale.
     """
     if syntax is RegexSyntax.RUST:
         translated = rust_source(
@@ -381,10 +384,10 @@ def compile_pattern(
         )
     if syntax is RegexSyntax.PERL and not fixed_string:
         source, fold = perl_regex(pattern, ignore_case, whole_word)
-        return compile_posix_regex(source, re.IGNORECASE if fold else 0)
+        return compile_posix_regex(source, re.IGNORECASE if fold else 0, utf8)
     flags = re.IGNORECASE if ignore_case else 0
     source = build_pattern_str(pattern, fixed_string, whole_word, syntax)
     try:
-        return compile_posix_regex(source, flags)
+        return compile_posix_regex(source, flags, utf8)
     except re.error as exc:
         raise UsageError("grep: Invalid regular expression") from exc

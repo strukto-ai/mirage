@@ -269,7 +269,7 @@
       "command": "man gh | head -8",
       "expect": {
         "exit": 0,
-        "stdout": "gh: GitHub CLI\n\nUsage: gh [flags] <command> [<args>]\n\nCommands:\n  api                  Make an authenticated GitHub API request\n  auth                 Manage authentication\n  issue                Manage issues\n",
+        "stdout": "gh: GitHub CLI\n\nUsage: gh [flags] <command> [<args>]\n\nCommands:\n  api                  Make an authenticated GitHub API request\n  auth                 Manage authentication\n  help                 Help about any command\n",
         "stderr": ""
       }
     },
@@ -2337,6 +2337,136 @@
       "expect": {
         "exit": 0,
         "stdout": "[\"nested\"]\n[[\"nested\",\"tree\"],[\"nested/library\",\"commit\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_fork_takes_a_url_and_false_clone_and_remote",
+      "seq": 569936,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo fork https://github.com/integ/repo-cli --fork-name url-fork --clone=false --remote=false",
+      "expect": {
+        "exit": 0,
+        "stdout": "✓ Created fork integ-user/url-fork\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_fork_org_and_default_branch_only",
+      "seq": 569937,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "sha=$(gh api repos/integ-user/url-fork/git/ref/heads/main --jq .object.sha) && gh api -X POST repos/integ-user/url-fork/git/refs -f ref=refs/heads/side -f sha=$sha > /dev/null && gh repo fork git@github.com:integ-user/url-fork.git --org acme --fork-name narrow --default-branch-only && gh api repos/acme/narrow/branches --jq '[.[].name]' && gh repo fork integ-user/url-fork --org acme --fork-name wide > /dev/null && gh api repos/acme/wide/branches --jq '[.[].name] | sort'",
+      "expect": {
+        "exit": 0,
+        "stdout": "✓ Created fork acme/narrow\n[\"main\"]\n[\"docs-pass\",\"feature\",\"main\",\"old\",\"side\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_fork_refuses_a_clone_and_a_blank_org",
+      "seq": 569938,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo fork integ/repo-cli --clone; gh repo fork integ/repo-cli --org ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh repo fork: --clone is not supported: there is no local checkout to clone into\ngh repo fork: --org cannot be blank\n"
+      }
+    },
+    {
+      "id": "gh_repo_fork_names_a_url_it_cannot_read",
+      "seq": 569939,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo fork https://github.com/integ",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh repo fork: did not understand argument: invalid path: /integ\n"
+      }
+    },
+    {
+      "id": "gh_repository_urls_name_owner_and_repo",
+      "seq": 569940,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo view https://github.com/integ/repo-cli --json nameWithOwner --jq .nameWithOwner; gh repo view git@github.com:integ/repo-cli.git --json nameWithOwner --jq .nameWithOwner; gh release list -R ssh://git@github.com/integ/repo-cli.git --json tagName --jq length; gh repo view https://github.com/integ/repo-cli/tree/main; gh repo view www.github.com/integ/repo-cli --json nameWithOwner --jq .nameWithOwner; gh repo view https://gitlab.com/integ/repo-cli; gh issue view https://gitlab.com/integ/repo-cli/issues/1",
+      "expect": {
+        "exit": 1,
+        "stdout": "integ/repo-cli\ninteg/repo-cli\n2\ninteg/repo-cli\n",
+        "stderr": "gh repo view: invalid path: /integ/repo-cli/tree/main\ngh repo view: error connecting to gitlab.com\ncheck your internet connection or https://githubstatus.com\ngh issue view: error connecting to gitlab.com\ncheck your internet connection or https://githubstatus.com\n"
+      }
+    },
+    {
+      "id": "gh_boolean_flags_take_true_and_false",
+      "seq": 569941,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli --jq .name --paginate=false; gh api repos/integ/repo-cli --silent=true; gh api repos/integ/repo-cli --jq .name --silent=false",
+      "expect": {
+        "exit": 0,
+        "stdout": "repo-cli\nrepo-cli\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_help_prints_the_root_and_a_commands_help",
+      "seq": 569942,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh help | head -1; gh help repo fork | grep -c -- --default-branch-only; gh help repo nosuch | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh: GitHub CLI\n1\ngh repo: Manage repositories\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_help_environment_says_what_this_gh_reads",
+      "seq": 569943,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh help environment | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "This gh reads no environment variables: `GH_TOKEN`, `GITHUB_TOKEN`, `GH_HOST`, `GH_REPO`\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_help_unknown_topic",
+      "seq": 569944,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh help nosuch",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Unknown help topic [`nosuch`]\nUsage:  gh <command> <subcommand> [flags]\n\nAvailable commands:\n  api\n  auth\n  issue\n  pr\n  release\n  repo\n  run\n  search\n  version\n  workflow\n"
+      }
+    },
+    {
+      "id": "gh_api_graphql_history",
+      "seq": 569945,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api graphql -f query='{ repository(owner: \"integ\", name: \"repo-cli\") { ref(qualifiedName: \"main\") { target { ... on Commit { history(first: 100) { nodes { oid } } } } } } }' --jq '[.data.repository.ref.target.history.nodes[].oid]' > /scratch/graph.json && gh api 'repos/integ/repo-cli/commits?per_page=100' --jq '[.[].sha]' > /scratch/rest.json && cmp /scratch/graph.json /scratch/rest.json && jq 'length > 1' /scratch/graph.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
         "stderr": ""
       }
     }

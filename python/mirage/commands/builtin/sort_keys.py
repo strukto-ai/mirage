@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import math
 import re
 from dataclasses import dataclass
 from functools import cmp_to_key, partial
 from typing import TypeAlias
 
 from mirage.commands.builtin.errors import SortKeyError
+from mirage.commands.builtin.utils.strtod import STRTOD, strtod_double
 from mirage.commands.quote import quote_text
 
 
@@ -469,50 +469,16 @@ def _human_number(field: str) -> tuple[int, NumericKey]:
     return (-order if match[1] else order), _leading_number(field)
 
 
-# glibc strtold's reading of a leading number in the C locale: blanks, a
-# sign, then a hex float, a decimal float, inf or nan. The rest of the
-# field is ignored, as GNU sort -g ignores it.
-_LEADING_FLOAT = re.compile(
-    r"[ \t\n\v\f\r]*([+-]?)(?:"
-    r"(0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)"
-    r"(?:[pP][+-]?[0-9]+)?)"
-    r"|((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)"
-    r"|([iI][nN][fF](?:[iI][nN][iI][tT][yY])?)"
-    r"|([nN][aA][nN](?:\([0-9A-Za-z_]*\))?))"
-)
-
-
-def _hex_float(text: str) -> float:
-    """A hex float such as 0x1.8p3, inf past the double range.
-
-    Args:
-        text (str): the hex float as typed.
-    """
-    try:
-        return float.fromhex(text)
-    except OverflowError:
-        return math.inf
-
-
 def _parse_general_float(field: str) -> float | None:
     """The number strtold reads at the start of a field, None for none.
+
+    The rest of the field is ignored, as GNU sort -g ignores it.
 
     Args:
         field (str): the key field.
     """
-    found = _LEADING_FLOAT.match(field)
-    if found is None:
-        return None
-    sign, hexa, decimal, inf, nan = found.groups()
-    if nan is not None:
-        return math.nan
-    if inf is not None:
-        value = math.inf
-    elif hexa is not None:
-        value = _hex_float(hexa)
-    else:
-        value = float(decimal)
-    return -value if sign == "-" else value
+    found = STRTOD.match(field)
+    return None if found is None else strtod_double(found)
 
 
 def _transform(field: str, mods: KeyMods) -> _SortKey:

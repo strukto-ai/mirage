@@ -57,7 +57,6 @@ import {
   targetFlags,
   updateGates,
   updateMode,
-  wrapTargetDir,
   type TransferPolicy,
 } from './cp.ts'
 import type { FlagView } from '../../spec/flag_view.ts'
@@ -74,7 +73,7 @@ export interface MvFlags {
   update: string | null
   backup: string | null
   suffix: string
-  targetDir: PathSpec | string | null
+  targetDir: PathSpec | null
   noTargetDir: boolean
   exchange: boolean
   noCopy: boolean
@@ -323,18 +322,11 @@ export async function mvGeneric(
 ): Promise<[ByteSource | null, IOResult]> {
   if (copies !== undefined) stat = (path) => linkStat(copies, path)
   const keyOf = backendKey ?? backendKeyDefault
-  const [sources, dstOperand] = splitOperands('mv', paths, flags.targetDir, flags.noTargetDir)
-  let dst: PathSpec
+  const [sources, dst] = splitOperands('mv', paths, flags.targetDir, flags.noTargetDir)
   let dstIsDir: boolean
   let dstExists: boolean
   let dstErr: string | null = null
-  if (dstOperand === null) {
-    const firstSource = sources[0]
-    if (firstSource === undefined) return [null, new IOResult()]
-    dst =
-      flags.targetDir instanceof PathSpec
-        ? flags.targetDir
-        : wrapTargetDir(firstSource, String(flags.targetDir))
+  if (flags.targetDir !== null) {
     const err = await targetDirError('mv', stat, dst)
     if (err !== null) {
       return [null, new IOResult({ stderr: ENC.encode(`${err}\n`), exitCode: 1 })]
@@ -342,11 +334,9 @@ export async function mvGeneric(
     dstIsDir = true
     dstExists = true
   } else if (flags.noTargetDir) {
-    dst = dstOperand
     dstIsDir = false
     dstExists = true
   } else {
-    dst = dstOperand
     const probe = await destKind(stat, dst)
     dstExists = probe.exists
     dstIsDir = probe.isDir

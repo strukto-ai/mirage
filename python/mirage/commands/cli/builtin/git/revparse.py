@@ -12,18 +12,30 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import posixpath
+import re
+from collections.abc import Iterable
+
 from dulwich.errors import NotTreeError
 from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.objectspec import parse_commit
 from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import HEAD
+from mirage.bridge.sync import run_async_from_sync
+from mirage.commands.cli.builtin.git.constants import DWIM_RULES, HEAD
 from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     BadRevisionError,
+    InvalidRevisionNameError,
+    PathNotAtStageError,
+    PathNotInIndexError,
+    PathNotInRevisionError,
 )
+from mirage.commands.cli.builtin.git.index_file import read_index
+from mirage.commands.cli.builtin.git.io import exists
 from mirage.commands.cli.builtin.git.refs import TAG_PREFIX
+from mirage.commands.cli.builtin.git.repo import Repo
 from mirage.commands.cli.builtin.git.types import AncestryStep, PeelStep, RevOp
 
 ANCESTOR = "~"
@@ -39,6 +51,7 @@ TAG = "tag"
 # Not a type any object reports: ``^{object}`` asks only that the name
 # resolve to something, and hands back whatever that is.
 OBJECT = "object"
+STAGED = re.compile(r"[0-3]:")
 # ``A..B`` hides A and walks B; a third dot walks both and hides only
 # what they share. A leading caret hides one revision on its own.
 RANGE = ".."
@@ -173,6 +186,7 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
         commit = parse_commit(repo, base)
     except (KeyError, ValueError) as exc:
         raise AmbiguousArgumentError(revision) from exc
+    note_ambiguity(repo, base)
     for op in ops:
         if isinstance(op, AncestryStep):
             commit = _step(repo, commit, op, revision)
@@ -431,14 +445,22 @@ def _at_path(repo: BaseRepo, rev: str, path: str, revision: str) -> ShaFile:
 
     Args:
         repo (BaseRepo): the opened repository.
-        rev (str): the revision before the colon, HEAD when empty.
+        rev (str): the revision before the colon.
         path (str): the path after it, repository-relative.
         revision (str): the whole revision, for error attribution.
+
+    Raises:
+        InvalidRevisionNameError: the revision names nothing.
+        PathNotInRevisionError: its tree holds no such path.
     """
+    try:
+        named = resolve_object(repo, rev)
+    except AmbiguousArgumentError as exc:
+        raise InvalidRevisionNameError(rev) from exc
     # A tag is no tree and holds no path, so it comes off first: the
     # rev half is a tree-ish, and ``<tag-id>:a.txt`` reads the blob
     # through it exactly as ``v1:a.txt`` does.
-    holder = unwrapped(repo, resolve_object(repo, rev), revision)
+    holder = unwrapped(repo, named, revision)
     if isinstance(holder, Commit):
         holder = _object_by_id(repo, holder.tree, revision)
     if not isinstance(holder, Tree):
@@ -448,8 +470,128 @@ def _at_path(repo: BaseRepo, rev: str, path: str, revision: str) -> ShaFile:
             repo.object_store.__getitem__, path.encode()
         )
     except (KeyError, NotTreeError, ValueError) as exc:
-        raise AmbiguousArgumentError(revision) from exc
+        raise PathNotInRevisionError(path, rev, _on_disk(repo, path)) from exc
     return _object_by_id(repo, sha, revision)
+
+
+def _on_disk(repo: BaseRepo, path: str) -> bool:
+    """Whether a repository-relative path is there in the working tree; a
+    path through a file is not.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        path (str): the path, repository-relative.
+    """
+    if not path or not isinstance(repo, Repo):
+        return False
+    where = posixpath.join(repo.location.worktree, path)
+    try:
+        return run_async_from_sync(exists(repo.dispatch, where), repo.loop)
+    except NotADirectoryError:
+        return False
+
+
+def _in_index(repo: BaseRepo, spec: str) -> ShaFile:
+    """The object ``:<path>`` or ``:<n>:<path>`` names in the index.
+
+    The staged entry at stage 0, or at the merge stage given. A path the
+    index holds at another stage, or not at all, is refused in git's
+    words (pinned against git 2.50.1).
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        spec (str): what follows the leading colon.
+
+    Raises:
+        PathNotAtStageError: the index holds it at another stage.
+        PathNotInIndexError: the index does not hold it.
+    """
+    staged = STAGED.match(spec)
+    stage = int(spec[0]) if staged else 0
+    path = spec[staged.end() :] if staged else spec
+    if not isinstance(repo, Repo):
+        raise PathNotInIndexError(path, False)
+    state = run_async_from_sync(
+        read_index(repo.dispatch, repo.location.gitdir), repo.loop
+    )
+    key = path.encode()
+    stages = [state.entries.get(key)]
+    conflicted = state.conflicts.get(key)
+    stages.extend(
+        [conflicted.ancestor, conflicted.this, conflicted.other]
+        if conflicted is not None
+        else [None, None, None]
+    )
+    found = stages[stage]
+    if found is not None:
+        return _object_by_id(repo, ObjectID(found.sha), spec)
+    held = next(
+        (at for at, entry in enumerate(stages) if entry is not None), -1
+    )
+    if held != -1:
+        raise PathNotAtStageError(path, stage, held)
+    raise PathNotInIndexError(path, _on_disk(repo, path))
+
+
+def refs_named(known: Iterable[str], name: str) -> list[str]:
+    """Every ref git's rev-parse rules find for a name, in rule order.
+
+    More than one is a name git calls ambiguous, and the first is the
+    one it reads.
+
+    Args:
+        known (Iterable[str]): every ref name.
+        name (str): the name as typed.
+    """
+    names = set(known)
+    return [
+        ref
+        for ref in dict.fromkeys(
+            rule.replace("{}", name) for rule in DWIM_RULES
+        )
+        if ref in names
+    ]
+
+
+def note_ambiguity(repo: BaseRepo, name: str) -> None:
+    """Put git's ``refname is ambiguous`` warning on the repository's
+    list when two refs answer to a name, as git does each time it reads
+    one.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        name (str): the name as typed.
+    """
+    if not isinstance(repo, Repo) or repo.ambiguous is None:
+        return
+    known = (ref.decode(errors="replace") for ref in repo.refs.allkeys())
+    if len(refs_named(known, name)) > 1:
+        repo.ambiguous.append(f"warning: refname '{name}' is ambiguous.\n")
+
+
+def _named_object(repo: BaseRepo, revision: str) -> ShaFile:
+    """The object a name or id stands for, an annotated tag unpeeled.
+
+    A name two refs answer to reads as the first, with git's warning
+    that it is ambiguous (pinned against git 2.47.3).
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        revision (str): the name or id as typed.
+    """
+    known = [ref.decode(errors="replace") for ref in repo.refs.allkeys()]
+    named = refs_named(known, revision)
+    if named:
+        try:
+            sha = repo.refs[Ref(named[0].encode())]
+        except KeyError as exc:
+            raise AmbiguousArgumentError(revision) from exc
+        note_ambiguity(repo, revision)
+        return _object_by_id(repo, ObjectID(sha), revision)
+    try:
+        return object_at(repo, revision)
+    except (KeyError, ValueError) as exc:
+        raise AmbiguousArgumentError(revision) from exc
 
 
 def tag_object(repo: BaseRepo, stem: str) -> Tag | None:
@@ -483,30 +625,6 @@ def tag_object(repo: BaseRepo, stem: str) -> Tag | None:
     return found if isinstance(found, Tag) else None
 
 
-def _tag_at_id(repo: BaseRepo, revision: str) -> Tag | None:
-    """The tag object a bare id names, None when the id names no tag.
-
-    A tag is the one type whose bare-id reading differs from the
-    commit-ish one below, which is why this is scoped to it rather than
-    put in front of every resolution: every other type either is the
-    commit that reading returns or is not commit-ish at all, and
-    already falls through to the id.
-
-    A tag *name* is deliberately not read here. git splits the two, and
-    the split is observable: ``git tag nested v1`` records the tag
-    object while ``git restore --source=v1`` reads the tree behind it.
-
-    Args:
-        repo (BaseRepo): the opened repository.
-        revision (str): the revision as the user spelled it.
-    """
-    try:
-        found = object_at(repo, revision)
-    except (KeyError, ValueError):
-        return None
-    return found if isinstance(found, Tag) else None
-
-
 def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
     """The object a revision names, whatever type it turns out to be.
 
@@ -521,35 +639,21 @@ def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
         repo (BaseRepo): repository to resolve against.
         revision (str): revision as the user spelled it.
     """
+    if revision.startswith(PATH_MARK):
+        return _in_index(repo, revision[len(PATH_MARK) :])
     if PATH_MARK in revision:
         rev, _, path = revision.partition(PATH_MARK)
-        return _at_path(repo, rev or HEAD, path, revision)
+        return _at_path(repo, rev, path, revision)
     base, ops = split_operators(revision)
     if not ops:
-        # A bare id names that exact object, and for an annotated tag
-        # that is the tag rather than the commit behind it: the
-        # commit-ish reading below is a peel, and git does not peel an
-        # id. ``git tag nested <tag-id>`` records the tag, which is the
-        # nested tag git warns about rather than quietly flattens.
-        held = _tag_at_id(repo, revision)
-        if held is not None:
-            return held
-        try:
-            return resolve_commit(repo, revision)
-        except AmbiguousArgumentError:
-            # Not a commit-ish. A raw id is read as itself before the
-            # revision is called unresolved, and the type is kept,
-            # since it is what a caller records.
-            try:
-                return object_at(repo, revision)
-            except (KeyError, ValueError) as exc:
-                raise AmbiguousArgumentError(revision) from exc
-    # The base is resolved without peeling an annotated tag, because
-    # ``^{tag}`` and ``^{object}`` are the two spellings that have to
-    # stop above it; every other operator unwraps the tag itself, which
-    # is git's own rule and costs nothing here.
-    held = tag_object(repo, base)
-    obj = held if held is not None else resolve_object(repo, base)
+        # A name or id stands for exactly the object it names, so an
+        # annotated tag is the tag rather than the commit behind it: git
+        # does not peel one until a caller asks for a commit-ish, and
+        # ``git rev-parse v1`` prints the tag's id.
+        return _named_object(repo, revision)
+    # Every operator but ``^{tag}`` and ``^{object}`` unwraps a tag,
+    # which is git's own rule and costs nothing here.
+    obj = resolve_object(repo, base)
     for op in ops:
         if isinstance(op, PeelStep):
             obj = _peeled(repo, obj, op.want, revision)

@@ -19,6 +19,7 @@ from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_to_kwargs
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.builtins.metadata.xattr import (
     SETFATTR_USAGE,
@@ -54,7 +55,7 @@ def decode_value(text: str) -> bytes | None:
             return base64.b64decode("".join(text[2:].split()), validate=True)
         except binascii.Error:
             return None
-    raw = text.encode()
+    raw = encode_text(text)
     if len(raw) >= 2 and raw[0] == raw[-1] == 0x22:
         raw = raw[1:-1]
     out = bytearray()

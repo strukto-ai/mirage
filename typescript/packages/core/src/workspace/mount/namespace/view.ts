@@ -44,6 +44,12 @@ function mountRootOf(registry: MountRegistry, virtual: string): string {
   return registry.tryMountFor(virtual)?.prefix ?? '/'
 }
 
+// The du walk budget of the mount serving a virtual path.
+function mountMaxDuEntries(registry: MountRegistry, virtual: string): number | null {
+  const mount = registry.tryMountFor(virtual)
+  return mount === null ? null : mount.vfs.maxDuEntries
+}
+
 /**
  * The mount-boundary facts on offer to every command.
  *
@@ -69,6 +75,7 @@ function mountView(registry: MountRegistry): MountView {
       mountRootsBelow(registry, path).filter((root) => pathAllowed(root)),
     isRoot: (path: string) => registry.isMountRoot(path),
     rootOf: (path: string) => mountRootOf(registry, path),
+    maxDuEntries: (path: string) => mountMaxDuEntries(registry, path),
   }
 }
 

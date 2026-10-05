@@ -20,7 +20,7 @@ from mirage.core.gridfs.du import size as _du_size
 from mirage.core.gridfs.exists import exists as _exists
 from mirage.core.gridfs.find import find as _find
 from mirage.core.gridfs.mkdir import mkdir as _mkdir
-from mirage.core.gridfs.read import read_bytes as _read
+from mirage.core.gridfs.read import read as _read
 from mirage.core.gridfs.readdir import readdir as _readdir
 from mirage.core.gridfs.rename import rename as _rename
 from mirage.core.gridfs.rm import rm_r as _rm_r
@@ -29,7 +29,7 @@ from mirage.core.gridfs.stat import stat as _stat
 from mirage.core.gridfs.stream import read_stream as _read_stream
 from mirage.core.gridfs.truncate import truncate as _truncate
 from mirage.core.gridfs.unlink import unlink as _unlink
-from mirage.core.gridfs.write import write_bytes as _write
+from mirage.core.gridfs.write import write as _write
 from mirage.vfs.adapter import VFSAdapter, append_from_read
 from mirage.vfs.types import DuOps, NativeReadOps, ReadOps, WriteOps
 
@@ -44,7 +44,7 @@ IO = VFSAdapter(
     ),
     writes=WriteOps(
         write=_write,
-        append=append_from_read(_read, _write),
+        append=append_from_read(_read, _write, _stat),
         mkdir=_mkdir,
         unlink=_unlink,
         rmdir=_rmdir,

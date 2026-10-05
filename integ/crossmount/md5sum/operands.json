@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_md5sum_both_mounts",
+      "seq": 9900001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf abc > /data/xm_md5sum && printf xyz > /data2/xm_md5sum && md5sum /data/xm_md5sum /data2/xm_md5sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "900150983cd24fb0d6963f7d28e17f72  /data/xm_md5sum\nd16fb36f0911f878998c136191af705e  /data2/xm_md5sum\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_md5sum_continues_after_missing",
+      "seq": 9900002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "md5sum /data/xm_md5sum_missing /data2/xm_md5sum",
+      "expect": {
+        "exit": 1,
+        "stdout": "d16fb36f0911f878998c136191af705e  /data2/xm_md5sum\n",
+        "stderr": "md5sum: /data/xm_md5sum_missing: No such file or directory\n"
+      }
+    }
+  ]
+}

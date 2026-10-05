@@ -19,13 +19,19 @@ from mirage.commands.cli.builtin.gh import release as release_commands
 from mirage.commands.cli.builtin.gh import repo as repo_commands
 from mirage.commands.cli.builtin.gh.api import api
 from mirage.commands.cli.builtin.gh.auth import status as auth_status
-from mirage.commands.cli.builtin.gh.constants import REPO_EDIT_FIELDS
+from mirage.commands.cli.builtin.gh.constants import (
+    BOOLEAN,
+    HELP_TOPICS,
+    REPO_EDIT_FIELDS,
+)
 from mirage.commands.cli.builtin.gh.search import search_spec
 from mirage.commands.cli.builtin.gh.types import RepoEditField
 from mirage.commands.cli.builtin.gh.version import version
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.walk import find_child, node_help
 from mirage.commands.spec.types import Operand, Option
 from mirage.core.github.config import GhConfig
+from mirage.io.types import IOResult
 
 REPO = Option(
     short="-R",
@@ -46,6 +52,31 @@ TITLE = Option(short="-t", long="--title", type="str")
 NUMBER = Operand(type="str", name="NUMBER", required=True)
 
 
+def _flag(
+    short: str | None = None, long: str = "", description: str | None = None
+) -> Option:
+    """One of gh's boolean flags, which are pflag's.
+
+    A bare ``--draft`` is true, and ``--draft=true`` or ``--draft=false``
+    spells the value out, which is how a script turns one off. The
+    shorts still cluster (``-sd``). Read one with ``gh_bool``.
+
+    Args:
+        short (str | None): the short spelling.
+        long (str): the long spelling.
+        description (str | None): the help line.
+    """
+    return Option(
+        short=short,
+        long=long,
+        type="str",
+        value_optional=True,
+        short_value=False,
+        choices=BOOLEAN,
+        description=description,
+    )
+
+
 def _repo_edit_option(field: RepoEditField) -> Option:
     """Build the grammar from the setting consumed by the handler.
 
@@ -57,7 +88,7 @@ def _repo_edit_option(field: RepoEditField) -> Option:
         long=field.flag,
         type="str",
         value_optional=field.kind != "value",
-        choices=field.choices if field.kind == "value" else ("true", "false"),
+        choices=field.choices if field.kind == "value" else BOOLEAN,
         description=field.description,
     )
 
@@ -100,7 +131,7 @@ def _issue() -> CLISpec:
                     REPO,
                     JSON,
                     JQ,
-                    Option(
+                    _flag(
                         short="-c",
                         long="--comments",
                         description="Show comments",
@@ -211,7 +242,7 @@ def _pr() -> CLISpec:
                     REPO,
                     JSON,
                     JQ,
-                    Option(
+                    _flag(
                         short="-c",
                         long="--comments",
                         description="Show comments",
@@ -231,8 +262,8 @@ def _pr() -> CLISpec:
                     BODY_FILE,
                     Option(short="-H", long="--head", type="str"),
                     Option(short="-B", long="--base", type="str"),
-                    Option(short="-d", long="--draft"),
-                    Option(long="--no-maintainer-edit"),
+                    _flag(short="-d", long="--draft"),
+                    _flag(long="--no-maintainer-edit"),
                 ),
             ),
             CLISpec(
@@ -259,9 +290,9 @@ def _pr() -> CLISpec:
                     REPO,
                     BODY,
                     BODY_FILE,
-                    Option(short="-m", long="--merge"),
-                    Option(short="-r", long="--rebase"),
-                    Option(short="-s", long="--squash"),
+                    _flag(short="-m", long="--merge"),
+                    _flag(short="-r", long="--rebase"),
+                    _flag(short="-s", long="--squash"),
                     Option(short="-t", long="--subject", type="str"),
                     Option(long="--match-head-commit", type="str"),
                 ),
@@ -289,7 +320,7 @@ def _pr() -> CLISpec:
                 positional=(NUMBER,),
                 options=(
                     REPO,
-                    Option(
+                    _flag(
                         long="--name-only",
                         description="Display only names of changed files",
                     ),
@@ -320,15 +351,15 @@ REPO_EDIT_OPTIONS = (
         multiple=True,
         description="Remove repository topic",
     ),
-    Option(
+    _flag(
         long="--accept-visibility-change-consequences",
         description="Accept the consequences of changing the repository "
         "visibility",
     ),
 )
 REPO_DELETE_OPTIONS = (
-    Option(long="--yes", description="Confirm deletion without prompting"),
-    Option(long="--confirm", description="Deprecated: use --yes instead"),
+    _flag(long="--yes", description="Confirm deletion without prompting"),
+    _flag(long="--confirm", description="Deprecated: use --yes instead"),
 )
 
 
@@ -359,11 +390,11 @@ def _repo() -> CLISpec:
                 write=True,
                 positional=(Operand(type="str", name="NAME"),),
                 options=(
-                    Option(long="--public"),
-                    Option(long="--private"),
+                    _flag(long="--public"),
+                    _flag(long="--private"),
                     Option(short="-d", long="--description", type="str"),
                     Option(short="-h", long="--homepage", type="str"),
-                    Option(long="--add-readme"),
+                    _flag(long="--add-readme"),
                 ),
             ),
             CLISpec(
@@ -372,7 +403,33 @@ def _repo() -> CLISpec:
                 fn=repo_commands.fork,
                 write=True,
                 positional=(Operand(type="str", name="REPOSITORY"),),
-                options=(Option(long="--fork-name", type="str"),),
+                options=(
+                    _flag(long="--clone", description="Clone the fork"),
+                    _flag(
+                        long="--default-branch-only",
+                        description="Only include the default branch in the "
+                        "fork",
+                    ),
+                    Option(
+                        long="--fork-name",
+                        type="str",
+                        description="Rename the forked repository",
+                    ),
+                    Option(
+                        long="--org",
+                        type="str",
+                        description="Create the fork in an organization",
+                    ),
+                    _flag(
+                        long="--remote",
+                        description="Add a git remote for the fork",
+                    ),
+                    Option(
+                        long="--remote-name",
+                        type="str",
+                        description="Specify the name for the new remote",
+                    ),
+                ),
             ),
             CLISpec(
                 name="rename",
@@ -434,9 +491,9 @@ def _release() -> CLISpec:
                     Option(short="-n", long="--notes", type="str"),
                     Option(short="-F", long="--notes-file", type="path"),
                     TITLE,
-                    Option(short="-d", long="--draft"),
-                    Option(short="-p", long="--prerelease"),
-                    Option(long="--generate-notes"),
+                    _flag(short="-d", long="--draft"),
+                    _flag(short="-p", long="--prerelease"),
+                    _flag(long="--generate-notes"),
                     Option(long="--target", type="str"),
                 ),
             ),
@@ -449,12 +506,12 @@ RUN_VIEW_OPTIONS = (
     REPO,
     JSON,
     JQ,
-    Option(long="--exit-status"),
-    Option(
+    _flag(long="--exit-status"),
+    _flag(
         long="--log",
         description="View full log for either a run or specific job",
     ),
-    Option(
+    _flag(
         long="--log-failed",
         description="View the log for any failed steps in a run or "
         "specific job",
@@ -463,7 +520,7 @@ RUN_VIEW_OPTIONS = (
 # `gh workflow view`'s flags, `--ref` only beside `--yaml`, as in gh 2.85.
 WORKFLOW_VIEW_OPTIONS = (
     REPO,
-    Option(
+    _flag(
         short="-y", long="--yaml", description="View the workflow yaml file"
     ),
     Option(
@@ -521,8 +578,8 @@ def _run() -> CLISpec:
                 ),
                 options=(
                     REPO,
-                    Option(short="-d", long="--debug"),
-                    Option(long="--failed"),
+                    _flag(short="-d", long="--debug"),
+                    _flag(long="--failed"),
                     Option(short="-j", long="--job", type="str"),
                 ),
             ),
@@ -547,7 +604,7 @@ def _workflow() -> CLISpec:
                     Option(
                         short="-L", long="--limit", type="int", default="50"
                     ),
-                    Option(short="-a", long="--all"),
+                    _flag(short="-a", long="--all"),
                 ),
             ),
             CLISpec(
@@ -579,11 +636,54 @@ def _workflow() -> CLISpec:
                     Option(
                         short="-F", long="--field", type="str", multiple=True
                     ),
-                    Option(long="--json"),
+                    _flag(long="--json"),
                 ),
             ),
         ),
     )
+
+
+async def _help_cmd(
+    inv: CLIInvocation[GhConfig],
+) -> tuple[bytes | None, IOResult]:
+    """``gh help [<command>...]``, as cobra answers it.
+
+    The help of the deepest command the words name (words past it are
+    ignored), a help topic when the first word names one, and otherwise
+    gh's unknown-topic answer, which goes to stderr with the list of
+    commands and still exits 0.
+
+    Args:
+        inv (CLIInvocation[GhConfig]): the words after ``help``.
+    """
+    node = GH
+    path: list[str] = []
+    for word in inv.texts:
+        child = find_child(node, word)
+        if child is None:
+            break
+        node = child
+        path.append(child.name)
+    if inv.texts and not path:
+        topic = HELP_TOPICS.get(inv.texts[0])
+        if topic is not None:
+            return topic.encode(), IOResult()
+        names = sorted(
+            f"  {child.name}\n"
+            for child in GH.subcommands
+            if child.name != "help"
+        )
+        asked = " ".join(f"`{word}`" for word in inv.texts)
+        usage = (
+            "Usage:  gh <command> <subcommand> [flags]\n\n"
+            f"Available commands:\n{''.join(names)}"
+        )
+        return None, IOResult(
+            stderr=f"Unknown help topic [{asked}]\n{usage}".encode()
+        )
+    return node_help(
+        " ".join(("gh", *path)), node, GH.usage_style
+    ).encode(), IOResult()
 
 
 GH = CLISpec(
@@ -601,6 +701,12 @@ GH = CLISpec(
                     fn=auth_status,
                 ),
             ),
+        ),
+        CLISpec(
+            name="help",
+            fn=_help_cmd,
+            description="Help about any command",
+            rest=Operand(type="str"),
         ),
         CLISpec(
             name="version",
@@ -621,7 +727,7 @@ GH = CLISpec(
                 ),
                 Option(short="-F", long="--field", type="str", multiple=True),
                 Option(short="-H", long="--header", type="str", multiple=True),
-                Option(
+                _flag(
                     short="-i",
                     long="--include",
                     description="Include HTTP response status line "
@@ -629,9 +735,9 @@ GH = CLISpec(
                 ),
                 Option(long="--input", type="path"),
                 JQ,
-                Option(long="--paginate"),
-                Option(long="--slurp"),
-                Option(long="--silent"),
+                _flag(long="--paginate"),
+                _flag(long="--slurp"),
+                _flag(long="--silent"),
             ),
         ),
         _issue(),

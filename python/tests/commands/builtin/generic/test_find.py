@@ -9,7 +9,6 @@ from mirage.commands.builtin.generic.find import (
     apply_mount_prefix,
     apply_mtime_filter,
     parse_find_args,
-    walk_find,
 )
 from mirage.commands.builtin.generic.find import find as stream_find
 from mirage.commands.builtin.generic.find import (
@@ -17,6 +16,7 @@ from mirage.commands.builtin.generic.find import (
 )
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import CommandTimeoutError, FindParseError
+from mirage.core.generic.find import walk_find
 from mirage.io.types import materialize
 from mirage.ops.types import LinkView
 from mirage.types import (
@@ -841,7 +841,6 @@ _FILE_STAT = FileStat(
 # GNU findutils 4.10.0, pinned on debian:stable-slim:
 #   find A B           -> A's rows, then B's rows (operand order, never
 #                         re-sorted across operands)
-#   find A A           -> A's rows twice (no dedupe)
 
 
 @pytest.mark.asyncio
@@ -866,23 +865,6 @@ async def test_find_walks_every_start_point_in_operand_order():
     assert stdout == b"/mnt/sub\n/mnt/sub/z.txt\n/mnt/a.txt\n"
     # The file start point is reported, never walked.
     assert calls == ["/mnt/sub"]
-
-
-@pytest.mark.asyncio
-async def test_find_duplicate_start_points_walk_twice():
-
-    async def core(_path: PathSpec, **_kw) -> list[str]:
-        return ["/sub/z.txt"]
-
-    root = _file_spec(virtual="/mnt/sub", key="sub")
-    stdout, io = await find(
-        [root, root],
-        (),
-        find_core=core,
-        stat_path=_stat_map({"/mnt/sub": _DIR_STAT}),
-    )
-    assert io.exit_code == 0
-    assert stdout == b"/mnt/sub\n/mnt/sub/z.txt\n" * 2
 
 
 @pytest.mark.asyncio

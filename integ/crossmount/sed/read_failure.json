@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "id": "xrf_sed",
+      "seq": 963102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed -n p /data/xrf.txt /data2/xrf_nope.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "b\na\n",
+        "stderr": "sed: can't read /data2/xrf_nope.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "xrf_sed_dir",
+      "seq": 963106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed -n p /data/xrf.txt /data2/xrf_dir",
+      "expect": {
+        "exit": 4,
+        "stdout": "b\na\n",
+        "stderr": "sed: read error on /data2/xrf_dir: Is a directory\n"
+      }
+    },
+    {
+      "id": "xrf_sed_dir_named_for_another_errno",
+      "seq": 963110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed -n p /data/xrf.txt '/data2/No such file or directory'",
+      "expect": {
+        "exit": 4,
+        "stdout": "b\na\n",
+        "stderr": "sed: read error on /data2/No such file or directory: Is a directory\n"
+      }
+    }
+  ]
+}

@@ -44,7 +44,10 @@ def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
     A backend words its refusals its own way; a guest catches the
     builtin and may print its message. Every named condition converts,
     so a non-empty rmdir is ``OSError`` errno 39 wherever it happened,
-    and a failure the vocabulary does not name passes through as is.
+    and a failure the vocabulary does not name is EIO, as a kernel
+    reports a device that failed (the engine knows only builtin types,
+    so a backend's own exception would reach the guest as
+    ``RuntimeError``).
 
     Args:
         path (str): the path the operation names.
@@ -53,9 +56,7 @@ def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
     try:
         yield
     except Exception as exc:
-        condition = classify(exc)
-        if condition is None:
-            raise
+        condition = classify(exc) or FsCondition.EIO
         raise guest_error(condition, path, target) from exc
 
 

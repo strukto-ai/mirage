@@ -18,10 +18,10 @@ from mirage.commands.builtin.email.io import resolve_glob
 from mirage.commands.builtin.generic.rg import (
     parse_flags,
     refuse_missing_pattern,
+    rg_generic,
     rg_matcher,
     rg_syntax,
 )
-from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (
@@ -124,7 +124,7 @@ async def rg(
         return format_records(all_results), IOResult()
 
     resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
-    return await generic_rg(
+    return await rg_generic(
         resolved,
         texts,
         opts,

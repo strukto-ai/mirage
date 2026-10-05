@@ -198,7 +198,7 @@ export function stripCount(raw: string): number {
  * no count. After the scan, more than one archive is refused without -M,
  * which mirage does not have (tar 1.35). Mirrors Python's parse_flags.
  */
-export function parseTarFlags(bag: Record<string, FlagValue>): TarFlags {
+export function parseFlags(bag: Record<string, FlagValue>): TarFlags {
   const fl = new FlagView(bag, specOf('tar'))
   let mode: string | null = null
   let stripComponents = 0
@@ -494,7 +494,7 @@ export async function tarGeneric(
   deps: TarDeps,
   relay = false,
 ): Promise<CommandFnResult> {
-  const parsed = parseTarFlags(opts.flags)
+  const parsed = parseFlags(opts.flags)
   const { create, extract, list, compression, verbose } = parsed
   const missing = unsupportedKind(compression, create)
   if (missing !== null) {

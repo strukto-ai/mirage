@@ -27,7 +27,7 @@ from mirage.core.gdrive.rmdir import rmdir as _rmdir
 from mirage.core.gdrive.stat import stat as _stat
 from mirage.core.gdrive.truncate import truncate as _truncate
 from mirage.core.gdrive.unlink import unlink as _unlink
-from mirage.core.gdrive.write import write_bytes as _write
+from mirage.core.gdrive.write import write as _write
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import DuOps, NativeReadOps, ReadOps, WriteOps
 

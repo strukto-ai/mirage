@@ -15,7 +15,8 @@
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { GraphError } from '../msgraph/client.ts'
+import { enotdir, isEexist, isEnoent } from '../../utils/errors.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'
 import { itemUrl } from './client.ts'
 import { resolveItem } from './resolve.ts'
@@ -24,9 +25,22 @@ async function createDir(
   accessor: SharePointAccessor,
   driveId: string,
   path: string,
+  virtual: string,
+  existOk: boolean,
 ): Promise<void> {
-  const url = itemUrl(accessor.config, driveId, parentPath(path), '/children')
-  await createChildFolder(accessor.config, url, baseName(path))
+  const config = accessor.config
+  const parent = parentPath(path)
+  await createChildFolder(
+    config,
+    itemUrl(config, driveId, parent, '/children'),
+    baseName(path),
+    {
+      item: itemUrl(config, driveId, path),
+      parent: itemUrl(config, driveId, parent),
+      virtual,
+    },
+    existOk,
+  )
 }
 
 /**
@@ -36,15 +50,38 @@ async function createDir(
  *   accessor: the mount's accessor.
  *   driveId: the drive the path lives in.
  *   itemPath: the drive-relative path, keyPrefix included.
+ *   path: the operand.
+ *   parents: `-p`: a folder at the operand passes, and a file in the way is
+ *     named rather than the operand.
  */
 async function createChain(
   accessor: SharePointAccessor,
   driveId: string,
   itemPath: string,
+  path: PathSpec,
+  parents: boolean,
 ): Promise<void> {
   const parts = itemPath.split('/')
+  const shown = rstripSlash(path.virtual).split('/')
+  const depth = path.vfsPath.split('/').filter((part) => part !== '').length
   for (let index = 1; index <= parts.length; index++) {
-    await createDir(accessor, driveId, parts.slice(0, index).join('/'))
+    try {
+      await createDir(
+        accessor,
+        driveId,
+        parts.slice(0, index).join('/'),
+        path.virtual,
+        parents || index < parts.length,
+      )
+    } catch (error) {
+      const above = parts.length - index
+      if (!isEexist(error) || above === 0) throw error
+      // `mkdir -p` names the file it stops at, as GNU does, and a file in the
+      // hidden keyPrefix as the mount root it blocks; mkdir(2) blames the
+      // operand.
+      const level = shown.slice(0, -Math.min(above, depth)).join('/') || '/'
+      throw enotdir(parents ? level : path)
+    }
   }
 }
 
@@ -74,19 +111,15 @@ export async function mkdir(
   const driveId = resolved.driveId ?? ''
   const itemPath = resolved.itemPath ?? ''
   if (parents) {
-    await createChain(accessor, driveId, itemPath)
+    await createChain(accessor, driveId, itemPath, path, true)
   } else {
     try {
-      await createDir(accessor, driveId, itemPath)
+      await createDir(accessor, driveId, itemPath, path.virtual, false)
     } catch (error) {
       const prefix = scopedPrefix(accessor)
-      const missingRoot =
-        error instanceof GraphError &&
-        error.status === 404 &&
-        prefix !== '' &&
-        parentPath(itemPath) === prefix
+      const missingRoot = isEnoent(error) && prefix !== '' && parentPath(itemPath) === prefix
       if (!missingRoot) throw error
-      await createChain(accessor, driveId, itemPath)
+      await createChain(accessor, driveId, itemPath, path, false)
     }
   }
   await invalidateAfterWrite(path)

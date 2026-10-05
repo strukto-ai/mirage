@@ -20,8 +20,9 @@ import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { dbxFetch } from './client.ts'
-import { isNotFound, notFoundError } from './errors.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
+import { enoent } from '../../utils/errors.ts'
 
 function nameFromBackendPath(remotePath: string): string {
   const stripped = stripSlash(remotePath)
@@ -43,7 +44,7 @@ async function directoryStatOrRaise(
   try {
     await dbxFetch(accessor, 'HEAD', 'directories', remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(path.virtual)
+    if (isNotFound(exc)) throw enoent(path.virtual)
     throw exc
   }
   return new FileStat({ name: nameFromBackendPath(remotePath), type: FileType.DIRECTORY })
@@ -82,7 +83,7 @@ export async function stat(
     const parent = virtualKey.replace(/\/[^/]*$/, '') || '/'
     const parentListing = await index.listDir(parent)
     if (parentListing.entries !== undefined && parentListing.entries !== null) {
-      throw notFoundError(path.virtual)
+      throw enoent(path.virtual)
     }
   }
   const remotePath = backendPath(accessor.config, path)

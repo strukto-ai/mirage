@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteView, decodeText, encodeText, textView, utf8Locale } from '../../../shell/bytes.ts'
 import { compilePosixRegex } from '../../../utils/posix.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -33,14 +34,20 @@ import { linkDoor } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
-import { decodeLine, lineOffsets, matchOffset, prefixOf } from '../grep_offsets.ts'
+import { validUtf8 } from '../grep_binary.ts'
+import { prefixOf } from '../grep_offsets.ts'
 import { formatRecords } from '../utils/output.ts'
 import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 
-function anyLineSelected(data: Uint8Array, pattern: RegExp, invert: boolean): boolean {
-  for (const line of splitLines(decodeLine(data))) {
+function anyLineSelected(
+  data: Uint8Array,
+  pattern: RegExp,
+  invert: boolean,
+  utf8: boolean,
+): boolean {
+  for (const line of splitLines(byteView(data, utf8))) {
     let hit = pattern.test(line)
     if (invert) hit = !hit
     if (hit) return true
@@ -48,25 +55,64 @@ function anyLineSelected(data: Uint8Array, pattern: RegExp, invert: boolean): bo
   return false
 }
 
-interface ZgrepOpts {
-  invert: boolean
-  count: boolean
-  lineNumbers: boolean
-  onlyMatching: boolean
-  maxCount: number | null
+// Parsed zgrep flags; the complete set zgrep honors.
+interface ZgrepFlags {
+  readonly ignoreCase: boolean
+  readonly invert: boolean
+  readonly count: boolean
+  readonly filesOnly: boolean
+  readonly filesWithoutMatch: boolean
+  readonly lineNumbers: boolean
   // -b: the byte offset of each line's start or, under -o, of the match
-  // itself, in the field order GNU grep prints (name, line, byte).
-  byteOffsets: boolean
+  // itself, in the field order GNU grep prints (name, line, byte). A line
+  // is matched as its byte view, so its length is already its byte count.
+  readonly byteOffsets: boolean
+  readonly fixed: boolean
+  readonly syntax: RegexSyntax
+  readonly forceFilename: boolean
+  readonly suppressFilename: boolean
+  readonly onlyMatching: boolean
+  readonly quiet: boolean
+  readonly wholeWord: boolean
+  readonly maxCount: number | null
+}
+
+// The zero-pattern sentinel is a regex, so it suppresses -F.
+function parseFlags(fl: FlagView, neverMatch: boolean): ZgrepFlags {
+  // -l and -L set one mode in grep, so the later one on the line wins.
+  let listing: string | null = null
+  for (const name of fl.typedOrder('args_l', 'files_without_match')) {
+    if (fl.asBool(name)) listing = name
+  }
+  return {
+    ignoreCase: fl.asBool('i'),
+    invert: fl.asBool('v'),
+    count: fl.asBool('c'),
+    filesOnly: listing === 'args_l',
+    filesWithoutMatch: listing === 'files_without_match',
+    lineNumbers: fl.asBool('n'),
+    byteOffsets: fl.asBool('byte_offset'),
+    fixed: fl.asBool('F') && !neverMatch,
+    // zgrep is grep over decompressed bytes, so it reads a basic expression
+    // unless -E or -P says otherwise, and refuses two matchers as grep does;
+    // -G asks for the default explicitly.
+    syntax: matcherSyntax(fl, 'grep', 'P'),
+    forceFilename: fl.asBool('H'),
+    suppressFilename: fl.asBool('h'),
+    onlyMatching: fl.asBool('o'),
+    quiet: fl.asBool('q'),
+    wholeWord: fl.asBool('w'),
+    maxCount: fl.asInt('m') ?? null,
+  }
 }
 
 function zgrepSearch(
   data: Uint8Array,
   pattern: RegExp,
-  opts: ZgrepOpts,
+  opts: ZgrepFlags,
   filename: string | null,
-): [string[], boolean] {
-  const lines = splitLines(decodeLine(data))
-  const offsets = opts.byteOffsets ? lineOffsets(lines) : []
+  utf8: boolean,
+): [string[], boolean, boolean] {
   const reGlobal = opts.onlyMatching
     ? compilePosixRegex(
         pattern.source,
@@ -74,20 +120,20 @@ function zgrepSearch(
       )
     : null
   const matched: [number, number, string][] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    const start = opts.byteOffsets ? (offsets[i] ?? 0) : 0
+  let start = 0
+  const bytesOf = (view: string): number => (utf8 ? encodeText(view).length : view.length)
+  for (const [i, line] of splitLines(byteView(data, utf8)).entries()) {
     if (opts.onlyMatching && !opts.invert && reGlobal !== null) {
       reGlobal.lastIndex = 0
       let m: RegExpExecArray | null
       const hits: RegExpExecArray[] = []
       while ((m = reGlobal.exec(line)) !== null) {
         hits.push(m)
-        if (m[0] === '') reGlobal.lastIndex += 1
+        if (m[0] === '') reGlobal.lastIndex += (line.codePointAt(m.index) ?? 0) > 0xffff ? 2 : 1
       }
       if (hits.length > 0) {
         for (const h of hits) {
-          matched.push([i + 1, matchOffset(start, line, matchStart(h)), matchText(h)])
+          matched.push([i + 1, start + bytesOf(line.slice(0, matchStart(h))), matchText(h)])
           if (opts.maxCount !== null && matched.length >= opts.maxCount) break
         }
       }
@@ -97,20 +143,29 @@ function zgrepSearch(
       if (hit) matched.push([i + 1, start, line])
     }
     if (opts.maxCount !== null && matched.length >= opts.maxCount) break
+    start += bytesOf(line) + 1
   }
   if (opts.count) {
     const value =
       filename !== null ? `${filename}:${String(matched.length)}` : String(matched.length)
-    return [[value], matched.length > 0]
+    return [[value], matched.length > 0, false]
   }
+  // Under a UTF-8 locale a line or match to print that holds a byte no
+  // character owns is binary output, which grep leaves out and reports once
+  // the input is done; the third value says whether any was.
   const result: string[] = []
+  let binary = false
   for (const [idx, offset, line] of matched) {
+    if (utf8 && !validUtf8(encodeText(line))) {
+      binary = true
+      continue
+    }
     let prefix = ''
     if (filename !== null) prefix = filename + ':'
     prefix += prefixOf(opts.lineNumbers ? idx : null, opts.byteOffsets ? offset : null)
-    result.push(prefix + line)
+    result.push(prefix + textView(line, utf8))
   }
-  return [result, matched.length > 0]
+  return [result, matched.length > 0, binary]
 }
 
 export async function zgrepGeneric(
@@ -143,45 +198,40 @@ export async function zgrepGeneric(
     ]
   }
   const rawPattern = resolution.pattern
-  // zgrep is grep over decompressed bytes, so it reads a basic expression
-  // unless -E or -P says otherwise, and refuses two matchers as grep does;
-  // -G asks for the default explicitly.
-  let syntax: RegexSyntax
+  let parsed: ZgrepFlags
   try {
-    syntax = matcherSyntax(fl, 'grep', 'P')
+    parsed = parseFlags(fl, neverMatch)
   } catch (err) {
     if (!(err instanceof UsageError)) throw err
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(err.message + '\n') })]
   }
-  const fixedString = fl.asBool('F') && !neverMatch
-  const wholeWord = fl.asBool('w')
-  const ignoreCase = fl.asBool('i')
-  const invert = fl.asBool('v')
-  const countOnly = fl.asBool('c')
-  const lineNumbers = fl.asBool('n')
-  const onlyMatching = fl.asBool('o')
-  const quiet = fl.asBool('q')
-  const byteOffsets = fl.asBool('byte_offset')
-  // -l and -L set one mode in grep, so the later one on the line wins.
-  let listing: string | null = null
-  for (const name of fl.typedOrder('args_l', 'files_without_match')) {
-    if (fl.asBool(name)) listing = name
-  }
-  const filesOnly = listing === 'args_l'
-  const filesWithoutMatch = listing === 'files_without_match'
-  const forceH = fl.asBool('H')
-  const hideH = fl.asBool('h')
-  const maxCount = fl.asInt('m') ?? null
+  const {
+    syntax,
+    fixed: fixedString,
+    invert,
+    filesOnly,
+    filesWithoutMatch,
+    quiet,
+    maxCount,
+  } = parsed
+  const utf8 = utf8Locale(opts.env)
   // GNU grep 3.11 skips regex validation and selection under -m0.
   const pattern =
     maxCount === 0
       ? null
       : neverMatch
         ? new RegExp(NEVER_MATCH)
-        : compilePattern(rawPattern, ignoreCase, fixedString, wholeWord, syntax)
+        : compilePattern(
+            byteView(rawPattern, utf8),
+            parsed.ignoreCase,
+            fixedString,
+            parsed.wholeWord,
+            syntax,
+            utf8,
+          )
 
   const multi = paths.length > 1
-  const showFilename = forceH || (multi && !hideH)
+  const showFilename = parsed.forceFilename || (multi && !parsed.suppressFilename)
   let anyMatch = false
   const allResults: string[] = []
 
@@ -202,7 +252,7 @@ export async function zgrepGeneric(
       door,
     })
     const data = await materialize(body)
-    errors += await io.stderrStr()
+    errors += decodeText(await io.materializeStderr())
     failed ||= io.exitCode === 1
     if (pattern === null) {
       if (filesWithoutMatch) allResults.push(p.rawPath)
@@ -215,25 +265,22 @@ export async function zgrepGeneric(
     if (filesOnly || filesWithoutMatch) {
       // -L lists the files that selected nothing; the status still
       // follows the matching, as GNU grep's does.
-      const matched = anyLineSelected(data, pattern, invert)
+      const matched = anyLineSelected(data, pattern, invert, utf8)
       if (matched === filesOnly) allResults.push(p.rawPath)
       anyMatch ||= matched
     } else {
-      const [result, hadMatch] = zgrepSearch(
-        data,
-        pattern,
-        { invert, count: countOnly, lineNumbers, onlyMatching, maxCount, byteOffsets },
-        fname,
-      )
+      const [result, hadMatch, binary] = zgrepSearch(data, pattern, parsed, fname, utf8)
       if (hadMatch) anyMatch = true
       for (const r of result) allResults.push(r)
+      if (binary && !quiet)
+        errors += `grep: ${operandLabel(p, '(standard input)')}: binary file matches\n`
     }
   }
 
   // gzip's failure is exit 2 even beside a match, -q included (zgrep 1.13
   // takes the more serious status of gzip's and grep's per file).
   const exitCode = failed ? 2 : anyMatch ? 0 : 1
-  const stderr = errors === '' ? null : ENC.encode(errors)
+  const stderr = errors === '' ? null : encodeText(errors)
   // Under -m0, GNU still prints -L's operands even with -q.
   if ((quiet && maxCount !== 0) || allResults.length === 0)
     return [null, new IOResult({ exitCode, stderr })]

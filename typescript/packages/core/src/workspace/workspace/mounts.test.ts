@@ -133,15 +133,6 @@ describe('normalizeMounts', () => {
     expect(normalized.commandLimits['/a']).toEqual({ curl: guard })
   })
 
-  it('refuses an unknown per-mount index field', () => {
-    expect(() =>
-      normalizeMounts(
-        { '/a': new Mount(new RAMVFS(), { index: { ttll: 5 } as IndexConfig }) },
-        DEFAULT_READ,
-      ),
-    ).toThrow(/"ttll"/)
-  })
-
   // Both checks would refuse this mount; the first one ends normalization,
   // and the caller should be told about the typo rather than the bound it
   // never reached.

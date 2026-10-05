@@ -18,6 +18,7 @@ from typing import Any, Literal
 from mirage.commands.cli.builtin.gh.accessor import (
     camel,
     csv_values,
+    gh_bool,
     gh_repo,
     json_fields,
     list_limit,
@@ -38,6 +39,7 @@ from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import (
+    RepoRef,
     create_repo,
     delete_repo,
     edit_repo,
@@ -510,12 +512,12 @@ async def create_cmd(
         raise ValueError(f'invalid repository name: "{spec}"')
     owner = parts[0] if len(parts) == 2 else None
     name = parts[-1]
-    if fl.as_bool("public") and fl.as_bool("private"):
+    if gh_bool(fl, "public") and gh_bool(fl, "private"):
         raise ValueError("--public and --private are mutually exclusive")
     body: dict[str, JsonValue] = {
         "name": name,
-        "private": fl.as_bool("private"),
-        "auto_init": fl.as_bool("add_readme"),
+        "private": gh_bool(fl, "private"),
+        "auto_init": gh_bool(fl, "add_readme"),
     }
     for flag, key in (
         ("description", "description"),
@@ -531,11 +533,50 @@ async def create_cmd(
 async def fork(
     inv: CLIInvocation[GhConfig],
 ) -> tuple[ByteSource | None, IOResult]:
+    """``gh repo fork``.
+
+    gh clones a fork, or adds a remote for one, into the local checkout,
+    which a workspace does not have: ``--clone`` is refused, and so is
+    ``--remote`` without a repository, where it would name that checkout.
+    gh ignores ``--remote`` beside a repository, and ``--clone=false`` or
+    ``--remote=false`` asks for what this fork does anyway.
+
+    Args:
+        inv (CLIInvocation[GhConfig]): the repository and the flags.
+    """
     fl = FlagView(inv.flags)
     operand = inv.texts[0] if inv.texts else None
-    source = gh_repo(inv.config, operand)
+    org = fl.as_str("org")
+    if org == "":
+        raise ValueError("--org cannot be blank")
+    if fl.as_str("remote_name") == "":
+        raise ValueError("--remote-name cannot be blank")
+    if gh_bool(fl, "clone"):
+        raise ValueError(
+            "--clone is not supported: there is no local checkout to clone "
+            "into"
+        )
+    if gh_bool(fl, "remote") and operand is None:
+        raise ValueError(
+            "--remote is not supported: there is no local checkout to add a "
+            "remote to"
+        )
+    source: RepoRef
+    try:
+        source = gh_repo(inv.config, operand)
+    except ValueError as exc:
+        if operand is None:
+            raise
+        raise ValueError(f"did not understand argument: {exc}") from exc
     name = fl.as_str("fork_name")
-    forked = await fork_repo(inv.config, source, name)
+    body: dict[str, JsonValue] = {}
+    if name is not None:
+        body["name"] = name
+    if org is not None:
+        body["organization"] = org
+    if gh_bool(fl, "default_branch_only"):
+        body["default_branch_only"] = True
+    forked = await fork_repo(inv.config, source, body)
     landed = forked.get("full_name") if isinstance(forked, dict) else None
     full = (
         landed
@@ -586,7 +627,7 @@ async def edit_cmd(
         if field.kind == "value":
             body[field.field] = fl.as_str(dest)
         else:
-            enabled = fl.as_bool(dest) or fl.as_str(dest) == "true"
+            enabled = gh_bool(fl, dest)
             if field.kind == "security":
                 security[field.field] = {
                     "status": "enabled" if enabled else "disabled"
@@ -595,7 +636,7 @@ async def edit_cmd(
                 body[field.field] = enabled
     adds = csv_values(fl.as_list("add_topic"))
     removes = csv_values(fl.as_list("remove_topic"))
-    accepted = fl.as_bool("accept_visibility_change_consequences")
+    accepted = gh_bool(fl, "accept_visibility_change_consequences")
     if not (body or security or adds or removes or accepted):
         raise UsageError(
             "specify properties to edit when not running interactively", 1
@@ -639,7 +680,7 @@ async def delete_cmd(
         inv (CLIInvocation[GhConfig]): the invocation.
     """
     fl = FlagView(inv.flags)
-    confirmed = fl.as_bool("yes") or fl.as_bool("confirm")
+    confirmed = gh_bool(fl, "yes") or gh_bool(fl, "confirm")
     spec = inv.texts[0] if inv.texts else None
     if spec is None and confirmed:
         raise UsageError(
@@ -655,7 +696,7 @@ async def delete_cmd(
     await delete_repo(inv.config, gh_repo(inv.config, named))
     warning = (
         b"Flag --confirm has been deprecated, use `--yes` instead\n"
-        if fl.as_bool("confirm")
+        if gh_bool(fl, "confirm")
         else b""
     )
     return b"", IOResult(stderr=warning)

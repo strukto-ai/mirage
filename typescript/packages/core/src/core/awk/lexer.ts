@@ -133,6 +133,22 @@ function token(kind: TokKind, text: string, value = ''): Token {
   return { kind, text, value }
 }
 
+/** Read one awk string escape, starting immediately after its backslash. */
+export function readEscape(src: string, pos: number): [string, number] {
+  const esc = src.charAt(pos)
+  if (OCTAL_DIGITS.includes(esc)) {
+    let end = pos
+    while (end < src.length && end - pos < 3 && OCTAL_DIGITS.includes(src.charAt(end))) end++
+    return [String.fromCharCode(parseInt(src.slice(pos, end), 8) & 0xff), end]
+  }
+  if (esc === 'x') {
+    let end = pos + 1
+    while (end < src.length && end - pos <= 2 && /[0-9a-fA-F]/.test(src.charAt(end))) end++
+    if (end > pos + 1) return [String.fromCharCode(parseInt(src.slice(pos + 1, end), 16)), end]
+  }
+  return [STRING_ESCAPES[esc] ?? '\\' + esc, pos + 1]
+}
+
 export class Lexer {
   private readonly src: string
   private pos = 0
@@ -185,22 +201,9 @@ export class Lexer {
       }
       this.pos += 1
       if (this.pos >= this.src.length) throw this.error('unterminated string')
-      const esc = this.at()
-      if (OCTAL_DIGITS.includes(esc)) {
-        let digits = ''
-        while (
-          digits.length < 3 &&
-          this.pos < this.src.length &&
-          OCTAL_DIGITS.includes(this.at())
-        ) {
-          digits += this.at()
-          this.pos += 1
-        }
-        out += String.fromCharCode(parseInt(digits, 8))
-        continue
-      }
-      out += STRING_ESCAPES[esc] ?? '\\' + esc
-      this.pos += 1
+      const [value, after] = readEscape(this.src, this.pos)
+      out += value
+      this.pos = after
     }
     throw this.error('unterminated string')
   }

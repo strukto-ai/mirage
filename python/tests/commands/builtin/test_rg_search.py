@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.rg import parse_flags, rg_matcher
 from mirage.commands.builtin.rg_search import (
     ByteCursor,
     NonmatchStop,
+    RgBinary,
     RgFlags,
     Tally,
     expand,
@@ -397,3 +398,34 @@ def test_auto_falls_back_to_pcre2_only_when_the_default_refuses():
     with pytest.raises(UsageError) as caught:
         rg_matcher(r"(a)\1", False, _flags())
     assert "backreferences are not supported" in str(caught.value)
+
+
+async def _read_all(binary: RgBinary, source) -> list[bytes]:
+    return [block async for block in binary.read(source)]
+
+
+@pytest.mark.asyncio
+async def test_a_walked_files_first_buffer_ends_at_a_nul_as_it_arrives():
+    # The first buffer is still growing toward its first newline, so the
+    # NUL is in it and ripgrep reads no further.
+    async def source():
+        yield b"x" * 10000 + b"\0"
+        raise AssertionError("read past the NUL")
+
+    binary = RgBinary("quit")
+    assert await _read_all(binary, source()) == []
+    assert (binary.skipped, binary.offset) == (True, 10000)
+
+
+@pytest.mark.asyncio
+async def test_a_files_first_read_joins_the_served_chunks_once():
+    # Twenty 8 KiB chunks with no newline grow one first buffer; the file
+    # ends before the step past the newline, so it is all one read.
+    async def source():
+        for _ in range(20):
+            yield b"y" * 8192
+        yield b"\nz\n"
+
+    binary = RgBinary("quit")
+    assert await _read_all(binary, source()) == [b"y" * 163840 + b"\nz\n"]
+    assert binary.offset is None

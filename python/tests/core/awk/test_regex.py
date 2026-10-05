@@ -21,6 +21,10 @@ from mirage.core.awk.regex import compile_ere, matches, split_pattern
         ("\\<the\\>", "in the end", True),
         ("\\<he\\>", "in the end", False),
         ("\\$", "cost $5", True),
+        ("\\w", "\xff", False),
+        ("\\s", "\xa0", False),
+        ("\\S", "\xa0", True),
+        ("\\<x", "\xe9x", True),
     ],
 )
 def test_matches(pattern, subject, expected):

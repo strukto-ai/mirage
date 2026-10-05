@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 
 class KeyLockMixin:
@@ -39,3 +41,37 @@ class KeyLockMixin:
 
     def _clear_locks(self) -> None:
         self._key_locks.clear()
+
+
+class KeyLock:
+    """Per-key async mutual exclusion that keeps nothing for an idle key.
+
+    Callers on one key run one at a time; callers on different keys
+    never wait on each other. A key's lock lives only while a caller
+    holds or awaits it, so an owner that touches many keys over its
+    life keeps no state for the ones it is done with.
+    """
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._users: dict[str, int] = {}
+
+    @asynccontextmanager
+    async def with_lock(self, key: str) -> AsyncIterator[None]:
+        """Hold `key` for the body of the ``async with``.
+
+        Args:
+            key (str): what the callers contend on.
+        """
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = self._locks[key] = asyncio.Lock()
+        self._users[key] = self._users.get(key, 0) + 1
+        try:
+            async with lock:
+                yield
+        finally:
+            self._users[key] -= 1
+            if self._users[key] == 0:
+                del self._users[key]
+                del self._locks[key]

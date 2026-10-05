@@ -27,7 +27,7 @@ vi.mock('./client.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { ContentType, FileType, PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
@@ -50,6 +50,7 @@ const FILE_ENTRY: DropboxEntry = {
   path_display: '/a.txt',
   size: 5,
   server_modified: '2026-04-01T00:00:00Z',
+  content_hash: 'hash-a',
 }
 
 const FOLDER_ENTRY: DropboxEntry = {
@@ -83,7 +84,7 @@ describe('dropbox stat', () => {
     expect(out.name).toBe('a.txt')
     expect(out.size).toBe(5)
     expect(out.modified).toBe('2026-04-01T00:00:00Z')
-    expect(out.fingerprint).toBe('2026-04-01T00:00:00Z')
+    expect(out.fingerprint).toBe('hash-a')
     expect(out.extra.dropbox_id).toBe('id:a')
     expect(out.extra.resource_type).toBe('dropbox/file')
   })
@@ -116,8 +117,9 @@ describe('dropbox stat', () => {
   })
 
   // statFromEntry fallbacks: server_modified→client_modified→'',
-  // id→path_display→name, and a non-number/absent size renders as null (the
-  // unknown-size machinery, never a fabricated number).
+  // id→path_display→name, no content_hash is no token, and a non-number/absent
+  // size renders as null (the unknown-size machinery, never a fabricated
+  // number).
   const fallbackCases: [DropboxEntry, string, number | null, string, string | null][] = [
     [
       {
@@ -130,7 +132,7 @@ describe('dropbox stat', () => {
       'id:x',
       3,
       '2026-01-02T00:00:00Z',
-      '2026-01-02T00:00:00Z',
+      null,
     ],
     [{ '.tag': 'file', id: 'id:x', name: 'f.txt', size: 3 }, 'id:x', 3, '', null],
     [{ '.tag': 'file', name: 'f.txt', path_display: '/d/f.txt', size: 3 }, '/d/f.txt', 3, '', null],
@@ -171,10 +173,11 @@ describe('dropbox stat', () => {
     expect(out.name).toBe('a.txt')
     expect(out.size).toBe(5)
     expect(out.modified).toBe('2026-04-01T00:00:00Z')
-    expect(out.fingerprint).toBe('2026-04-01T00:00:00Z')
+    expect(out.fingerprint).toBe('hash-a')
     expect(out.extra.dropbox_id).toBe('id:a')
     expect(out.extra.resource_type).toBe('dropbox/file')
     expect(fake.listRequests).toBe(1)
+    expect(fake.metadataPaths).toEqual([])
   })
 
   it('serves an index hit without a second listing', async () => {
@@ -355,7 +358,7 @@ describe('dropbox stat', () => {
     vi.mocked(client.dropboxDownload).mockImplementation((_tm, path) => {
       const data = contents[path]
       if (data === undefined) throw new Error(`no content for ${path}`)
-      return Promise.resolve(data)
+      return Promise.resolve([data, null])
     })
 
     const accessor = makeAccessor()
@@ -380,5 +383,53 @@ describe('dropbox stat', () => {
       }
     }
     expect(files.sort()).toEqual(['/a.txt', '/docs/b.bin', '/empty.txt'])
+  })
+
+  // A fresh check stats through a throwaway store: one get_metadata, not a
+  // listing of the parent into a store dropped right after.
+  it('asks one lookup through a check store', async () => {
+    const fake = new FakeDropboxRpc({ entries: [FILE_ENTRY], metadata: FILE_ENTRY })
+    vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
+    const out = await stat(
+      makeAccessor(),
+      new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
+      new ListingCheckStore(),
+    )
+    expect(out.fingerprint).toBe('hash-a')
+    expect(fake.listRequests).toBe(0)
+    expect(fake.metadataPaths).toEqual(['/a.txt'])
+  })
+
+  // A restricted file exists, so a fresh probe must not hear ENOENT and drop
+  // its overlay; a 5xx body naming not_found is a relay's.
+  const answers: [string, number, string, Record<string, unknown>][] = [
+    ['not-found', 409, 'path/not_found/..', { code: 'ENOENT' }],
+    ['not-folder', 409, 'path/not_folder/..', { code: 'ENOENT' }],
+    ['restricted', 409, 'path/restricted_content/..', { status: 409 }],
+    ['5xx', 502, 'path/not_found/..', { status: 502 }],
+  ]
+  it.each([false, true].flatMap((check) => answers.map((answer) => [check, ...answer] as const)))(
+    'reads only a miss as ENOENT (check store %s, %s)',
+    async (check, _id, status, summary, raised) => {
+      vi.mocked(client.dropboxRpc).mockRejectedValue(
+        new DropboxApiError('refused', status, summary),
+      )
+      await expect(
+        stat(
+          makeAccessor(),
+          new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
+          check ? new ListingCheckStore() : undefined,
+        ),
+      ).rejects.toMatchObject(raised)
+    },
+  )
+
+  // get_metadata matches case-insensitively where a listing is exact.
+  it('reports ENOENT when get_metadata answers another case', async () => {
+    const fake = new FakeDropboxRpc({ metadata: FILE_ENTRY })
+    vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
+    await expect(stat(makeAccessor(), PathSpec.fromStrPath('/A.TXT'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

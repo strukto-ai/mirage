@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import codecs
 from collections.abc import AsyncIterator, Callable
 
 from mirage.core.awk.builtins import take_record
 from mirage.io.cooperative import chunks
 from mirage.io.yield_budget import YieldBudget
+from mirage.shell.bytes import byte_view
 
 
 class RecordReader:
@@ -40,7 +40,6 @@ class RecordReader:
     ) -> None:
         self.pulled = chunks(source)
         self.separator = separator
-        self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.budget = YieldBudget()
         self.buffer = ""
         self.start = 0
@@ -59,9 +58,7 @@ class RecordReader:
                 return None
             data = await anext(self.pulled, None)
             self.final = data is None
-            self.buffer = self.buffer[self.start :] + self.decoder.decode(
-                data or b"", self.final
-            )
+            self.buffer = self.buffer[self.start :] + byte_view(data or b"")
             self.start = 0
 
     async def close(self) -> None:

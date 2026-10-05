@@ -354,6 +354,7 @@ async def test_a_body_over_the_limit_is_refused_before_it_is_all_read(
             "path_params": {"workspace_id": workspace_id},
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
+            "state": {"account": None},
         }
         await asyncio.wait_for(app.state.mcp(scope, receive, send), 10)
         assert statuses == [413]

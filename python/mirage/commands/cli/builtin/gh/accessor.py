@@ -19,19 +19,51 @@ import sys
 from collections.abc import Callable, Iterable
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlsplit
 
-from mirage.commands.cli.builtin.gh.constants import GOJQ_RAISED
+from mirage.commands.cli.builtin.gh.constants import (
+    CONNECT_HINT,
+    GITHUB_HOST,
+    GOJQ_RAISED,
+)
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.github.config import GhConfig
-from mirage.core.github.repo import RepoRef, parse_repo
+from mirage.core.github.repo import RepoRef, parse_repo, repo_host
 from mirage.core.jq import JqHalt, JqRun, jq_raised, jq_run
 from mirage.io.stream import materialize, yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.errors import fs_strerror
+
+
+def check_host(config: GhConfig, host: str | None) -> None:
+    """Refuse a repository on a host this install cannot reach.
+
+    Real gh sends the request to whatever host a repository argument
+    names; this one answers github.com, whose subdomains go-gh reads as
+    github.com, and the host its ``base_url`` names. Any other host is
+    one it cannot connect to, and it says so in gh's words (pinned
+    against gh 2.85.0) rather than asking its own host for a repository
+    of the same name.
+
+    Args:
+        config (GhConfig): the install's configuration.
+        host (str | None): the host the argument named, if any.
+
+    Raises:
+        ValueError: the host is not one this install answers.
+    """
+    if host is None:
+        return
+    host = host.lower()
+    if host == GITHUB_HOST or host.endswith(f".{GITHUB_HOST}"):
+        return
+    if config.base_url and urlsplit(config.base_url).hostname == host:
+        return
+    raise ValueError(f"error connecting to {host}\n{CONNECT_HINT}")
 
 
 def gh_repo(config: GhConfig, spec: str | None) -> RepoRef:
@@ -56,7 +88,9 @@ def gh_repo(config: GhConfig, spec: str | None) -> RepoRef:
         raise ValueError(
             "no repository given; pass one or set `repo` on the install"
         )
-    return parse_repo(named)
+    ref = parse_repo(named)
+    check_host(config, repo_host(named))
+    return ref
 
 
 # gh's exporter writes with Go's encoding/json, which escapes U+2028 and
@@ -91,6 +125,16 @@ def text_out(text: str) -> tuple[ByteSource | None, IOResult]:
     return yield_bytes(text.encode()), IOResult()
 
 
+def gh_bool(fl: FlagView, name: str) -> bool:
+    """Whether a gh boolean flag is on: given bare, or as ``=true``.
+
+    Args:
+        fl (FlagView): the leaf's flags.
+        name (str): the flag's name.
+    """
+    return fl.as_bool(name) or fl.as_str(name) == "true"
+
+
 def repo_for(inv: CLIInvocation[GhConfig], fl: FlagView) -> RepoRef:
     """Resolve a typed verb's shared `-R/--repo` target."""
     return gh_repo(inv.config, fl.as_str("repo"))
@@ -118,6 +162,7 @@ def repo_number(
     )
     if match is None or match.group(3) != url_kind:
         raise ValueError(f"a {label} number is required")
+    check_host(inv.config, urlsplit(raw).hostname)
     return parse_repo(f"{match.group(1)}/{match.group(2)}"), int(
         match.group(4)
     )

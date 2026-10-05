@@ -1,3 +1,5 @@
+import { encodeText } from '../../shell/bytes.ts'
+
 const DEFAULT_FORMAT = '\nreal\t%3lR\nuser\t%3lU\nsys\t%3lS'
 const TOKEN = /%(?:([0-9])?(l)?([RUS])|([%P]))/g
 
@@ -7,15 +9,14 @@ export function timingReport(
   portable: boolean,
   format: string | undefined,
 ): Uint8Array {
-  if (portable) return new TextEncoder().encode(`real ${elapsed.toFixed(2)}\nuser 0.00\nsys 0.00\n`)
+  if (portable) return encodeText(`real ${elapsed.toFixed(2)}\nuser 0.00\nsys 0.00\n`)
   const template = format ?? DEFAULT_FORMAT
   if (template === '') return new Uint8Array()
   const pieces: string[] = []
   let cursor = 0
   for (const match of template.matchAll(TOKEN)) {
     const gap = template.slice(cursor, match.index)
-    if (gap.includes('%'))
-      return new TextEncoder().encode('mirage: TIMEFORMAT: invalid format character\n')
+    if (gap.includes('%')) return encodeText('mirage: TIMEFORMAT: invalid format character\n')
     pieces.push(gap)
     if (match[4] !== undefined) pieces.push(match[4] === '%' ? '%' : '0.00')
     else {
@@ -30,7 +31,6 @@ export function timingReport(
     cursor = match.index + match[0].length
   }
   const tail = template.slice(cursor)
-  if (tail.includes('%'))
-    return new TextEncoder().encode('mirage: TIMEFORMAT: invalid format character\n')
-  return new TextEncoder().encode(pieces.join('') + tail + '\n')
+  if (tail.includes('%')) return encodeText('mirage: TIMEFORMAT: invalid format character\n')
+  return encodeText(pieces.join('') + tail + '\n')
 }

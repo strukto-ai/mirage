@@ -28,6 +28,7 @@ from mirage.shell.array import (
     array_slice,
     array_values,
 )
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import RANDOM
 from mirage.shell.errors import (
@@ -146,7 +147,9 @@ def guard_expansion_write(session: SessionState, *names: str) -> None:
         try:
             ensure_var_visible(session, name)
         except PolicyDenied as exc:
-            raise DiscardSignal(f"bash: {exc.strerror}\n".encode()) from exc
+            raise DiscardSignal(
+                encode_text(f"bash: {exc.strerror}\n")
+            ) from exc
 
 
 def _write_refusal(exc: PolicyDenied | ArithError) -> ExitSignal:
@@ -160,8 +163,10 @@ def _write_refusal(exc: PolicyDenied | ArithError) -> ExitSignal:
         exc (PolicyDenied | ArithError): the refusal.
     """
     if isinstance(exc, PolicyDenied):
-        return DiscardSignal(f"bash: {exc.strerror}\n".encode())
-    return ExitSignal(1, stderr=f"bash: {exc}\n".encode(), contained_code=1)
+        return DiscardSignal(encode_text(f"bash: {exc.strerror}\n"))
+    return ExitSignal(
+        1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
+    )
 
 
 async def _expansion_index(
@@ -266,7 +271,7 @@ async def expansion_write(
         raise ReadonlyVariableError(name)
     if status != "ok":
         raise DiscardSignal(
-            f"bash: {name}[{key}]: bad array subscript\n".encode()
+            encode_text(f"bash: {name}[{key}]: bad array subscript\n")
         )
 
 
@@ -986,7 +991,9 @@ class _ArithOperand:
             )
             raise ExitSignal(
                 1,
-                stderr=(f"bash: {self.ref}: {text.strip()}: {exc}\n").encode(),
+                stderr=encode_text(
+                    f"bash: {self.ref}: {text.strip()}: {exc}\n"
+                ),
                 contained_code=1,
             ) from exc
         await land_arith_writes(self.session, self.view, result.writes, reader)
@@ -1128,7 +1135,7 @@ async def _unset_error(
         )
     ref = p.var_name if p.subscript is None else f"{p.var_name}[{p.subscript}]"
     return ExitSignal(
-        127, stderr=f"bash: {ref}: {message}\n".encode(), contained_code=1
+        127, stderr=encode_text(f"bash: {ref}: {message}\n"), contained_code=1
     )
 
 
@@ -1436,7 +1443,9 @@ def _bad_subscript(p: _BraceParse) -> DiscardSignal:
         p (_BraceParse): the parsed expansion.
     """
     return DiscardSignal(
-        f"bash: {p.var_name}[{p.subscript}]: bad array subscript\n".encode()
+        encode_text(
+            f"bash: {p.var_name}[{p.subscript}]: bad array subscript\n"
+        )
     )
 
 
@@ -1573,7 +1582,9 @@ async def _expand_splat(
             raise _bad_subscript(p)
         if triggered:
             raise DiscardSignal(
-                f"bash: ${p.var_name}: cannot assign in this way\n".encode()
+                encode_text(
+                    f"bash: ${p.var_name}: cannot assign in this way\n"
+                )
             )
     if star and quoted:
         return [value_piece(joiner.join(items), True)]

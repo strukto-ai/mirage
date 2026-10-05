@@ -25,7 +25,6 @@ from pydantic_ai_backends.types import (
     WriteResult,
 )
 
-from mirage.agents.io_text import replace_text
 from mirage.agents.pydantic_ai.convert import (
     io_to_execute_response,
     io_to_file_infos,
@@ -34,6 +33,7 @@ from mirage.agents.pydantic_ai.convert import (
 from mirage.bridge.sync import run_async_from_sync
 from mirage.io.types import IOResult
 from mirage.ops.ops import Ops
+from mirage.workspace.tools.io_text import replace_text
 from mirage.workspace.workspace import Session, Workspace
 
 T = TypeVar("T")

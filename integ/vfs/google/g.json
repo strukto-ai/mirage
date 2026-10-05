@@ -489,6 +489,20 @@
         "stdout": "{\"presentationId\":true,\"title\":\"Deck\",\"slides\":1}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "g_native_grep_I_keeps_rendered_json",
+      "seq": 501004,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files create --json '{\"name\": \"R10Doc\", \"mimeType\": \"application/vnd.google-apps.document\", \"parents\": [\"f0001\"]}' > /dev/null && grep -Ic . /data/R10Doc.gdoc.json /data/Board.gsheet.json /data/Deck.gslide.json; F=$(cat /data/R10Doc.gdoc.json | jq -r .documentId) && gws drive files delete --params \"{\\\"fileId\\\": \\\"$F\\\"}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/R10Doc.gdoc.json:1\n/data/Board.gsheet.json:1\n/data/Deck.gslide.json:1\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -34,7 +34,7 @@ from mirage.core.gmail.scope import detect_scope
 from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.utils.glob_walk import glob_span, has_glob_span
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len, sanitize_label
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, sanitize_label
 
 TITLE_MAX = 80
 MSG_SUFFIX = ".gmail.json"
@@ -60,7 +60,7 @@ def _subject(subject: str, msg_id: str) -> str:
     Returns:
         str: the sanitized subject segment.
     """
-    fixed = len("__") + byte_len(msg_id) + len(MSG_SUFFIX)
+    fixed = len("__") + byte_length(msg_id) + len(MSG_SUFFIX)
     return _sanitize(subject, max_bytes=NAME_MAX_BYTES - fixed)
 
 

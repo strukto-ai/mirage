@@ -48,7 +48,7 @@ describe('Workspace index option', () => {
     await ws.close()
   })
 
-  it('takes the snake_case spelling of a workspace index field', async () => {
+  it('gives every mount the snake_case spelling of a workspace index field', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
@@ -59,7 +59,9 @@ describe('Workspace index option', () => {
         } as IndexConfig,
       },
     )
+    ws.addMount('/late', new RAMVFS())
     expect((ws.mount('/data').indexConfig as RedisIndexConfig).keyPrefix).toBe('t1:')
+    expect((ws.mount('/late').indexConfig as RedisIndexConfig).keyPrefix).toBe('t1:')
     await ws.close()
   })
 
@@ -74,12 +76,6 @@ describe('Workspace index option', () => {
     await ws.close()
   })
 
-  it('refuses an unknown workspace index field', () => {
-    expect(
-      () => new Workspace({ '/data': new RAMVFS() }, { index: { ttll: 5 } as IndexConfig }),
-    ).toThrow(/"ttll"/)
-  })
-
   // Both checks would refuse this; the first one ends construction, and the
   // caller should be told about the typo rather than the bound it never reached.
   it('names an unknown workspace index field before judging the read policy', () => {
@@ -90,22 +86,6 @@ describe('Workspace index option', () => {
           { index: { ttll: 5 } as IndexConfig },
         ),
     ).toThrow(/"ttll"/)
-  })
-
-  it('gives a mount added later the snake_case workspace index field', async () => {
-    const ws = new Workspace(
-      {},
-      {
-        index: {
-          type: IndexType.REDIS,
-          url: 'redis://127.0.0.1:1/0',
-          key_prefix: 't3:',
-        } as IndexConfig,
-      },
-    )
-    ws.addMount('/late', new RAMVFS())
-    expect((ws.mount('/late').indexConfig as RedisIndexConfig).keyPrefix).toBe('t3:')
-    await ws.close()
   })
 
   // RAM keeps no listings of its own (indexTtl 0), so these only pass on

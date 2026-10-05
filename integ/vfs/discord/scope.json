@@ -143,6 +143,45 @@
         "stderr": "grep: /discord/Mirage HQ__100000000000000001/channels/general__200000000000000001: Is a directory\n"
       },
       "note": "The guild search takes one term, so several -e patterns must leave the channel to the scan: grep refuses the directory operand as GNU does, rg walks it."
+    },
+    {
+      "id": "dc_grep_w_channel_filters_out_other_channels",
+      "seq": 690211,
+      "targets": [
+        "discord"
+      ],
+      "command": "grep -w released '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_rg_w_channel_uses_native_search",
+      "seq": 690212,
+      "targets": [
+        "discord"
+      ],
+      "command": "rg -w green '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; echo rc=$?; rg -w zzznomatch '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl:[alice] deploy is green\nrc=0\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_head_c_reads_bytes_of_a_day_file",
+      "seq": 690213,
+      "targets": [
+        "discord"
+      ],
+      "command": "head -c 20 '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":\"1510934682009\n",
+        "stderr": ""
+      }
     }
   ]
 }

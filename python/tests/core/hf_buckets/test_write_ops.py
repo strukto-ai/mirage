@@ -17,7 +17,7 @@ from opendal.exceptions import NotFound
 
 from mirage.core.hf_buckets.create import create
 from mirage.core.hf_buckets.unlink import unlink
-from mirage.core.hf_buckets.write import write_bytes
+from mirage.core.hf_buckets.write import write
 from mirage.types import PathSpec
 from tests.core.hf_buckets.conftest import FakeAsyncOperator
 
@@ -25,7 +25,7 @@ from tests.core.hf_buckets.conftest import FakeAsyncOperator
 @pytest.mark.asyncio
 async def test_write_bytes_uploads(make_acc):
     acc = make_acc({})
-    await write_bytes(acc, PathSpec.from_str_path("/hello.txt"), b"hi there")
+    await write(acc, PathSpec.from_str_path("/hello.txt"), b"hi there")
     assert acc._fake.files == {"hello.txt": b"hi there"}
 
 
@@ -77,7 +77,7 @@ async def test_write_into_a_missing_repo_names_the_virtual_path(make_acc):
     acc = make_acc({})
     acc.operator = lambda: _MissingRepoOperator(files={})
     with pytest.raises(FileNotFoundError) as caught:
-        await write_bytes(acc, PathSpec.from_str_path("/out.txt"), b"hi")
+        await write(acc, PathSpec.from_str_path("/out.txt"), b"hi")
     assert str(caught.value) == "/out.txt"
 
 

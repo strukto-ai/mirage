@@ -649,6 +649,9 @@ jobs:
       # another, and the Airtable replay pages every table through its fake.
       # Neither binds a fixed port. Each is collected, output and status, by
       # the step that bears its name at the end of the job.
+      - name: Check cross-mount command coverage
+        run: ./python/.venv/bin/python integ/runners/tools/check_crossmount_coverage.py --selftest
+
       - name: Start the runner gates and the Airtable replay (background)
         run: |
           integ/scripts/background.sh start gates \
@@ -837,8 +840,8 @@ jobs:
   # disk, redis) — the credentialed targets stay in their own jobs.
   # The battery jobs keep every target's raw outputs, so parity is a diff of
   # those files rather than both hosts running these targets a second time.
-  # The targets stay pinned to the ones it has always compared; widening the
-  # list costs nothing now but a run's worth of divergences to triage.
+  # Include nested mounts and the search-only command service so native
+  # delegation and dispatcher-backed composition are checked across hosts.
   integ-shared-parity:
     needs: [changes, integ-shared-py, integ-shared-ts]
     if: ${{ !cancelled() && needs.integ-shared-py.result == 'success' && needs.integ-shared-ts.result == 'success' }}
@@ -858,7 +861,7 @@ jobs:
       - name: Diff python and typescript battery output
         run: >-
           python3 integ/runners/parity.py --from emit
-          ram disk disk-host-links redis ram-history
+          ram disk disk-host-links redis ram-history ram-nested command-service
 
   # One job per backend family with both hosts inside it. The postgres, chroma,
   # qdrant and mongodb fleet is the expensive part and was being started twice,

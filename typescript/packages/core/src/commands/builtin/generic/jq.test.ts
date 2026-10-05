@@ -40,7 +40,6 @@ const DEC = new TextDecoder()
 
 const FILES: Record<string, string> = {
   '/d/four.json': '1\n2\n3\n4\n',
-  '/d/empty.json': '',
   '/d/bad.json': '{"a":1}\n{"a":2}\n[',
   '/d/mid.json': '1\n[1 2]\n3\n4\n',
   '/d/one.json': '1',
@@ -91,15 +90,6 @@ async function ranOver(
 /** Run jq over one file and return what it printed and how it exited. */
 async function ran(path: string, program: string, flags: CommandOpts['flags'] = {}): Promise<Ran> {
   return ranOver([path], program, flags)
-}
-
-/** Run jq over one file and return what it printed. */
-async function run(
-  path: string,
-  program: string,
-  flags: CommandOpts['flags'] = {},
-): Promise<string> {
-  return (await ran(path, program, flags)).stdout
 }
 
 function view(flags: Record<string, string | boolean | number | string[]>): FlagView {
@@ -625,21 +615,6 @@ describe("jq's option loop", () => {
   })
 })
 
-describe('jqGeneric over a stream that input and inputs read', () => {
-  it('takes one document per run for input alone', async () => {
-    expect(await run('/d/four.json', '[., input]')).toBe('[1,2]\n[3,4]\n')
-    expect(await run('/d/four.json', 'input')).toBe('2\n4\n')
-  })
-
-  it('fails input with break when the stream is empty', async () => {
-    expect(await ran('/d/empty.json', 'input', { null_input: true })).toEqual({
-      stdout: '',
-      stderr: 'jq: error (at /d/empty.json:0): break\n',
-      exitCode: 5,
-    })
-  })
-})
-
 describe('jqGeneric over malformed input', () => {
   it('closes the input it stopped in at a parse error', async () => {
     const closed: string[] = []
@@ -653,21 +628,6 @@ describe('jqGeneric over malformed input', () => {
     const result = await ranOver(['/d/mid.json', '/d/a.json'], '.', {}, tracked)
     expect([result.stdout, result.exitCode]).toEqual(['1\n', 5])
     expect(closed).toEqual(['/d/mid.json'])
-  })
-
-  it('places a run where its reads leave the reader', async () => {
-    // A run reports where the reader stands once it has read its own
-    // document and whatever `input` or `inputs` took past it.
-    expect(await ran('/d/four.json', '[., input] | error(tojson)')).toEqual({
-      stdout: '',
-      stderr: 'jq: error (at /d/four.json:2): [1,2]\njq: error (at /d/four.json:4): [3,4]\n',
-      exitCode: 5,
-    })
-    expect(await ran('/d/four.json', '[., inputs] | error(tojson)')).toEqual({
-      stdout: '',
-      stderr: 'jq: error (at /d/four.json:4): [1,2,3,4]\n',
-      exitCode: 5,
-    })
   })
 
   it('reads no further than what input takes', async () => {

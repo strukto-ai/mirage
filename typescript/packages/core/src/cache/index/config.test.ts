@@ -94,74 +94,28 @@ describe('IndexDirectory JSON', () => {
 })
 
 describe('normalizeIndexConfig', () => {
-  it('takes the fields of a RAM index', () => {
-    expect(normalizeIndexConfig({ ttl: 5 })).toEqual({ ttl: 5 })
-  })
-
-  it('takes the fields of a redis index', () => {
-    const config = {
-      type: IndexType.REDIS,
-      ttl: 5,
-      url: 'redis://localhost:6379/0',
-      keyPrefix: 's3:',
-    } as IndexConfig
-    expect(normalizeIndexConfig(config)).toEqual(config)
-  })
-
-  it('refuses an unknown field on a redis index', () => {
-    expect(() =>
-      normalizeIndexConfig({ type: IndexType.REDIS, urll: 'redis://x' } as IndexConfig),
-    ).toThrow(/"urll"/)
-  })
-
-  it('refuses a redis field on an explicit RAM index', () => {
-    expect(() =>
-      normalizeIndexConfig({ type: IndexType.RAM, keyPrefix: 's3:' } as IndexConfig),
-    ).toThrow(/"keyPrefix"/)
-  })
-
-  it('refuses an unknown field', () => {
-    expect(() => {
-      normalizeIndexConfig({ ttll: 5 } as IndexConfig)
-    }).toThrow(/"ttll"/)
-  })
-
-  it('refuses a redis field on a default RAM index', () => {
-    expect(() => {
-      normalizeIndexConfig({ keyPrefix: 's3:' } as IndexConfig)
-    }).toThrow(/"keyPrefix"/)
-  })
-
-  it('refuses an unknown index type rather than building RAM', () => {
-    expect(() => normalizeIndexConfig({ type: 'redsi' as IndexType })).toThrow(ZodError)
-  })
-
-  it('refuses a null index type rather than building RAM', () => {
-    expect(() => normalizeIndexConfig({ type: null } as unknown as IndexConfig)).toThrow(ZodError)
-  })
-
-  it('writes a snake_case field under its camelCase name', () => {
-    expect(
-      normalizeIndexConfig({ type: IndexType.REDIS, key_prefix: 's3:' } as IndexConfig),
-    ).toEqual({
-      type: IndexType.REDIS,
-      keyPrefix: 's3:',
-    })
+  it.each([
+    [{ ttl: 5 }, { ttl: 5 }],
+    [
+      { type: IndexType.REDIS, ttl: 5, url: 'redis://localhost:6379/0', key_prefix: 's3:' },
+      { type: IndexType.REDIS, ttl: 5, url: 'redis://localhost:6379/0', keyPrefix: 's3:' },
+    ],
+  ])('takes %j', (config, expected) => {
+    expect(normalizeIndexConfig(config as IndexConfig)).toEqual(expected)
   })
 
   it.each([
-    [{ type: IndexType.REDIS, keyPrefix: 'tenant:', key_prefix: 'default:' }],
-    [{ type: IndexType.REDIS, key_prefix: 'default:', keyPrefix: 'tenant:' }],
-  ])('refuses one field named in both spellings: %j', (config) => {
-    expect(() => normalizeIndexConfig(config as IndexConfig)).toThrow(ZodError)
-    expect(() => normalizeIndexConfig(config as IndexConfig)).toThrow(/name the same field/)
-  })
-
-  it('names an unknown key before a repeated field', () => {
-    const config = { type: IndexType.REDIS, keyPrefix: 'a:', key_prefix: 'b:', urll: 'x' }
-    expect(refusal(() => normalizeIndexConfig(config as IndexConfig))).toBe(
-      'urll: unrecognized_keys',
-    )
+    [{ ttll: 5 }, 'ttll: unrecognized_keys'],
+    [{ keyPrefix: 's3:' }, 'keyPrefix: unrecognized_keys'],
+    [{ type: IndexType.RAM, keyPrefix: 's3:' }, 'keyPrefix: unrecognized_keys'],
+    [{ type: IndexType.REDIS, urll: 'redis://x' }, 'urll: unrecognized_keys'],
+    [{ type: IndexType.REDIS, keyPrefix: 'a:', key_prefix: 'b:' }, 'keyPrefix: unrecognized_keys'],
+    [{ type: 'redsi' }, 'type: invalid_value'],
+    [{ type: null }, 'type: invalid_value'],
+    [{ ttl: 'abc' }, 'ttl: invalid_type'],
+    [{ type: IndexType.REDIS, key_prefix: 1 }, 'keyPrefix: invalid_type'],
+  ])('refuses %j', (config, summary) => {
+    expect(refusal(() => normalizeIndexConfig(config as unknown as IndexConfig))).toBe(summary)
   })
 })
 

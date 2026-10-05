@@ -13,14 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commGeneric } from '../../generic/comm.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const comm: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return commGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+}
 
 export const BUILDER: Builder = {
   name: 'comm',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return commGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
-  },
+  fn: comm,
 }

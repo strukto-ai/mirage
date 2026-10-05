@@ -13,7 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dulwich.object_store import BaseObjectStore, iter_tree_contents
-from dulwich.objects import ObjectID
+from dulwich.objects import Blob, ObjectID
+from dulwich.objectspec import parse_commit
+from dulwich.repo import BaseRepo
+
+Tree = dict[bytes, tuple[int, bytes]]
 
 
 def tree_entries(
@@ -32,3 +36,43 @@ def tree_entries(
         entry.path: (entry.mode, entry.sha)
         for entry in iter_tree_contents(store, ObjectID(tree))
     }
+
+
+def flat_tree(repo: BaseRepo, tree_id: ObjectID) -> Tree:
+    """Every path one tree holds, with its mode and blob id.
+
+    Synchronous, and called on a worker thread: reading a tree pulls
+    objects through the dispatcher.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        tree_id (ObjectID): the tree to read.
+    """
+    return {
+        entry.path: (entry.mode, entry.sha)
+        for entry in iter_tree_contents(repo.object_store, tree_id)
+    }
+
+
+def tree_of(repo: BaseRepo, commit_id: ObjectID) -> Tree:
+    """Every path a commit's tree holds, with its mode and blob id.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        commit_id (ObjectID): the commit to read.
+    """
+    return flat_tree(repo, parse_commit(repo, commit_id).tree)
+
+
+def contents(repo: BaseRepo, shas: list[bytes]) -> dict[bytes, bytes]:
+    """Fetch several blobs at once, off the event loop.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        shas (list[bytes]): the blob ids to read.
+    """
+    out: dict[bytes, bytes] = {}
+    for sha in shas:
+        obj = repo.object_store[ObjectID(sha)]
+        out[sha] = obj.data if isinstance(obj, Blob) else b""
+    return out

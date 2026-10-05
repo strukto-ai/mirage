@@ -13,12 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.git.add import add
-from mirage.commands.cli.builtin.git.branch import branch
-from mirage.commands.cli.builtin.git.checkout import checkout
-from mirage.commands.cli.builtin.git.clone import clone
+from mirage.commands.cli.builtin.git.branch import branch, branch_read_only
+from mirage.commands.cli.builtin.git.checkout import (
+    checkout,
+    checkout_read_only,
+)
+from mirage.commands.cli.builtin.git.clone import clone, clone_read_only
 from mirage.commands.cli.builtin.git.commit import commit
 from mirage.commands.cli.builtin.git.diff import diff
-from mirage.commands.cli.builtin.git.fetch import fetch
+from mirage.commands.cli.builtin.git.errors import GitError
+from mirage.commands.cli.builtin.git.fetch import fetch, fetch_read_only
 from mirage.commands.cli.builtin.git.for_each_ref import for_each_ref
 from mirage.commands.cli.builtin.git.fsck import fsck
 from mirage.commands.cli.builtin.git.init import init
@@ -37,16 +41,22 @@ from mirage.commands.cli.builtin.git.reflog import reflog
 from mirage.commands.cli.builtin.git.reset import reset
 from mirage.commands.cli.builtin.git.restore import restore
 from mirage.commands.cli.builtin.git.rm import rm
+from mirage.commands.cli.builtin.git.session import index_locked, verb
 from mirage.commands.cli.builtin.git.shortlog import shortlog
 from mirage.commands.cli.builtin.git.show import diff_tree, show
 from mirage.commands.cli.builtin.git.stash import stash_list, stash_show
 from mirage.commands.cli.builtin.git.status import status
-from mirage.commands.cli.builtin.git.switch import switch
-from mirage.commands.cli.builtin.git.tag import tag
+from mirage.commands.cli.builtin.git.switch import switch, switch_read_only
+from mirage.commands.cli.builtin.git.symbolic_ref import (
+    symbolic_ref,
+    symbolic_ref_read_only,
+)
+from mirage.commands.cli.builtin.git.tag import tag, tag_read_only
+from mirage.commands.cli.builtin.git.util import check_switches, fatal
 from mirage.commands.cli.types import CLIInvocation, CLISpec, UsageStyle
 from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.spec.types import Operand, Option
-from mirage.io.types import IOResult
+from mirage.io.types import ByteSource, IOResult
 
 # `-C` is git's own before-anything-else option, so it sits on the root
 # and every verb inherits it. The "." default is load-bearing: a PATH
@@ -143,6 +153,19 @@ DIFF_OPTIONS = (
     Option(long="--raw", description="Show the raw diff format"),
 )
 
+# git's optional-value form: a bare --decorate is short, and a detached
+# next word is a revision, never a style.
+DECORATE_OPTIONS = (
+    Option(
+        long="--decorate",
+        type="str",
+        value_optional=True,
+        description="Print ref names on commits: short (the default), full, "
+        "auto or no",
+    ),
+    Option(long="--no-decorate", description="Print no ref names on commits"),
+)
+
 MERGE_OPTIONS = (
     Option(
         short="-m",
@@ -223,7 +246,7 @@ LOG_OPTIONS = (
     Option(long="--merges", description="Show only merge commits"),
     Option(long="--no-merges", description="Leave out merge commits"),
     DATE_OPTION,
-    Option(long="--decorate", description="Print ref names on commits"),
+    *DECORATE_OPTIONS,
     Option(
         short="-n",
         long="--max-count",
@@ -418,6 +441,9 @@ FOR_EACH_REF_OPTIONS = (
 BRANCH_OPTIONS = (
     Option(long="--show-current", description="Show the current branch name"),
     Option(
+        short="-q", long="--quiet", description="Suppress feedback messages"
+    ),
+    Option(
         short="-v",
         long="--verbose",
         count=True,
@@ -479,10 +505,15 @@ COMMIT_OPTIONS = (
     Option(
         long="--author", type="str", description="Override the recorded author"
     ),
+    Option(
+        long="--allow-empty",
+        description="Record a commit that changes nothing from its parent",
+    ),
 )
 
 CHECKOUT_OPTIONS = (
     Option(short="-b", description="Create the branch and switch to it"),
+    Option(long="--detach", description="Leave HEAD on the commit itself"),
     Option(
         short="-q", long="--quiet", description="Suppress feedback messages"
     ),
@@ -615,12 +646,18 @@ STATUS_OPTIONS = (
 )
 
 
-async def help_cmd(inv: CLIInvocation[None]) -> tuple[bytes | None, IOResult]:
+async def help_cmd(
+    inv: CLIInvocation[None],
+) -> tuple[ByteSource | None, IOResult]:
     """Render the declared command tree, without needing a repository.
 
     Args:
         inv (CLIInvocation[None]): optional command to describe.
     """
+    try:
+        check_switches(inv, inv.texts)
+    except GitError as exc:
+        return fatal(exc)
     found = find_node(GIT, inv.texts)
     if found is None:
         return None, IOResult(
@@ -661,7 +698,7 @@ GIT = CLISpec(
     subcommands=(
         CLISpec(
             name="reflog",
-            fn=reflog,
+            fn=verb(reflog),
             description="Show reference history",
             options=(
                 Option(
@@ -676,14 +713,14 @@ GIT = CLISpec(
         ),
         CLISpec(
             name="for-each-ref",
-            fn=for_each_ref,
+            fn=verb(for_each_ref),
             description="List references with a format",
             options=FOR_EACH_REF_OPTIONS,
             rest=REVISION,
         ),
         CLISpec(
             name="ls-files",
-            fn=ls_files,
+            fn=verb(ls_files),
             description="Show files in the index",
             options=(
                 Option(short="-z", description="Terminate paths with NUL"),
@@ -702,7 +739,7 @@ GIT = CLISpec(
         ),
         CLISpec(
             name="fetch",
-            fn=fetch,
+            fn=verb(fetch, fetch_read_only),
             description="Download objects and refs from another repository",
             options=(
                 Option(
@@ -732,7 +769,7 @@ GIT = CLISpec(
         ),
         CLISpec(
             name="clone",
-            fn=clone,
+            fn=verb(clone, clone_read_only),
             description="Clone a repository into a new directory",
             options=(
                 Option(
@@ -762,13 +799,13 @@ GIT = CLISpec(
         ),
         CLISpec(
             name="help",
-            fn=help_cmd,
+            fn=verb(help_cmd),
             description="Show command help",
             rest=Operand(type="str"),
         ),
         CLISpec(
             name="init",
-            fn=init,
+            fn=verb(init),
             description=(
                 "Create an empty Git repository or reinitialize an "
                 "existing one"
@@ -783,7 +820,7 @@ GIT = CLISpec(
         ),
         CLISpec(
             name="fsck",
-            fn=fsck,
+            fn=verb(fsck),
             description="Verify object hashes and connectivity",
             options=(Option(long="--full"), Option(long="--no-dangling")),
         ),
@@ -793,12 +830,12 @@ GIT = CLISpec(
             subcommands=(
                 CLISpec(
                     name="list",
-                    fn=stash_list,
+                    fn=verb(stash_list),
                     description="List stashed changes",
                 ),
                 CLISpec(
                     name="show",
-                    fn=stash_show,
+                    fn=verb(stash_show),
                     description="Show stashed changes",
                     options=DIFF_OPTIONS,
                     positional=(Operand(type="str", name="stash"),),
@@ -808,13 +845,13 @@ GIT = CLISpec(
         CLISpec(
             name="version",
             aliases=("--version", "-v"),
-            fn=version,
+            fn=verb(version),
             description="Show the Mirage Git implementation version",
         ),
         CLISpec(
             name="remote",
             description="List remotes",
-            fn=remote,
+            fn=verb(remote),
             options=(
                 Option(
                     short="-v",
@@ -826,7 +863,7 @@ GIT = CLISpec(
         CLISpec(
             name="config",
             description="Read repository configuration",
-            fn=config,
+            fn=verb(config),
             options=(
                 Option(
                     long="--global", description="Read global configuration"
@@ -852,14 +889,67 @@ GIT = CLISpec(
         CLISpec(
             name="show-ref",
             description="List references",
-            fn=show_ref,
+            fn=verb(show_ref),
             rest=REVISION,
+        ),
+        # symbolic-ref has every option git's has, so its rows carry git's
+        # own help and its usage block reads exactly as git's.
+        CLISpec(
+            name="symbolic-ref",
+            description="Read, change or delete a symbolic ref",
+            fn=verb(symbolic_ref, symbolic_ref_read_only),
+            options=(
+                Option(
+                    short="-q",
+                    long="--quiet",
+                    description="suppress error message for non-symbolic "
+                    "(detached) refs",
+                ),
+                Option(
+                    long="--no-quiet",
+                    description="Refuse a ref that is not symbolic aloud",
+                ),
+                Option(
+                    short="-d",
+                    long="--delete",
+                    description="delete symbolic ref",
+                ),
+                Option(
+                    long="--no-delete",
+                    description="Read or change the ref instead",
+                ),
+                Option(
+                    long="--short",
+                    description="shorten ref output",
+                ),
+                Option(
+                    long="--no-short",
+                    description="Print the full name it points at",
+                ),
+                Option(
+                    long="--recurse",
+                    description="recursively dereference (default)",
+                ),
+                Option(
+                    long="--no-recurse",
+                    description="Print only the ref this one points at "
+                    "directly",
+                ),
+                Option(
+                    short="-m",
+                    type="str",
+                    metavar="reason",
+                    description="reason of the update",
+                ),
+            ),
+            rest=Operand(type="str"),
+            write=True,
         ),
         # shortlog's -n is --numbered, so the count keeps only its long
         # spelling.
         CLISpec(
             name="shortlog",
-            fn=shortlog,
+            fn=verb(shortlog),
             description="Summarize commit history",
             options=(
                 *(opt for opt in LOG_OPTIONS if opt.short != "-n"),
@@ -888,7 +978,7 @@ GIT = CLISpec(
         ),
         CLISpec(
             name="rev-parse",
-            fn=rev_parse,
+            fn=verb(rev_parse),
             description="Resolve revisions",
             options=(
                 Option(
@@ -897,7 +987,36 @@ GIT = CLISpec(
                 ),
                 Option(
                     long="--abbrev-ref",
-                    description="Show abbreviated reference names",
+                    type="str",
+                    value_optional=True,
+                    description="Show abbreviated reference names, strict "
+                    "or loose",
+                ),
+                Option(
+                    long="--show-prefix",
+                    description="Show the current directory relative to the "
+                    "worktree root",
+                ),
+                Option(
+                    long="--is-inside-work-tree",
+                    description="Print whether the current directory is "
+                    "inside the work tree",
+                ),
+                Option(
+                    long="--verify",
+                    description="Require exactly one revision that names an "
+                    "object",
+                ),
+                Option(
+                    long="--short",
+                    type="str",
+                    value_optional=True,
+                    description="Abbreviate the object name; implies --verify",
+                ),
+                Option(
+                    short="-q",
+                    long="--quiet",
+                    description="With --verify, exit 1 without a message",
                 ),
             ),
             rest=REVISION,
@@ -905,7 +1024,7 @@ GIT = CLISpec(
         CLISpec(
             name="rev-list",
             description="List reachable commits",
-            fn=rev_list,
+            fn=verb(rev_list),
             options=(
                 *LOG_OPTIONS,
                 Option(long="--count", description="Print commit count"),
@@ -915,7 +1034,7 @@ GIT = CLISpec(
         CLISpec(
             name="diff-tree",
             description="Compare a commit with its parent",
-            fn=diff_tree,
+            fn=verb(diff_tree),
             options=(
                 *SHOW_OPTIONS,
                 Option(
@@ -929,27 +1048,27 @@ GIT = CLISpec(
         CLISpec(
             name="status",
             description="Show the working tree status",
-            fn=status,
+            fn=verb(status),
             options=STATUS_OPTIONS,
         ),
         CLISpec(
             name="log",
             description="Show commit logs",
-            fn=log,
+            fn=verb(log),
             options=(*LOG_OPTIONS, *MAILMAP_OPTIONS, *DIFF_OPTIONS),
             rest=REVISION,
         ),
         CLISpec(
             name="show",
             description="Show a commit and its diff",
-            fn=show,
-            options=SHOW_OPTIONS,
+            fn=verb(show),
+            options=(*SHOW_OPTIONS, *DECORATE_OPTIONS),
             rest=REVISION,
         ),
         CLISpec(
             name="diff",
             description="Show changes between commits",
-            fn=diff,
+            fn=verb(diff),
             options=(
                 *DIFF_OPTIONS,
                 Option(
@@ -963,7 +1082,7 @@ GIT = CLISpec(
         CLISpec(
             name="branch",
             description="List, create or delete branches",
-            fn=branch,
+            fn=verb(branch, branch_read_only),
             options=BRANCH_OPTIONS,
             rest=Operand(type="str"),
             write=True,
@@ -971,7 +1090,7 @@ GIT = CLISpec(
         CLISpec(
             name="add",
             description="Stage working tree content",
-            fn=add,
+            fn=verb(add, index_locked),
             options=ADD_OPTIONS,
             rest=PATHSPEC,
             write=True,
@@ -979,7 +1098,7 @@ GIT = CLISpec(
         CLISpec(
             name="reset",
             description="Unstage, putting the index back to HEAD",
-            fn=reset,
+            fn=verb(reset, index_locked),
             options=(
                 Option(
                     short="-q",
@@ -993,14 +1112,14 @@ GIT = CLISpec(
         CLISpec(
             name="commit",
             description="Record the index as a new commit",
-            fn=commit,
+            fn=verb(commit, index_locked),
             options=COMMIT_OPTIONS,
             write=True,
         ),
         CLISpec(
             name="checkout",
             description="Switch branches",
-            fn=checkout,
+            fn=verb(checkout, checkout_read_only),
             options=CHECKOUT_OPTIONS,
             rest=REVISION,
             write=True,
@@ -1008,7 +1127,7 @@ GIT = CLISpec(
         CLISpec(
             name="switch",
             description="Switch branches",
-            fn=switch,
+            fn=verb(switch, switch_read_only),
             options=SWITCH_OPTIONS,
             rest=REVISION,
             write=True,
@@ -1016,7 +1135,7 @@ GIT = CLISpec(
         CLISpec(
             name="restore",
             description="Restore working tree files",
-            fn=restore,
+            fn=verb(restore, index_locked),
             options=RESTORE_OPTIONS,
             rest=PATHSPEC,
             write=True,
@@ -1024,7 +1143,7 @@ GIT = CLISpec(
         CLISpec(
             name="rm",
             description="Remove files from the working tree and the index",
-            fn=rm,
+            fn=verb(rm, index_locked),
             options=RM_OPTIONS,
             rest=PATHSPEC,
             write=True,
@@ -1032,7 +1151,7 @@ GIT = CLISpec(
         CLISpec(
             name="mv",
             description="Move or rename a file, a directory, or a symlink",
-            fn=mv,
+            fn=verb(mv, index_locked),
             options=MV_OPTIONS,
             rest=PATHSPEC,
             write=True,
@@ -1040,7 +1159,7 @@ GIT = CLISpec(
         CLISpec(
             name="tag",
             description="Create, list or delete a tag",
-            fn=tag,
+            fn=verb(tag, tag_read_only),
             options=TAG_OPTIONS,
             rest=Operand(type="str"),
             write=True,

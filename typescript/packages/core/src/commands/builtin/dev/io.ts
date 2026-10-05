@@ -16,7 +16,7 @@ import { VFSAdapter } from '../../../vfs/adapter.ts'
 
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { read, readRange, stat, stream } from '../../../core/dev/index.ts'
+import { read, readRange, stat, readStream } from '../../../core/dev/index.ts'
 import { appendBytes as ramAppend } from '../../../core/ram/append.ts'
 import { copy as ramCopy } from '../../../core/ram/copy.ts'
 import { create as ramCreate } from '../../../core/ram/create.ts'
@@ -33,7 +33,7 @@ import { rmdir as ramRmdir } from '../../../core/ram/rmdir.ts'
 import { setAttrs as ramSetAttrs } from '../../../core/ram/set_attrs.ts'
 import { truncate as ramTruncate } from '../../../core/ram/truncate.ts'
 import { unlink as ramUnlink } from '../../../core/ram/unlink.ts'
-import { writeBytes as ramWrite } from '../../../core/ram/write.ts'
+import { write as ramWrite } from '../../../core/ram/write.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
@@ -76,5 +76,5 @@ export const IO: CommandIO<RAMAccessor> = new VFSAdapter<RAMAccessor>({
 
 export const DEV_STREAMING: CommandIO<RAMAccessor> = {
   ...IO,
-  readStream: stream,
+  readStream,
 }

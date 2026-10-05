@@ -67,7 +67,7 @@ async function readFile(
 
 export const read = makeRead<GDocsAccessor>(detectScope, { file: readFile })
 
-export async function* stream(
+export async function* readStream(
   accessor: GDocsAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

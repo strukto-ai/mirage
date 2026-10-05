@@ -19,10 +19,10 @@ from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
     relay,
-    transfer_links,
+    transfer_links_of,
     transfer_primitives,
 )
-from mirage.commands.builtin.generic.mv import mv as generic_mv
+from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
 from mirage.commands.builtin.generic_bind.adapter import refuse_reveal
 from mirage.commands.spec import SPECS
@@ -76,7 +76,7 @@ async def run_mv(
         backend_key=storage_key,
         guard=refuse_reveal,
         copies=(
-            transfer_links(ns.links, dispatch, "/")
+            transfer_links_of(ns.links, dispatch, "/")
             if ns is not None and ns.links is not None
             else None
         ),

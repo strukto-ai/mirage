@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
-import type { RuntimeVFS, VFSStat } from '../../vfs.ts'
+import type { RuntimeVFS } from '../../vfs.ts'
+import type { VFSStat } from '../../types.ts'
 import { WASI, errnoFor } from './errors.ts'
 
 export async function stat(
@@ -46,7 +47,7 @@ export async function stat(
     setNum('dev', 0)
     setNum('ino', 0)
     setNum('mode', st.mode)
-    setNum('nlink', 1)
+    setNum('nlink', st.isDir ? 2 : 1)
     setNum('uid', 0)
     setNum('gid', 0)
     setNum('rdev', st.rdev ?? 0)

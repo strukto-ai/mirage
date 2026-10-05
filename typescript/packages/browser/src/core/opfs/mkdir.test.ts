@@ -17,7 +17,7 @@ import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { exists } from './exists.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/mkdir', () => {
   it('creates a single directory', async () => {
@@ -34,7 +34,7 @@ describe('opfs/mkdir', () => {
 
   it('is ENOTDIR when a parent component is a plain file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/plain'), new TextEncoder().encode('y'))
+    await write(accessor, spec('/plain'), new TextEncoder().encode('y'))
     await expect(mkdir(accessor, spec('/plain/sub'))).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
   it('creates nested directories with parents=true', async () => {
@@ -51,7 +51,7 @@ describe('opfs/mkdir', () => {
 
   it('-p across a plain file names the component and keeps the file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/f.txt'), new TextEncoder().encode('hi'))
+    await write(accessor, spec('/f.txt'), new TextEncoder().encode('hi'))
     await expect(mkdir(accessor, spec('/f.txt/sub'), true)).rejects.toMatchObject({
       code: 'ENOTDIR',
       virtualPath: '/f.txt',
@@ -61,7 +61,7 @@ describe('opfs/mkdir', () => {
 
   it('-p onto a plain file target is EEXIST', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/f.txt'), new TextEncoder().encode('hi'))
+    await write(accessor, spec('/f.txt'), new TextEncoder().encode('hi'))
     await expect(mkdir(accessor, spec('/f.txt'), true)).rejects.toMatchObject({ code: 'EEXIST' })
   })
 })

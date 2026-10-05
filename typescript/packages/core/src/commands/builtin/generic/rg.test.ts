@@ -126,7 +126,9 @@ describe('rgGeneric - operand', () => {
 
 // A listing is settled by the first selected line and -m once its last
 // selected line (and that line's trailing context) is out, so a source that
-// goes on is never read past the answer: `-` is a typed stdin operand.
+// goes on is never read past the answer: `-` is a typed stdin operand. A file
+// is read a whole first buffer at a time, as ripgrep reads one, so the file
+// row serves one before it goes on.
 it.each([
   ['stdin', [], { files_without_match: true }, '', 1],
   ['stdin', ['-'], { files_with_matches: true }, '<stdin>\n', 0],
@@ -140,7 +142,7 @@ it.each([
   ['file', ['/a.txt'], { max_count: '1', with_filename: true }, '/a.txt:b\n', 0],
 ])('stops reading %s at the answer: %j %j', async (source, paths, flags, want, code) => {
   const operands = paths.map((p) => (p === '-' ? stdinOperand() : spec(p)))
-  const pipe = pipeThatGoesOn('a\nb\nc\n')
+  const pipe = pipeThatGoesOn('a\nb\nc\n' + (source === 'file' ? 'd\n'.repeat(32768) : ''))
   const result =
     source === 'stdin'
       ? await run(operands, 'b', flags, pipe)
@@ -280,11 +282,12 @@ describe('rgGeneric - an operand the walk refused', () => {
   ] as const)('refuses %s by name', async (_, operand, message) => {
     // ripgrep 14.1.1: `rg o ''` and `rg o lp1` (a loop) refuse the operand by
     // name with exit 2. The empty name's `virtual` is the cwd it joined onto,
-    // which must not be walked.
+    // which must not be walked. Beside another operand the parallel walker
+    // names it once.
     expect(await runAll([operand])).toEqual(['', message, 2])
     expect(await runAll([spec('/a.txt'), operand])).toEqual([
       '/a.txt:hello\n/a.txt:world\n',
-      message,
+      message.replace(/IO error for operation on [^:]*: /, ''),
       2,
     ])
   })
@@ -383,7 +386,11 @@ describe('rg -L', () => {
   // glob-excluded, each named as the walker spells it: `./x` under the
   // implicit cwd, whose matches print bare (ripgrep 14.1.1).
   it.each([
-    ["ln -s nowhere s/.dang && rg -L -g '*.txt' o s", '', dang('s/.dang')],
+    [
+      "ln -s nowhere s/.dang && rg -L -g '*.txt' o s",
+      '',
+      'rg: s/.dang: No such file or directory (os error 2)\n',
+    ],
     [
       'ln -s lp2 s/lp1 && ln -s lp1 s/lp2 && rg -L --sort path o s',
       's/f:o\n',

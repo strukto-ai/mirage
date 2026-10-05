@@ -34,6 +34,7 @@ import { commandName } from './utils.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
 import { isControlFlowError } from './failure.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * What a whole line answers: the runtime's own result plus the
@@ -91,13 +92,13 @@ export async function runWholeLine(
       deadline?.abort()
       result = {
         stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(`${err.message}\n`),
+        stderr: encodeText(`${err.message}\n`),
         exitCode: 124,
       }
     } else {
       result = {
         stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(err instanceof Error ? err.message : String(err)),
+        stderr: encodeText(err instanceof Error ? err.message : String(err)),
         exitCode: 1,
       }
     }

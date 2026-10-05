@@ -24,7 +24,7 @@ from mirage.core.dev.stream import read_stream as _read_stream
 from mirage.types import PathSpec
 
 
-async def _finite_read_stream(
+async def _finite_stream(
     accessor: RAMAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
 ) -> AsyncIterator[bytes]:
     data = await _read(accessor, path, index)
@@ -43,4 +43,4 @@ STREAMING_IO = dataclasses.replace(
     read_range=_read,
     read_stream=_read_stream,
 )
-IO = dataclasses.replace(STREAMING_IO, read_stream=_finite_read_stream)
+IO = dataclasses.replace(STREAMING_IO, read_stream=_finite_stream)

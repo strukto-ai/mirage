@@ -18,7 +18,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { remoteBranch, setUpTracking, trackMode } from './branch.ts'
+import { refuseAmbiguous, remoteBranch, setUpTracking, trackMode } from './branch.ts'
 import { moveHead, previousPosition, trackingReport } from './checkout.ts'
 import { HEAD } from './constants.ts'
 import {
@@ -32,10 +32,12 @@ import {
   NoWorkspaceError,
   OneReferenceError,
   RefLockError,
-  UnknownSwitchError,
+  RefReadOnlyError,
 } from './errors.ts'
 import { short } from './format.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
+import { under } from './io.ts'
+import type { ReadOnlyRefusal } from './types.ts'
 import {
   BRANCH_PREFIX,
   blockingRef,
@@ -46,9 +48,9 @@ import {
   validRefName,
 } from './refs.ts'
 import { repoArgs } from './repo.ts'
-import { opened } from './session.ts'
-import { resolveCommit } from './revparse.ts'
-import { checkOperands, escaped, fatal, switches } from './util.ts'
+import { indexLocked, opened } from './session.ts'
+import { noteAmbiguity, resolveCommit } from './revparse.ts'
+import { checkSwitches, fatal } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -104,7 +106,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const flags = parseFlags(fl)
     let creating = flags.create !== undefined
     if (creating && flags.detach) throw new DetachWithCreateError()
@@ -143,6 +145,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
         } catch {
           throw new InvalidReferenceError(start)
         }
+        if (first !== undefined) await refuseAmbiguous(repo, first, false)
       }
       // After the start point and before anything is written, which is git's
       // own order. A ref is a path below .git, so an unchecked name reaches
@@ -174,6 +177,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       // is what leaves `switch -c` as the only line an unborn HEAD accepts.
       // Pinned against git 2.50.1.
       if (!flags.detach && target === head.branch && known.has(`${BRANCH_PREFIX}${target}`)) {
+        await noteAmbiguity(repo, target)
         // Moving nothing is not the same as having nothing to check: git dies
         // on an unresolved index here too, so the shortcut reads it before it
         // answers. Every ref check above comes first, which is git's own order.
@@ -193,8 +197,13 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
           : await remoteBranch(repo, target)
       creating = guessed !== null
       startPoint = guessed ?? undefined
+      // A branch of that name wins over every other reading, as git's switch
+      // reads it, though the name is still reported as ambiguous.
+      const branch = `${BRANCH_PREFIX}${target}`
+      const local = !flags.detach && guessed === null && known.has(branch)
+      if (local) await noteAmbiguity(repo, target)
       try {
-        oid = await resolveCommit(repo, guessed ?? target)
+        oid = await resolveCommit(repo, local ? branch : (guessed ?? target))
       } catch {
         throw new InvalidReferenceError(target)
       }
@@ -215,6 +224,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       target,
       attached ? `${BRANCH_PREFIX}${target}` : null,
       creating,
+      startPoint ?? HEAD,
       creating && startPoint === undefined,
     )
     carried = [...moved.carried]
@@ -247,4 +257,15 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
   }
   if (fl.asBool('quiet')) return [null, new IOResult({ stderr: ENC.encode(warnings) })]
   return [ENC.encode(carried), new IOResult({ stderr: ENC.encode(note) })]
+}
+
+/**
+ * switch's refusal by a read-only mount: the new branch's ref under `-c`, whose
+ * lock git takes first, and the index's otherwise.
+ */
+export const switchReadOnly: ReadOnlyRefusal = (inv, location) => {
+  const name = new FlagView(inv.flags).asStr('create')
+  if (name === undefined) return indexLocked(inv, location)
+  const ref = `${BRANCH_PREFIX}${name}`
+  return new RefReadOnlyError(ref, under(location?.commondir ?? '.git', ref))
 }

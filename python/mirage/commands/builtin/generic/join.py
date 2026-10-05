@@ -23,7 +23,7 @@ INTMAX_MIN = -(2**63)
 WHOLE_LINE = b"\n"
 FIELD_RUN = re.compile(rb"[^ \t\n]+")
 INTEGER = re.compile(r"[ \t\n\v\f\r]*([+-]?[0-9]+)", re.ASCII)
-OUTLIST_SEPARATORS = re.compile(r"[, \t]")
+OUTLIST_SEPARATOR = re.compile(r"[, \t]")
 ASCII_UPPER = bytes.maketrans(
     b"abcdefghijklmnopqrstuvwxyz", b"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
@@ -191,7 +191,7 @@ def _field_list(text: str) -> list[tuple[int, int]]:
     specs: list[tuple[int, int]] = []
     rest = text
     while True:
-        match = OUTLIST_SEPARATORS.search(rest)
+        match = OUTLIST_SEPARATOR.search(rest)
         item = rest if match is None else rest[: match.start()]
         specs.append(_field_spec(item))
         if match is None or match.end() == len(rest):

@@ -21,7 +21,7 @@ from mirage.utils.dates import now_iso
 from mirage.utils.path import norm
 
 
-async def write_bytes(
+async def write(
     accessor: RedisAccessor,
     path_spec: PathSpec,
     data: bytes,

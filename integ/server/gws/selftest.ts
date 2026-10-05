@@ -753,6 +753,51 @@ async function gridRangesHttp(at: string): Promise<void> {
 
   const bad = await get(`includeGridData=true&ranges=${encodeURIComponent('Missing!A1')}`)
   eq('ranges: an unknown tab is a 400', bad.status, 400)
+
+  const mask = 'spreadsheetId,sheets(properties(title),data(rowData(values(formattedValue))))'
+  const masked = await get(`includeGridData=true&fields=${encodeURIComponent(mask)}`)
+  eq(
+    'fields: a GET mask keeps only what it names',
+    Object.keys(obj(masked.body)).join(','),
+    'spreadsheetId,sheets',
+  )
+  const maskedGrid = obj(arr(sheetsOf(masked.body)[0]?.data)[0])
+  eq(
+    'fields: down to the cell',
+    JSON.stringify(arr(obj(arr(maskedGrid.rowData)[0]).values)[0]),
+    '{"formattedValue":"r1c1"}',
+  )
+  eq(
+    'fields: through a message the fake keeps no tree for',
+    JSON.stringify(sheetsOf(masked.body)[0]?.properties),
+    '{"title":"Sheet1"}',
+  )
+  eq(
+    'fields: a read mask splits on /',
+    parseMask('sheets/properties', true).map((p) => [...p]),
+    [['sheets', 'properties']],
+  )
+  check(
+    'fields: a write mask keeps / in the name, so the check refuses it',
+    badField(parseMask('userEnteredFormat/textFormat/bold'), CELL_DATA) !== null,
+  )
+  for (const whole of ['sheets/*', 'sheets(*)', 'sheets/data/rowData/*'])
+    eq(
+      `fields: ${whole} keeps the message whole`,
+      (await get(`includeGridData=true&fields=${encodeURIComponent(whole)}`)).status,
+      200,
+    )
+  eq(
+    'fields: sheets/* keeps every sheet field',
+    Object.keys(obj((await get(`fields=${encodeURIComponent('sheets/*')}`)).body)).join(','),
+    'sheets',
+  )
+  for (const wrong of [
+    'notAField',
+    'sheets(propertis)',
+    'sheets(data(rowData(values(formattedValu))))',
+  ])
+    eq(`fields: ${wrong} is a 400`, (await get(`fields=${encodeURIComponent(wrong)}`)).status, 400)
 }
 
 async function driveMoveHttp(at: string): Promise<void> {

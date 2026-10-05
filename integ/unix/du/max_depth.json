@@ -107,6 +107,82 @@
         "stdout": "4.0K\t/data/r10du/f\n3\t/data/r10du/d\n4096\t/data/r10du/f\n4099\t/data/r10du\n3\t.\n3\t./g\n3\t.\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "du_max_depth_zero_or_negative_prints_only_the_operand",
+      "seq": 15800005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/dumd/sub/deep && printf 'deep\\n' > /data/dumd/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dumd/sub/nested.txt && du -a --max-depth=0 /data/dumd/sub; du --max-depth=-1 /data/dumd/sub; echo rc=$?; du -s --max-depth=0 /data/dumd/sub; echo rc=$?; du -s /data/dumd/sub; rm -r /data/dumd",
+      "expect": {
+        "exit": 0,
+        "stdout": "20\t/data/dumd/sub\n20\t/data/dumd/sub\nrc=0\n20\t/data/dumd/sub\nrc=0\n20\t/data/dumd/sub\n",
+        "stderr": "du: warning: summarizing is the same as using --max-depth=0\n"
+      },
+      "flags": [
+        "max-depth",
+        "a",
+        "s"
+      ]
+    },
+    {
+      "id": "du_max_depth_reads_its_number_as_strtoimax_does",
+      "seq": 15800006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for d in 0 2 +2 -0 010 0x2 0X3 09 0xz 1x 1_0 ' 1 ' '' 9223372036854775807 9223372036854775808 -9223372036854775808 -9223372036854775809; do du --max-depth=\"$d\" /data/sub > /dev/null; echo \"[$d] rc=$?\"; done 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0] rc=0\n[2] rc=0\n[+2] rc=0\n[-0] rc=0\n[010] rc=0\n[0x2] rc=0\n[0X3] rc=0\ndu: invalid maximum depth '09'\nTry 'du --help' for more information.\n[09] rc=1\ndu: invalid maximum depth '0xz'\nTry 'du --help' for more information.\n[0xz] rc=1\ndu: invalid maximum depth '1x'\nTry 'du --help' for more information.\n[1x] rc=1\ndu: invalid maximum depth '1_0'\nTry 'du --help' for more information.\n[1_0] rc=1\ndu: invalid maximum depth ' 1 '\nTry 'du --help' for more information.\n[ 1 ] rc=1\ndu: invalid maximum depth ''\nTry 'du --help' for more information.\n[] rc=1\n[9223372036854775807] rc=0\ndu: invalid maximum depth '9223372036854775808'\nTry 'du --help' for more information.\n[9223372036854775808] rc=1\n[-9223372036854775808] rc=0\ndu: invalid maximum depth '-9223372036854775809'\nTry 'du --help' for more information.\n[-9223372036854775809] rc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "max-depth"
+      ]
     }
   ]
 }

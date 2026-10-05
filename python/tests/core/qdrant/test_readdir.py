@@ -7,7 +7,7 @@ from mirage.core.qdrant.render import render_json, render_text
 from mirage.core.qdrant.tree import readdir
 from mirage.core.vector.read import blob_bytes
 from mirage.types import PathSpec
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 from tests.fixtures.index_spy import WindowSpy
 
 
@@ -192,7 +192,7 @@ async def test_a_basename_past_name_max_lists_within_it_and_opens(
     names = _names(await readdir(long_basename, _ps("/")))
     assert len(names) == 2
     for name in names:
-        assert byte_len(name) <= NAME_MAX_BYTES
+        assert byte_length(name) <= NAME_MAX_BYTES
     first = group_name(f"s3://docs/{'r' * 300}a.pdf", basename=True)
     second = group_name(f"s3://docs/{'r' * 300}b.pdf", basename=True)
     assert names == {first, second}

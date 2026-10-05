@@ -28,7 +28,7 @@ import { rename as s3Rename } from '../../../core/s3/rename.ts'
 import { rmR as s3RmR } from '../../../core/s3/rm.ts'
 import { rmdir as s3Rmdir } from '../../../core/s3/rmdir.ts'
 import { stat as s3Stat } from '../../../core/s3/stat.ts'
-import { readRange as s3ReadRange, stream as s3Stream } from '../../../core/s3/stream.ts'
+import { readRange as s3ReadRange, readStream as s3Stream } from '../../../core/s3/stream.ts'
 import { truncate as s3Truncate } from '../../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../../core/s3/unlink.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
@@ -44,7 +44,7 @@ export const IO: CommandIO<S3Accessor> = new VFSAdapter<S3Accessor>({
     du: { size: s3Du, entries: s3DuAll },
   },
   writes: {
-    append: appendFromRead(s3Read, s3Write),
+    append: appendFromRead(s3Read, s3Write, s3Stat),
     write: s3Write,
     mkdir: s3Mkdir,
     unlink: s3Unlink,

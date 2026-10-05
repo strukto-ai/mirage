@@ -23,11 +23,13 @@ import {
   under,
   writeFile,
 } from './io.ts'
-import type { Dispatch, HeadRef, Refspec } from './types.ts'
+import type { Dispatch, HeadRef, Refspec, SymbolicEnd } from './types.ts'
 
 const HEAD_FILE = 'HEAD'
 const PACKED_REFS = 'packed-refs'
 const REFS_DIR = 'refs'
+const MAX_SYMREF_DEPTH = 5
+const SAFE_ONE_LEVEL = /^[A-Z_]+$/
 export const SYMREF_PREFIX = 'ref: '
 export const BRANCH_PREFIX = 'refs/heads/'
 
@@ -275,6 +277,94 @@ export function validRefName(name: string): boolean {
     if (code < 0x20 || code === 0x7f || FORBIDDEN_IN_REF.has(ch)) return false
   }
   return name.split('/').every((part) => !part.startsWith('.') && !part.endsWith(LOCK_SUFFIX))
+}
+
+/**
+ * Whether git's ref rules take a whole ref name, one level allowed
+ * (`check_refname_format` with `REFNAME_ALLOW_ONELEVEL`): a bare `@` is the one
+ * name they refuse whole that they take below `refs/`.
+ *
+ * @param name the full ref name
+ */
+export function wholeRefName(name: string): boolean {
+  return name !== '@' && validRefName(name)
+}
+
+/**
+ * A ref's raw value, an object id or `ref: <target>`, null when there is none.
+ *
+ * Read from the ref table, or for a one-level name outside it (`ORIG_HEAD` and
+ * its kin) from the checkout's git directory, which is where git keeps them.
+ *
+ * @param dispatch workspace op dispatcher
+ * @param gitdir this checkout's git directory
+ * @param table every ref, as loadRefs reads them
+ * @param name the full ref name
+ */
+export async function rawRef(
+  dispatch: Dispatch,
+  gitdir: string,
+  table: ReadonlyMap<string, string>,
+  name: string,
+): Promise<string | null> {
+  const known = table.get(name)
+  if (known !== undefined) return known
+  if (name.startsWith(`${REFS_DIR}/`)) return null
+  const data = await readOptional(dispatch, under(gitdir, name))
+  return data === null ? null : DEC.decode(data).trim()
+}
+
+/**
+ * Follow a ref the way `refs_resolve_ref_unsafe` does without reading.
+ *
+ * One hop when `recurse` is off, otherwise to the end of the chain, which may
+ * name a ref that does not exist yet (an unborn branch). Null where git finds
+ * no such ref: a name its rules refuse, or a chain more than five deep. Pinned
+ * against git 2.47.3.
+ *
+ * @param dispatch workspace op dispatcher
+ * @param gitdir this checkout's git directory
+ * @param table every ref, as loadRefs reads them
+ * @param name the full ref name to start from
+ * @param recurse follow every hop rather than the first
+ */
+export async function resolveSymbolic(
+  dispatch: Dispatch,
+  gitdir: string,
+  table: ReadonlyMap<string, string>,
+  name: string,
+  recurse: boolean,
+): Promise<SymbolicEnd | null> {
+  if (!wholeRefName(name)) return null
+  let current = name
+  let symbolic = false
+  for (let depth = 0; depth < MAX_SYMREF_DEPTH; depth++) {
+    const raw = await rawRef(dispatch, gitdir, table, current)
+    if (!raw?.startsWith(SYMREF_PREFIX)) return { name: current, symbolic }
+    symbolic = true
+    current = raw.slice(SYMREF_PREFIX.length).trim()
+    if (!recurse) return { name: current, symbolic }
+    if (!wholeRefName(current)) return null
+  }
+  return null
+}
+
+/**
+ * Whether git lets a ref transaction write a name it has no object for
+ * (`refname_is_safe`): below `refs/`, a path with no empty, `.` or `..`
+ * component; anywhere else, capitals and underscores only, which is HEAD and
+ * its kin. Pinned against git 2.47.3.
+ *
+ * @param name the full ref name about to be written
+ */
+export function safeRefName(name: string): boolean {
+  if (name.startsWith(`${REFS_DIR}/`)) {
+    return name
+      .slice(REFS_DIR.length + 1)
+      .split('/')
+      .every((part) => part !== '' && part !== '.' && part !== '..')
+  }
+  return SAFE_ONE_LEVEL.test(name)
 }
 
 /** Split a refspec into its source, destination and force flag. */

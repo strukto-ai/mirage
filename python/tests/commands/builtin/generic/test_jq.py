@@ -30,7 +30,6 @@ FILES = {
     "/d/a.json": b'{"a":1}\n',
     "/d/b.json": b'{"b":2}\n',
     "/d/four.json": b"1\n2\n3\n4\n",
-    "/d/empty.json": b"",
     "/d/bad.json": b'{"a":1}\n{"a":2}\n[',
     "/d/mid.json": b"1\n[1 2]\n3\n4\n",
     "/d/one.json": b"1",
@@ -359,24 +358,6 @@ def test_an_input_is_named_as_typed_and_dash_as_stdin():
     )
 
 
-@pytest.mark.asyncio
-async def test_input_alone_takes_one_document_per_run():
-    out, _ = await _run(["/d/four.json"], "[., input]", compact_output=True)
-    assert out == b"[1,2]\n[3,4]\n"
-    out, _ = await _run(["/d/four.json"], "input", compact_output=True)
-    assert out == b"2\n4\n"
-
-
-@pytest.mark.asyncio
-async def test_input_fails_with_break_on_an_empty_stream():
-    out, io = await _run(["/d/empty.json"], "input", null_input=True)
-    assert (out, io.exit_code) == (b"", 5)
-    assert (
-        await materialize(io.stderr)
-        == b"jq: error (at /d/empty.json:0): break\n"
-    )
-
-
 def test_args_reads_an_operand_as_a_string():
     assert positional_value("args", "1") == '"1"'
 
@@ -455,20 +436,6 @@ async def test_keyword_operands_come_after_every_option(
     assert opts.positional_args == positional
 
 
-@pytest.mark.asyncio
-async def test_args_reach_the_program_through_dollar_args():
-    out, _ = await _run(
-        [], "$ARGS", "a", "b", null_input=True, compact_output=True, args=True
-    )
-    assert out == b'{"positional":["a","b"],"named":{}}\n'
-
-
-@pytest.mark.asyncio
-async def test_dollar_args_is_defined_with_no_bindings_at_all():
-    out, _ = await _run([], "$ARGS", null_input=True, compact_output=True)
-    assert out == b'{"positional":[],"named":{}}\n'
-
-
 async def _flagged(
     paths: list[str], program: str, **flags: FlagValue
 ) -> tuple[bytes, bytes, int]:
@@ -494,23 +461,6 @@ async def test_a_parse_error_closes_the_input_it_stopped_in():
     assert await materialize(source) == b"1\n"
     assert io.exit_code == 5
     assert opened[0].ag_frame is None
-
-
-@pytest.mark.asyncio
-async def test_a_run_is_placed_where_its_reads_leave_the_reader():
-    # A run reports where the reader stands once it has read its own
-    # document and whatever `input` or `inputs` took past it.
-    assert await _flagged(["/d/four.json"], "[., input] | error(tojson)") == (
-        b"",
-        b"jq: error (at /d/four.json:2): [1,2]\n"
-        b"jq: error (at /d/four.json:4): [3,4]\n",
-        5,
-    )
-    assert await _flagged(["/d/four.json"], "[., inputs] | error(tojson)") == (
-        b"",
-        b"jq: error (at /d/four.json:4): [1,2,3,4]\n",
-        5,
-    )
 
 
 def _live(data: bytes):

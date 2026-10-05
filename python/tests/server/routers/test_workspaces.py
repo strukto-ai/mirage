@@ -20,6 +20,7 @@ import uuid
 from collections.abc import Iterator
 
 import boto3
+import jwt as pyjwt
 import pytest
 from httpx import ASGITransport, AsyncClient, Response
 from moto.server import ThreadedMotoServer
@@ -30,6 +31,7 @@ from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.server import build_app
+from mirage.server.auth.config import AuthConfig, JWTConfig
 from mirage.server.env import ENV_HOME
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import workspaces as workspaces_router
@@ -602,6 +604,182 @@ async def test_snapshot_store_round_trip(snapshot_store):
 
 
 @pytest.mark.asyncio
+async def test_an_account_keeps_its_snapshots_under_its_own_prefix(
+    snapshot_store, tmp_path
+):
+    secret = "s" * 32
+    app = build_app(
+        idle_grace_seconds=10.0,
+        auth_config=AuthConfig(
+            mode="jwt", jwt=JWTConfig(key=secret, algorithm="HS256")
+        ),
+        state_root=tmp_path / "state",
+        snapshot_store=snapshot_store,
+    )
+
+    def client(sub: str) -> AsyncClient:
+        token = pyjwt.encode(
+            {"sub": sub, "exp": int(time.time()) + 60}, secret, "HS256"
+        )
+        return AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    async with client("alice") as alice, client("bob") as bob:
+        r = await alice.post("/v1/workspaces", json=_minimal_config())
+        wid = r.json()["id"]
+        r = await alice.post(
+            f"/v1/workspaces/{wid}/snapshot", json={"key": "s.tar"}
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["key"] == "s.tar"
+        r = await alice.post(
+            f"/v1/workspaces/{wid}/snapshot", json={"key": "../x.tar"}
+        )
+        assert r.status_code == 400, r.text
+        r = await bob.post("/v1/workspaces/load", json={"key": "s.tar"})
+        assert r.status_code == 400, r.text
+        r = await alice.post("/v1/workspaces/load", json={"key": "s.tar"})
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+    keys = boto3.client(
+        "s3",
+        endpoint_url=snapshot_store.endpoint_url,
+        aws_access_key_id="testing",
+        aws_secret_access_key="testing",
+        region_name="us-east-1",
+    ).list_objects_v2(Bucket="snaps")["Contents"]
+    assert [k["Key"] for k in keys if k["Key"].endswith("/s.tar")] == [
+        "team/accounts/alice/s.tar"
+    ]
+
+
+def _jwt_app(secret: str, state_root, **kwargs):
+    return build_app(
+        idle_grace_seconds=10.0,
+        auth_config=AuthConfig(
+            mode="jwt", jwt=JWTConfig(key=secret, algorithm="HS256")
+        ),
+        state_root=state_root,
+        **kwargs,
+    )
+
+
+def _account(app, secret: str, sub: str) -> AsyncClient:
+    token = pyjwt.encode(
+        {"sub": sub, "exp": int(time.time()) + 60}, secret, "HS256"
+    )
+    return AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_leading_slash_names_the_same_key(snapshot_store):
+    app = build_app(idle_grace_seconds=10.0, snapshot_store=snapshot_store)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/snapshot", json={"key": "/lead.tar"}
+        )
+        assert r.status_code == 200, r.text
+        r = await client.post("/v1/workspaces/load", json={"key": "lead.tar"})
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_create_leaves_the_id_free(tmp_path):
+    secret = "s" * 32
+    app = _jwt_app(secret, tmp_path / "state")
+    bad = {**_minimal_config(), "id": "w"}
+    bad["config"] = {**bad["config"], "secrets": {"prod": {"source": "nope"}}}
+    async with (
+        _account(app, secret, "alice") as alice,
+        _account(app, secret, "bob") as bob,
+    ):
+        r = await alice.post("/v1/workspaces", json=bad)
+        assert r.status_code == 400, r.text
+        r = await bob.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_state_from_before_accounts_is_no_accounts_to_take(tmp_path):
+    state = tmp_path / "state"
+    local = build_app(idle_grace_seconds=10.0, state_root=state)
+    async with AsyncClient(
+        transport=ASGITransport(app=local), base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 201, r.text
+        r = await client.post(
+            "/v1/workspaces/w/shell", json={"command": "echo kept"}
+        )
+        assert r.status_code == 200, r.text
+    await local.state.registry.close_all()
+    secret = "s" * 32
+    app = _jwt_app(secret, state)
+    async with _account(app, secret, "alice") as alice:
+        r = await alice.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 409, r.text
+        r = await alice.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "fresh"}
+        )
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_create_waits_out_a_load_of_the_same_id(
+    snapshot_store, tmp_path, monkeypatch
+):
+    # A create that took over a load's claim could register first, and the
+    # load's failure would then drop the owner record of a live workspace.
+    secret = "s" * 32
+    app = _jwt_app(secret, tmp_path / "state", snapshot_store=snapshot_store)
+    loading = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def held_load(*args, **kwargs):
+        loading.set()
+        await finish.wait()
+        raise ValueError("not a snapshot")
+
+    monkeypatch.setattr(Workspace, "load", held_load)
+    async with _account(app, secret, "alice") as alice:
+        load = asyncio.create_task(
+            alice.post("/v1/workspaces/load", json={"key": "s.tar", "id": "w"})
+        )
+        await loading.wait()
+        r = await alice.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 409, r.text
+        finish.set()
+        assert (await load).status_code == 400
+        r = await alice.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
 async def test_a_key_needs_a_snapshot_store():
     app, _ = _make_app_with_short_grace(grace=10.0)
     async with AsyncClient(
@@ -975,3 +1153,64 @@ async def test_load_with_an_unbuildable_vfs_override_is_a_bad_request(
         assert r.status_code == 400, r.text
         assert r.json()["detail"].startswith("override build failed: ")
         assert "gone.py" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_cancel_and_kill_reach_every_session(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = (
+            await client.post("/v1/workspaces", json=_minimal_config())
+        ).json()["id"]
+        await client.post(
+            f"/v1/workspaces/{wid}/sessions", json={"session_id": "a"}
+        )
+        await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            json={"command": "sleep 30 &", "session_id": "a"},
+        )
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell?background=true",
+            json={"command": "sleep 30"},
+        )
+        job_id = r.json()["job_id"]
+        for _ in range(500):
+            status = (await client.get(f"/v1/jobs/{job_id}")).json()["status"]
+            if status == "running":
+                break
+            await asyncio.sleep(0.01)
+        assert (await client.post(f"/v1/workspaces/{wid}/cancel")).json() == {
+            "canceled": 1
+        }
+        assert (await client.post(f"/v1/workspaces/{wid}/kill")).json() == {
+            "killed": 1
+        }
+        await client.delete(f"/v1/workspaces/{wid}")
+
+
+@pytest.mark.asyncio
+async def test_close_keeps_state_for_the_same_id(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        body = {**_minimal_config(), "id": "keep"}
+        assert (
+            await client.post("/v1/workspaces", json=body)
+        ).status_code == 201
+        await client.post(
+            "/v1/workspaces/keep/shell", json={"command": "echo kept"}
+        )
+        r = await client.post("/v1/workspaces/keep/close")
+        assert r.status_code == 200
+        assert (await client.get("/v1/workspaces/keep")).status_code == 404
+        assert (
+            await client.post("/v1/workspaces", json=body)
+        ).status_code == 201
+        r = await client.post(
+            "/v1/workspaces/keep/shell", json={"command": "history"}
+        )
+        assert "echo kept" in r.json()["stdout"]
+        await client.delete("/v1/workspaces/keep")

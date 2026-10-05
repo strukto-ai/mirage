@@ -17,10 +17,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.ops.types import LinkView, MountView, StatPath
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
     FileType,
@@ -182,14 +183,14 @@ async def split_readable_coded(
         if failure is None:
             readable.append(p)
             continue
-        err += fs_error_line(cmd_name, p, failure).encode()
+        err += encode_text(fs_error_line(cmd_name, p, failure))
         # A directory is gzip's warning and everything else its error, so
         # the directory yields to a code already recorded. Keyed on the
         # errno rather than on which branch reported it, because a keyed
         # backend raises EISDIR from the stat where an explicit directory
         # returns a row.
         if code == 0 or not isinstance(failure, IsADirectoryError):
-            code = read_fail_exit(cmd_name, failure)
+            code = read_fail_exit_code(cmd_name, failure)
     return readable, err, code
 
 
@@ -262,7 +263,7 @@ async def split_opened(
             if getattr(st, "type", None) == FileType.DIRECTORY:
                 failure = eisdir(p)
         if failure is not None:
-            err += fs_error_line(cmd_name, p, failure).encode()
+            err += encode_text(fs_error_line(cmd_name, p, failure))
             if not isinstance(failure, READ_FAILURES):
                 continue
             unread.add(p.virtual)
@@ -314,7 +315,7 @@ async def read_operands(
                 source = await source
             data = await materialize(source)
         except FS_ERRORS as exc:
-            err += fs_error_line(cmd_name, p, exc).encode()
+            err += encode_text(fs_error_line(cmd_name, p, exc))
             continue
         ok.append(ReadOperand(p, data))
     return ok, err

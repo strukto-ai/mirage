@@ -19,7 +19,7 @@ from mirage.core.onedrive.client import drive_loc
 from mirage.types import PathSpec
 
 
-async def read_bytes(
+async def read(
     accessor: OneDriveAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

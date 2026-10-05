@@ -430,7 +430,7 @@ describe('mvGeneric -t/-T', () => {
   it('a missing target directory fails the whole command', async () => {
     const files = new Map([['/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(), ['/a.txt'], {
-      flags: mvFlags({ targetDir: '/nosuch' }),
+      flags: mvFlags({ targetDir: PathSpec.fromStrPath('/nosuch') }),
     })
     expect(io.exitCode).toBe(1)
     expect(await io.stderrStr()).toBe("mv: target directory '/nosuch': No such file or directory\n")

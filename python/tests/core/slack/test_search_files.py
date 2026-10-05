@@ -25,7 +25,7 @@ from mirage.core.slack.formatters import (
 )
 from mirage.core.slack.scope import SearchTarget
 from mirage.core.slack.search import search_files
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 
 
 @pytest.mark.asyncio
@@ -182,4 +182,4 @@ def test_a_long_channel_name_reports_the_path_readdir_emits():
     dirname = line.split("/slack/channels/")[1].split("/")[0]
 
     assert dirname == channel_dirname({"id": "C001", "name": name})
-    assert byte_len(dirname) <= NAME_MAX_BYTES
+    assert byte_length(dirname) <= NAME_MAX_BYTES

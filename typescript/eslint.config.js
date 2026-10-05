@@ -145,14 +145,18 @@ export default tseslint.config(
         __mirage_env: 'readonly',
         __mirage_open: 'readonly',
         __mirage_read: 'readonly',
+        __mirage_read_bytes: 'readonly',
         __mirage_lacks: 'readonly',
         __mirage_lacks_line: 'readonly',
         __mirage_fill: 'readonly',
         __mirage_getline: 'readonly',
         __mirage_write: 'readonly',
+        __mirage_write_bytes: 'readonly',
         __mirage_seek: 'readonly',
         __mirage_tell: 'readonly',
         __mirage_eof: 'readonly',
+        __mirage_ferror: 'readonly',
+        __mirage_clearerr: 'readonly',
         __mirage_close: 'readonly',
         __mirage_readdir: 'readonly',
         __mirage_stat: 'readonly',
@@ -162,6 +166,10 @@ export default tseslint.config(
         __mirage_mkdir: 'readonly',
         __mirage_rename: 'readonly',
         __mirage_utimes: 'readonly',
+        // execution.js defines these and filesystem.js, the next part of
+        // the same bootstrap, uses them.
+        __text: 'readonly',
+        __pieces: 'readonly',
       },
       parserOptions: { projectService: false },
     },
@@ -242,10 +250,7 @@ export default tseslint.config(
     // bundles, so every module they load must run without Node. A
     // `node:crypto` import in file_version.ts typechecked, tested and
     // built clean and only failed inside a browser bundle.
-    files: [
-      'packages/agents/src/{file_version,io_text,prompt,read_file,tool_descriptions,tool_operations}.ts',
-      'packages/agents/src/{openai,read_file,vercel}/**/*.ts',
-    ],
+    files: ['packages/agents/src/prompt.ts', 'packages/agents/src/{openai,vercel}/**/*.ts'],
     ignores: ['**/*.test.ts'],
     rules: {
       'no-restricted-imports': [

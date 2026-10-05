@@ -24,7 +24,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.builtin.utils.paths import dot_refusal
-from mirage.commands.config import CommandFnResult, CommandOpts
+from mirage.commands.config import AggregateFn, CommandFnResult, CommandOpts
 from mirage.context import (
     effective_path_mode,
     get_admission,
@@ -38,6 +38,7 @@ from mirage.context import (
 )
 from mirage.context.session_context import require_paths_writable
 from mirage.io import IOResult
+from mirage.ops.generic.factory import refuse_taken
 from mirage.ops.types import ChildMounts, LinkTargetStat, StatOverlay
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, pre_ops_gate
@@ -83,9 +84,6 @@ class BuilderFn(Protocol):
         texts: list[str],
         opts: CommandOpts,
     ) -> Awaitable[CommandFnResult]: ...
-
-
-AggregateFn = Callable[[list[tuple[str, bytes]]], Awaitable[bytes]]
 
 
 async def overlaid_stat(
@@ -942,6 +940,30 @@ async def _mkdir_on_read_only(
         raise eexist(path)
 
 
+async def _mkdir_on_writable(
+    fn: OperationFn,
+    stat: StatOp,
+    accessor: Any,
+    path: Any,
+    parents: bool,
+    **options: Any,
+) -> Any:
+    """mkdir on a writable region: a taken name is refused before the
+    create, as mkdir(2) does (``refuse_taken``).
+
+    Args:
+        fn (OperationFn): the raw backend mkdir.
+        stat (StatOp): the backend stat.
+        accessor (Any): the call's accessor.
+        path (Any): the directory to make.
+        parents (bool): ``-p``.
+        **options: forwarded untouched.
+    """
+    if isinstance(path, PathSpec):
+        await refuse_taken(stat, accessor, path, parents)
+    return await fn(accessor, path, parents=parents, **options)
+
+
 def _mode_mkdir(
     fn: OperationFn,
     stat: StatOp,
@@ -952,8 +974,9 @@ def _mode_mkdir(
 ) -> Any:
     """The mkdir slot of ``_mode_call``: a directory on a read-only
     region answers what the create would run into instead of refusing
-    the operand outright (``_mkdir_on_read_only``). Sync like
-    ``_mode_call``.
+    the operand outright (``_mkdir_on_read_only``), and one on a
+    writable region refuses a taken name (``_mkdir_on_writable``). Sync
+    like ``_mode_call``.
 
     Args:
         fn (OperationFn): the raw backend mkdir.
@@ -970,7 +993,7 @@ def _mode_mkdir(
         and effective_path_mode(path.virtual, *gate) == MountMode.READ
     ):
         return _mkdir_on_read_only(stat, gate, accessor, path, parents)
-    return fn(accessor, path, parents=parents, **options)
+    return _mkdir_on_writable(fn, stat, accessor, path, parents, **options)
 
 
 def with_mode_guard(ops: CommandIO) -> CommandIO:

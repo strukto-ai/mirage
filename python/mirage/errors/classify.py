@@ -33,11 +33,15 @@ def classify(exc: BaseException) -> FsCondition | None:
         exc (BaseException): the exception a mount, the namespace, or a
             policy raised.
     """
-    if isinstance(exc, PermissionError) and exc.errno == errno.EPERM:
-        # CPython constructs OSError(EPERM, ...) AS a PermissionError,
-        # the same subclass EACCES gets, so the one class carries two
-        # conditions and only the errno tells them apart.
-        return FsCondition.EPERM
+    if isinstance(exc, PermissionError) and exc.errno in (
+        errno.EPERM,
+        errno.EROFS,
+    ):
+        # One class carries three conditions: CPython constructs
+        # OSError(EPERM, ...) AS a PermissionError, the subclass EACCES
+        # gets, and ReadOnlyError is one stamped EROFS. Only the errno
+        # tells them apart.
+        return ERRNO_ARMS[exc.errno]
     for exc_type, condition in CLASS_ARMS:
         if isinstance(exc, exc_type):
             return condition

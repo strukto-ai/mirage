@@ -63,6 +63,23 @@
       }
     },
     {
+      "id": "du_empty_operand_is_zero",
+      "seq": 1301086,
+      "targets": [
+        "disk",
+        "ssh",
+        "ram",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir /data/cre && du /data/cre; du -s /data/cre; rmdir /data/cre",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\t/data/cre\n0\t/data/cre\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "du_empty_dirs_depth_limit",
       "seq": 1301084,
       "targets": [

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ScriptSource } from '../runtime/routing/types.ts'
+import type { ScriptSource } from '../runtime/types.ts'
 import type { Limit, PathSpec, Producer, Refusal } from '../types.ts'
 
 /**

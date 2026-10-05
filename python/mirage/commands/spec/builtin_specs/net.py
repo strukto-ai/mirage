@@ -22,6 +22,7 @@ SPECS: dict[str, CommandSpec] = {
                 short="-H",
                 long="--header",
                 type="str",
+                multiple=True,
                 description="Add a custom header to the request.",
             ),
             Option(
@@ -40,7 +41,39 @@ SPECS: dict[str, CommandSpec] = {
                 short="-d",
                 long="--data",
                 type="str",
+                multiple=True,
                 description="Send the given data as the request body.",
+            ),
+            Option(
+                long="--data-binary",
+                type="str",
+                multiple=True,
+                description="Send the data exactly as given, a file "
+                "unchanged.",
+            ),
+            Option(
+                long="--data-raw",
+                type="str",
+                multiple=True,
+                description="Send the data with no special meaning for @.",
+            ),
+            Option(
+                long="--data-urlencode",
+                type="str",
+                multiple=True,
+                description="Send the data URL-encoded.",
+            ),
+            Option(
+                long="--json",
+                type="str",
+                multiple=True,
+                description="Send the data as JSON.",
+            ),
+            Option(
+                short="-u",
+                long="--user",
+                type="str",
+                description="Send the user and password for basic auth.",
             ),
             Option(
                 short="-F",

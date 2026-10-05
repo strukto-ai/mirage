@@ -33,7 +33,7 @@ import { mountPrefixOf } from '../../../../utils/key_prefix.ts'
 import { CycleError, norm, parent, walkNodes } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { MkdirOp } from '../../../../vfs/types.ts'
-import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 import { missingOperandError } from '../../../spec/usage.ts'
 
 /**
@@ -200,59 +200,61 @@ export async function makeDirectory<A extends Accessor>(
   return null
 }
 
+const mkdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const fl = new FlagView(opts.flags, specOf('mkdir'))
+  const parents = fl.asBool('parents')
+  const verbose = fl.asBool('verbose')
+  const modeText = fl.asStr('mode') ?? null
+  if (paths.length === 0) throw missingOperandError('mkdir', null)
+  const idx = opts.index ?? undefined
+  const { setAttrs } = ops
+  const mkdirOp = requireOp(ops.mkdir, 'mkdir')
+  let mode: number | null = null
+  if (modeText !== null) {
+    // Symbolic clauses build on what mirage renders for a new
+    // directory; `-m` is applied after the create, so the session's
+    // umask does not reach it, which is GNU's rule too.
+    mode = parseChmod(modeText, DEFAULT_DIR_MODE)
+    if (mode === null) throw new Error(`mkdir: invalid mode '${modeText}'`)
+    if (setAttrs === undefined) {
+      throw new Error('mkdir: --mode is not supported on this backend')
+    }
+  } else if (setAttrs !== undefined) {
+    // A new directory is 0777 masked by the session's umask. Only a
+    // mask away from bash's default costs a setattr, since 755 is what
+    // every backend already renders for a fresh directory; parents
+    // made by `-p` keep that default.
+    const umask = sessionUmask()
+    if (umask !== DEFAULT_UMASK) mode = 0o777 & ~umask
+  }
+  const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
+  const lines: string[] = []
+  const errors: string[] = []
+  const links = opts.ns?.links ?? null
+  for (const p of resolved) {
+    const collision = await mkdirLinkRefusal(p, links, { parents })
+    if (collision.taken) {
+      if (collision.message !== null) errors.push(collision.message)
+      continue
+    }
+    const names = verbose ? await createdNames(p, parents, links) : []
+    const failed = await makeDirectory(mkdirOp, accessor, p, parents, links)
+    if (failed !== null) {
+      errors.push(failed)
+      continue
+    }
+    // -m applies to the named directory only; any parents made by -p keep
+    // the default mode (GNU).
+    if (mode !== null && setAttrs !== undefined) await setAttrs(accessor, p, { mode })
+    lines.push(...createdLines(names))
+  }
+  const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
+  const stderr = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+  return [out, new IOResult({ stderr, exitCode: errors.length > 0 ? 1 : 0 })]
+}
+
 export const BUILDER: Builder = {
   name: 'mkdir',
   write: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const fl = new FlagView(opts.flags, specOf('mkdir'))
-    const parents = fl.asBool('parents')
-    const verbose = fl.asBool('verbose')
-    const modeText = fl.asStr('mode') ?? null
-    if (paths.length === 0) throw missingOperandError('mkdir', null)
-    const idx = opts.index ?? undefined
-    const { setAttrs } = ops
-    const mkdir = requireOp(ops.mkdir, 'mkdir')
-    let mode: number | null = null
-    if (modeText !== null) {
-      // Symbolic clauses build on what mirage renders for a new
-      // directory; `-m` is applied after the create, so the session's
-      // umask does not reach it, which is GNU's rule too.
-      mode = parseChmod(modeText, DEFAULT_DIR_MODE)
-      if (mode === null) throw new Error(`mkdir: invalid mode '${modeText}'`)
-      if (setAttrs === undefined) {
-        throw new Error('mkdir: --mode is not supported on this backend')
-      }
-    } else if (setAttrs !== undefined) {
-      // A new directory is 0777 masked by the session's umask. Only a
-      // mask away from bash's default costs a setattr, since 755 is what
-      // every backend already renders for a fresh directory; parents
-      // made by `-p` keep that default.
-      const umask = sessionUmask()
-      if (umask !== DEFAULT_UMASK) mode = 0o777 & ~umask
-    }
-    const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    const lines: string[] = []
-    const errors: string[] = []
-    const links = opts.ns?.links ?? null
-    for (const p of resolved) {
-      const collision = await mkdirLinkRefusal(p, links, { parents })
-      if (collision.taken) {
-        if (collision.message !== null) errors.push(collision.message)
-        continue
-      }
-      const names = verbose ? await createdNames(p, parents, links) : []
-      const failed = await makeDirectory(mkdir, accessor, p, parents, links)
-      if (failed !== null) {
-        errors.push(failed)
-        continue
-      }
-      // -m applies to the named directory only; any parents made by -p keep
-      // the default mode (GNU).
-      if (mode !== null && setAttrs !== undefined) await setAttrs(accessor, p, { mode })
-      lines.push(...createdLines(names))
-    }
-    const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-    const stderr = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
-    return [out, new IOResult({ stderr, exitCode: errors.length > 0 ? 1 : 0 })]
-  },
+  fn: mkdir,
 }

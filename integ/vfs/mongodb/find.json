@@ -25,6 +25,32 @@
         "stdout": "/mongodb/mirage_integ/collections/authors/schema.json\n/mongodb/mirage_integ/collections/books/schema.json\n/mongodb/mirage_integ/collections/system.views/schema.json\n/mongodb/mirage_integ/views/recent_books/schema.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mdb_find_glob_expands_mid_path",
+      "seq": 620042,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "find /mongodb/*/collections",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mongodb/mirage_integ/collections\n/mongodb/mirage_integ/collections/authors\n/mongodb/mirage_integ/collections/authors/documents.jsonl\n/mongodb/mirage_integ/collections/authors/schema.json\n/mongodb/mirage_integ/collections/books\n/mongodb/mirage_integ/collections/books/documents.jsonl\n/mongodb/mirage_integ/collections/books/schema.json\n/mongodb/mirage_integ/collections/system.views\n/mongodb/mirage_integ/collections/system.views/documents.jsonl\n/mongodb/mirage_integ/collections/system.views/schema.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_find_size_counts_a_rendered_file_as_zero",
+      "seq": 620043,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "find /mongodb/mirage_integ -size +1; echo --; find /mongodb/mirage_integ -size -1k",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mongodb/mirage_integ\n/mongodb/mirage_integ/collections\n/mongodb/mirage_integ/collections/authors\n/mongodb/mirage_integ/collections/books\n/mongodb/mirage_integ/collections/system.views\n/mongodb/mirage_integ/views\n/mongodb/mirage_integ/views/recent_books\n--\n/mongodb/mirage_integ/collections/authors/documents.jsonl\n/mongodb/mirage_integ/collections/authors/schema.json\n/mongodb/mirage_integ/collections/books/documents.jsonl\n/mongodb/mirage_integ/collections/books/schema.json\n/mongodb/mirage_integ/collections/system.views/documents.jsonl\n/mongodb/mirage_integ/collections/system.views/schema.json\n/mongodb/mirage_integ/database.json\n/mongodb/mirage_integ/views/recent_books/documents.jsonl\n/mongodb/mirage_integ/views/recent_books/schema.json\n",
+        "stderr": ""
+      }
     }
   ]
 }

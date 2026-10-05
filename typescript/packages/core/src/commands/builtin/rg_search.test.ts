@@ -22,6 +22,7 @@ import { parseFlags, rgMatcher } from './generic/rg.ts'
 import {
   ByteCursor,
   NonmatchStop,
+  RgBinary,
   type RgFlags,
   expand,
   replaceAll,
@@ -347,5 +348,39 @@ describe('PCRE2 keep', () => {
     expect(() => rgMatcher('(a)\\1', false, flagsOf({}))).toThrow(
       /backreferences are not supported/,
     )
+  })
+})
+
+async function readAll(binary: RgBinary, source: AsyncIterable<Uint8Array>): Promise<string[]> {
+  const out: string[] = []
+  for await (const block of binary.read(source)) out.push(DEC.decode(block))
+  return out
+}
+
+describe('RgBinary', () => {
+  it("ends a walked file's first buffer at a NUL as it arrives", async () => {
+    // The first buffer is still growing toward its first newline, so the NUL
+    // is in it and ripgrep reads no further.
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async function* source(): AsyncIterable<Uint8Array> {
+      yield new Uint8Array([...new Uint8Array(10000).fill(0x78), 0])
+      throw new Error('read past the NUL')
+    }
+    const binary = new RgBinary('quit')
+    expect(await readAll(binary, source())).toEqual([])
+    expect([binary.skipped, binary.offset]).toEqual([true, 10000])
+  })
+
+  it('joins the chunks a file serves into one first read', async () => {
+    // Twenty 8 KiB chunks with no newline grow one first buffer; the file ends
+    // before the step past the newline, so it is all one read.
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async function* source(): AsyncIterable<Uint8Array> {
+      for (let i = 0; i < 20; i++) yield new Uint8Array(8192).fill(0x79)
+      yield ENC.encode('\nz\n')
+    }
+    const binary = new RgBinary('quit')
+    expect(await readAll(binary, source())).toEqual(['y'.repeat(163840) + '\nz\n'])
+    expect(binary.offset).toBeNull()
   })
 })

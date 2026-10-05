@@ -56,6 +56,13 @@ describe('FileHandle', () => {
     expect(calls).toEqual([[0, null]])
   })
 
+  it('finds the end of a file whose size was unknown', async () => {
+    const h = FileHandle.opened('/f', over('abc'), { size: 0, writable: false, append: false })
+    expect(h.eof).toBe(false)
+    expect(await read(h, -1)).toBe('abc')
+    expect(h.eof).toBe(true)
+  })
+
   it('fetches a large file a chunk at a time', async () => {
     const calls: [number, number | null][] = []
     const data = new Uint8Array(READ_CHUNK + 10).fill(120)

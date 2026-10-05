@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import posixpath
+import time
 from dataclasses import replace
 from io import BytesIO
 
 from dulwich.config import ConfigFile
-from dulwich.objects import ObjectID
+from dulwich.objects import Commit, ObjectID
 from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 from dulwich.walk import Walker
@@ -25,17 +27,22 @@ from dulwich.walk import Walker
 from mirage.commands.cli.builtin.git.constants import DWIM_RULES, HEAD
 from mirage.commands.cli.builtin.git.dates import date_clock
 from mirage.commands.cli.builtin.git.errors import (
+    AmbiguousArgumentError,
+    AmbiguousObjectNameError,
     BranchExistsError,
     BranchNameRequiredError,
-    BranchUsageError,
+    BranchPointError,
     CheckedOutBranchError,
     GitError,
     InvalidBranchNameError,
+    InvalidObjectNameError,
     NoBranchError,
     NoWorkspaceError,
+    RefDeleteReadOnlyError,
     RefLockError,
-    UnknownSwitchError,
+    RefReadOnlyError,
     UnmergedBranchError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
@@ -61,6 +68,13 @@ from mirage.commands.cli.builtin.git.ref_list import (
     ref_listing,
     sort_keys,
 )
+from mirage.commands.cli.builtin.git.reflog import (
+    IDENTITY,
+    ZERO,
+    append,
+    entry,
+    logged,
+)
 from mirage.commands.cli.builtin.git.refs import (
     blocking_ref,
     delete_ref,
@@ -68,8 +82,13 @@ from mirage.commands.cli.builtin.git.refs import (
     valid_ref_name,
     write_ref,
 )
-from mirage.commands.cli.builtin.git.repo import config_values
-from mirage.commands.cli.builtin.git.revparse import resolve_commit
+from mirage.commands.cli.builtin.git.repo import config_bool, config_values
+from mirage.commands.cli.builtin.git.revparse import (
+    note_ambiguity,
+    refs_named,
+    resolve_object,
+    unwrapped,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import (
     HeadRef,
@@ -80,13 +99,12 @@ from mirage.commands.cli.builtin.git.types import (
     Upstream,
 )
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
+    check_switches,
     config_section,
-    escaped,
     fatal,
     git_bool,
     multivar,
-    switches,
+    verb_usage,
     without_section,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
@@ -100,6 +118,44 @@ REMOTES_PREFIX = b"refs/remotes/"
 REMOTE = "remotes/"
 AUTO_SETUP_MERGE = "branch.autosetupmerge"
 TRACK_WORDS = (Track.ALWAYS, Track.SIMPLE, Track.INHERIT)
+
+
+async def refuse_ambiguous(
+    dispatch: DispatchFn,
+    location: RepoLocation,
+    repo: BaseRepo,
+    name: str,
+    warned: bool,
+) -> None:
+    """Refuse a start point two refs answer to.
+
+    As git's branch creation does while ``core.warnAmbiguousRefs`` is
+    on, after warning that it is ambiguous. With no start point git
+    starts from the current branch by its short name, so that name is
+    the one checked.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        location (RepoLocation): the discovered repository.
+        repo (BaseRepo): the opened repository.
+        name (str): the start point as typed, or the current branch's
+            short name.
+        warned (bool): whether reading it already put the warning on
+            the list.
+
+    Raises:
+        AmbiguousObjectNameError: two refs answer to the name.
+    """
+    if not await config_bool(
+        dispatch, location, b"core", b"warnambiguousrefs", True
+    ):
+        return
+    known = (ref.decode(errors="replace") for ref in repo.refs.allkeys())
+    if len(refs_named(known, name)) <= 1:
+        return
+    if not warned:
+        note_ambiguity(repo, name)
+    raise AmbiguousObjectNameError(name)
 
 
 async def _create(
@@ -133,7 +189,20 @@ async def _create(
     ref = f"{HEADS_PREFIX.decode()}{name}"
     if Ref(ref.encode()) in repo.refs.allkeys():
         raise BranchExistsError(name)
-    commit = resolve_commit(repo, start or HEAD)
+    # With no start point git starts from the current branch by its
+    # short name, or from HEAD when it is detached, and it is that name
+    # the refusals and the new branch's log speak of.
+    origin = start or head.branch or HEAD
+    try:
+        found = await asyncio.to_thread(resolve_object, repo, origin)
+    except AmbiguousArgumentError as exc:
+        raise InvalidObjectNameError(origin) from exc
+    await refuse_ambiguous(dispatch, location, repo, origin, True)
+    commit = await asyncio.to_thread(unwrapped, repo, found, origin)
+    if not isinstance(commit, Commit):
+        raise BranchPointError(
+            commit.id.decode(), commit.type_name.decode(), origin
+        )
     # Last, as it is for git: a ref whose path another ref already
     # holds fails when the lock is taken, so a bad start point is
     # reported first.
@@ -141,6 +210,16 @@ async def _create(
     if held is not None:
         raise RefLockError(ref, held)
     await write_ref(dispatch, location.commondir, ref, commit.id)
+    log = posixpath.join(location.commondir, "logs", ref)
+    if await logged(dispatch, location, ref, log):
+        line = entry(
+            ZERO,
+            commit.id,
+            IDENTITY,
+            int(time.time()),
+            f"branch: Created from {origin}",
+        )
+        await append(dispatch, location.commondir, f"logs/{ref}", line)
     return await set_up_tracking(
         dispatch, repo, location, name, start, mode, head
     )
@@ -641,9 +720,7 @@ async def branch(
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         repo, location = await opened(fl, doors)
         mode = await track_mode(dispatch, location)
         filt = await asyncio.to_thread(ref_filter, repo, words)
@@ -655,7 +732,7 @@ async def branch(
         force = fl.as_bool("D")
         if fl.as_bool("delete") or force:
             if listing:
-                raise BranchUsageError()
+                raise UsageError("", verb_usage(inv))
             if not texts:
                 raise BranchNameRequiredError()
             deleted = b"".join(
@@ -664,6 +741,8 @@ async def branch(
                     for name in texts
                 ]
             )
+            if fl.as_bool("quiet"):
+                return None, IOResult()
             return yield_bytes(deleted), IOResult()
         if texts and not listing:
             tracking, warning = await _create(
@@ -676,7 +755,9 @@ async def branch(
                 head,
             )
             return (
-                yield_bytes(tracking.encode()) if tracking else None,
+                yield_bytes(tracking.encode())
+                if tracking and not fl.as_bool("quiet")
+                else None,
                 IOResult(stderr=warning.encode()),
             )
         return await _list_branches(
@@ -760,3 +841,22 @@ async def branch_upstream(
     return await asyncio.to_thread(
         upstream_of, repo, cfg, head.branch, ObjectID(repo.refs[ref])
     )
+
+
+def branch_read_only(
+    inv: CLIInvocation[None], location: RepoLocation | None
+) -> GitError:
+    """branch's refusal by a read-only mount: the lock on the ref it
+    creates or deletes.
+
+    Args:
+        inv (CLIInvocation[None]): the line's invocation record.
+        location (RepoLocation | None): the repository it opened.
+    """
+    fl = FlagView(inv.flags)
+    ref = f"{HEADS_PREFIX.decode()}{inv.texts[0] if inv.texts else ''}"
+    root = location.commondir if location is not None else ".git"
+    path = posixpath.join(root, ref)
+    if fl.as_bool("delete") or fl.as_bool("D"):
+        return RefDeleteReadOnlyError(ref, path)
+    return RefReadOnlyError(ref, path)

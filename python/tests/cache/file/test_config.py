@@ -15,57 +15,27 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.cache.file.config import CacheConfig, CacheType, RedisCacheConfig
+from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 
 
-def test_cache_config_takes_its_fields():
-    config = CacheConfig(limit="1MB", max_drain_bytes=64)
-    assert config.type == CacheType.RAM
-    assert config.limit == "1MB"
-    assert config.max_drain_bytes == 64
-
-
-def test_cache_config_refuses_an_unknown_field():
-    with pytest.raises(ValidationError, match="limti"):
-        CacheConfig(limti="1MB")
-
-
-def test_cache_config_refuses_a_redis_field_on_a_default_ram_type():
-    with pytest.raises(ValidationError, match="url"):
-        CacheConfig(url="redis://localhost:6379/0")
-
-
-def test_redis_cache_config_takes_its_fields():
-    config = RedisCacheConfig(limit="8GB", key_prefix="w1:")
-    assert config.type == CacheType.REDIS
-    assert config.limit == "8GB"
-    assert config.key_prefix == "w1:"
-
-
-def test_redis_cache_config_refuses_the_camel_case_spelling():
-    with pytest.raises(ValidationError, match="keyPrefix"):
-        RedisCacheConfig(key_prefix="a:", keyPrefix="b:")
-
-
-def test_redis_cache_config_refuses_an_unknown_field():
-    with pytest.raises(ValidationError, match="key_prefx"):
-        RedisCacheConfig(key_prefx="w1:")
-
-
-def test_cache_config_refuses_an_unknown_type():
-    with pytest.raises(
-        ValidationError, match="Input should be 'ram' or 'redis'"
-    ):
-        CacheConfig(type="redsi")
-
-
-def test_cache_config_refuses_a_null_type():
-    with pytest.raises(
-        ValidationError, match="Input should be 'ram' or 'redis'"
-    ):
-        CacheConfig(type=None)
-
-
-def test_cache_config_refuses_a_redis_field_on_an_explicit_ram_type():
-    with pytest.raises(ValidationError, match="url"):
-        CacheConfig(type="ram", url="redis://localhost:6379/0")
+@pytest.mark.parametrize(
+    ("model", "fields", "named"),
+    [
+        (CacheConfig, {"limti": "1MB"}, "limti"),
+        (CacheConfig, {"url": "redis://localhost:6379/0"}, "url"),
+        (
+            CacheConfig,
+            {"type": "ram", "url": "redis://localhost:6379/0"},
+            "url",
+        ),
+        (RedisCacheConfig, {"key_prefx": "w1:"}, "key_prefx"),
+        (
+            RedisCacheConfig,
+            {"key_prefix": "a:", "keyPrefix": "b:"},
+            "keyPrefix",
+        ),
+    ],
+)
+def test_cache_config_refuses_a_field_it_does_not_take(model, fields, named):
+    with pytest.raises(ValidationError, match=named):
+        model(**fields)

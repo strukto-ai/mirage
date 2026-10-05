@@ -143,6 +143,7 @@ class CommandOpts:
 
 
 CommandFnResult = tuple[ByteSource | None, IOResult] | None
+AggregateFn = Callable[[list[tuple[str, bytes]]], Awaitable[bytes]]
 
 
 class CommandFn(Protocol):
@@ -173,8 +174,8 @@ class RegisteredCommand:
         filetype (str | None): The file extension it handles, or None
             for every file.
         fn (CommandFn): The handler.
-        aggregate (Callable[..., Any] | None): Merges the results of a
-            run split across mounts.
+        aggregate (AggregateFn | None): Merges the results of a run
+            split across mounts.
         write (bool): Whether it changes files.
         limit (Limit | None): Its output limit.
         path_guarded (bool): Whether mount-root policy checks its
@@ -186,7 +187,7 @@ class RegisteredCommand:
     vfs: str | None
     filetype: str | None
     fn: CommandFn
-    aggregate: Callable[..., Any] | None = None
+    aggregate: AggregateFn | None = None
     write: bool = False
     limit: Limit | None = None
     path_guarded: bool = False
@@ -247,7 +248,7 @@ def command(
     vfs: str | list[str] | None,
     spec: CommandSpec,
     filetype: str | None = None,
-    aggregate: Callable[..., Any] | None = None,
+    aggregate: AggregateFn | None = None,
     write: bool = False,
     limit: Limit | None = None,
     path_guarded: bool = False,
@@ -263,7 +264,7 @@ def command(
         vfs (str | list[str] | None): The VFS name, or several.
         spec (CommandSpec): The command's grammar.
         filetype (str | None): The file extension it handles.
-        aggregate (Callable[..., Any] | None): Merges a run split across
+        aggregate (AggregateFn | None): Merges a run split across
             mounts.
         write (bool): Whether it changes files.
         limit (Limit | None): Its output limit.

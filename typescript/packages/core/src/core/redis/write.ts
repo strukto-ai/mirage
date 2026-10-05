@@ -21,7 +21,7 @@ import { checkDestParents, checkWriteTarget } from './dest.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
-export async function writeBytes(
+export async function write(
   accessor: RedisAccessor,
   path: PathSpec,
   data: Uint8Array,

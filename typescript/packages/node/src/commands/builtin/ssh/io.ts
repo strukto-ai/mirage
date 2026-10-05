@@ -32,10 +32,10 @@ import { rmR as sshRmR } from '../../../core/ssh/rm.ts'
 import { rmdir as sshRmdir } from '../../../core/ssh/rmdir.ts'
 import { setAttrs as sshSetAttrs } from '../../../core/ssh/set_attrs.ts'
 import { stat as sshStat } from '../../../core/ssh/stat.ts'
-import { stream as sshStream } from '../../../core/ssh/stream.ts'
+import { readStream as sshStream } from '../../../core/ssh/stream.ts'
 import { truncate as sshTruncate } from '../../../core/ssh/truncate.ts'
 import { unlink as sshUnlink } from '../../../core/ssh/unlink.ts'
-import { writeBytes as sshWrite } from '../../../core/ssh/write.ts'
+import { write as sshWrite } from '../../../core/ssh/write.ts'
 
 export const IO: CommandIO<SSHAccessor> = new VFSAdapter<SSHAccessor>({
   read: { readdir: sshReaddir, readBytes: sshRead, stat: sshStat },

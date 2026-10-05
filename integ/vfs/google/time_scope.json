@@ -753,6 +753,32 @@
         "stdout": "/fullweek/primary/2026-06-01--2026-06-07\nAt start\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_scope_grep_cannot_escape",
+      "seq": 880020,
+      "targets": [
+        "slack-time-scope"
+      ],
+      "command": "grep -rlw scope_before '/slack/channels/general__C1'; echo $?; grep -rlw scope_start '/slack/channels/general__C1'; grep -w scope_start '/slack/channels/general__C1'; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n/slack/channels/general__C1/2026-06-01/chat.jsonl\n/slack/channels/general__C1/2026-06-01/files/scope_start__FT1.txt\n2\n",
+        "stderr": "grep: /slack/channels/general__C1: Is a directory\n"
+      }
+    },
+    {
+      "id": "discord_scope_grep_cannot_escape",
+      "seq": 880040,
+      "targets": [
+        "discord-time-scope"
+      ],
+      "command": "grep -rlw scope_before '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; echo $?; grep -rlw scope_start '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; grep -w scope_start '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl\n/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/scope_start__500000000000000012.txt\n2\n",
+        "stderr": "grep: /discord/Mirage HQ__100000000000000001/channels/general__200000000000000001: Is a directory\n"
+      }
     }
   ]
 }

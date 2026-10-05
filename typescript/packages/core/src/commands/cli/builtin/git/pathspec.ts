@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { encodeText } from '../../../../shell/bytes.ts'
+import { byteView } from '../../../../shell/bytes.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { posixNormpath } from '../../../../utils/path.ts'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
@@ -141,10 +141,5 @@ function selects(path: string, pattern: string, directory: boolean): boolean {
   const stem = pattern.endsWith(SLASH) ? pattern.slice(0, -1) : pattern
   if (under(path, stem) || path === pattern) return true
   if (directory && (path === stem || under(stem, path))) return true
-  return fnmatch(byteText(path), byteText(pattern))
-}
-
-/** A path's bytes one character each, for a byte-wise glob. */
-function byteText(text: string): string {
-  return String.fromCharCode(...encodeText(text))
+  return fnmatch(byteView(path), byteView(pattern))
 }

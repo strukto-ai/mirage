@@ -20,7 +20,6 @@ from mirage.commands.cli.builtin.git.dates import date_clock
 from mirage.commands.cli.builtin.git.errors import (
     FormatUsageError,
     GitError,
-    UnknownSwitchError,
 )
 from mirage.commands.cli.builtin.git.ref_filter import (
     filter_words,
@@ -43,10 +42,8 @@ from mirage.commands.cli.builtin.git.ref_list import (
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import QuoteStyle, RefKind
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
-    switches,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -93,9 +90,7 @@ async def for_each_ref(
     words = filter_words(inv)
     texts = without_filter_values(inv.texts, words)
     try:
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         repo, location = await opened(fl, doors)
         assert doors.dispatch is not None
         filt = await asyncio.to_thread(ref_filter, repo, words)

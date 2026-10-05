@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.sort import sort as generic_sort
+from mirage.commands.builtin.generic.sort import sort_generic as generic_sort
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,

@@ -30,6 +30,40 @@
         "stdout": "/data/b.txt\n",
         "stderr": "stat: cannot statx '/data2/xpr_nope.txt': No such file or directory\n"
       }
+    },
+    {
+      "id": "xm_stat_sha256sum_keep_going_past_a_missing_first_operand",
+      "seq": 15800034,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "stat -c '%n' /data2/xpr_nope.txt /data/b.txt; echo rc=$?; sha256sum /data2/xpr_nope.txt /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/b.txt\nrc=1\n14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt\nrc=1\n",
+        "stderr": "stat: cannot statx '/data2/xpr_nope.txt': No such file or directory\nsha256sum: /data2/xpr_nope.txt: No such file or directory\n"
+      }
     }
   ]
 }

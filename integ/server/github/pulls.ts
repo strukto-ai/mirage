@@ -16,7 +16,7 @@ import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts
 import { API_PREFIXES, DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
 import { combinedStatus } from './actions.ts'
-import { rangeOf } from './compare.ts'
+import { commitHistory, rangeOf } from './compare.ts'
 import type { Range } from './compare.ts'
 import { changeJson, changeType, patchLines } from './diff.ts'
 import type { FileChange, PatchLine } from './diff.ts'
@@ -37,9 +37,11 @@ import type { CommitRow, PageArgs } from './wire.ts'
 import {
   allRepos,
   branchFor,
+  commitsBySha,
   commitsJson,
   forkOwnedBy,
   nextNumber,
+  reachableFrom,
   repoJson,
   resolveRef,
   scope,
@@ -113,7 +115,9 @@ const REVIEWED_AT = '2026-01-01T00:04:00Z'
  * tip, and the range the head holds past the base. Everything a pull request
  * reports about what it changes is read off that range, the same one a
  * comparison of the two answers. A head that no longer shares history with
- * its base, which only a forced ref move can make, changes nothing.
+ * its base, which only a forced ref move can make, changes nothing. `history`
+ * is every commit the head reaches through any parent, which is what a review
+ * may name.
  */
 interface PullState {
   head: string
@@ -184,10 +188,12 @@ async function pullState(
     head === null || base === null
       ? NO_RANGE
       : ((await rangeOf(ctx.db, ctx.tenant, repo, base, head, home)) ?? NO_RANGE)
+  const tip = head?.history[0]?.sha
   return {
-    head: head?.history[0]?.sha ?? row.headSha,
+    head: tip ?? row.headSha,
     base: base?.history[0]?.sha ?? '',
-    history: head?.history ?? [],
+    history:
+      tip === undefined ? [] : reachableFrom(tip, await commitsBySha(ctx.db, ctx.tenant, home)),
     range,
   }
 }
@@ -797,13 +803,21 @@ function reviewNode(repo: RepoRow, number: number, row: ReviewRow): Record<strin
   }
 }
 
+/** The arguments GraphQL's `Commit.history` is read with. */
+interface HistoryArgs extends PageArgs {
+  path?: string | null
+  since?: string | null
+  until?: string | null
+}
+
 /**
- * One commit of a pull request as GraphQL reports it: its headline and body,
- * who wrote it and when, and the checks and statuses set on it in the
- * repositories named, rolled up: the base's, and the fork's for a pull
- * request from one, since its head commit's CI may report to either.
+ * One commit as GraphQL's `Commit` reports it: its headline and body, who
+ * wrote it and when, the checks and statuses set on it in the repositories
+ * named, rolled up (the base's, and the fork's for a pull request from one,
+ * since its head commit's CI may report to either), and its history, the
+ * listing `GET /commits` answers from it, filtered and paged the same way.
  */
-function commitNode(
+export function commitNode(
   ctx: { db: C; tenant: string },
   repos: RepoRow[],
   row: CommitRow,
@@ -816,6 +830,7 @@ function commitNode(
   const who = commitIdentity(row)
   const [headline = '', ...rest] = row.message.split('\n')
   return {
+    __typename: 'Commit',
     oid: row.sha,
     messageHeadline: headline,
     messageBody: rest.join('\n').replace(/^\n+/, ''),
@@ -852,6 +867,19 @@ function commitNode(
         ]
         return page(contexts, first, after)
       },
+    },
+    history: async ({ first, after, path, since, until }: HistoryArgs) => {
+      const [home] = repos
+      if (home === undefined) return page([], first, after)
+      const byId = await commitsBySha(ctx.db, ctx.tenant, home)
+      const listed = await commitHistory(ctx.db, ctx.tenant, home, row.sha, byId, {
+        since: since ?? null,
+        until: until ?? null,
+        author: '',
+        path: path ?? '',
+      })
+      const paged = page(listed, first, after)
+      return { ...paged, nodes: paged.nodes.map((at) => commitNode(ctx, repos, at)) }
     },
   }
 }

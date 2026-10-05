@@ -77,6 +77,32 @@
         "stdout": "/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:1:# Kestrel Runtime Spec (Quokka)\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:2:{\"type\":\"message\",\"user\":\"U8\",\"text\":\"kicking off project Quokka, the runtime for building agents over company tools\",\"ts\":\"1767878065.000559\"}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_grep_rg_day_file_scans_only_that_day",
+      "seq": 520028,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -w deploy /slack/channels/engineering__C3/2026-01-19/chat.jsonl; echo rc=$?; rg -w deploy /slack/channels/engineering__C3/2026-01-19/chat.jsonl; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U5\",\"text\":\"deploy #2064 succeeded on preview\",\"ts\":\"1768827382.000652\"}\nrc=0\n{\"type\":\"message\",\"user\":\"U5\",\"text\":\"deploy #2064 succeeded on preview\",\"ts\":\"1768827382.000652\"}\nrc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_grep_rg_files_dir_scans_each_upload",
+      "seq": 520029,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rw Spec /slack/channels/product-runtime__C7/2026-01-15/files; echo rc=$?; rg -w Spec /slack/channels/product-runtime__C7/2026-01-15/files; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:# Kestrel Runtime Spec (Quokka)\nrc=0\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:# Kestrel Runtime Spec (Quokka)\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

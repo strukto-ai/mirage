@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.bytes import byte_view
+
 # The seven C escapes gnulib spells by name, plus the two printable
 # characters it still escapes because they would otherwise close or
 # confuse the quotes it wrapped the word in. Every other byte outside
@@ -29,7 +31,7 @@ QUOTE_ESCAPES = {
 }
 
 
-def quote_word(view: str) -> str:
+def quote_word(view: str, utf8: bool = False) -> str:
     r"""One word as gnulib's `quote()` renders it inside a diagnostic.
 
     Every GNU coreutils diagnostic that names a word passes it through
@@ -65,13 +67,16 @@ def quote_word(view: str) -> str:
 
     Args:
         view (str): the word as a byte view, one character per byte.
+        utf8 (bool): the word is text, as a command under a UTF-8 locale
+            holds it; it is quoted per byte all the same, as the C locale
+            quotes it.
 
     Returns:
         str: the escaped body, still a byte view since every character
             it emits is ASCII.
     """
     out = []
-    for ch in view:
+    for ch in byte_view(view) if utf8 else view:
         named = QUOTE_ESCAPES.get(ch)
         if named is not None:
             out.append(named)
@@ -86,12 +91,9 @@ def quote_text(text: str) -> str:
     r"""`quote_word` for a caller holding an ordinary decoded string.
 
     The commands that refuse a flag value hold it as a `str`, not as
-    the byte view `expr`'s parser runs on, so they need the encode
+    the byte view `expr`'s parser runs on, so they need the byte view
     first: the rule counts bytes, and `é` must render as two octal
-    escapes rather than one. `surrogateescape` is what carries a raw
-    non-UTF-8 byte through as itself, since such a byte reaches a
-    command as its lone surrogate and would otherwise be encoded as
-    U+FFFD's three bytes.
+    escapes rather than one.
 
     Args:
         text (str): the refused word as the command holds it.
@@ -99,6 +101,4 @@ def quote_text(text: str) -> str:
     Returns:
         str: the escaped body, ASCII only.
     """
-    return quote_word(
-        text.encode("utf-8", "surrogateescape").decode("latin-1")
-    )
+    return quote_word(byte_view(text))

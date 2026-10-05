@@ -12,14 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import { makeEnv, NATIVE_BACKENDS } from './native_fixture.ts'
 
 const ENC = new TextEncoder()
-const skipLinux = process.platform === 'linux'
+// mirage follows GNU fmt; macOS ships BSD fmt's greedy fill. Mirrors
+// test_fmt.py.
+const fmtVersion = spawnSync('fmt', ['--version'], { encoding: 'utf8' })
+const notGnuFmt = fmtVersion.error !== undefined || !fmtVersion.stdout.includes('GNU')
 
 describe.each(NATIVE_BACKENDS)('native fmt (%s backend)', (kind) => {
-  it.skipIf(skipLinux)('fmt -w 20 matches native', async () => {
+  it.skipIf(notGnuFmt)('fmt -w 20 matches native', async () => {
     const env = makeEnv(kind)
     try {
       const data = ENC.encode('this is a long line that should be wrapped\n')
@@ -31,7 +35,7 @@ describe.each(NATIVE_BACKENDS)('native fmt (%s backend)', (kind) => {
     }
   })
 
-  it.skipIf(skipLinux)('fmt -w 15 file matches native', async () => {
+  it.skipIf(notGnuFmt)('fmt -w 15 file matches native', async () => {
     const env = makeEnv(kind)
     try {
       env.createFile('f.txt', ENC.encode('short words in a line\n'))

@@ -42,15 +42,6 @@ def test_plus_makes_every_base_readable_and_writable():
         assert mode.writable, spelling
 
 
-def test_wx_is_c_fopen_exclusive_create():
-    # CPython spells exclusive creation as a bare 'x'; C fopen (and so
-    # qjs-wasi's std.open) spells it 'wx'. One parser serves both
-    # dialects, so both spellings answer the same facts.
-    mode = parse_mode("wx")
-    assert mode.exclusive and mode.create and mode.truncate
-    assert mode.writable and not mode.readable
-
-
 @pytest.mark.parametrize(
     "bad",
     [

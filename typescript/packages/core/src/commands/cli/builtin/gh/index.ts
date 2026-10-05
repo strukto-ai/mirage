@@ -14,9 +14,13 @@
 
 import { searchSpec } from './search.ts'
 import { GhConfigSchema } from '../../../../core/github/config.ts'
-import { REPO_EDIT_FIELDS } from './constants.ts'
+import { BOOLEAN, HELP_TOPICS, REPO_EDIT_FIELDS } from './constants.ts'
 import type { RepoEditField } from './types.ts'
-import { CLISpec } from '../../types.ts'
+import { CLISpec, type CLIInvocation } from '../../types.ts'
+import { findChild, nodeHelp } from '../../walk.ts'
+import { IOResult } from '../../../../io/types.ts'
+import type { CommandFnResult } from '../../../config.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import { Operand, Option } from '../../../spec/types.ts'
 import { api } from './api.ts'
 import { status as authStatus } from './auth.ts'
@@ -82,6 +86,19 @@ const BODY_FILE = new Option({ short: '-F', long: '--body-file', type: 'path' })
 const TITLE = new Option({ short: '-t', long: '--title', type: 'str' })
 const NUMBER = new Operand({ type: 'str', name: 'NUMBER', required: true })
 
+// gh's boolean flags are pflag's: a bare `--draft` is true, and `--draft=true`
+// or `--draft=false` spells the value out, which is how a script turns one
+// off. Their shorts still cluster (`-sd`). Read one with `ghBool`.
+function flag(init: { short?: string; long: string; description?: string }): Option {
+  return new Option({
+    ...init,
+    type: 'str',
+    valueOptional: true,
+    shortValue: false,
+    choices: BOOLEAN,
+  })
+}
+
 // The grammar and request mapping consume the same setting definition.
 function repoEditOption(field: RepoEditField): Option {
   return new Option({
@@ -89,7 +106,7 @@ function repoEditOption(field: RepoEditField): Option {
     long: field.flag,
     type: 'str',
     valueOptional: field.kind !== 'value',
-    choices: field.kind === 'value' ? [...(field.choices ?? [])] : ['true', 'false'],
+    choices: field.kind === 'value' ? [...(field.choices ?? [])] : BOOLEAN,
     description: field.description,
   })
 }
@@ -130,7 +147,7 @@ function issue(): CLISpec {
           REPO,
           JSON_FIELDS,
           JQ,
-          new Option({ short: '-c', long: '--comments', description: 'Show comments' }),
+          flag({ short: '-c', long: '--comments', description: 'Show comments' }),
         ],
       }),
       new CLISpec({
@@ -228,7 +245,7 @@ function pr(): CLISpec {
           REPO,
           JSON_FIELDS,
           JQ,
-          new Option({ short: '-c', long: '--comments', description: 'Show comments' }),
+          flag({ short: '-c', long: '--comments', description: 'Show comments' }),
         ],
       }),
       new CLISpec({
@@ -244,8 +261,8 @@ function pr(): CLISpec {
           BODY_FILE,
           new Option({ short: '-H', long: '--head', type: 'str' }),
           new Option({ short: '-B', long: '--base', type: 'str' }),
-          new Option({ short: '-d', long: '--draft' }),
-          new Option({ long: '--no-maintainer-edit' }),
+          flag({ short: '-d', long: '--draft' }),
+          flag({ long: '--no-maintainer-edit' }),
         ],
       }),
       new CLISpec({
@@ -272,9 +289,9 @@ function pr(): CLISpec {
           REPO,
           BODY,
           BODY_FILE,
-          new Option({ short: '-m', long: '--merge' }),
-          new Option({ short: '-r', long: '--rebase' }),
-          new Option({ short: '-s', long: '--squash' }),
+          flag({ short: '-m', long: '--merge' }),
+          flag({ short: '-r', long: '--rebase' }),
+          flag({ short: '-s', long: '--squash' }),
           new Option({ short: '-t', long: '--subject', type: 'str' }),
           new Option({ long: '--match-head-commit', type: 'str' }),
         ],
@@ -302,7 +319,7 @@ function pr(): CLISpec {
         positional: [NUMBER],
         options: [
           REPO,
-          new Option({ long: '--name-only', description: 'Display only names of changed files' }),
+          flag({ long: '--name-only', description: 'Display only names of changed files' }),
         ],
       }),
       new CLISpec({
@@ -343,11 +360,11 @@ function repo(): CLISpec {
         write: true,
         positional: [new Operand({ type: 'str', name: 'NAME' })],
         options: [
-          new Option({ long: '--public' }),
-          new Option({ long: '--private' }),
+          flag({ long: '--public' }),
+          flag({ long: '--private' }),
           new Option({ short: '-d', long: '--description', type: 'str' }),
           new Option({ short: '-h', long: '--homepage', type: 'str' }),
-          new Option({ long: '--add-readme' }),
+          flag({ long: '--add-readme' }),
         ],
       }),
       new CLISpec({
@@ -356,7 +373,29 @@ function repo(): CLISpec {
         fn: fork,
         write: true,
         positional: [new Operand({ type: 'str', name: 'REPOSITORY' })],
-        options: [new Option({ long: '--fork-name', type: 'str' })],
+        options: [
+          flag({ long: '--clone', description: 'Clone the fork' }),
+          flag({
+            long: '--default-branch-only',
+            description: 'Only include the default branch in the fork',
+          }),
+          new Option({
+            long: '--fork-name',
+            type: 'str',
+            description: 'Rename the forked repository',
+          }),
+          new Option({
+            long: '--org',
+            type: 'str',
+            description: 'Create the fork in an organization',
+          }),
+          flag({ long: '--remote', description: 'Add a git remote for the fork' }),
+          new Option({
+            long: '--remote-name',
+            type: 'str',
+            description: 'Specify the name for the new remote',
+          }),
+        ],
       }),
       new CLISpec({
         name: 'rename',
@@ -386,7 +425,7 @@ function repo(): CLISpec {
             multiple: true,
             description: 'Remove repository topic',
           }),
-          new Option({
+          flag({
             long: '--accept-visibility-change-consequences',
             description: 'Accept the consequences of changing the repository visibility',
           }),
@@ -399,8 +438,8 @@ function repo(): CLISpec {
         write: true,
         positional: [new Operand({ type: 'str', name: 'REPOSITORY' })],
         options: [
-          new Option({ long: '--yes', description: 'Confirm deletion without prompting' }),
-          new Option({ long: '--confirm', description: 'Deprecated: use --yes instead' }),
+          flag({ long: '--yes', description: 'Confirm deletion without prompting' }),
+          flag({ long: '--confirm', description: 'Deprecated: use --yes instead' }),
         ],
       }),
     ],
@@ -437,9 +476,9 @@ function release(): CLISpec {
           new Option({ short: '-n', long: '--notes', type: 'str' }),
           new Option({ short: '-F', long: '--notes-file', type: 'path' }),
           TITLE,
-          new Option({ short: '-d', long: '--draft' }),
-          new Option({ short: '-p', long: '--prerelease' }),
-          new Option({ long: '--generate-notes' }),
+          flag({ short: '-d', long: '--draft' }),
+          flag({ short: '-p', long: '--prerelease' }),
+          flag({ long: '--generate-notes' }),
           new Option({ long: '--target', type: 'str' }),
         ],
       }),
@@ -480,12 +519,12 @@ function run(): CLISpec {
           REPO,
           JSON_FIELDS,
           JQ,
-          new Option({ long: '--exit-status' }),
-          new Option({
+          flag({ long: '--exit-status' }),
+          flag({
             long: '--log',
             description: 'View full log for either a run or specific job',
           }),
-          new Option({
+          flag({
             long: '--log-failed',
             description: 'View the log for any failed steps in a run or specific job',
           }),
@@ -499,8 +538,8 @@ function run(): CLISpec {
         positional: [new Operand({ type: 'str', name: 'RUN-ID', required: true })],
         options: [
           REPO,
-          new Option({ short: '-d', long: '--debug' }),
-          new Option({ long: '--failed' }),
+          flag({ short: '-d', long: '--debug' }),
+          flag({ long: '--failed' }),
           new Option({ short: '-j', long: '--job', type: 'str' }),
         ],
       }),
@@ -523,7 +562,7 @@ function workflow(): CLISpec {
           JSON_FIELDS,
           JQ,
           new Option({ short: '-L', long: '--limit', type: 'int', default: '50' }),
-          new Option({ short: '-a', long: '--all' }),
+          flag({ short: '-a', long: '--all' }),
         ],
       }),
       new CLISpec({
@@ -533,7 +572,7 @@ function workflow(): CLISpec {
         positional: [new Operand({ type: 'str', name: 'WORKFLOW', required: true })],
         options: [
           REPO,
-          new Option({ short: '-y', long: '--yaml', description: 'View the workflow yaml file' }),
+          flag({ short: '-y', long: '--yaml', description: 'View the workflow yaml file' }),
           new Option({
             short: '-r',
             long: '--ref',
@@ -554,11 +593,43 @@ function workflow(): CLISpec {
           new Option({ short: '-r', long: '--ref', type: 'str' }),
           new Option({ short: '-f', long: '--raw-field', type: 'str', multiple: true }),
           new Option({ short: '-F', long: '--field', type: 'str', multiple: true }),
-          new Option({ long: '--json' }),
+          flag({ long: '--json' }),
         ],
       }),
     ],
   })
+}
+
+const ENC = new TextEncoder()
+
+/**
+ * `gh help [<command>...]`, as cobra answers it: the help of the deepest
+ * command the words name (words past it are ignored), a help topic when the
+ * first word names one, and otherwise gh's unknown-topic answer, which goes to
+ * stderr with the list of commands and still exits 0.
+ */
+function helpCmd(inv: CLIInvocation): CommandFnResult {
+  let node: CLISpec = GH
+  const path: string[] = []
+  for (const word of inv.texts) {
+    const child = findChild(node, word)
+    if (child === null) break
+    node = child
+    path.push(child.name)
+  }
+  const first = inv.texts[0]
+  if (first !== undefined && path.length === 0) {
+    const topic = HELP_TOPICS[first]
+    if (topic !== undefined) return [ENC.encode(topic), new IOResult()]
+    const names = GH.subcommands
+      .filter((child) => child.name !== 'help')
+      .map((child) => `  ${child.name}\n`)
+      .sort(compareCodePoints)
+    const asked = inv.texts.map((word) => `\`${word}\``).join(' ')
+    const usage = `Usage:  gh <command> <subcommand> [flags]\n\nAvailable commands:\n${names.join('')}`
+    return [null, new IOResult({ stderr: ENC.encode(`Unknown help topic [${asked}]\n${usage}`) })]
+  }
+  return [ENC.encode(nodeHelp(['gh', ...path].join(' '), node, GH.usageStyle)), new IOResult()]
 }
 
 export const GH = new CLISpec({
@@ -572,6 +643,12 @@ export const GH = new CLISpec({
       subcommands: [
         new CLISpec({ name: 'status', description: 'Check the configured token', fn: authStatus }),
       ],
+    }),
+    new CLISpec({
+      name: 'help',
+      fn: helpCmd,
+      description: 'Help about any command',
+      rest: new Operand({ type: 'str' }),
     }),
     new CLISpec({
       name: 'version',
@@ -590,16 +667,16 @@ export const GH = new CLISpec({
         new Option({ short: '-f', long: '--raw-field', type: 'str', multiple: true }),
         new Option({ short: '-F', long: '--field', type: 'str', multiple: true }),
         new Option({ short: '-H', long: '--header', type: 'str', multiple: true }),
-        new Option({
+        flag({
           short: '-i',
           long: '--include',
           description: 'Include HTTP response status line and headers in the output',
         }),
         new Option({ long: '--input', type: 'path' }),
         JQ,
-        new Option({ long: '--paginate' }),
-        new Option({ long: '--slurp' }),
-        new Option({ long: '--silent' }),
+        flag({ long: '--paginate' }),
+        flag({ long: '--slurp' }),
+        flag({ long: '--silent' }),
       ],
     }),
     issue(),

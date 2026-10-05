@@ -50,7 +50,7 @@ export async function read(
   return data
 }
 
-export async function* stream(
+export async function* readStream(
   accessor: GitHubAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

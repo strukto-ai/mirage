@@ -203,6 +203,74 @@
         "stdout": "argc=2 [x; touch mfran]\nargc=2 [b c]\nclean\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mapfile_keeps_raw_bytes",
+      "seq": 940066,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\377b\\nc\\376\\n' | { mapfile -t arr; printf '%s|' \"${arr[@]}\"; } | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 ff 62 7c 63 fe 7c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mapfile_splits_at_the_first_byte_of_its_delimiter",
+      "seq": 940067,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\377b\\377c' | { mapfile -t -d $'\\377' arr; printf '<%s>' \"${arr[@]}\"; echo; }; printf 'a\\303\\251b' | { mapfile -t -d é arr; printf '<%s>' \"${arr[@]}\"; echo; } | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "<a><b><c>\n   <   a   >   < 251   b   >  \\n\n",
+        "stderr": ""
+      }
     }
   ]
 }

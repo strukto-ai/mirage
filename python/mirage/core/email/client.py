@@ -13,14 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from email import policy
-from email.parser import BytesParser
 from typing import Any
 
 import aioimaplib
 
 from mirage.accessor.email import EmailAccessor
-from mirage.core.email._parse import parse_rfc822
+from mirage.core.email._parse import parse_rfc822, parse_with_payloads
 
 INTERNAL_DATE_KEY = "internal_date"
 INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]*)"')
@@ -283,28 +281,11 @@ async def fetch_attachment(
     await select_folder(imap, folder)
     response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     raw_bytes = _extract_body(response)
-    attachments = _parse_with_payloads(raw_bytes)
+    attachments = parse_with_payloads(raw_bytes)
     for att in attachments:
         if att["filename"] == filename:
             return att["payload"]
     return None
-
-
-def _parse_with_payloads(raw: bytes) -> list[dict[str, Any]]:
-    msg = BytesParser(policy=policy.default).parsebytes(raw)
-    attachments: list[dict[str, Any]] = []
-    if msg.is_multipart():
-        for part in msg.walk():
-            disposition = str(part.get("Content-Disposition", ""))
-            if "attachment" in disposition:
-                payload = part.get_payload(decode=True) or b""
-                attachments.append(
-                    {
-                        "filename": part.get_filename() or "unnamed",
-                        "payload": payload,
-                    }
-                )
-    return attachments
 
 
 def _extract_body(response) -> bytes:

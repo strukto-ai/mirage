@@ -33,6 +33,40 @@
         "stdout": "/data/b.txt\n/data2/xm.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_ls_file_operand_prints_first_unheaded",
+      "seq": 15800021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xlf && echo a > /data/xlf/f && ls /data/xlf /data2/xm.txt; rm -r /data/xlf",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data2/xm.txt\n\n/data/xlf:\nf\n",
+        "stderr": ""
+      }
     }
   ]
 }

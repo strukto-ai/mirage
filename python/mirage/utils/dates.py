@@ -48,7 +48,7 @@ def _date_unit(word: str) -> str | None:
     return None
 
 
-def _add_months(dt: datetime, count: int) -> datetime:
+def _add_months_gnu(dt: datetime, count: int) -> datetime:
     total = dt.month - 1 + count
     year = dt.year + total // 12
     month = total % 12 + 1
@@ -104,7 +104,7 @@ def _place(wall: datetime, tz: tzinfo, offset: timedelta | None) -> datetime:
 def _shift(dt: datetime, unit: str, count: int) -> datetime:
     """Displace a moment by ``count`` units, as gnulib does.
 
-    Months and years move the calendar (``_add_months``), and days and
+    Months and years move the calendar (``_add_months_gnu``), and days and
     weeks move it too, keeping the wall clock across a DST change; the
     moved wall clock is then read as mktime reads it (``_place``).
     Hours, minutes and seconds are exact, so they are added on the UTC
@@ -123,9 +123,9 @@ def _shift(dt: datetime, unit: str, count: int) -> datetime:
         return (dt.astimezone(timezone.utc) + delta).astimezone(dt.tzinfo)
     wall = dt.replace(tzinfo=None)
     if unit == "month":
-        wall = _add_months(wall, count)
+        wall = _add_months_gnu(wall, count)
     elif unit == "year":
-        wall = _add_months(wall, 12 * count)
+        wall = _add_months_gnu(wall, 12 * count)
     else:
         wall += timedelta(seconds=_UNIT_SECONDS[unit] * count)
     if dt.tzinfo is None:

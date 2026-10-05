@@ -248,7 +248,34 @@
       "type": "bool"
     },
     {
+      "long": "--recursive",
       "short": "-r",
+      "type": "bool"
+    },
+    {
+      "long": "--new-file",
+      "short": "-N",
+      "type": "bool"
+    },
+    {
+      "long": "--unidirectional-new-file",
+      "type": "bool"
+    },
+    {
+      "long": "--exclude",
+      "multiple": true,
+      "short": "-x",
+      "type": "str"
+    },
+    {
+      "long": "--exclude-from",
+      "multiple": true,
+      "short": "-X",
+      "type": "path"
+    },
+    {
+      "long": "--report-identical-files",
+      "short": "-s",
       "type": "bool"
     }
   ],

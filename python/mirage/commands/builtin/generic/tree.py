@@ -101,7 +101,7 @@ def _child_mounts(mounts: MountView | None, directory: str) -> list[str]:
     ]
 
 
-async def _walk(
+async def _walk_tree(
     path: PathSpec,
     readdir: Readdir,
     stat: Stat,
@@ -203,7 +203,7 @@ async def _walk(
         # routes every path to its owner.
         sub_readdir = cross_readdir if crossing and cross_readdir else readdir
         sub_stat = cross_stat if crossing and cross_stat else stat
-        sub, sub_dirs, sub_files, sub_unopened = await _walk(
+        sub, sub_dirs, sub_files, sub_unopened = await _walk_tree(
             entry_spec,
             sub_readdir,
             sub_stat,
@@ -241,32 +241,8 @@ def _summary(dirs: int, files: int, dirs_only: bool) -> str:
     return f"{dirs} {dir_word}, {files} {file_word}"
 
 
-def _unopenable(
-    root_label: str, dirs_only: bool, files: int, exit_code: int
-) -> tuple[bytes, IOResult]:
-    """GNU's inline marker for a root it could not open.
-
-    ``tree`` prints the marker and nothing on stderr, so the exit code and
-    the counted file carry the distinction: a path that is not a directory
-    exists and is counted (exit 0), a path that is not there is not
-    (exit 2).
-
-    Args:
-        root_label (str): the operand as typed.
-        dirs_only (bool): whether ``-d`` omits the file count.
-        files (int): files to report in the summary.
-        exit_code (int): process exit status.
-    """
-    body = [
-        f"{root_label}{UNOPENABLE_MARK}",
-        "",
-        _summary(0, files, dirs_only),
-    ]
-    return format_records(body), IOResult(exit_code=exit_code)
-
-
 async def tree(
-    path: PathSpec,
+    paths: list[PathSpec],
     *,
     readdir: Readdir,
     stat: Stat,
@@ -281,17 +257,18 @@ async def tree(
     mounts: MountView | None = None,
     one_file_system: bool = False,
 ) -> tuple[bytes, IOResult]:
-    """Render one directory tree, GNU ``tree``'s drawing and summary.
+    """Render each operand's tree, GNU ``tree``'s drawing, under one summary.
 
-    Unlike find and du, tree's output is a single document: one root
-    line, one drawing, one count. Concatenating a per-mount run would
-    print two of each, so a nested mount is crossed here instead, the
-    way real ``tree`` crosses one (pinned on tree 2.2.1: the mounted
-    filesystem's entries are drawn under the mount point, the covered
-    ones are not drawn at all, and the summary counts the whole thing).
+    Unlike find and du, tree's output is a single document: each root
+    line and its drawing in operand order, then one count. Concatenating
+    a per-mount run would print two counts, so a nested mount is crossed
+    here instead, the way real ``tree`` crosses one (pinned on tree
+    2.2.1: the mounted filesystem's entries are drawn under the mount
+    point, the covered ones are not drawn at all, and the summary counts
+    the whole thing).
 
     Args:
-        path (PathSpec): the operand to draw.
+        paths (list[PathSpec]): the operands to draw, in order.
         readdir (Readdir): this mount's directory listing.
         stat (Stat): this mount's stat.
         max_depth (int | None): -L, deepest level to draw.
@@ -307,21 +284,6 @@ async def tree(
         mounts (MountView | None): where the mount boundaries are.
         one_file_system (bool): -x, draw a mount point but nothing in it.
     """
-    warnings: list[str] = []
-    root_label = path.raw_path or path.virtual
-    # What the operand is decides the whole result, so it is resolved
-    # before the walk rather than inferred from how a backend answered
-    # readdir on it: an object store lists a file key as an empty prefix,
-    # lists a missing path as one too, and Graph 404s, which read as
-    # three different trees. The probe asks both channels a backend can
-    # answer on, so a directory that exists only as its children still
-    # reports as one and None means nothing is there.
-    if stat_path is not None:
-        start = await stat_path(path.virtual)
-        if start is None:
-            return _unopenable(root_label, dirs_only, 0, 2)
-        if start.type != FileType.DIRECTORY:
-            return _unopenable(root_label, dirs_only, 1, 0)
     cross_readdir: Readdir | None = (
         partial(_cross_readdir, readdir_path)
         if readdir_path is not None
@@ -332,38 +294,74 @@ async def tree(
     cross_stat = (
         partial(_cross_stat, stat_path) if stat_path is not None else None
     )
-    lines, dirs, files, unopened = await _walk(
-        path,
-        readdir,
-        stat,
-        prefix="",
-        depth=0,
-        max_depth=max_depth,
-        show_hidden=show_hidden,
-        ignore_pattern=ignore_pattern,
-        dirs_only=dirs_only,
-        match_pattern=match_pattern,
-        warnings=warnings,
-        index=index,
-        mounts=mounts,
-        cross_readdir=cross_readdir,
-        cross_stat=cross_stat,
-    )
-    # GNU signals an unopenable path with the inline "[error opening dir]"
-    # marker and exit 2, and writes nothing to stderr. `warnings` therefore
-    # only decides the marker; emitting it would diverge. With stat_path
-    # wired the two clear cases are already answered above, so this covers
-    # a directory that exists but could not be read (a permission error).
-    if warnings and not lines:
-        return _unopenable(root_label, dirs_only, 0, 2)
-    # GNU counts the root as a directory once it has any listed entry (an
-    # empty root reports 0), then a blank line and the summary (the file
-    # count is omitted under -d).
-    root_dirs = dirs + 1 if lines else 0
-    body = [root_label] + lines + ["", _summary(root_dirs, files, dirs_only)]
-    # A directory below the root it could not open is marked inline and
-    # makes the run exit 2, as GNU does, with nothing on stderr.
-    return format_records(body), IOResult(exit_code=2 if unopened else 0)
+    body: list[str] = []
+    total_dirs = 0
+    total_files = 0
+    failed = False
+    for path in paths:
+        root_label = path.raw_path or path.virtual
+        # What the operand is decides its result, so it is resolved before
+        # the walk rather than inferred from how a backend answered readdir
+        # on it: an object store lists a file key as an empty prefix, lists
+        # a missing path as one too, and Graph 404s, which read as three
+        # different trees. The probe asks both channels a backend can
+        # answer on, so a directory that exists only as its children still
+        # reports as one and None means nothing is there.
+        #
+        # GNU prints the same inline marker either way and nothing on
+        # stderr; what differs is the count and the status. A
+        # non-directory exists, so it is counted and the exit stays 0; a
+        # path that is not there is not counted and exits 2.
+        if stat_path is not None:
+            start = await stat_path(path.virtual)
+            if start is None:
+                body.append(root_label + UNOPENABLE_MARK)
+                failed = True
+                continue
+            if start.type != FileType.DIRECTORY:
+                body.append(root_label + UNOPENABLE_MARK)
+                total_files += 1
+                continue
+        warnings: list[str] = []
+        lines, dirs, files, unopened = await _walk_tree(
+            path,
+            readdir,
+            stat,
+            prefix="",
+            depth=0,
+            max_depth=max_depth,
+            show_hidden=show_hidden,
+            ignore_pattern=ignore_pattern,
+            dirs_only=dirs_only,
+            match_pattern=match_pattern,
+            warnings=warnings,
+            index=index,
+            mounts=mounts,
+            cross_readdir=cross_readdir,
+            cross_stat=cross_stat,
+        )
+        # `warnings` only decides the marker; emitting it would diverge.
+        # With stat_path wired the two clear cases are already answered
+        # above, so this covers a directory that exists but could not be
+        # read (a permission error).
+        if warnings and not lines:
+            body.append(root_label + UNOPENABLE_MARK)
+            failed = True
+            continue
+        body.append(root_label)
+        body.extend(lines)
+        # GNU counts the root as a directory once it has any listed entry
+        # (an empty root reports 0).
+        if lines:
+            total_dirs += dirs + 1
+            total_files += files
+        # A directory below the root it could not open is marked inline
+        # and makes the run exit 2, as GNU does, with nothing on stderr.
+        failed = failed or unopened > 0
+    # A blank line and the one summary close the run (the file count is
+    # omitted under -d).
+    body += ["", _summary(total_dirs, total_files, dirs_only)]
+    return format_records(body), IOResult(exit_code=2 if failed else 0)
 
 
 __all__ = ["tree"]
@@ -401,7 +399,7 @@ async def tree_generic(
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(opts.flags)
     return await tree(
-        paths[0],
+        paths,
         readdir=readdir,
         stat=stat,
         max_depth=parsed.max_depth,

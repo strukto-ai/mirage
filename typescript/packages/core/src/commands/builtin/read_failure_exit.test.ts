@@ -66,11 +66,13 @@ const GNU_READ_EXIT: Record<string, [number, number]> = {
 
 // zgrep runs gzip with -q, which keeps a directory's warning to itself, so
 // GNU and mirage both exit 1 there without a word. jq 1.8.2 opens a
-// directory, fails at its first read and says so without naming it (see the
-// python twin).
+// directory, fails at its first read and says so without naming it, and
+// glibc's iconv words it as "error while reading the input" (see the python
+// twin).
 const SILENT_HERE: ReadonlySet<string> = new Set(['zgrep x {p}'])
 const BARE_HERE: ReadonlyMap<string, string> = new Map([
   ['jq . {p}', 'jq: error: Is a directory\n'],
+  ['iconv -f utf-8 -t utf-8 {p}', 'iconv: error while reading the input: Is a directory\n'],
 ])
 
 async function makeWs(): Promise<Workspace> {

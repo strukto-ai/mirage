@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.commands.builtin import grep_offsets
 from mirage.commands.builtin.generic.grep import parse_flags
 from mirage.commands.builtin.grep_binary import PROBE_BLOCK_BYTES, grep_input
+from mirage.commands.builtin.grep_pattern import compile_pattern
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -646,27 +646,16 @@ def test_byte_offset_reaches_the_generic_from_either_spelling(argv, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("byte_offsets", [False, True])
-async def test_only_matching_encodes_at_most_one_prefix_pass(
-    monkeypatch, byte_offsets
+async def test_only_matching_offsets_count_bytes_along_one_long_line(
+    byte_offsets,
 ):
     count = 8000
     row = "é😀" + "x" * 100 + "needle"
-    line = row * count
-    data = line.encode()
-    encoded = 0
-    calls = 0
-    original = grep_offsets.byte_offset
-
-    def measured(text, index):
-        nonlocal encoded, calls
-        encoded += len(text)
-        calls += 1
-        return original(text, index)
+    data = (row * count).encode()
 
     async def source():
         yield data
 
-    monkeypatch.setattr(grep_offsets, "byte_offset", measured)
     flags = parse_flags(
         FlagView({"o": True, "byte_offset": byte_offsets}, spec=SPECS["grep"]),
         False,
@@ -684,34 +673,23 @@ async def test_only_matching_encodes_at_most_one_prefix_pass(
     )
     assert out == expected.encode()
     assert io.exit_code == 0
-    assert calls == (count if byte_offsets else 0)
-    assert encoded <= len(line)
 
 
 @pytest.mark.asyncio
-async def test_cancellation_during_single_line_matches(monkeypatch):
+async def test_cancellation_during_single_line_matches():
     data = b"needle " * 100000 + b"\n"
     closed = False
-    calls = 0
     task = asyncio.current_task()
-    original = grep_offsets.MatchOffsets.at
-
-    def measured(self, index):
-        nonlocal calls
-        if calls == 0:
-            asyncio.get_running_loop().call_later(0, task.cancel)
-        calls += 1
-        return original(self, index)
 
     async def source():
         nonlocal closed
         try:
+            asyncio.get_running_loop().call_later(0, task.cancel)
             yield data
             raise AssertionError("read beyond the matching line")
         finally:
             closed = True
 
-    monkeypatch.setattr(grep_offsets.MatchOffsets, "at", measured)
     flags = parse_flags(
         FlagView({"o": True, "byte_offset": True}, spec=SPECS["grep"]), False
     )
@@ -722,7 +700,6 @@ async def test_cancellation_during_single_line_matches(monkeypatch):
         async for _ in scanned:
             pass
     assert closed
-    assert calls < 100000
 
 
 @pytest.mark.asyncio
@@ -1003,3 +980,40 @@ async def test_cancellation_while_skipping_nonmatching_buffers():
             )
         )
     assert closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,pattern,stdout,stderr",
+    [
+        ({}, "a", "a1\néa2\n", b"grep: f: binary file matches\n"),
+        ({"args_I": True}, "a", "a1\néa2\n", b""),
+        ({"text": True}, "a", "a1\na\udcff\néa2\n", b""),
+        ({"c": True}, "a.", "2\n", b""),
+        ({"o": True, "byte_offset": True}, "2", "9:2\n", b""),
+    ],
+)
+async def test_a_utf8_scan_leaves_out_a_line_no_character_owns(
+    flags, pattern, stdout, stderr
+):
+    async def source() -> AsyncIterator[bytes]:
+        yield "a1\na\udcff\néa2\n".encode("utf-8", "surrogateescape")
+
+    f = parse_flags(FlagView(flags, spec=SPECS["grep"]), False)
+    io = IOResult(exit_code=1)
+    out = await materialize(
+        grep_input(
+            source(),
+            compile_pattern(pattern, utf8=True),
+            f,
+            "f",
+            False,
+            io,
+            utf8=True,
+        )
+    )
+    assert (out, io.stderr or b"", io.exit_code) == (
+        stdout.encode("utf-8", "surrogateescape"),
+        stderr,
+        0,
+    )

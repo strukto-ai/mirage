@@ -16,11 +16,21 @@ import { describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
 import { LimitExceededError } from '../commands/errors.ts'
 import { OpsRegistry } from './registry.ts'
+import type { RegisteredOp } from './registry.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied, PolicyError } from '../policy/errors.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { FileType, Limit, MountMode, OnExceed } from '../types.ts'
+import { stat as ramStat } from '../core/ram/stat.ts'
+import {
+  DEFAULT_READ_TTL,
+  FileStat,
+  FileType,
+  Limit,
+  MountMode,
+  OnExceed,
+  ReadPolicy,
+} from '../types.ts'
 import { eacces, enoent, enotdir } from '../utils/errors.ts'
 import { Session } from '../workspace/workspace/handle.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
@@ -292,6 +302,55 @@ describe('Ops policy door', () => {
   })
 })
 
+function tallyOp(vfs: RAMVFS, name: 'read' | 'stat'): RegisteredOp {
+  return {
+    name,
+    vfs: vfs.name,
+    filetype: '.tally',
+    write: false,
+    fn:
+      name === 'read'
+        ? () => Promise.resolve(new TextEncoder().encode('rendered'))
+        : (accessor, path) => ramStat(accessor as never, path),
+  }
+}
+
+function cachingRam(): RAMVFS {
+  const vfs = new RAMVFS()
+  Object.assign(vfs, { cachesReads: true })
+  return vfs
+}
+
+function rendererOnMount(): Workspace {
+  const vfs = cachingRam()
+  const ops = new OpsRegistry()
+  ops.registerVfs(vfs)
+  ops.register(tallyOp(vfs, 'read'))
+  return new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, ops })
+}
+
+function rendererInVfs(): Workspace {
+  const vfs = cachingRam()
+  const own = vfs.ops.bind(vfs)
+  Object.assign(vfs, { ops: () => [...own(), tallyOp(vfs, 'read')] })
+  const ops = new OpsRegistry()
+  ops.registerVfs(vfs)
+  return new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, ops })
+}
+
+function statOnlyForTally(): Workspace {
+  const vfs = cachingRam()
+  const ops = new OpsRegistry()
+  ops.registerVfs(vfs)
+  ops.register(tallyOp(vfs, 'stat'))
+  return new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, ops })
+}
+
+async function seed(ws: Workspace, path: string): Promise<void> {
+  await ws.vfs.write(path, 'stored')
+  await ws.cache.set(path, new TextEncoder().encode('cached'), { ttl: 600 })
+}
+
 // The facade is not a second pipeline: it hands every op to the
 // dispatcher, so what the shell sees and what ws.vfs sees cannot drift,
 // and each gate fires exactly once per op.
@@ -405,9 +464,9 @@ describe('Ops is one door with the dispatcher', () => {
   })
 
   it('does not serve a raw read from the file cache', async () => {
-    // A rendering command's read lands in the file cache keyed on the
-    // path alone (that is what `applyIo` does with an IOResult), so the
-    // rendering sits under the very key a raw read asks for. Seeding
+    // A command's read lands in the file cache keyed on the path alone
+    // (that is what `applyIo` does with an IOResult), so whatever it
+    // returned sits under the very key a raw read asks for. Seeding
     // the cache directly is the same state one command earlier reaches.
     // Mirrors Python's tests/ops/test_raw_read.py.
     const vfs = new RAMVFS()
@@ -419,6 +478,157 @@ describe('Ops is one door with the dispatcher', () => {
     await ws.cache.set('/m/doc.gdoc.json', new TextEncoder().encode('rendered'), { ttl: 600 })
     expect(await ws.vfs.cat('/m/doc.gdoc.json')).toBe('rendered')
     expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json', { raw: true }))).toBe('stored')
+  })
+
+  // Commands fill the cache with what their own reads return. A filetype
+  // read op, whoever registered it, renders on every read instead.
+  it.each([
+    ['added on the mount', rendererOnMount],
+    ['shipped by the VFS', rendererInVfs],
+  ])('never serves a filetype renderer %s from the file cache', async (_, build) => {
+    const ws = build()
+    await seed(ws, '/m/books.tally')
+    expect(await ws.vfs.cat('/m/books.tally')).toBe('rendered')
+  })
+
+  it('never serves a renderer named by filetype warm', async () => {
+    const ws = rendererOnMount()
+    await seed(ws, '/m/notes.txt')
+    const named = await ws.dispatch('read', '/m/notes.txt', [], { filetype: '.tally' })
+    expect(DEC.decode(named as Uint8Array)).toBe('rendered')
+  })
+
+  // Only a read op scoped to the path's filetype renders: another path,
+  // no extension, or another op scoped to it leaves the cache in charge.
+  it.each([
+    ['a plain path', rendererOnMount, '/m/notes.txt'],
+    ['an extensionless path', rendererOnMount, '/m/README'],
+    ['a non-read op for the extension', statOnlyForTally, '/m/books.tally'],
+  ])('still serves %s warm', async (_, build, path) => {
+    const ws = build()
+    await seed(ws, path)
+    expect(await ws.vfs.cat(path)).toBe('cached')
+  })
+
+  // The cached entry is never served to a user renderer, but its freshness
+  // check still runs: a path the backend reports gone fails, as it does for
+  // every other warm read, instead of reaching a renderer that may not look
+  // at the backend at all.
+  it('fails a user renderer read of a remotely deleted path under fresh', async () => {
+    const vfs = new RAMVFS()
+    Object.assign(vfs, { cachesReads: true, readRevalidatable: true })
+    const ops = new OpsRegistry()
+    ops.registerVfs(vfs)
+    ops.register({
+      name: 'read',
+      vfs: vfs.name,
+      filetype: '.tally',
+      write: false,
+      fn: () => Promise.resolve(new TextEncoder().encode('rendered')),
+    })
+    const ws = new Workspace(
+      { '/m': vfs },
+      { mode: MountMode.WRITE, ops, read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL } },
+    )
+    await ws.vfs.write('/m/books.tally', 'stored')
+    await ws.cache.set('/m/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
+    const other = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+    await other.vfs.unlink('/m/books.tally')
+    await expect(ws.vfs.cat('/m/books.tally')).rejects.toThrow()
+  })
+
+  // The renderer lands while the read waits on the cache; the entry it
+  // finds is still the command's raw bytes, not this rendering.
+  it('never serves a renderer registered mid-read from the file cache', async () => {
+    const vfs = new RAMVFS()
+    Object.assign(vfs, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerVfs(vfs)
+    const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, ops })
+    await ws.vfs.write('/m/books.tally', 'stored')
+    await ws.cache.set('/m/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
+    const original = ws.cache.get.bind(ws.cache)
+    Object.assign(ws.cache, {
+      get: async (path: string) => {
+        const data = await original(path)
+        ops.register({
+          name: 'read',
+          vfs: vfs.name,
+          filetype: '.tally',
+          write: false,
+          fn: () => Promise.resolve(new TextEncoder().encode('rendered')),
+        })
+        return data
+      },
+    })
+    expect(await ws.vfs.cat('/m/books.tally')).toBe('rendered')
+  })
+
+  // The entry carries the version the backend answers, so the freshness
+  // check would serve it: only the renderer rule keeps the bytes out.
+  it('still renders a user renderer whose entry is fresh', async () => {
+    const vfs = new RAMVFS()
+    Object.assign(vfs, { cachesReads: true, readRevalidatable: true })
+    const ops = new OpsRegistry()
+    ops.registerVfs(vfs)
+    const ws = new Workspace(
+      { '/m': vfs },
+      { mode: MountMode.WRITE, ops, read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL } },
+    )
+    await ws.vfs.write('/m/books.tally', 'stored')
+    ops.register({
+      name: 'read',
+      vfs: vfs.name,
+      filetype: '.tally',
+      write: false,
+      fn: () => Promise.resolve(new TextEncoder().encode('rendered')),
+    })
+    ops.register({
+      name: 'stat',
+      vfs: vfs.name,
+      filetype: null,
+      write: false,
+      fn: async (accessor, path) => {
+        const real = await ramStat(accessor as never, path)
+        return new FileStat({
+          name: real.name,
+          size: real.size,
+          modified: real.modified,
+          type: real.type,
+          fingerprint: 'v1',
+        })
+      },
+    })
+    await ws.cache.set('/m/books.tally', new TextEncoder().encode('cached'), {
+      ttl: 600,
+      fingerprint: 'v1',
+    })
+    expect(await ws.vfs.cat('/m/books.tally')).toBe('rendered')
+  })
+
+  // A renderer one RAM mount ships is that instance's own: a sibling mount
+  // of the same kind that does not ship it is still served warm.
+  it('serves a sibling mount warm when only the other ships a renderer', async () => {
+    const shipping = new RAMVFS()
+    const plain = new RAMVFS()
+    Object.assign(shipping, { cachesReads: true })
+    Object.assign(plain, { cachesReads: true })
+    const rendering: RegisteredOp = {
+      name: 'read',
+      vfs: shipping.name,
+      filetype: '.tally',
+      write: false,
+      fn: () => Promise.resolve(new TextEncoder().encode('rendered')),
+    }
+    const own = shipping.ops.bind(shipping)
+    Object.assign(shipping, { ops: () => [...own(), rendering] })
+    const ops = new OpsRegistry()
+    ops.registerVfs(shipping)
+    ops.registerVfs(plain)
+    const ws = new Workspace({ '/a': shipping, '/b': plain }, { mode: MountMode.WRITE, ops })
+    await ws.vfs.write('/b/books.tally', 'stored')
+    await ws.cache.set('/b/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
+    expect(await ws.vfs.cat('/b/books.tally')).toBe('cached')
   })
 
   it('refuses a write to a read-only mount at the door', async () => {
@@ -680,11 +890,13 @@ describe('Ops rename is bounded by the mount', () => {
     expect(await ws.vfs.exists('/b/y.txt')).toBe(false)
   })
 
-  it('refuses a rename to a path no mount serves', async () => {
+  it('refuses a rename into a missing directory with ENOENT', async () => {
+    // rename(2) resolves the destination's directory before it compares
+    // filesystems, so a missing one is ENOENT, not EXDEV.
     const ws = mkTwoMounts()
     await ws.vfs.write('/a/x.txt', 'bytes')
     await expect(ws.vfs.rename('/a/x.txt', '/nowhere/y.txt')).rejects.toMatchObject({
-      code: 'EXDEV',
+      code: 'ENOENT',
     })
     expect(await ws.vfs.cat('/a/x.txt')).toBe('bytes')
   })

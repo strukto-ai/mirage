@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { GIT } from './index.ts'
-import { parseFlags } from './history.ts'
+import { decorationStyle, parseFlags } from './history.ts'
+import { Decoration } from './types.ts'
 import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 
@@ -83,4 +84,17 @@ it.each([
   [['--committer=\\('], "header, '\\(': Unmatched ( or \\("],
 ])('names where a refused pattern came from in %j', (argv, message) => {
   expect(() => logFlags(argv)).toThrow(message)
+})
+
+it.each([
+  ['short', Decoration.SHORT],
+  ['full', Decoration.FULL],
+  ['no', Decoration.NONE],
+  ['', Decoration.NONE],
+  ['1', Decoration.SHORT],
+  ['auto', Decoration.NONE],
+  ['bogus', null],
+  ['Full', null],
+])('decorationStyle names git styles: %s', (value, style) => {
+  expect(decorationStyle(value)).toBe(style)
 })

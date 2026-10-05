@@ -18,7 +18,16 @@ import type { Dmmf, JsonValue } from '../kit/typescript/index.ts'
 import { DEFAULT_LOGIN, REPO_DATE, SEARCH_SIZE_LIMIT, config } from './config.ts'
 import type { C } from './config.ts'
 import { languagesOf } from './languages.ts'
-import { blobSha, commitJson, commitSha, rootCommit, rootSha, treeSha } from './wire.ts'
+import {
+  blobSha,
+  commitIdentity,
+  commitJson,
+  commitSha,
+  parentsOf,
+  rootCommit,
+  rootSha,
+  treeSha,
+} from './wire.ts'
 import type { CommitRow } from './wire.ts'
 
 export interface RepoRow {
@@ -763,11 +772,15 @@ async function resolveTag(
 // `^` or `~` meaning 1.
 const ANCESTRY_STEP = /^(?:\^\{(?:commit)?\}|\^(\d*)|~(\d*))/
 
-// How many first parents a suffix walks back, or null for one that names no
-// commit. The fake's history is first parents only, so `^<n>` past 1 names
-// nothing, as it does in git on a commit with one parent.
-function ancestrySteps(suffix: string): number | null {
-  let steps = 0
+// The commit a suffix walks to from `from`, or null for one that names no
+// commit: `^<n>` past a commit's last parent, or `~<n>` past the start of its
+// first-parent chain. `^0` is the commit itself.
+function ancestorOf(
+  from: CommitRow,
+  suffix: string,
+  byId: Map<string, CommitRow>,
+): CommitRow | null {
+  let at = from
   let rest = suffix
   while (rest !== '') {
     const step = ANCESTRY_STEP.exec(rest)
@@ -776,13 +789,18 @@ function ancestrySteps(suffix: string): number | null {
     const [, parent, back] = step
     if (parent !== undefined) {
       const n = parent === '' ? 1 : Number(parent)
-      if (n > 1) return null
-      steps += n
+      if (n === 0) continue
+      const sha = parentsOf(at)[n - 1]
+      if (sha === undefined) return null
+      at = byId.get(sha) ?? rootCommit(sha)
     } else if (back !== undefined) {
-      steps += back === '' ? 1 : Number(back)
+      for (let n = back === '' ? 1 : Number(back); n > 0; n--) {
+        if (at.parentSha === '') return null
+        at = byId.get(at.parentSha) ?? rootCommit(at.parentSha)
+      }
     }
   }
-  return steps
+  return at
 }
 
 // A fully qualified name stays in its namespace. Otherwise an existing full
@@ -802,11 +820,12 @@ export async function resolveRef(
 ): Promise<Resolved | null> {
   const cut = ref === null ? -1 : ref.search(/[~^]/)
   if (ref !== null && cut >= 0) {
-    const steps = ancestrySteps(ref.slice(cut))
-    const from =
-      steps === null || cut === 0 ? null : await resolveRef(db, tenant, repo, ref.slice(0, cut))
-    const history = from === null || steps === null ? [] : from.history.slice(steps)
-    return history.length === 0 ? null : { branch: null, history }
+    const from = cut === 0 ? null : await resolveRef(db, tenant, repo, ref.slice(0, cut))
+    const start = from?.history[0]
+    if (start === undefined) return null
+    const byId = await commitsBySha(db, tenant, repo)
+    const at = ancestorOf(start, ref.slice(cut), byId)
+    return at === null ? null : { branch: null, history: historyFrom(at.sha, byId) }
   }
   if (ref !== null && ref.startsWith('refs/tags/')) {
     return await resolveTag(db, tenant, repo, ref.slice('refs/tags/'.length))
@@ -945,9 +964,10 @@ export function chainFrom(head: string, byId: Map<string, CommitRow>): CommitRow
   return out
 }
 
-// Whether `ancestor` is reachable from `head` by first parents, which is the
-// exact question a fast-forward asks. The empty sha is every commit's
-// ancestor, since that is where a chain ends.
+// Whether `ancestor` is reachable from `head` through any parent, which is
+// the exact question a fast-forward asks: a branch merged into another is
+// behind it, not beside it. The empty sha is every commit's ancestor, since
+// that is where a chain ends.
 export function reaches(head: string, ancestor: string, byId: Map<string, CommitRow>): boolean {
   if (ancestor === '') return true
   // Walked as POINTERS rather than as rows, because the sha being looked for
@@ -955,13 +975,42 @@ export function reaches(head: string, ancestor: string, byId: Map<string, Commit
   // content and stored nowhere, yet it is what the ref endpoint answers with
   // and therefore what a commit on a seeded branch states as its parent.
   const seen = new Set<string>()
-  let at = head
-  while (at !== '' && !seen.has(at)) {
+  const pending = [head]
+  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
     if (at === ancestor) return true
+    if (at === '' || seen.has(at)) continue
     seen.add(at)
-    at = byId.get(at)?.parentSha ?? ''
+    const row = byId.get(at)
+    if (row !== undefined) pending.push(...parentsOf(row))
   }
   return false
+}
+
+// Every commit reachable from a sha through any parent, newest first, as
+// GitHub lists a ref's commits: git's default walk, which lists the commit
+// with the latest commit date among the ones reached and not yet listed, ties
+// going to the one reached first. The sha itself always comes first. A parent
+// no row holds is a synthesized root, listed with no parents of its own.
+export function reachableFrom(head: string, byId: Map<string, CommitRow>): CommitRow[] {
+  const out: CommitRow[] = []
+  const seen = new Set([head])
+  const queue = [byId.get(head) ?? rootCommit(head)]
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    out.push(next)
+    for (const sha of parentsOf(next)) {
+      if (seen.has(sha)) continue
+      seen.add(sha)
+      const row = byId.get(sha) ?? rootCommit(sha)
+      const when = committedAt(row)
+      const at = queue.findIndex((other) => when > committedAt(other))
+      queue.splice(at === -1 ? queue.length : at, 0, row)
+    }
+  }
+  return out
+}
+
+function committedAt(row: CommitRow): number {
+  return Date.parse(commitIdentity(row).committed)
 }
 
 // Where a ref answers it points, which is the stored head once anything has
@@ -1037,6 +1086,21 @@ export async function commitList(
   return tree.size === 0 ? [] : [rootCommit(rootOf(tree))]
 }
 
+// Every commit a branch holds, reached through any parent, newest first, as
+// reachableFrom lists them: what its commit listing, its contributors and a
+// search of it read, where commitList is the first-parent chain a ref's
+// history and its `~<n>` walk.
+export async function branchCommits(
+  db: C,
+  tenant: string,
+  repo: RepoRow,
+  branch: string,
+): Promise<CommitRow[]> {
+  const head = await headOf(db, tenant, repo, branch)
+  if (head === '') return await commitList(db, tenant, repo, branch)
+  return reachableFrom(head, await commitsBySha(db, tenant, repo))
+}
+
 // A commit's history, newest first: the first-parent chain from it and the
 // synthesized root under that chain, or the root alone when the sha is one.
 export function historyFrom(head: string, byId: Map<string, CommitRow>): CommitRow[] {
@@ -1057,23 +1121,39 @@ export async function commitTree(
   return (await treeAt(db, tenant, repo, { branch: null, history: [commit] })) ?? new Map()
 }
 
-// Where two first-parent histories meet: the head's commits past that point,
-// newest first, and how many the base holds past it. Null when they never
-// meet, which is a different answer from meeting at the head.
+// Where two histories meet: the head's commits the base cannot reach, newest
+// first, how many of the base's the head cannot reach, and the newest commit
+// both reach. Null when they never meet, which is a different answer from
+// meeting at the head.
 export interface Divergence {
   ahead: CommitRow[]
   behind: number
   mergeBase: CommitRow
 }
 
+// Both sides are every commit reachable through any parent, as reachableFrom
+// lists them, so a branch merged into the base reads as behind it, or as
+// identical, never as diverged from it. The merge base is a commit both reach
+// that no other such commit reaches, as git's is: dates alone can list an
+// older shared ancestor first, and commits made in one second all tie.
 export function divergence(head: CommitRow[], base: CommitRow[]): Divergence | null {
   const onBase = new Set(base.map((c) => c.sha))
-  const at = head.findIndex((c) => onBase.has(c.sha))
-  const mergeBase = head[at]
+  const onHead = new Set(head.map((c) => c.sha))
+  const shared = head.filter((c) => onBase.has(c.sha))
+  const byId = new Map(head.map((c) => [c.sha, c]))
+  const below = new Set<string>()
+  const pending = shared.flatMap(parentsOf)
+  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
+    if (below.has(at)) continue
+    below.add(at)
+    const row = byId.get(at)
+    if (row !== undefined) pending.push(...parentsOf(row))
+  }
+  const mergeBase = shared.find((c) => !below.has(c.sha))
   if (mergeBase === undefined) return null
   return {
-    ahead: head.slice(0, at),
-    behind: base.findIndex((c) => c.sha === mergeBase.sha),
+    ahead: head.filter((c) => !onBase.has(c.sha)),
+    behind: base.filter((c) => !onHead.has(c.sha)).length,
     mergeBase,
   }
 }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { strftime } from '../../../builtin/utils/strftime.ts'
+import { gnuStrftime } from '../../../builtin/utils/strftime.ts'
 import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv, type Zone } from '../../../../utils/timezone.ts'
 import { DateFormatColonError, UnknownDateFormatError } from './errors.ts'
 import { DateKind, type DateMode } from './types.ts'
@@ -262,7 +262,7 @@ function formatted(timestamp: number, offsetMinutes: number, mode: DateMode): st
   }
   const zone: Zone = mode.local ? (mode.zone ?? LOCAL_ZONE) : UTC_ZONE
   const shown = mode.local ? timestamp : timestamp + offsetMinutes * 60
-  return strftime(new Date(shown * 1000), munged.join(''), zone)
+  return gnuStrftime(new Date(shown * 1000), munged.join(''), zone)
 }
 
 /**

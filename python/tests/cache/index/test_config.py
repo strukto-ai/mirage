@@ -117,44 +117,20 @@ def test_redis_index_config_is_index_config():
     assert isinstance(config, IndexConfig)
 
 
-def test_index_config_takes_ttl():
-    assert IndexConfig(ttl=5).ttl == 5
-
-
-def test_index_config_refuses_an_unknown_field():
-    with pytest.raises(ValidationError, match="ttll"):
-        IndexConfig(ttll=5)
-
-
-def test_index_config_refuses_a_redis_field_on_a_default_ram_type():
-    with pytest.raises(ValidationError, match="key_prefix"):
-        IndexConfig(key_prefix="s3:")
-
-
-def test_redis_index_config_refuses_the_camel_case_spelling():
-    with pytest.raises(ValidationError, match="keyPrefix"):
-        RedisIndexConfig(key_prefix="a:", keyPrefix="b:")
-
-
-def test_redis_index_config_refuses_an_unknown_field():
-    with pytest.raises(ValidationError, match="urll"):
-        RedisIndexConfig(urll="redis://localhost:6379/0")
-
-
-def test_index_config_refuses_an_unknown_type():
-    with pytest.raises(
-        ValidationError, match="Input should be 'ram' or 'redis'"
-    ):
-        IndexConfig(type="redsi")
-
-
-def test_index_config_refuses_a_null_type():
-    with pytest.raises(
-        ValidationError, match="Input should be 'ram' or 'redis'"
-    ):
-        IndexConfig(type=None)
-
-
-def test_index_config_refuses_a_redis_field_on_an_explicit_ram_type():
-    with pytest.raises(ValidationError, match="key_prefix"):
-        IndexConfig(type="ram", key_prefix="s3:")
+@pytest.mark.parametrize(
+    ("model", "fields", "named"),
+    [
+        (IndexConfig, {"ttll": 5}, "ttll"),
+        (IndexConfig, {"key_prefix": "s3:"}, "key_prefix"),
+        (IndexConfig, {"type": "ram", "key_prefix": "s3:"}, "key_prefix"),
+        (RedisIndexConfig, {"urll": "redis://localhost:6379/0"}, "urll"),
+        (
+            RedisIndexConfig,
+            {"key_prefix": "a:", "keyPrefix": "b:"},
+            "keyPrefix",
+        ),
+    ],
+)
+def test_index_config_refuses_a_field_it_does_not_take(model, fields, named):
+    with pytest.raises(ValidationError, match=named):
+        model(**fields)

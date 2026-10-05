@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from io import BytesIO
 
 from dulwich.config import ConfigFile
+from dulwich.object_store import PackCapableObjectStore
+from dulwich.refs import RefsContainer
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.io import read_optional
@@ -25,7 +28,47 @@ from mirage.commands.cli.builtin.git.util import git_bool
 from mirage.runtime.types import DispatchFn
 
 
-async def open_repo(dispatch: DispatchFn, location: RepoLocation) -> BaseRepo:
+class Repo(BaseRepo):
+    """A repository opened from a mount: dulwich's ``BaseRepo`` and the
+    planes a resolution reaching past the object store needs.
+
+    The working tree and the index are read through the dispatcher, on
+    the loop serving the mount, from the worker thread a resolution runs
+    on.
+
+    Args:
+        store (PackCapableObjectStore): the object database.
+        refs (RefsContainer): every ref, as load_refs reads them.
+        dispatch (DispatchFn): workspace op dispatcher.
+        location (RepoLocation): the discovered repository.
+        loop (asyncio.AbstractEventLoop): the loop serving the mount.
+        ambiguous (list[str] | None): where resolving a name two refs
+            answer to puts git's ``refname is ambiguous`` warning, for
+            the verb to print ahead of its own stderr; None when
+            ``core.warnAmbiguousRefs`` is off or nothing collects them.
+    """
+
+    def __init__(
+        self,
+        store: PackCapableObjectStore,
+        refs: RefsContainer,
+        dispatch: DispatchFn,
+        location: RepoLocation,
+        loop: asyncio.AbstractEventLoop,
+        ambiguous: list[str] | None,
+    ) -> None:
+        super().__init__(store, refs)
+        self.dispatch = dispatch
+        self.location = location
+        self.loop = loop
+        self.ambiguous = ambiguous
+
+
+async def open_repo(
+    dispatch: DispatchFn,
+    location: RepoLocation,
+    ambiguous: list[str] | None = None,
+) -> Repo:
     """Open a repository living in a mount as a dulwich repository.
 
     This is the async-to-sync boundary the whole design turns on. Every
@@ -46,10 +89,14 @@ async def open_repo(dispatch: DispatchFn, location: RepoLocation) -> BaseRepo:
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         location (RepoLocation): the discovered repository.
+        ambiguous (list[str] | None): where ambiguity warnings go, None
+            for nowhere.
     """
     store = await load_object_store(dispatch, location.commondir)
     refs = await load_refs(dispatch, location.gitdir, location.commondir)
-    return BaseRepo(store, refs)
+    return Repo(
+        store, refs, dispatch, location, asyncio.get_running_loop(), ambiguous
+    )
 
 
 async def config_values(

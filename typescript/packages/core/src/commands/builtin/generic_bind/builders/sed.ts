@@ -12,37 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../../../utils/key_prefix.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { PathSpec } from '../../../../types.ts'
-import { resolvePath } from '../../../../utils/path.ts'
-import { rstripSlash } from '../../../../utils/slash.ts'
-import type { CommandOpts } from '../../../config.ts'
 import { sedGeneric } from '../../generic/sed.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { positionalAsPaths } from '../../generic/sed.ts'
 
 const ENC = new TextEncoder()
-
-/**
- * When the script is supplied via -e/-f, GNU sed treats every bare argument as
- * a file. The arg parser instead routes the first bare arg into the positional
- * `text` (script) slot, so recover it as a path operand here.
- */
-function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[] {
-  const prefix = opts.mountPrefix !== undefined ? rstripSlash(opts.mountPrefix) : ''
-  return texts.map((t) => {
-    const resolved = resolvePath(t, opts.cwd)
-    const slash = resolved.lastIndexOf('/')
-    return new PathSpec({
-      virtual: resolved,
-      directory: slash >= 0 ? resolved.slice(0, slash + 1) : '/',
-      resolved: true,
-      vfsPath: mountKey(resolved, prefix),
-    })
-  })
-}
 
 export const BUILDER: Builder = {
   name: 'sed',

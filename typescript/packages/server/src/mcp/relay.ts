@@ -41,13 +41,18 @@ export class McpRelay {
 
 /**
  * Relay this process's stdio to a daemon's MCP endpoint, until stdin
- * ends.
+ * ends. The bearer token is asked for on every request, so a login
+ * refreshed while the relay runs is sent; an empty one sends none.
  */
-export async function relayStdio(url: string, headers: Record<string, string>): Promise<void> {
+export async function relayStdio(url: string, token: () => Promise<string>): Promise<void> {
   const upstream = new Client({ name: 'mirage', version: VERSION })
-  await upstream.connect(
-    new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers } }),
-  )
+  const authProvider = {
+    token: async (): Promise<string | undefined> => {
+      const bearer = await token()
+      return bearer !== '' ? bearer : undefined
+    },
+  }
+  await upstream.connect(new StreamableHTTPClientTransport(new URL(url), { authProvider }))
   try {
     const { server } = new McpRelay(upstream)
     const closed = new Promise<void>((resolve) => {

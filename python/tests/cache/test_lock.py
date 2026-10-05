@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.cache.lock import KeyLockMixin
+from mirage.cache.lock import KeyLock, KeyLockMixin
 
 
 class _Store(KeyLockMixin):
@@ -90,3 +90,48 @@ async def test_same_key_serialized():
     assert order[1] == "first_end"
     assert order[2] == "second_start"
     assert order[3] == "second_end"
+
+
+async def _section(lock: KeyLock, key: str, name: str, order: list[str]):
+    async with lock.with_lock(key):
+        order.append(f"{name}_start")
+        await asyncio.sleep(0.01)
+        order.append(f"{name}_end")
+
+
+@pytest.mark.asyncio
+async def test_key_lock_runs_one_caller_at_a_time_per_key():
+    lock = KeyLock()
+    order: list[str] = []
+    await asyncio.gather(
+        _section(lock, "/same", "first", order),
+        _section(lock, "/same", "second", order),
+    )
+    assert order == ["first_start", "first_end", "second_start", "second_end"]
+
+
+@pytest.mark.asyncio
+async def test_key_lock_runs_different_keys_at_once():
+    lock = KeyLock()
+    order: list[str] = []
+    await asyncio.gather(
+        _section(lock, "/a", "a", order),
+        _section(lock, "/b", "b", order),
+    )
+    assert order.index("b_start") < order.index("a_end")
+
+
+@pytest.mark.asyncio
+async def test_key_lock_keeps_nothing_once_released():
+    # An owner touching many paths over its life holds no lock for the
+    # ones it is done with, whether the body returned or raised.
+    lock = KeyLock()
+    await asyncio.gather(
+        _section(lock, "/a", "a", []), _section(lock, "/a", "b", [])
+    )
+    with pytest.raises(RuntimeError):
+        async with lock.with_lock("/b"):
+            raise RuntimeError("boom")
+    async with lock.with_lock("/b"):
+        pass
+    assert lock._locks == {} and lock._users == {}

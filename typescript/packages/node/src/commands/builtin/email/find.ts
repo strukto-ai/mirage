@@ -32,7 +32,7 @@ const resolveGlob = resolveGlobOf(IO)
 // classifies entries through stat, so an attachment named report.pdf is a
 // file and its like-named parent dir stays a directory. It also merges
 // namespace symlinks, which no email readdir can see.
-async function findCommand(
+async function find(
   accessor: EmailAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -70,5 +70,5 @@ export const EMAIL_FIND = command({
   name: 'find',
   vfs: VFSName.EMAIL,
   spec: specOf('find'),
-  fn: findCommand,
+  fn: find,
 })

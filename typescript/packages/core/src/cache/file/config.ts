@@ -14,8 +14,7 @@
 
 import { z } from 'zod'
 
-import { normalizeFields } from '../../utils/normalize.ts'
-import { refuseRepeatedFields, refuseUnknownKeys } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
 
 export const CacheType = Object.freeze({
   RAM: 'ram',
@@ -24,56 +23,43 @@ export const CacheType = Object.freeze({
 
 export type CacheType = (typeof CacheType)[keyof typeof CacheType]
 
+// The type is any registered one: `registerFileCacheStore` takes names
+// this module does not list, and the registry names a missing factory.
+const CacheConfigSchema = z.object({
+  type: z.custom<CacheType>((value) => typeof value === 'string').optional(),
+  limit: z.union([z.string(), z.number()]).optional(),
+  maxDrainBytes: z.number().nullable().optional(),
+})
+
+const RedisCacheConfigSchema = CacheConfigSchema.extend({
+  url: z.string().optional(),
+  keyPrefix: z.string().optional(),
+})
+
 /**
  * Declarative description of the workspace's file cache, the twin of
  * {@link IndexConfig} for the byte cache. Mirrors Python `CacheConfig`.
  */
-export interface CacheConfig {
-  type?: CacheType
-  limit?: string | number
-  maxDrainBytes?: number | null
-}
+export type CacheConfig = ConfigOf<typeof CacheConfigSchema>
 
-export interface RedisCacheConfig extends CacheConfig {
-  url?: string
-  keyPrefix?: string
-}
-
-const CACHE_FIELDS: Record<keyof CacheConfig, true> = {
-  type: true,
-  limit: true,
-  maxDrainBytes: true,
-}
-const REDIS_CACHE_FIELDS: Record<keyof RedisCacheConfig, true> = {
-  ...CACHE_FIELDS,
-  url: true,
-  keyPrefix: true,
-}
-const CacheTypeField = z.object({ type: z.string().optional() })
+export type RedisCacheConfig = ConfigOf<typeof RedisCacheConfigSchema>
 
 /**
- * Refuse a cache config's unknown keys and camelize the rest.
+ * Check a cache config the way python's `CacheConfig` checks one on
+ * construction, and camelize its keys.
  *
- * The interface checks only a fresh literal, at compile time; python's
- * `CacheConfig` forbids extra fields at construction, and this is its
- * twin at the door that builds the cache. A key no field of its type
- * takes is refused; a field's snake_case spelling is taken at runtime
- * and written under its camelCase name, as `refuseUnknownKeys` and
- * `normalizeFields` do for a schemaless VFS block. Unlike those blocks,
- * one field named in both spellings is refused rather than resolved by
- * key order. Only the type and the key names are checked: the values
- * are the interface's to type. The fields are picked by `type`, where
- * python picks them by class: a RAM cache takes no connection fields,
- * and any other type takes the redis set, which is what its registered
- * factory receives.
+ * The fields are picked by `type`, where python picks them by class: a
+ * RAM cache takes no connection fields, and any other type takes the
+ * redis set its registered factory receives. One field named in both
+ * spellings is refused, as python refuses the camelCase one.
  *
  * @param config the cache config as the caller passed it.
- * @returns the config with every key in its camelCase spelling.
+ * @returns the checked config with every key in its camelCase spelling.
  */
 export function normalizeCacheConfig(config: CacheConfig): CacheConfig {
-  const ram = (CacheTypeField.parse(config).type ?? CacheType.RAM) === CacheType.RAM
-  const input = { ...config }
-  refuseUnknownKeys(input, Object.keys(ram ? CACHE_FIELDS : REDIS_CACHE_FIELDS))
+  const input = config as Record<string, unknown>
   refuseRepeatedFields(input)
-  return normalizeFields(input) as CacheConfig
+  return (input.type ?? CacheType.RAM) === CacheType.RAM
+    ? parseConfigWithSchema(CacheConfigSchema, input)
+    : parseConfigWithSchema(RedisCacheConfigSchema, input)
 }

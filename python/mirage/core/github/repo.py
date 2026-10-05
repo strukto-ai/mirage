@@ -15,6 +15,7 @@
 import base64
 from dataclasses import dataclass
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.core.api.client import SessionArg
@@ -103,13 +104,82 @@ async def ensure_ref(accessor: GitHubAccessor) -> str:
     return resolved
 
 
-def parse_repo(spec: str) -> RepoRef:
-    """Split gh's `[HOST/]OWNER/REPO`.
+# go-gh's IsURL: a word that starts `git@` or with a scheme a git remote
+# uses names a repository by URL rather than as `[HOST/]OWNER/REPO`.
+URL_PREFIXES = (
+    "git@",
+    "ssh:",
+    "git+ssh:",
+    "git:",
+    "http:",
+    "git+https:",
+    "https:",
+)
+# The schemes go-gh leaves alone before it reads an scp-style `host:path`.
+PROTOCOLS = (*URL_PREFIXES[1:], "ftp:", "ftps:", "file:")
 
-    The host is optional and leading, so the owner and the repository are
-    always the last two segments. Taking the first two instead reads
-    `github.com/acme/tools` as owner `github.com`, repo `acme` -- a
-    different repository, reported as success.
+
+def _url_of(spec: str) -> tuple[str, str, str]:
+    """A repository URL's scheme, host and path, as go-gh's ParseURL
+    reads them: ``git@HOST:OWNER/REPO.git`` is scp syntax for ``ssh://``.
+
+    Args:
+        spec (str): the URL as the line spelled it.
+
+    Raises:
+        ValueError: the URL names no host.
+    """
+    raw = spec
+    if not raw.startswith(PROTOCOLS) and ":" in raw and "\\" not in raw:
+        raw = "ssh://" + raw.replace(":", "/", 1)
+    try:
+        url = urlsplit(raw)
+        host = url.hostname
+    except ValueError:
+        host = None
+    if not host:
+        raise ValueError("no hostname detected")
+    return url.scheme, host, url.path
+
+
+def repo_host(spec: str) -> str | None:
+    """The host a repository argument names, None for ``OWNER/REPO``.
+
+    Args:
+        spec (str): the repository as the line spelled it.
+    """
+    if spec.startswith(URL_PREFIXES):
+        return _url_of(spec)[1]
+    parts = spec.split("/")
+    return parts[0].lower() if len(parts) == 3 else None
+
+
+def _repo_from_url(spec: str) -> RepoRef:
+    """A repository named by URL, as go-gh's ParseURL reads it.
+
+    The path must be exactly two segments once its slashes are trimmed,
+    and ``.git`` comes off the name.
+
+    Args:
+        spec (str): the URL as the line spelled it.
+    """
+    scheme, _host, path = _url_of(spec)
+    if scheme == "ssh" and path.startswith("//"):
+        path = path[1:]
+    parts = path.strip("/").split("/")
+    if len(parts) != 2:
+        raise ValueError(f"invalid path: {path}")
+    return RepoRef(owner=parts[0], repo=parts[1].removesuffix(".git"))
+
+
+def parse_repo(spec: str) -> RepoRef:
+    """Split gh's repository argument.
+
+    A URL (``https://HOST/OWNER/REPO``, ``git@HOST:OWNER/REPO.git``) or
+    ``[HOST/]OWNER/REPO``. The host is optional and leading, so the owner
+    and the repository are always the last two segments. Taking the first
+    two instead reads `github.com/acme/tools` as owner `github.com`, repo
+    `acme` -- a different repository, reported as success.
 
     Args:
         spec (str): the repository as the line spelled it.
@@ -118,12 +188,15 @@ def parse_repo(spec: str) -> RepoRef:
         RepoRef: the owner and repository names.
 
     Raises:
-        ValueError: the spec is not one or two slashes of names.
+        ValueError: the spec is neither a URL nor one or two slashes of
+            names.
     """
+    if spec.startswith(URL_PREFIXES):
+        return _repo_from_url(spec)
     parts = spec.split("/")
     # One extra segment is a host; two is not a repository any spelling
     # of gh's format reaches.
-    if len(parts) not in (2, 3) or not all(parts[-2:]):
+    if len(parts) not in (2, 3) or not all(parts):
         raise ValueError(
             f'expected the "[HOST/]OWNER/REPO" format, got "{spec}"'
         )
@@ -297,14 +370,21 @@ async def read_readme(config: GhConfig, ref: RepoRef) -> str | None:
 
 
 async def fork_repo(
-    config: GhConfig, ref: RepoRef, name: str | None = None
+    config: GhConfig, ref: RepoRef, body: dict[str, JsonValue] | None = None
 ) -> JsonValue:
-    body: JsonValue = {} if name is None else {"name": name}
+    """Fork a repository.
+
+    Args:
+        config (GhConfig): the install.
+        ref (RepoRef): the repository to fork.
+        body (dict[str, JsonValue] | None): the request's ``name``,
+            ``organization`` and ``default_branch_only``.
+    """
     return await github_request(
         config.token,
         "POST",
         f"/repos/{ref.owner}/{ref.repo}/forks",
-        body,
+        body or {},
         base_url=config.base_url,
     )
 

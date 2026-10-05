@@ -220,13 +220,18 @@ async def _one_stdin_twice(
     limit: int | None,
     print_bytes: bool,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Both operands naming the one stdin, as diffutils 3.10 answers it.
+    """Both operands naming the one stdin, as diffutils 3.10 answers it
+    for stdin redirected from a regular file.
 
-    The same file at the same offset is equal unread. Otherwise cmp
-    skips on the one descriptor twice, so the first file reads what is
-    left past both skips and the second reads nothing, and closing the
-    descriptor a second time fails: that line and exit 2 follow
-    whatever the comparison said, -s included.
+    One name at one skip is equal unread. Otherwise cmp skips on the
+    one descriptor twice, so the files sit at the first skip and at the
+    sum of both, and are equal unread when those match. -s then answers
+    1 unread when the bytes left past each position differ within -n.
+    Otherwise the first file reads what is left past both skips and the
+    second reads nothing, and closing the descriptor a second time
+    fails: that line and exit 2 follow whatever the comparison said. A
+    pipe fails both seeks, which GNU takes for one position, so it
+    answers 0 where this answers as the file.
 
     Args:
         read_bytes (Callable): the backend reader, which stdin rides.
@@ -238,9 +243,13 @@ async def _one_stdin_twice(
         limit (int | None): -n.
         print_bytes (bool): -b.
     """
-    if skip[0] == skip[1]:
+    if skip[0] == skip[1] or skip[1] == 0:
         return None, IOResult()
     data = await stdin_bytes(read_bytes, stdin)(p)
+    left = (max(len(data) - skip[0], 0), max(len(data) - sum(skip), 0))
+    if silent and left[0] != left[1]:
+        if limit is None or min(left) < limit:
+            return None, IOResult(exit_code=1)
     stdout, io = _compared(
         data[skip[0] + skip[1] :],
         b"",

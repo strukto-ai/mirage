@@ -18,6 +18,7 @@ from typing import Any
 import tree_sitter
 import tree_sitter_bash
 
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parameter import scan_parameter
 from mirage.shell.parse.constants import (
     ARITH_OPEN_TOKEN,
@@ -439,7 +440,7 @@ def source_offsets(command: str, root: TSNodeLike) -> tuple[int, ...]:
     """
     if isinstance(root, HeredocNode | PrefixNode):
         return root.offsets
-    data = command.encode()
+    data = encode_text(command)
     source = drop_source_bytes(
         HeredocSource(data, data, tuple(range(len(data) + 1)), ()),
         continuation_bytes(data),
@@ -454,8 +455,8 @@ def join_continuations(command: str) -> str:
     Args:
         command (str): the raw command line.
     """
-    data = command.encode()
-    return drop_bytes(data, continuation_bytes(data)).decode()
+    data = encode_text(command)
+    return decode_text(drop_bytes(data, continuation_bytes(data)))
 
 
 def _orphaned_dollar_offsets(root: TSNodeLike, data: bytes) -> list[int]:
@@ -484,7 +485,7 @@ def _orphaned_dollar_offsets(root: TSNodeLike, data: bytes) -> list[int]:
                 and child.type == "$"
                 and node.type != "simple_expansion"
                 and data[child.end_byte : child.end_byte + 1] != b"{"
-                and scan_parameter(data[child.start_byte :].decode(), 0)
+                and scan_parameter(decode_text(data[child.start_byte :]), 0)
                 is not None
             ):
                 offsets.append(child.start_byte)
@@ -504,7 +505,7 @@ def _rebrace_dollar(data: bytes, offset: int) -> bytes:
         data (bytes): shell source holding the orphaned ``$``.
         offset (int): byte offset of the ``$``.
     """
-    ref = scan_parameter(data[offset:].decode(), 0)
+    ref = scan_parameter(decode_text(data[offset:]), 0)
     if ref is None:
         return data
     name, consumed = ref
@@ -513,7 +514,7 @@ def _rebrace_dollar(data: bytes, offset: int) -> bytes:
     return (
         data[:offset]
         + b"${"
-        + name.encode()
+        + encode_text(name)
         + b"}"
         + data[offset + consumed :]
     )
@@ -690,7 +691,7 @@ def parse(command: str) -> TSNodeLike:
         TSNodeLike: root node, or the original errored root when no
         reparse helps.
     """
-    original = command.encode()
+    original = encode_text(command)
     source = None
     if b"<<" in original:
         # The operators are read off a tree that lexes `0<<EOF` as one.
@@ -706,7 +707,7 @@ def parse(command: str) -> TSNodeLike:
     data = (
         source.source
         if source is not None
-        else join_continuations(command).encode()
+        else encode_text(join_continuations(command))
     )
     timing_marks: list[tuple[int, str, bool, int, int]] = []
     if b"time" in data or b"!" in data:

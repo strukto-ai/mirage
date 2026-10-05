@@ -18,7 +18,7 @@ import type { PathSpec } from '../../types.ts'
 import { streamItem } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'
 
-export async function* stream(
+export async function* readStream(
   accessor: OneDriveAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,

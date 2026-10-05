@@ -70,7 +70,7 @@ async function* headSource(
   yield data
 }
 
-async function headCommand(
+async function head(
   accessor: PostgresAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -100,5 +100,5 @@ export const POSTGRES_HEAD = command({
   name: 'head',
   vfs: VFSName.POSTGRES,
   spec: specOf('head'),
-  fn: headCommand,
+  fn: head,
 })

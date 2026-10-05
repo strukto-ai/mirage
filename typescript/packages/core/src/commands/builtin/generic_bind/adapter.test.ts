@@ -21,7 +21,6 @@ import { eacces, eisdir, enoent, formatFsError } from '../../../utils/errors.ts'
 import {
   dirAwareStat,
   dirAwareStream,
-  makeResolveGlob,
   resolveGlobOf,
   withDirGuard,
   withHiddenGuard,
@@ -29,10 +28,12 @@ import {
   withPolicyGuard,
   withRuleGuard,
   withDispatchRuleGuard,
+  withModeGuard,
   withPathGuards,
   requireOp,
   type CommandIO,
 } from './adapter.ts'
+import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 import {
   runWithAdmission,
   runWithMountGate,
@@ -1084,3 +1085,38 @@ describe('directory EOF', () => {
     }
   })
 })
+
+// mkdir(2) refuses a taken name even where the create would pass. Mirrors
+// test_adapter.py.
+it.each([
+  [FileType.DIRECTORY, false, true],
+  [FileType.FILE, false, true],
+  [FileType.FILE, true, true],
+  [FileType.DIRECTORY, true, false],
+  [null, false, false],
+])(
+  'the mode guard refuses a taken %s (parents=%s) on a writable mount: %s',
+  async (kind, parents, refused) => {
+    const made: string[] = []
+    const ops = withModeGuard({
+      readdir: () => Promise.resolve([]),
+      readBytes: () => Promise.resolve(new Uint8Array()),
+      readStream: () => oneChunkStream(new Uint8Array()),
+      stat: (_accessor, path) =>
+        kind === null
+          ? Promise.reject(enoent(path.virtual))
+          : Promise.resolve(new FileStat({ name: 'd', type: kind })),
+      isMounted: () => true,
+      mkdir: (_accessor, path) => {
+        made.push(path.virtual)
+        return Promise.resolve()
+      },
+    })
+    await runWithMountGate('/data', MountMode.WRITE, async () => {
+      const call = ops.mkdir?.(accessor, PathSpec.fromStrPath('/data/d', 'd'), parents)
+      if (refused) await expect(call).rejects.toMatchObject({ code: 'EEXIST' })
+      else await call
+    })
+    expect(made).toEqual(refused ? [] : ['/data/d'])
+  },
+)

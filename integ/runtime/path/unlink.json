@@ -33,11 +33,12 @@
             "js": "console.log(os.remove('/data/a.txt'), os.stat('/data/a.txt')[1])"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "False\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "False\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "0 44\n"
             }
           }
@@ -48,11 +49,12 @@
             "js": "console.log(os.remove('/data/a.txt'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "-44\n"
             }
           }
@@ -64,20 +66,6 @@
           "expect": {
             "exit": 0,
             "stdout": "IsADirectoryError\n"
-          },
-          "expect_on": {
-            "monty@ram": {
-              "stdout": "FileNotFoundError\n"
-            },
-            "monty@redis": {
-              "stdout": "FileNotFoundError\n"
-            },
-            "wasi@ram": {
-              "stdout": "FileNotFoundError\n"
-            },
-            "wasi@redis": {
-              "stdout": "FileNotFoundError\n"
-            }
           }
         },
         {

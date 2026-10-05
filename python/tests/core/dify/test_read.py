@@ -21,7 +21,7 @@ async def test_read_bytes_uses_document_segments(
     monkeypatch.setattr(tree, "list_all_documents", list_basic_documents)
     monkeypatch.setattr(read, "get_document_segments", get_segments)
 
-    data = await read.read_bytes(dify_accessor, guide_path, dify_index)
+    data = await read.read(dify_accessor, guide_path, dify_index)
 
     assert data == b"first\nsecond"
 

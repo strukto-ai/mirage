@@ -47,26 +47,26 @@ export function registerFileCacheStore(type: CacheType, factory: FileCacheFactor
  * including its failure mode: asking for a store whose package has not
  * been loaded names the package rather than silently degrading to RAM.
  *
- * @param config the cache config; undefined keeps the RAM store sized by
+ * @param cache the cache config; undefined keeps the RAM store sized by
  *   `cacheLimit`.
  * @param cacheLimit the size knob used only when no config is given.
  */
 export function buildFileCache(
-  config: CacheConfig | undefined,
+  cache: CacheConfig | undefined,
   cacheLimit: string | number = '512MB',
 ): FileCacheStore {
   // Every CacheConfig field is optional, so a built store is
   // structurally assignable to it and would slip through to the RAM
   // branch below — silently replaced by a cache that never sees a read.
   // Structural typing cannot refuse this; say so instead.
-  if (config !== undefined && typeof (config as Partial<FileCache>).get === 'function') {
+  if (cache !== undefined && typeof (cache as Partial<FileCache>).get === 'function') {
     throw new Error(
       'options.cache takes the config to build a cache from, not a built store; ' +
         'register a factory for its type with registerFileCacheStore(type, ...) ' +
         'and name that type here',
     )
   }
-  const normalized = config === undefined ? undefined : normalizeCacheConfig(config)
+  const normalized = cache === undefined ? undefined : normalizeCacheConfig(cache)
   const type = normalized?.type ?? CacheType.RAM
   if (type !== CacheType.RAM) {
     const factory = FACTORIES[type]

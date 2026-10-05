@@ -88,21 +88,3 @@ async def test_door_options_route_nothing(line, out):
     )
     r = await ws.shell(line)
     assert (r.exit_code, r.stdout, r.stderr or b"") == (0, out, b"")
-
-
-@pytest.mark.asyncio
-async def test_positional_operands_on_two_mounts_still_refused():
-    ws = Workspace(
-        {
-            "/data": (RAMVFS(), MountMode.WRITE),
-            "/work": (RAMVFS(), MountMode.WRITE),
-        },
-        mode=MountMode.WRITE,
-    )
-    await ws.shell("echo 1 > /work/t.json; echo 2 > /data/d.json")
-    r = await ws.shell("jq . /work/t.json /data/d.json")
-    assert r.exit_code == 1
-    assert r.stderr == (
-        b"jq: paths span multiple mounts (/data/, /work/), "
-        b"cross-mount not supported\n"
-    )

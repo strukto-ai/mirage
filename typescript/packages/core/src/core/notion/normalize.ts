@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { jsonBytes } from '../render/json.ts'
-import { formatSegment, stripDashes } from './pathing.ts'
+import { formatSegment } from './pathing.ts'
 import { blocksToMarkdown } from './render.ts'
 
 type Json = Record<string, unknown>
-
-const ID_PATTERN = /^[0-9a-f]{32}$/
 
 function pickStringOrNull(record: Json, key: string): string | null {
   const value = record[key]
@@ -68,18 +66,6 @@ export function extractTitle(page: Json): string {
     if (joined !== '') return joined
   }
   return 'untitled'
-}
-
-export function extractIdNoDashes(page: Json): string {
-  const id = pickStringOrNull(page, 'id')
-  if (id === null) {
-    throw new Error('notion page missing id')
-  }
-  const stripped = stripDashes(id).toLowerCase()
-  if (!ID_PATTERN.test(stripped)) {
-    throw new Error('notion page missing id')
-  }
-  return stripped
 }
 
 export function pageSegmentName(page: Json): string {

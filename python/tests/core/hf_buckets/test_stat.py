@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.hf_buckets.read import read_bytes
+from mirage.core.hf_buckets.read import read
 from mirage.core.hf_buckets.readdir import readdir
 from mirage.core.hf_buckets.stat import stat
 from mirage.core.hf_hub.client import HfHubError
@@ -84,7 +84,7 @@ async def test_stat_size_matches_read_for_every_file(make_acc):
             if st.type == FileType.DIRECTORY:
                 pending.append(child)
                 continue
-            data = await read_bytes(acc, PathSpec.from_str_path(child))
+            data = await read(acc, PathSpec.from_str_path(child))
             assert st.size == len(data)
 
 

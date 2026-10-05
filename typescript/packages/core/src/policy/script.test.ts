@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { PrefixResolver } from '../runtime/resolver.ts'
-import { ScriptSource } from '../runtime/routing/types.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import type { BridgeDispatchFn } from '../runtime/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../types.ts'
 import type { Policy } from './base.ts'

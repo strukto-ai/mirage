@@ -17,7 +17,7 @@ from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.hierarchy.probe import assert_parent
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
-from mirage.core.notion.pathing import page_dirname
+from mirage.core.notion.normalize import page_segment_name
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.resolve import guard_row, resolve_row
 from mirage.core.notion.scope import detect_scope
@@ -43,7 +43,7 @@ async def _row_stat(
 ) -> FileStat:
     await assert_parent(stat, accessor, path, index)
     page = await resolve_row(accessor, match, path.virtual)
-    name = page_dirname(page)
+    name = page_segment_name(page)
     return FileStat(
         name=name,
         type=FileType.DIRECTORY,

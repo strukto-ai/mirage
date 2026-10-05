@@ -26,36 +26,114 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
-def test_monty_runs_sandboxed_print():
-    runtime = MontyRuntime()
-    result = asyncio.run(runtime.run(RunArgs(code="print(21 * 2)")))
-    assert result.exit_code == 0
-    assert result.stdout == b"42\n"
-    assert result.stderr is None
-
-
-def test_monty_syntax_error():
-    runtime = MontyRuntime()
-    result = asyncio.run(runtime.run(RunArgs(code="def broken(")))
-    assert result.exit_code == 1
-    assert b"SyntaxError" in result.stderr
-
-
-def test_monty_runtime_error_keeps_stdout():
-    runtime = MontyRuntime()
-    result = asyncio.run(runtime.run(RunArgs(code="print('before')\n1/0")))
-    assert result.exit_code == 1
-    assert result.stdout == b"before\n"
-    assert b"ZeroDivisionError" in result.stderr
-
-
-def test_monty_argv_global():
-    runtime = MontyRuntime()
-    result = asyncio.run(
-        runtime.run(RunArgs(code="print(argv[1:])", args=["a", "b"]))
-    )
-    assert result.exit_code == 0
-    assert result.stdout == b"['a', 'b']\n"
+# A program's whole answer on both hosts: what it prints, its exit
+# code, and a phrase its stderr carries (None: nothing on stderr). The
+# clock rows read the engine's own host clock, and resolve() is
+# absolute() against '/' with no symlinks in the tree, a str on both
+# hosts.
+@pytest.mark.parametrize(
+    ("args", "exit_code", "stdout", "stderr"),
+    [
+        pytest.param(
+            RunArgs(code="print(21 * 2)"), 0, b"42\n", None, id="print"
+        ),
+        pytest.param(
+            RunArgs(code="def broken("), 1, b"", b"SyntaxError", id="syntax"
+        ),
+        pytest.param(
+            RunArgs(code="print('before')\n1/0"),
+            1,
+            b"before\n",
+            b"ZeroDivisionError",
+            id="error-keeps-stdout",
+        ),
+        pytest.param(
+            RunArgs(code="print(argv[1:])", args=["a", "b"]),
+            0,
+            b"['a', 'b']\n",
+            None,
+            id="argv",
+        ),
+        pytest.param(
+            RunArgs(code="print(stdin.decode())", stdin=b"piped"),
+            0,
+            b"piped\n",
+            None,
+            id="stdin",
+        ),
+        pytest.param(
+            RunArgs(code="print(stdin is None)"),
+            0,
+            b"True\n",
+            None,
+            id="no-stdin",
+        ),
+        pytest.param(
+            RunArgs(
+                code="import os; print(os.environ.get('MY_VAR', 'unset'))",
+                env={"MY_VAR": "v1"},
+            ),
+            0,
+            b"v1\n",
+            None,
+            id="run-env",
+        ),
+        pytest.param(
+            RunArgs(
+                code="import os\n"
+                "try:\n"
+                "    os.environ['nope']\n"
+                "except KeyError as e:\n"
+                "    print('KeyError', e)",
+                env={"K": "v"},
+            ),
+            0,
+            b"KeyError 'nope'\n",
+            None,
+            id="missing-env-key",
+        ),
+        pytest.param(
+            RunArgs(
+                code="import os\nos.environ['K'] = 'guest'\n"
+                "print(os.getenv('K'))",
+                env={"K": "v"},
+            ),
+            0,
+            b"v\n",
+            None,
+            id="env-mutation-stays-in-the-guest",
+        ),
+        pytest.param(
+            RunArgs(
+                code="from datetime import datetime, timezone\n"
+                "print(datetime.now().tzinfo)\n"
+                "print(datetime.now(timezone.utc).tzinfo)"
+            ),
+            0,
+            b"None\nUTC\n",
+            None,
+            id="host-clock",
+        ),
+        pytest.param(
+            RunArgs(
+                code="from pathlib import Path\n"
+                "r = Path('rel/x.txt').resolve()\n"
+                "print(type(r).__name__, r)"
+            ),
+            0,
+            b"str /rel/x.txt\n",
+            None,
+            id="lexical-resolve",
+        ),
+    ],
+)
+def test_monty_runs_a_program(args, exit_code, stdout, stderr):
+    result = asyncio.run(MontyRuntime().run(args))
+    assert (result.exit_code, result.stdout) == (exit_code, stdout)
+    if stderr is None:
+        assert result.stderr is None
+    else:
+        assert stderr in result.stderr
 
 
 def test_monty_argv0_is_prog_when_named():
@@ -68,35 +146,6 @@ def test_monty_argv0_is_prog_when_named():
     assert (result.exit_code, result.stdout) == (0, b"pager\n")
     plain = asyncio.run(runtime.run(RunArgs(code="print(argv[0])")))
     assert plain.stdout == b"main.py\n"
-
-
-def test_monty_stdin_global():
-    runtime = MontyRuntime()
-    result = asyncio.run(
-        runtime.run(RunArgs(code="print(stdin.decode())", stdin=b"piped"))
-    )
-    assert result.exit_code == 0
-    assert result.stdout == b"piped\n"
-
-
-def test_monty_stdin_global_none_without_pipe():
-    runtime = MontyRuntime()
-    result = asyncio.run(runtime.run(RunArgs(code="print(stdin is None)")))
-    assert result.exit_code == 0
-    assert result.stdout == b"True\n"
-
-
-def test_monty_env_isolated_to_run_env():
-    runtime = MontyRuntime()
-    result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="import os; print(os.environ.get('MY_VAR', 'unset'))",
-                env={"MY_VAR": "v1"},
-            )
-        )
-    )
-    assert result.stdout == b"v1\n"
 
 
 def test_monty_environ_is_a_dict_of_the_run_env():
@@ -130,26 +179,6 @@ def test_monty_environ_is_a_dict_of_the_run_env():
         b"2\n"
         b"dict\n"
     )
-
-
-def test_monty_missing_environ_key_raises_key_error():
-    runtime = MontyRuntime()
-    code = (
-        "import os\n"
-        "try:\n"
-        "    os.environ['nope']\n"
-        "except KeyError as e:\n"
-        "    print('KeyError', e)"
-    )
-    result = asyncio.run(runtime.run(RunArgs(code=code, env={"K": "v"})))
-    assert (result.exit_code, result.stdout) == (0, b"KeyError 'nope'\n")
-
-
-def test_monty_environ_mutation_cannot_reach_the_host_env():
-    runtime = MontyRuntime()
-    code = "import os\nos.environ['K'] = 'guest'\nprint(os.getenv('K'))"
-    result = asyncio.run(runtime.run(RunArgs(code=code, env={"K": "v"})))
-    assert (result.exit_code, result.stdout) == (0, b"v\n")
 
 
 def test_monty_name():
@@ -395,38 +424,3 @@ def test_monty_refuses_a_path_no_mount_serves():
     )
     assert result.exit_code == 0, result.stderr
     assert result.stdout == b"False\n"
-
-
-def test_monty_serves_the_host_clock():
-    # MontyFs leaves these to the engine's host clock; the TS
-    # door answers with DateTime markers, and both hosts must agree a
-    # guest can read a naive local now and an aware UTC now.
-    runtime = MontyRuntime()
-    result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="from datetime import datetime, timezone\n"
-                "print(datetime.now().tzinfo)\n"
-                "print(datetime.now(timezone.utc).tzinfo)"
-            )
-        )
-    )
-    assert result.exit_code == 0, result.stderr
-    assert result.stdout == b"None\nUTC\n"
-
-
-def test_monty_resolve_answers_a_lexical_str():
-    # No symlinks in the tree, so resolve() is absolute() against '/',
-    # and the answer is a str on both hosts.
-    runtime = MontyRuntime()
-    result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="from pathlib import Path\n"
-                "r = Path('rel/x.txt').resolve()\n"
-                "print(type(r).__name__, r)"
-            )
-        )
-    )
-    assert result.exit_code == 0, result.stderr
-    assert result.stdout == b"str /rel/x.txt\n"

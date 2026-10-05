@@ -21,5 +21,5 @@ export {
 } from './decide.ts'
 export { RouteDeny, RouteError } from './errors.ts'
 export { commandNodes, parsedCommands } from './facts.ts'
-export { DenyResult, RouteResult, ScriptSource } from './types.ts'
+export { DenyResult, RouteResult } from './types.ts'
 export type { RouteDecision, RouteContext, RoutePolicy } from './types.ts'

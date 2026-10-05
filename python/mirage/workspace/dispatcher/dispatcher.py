@@ -18,21 +18,23 @@ import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
+from mirage.commands.resolve import get_extension
 from mirage.context import (
     get_current_session,
     hidden_paths_intersect,
     hidden_refusal,
     path_allowed,
 )
-from mirage.errors import POSIX, FsCondition
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
@@ -44,6 +46,7 @@ from mirage.ops.namespace_view import (
 )
 from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.policy.errors import PolicyDenied, PolicyError
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     DEFAULT_READ_TTL,
     CacheFacts,
@@ -60,7 +63,9 @@ from mirage.utils.errors import (
     eisdir,
     eloop,
     enoent,
+    exdev,
     no_mount,
+    no_xattr,
     walk_refusal,
 )
 from mirage.utils.hidden import move_reveals
@@ -77,6 +82,7 @@ from mirage.workspace.dispatcher.constants import (
     LINK_ENTRY_OPS,
     NAMESPACE_TABLE_OPS,
     POLICY_WRITE_OPS,
+    SERIAL_WRITE_OPS,
     SETATTR_KEYS,
     XATTR_OPS,
 )
@@ -110,9 +116,19 @@ def _memory_answered(
         report.served(VFSName.RAM.value, moved)
 
 
-def _no_xattr(path: PathSpec) -> OSError:
-    condition = POSIX[FsCondition.NO_XATTR]
-    return OSError(condition.errno, condition.phrase, path.virtual)
+def _served(report: OpReport | None, result: Any) -> None:
+    """Stamp the caller's report: the owning mount answered.
+
+    Args:
+        report (OpReport | None): the caller's report, None when the
+            caller does not observe ops.
+        result (Any): the op's answer; bytes are the measure moved.
+    """
+    if report is not None:
+        report.served(
+            None,
+            len(result) if isinstance(result, (bytes, bytearray)) else None,
+        )
 
 
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
@@ -264,16 +280,25 @@ class Dispatcher:
     workspace state. The snapshot drift queue rides along because this
     is the one door: a strict restore's pending fingerprint checks must
     run before ANY op can touch a mount, and FUSE and the ops facade
-    reach here without passing Workspace.dispatch.
+    reach here without passing Workspace.dispatch. So does the
+    workspace's write admission, which holds a write while a capture
+    reads.
     """
 
     def __init__(
-        self, namespace: Namespace, cache, drift: DriftQueue | None = None
+        self,
+        namespace: Namespace,
+        cache,
+        drift: DriftQueue | None = None,
+        admit_write: Callable[[], AbstractAsyncContextManager[None]]
+        | None = None,
     ) -> None:
         self._namespace = namespace
         self._cache = cache
         self._reconciler = Reconciler(cache, namespace)
         self._drift = drift
+        self._admit_write = admit_write
+        self._writers = KeyLock()
 
     @property
     def reconciler(self) -> Reconciler:
@@ -334,6 +359,19 @@ class Dispatcher:
         return fallback
 
     async def dispatch(
+        self,
+        op: str,
+        path: PathSpec,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[Any, IOResult]:
+        if self._admit_write is None or op not in POLICY_WRITE_OPS:
+            return await self._dispatch(op, path, report=report, **kwargs)
+        async with self._admit_write():
+            return await self._dispatch(op, path, report=report, **kwargs)
+
+    async def _dispatch(
         self,
         op: str,
         path: PathSpec,
@@ -487,6 +525,20 @@ class Dispatcher:
                 await self._gated_namespace(op, path, fallback, report),
                 IOResult(),
             )
+        # A mount is a filesystem boundary: rename(2) moves a name within
+        # one and answers EXDEV across two, before any permission is
+        # weighed, so `mv` falls back to copy and unlink instead of the
+        # source's backend taking the destination for one of its keys. It
+        # resolves both parent directories first, so a missing one is
+        # ENOENT (ENOTDIR through a file) ahead of EXDEV.
+        if (
+            op == "rename"
+            and isinstance(dst, PathSpec)
+            and self._namespace.try_mount_for(dst.virtual) is not mount
+        ):
+            refusal = await self._parent_refusal(path)
+            refusal = refusal or await self._parent_refusal(dst)
+            raise refusal or exdev(path)
         # Admission policies fire at the door, before the warm-cache
         # early return below: a cached read must be refused exactly
         # like a cold one, or the cache becomes a policy bypass.
@@ -518,29 +570,26 @@ class Dispatcher:
             )
         await mount.ensure_ready()
         caches_reads = mount.vfs.caches_reads
-        # The file cache is keyed on the path alone, and what it holds is
-        # the rendered read. A raw read asks for a different value under
-        # the same key, so it is neither served from that cache nor kept
-        # in it.
+        # The file cache holds what commands read, keyed on the path
+        # alone. A raw read, or a read through a filetype renderer
+        # (whoever registered it), asks for a different value under the
+        # same key, so it is neither served from that cache nor kept in
+        # it. The renderer read still gets the freshness check, so a path
+        # the backend reports gone fails.
         raw = "filetype" in kwargs and kwargs["filetype"] is None
-        # A cold read keeps the whole file it fetched for the next reader,
-        # through the mount's own manager, the one a command's read
-        # fills: a write racing the fetch retires its generation, so the
-        # bytes it read are not kept. A ranged read comes from the store
-        # only where the store can serve one; elsewhere the read op would
-        # fetch the whole file and slice it for every range, so the whole
-        # file is read once, kept, and each range sliced from it.
+        filetype = (
+            kwargs["filetype"]
+            if "filetype" in kwargs
+            else get_extension(path.virtual)
+        )
+
+        def renders_read() -> bool:
+            return filetype is not None and mount.has_filetype_op(
+                "read", filetype
+            )
+
         offset, size = _window(kwargs)
         whole = (offset, size) == (0, None)
-        filler = (
-            mount.cache_manager
-            if caches_reads
-            and not raw
-            and op in DISPATCH_READ_OPS
-            and size != 0
-            and (whole or not mount.reads_ranges(path.virtual))
-            else None
-        )
 
         if caches_reads and not raw and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
@@ -549,6 +598,7 @@ class Dispatcher:
                 and await self._reconciler.may_serve_cached(
                     mount, path.virtual
                 )
+                and not renders_read()
                 and not mount.retiring
                 and self._namespace.try_mount_for(path.virtual) is mount
             ):
@@ -570,6 +620,26 @@ class Dispatcher:
                 if bound is not None:
                     served = await apply_op_limit(served, bound)
                 return served, IOResult(reads={path.virtual: served})
+
+        # A cold read keeps the whole file it fetched for the next reader,
+        # through the mount's own manager, the one a command's read
+        # fills: a write racing the fetch retires its generation, so the
+        # bytes it read are not kept. A ranged read comes from the store
+        # only where the store can serve one; elsewhere the read op would
+        # fetch the whole file and slice it for every range, so the whole
+        # file is read once, kept, and each range sliced from it. The op
+        # is resolved only once the mount is ready, so a renderer can land
+        # after this check; the fill asks again before it keeps anything.
+        filler = (
+            mount.cache_manager
+            if caches_reads
+            and not raw
+            and op in DISPATCH_READ_OPS
+            and size != 0
+            and (whole or not mount.reads_ranges(path.virtual))
+            and not renders_read()
+            else None
+        )
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             # Ops.rename addresses both endpoints against the source's
@@ -597,8 +667,34 @@ class Dispatcher:
                         path.virtual,
                         **_whole_read(kwargs),
                     ),
+                    keep=lambda: not renders_read(),
                 )
                 result = kept if whole else slice_window(kept, offset, size)
+            elif op in SERIAL_WRITE_OPS:
+                # Held by the store's own object, so one store mounted
+                # twice is one file, and a rename holds both of its
+                # names, taken in one order so two renames between the
+                # same pair cannot deadlock. What the write changes beside
+                # the store (caches, the node table's links and attributes)
+                # changes under the same hold: a chain of renames finishing
+                # out of order would move one name's attributes onto
+                # another.
+                names = {path.virtual}
+                if isinstance(kwargs.get("dst"), PathSpec):
+                    names.add(kwargs["dst"].virtual)
+                prefix = mount.prefix.rstrip("/")
+                keys = {
+                    f"{id(mount.vfs)}:{mount_key(name, prefix)}"
+                    for name in names
+                }
+                async with AsyncExitStack() as held:
+                    for key in sorted(keys):
+                        await held.enter_async_context(
+                            self._writers.with_lock(key)
+                        )
+                    result = await mount.execute_op(op, path.virtual, **kwargs)
+                    _served(report, result)
+                    await self._settle_write(mount, op, path, kwargs)
             else:
                 result = await mount.execute_op(op, path.virtual, **kwargs)
         except (FileNotFoundError, NotADirectoryError):
@@ -621,13 +717,7 @@ class Dispatcher:
             # The op ran, whatever invalidation, the post gate, or an
             # output cap do next: stamped here so a failure in any of
             # them cannot erase a transfer the backend already made.
-            if report is not None:
-                report.served(
-                    None,
-                    len(result)
-                    if isinstance(result, (bytes, bytearray))
-                    else None,
-                )
+            _served(report, result)
         if op == "readdir":
             result = _visible_entries(
                 merge_readdir(
@@ -642,62 +732,8 @@ class Dispatcher:
             result = merge_overlay_stat(
                 self._namespace.meta_for(path.virtual), result
             )
-        if op in DISPATCH_WRITE_OPS:
-            observed = time.time() if op in STAMP_WRITE_OPS else None
-            await self.invalidate_after_write(mount, path, observed=observed)
-            if op in ("unlink", "rmdir"):
-                # The name no longer holds that file, so what was set on
-                # it (overlay mode and owner, extended attributes) goes
-                # with it, as the shell's rm already drops it: a file
-                # created there next starts bare on every surface.
-                await self._namespace.drop_overlay(path.virtual)
-                if op == "rmdir":
-                    # The link check ran before the backend was asked, so
-                    # a visible link below now was created since: it is
-                    # younger than this rmdir, lands after it in the
-                    # serial order (a link synthesizes its parents), and
-                    # the purge taking the directory's hidden nodes must
-                    # not take it too.
-                    arrived = frozenset(
-                        link
-                        for link, _ in self._namespace.link_stats_below(
-                            path.virtual
-                        )
-                        if path_allowed(link)
-                    )
-                    await self._namespace.purge_under(
-                        path.virtual, keep=arrived
-                    )
-            if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-                await self.invalidate_after_rename(mount, path, kwargs["dst"])
-                # rename(2) replaces the destination, so a node the
-                # table holds at that name does not survive the move.
-                # A link left there shadowed the file that had just
-                # landed: the listing showed the new file, every read
-                # followed the old link, and the moved content was
-                # reachable under no name at all.
-                await self._namespace.unlink(kwargs["dst"].virtual)
-                # The subtree moves with it, and only the node table can
-                # move the part of it no backend holds: a link or an
-                # attr overlay below the source is addressed by absolute
-                # path, so it would otherwise stay behind at a name the
-                # rename has emptied. The destination's own subtree is
-                # replaced first, as rename(2) replaces what it lands on.
-                await self._namespace.purge_under(kwargs["dst"].virtual)
-                # The node at the source itself is not part of the
-                # subtree below it, so re-anchoring that subtree leaves
-                # it behind: the mode or ownership a chmod recorded
-                # stayed at the emptied name, never reached the
-                # landing, and was inherited by whatever was created at
-                # the old name next. Shell mv compensates for this in
-                # its own prepare step; a verb reaching the dispatcher
-                # directly, as git mv does, had nothing to.
-                await self._namespace.rename(
-                    path.virtual, kwargs["dst"].virtual
-                )
-                await self._namespace.rename_under(
-                    path.virtual, kwargs["dst"].virtual
-                )
+        if op in DISPATCH_WRITE_OPS and op not in SERIAL_WRITE_OPS:
+            await self._settle_write(mount, op, path, kwargs)
         bound = await post_ops_gate(
             policies, op, path, write, mount.prefix, result
         )
@@ -707,6 +743,75 @@ class Dispatcher:
             # report above already carries the moved count.
             result = await apply_op_limit(result, bound)
         return result, IOResult()
+
+    async def _settle_write(
+        self,
+        mount: MountEntry,
+        op: str,
+        path: PathSpec,
+        kwargs: dict[str, Any],
+    ) -> None:
+        """What a write changes beside the store: the caches above the
+        path, and the node table's links and attributes at its names.
+
+        Args:
+            mount (MountEntry): the mount the write ran on.
+            op (str): the write op that ran.
+            path (PathSpec): the path it wrote, after any follow.
+            kwargs (dict[str, Any]): the op's kwargs; a rename's ``dst``
+                is the moved name.
+        """
+        observed = time.time() if op in STAMP_WRITE_OPS else None
+        await self.invalidate_after_write(mount, path, observed=observed)
+        if op in ("unlink", "rmdir"):
+            # The name no longer holds that file, so what was set on
+            # it (overlay mode and owner, extended attributes) goes
+            # with it, as the shell's rm already drops it: a file
+            # created there next starts bare on every surface.
+            await self._namespace.drop_overlay(path.virtual)
+            if op == "rmdir":
+                # The link check ran before the backend was asked, so
+                # a visible link below now was created since: it is
+                # younger than this rmdir, lands after it in the
+                # serial order (a link synthesizes its parents), and
+                # the purge taking the directory's hidden nodes must
+                # not take it too.
+                arrived = frozenset(
+                    link
+                    for link, _ in self._namespace.link_stats_below(
+                        path.virtual
+                    )
+                    if path_allowed(link)
+                )
+                await self._namespace.purge_under(path.virtual, keep=arrived)
+        if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
+            await self.invalidate_after_rename(mount, path, kwargs["dst"])
+            # rename(2) replaces the destination, so a node the
+            # table holds at that name does not survive the move.
+            # A link left there shadowed the file that had just
+            # landed: the listing showed the new file, every read
+            # followed the old link, and the moved content was
+            # reachable under no name at all.
+            await self._namespace.unlink(kwargs["dst"].virtual)
+            # The subtree moves with it, and only the node table can
+            # move the part of it no backend holds: a link or an
+            # attr overlay below the source is addressed by absolute
+            # path, so it would otherwise stay behind at a name the
+            # rename has emptied. The destination's own subtree is
+            # replaced first, as rename(2) replaces what it lands on.
+            await self._namespace.purge_under(kwargs["dst"].virtual)
+            # The node at the source itself is not part of the
+            # subtree below it, so re-anchoring that subtree leaves
+            # it behind: the mode or ownership a chmod recorded
+            # stayed at the emptied name, never reached the
+            # landing, and was inherited by whatever was created at
+            # the old name next. Shell mv compensates for this in
+            # its own prepare step; a verb reaching the dispatcher
+            # directly, as git mv does, had nothing to.
+            await self._namespace.rename(path.virtual, kwargs["dst"].virtual)
+            await self._namespace.rename_under(
+                path.virtual, kwargs["dst"].virtual
+            )
 
     async def _moved_source_is_dir(self, path: PathSpec) -> bool:
         """Whether a rename's source stats as a directory.
@@ -1011,7 +1116,7 @@ class Dispatcher:
             op,
             path.virtual,
             VFSName.RAM.value,
-            len(target.encode("utf-8")),
+            len(encode_text(target)),
             timer,
         )
         _memory_answered(report)
@@ -1290,7 +1395,7 @@ class Dispatcher:
         elif op == "getxattr":
             found = stored.get(name)
             if found is None:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             result = found
         elif op == "setxattr":
             if kwargs.get("create") and name in stored:
@@ -1298,13 +1403,13 @@ class Dispatcher:
                     errno.EEXIST, os.strerror(errno.EEXIST), path.virtual
                 )
             if kwargs.get("replace") and name not in stored:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             await self._namespace.set_xattr(
                 path.virtual, name, bytes(kwargs.get("value") or b"")
             )
         else:
             if name not in stored:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             await self._namespace.remove_xattr(path.virtual, name)
         record(
             op,

@@ -2752,7 +2752,14 @@
           "backend": "tmpdir",
           "fixture": "git"
         }
-      ]
+      ],
+      "sessions": {
+        "reader": {
+          "mounts": {
+            "/repo": "read"
+          }
+        }
+      }
     },
     {
       "id": "git-ram",
@@ -2770,7 +2777,14 @@
           "backend": "memory",
           "fixture": "git"
         }
-      ]
+      ],
+      "sessions": {
+        "reader": {
+          "mounts": {
+            "/repo": "read"
+          }
+        }
+      }
     },
     {
       "id": "ram-commands",
@@ -3584,6 +3598,73 @@
             "bucket_days": 7
           }
         }
+      ]
+    },
+    {
+      "id": "command-service",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/a",
+          "vfs": "ram",
+          "backend": "command-service"
+        },
+        {
+          "path": "/a/inner",
+          "vfs": "ram",
+          "backend": "command-service"
+        },
+        {
+          "path": "/a/inner/deep",
+          "vfs": "ram",
+          "backend": "command-service"
+        },
+        {
+          "path": "/b",
+          "vfs": "ram",
+          "backend": "command-service"
+        },
+        {
+          "path": "/ghost/deep",
+          "vfs": "ram",
+          "backend": "command-service"
+        },
+        {
+          "path": "/shadow",
+          "vfs": "ram",
+          "backend": "command-service",
+          "alias_of": "/a"
+        },
+        {
+          "path": "/plain",
+          "vfs": "ram",
+          "backend": "ram"
+        },
+        {
+          "path": "/meta",
+          "vfs": "ram",
+          "backend": "command-service"
+        },
+        {
+          "path": "/meta/child",
+          "vfs": "ram",
+          "backend": "metadata-service"
+        }
+      ],
+      "sessions": {
+        "blind": {
+          "paths": {
+            "hide": [
+              "/a/inner/deep"
+            ]
+          }
+        }
+      },
+      "clis": [
+        "scope-probe"
       ]
     }
   ]

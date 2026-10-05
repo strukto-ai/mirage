@@ -52,7 +52,7 @@ async function allExist(accessor: MongoDBAccessor, paths: readonly PathSpec[]): 
   return true
 }
 
-async function wcCommand(
+async function wc(
   accessor: MongoDBAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -85,7 +85,7 @@ async function wcCommand(
       total += count
     }
     const out: ByteSource | null = formatCountRows(rows, [total], resolved.length, parsed.total)
-    return [out, new IOResult()]
+    return [out, new IOResult({ countedRuns: rows })]
   }
   return wcGeneric(resolved, texts, opts, (p) => streamAny(accessor, p, opts.index ?? undefined))
 }
@@ -94,5 +94,5 @@ export const MONGODB_WC = command({
   name: 'wc',
   vfs: VFSName.MONGODB,
   spec: specOf('wc'),
-  fn: wcCommand,
+  fn: wc,
 })

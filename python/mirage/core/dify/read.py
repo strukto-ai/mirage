@@ -10,7 +10,7 @@ from mirage.types import PathSpec
 from mirage.utils.ranges import slice_window
 
 
-async def read_bytes(
+async def read(
     accessor: DifyAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

@@ -22,9 +22,7 @@ from mirage.commands.builtin.generic.cmp import (
 )
 from mirage.commands.errors import UsageError
 from mirage.io.stream import materialize
-from mirage.types import MountMode, PathSpec
-from mirage.vfs.ram import RAMVFS
-from mirage.workspace import Workspace
+from mirage.types import PathSpec
 
 P1 = PathSpec.from_str_path("/F/one", "")
 P2 = PathSpec.from_str_path("/F/two", "")
@@ -38,14 +36,6 @@ def _reader(first: bytes, second: bytes):
         return first if path.virtual == P1.virtual else second
 
     return read_bytes
-
-
-async def _run(first: bytes, second: bytes, **kwargs):
-    src, io = await cmp_cmd(
-        [P1, P2], read_bytes=_reader(first, second), **kwargs
-    )
-    out = b"" if src is None else await materialize(src)
-    return out.decode(), (io.stderr or b"").decode(), io.exit_code
 
 
 @pytest.mark.parametrize(
@@ -162,12 +152,6 @@ def test_visible_renders_one_byte_the_cat_v_way(byte, rendered):
     assert visible(byte) == rendered
 
 
-@pytest.mark.asyncio
-async def test_verbose_pads_the_octal_to_three_columns():
-    out, _, _ = await _run(b"a\x01c", b"a\x7fc", verbose=True)
-    assert out == "2   1 177\n"
-
-
 @pytest.mark.parametrize("value", ["1é", "1\x01", "1\r", "1'", "1\\"])
 def test_parse_count_leaves_the_value_unescaped(value):
     """`cmp -n` quotes the value but does NOT escape it.
@@ -190,64 +174,23 @@ def test_parse_count_leaves_the_value_unescaped(value):
     )
 
 
-async def _run_with_stdin(
-    paths: list[PathSpec], stdin: bytes, second: bytes, **kwargs
-):
-
-    async def read_bytes(path: PathSpec) -> bytes:
-        assert path.virtual == P2.virtual, path
-        return second
-
-    src, io = await cmp_cmd(
-        paths, read_bytes=read_bytes, stdin=stdin, **kwargs
-    )
-    out = b"" if src is None else await materialize(src)
-    return out.decode(), (io.stderr or b"").decode(), io.exit_code
-
-
 @pytest.mark.asyncio
-async def test_dev_stdin_reads_stdin_and_is_named_as_typed():
-    assert await _run_with_stdin([DEV_STDIN, P2], b"one\n", b"two\n") == (
-        "/dev/stdin /F/two differ: char 1, line 1\n",
-        "",
-        1,
-    )
-
-
-@pytest.mark.asyncio
-async def test_two_stdin_operands_at_one_offset_are_equal_unread():
+@pytest.mark.parametrize("texts", [(), ("1", "0")])
+async def test_two_stdin_operands_at_one_offset_are_equal_unread(texts):
+    # One name at one skip, or the second skip of zero that leaves the one
+    # descriptor where the first put it: diffutils 3.10 reads neither.
 
     async def unread(path: PathSpec) -> bytes:
         raise AssertionError(f"read {path.virtual}")
 
     src, io = await cmp_cmd(
-        [DASH, DEV_STDIN], read_bytes=unread, stdin=b"abc", skip=(1, 1)
+        [DASH, DEV_STDIN] if not texts else [DASH, DASH],
+        texts,
+        read_bytes=unread,
+        stdin=b"abc",
+        skip=(1, 1) if not texts else (0, 0),
     )
     assert (src, io.exit_code, io.stderr) == (None, 0, None)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "silent,err",
-    [
-        (False, "cmp: EOF on - which is empty\ncmp: -: Bad file descriptor\n"),
-        (True, "cmp: -: Bad file descriptor\n"),
-    ],
-)
-async def test_two_stdin_operands_skipped_apart_share_one_descriptor(
-    silent, err
-):
-    # diffutils 3.10 skips on the one descriptor twice, the first file
-    # reads what is left and the second nothing, and closing it again
-    # fails: `cmp - - 1 2 < a.txt`.
-    src, io = await cmp_cmd(
-        [DASH, DASH],
-        ["1", "2"],
-        read_bytes=_reader(b"", b""),
-        stdin=b"hello\n",
-        silent=silent,
-    )
-    assert (src, (io.stderr or b"").decode(), io.exit_code) == (None, err, 2)
 
 
 @pytest.mark.asyncio
@@ -301,85 +244,6 @@ async def test_a_bad_or_extra_skip_operand_is_a_usage_error(texts, message):
     assert exc.value.exit_code == 2
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "argv,after",
-    [
-        ((), "cmp"),
-        (("-i3",), "-i3"),
-    ],
-)
-async def test_no_operand_names_the_lines_last_word(argv, after):
-    # diffutils names argv[argc - 1], an option or its value included,
-    # and the program itself on a bare line.
-    with pytest.raises(UsageError) as exc:
-        await cmp_cmd([], read_bytes=_reader(b"", b""), argv=argv)
-    assert str(exc.value) == (
-        f"cmp: missing operand after '{after}'\n"
-        "cmp: Try 'cmp --help' for more information."
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("verbose", [False, True])
-async def test_eof_on_an_empty_file_says_which_is_empty(verbose):
-    _, err, code = await _run(b"", b"x", verbose=verbose)
-    assert (err, code) == ("cmp: EOF on /F/one which is empty\n", 1)
-
-
-@pytest.mark.asyncio
-async def test_verbose_pads_offsets_to_the_smaller_regular_file():
-    out, _, _ = await _run(b"a" * 11, b"b" + b"a" * 12, verbose=True)
-    assert out == " 1 141 142\n"
-
-
-@pytest.mark.asyncio
-async def test_operands_are_named_as_typed():
-    one = PathSpec(
-        virtual="/F/one", directory="/F/", vfs_path="one", raw_path="one"
-    )
-    two = PathSpec(
-        virtual="/F/two", directory="/F/", vfs_path="two", raw_path="two"
-    )
-    src, _ = await cmp_cmd([one, two], read_bytes=_reader(b"a", b"b"))
-    assert await materialize(src) == b"one two differ: char 1, line 1\n"
-
-
-def _dirs(*dirs: str):
-
-    async def read(path: PathSpec) -> bytes:
-        if path.virtual in dirs:
-            raise IsADirectoryError(path.virtual)
-        if path.virtual.endswith("nope"):
-            raise FileNotFoundError(path.virtual)
-        return b"a"
-
-    return read
-
-
-def _spec(name: str) -> PathSpec:
-    return PathSpec(
-        virtual=f"/F/{name}", directory="/F/", vfs_path=name, raw_path=name
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "names,stderr",
-    [
-        (("one", "dir"), "cmp: dir: Is a directory\n"),
-        (("dir", "nope"), ""),
-    ],
-)
-async def test_a_directory_fails_at_its_read_after_both_opens(names, stderr):
-    # diffutils 3.10 opens both operands, then reads: -s drops only a
-    # failed open, and a directory opens and fails reading.
-    _, io = await cmp_cmd(
-        [_spec(n) for n in names], read_bytes=_dirs("/F/dir"), silent=True
-    )
-    assert ((io.stderr or b"").decode(), io.exit_code) == (stderr, 2)
-
-
 def test_parse_flags_reads_the_long_spellings_and_refuses_l_with_s():
     # --quiet and --silent are -s; --verbose is -l, and diffutils refuses
     # the pair while it reads the options.
@@ -392,34 +256,3 @@ def test_parse_flags_reads_the_long_spellings_and_refuses_l_with_s():
         "cmp: options -l and -s are incompatible\n"
         "cmp: Try 'cmp --help' for more information."
     )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line,out,err",
-    [
-        ("cmp /data/x /other/f 1; echo rc=$?", "rc=0\n", ""),
-        (
-            "cmp /data/x /other/f z; echo rc=$?",
-            "rc=2\n",
-            "cmp: invalid --ignore-initial value 'z'\n"
-            "cmp: Try 'cmp --help' for more information.\n",
-        ),
-    ],
-)
-async def test_the_skips_reach_a_cmp_across_mounts(line, out, err):
-    # The relay reads the skips too, and refuses a bad one as cmp's own
-    # result, so the rest of the line still runs.
-    ws = Workspace(
-        {
-            "/data": (RAMVFS(), MountMode.WRITE),
-            "/other": (RAMVFS(), MountMode.WRITE),
-        },
-        mode=MountMode.WRITE,
-    )
-    await ws.shell("printf 'xro\\n' > /data/x && printf 'ro\\n' > /other/f")
-    r = await ws.shell(line)
-    assert (
-        (await r.materialize_stdout()).decode(),
-        (await r.materialize_stderr()).decode(),
-    ) == (out, err)

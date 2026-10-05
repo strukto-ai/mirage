@@ -16,16 +16,19 @@
   "options": [
     {
       "description": "Use the given string as separator between numbers.",
+      "long": "--separator",
       "short": "-s",
       "type": "str"
     },
     {
       "description": "Pad numbers with zeros to equal width.",
+      "long": "--equal-width",
       "short": "-w",
       "type": "bool"
     },
     {
       "description": "Format each number with a printf-style format string.",
+      "long": "--format",
       "short": "-f",
       "type": "str"
     }
@@ -40,5 +43,9 @@
     {
       "type": "str"
     }
-  ]
+  ],
+  "rest": {
+    "remainder": true,
+    "type": "str"
+  }
 }

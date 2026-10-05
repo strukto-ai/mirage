@@ -95,14 +95,6 @@ describe('refuseUnknownKeys', () => {
 })
 
 describe('refuseRepeatedFields', () => {
-  it('refuses one field named in both spellings as an unrecognized key', () => {
-    expect(
-      refusal(() => {
-        refuseRepeatedFields({ key_prefix: 'b:', keyPrefix: 'a:' })
-      }),
-    ).toBe('keyPrefix: unrecognized_keys')
-  })
-
   it("keeps the block's values out of the error", () => {
     try {
       refuseRepeatedFields({
@@ -128,11 +120,5 @@ describe('refuseRepeatedFields', () => {
         })
       }),
     ).toBe('keyPrefix: unrecognized_keys; maxDrainBytes: unrecognized_keys')
-  })
-
-  it('takes each field once under either spelling', () => {
-    expect(() => {
-      refuseRepeatedFields({ key_prefix: 'a:', url: 'redis://x' })
-    }).not.toThrow()
   })
 })

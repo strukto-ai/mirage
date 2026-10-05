@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { strftime } from '../commands/builtin/utils/strftime.ts'
+import { gnuStrftime } from '../commands/builtin/utils/strftime.ts'
 import {
   LOCAL_ZONE,
   UTC_ZONE,
@@ -36,7 +36,7 @@ const JULY_2024 = 1720000000
 const NOVEMBER_2023 = 1700000000
 
 function render(spec: string, epoch: number, fmt = '%Y-%m-%d %H:%M:%S %z %Z'): string {
-  return strftime(new Date(epoch * 1000), fmt, resolveTz(spec))
+  return gnuStrftime(new Date(epoch * 1000), fmt, resolveTz(spec))
 }
 
 describe('resolveTz: tzdata names', () => {

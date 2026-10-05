@@ -599,7 +599,7 @@ def grep_search_options(query: SearchQuery) -> GrepSearchOptions:
         query (SearchQuery): resource query with optional grep namespace.
     """
     options = query.options.get("grep", {})
-    allowed = {"ignore_case", "fixed_string", "whole_word", "syntax"}
+    allowed = {"ignore_case", "fixed_string", "whole_word", "syntax", "utf8"}
     if not isinstance(options, dict) or set(options) - allowed:
         raise ValueError("search.options.grep contains unknown options")
     if any(
@@ -618,4 +618,5 @@ def grep_search_options(query: SearchQuery) -> GrepSearchOptions:
         fixed_string=options.get("fixed_string", True) is True,
         whole_word=options.get("whole_word", False) is True,
         syntax=RegexSyntax(syntax),
+        utf8=options.get("utf8", False) is True,
     )

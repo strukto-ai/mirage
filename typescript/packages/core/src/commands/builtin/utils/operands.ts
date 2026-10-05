@@ -14,23 +14,20 @@
 
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { mountKey } from '../../../utils/key_prefix.ts'
+import type { FileStat, PathSpec } from '../../../types.ts'
+import { FileType } from '../../../types.ts'
 import {
   eisdir,
   fsErrorLine,
   isDotWalkError,
   isEisdir,
   isFsError,
-  isMissError,
   READ_FAILURES,
 } from '../../../utils/errors.ts'
 import { readFailExitCode } from '../../spec/usage.ts'
-import { resolvePath } from '../../../utils/path.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 type Stat = (p: PathSpec) => Promise<FileStat>
 
@@ -39,7 +36,7 @@ type Stat = (p: PathSpec) => Promise<FileStat>
 // uses for a namespace-only directory. Mirrors Python's `operand_name`,
 // which takes a PathSpec because its one caller outside this module has
 // one; here both callers hold the virtual string.
-function operandName(virtual: string): string {
+export function operandName(virtual: string): string {
   const trimmed = rstripSlash(virtual)
   const cut = trimmed.lastIndexOf('/')
   return trimmed.slice(cut + 1) || '/'
@@ -96,56 +93,6 @@ export async function operandStat(
 }
 
 /**
- * Wrap a walker's readdir so a mount parent lists as empty, not absent.
- *
- * A directory that exists only because mounts sit under it has no backend
- * to list it, so the readdir throws and a recursive command reports the
- * operand missing even as the fan-out searches the mounts below it and
- * prints hits. Empty is the honest answer for the primary backend: the
- * directory is there, and it owns nothing in it.
- *
- * Empty rather than the mount names, because the fan-out already runs the
- * command once per descendant mount and concatenates. Listing them here
- * would search each one twice.
- *
- * The visible descendants, not every descendant. Answering at all tells
- * the session the directory is there, and a directory that exists only
- * because of a mount it may not be told about is a directory it may not be
- * told about either: a hidden mount under an otherwise absent parent has
- * to keep reading as absence, the same way the mount itself does.
- *
- * Only for an absence, which is why the catch is `isMissError` and not the
- * walk's own wider set: a directory the backend refused with EACCES or
- * ENOTSUP is there and holds data this run cannot read, and calling it
- * empty would let `grep -r` print the descendant mount's hits and exit 0
- * while silently omitting it. A refusal that is not absence keeps
- * propagating and gets reported.
- *
- * A directory a mount below this one serves lists as empty too, whatever
- * the backend holds there: the mount shadows those keys, as a kernel mount
- * does, and the fan-out walks it in a run of its own. `home` is the prefix
- * of the mount the readdir is bound to.
- */
-export function mountParentReaddir(
-  readdir: (p: string) => Promise<string[]>,
-  mounts: MountView | null | undefined,
-  home: string,
-): (p: string) => Promise<string[]> {
-  if (mounts === undefined || mounts === null) return readdir
-  return async (p: string) => {
-    const below = mounts.descendants(home === '' ? '/' : home)
-    if (below.some((root) => p === root || p.startsWith(rstripSlash(root) + '/'))) return []
-    try {
-      return await readdir(p)
-    } catch (e) {
-      if (!isMissError(e)) throw e
-      if (mounts.visibleDescendants(p).length === 0) throw e
-      return []
-    }
-  }
-}
-
-/**
  * The mount roots a walk of `directory` reaches first, sorted: the edge of
  * the directory's own filesystem, so a mount nested in a mount is not one
  * of them. Mirrors Python's mount_points.
@@ -156,68 +103,6 @@ export function mountPoints(mounts: MountView | null | undefined, directory: str
   return roots
     .filter((root) => !roots.some((other) => root.startsWith(`${other}/`)))
     .sort(compareCodePoints)
-}
-
-/**
- * Wrap a walker's stat so a mount parent reports as a directory.
- *
- * The twin of `mountParentReaddir`, and the reason a recursive search over
- * `/repos` reported it missing while still printing hits from
- * `/repos/alpha`: the operand was statted before it was walked, the
- * primary backend has no such path, and the miss was reported as absence.
- *
- * The mount table decides, not the dispatcher. A dispatched stat would
- * answer for paths inside the descendant mounts too, which is exactly what
- * the primary run must not see: the fan-out searches each of them
- * separately, so claiming their entries here would search them twice.
- *
- * Visible descendants only, because a row is a disclosure: the parent of a
- * mount this session may not be told about stays absent, which is what
- * every other verb already answers there.
- *
- * An absence only, the same as its readdir twin: a backend that refused the
- * path rather than not having it is reporting something the run must not
- * paper over with a synthesized row.
- */
-export function mountParentStat(
-  stat: (p: string) => Promise<FileStat>,
-  mounts?: MountView | null,
-): (p: string) => Promise<FileStat> {
-  if (mounts === undefined || mounts === null) return stat
-  return async (p: string) => {
-    try {
-      return await stat(p)
-    } catch (e) {
-      if (!isMissError(e)) throw e
-      if (mounts.visibleDescendants(p).length === 0) throw e
-      return new FileStat({ name: operandName(p), type: FileType.DIRECTORY })
-    }
-  }
-}
-
-// True when any operand still carries a glob to expand. Backend push-down
-// branches read paths[0] directly to build SQL, so they must not run before
-// glob expansion: a pattern segment would be taken for a literal entity
-// name, and tables/*/rows.jsonl would query a relation actually called "*".
-export function hasUnresolvedGlob(paths: PathSpec[]): boolean {
-  return paths.some((p) => p.pattern !== null && p.pattern !== '')
-}
-
-// Resolve a script operand (absolute or cwd-relative) to a fully-resolved
-// PathSpec, the way python3/js locate a mounted script before running it.
-// The spelling as typed rides along in rawPath, which is the name an
-// interpreter gives its program.
-export function resolveScript(name: string, cwd: string): PathSpec {
-  const path = resolvePath(name, cwd)
-  const lastSlash = path.lastIndexOf('/')
-  const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({
-    vfsPath: stripSlash(path),
-    virtual: path,
-    directory,
-    resolved: true,
-    rawPath: name,
-  })
 }
 
 // Partition operands into readable paths and GNU stderr lines. Read-family
@@ -353,7 +238,7 @@ export function operandsIo(err: string, init?: { cache?: string[]; exitCode?: nu
   return new IOResult({
     ...(init?.cache !== undefined ? { cache: init.cache } : {}),
     exitCode: err === '' ? 0 : (init?.exitCode ?? 1),
-    stderr: err === '' ? null : ENC.encode(err),
+    stderr: err === '' ? null : encodeText(err),
   })
 }
 
@@ -362,12 +247,4 @@ export function operandsIo(err: string, init?: { cache?: string[]; exitCode?: nu
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function* singleChunk(data: Uint8Array): AsyncIterable<Uint8Array> {
   if (data.byteLength > 0) yield data
-}
-
-// Default a command's path operands the way the shell would: explicit
-// operands pass through, otherwise the session cwd becomes the single
-// operand (keyed against the mount prefix when the caller knows it).
-export function defaultPaths(paths: PathSpec[], cwd: string, mountPrefix = ''): PathSpec[] {
-  if (paths.length > 0) return paths
-  return [PathSpec.fromStrPath(cwd, mountKey(cwd, mountPrefix))]
 }

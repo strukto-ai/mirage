@@ -14,7 +14,7 @@
 
 import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -34,10 +34,10 @@ import { rename } from '@struktoai/mirage-core/core/redis/rename'
 import { rmR } from '@struktoai/mirage-core/core/redis/rm'
 import { rmdir } from '@struktoai/mirage-core/core/redis/rmdir'
 import { stat } from '@struktoai/mirage-core/core/redis/stat'
-import { stream } from '@struktoai/mirage-core/core/redis/stream'
+import { readStream } from '@struktoai/mirage-core/core/redis/stream'
 import { truncate } from '@struktoai/mirage-core/core/redis/truncate'
 import { unlink } from '@struktoai/mirage-core/core/redis/unlink'
-import { writeBytes } from '@struktoai/mirage-core/core/redis/write'
+import { write } from '@struktoai/mirage-core/core/redis/write'
 
 const resolveGlob = makeResolveGlob(readdir, SCOPE_ERROR)
 
@@ -70,14 +70,14 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('writeBytes + read round-trip', async () => {
-    await writeBytes(acc, spec('/hi.txt'), ENC.encode('hello'))
+    await write(acc, spec('/hi.txt'), ENC.encode('hello'))
     expect(DEC.decode(await read(acc, spec('/hi.txt')))).toBe('hello')
   })
 
   it('writeBytes fails when parent is missing', async () => {
     // The operand is what a GNU stderr line names, so the error carries the
     // virtual path and an errno, not the internal parent phrasing.
-    await expect(writeBytes(acc, spec('/missing/x.txt'), ENC.encode('.'))).rejects.toMatchObject({
+    await expect(write(acc, spec('/missing/x.txt'), ENC.encode('.'))).rejects.toMatchObject({
       code: 'ENOENT',
       virtualPath: '/missing/x.txt',
     })
@@ -95,7 +95,7 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('exists sees files and dirs', async () => {
-    await writeBytes(acc, spec('/f'), ENC.encode('x'))
+    await write(acc, spec('/f'), ENC.encode('x'))
     await mkdir(acc, spec('/d'))
     expect(await exists(acc, spec('/f'))).toBe(true)
     expect(await exists(acc, spec('/d'))).toBe(true)
@@ -117,7 +117,7 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('mkdir -p across a plain file names the component and keeps the file', async () => {
-    await writeBytes(acc, spec('/f.txt'), ENC.encode('hi'))
+    await write(acc, spec('/f.txt'), ENC.encode('hi'))
     await expect(mkdir(acc, spec('/f.txt/sub'), true)).rejects.toMatchObject({
       code: 'ENOTDIR',
       virtualPath: '/f.txt',
@@ -127,7 +127,7 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('mkdir -p onto a plain file target is EEXIST', async () => {
-    await writeBytes(acc, spec('/f.txt'), ENC.encode('hi'))
+    await write(acc, spec('/f.txt'), ENC.encode('hi'))
     await expect(mkdir(acc, spec('/f.txt'), true)).rejects.toMatchObject({ code: 'EEXIST' })
   })
 
@@ -138,7 +138,7 @@ describe.skipIf(skip)('core/redis ops', () => {
 
   it('rmdir refuses non-empty and removes empty', async () => {
     await mkdir(acc, spec('/dir'))
-    await writeBytes(acc, spec('/dir/f'), ENC.encode('.'))
+    await write(acc, spec('/dir/f'), ENC.encode('.'))
     await expect(rmdir(acc, spec('/dir'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
     // The refusal must leave the child addressable, not orphan it.
     expect(await exists(acc, spec('/dir/f'))).toBe(true)
@@ -152,13 +152,13 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('unlink removes files', async () => {
-    await writeBytes(acc, spec('/f'), ENC.encode('.'))
+    await write(acc, spec('/f'), ENC.encode('.'))
     await unlink(acc, spec('/f'))
     expect(await exists(acc, spec('/f'))).toBe(false)
   })
 
   it('rename moves a file + preserves content', async () => {
-    await writeBytes(acc, spec('/a'), ENC.encode('data'))
+    await write(acc, spec('/a'), ENC.encode('data'))
     await rename(acc, spec('/a'), spec('/b'))
     expect(await exists(acc, spec('/a'))).toBe(false)
     expect(DEC.decode(await read(acc, spec('/b')))).toBe('data')
@@ -166,20 +166,20 @@ describe.skipIf(skip)('core/redis ops', () => {
 
   it('rename moves a dir with nested files', async () => {
     await mkdir(acc, spec('/d1'))
-    await writeBytes(acc, spec('/d1/x'), ENC.encode('x'))
+    await write(acc, spec('/d1/x'), ENC.encode('x'))
     await rename(acc, spec('/d1'), spec('/d2'))
     expect(DEC.decode(await read(acc, spec('/d2/x')))).toBe('x')
   })
 
   it('copy duplicates contents', async () => {
-    await writeBytes(acc, spec('/s'), ENC.encode('hi'))
+    await write(acc, spec('/s'), ENC.encode('hi'))
     await copy(acc, spec('/s'), spec('/t'))
     expect(DEC.decode(await read(acc, spec('/t')))).toBe('hi')
     expect(await exists(acc, spec('/s'))).toBe(true)
   })
 
   it('truncate shrinks and zero-pads', async () => {
-    await writeBytes(acc, spec('/x'), ENC.encode('abcdef'))
+    await write(acc, spec('/x'), ENC.encode('abcdef'))
     await truncate(acc, spec('/x'), 3)
     expect(DEC.decode(await read(acc, spec('/x')))).toBe('abc')
     await truncate(acc, spec('/x'), 6)
@@ -188,15 +188,15 @@ describe.skipIf(skip)('core/redis ops', () => {
 
   it('rmR removes dir tree', async () => {
     await mkdir(acc, spec('/t/a'), true)
-    await writeBytes(acc, spec('/t/a/f'), ENC.encode('.'))
+    await write(acc, spec('/t/a/f'), ENC.encode('.'))
     await rmR(acc, spec('/t'))
     expect(await exists(acc, spec('/t'))).toBe(false)
   })
 
   it('du sums file sizes under path', async () => {
     await mkdir(acc, spec('/d'))
-    await writeBytes(acc, spec('/d/a'), ENC.encode('abc'))
-    await writeBytes(acc, spec('/d/b'), ENC.encode('defg'))
+    await write(acc, spec('/d/a'), ENC.encode('abc'))
+    await write(acc, spec('/d/b'), ENC.encode('defg'))
     expect(await size(acc, spec('/d'))).toBe(7)
     const [found, total] = await entries(acc, spec('/d'))
     expect(found).toHaveLength(2)
@@ -205,14 +205,14 @@ describe.skipIf(skip)('core/redis ops', () => {
 
   it('readdir returns mount-prefixed entries', async () => {
     await mkdir(acc, spec('/d'))
-    await writeBytes(acc, spec('/d/a'), ENC.encode('.'))
-    await writeBytes(acc, spec('/d/b'), ENC.encode('.'))
+    await write(acc, spec('/d/a'), ENC.encode('.'))
+    await write(acc, spec('/d/b'), ENC.encode('.'))
     const entries = await readdir(acc, spec('/mount/d', '/mount'))
     expect(entries).toEqual(['/mount/d/a', '/mount/d/b'])
   })
 
   it('stat returns file + dir metadata', async () => {
-    await writeBytes(acc, spec('/f.txt'), ENC.encode('xyz'))
+    await write(acc, spec('/f.txt'), ENC.encode('xyz'))
     const fs = await stat(acc, spec('/f.txt'))
     expect(fs.size).toBe(3)
     await mkdir(acc, spec('/d'))
@@ -221,16 +221,16 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('find filters by name pattern', async () => {
-    await writeBytes(acc, spec('/a.txt'), ENC.encode('.'))
-    await writeBytes(acc, spec('/b.md'), ENC.encode('.'))
+    await write(acc, spec('/a.txt'), ENC.encode('.'))
+    await write(acc, spec('/b.md'), ENC.encode('.'))
     const r = await find(acc, spec('/'), { name: '*.txt' })
     expect(r).toEqual(['/a.txt'])
   })
 
   it('stream yields file contents once', async () => {
-    await writeBytes(acc, spec('/f'), ENC.encode('hello'))
+    await write(acc, spec('/f'), ENC.encode('hello'))
     const chunks: Uint8Array[] = []
-    for await (const c of stream(acc, spec('/f'))) chunks.push(c)
+    for await (const c of readStream(acc, spec('/f'))) chunks.push(c)
     expect(chunks).toHaveLength(1)
     const first = chunks[0]
     expect(first).toBeDefined()
@@ -239,8 +239,8 @@ describe.skipIf(skip)('core/redis ops', () => {
 
   it('readdir with index populates the cache', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
-    await writeBytes(acc, spec('/a.txt'), ENC.encode('.'))
-    await writeBytes(acc, spec('/b.txt'), ENC.encode('.'))
+    await write(acc, spec('/a.txt'), ENC.encode('.'))
+    await write(acc, spec('/b.txt'), ENC.encode('.'))
     const entries = await readdir(acc, spec('/data', '/data'), index)
     expect(entries.sort()).toEqual(['/data/a.txt', '/data/b.txt'])
     // readdir stores under the canonical key: no trailing slash except root.
@@ -251,19 +251,19 @@ describe.skipIf(skip)('core/redis ops', () => {
 
   it('readdir with index returns cached entries when present', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
-    await writeBytes(acc, spec('/a.txt'), ENC.encode('.'))
+    await write(acc, spec('/a.txt'), ENC.encode('.'))
     await readdir(acc, spec('/data', '/data'), index)
     // mutate store but cached result should still return
-    await writeBytes(acc, spec('/c.txt'), ENC.encode('.'))
+    await write(acc, spec('/c.txt'), ENC.encode('.'))
     const again = await readdir(acc, spec('/data', '/data'), index)
     expect(again).not.toContain('/data/c.txt')
   })
 
   it('readdir without index misses stale data (control test)', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
-    await writeBytes(acc, spec('/a.txt'), ENC.encode('.'))
+    await write(acc, spec('/a.txt'), ENC.encode('.'))
     await readdir(acc, spec('/data', '/data'), index)
-    await writeBytes(acc, spec('/c.txt'), ENC.encode('.'))
+    await write(acc, spec('/c.txt'), ENC.encode('.'))
     const fresh = await readdir(acc, spec('/data', '/data'))
     expect(fresh).toContain('/data/c.txt')
     const evicted = await index.listDir('/data')
@@ -271,9 +271,9 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('resolveGlob expands star patterns', async () => {
-    await writeBytes(acc, spec('/a.txt'), ENC.encode('.'))
-    await writeBytes(acc, spec('/b.txt'), ENC.encode('.'))
-    await writeBytes(acc, spec('/c.md'), ENC.encode('.'))
+    await write(acc, spec('/a.txt'), ENC.encode('.'))
+    await write(acc, spec('/b.txt'), ENC.encode('.'))
+    await write(acc, spec('/c.md'), ENC.encode('.'))
     const patternSpec = new PathSpec({
       virtual: '/*.txt',
       directory: '/',

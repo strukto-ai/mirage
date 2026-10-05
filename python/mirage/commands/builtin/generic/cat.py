@@ -21,6 +21,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain, chain_cachables, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
     FileType,
@@ -70,18 +71,6 @@ def _wants_display(parsed: CatFlags) -> bool:
             parsed.show_tabs,
             parsed.show_nonprinting,
         )
-    )
-
-
-def _display(source: ByteSource, parsed: CatFlags) -> AsyncIterator[bytes]:
-    return cat(
-        source,
-        number_lines=parsed.number_lines,
-        number_nonblank=parsed.number_nonblank,
-        show_ends=parsed.show_ends,
-        squeeze_blank=parsed.squeeze_blank,
-        show_tabs=parsed.show_tabs,
-        show_nonprinting=parsed.show_nonprinting,
     )
 
 
@@ -169,7 +158,7 @@ async def cat_generic(
                     # A read the backend refuses once the stat passed (a
                     # table past its read cap) is reported like a missing
                     # operand, and the next operand still prints.
-                    err += fs_error_line("cat", p, exc).encode()
+                    err += encode_text(fs_error_line("cat", p, exc))
                     continue
                 if not is_stdin(p):
                     reads[p.mount_path] = data
@@ -181,11 +170,11 @@ async def cat_generic(
             io.stderr = err
             io.exit_code = 1
         if _wants_display(parsed):
-            return _display(source, parsed), io
+            return display_lines(source, parsed), io
         return source, io
     source = resolve_source(opts.stdin)
     if _wants_display(parsed):
-        return _display(source, parsed), IOResult()
+        return display_lines(source, parsed), IOResult()
     return source, IOResult()
 
 
@@ -226,56 +215,45 @@ def _visible(line: bytes, show_tabs: bool, show_nonprinting: bool) -> bytes:
     return bytes(out)
 
 
-async def cat(
-    src: bytes | AsyncIterator[bytes],
-    *,
-    number_lines: bool = False,
-    number_nonblank: bool = False,
-    show_ends: bool = False,
-    squeeze_blank: bool = False,
-    show_tabs: bool = False,
-    show_nonprinting: bool = False,
+async def display_lines(
+    source: ByteSource, parsed: CatFlags
 ) -> AsyncIterator[bytes]:
-    if number_nonblank:
-        number_lines = False
-    needs_line_processing = (
-        number_lines
-        or show_ends
-        or squeeze_blank
-        or show_tabs
-        or show_nonprinting
-        or number_nonblank
-    )
+    """Line-process a stream for GNU cat's display flags (-n -E -T -v -s).
 
-    if not needs_line_processing:
-        async for chunk in ensure_stream(src):
-            yield chunk
-        return
-
+    Args:
+        source (ByteSource): the bytes to render.
+        parsed (CatFlags): the display flags.
+    """
+    number_lines = parsed.number_lines and not parsed.number_nonblank
+    transform = parsed.show_tabs or parsed.show_nonprinting
     line_no = 0
     buf = b""
     prev_blank = False
-    async for chunk in ensure_stream(src):
+    async for chunk in ensure_stream(source):
         buf += chunk
         while b"\n" in buf:
             line, buf = buf.split(b"\n", 1)
-            if squeeze_blank and not line and prev_blank:
+            if parsed.squeeze_blank and not line and prev_blank:
                 prev_blank = True
                 continue
-            should_number = number_lines or (number_nonblank and bool(line))
+            should_number = number_lines or (
+                parsed.number_nonblank and bool(line)
+            )
             if should_number:
                 line_no += 1
-            prefix = f"{line_no:6d}\t".encode() if should_number else b""
-            suffix = b"$\n" if show_ends else b"\n"
-            if show_tabs or show_nonprinting:
-                line = _visible(line, show_tabs, show_nonprinting)
+            prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
+            suffix = b"$\n" if parsed.show_ends else b"\n"
+            if transform:
+                line = _visible(
+                    line, parsed.show_tabs, parsed.show_nonprinting
+                )
             yield prefix + line + suffix
             prev_blank = not line
     if buf:
-        should_number = number_lines or number_nonblank
+        should_number = parsed.number_lines or parsed.number_nonblank
         if should_number:
             line_no += 1
-        prefix = f"{line_no:6d}\t".encode() if should_number else b""
-        if show_tabs or show_nonprinting:
-            buf = _visible(buf, show_tabs, show_nonprinting)
+        prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
+        if transform:
+            buf = _visible(buf, parsed.show_tabs, parsed.show_nonprinting)
         yield prefix + buf

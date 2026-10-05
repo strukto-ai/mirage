@@ -54,7 +54,7 @@ async function* emailStream(
   yield await emailRead(accessor, p, index)
 }
 
-async function rgCommand(
+async function rg(
   accessor: EmailAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -122,5 +122,5 @@ export const EMAIL_RG = command({
   name: 'rg',
   vfs: VFSName.EMAIL,
   spec: specOf('rg'),
-  fn: rgCommand,
+  fn: rg,
 })

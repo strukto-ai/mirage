@@ -17,7 +17,7 @@ import gzip
 
 import pytest
 
-from mirage.commands.builtin.generic.zgrep import zgrep as zgrep_generic
+from mirage.commands.builtin.generic.zgrep import zgrep_generic
 from mirage.io.types import materialize
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -362,3 +362,16 @@ async def test_zgrep_keeps_partial_matches_and_continues_after_a_read_error(
     assert io.exit_code == 2
     assert io.stderr == b"\ngzip: /bad.gz: Permission denied\n"
     assert reads == ["/bad", "/bad.gz", "/good.gz"]
+
+
+def test_zgrep_utf8_leaves_out_a_line_no_character_owns():
+    ws, _ = _ws()
+    _run_raw(ws, "tee /data/u.gz", stdin=gzip.compress(b"a1\na\xff\na2\n"))
+    stdout, io = _run_raw(ws, "LC_ALL=C.UTF-8 zgrep a /data/u.gz")
+    assert (_bytes(stdout), _bytes(io.stderr), io.exit_code) == (
+        b"a1\na2\n",
+        b"grep: /data/u.gz: binary file matches\n",
+        0,
+    )
+    stdout, io = _run_raw(ws, "zgrep a /data/u.gz")
+    assert (_bytes(stdout), _bytes(io.stderr)) == (b"a1\na\xff\na2\n", b"")

@@ -63,6 +63,106 @@
         "stdout": "/data/lsop/zf.txt\n\n/data/lsop/a:\nf.txt\nsub\n\n/data/lsop/b:\ng.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ls_operands_reverse_repeat_and_recursive_file",
+      "seq": 15800010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crlo/a/sub /data/crlo/b && touch /data/crlo/a/f.txt /data/crlo/a/sub/x /data/crlo/b/g.txt /data/crlo/zfile && cd /data/crlo && ls -r a b; ls a a; ls -R a zfile; cd / && rm -r /data/crlo",
+      "expect": {
+        "exit": 0,
+        "stdout": "b:\ng.txt\n\na:\nsub\nf.txt\na:\nf.txt\nsub\n\na:\nf.txt\nsub\nzfile\n\na:\nf.txt\nsub\n\na/sub:\nx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_long_columns_are_sized_per_directory",
+      "seq": 15800011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crlw/a /data/crlw/b && head -c 1000 /dev/zero > /data/crlw/a/big && printf x > /data/crlw/b/small && ls -go --time-style=+x /data/crlw/a /data/crlw/b | grep -v total; rm -r /data/crlw",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/crlw/a:\n-rw-r--r-- 1 1000 x big\n\n/data/crlw/b:\n-rw-r--r-- 1 1 x small\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_empty_dir_operand_still_gets_a_header",
+      "seq": 15800012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crle/b /data/crle/c && touch /data/crle/b/g.txt && ls /data/crle/b /data/crle/c; rm -r /data/crle",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/crle/b:\ng.txt\n\n/data/crle/c:\n",
+        "stderr": ""
+      }
     }
   ]
 }

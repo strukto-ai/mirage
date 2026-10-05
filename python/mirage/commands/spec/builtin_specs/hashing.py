@@ -26,7 +26,14 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-U", type="str"),
             Option(long="--unified", type="str", value_optional=True),
             Option(short="-q", long="--brief"),
-            Option(short="-r"),
+            Option(short="-r", long="--recursive"),
+            Option(short="-N", long="--new-file"),
+            Option(long="--unidirectional-new-file"),
+            Option(short="-x", long="--exclude", type="str", multiple=True),
+            Option(
+                short="-X", long="--exclude-from", type="path", multiple=True
+            ),
+            Option(short="-s", long="--report-identical-files"),
         ),
         positional=(
             Operand(type="path"),

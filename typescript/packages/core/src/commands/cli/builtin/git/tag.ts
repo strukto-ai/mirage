@@ -28,16 +28,20 @@ import {
   ListModeOnlyError,
   MissingTagMessageError,
   NoWorkspaceError,
+  RefDeleteReadOnlyError,
   RefLockError,
+  RefReadOnlyError,
   RefUpdateConflictError,
   TagExistsError,
   TagNotFoundError,
-  TagUsageError,
+  TagWriteReadOnlyError,
   TooManyArgumentsError,
-  UnknownSwitchError,
   UnresolvedRefError,
+  UsageError,
 } from './errors.ts'
 import { short } from './format.ts'
+import { under } from './io.ts'
+import type { ReadOnlyRefusal } from './types.ts'
 import { blockingRef, deleteRef, loadRefs, TAG_PREFIX, validRefName, writeRef } from './refs.ts'
 import { filterWords, listModeOption, refFilter, withoutFilterValues } from './ref_filter.ts'
 import { formatRefs, listingFormat, usedFields } from './ref_format.ts'
@@ -45,7 +49,7 @@ import { configuredSort, listingResult, matchShort, refListing, sortKeys } from 
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveObject } from './revparse.ts'
-import { checkOperands, escaped, fatal, switches } from './util.ts'
+import { checkSwitches, fatal, verbUsage } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -105,26 +109,14 @@ function parseFlags(fl: FlagView): TagFlags {
  * The object a new tag points at, and what kind it is.
  *
  * A tag made from another tag points at the tag object itself rather than at
- * what it peels to, which is git's own rule. Anything else is resolved as an
- * object expression, because git tags any object and its usage line says so:
- * `HEAD^{tree}` and `HEAD:a.txt` are as good a target as a branch, and the type
- * resolution lands on is what the tag records.
+ * what it peels to, which is git's own rule, and the type is recorded as read:
+ * a lightweight tag is a ref like any other and points at whatever it was made
+ * from, so `tag blobtag HEAD:a.txt` then `tag -a release -m x blobtag` records
+ * `type blob`. Anything else is resolved as an object expression, because git
+ * tags any object and its usage line says so: `HEAD^{tree}` and `HEAD:a.txt`
+ * are as good a target as a branch.
  */
-async function resolveTarget(
-  repo: Repo,
-  known: ReadonlyMap<string, string>,
-  revision: string,
-): Promise<{ oid: string; type: string }> {
-  const held = known.get(`${TAG_PREFIX}${revision}`)
-  if (held !== undefined) {
-    // The type is recorded as read. A lightweight tag is a ref like any
-    // other and points at whatever it was made from, so `tag blobtag
-    // HEAD:a.txt` then `tag -a release -m x blobtag` records `type blob`;
-    // calling it a commit wrote a tag object git show and git fsck reject.
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const { type } = await git.readObject({ ...repoArgs(repo), oid: held })
-    return { oid: held, type }
-  }
+async function resolveTarget(repo: Repo, revision: string): Promise<{ oid: string; type: string }> {
   try {
     return await resolveObject(repo, revision)
   } catch {
@@ -185,7 +177,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const dispatch = doors.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const flags = parseFlags(fl)
     if (flags.listing && flags.remove) throw new IncompatibleOptionsError('-l', '-d')
     // -a, -m and -f create a tag, so a line that lists or deletes instead has
@@ -196,7 +188,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
       (flags.annotate || flags.force) &&
       (flags.listing || flags.remove || flags.lines !== undefined || filtered || texts.length === 0)
     ) {
-      throw new TagUsageError()
+      throw new UsageError('', verbUsage(inv))
     }
     // After the two usage refusals above, which git reaches first: `-l -d -n1`
     // is the incompatible pair and `-d -f -n1` the usage, both exiting 129,
@@ -279,7 +271,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     was = known.get(ref)
     if (was !== undefined && !flags.force) throw new TagExistsError(name)
     if (flags.annotate && flags.message === undefined) throw new MissingTagMessageError()
-    const target = await resolveTarget(repo, known, texts[1] ?? HEAD)
+    const target = await resolveTarget(repo, texts[1] ?? HEAD)
     let pointed = target.oid
     if (flags.annotate) {
       pointed = await buildTag(
@@ -303,4 +295,17 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   if (was === undefined) return [null, new IOResult()]
   return [ENC.encode(`Updated tag '${name}' (was ${short(was, abbrev)})\n`), new IOResult()]
+}
+
+/**
+ * tag's refusal by a read-only mount: the lock on the ref it creates or
+ * deletes, and for an annotated tag the object it could not write first.
+ */
+export const tagReadOnly: ReadOnlyRefusal = (inv, location) => {
+  const fl = new FlagView(inv.flags)
+  const ref = `${TAG_PREFIX}${inv.texts[0] ?? ''}`
+  const path = under(location?.commondir ?? '.git', ref)
+  if (fl.asBool('delete')) return new RefDeleteReadOnlyError(ref, path)
+  if (fl.asBool('annotate') || fl.raw('message') !== undefined) return new TagWriteReadOnlyError()
+  return new RefReadOnlyError(ref, path)
 }

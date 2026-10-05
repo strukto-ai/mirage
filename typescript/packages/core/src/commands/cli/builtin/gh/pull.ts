@@ -34,6 +34,7 @@ import type { RepoRef } from '../../../../core/github/repo.ts'
 import {
   bodyValue,
   camel,
+  ghBool,
   ghTransport,
   jsonFields,
   repoFor,
@@ -400,7 +401,7 @@ export async function viewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   return typedOut(
     row,
     fl,
-    fl.asBool('comments') ? commentsText(comments ?? []) : viewText(row),
+    ghBool(fl, 'comments') ? commentsText(comments ?? []) : viewText(row),
     PR_FIELDS,
   )
 }
@@ -422,8 +423,8 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     head: head ?? '',
     base: base ?? '',
     body: (await bodyValue(inv, fl, { required: true })) ?? '',
-    draft: fl.asBool('draft'),
-    maintainer_can_modify: !fl.asBool('no_maintainer_edit'),
+    draft: ghBool(fl, 'draft'),
+    maintainer_can_modify: !ghBool(fl, 'no_maintainer_edit'),
   }
   const created = pull(await createPull(ghTransport(inv.config), repoFor(inv, fl), body))
   return textOut(`${textValue(created.url)}\n`)
@@ -446,7 +447,7 @@ export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
 
 export async function mergeCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const methods = ['merge', 'rebase', 'squash'].filter((name) => fl.asBool(name))
+  const methods = ['merge', 'rebase', 'squash'].filter((name) => ghBool(fl, name))
   if (methods.length > 1) throw new Error('choose only one merge strategy')
   const body: Record<string, unknown> = { merge_method: methods[0] ?? 'merge' }
   const subject = fl.asStr('subject')
@@ -487,7 +488,7 @@ export async function diffCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const [ref, number] = target(inv, fl)
   const value = await diffPull(ghTransport(inv.config), ref, number)
-  if (fl.asBool('name_only')) {
+  if (ghBool(fl, 'name_only')) {
     return textOut(
       changedNames(value)
         .map((name) => `${name}\n`)

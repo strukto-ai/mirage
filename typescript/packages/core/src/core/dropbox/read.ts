@@ -16,8 +16,11 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
+import { record, recordStream, startOp } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { DropboxApiError, dropboxDownload, dropboxDownloadStream } from './client.ts'
+import { RESULT_HEADER } from './constants.ts'
+import { resultToken } from './fingerprint.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
@@ -53,31 +56,40 @@ export async function read(
   if (key === '') throw eisdir(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
 
+  if (index !== undefined) {
+    const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
+    const entry = await entryOrWarm(
+      index,
+      virtualKey,
+      parentKey !== virtualKey
+        ? () =>
+            readdir(accessor, PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix)), index)
+        : null,
+    )
+    if (entry === null) throw enoent(path.virtual)
+    if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
+  }
   const dropboxPath = dropboxPathFromVirtual(accessor.rootPath, virtualKey, prefix)
-  if (index === undefined) {
+  const timer = startOp()
+  let download: [Uint8Array, string | null]
+  try {
+    download = await dropboxDownload(accessor.tokenManager, dropboxPath, window)
+  } catch (err) {
     // Index-less callers (the ops factory's emulated truncate) download
     // directly; the API 409s on missing paths and folders.
-    try {
-      return await dropboxDownload(accessor.tokenManager, dropboxPath, window)
-    } catch (err) {
-      if (err instanceof DropboxApiError && err.status === 409) throw enoent(path.virtual)
-      throw err
+    if (index === undefined && err instanceof DropboxApiError && err.status === 409) {
+      throw enoent(path.virtual)
     }
+    throw err
   }
-  const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-  const entry = await entryOrWarm(
-    index,
-    virtualKey,
-    parentKey !== virtualKey
-      ? () => readdir(accessor, PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix)), index)
-      : null,
-  )
-  if (entry === null) throw enoent(path.virtual)
-  if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
-  return dropboxDownload(accessor.tokenManager, dropboxPath, window)
+  const [data, result] = download
+  record('read', path.virtual, 'dropbox', data.byteLength, timer, {
+    fingerprint: resultToken(result),
+  })
+  return data
 }
 
-export async function* stream(
+export async function* readStream(
   accessor: DropboxAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
@@ -108,7 +120,12 @@ export async function* stream(
   if (entry === null) throw enoent(path.virtual)
   if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
   const dropboxPath = dropboxPathFromVirtual(accessor.rootPath, virtualKey, prefix)
-  for await (const chunk of dropboxDownloadStream(accessor.tokenManager, dropboxPath)) {
+  const rec = recordStream('read', path.virtual, 'dropbox')
+  const stamp = (headers: Record<string, string>): void => {
+    if (rec !== null) rec.fingerprint = resultToken(headers[RESULT_HEADER.toLowerCase()])
+  }
+  for await (const chunk of dropboxDownloadStream(accessor.tokenManager, dropboxPath, stamp)) {
+    if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }
 }

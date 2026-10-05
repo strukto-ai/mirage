@@ -13,20 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { zgrepGeneric } from '../../generic/zgrep.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const zgrep: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return zgrepGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => ops.readStream(accessor, p, idx),
+    (p) => ops.stat(accessor, p),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'zgrep',
   read: true,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return zgrepGeneric(
-      resolved,
-      texts,
-      opts,
-      (p) => ops.readStream(accessor, p, idx),
-      (p) => ops.stat(accessor, p),
-    )
-  },
+  fn: zgrep,
 }

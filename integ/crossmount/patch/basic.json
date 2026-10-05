@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_patch_across_mounts",
+      "seq": 963212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' > /data/xm_rt_pt; printf -- '--- a\\n+++ b\\n@@ -1 +1 @@\\n-a\\n+b\\n' > /data2/xm_rt_pt.diff; patch -i /data2/xm_rt_pt.diff /data/xm_rt_pt; cat /data/xm_rt_pt; rm /data/xm_rt_pt /data2/xm_rt_pt.diff",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file /data/xm_rt_pt\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

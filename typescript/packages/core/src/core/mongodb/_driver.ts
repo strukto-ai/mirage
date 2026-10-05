@@ -34,11 +34,6 @@ export interface MongoCollectionSpec {
   options?: { validator?: { $jsonSchema?: unknown } | Record<string, unknown> }
 }
 
-export interface MongoIndexAccess {
-  ops?: number
-  since?: string
-}
-
 export interface MongoDriver {
   listDatabases(): Promise<string[]>
   listCollections(database: string, kind?: EntityKind | null): Promise<string[]>
@@ -67,6 +62,5 @@ export interface MongoDriver {
     filter?: Record<string, unknown>,
   ): Promise<number>
   listIndexes(database: string, collection: string): Promise<Record<string, unknown>[]>
-  getIndexStats(database: string, collection: string): Promise<Record<string, MongoIndexAccess>>
   close(): Promise<void>
 }

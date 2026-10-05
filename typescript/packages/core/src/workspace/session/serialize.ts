@@ -20,7 +20,7 @@ import type {
   ProfileScript,
 } from '../../policy/types.ts'
 import type { Scope } from '../../policy/types.ts'
-import { ScriptSource } from '../../runtime/routing/types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
 import type { RuntimeLanguage } from '../../runtime/types.ts'
 
 /** A compiled command tier as the session record stores it (the Python spelling). */

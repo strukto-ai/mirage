@@ -25,6 +25,7 @@ import {
   zipinfoLayout,
   type ZipRow,
 } from './archive/zipinfo.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { inflateRaw } from '../../../utils/compress.ts'
@@ -33,7 +34,7 @@ import { versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { errorVirtualPath, fsStrerror, isFsError } from '../../../utils/errors.ts'
-import { pathExists } from '../utils/copy.ts'
+import { isDirectory, pathExists } from '../utils/copy.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -85,6 +86,60 @@ const TESTED_SOME = (archive: string, count: number): string =>
 const TESTING = (name: string): string => `    testing: ${name.padEnd(22)}   OK\n`
 // A -d in a mode that writes nothing (Info-ZIP 6.00).
 const D_IGNORED = 'caution:  not extracting; -d ignored\n'
+const NO_AND_O = 'caution:  both -n and -o specified; ignoring -o\n'
+// Info-ZIP asks before it replaces a file, and reads the answer from its
+// input: the first character decides, and the answer stays on the line.
+const REPLACE_PROMPT = (name: string): string =>
+  `replace ${name}? [y]es, [n]o, [A]ll, [N]one, [r]ename: `
+const REPLACE_EOF = ' NULL\n(EOF or read error, treating as "[N]one" ...)\n'
+const NEW_NAME = 'new name: '
+const INVALID_RESPONSE = (shown: string): string => `error:  invalid response [${shown}]\n`
+// Info-ZIP's mapname keeps every extracted path under the root: it drops a
+// leading slash on stderr, a `..` component on stdout, and refuses a name
+// that maps to nothing.
+const STRIPPED_ABSOLUTE = (name: string): string =>
+  `warning:  stripped absolute path spec from ${name}\n`
+const SKIPPED_DOTDOT = (name: string): string =>
+  `warning:  skipped "../" path component(s) in ${name}`
+const MAPNAME_FAILED = (name: string): string => `mapname:  conversion of ${name} failed\n`
+const MAPNAME_EXIT = 2
+
+/**
+ * A member name as Info-ZIP's mapname turns it into a path: empty, `.` and
+ * `..` directory components are dropped, and a final `.` or `..` becomes `_`
+ * or `__`, so no mapped name climbs out of the extraction root. Returns the
+ * path (a directory keeps its trailing slash) and whether a `..` was
+ * dropped. Mirrors unzip.py.
+ */
+function mapName(name: string): [string, boolean] {
+  const directory = name.endsWith('/')
+  const parts = directory ? name.split('/').slice(0, -1) : name.split('/')
+  const kept: string[] = []
+  let skipped = false
+  parts.forEach((part, index) => {
+    const last = index === parts.length - 1 && !directory
+    if (part === '' || (!last && part === '.')) return
+    if (!last && part === '..') {
+      skipped = true
+      return
+    }
+    kept.push(part === '.' ? '_' : part === '..' ? '__' : part)
+  })
+  const mapped = kept.join('/')
+  return [directory && mapped !== '' ? mapped + '/' : mapped, skipped]
+}
+
+// An answer as Info-ZIP echoes one it refuses.
+function response(line: Uint8Array): string {
+  if (line.length === 0) return '{ENTER}'
+  const shown: number[] = []
+  for (const byte of line) {
+    if (byte === 0x7f) shown.push(0x5e, 0x3f)
+    else if (byte < 0x20) shown.push(0x5e, byte + 64)
+    else shown.push(byte)
+  }
+  return new TextDecoder().decode(Uint8Array.from(shown))
+}
 
 /**
  * The member patterns and the -x patterns, as Info-ZIP reads them: -x takes
@@ -392,6 +447,15 @@ export function readZipEntries(data: Uint8Array): {
   return { entries, count, slack: shift, comment }
 }
 
+// Info-ZIP's line for one extracted file, `%8sing: %-22s  %s`: a stored entry
+// is `extracting`, a compressed one `inflating`, and the name is padded to 22
+// columns and followed by two blanks, the room Info-ZIP keeps for a -a note.
+// Mirrors Python's `_extracted_line`.
+function extractedLine(method: number, shown: string): string {
+  const verb = method === 0 ? 'extract' : 'inflat'
+  return `${verb.padStart(8)}ing: ${shown.padEnd(22)}  `
+}
+
 async function entryContent(
   data: Uint8Array,
   localOffset: number,
@@ -418,11 +482,13 @@ function makePathSpec(virtual: string): PathSpec {
 }
 
 // Info-ZIP's refusals of a create: a member it cannot write (exit 50,
-// PK_DISK), a directory of the chain it cannot make, and an extraction
+// PK_DISK), a directory of the chain it cannot make or that a file already
+// holds (exit 2, and the next member still extracts), and an extraction
 // directory it cannot make (exit 2, before any member). The strerror line
 // hangs under the text after the label, as UnZip 6.00 indents it. Mirrors
 // unzip.py.
 const CREATE_EXIT = 50
+const CHECKDIR_EXIT = 2
 const DEST_EXIT = 2
 
 function createError(verb: string, name: string, strerror: string): string {
@@ -436,8 +502,70 @@ function checkdirError(dir: string, strerror: string, member: string): string {
   )
 }
 
+function checkdirFile(dir: string, member: string): string {
+  return (
+    `checkdir error:  ${dir} exists but is not directory\n` +
+    `                 unable to process ${member}.\n`
+  )
+}
+
+// The first level of `chain` below `base` that is not a directory, which
+// Info-ZIP names ("exists but is not directory") instead of the mkdir that
+// failed under it. Mirrors Python's `_file_in_chain`.
+async function fileInChain(stat: StatDoor, base: string, chain: string): Promise<string | null> {
+  let level = base
+  for (const part of chain
+    .slice(base.length)
+    .split('/')
+    .filter((p) => p !== '')) {
+    level = `${level}/${part}`
+    const node = makePathSpec(level)
+    if (!(await pathExists(stat, node))) return null
+    if (!(await isDirectory(stat, node))) return level
+  }
+  return null
+}
+
 function checkdirDest(dir: string, strerror: string): string {
   return `checkdir:  cannot create extraction directory: ${dir}\n           ${strerror}\n`
+}
+
+interface UnzipFlags {
+  readonly overwrite: boolean
+  readonly neverOverwrite: boolean
+  readonly listOnly: boolean
+  readonly quiet: boolean
+  readonly toStdout: boolean
+  readonly testOnly: boolean
+  readonly verbose: boolean
+  readonly excludes: readonly string[]
+  readonly zipinfo: boolean
+  readonly namesOnly: boolean
+  readonly namesHeaders: boolean
+  readonly short: boolean
+  readonly medium: boolean
+  readonly header: boolean
+}
+
+// The view stays with the caller: -x, -d and the operands are read back in
+// the order typed, and -d as typed, a path and a string.
+function parseFlags(fl: FlagView): UnzipFlags {
+  return {
+    overwrite: fl.asBool('o'),
+    neverOverwrite: fl.asBool('n'),
+    listOnly: fl.asBool('args_l'),
+    quiet: fl.asBool('q'),
+    toStdout: fl.asBool('p'),
+    testOnly: fl.asBool('t'),
+    verbose: fl.asBool('v'),
+    excludes: fl.asList('x'),
+    zipinfo: fl.asBool('Z'),
+    namesOnly: fl.asBool('args_1'),
+    namesHeaders: fl.asBool('2'),
+    short: fl.asBool('s'),
+    medium: fl.asBool('m'),
+    header: fl.asBool('h'),
+  }
 }
 
 export async function unzipGeneric(
@@ -451,24 +579,27 @@ export async function unzipGeneric(
   relay = false,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('unzip'))
-  const verbose = fl.asBool('v')
+  const parsed = parseFlags(fl)
+  const verbose = parsed.verbose
   if (paths.length === 0) {
     // Info-ZIP answers -v without an archive with its version banner, and
     // mirage's version line is that banner here.
     if (verbose) return [ENC.encode(versionLine('unzip')), new IOResult()]
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('unzip: missing operand\n') })]
   }
-  const listMode = fl.asBool('args_l')
-  const testMode = fl.asBool('t')
-  const pipeMode = fl.asBool('p')
-  const quiet = fl.asBool('q')
-  const zipinfoMode = fl.asBool('Z')
-  const namesOnly = fl.asBool('args_1')
-  const namesHeaders = fl.asBool('2')
-  const short = fl.asBool('s')
-  const medium = fl.asBool('m')
-  const header = fl.asBool('h')
-  const [chosen, excludes] = patterns(fl, members, fl.asList('x'))
+  const {
+    listOnly: listMode,
+    testOnly: testMode,
+    toStdout: pipeMode,
+    quiet,
+    zipinfo: zipinfoMode,
+    namesOnly,
+    namesHeaders,
+    short,
+    medium,
+    header,
+  } = parsed
+  const [chosen, excludes] = patterns(fl, members, parsed.excludes)
   if (!zipinfoMode) {
     const zipinfoOnly: [string, boolean][] = [
       ['-1', namesOnly],
@@ -592,7 +723,7 @@ export async function unzipGeneric(
       return [out, new IOResult()]
     }
 
-    const exitCode = unmatched.length > 0 || nothingLeft ? 11 : 0
+    let exitCode = unmatched.length > 0 || nothingLeft ? 11 : 0
     const stderr = cautions !== '' ? ENC.encode(cautions) : null
 
     if (pipeMode) {
@@ -645,49 +776,165 @@ export async function unzipGeneric(
         ]
       }
     }
+    let checkdirFailed = false
+    let createFailed = false
+    let answers: AsyncLineIterator | null = null
+    const extracted = new Set<string>()
+    let replaceAll = parsed.overwrite && !parsed.neverOverwrite
+    let skipAll = parsed.neverOverwrite
+    const answer = async (): Promise<Uint8Array | null> => {
+      if (opts.stdin === null) return null
+      answers ??= new AsyncLineIterator(opts.stdin)
+      return answers.readline()
+    }
+    // Where a file entry goes when a file may hold its name. Info-ZIP asks
+    // first, unless -o or an `A` said to replace and -n or an `N` said never
+    // to; end of input answers `N`. `r` names another file under the same
+    // directory, which is asked about in its turn. Mirrors unzip.py.
+    const destination = async (start: string): Promise<string | null> => {
+      let outPath = start
+      for (;;) {
+        if (replaceAll) return outPath
+        // Two members can map to one path, so what this run wrote counts as
+        // there even without a stat to ask.
+        const exists =
+          extracted.has(outPath) ||
+          (stat !== undefined && (await pathExists(stat, makePathSpec(outPath))))
+        if (!exists) return outPath
+        if (skipAll) return null
+        const prompt = REPLACE_PROMPT(shown(outPath))
+        const line = await answer()
+        if (line === null) {
+          errors.push(prompt + REPLACE_EOF)
+          skipAll = true
+          exitCode = Math.max(exitCode, WARN_EXIT)
+          return null
+        }
+        errors.push(prompt)
+        const first = String.fromCharCode(line[0] ?? 0)
+        if (first === 'y' || first === 'Y') return outPath
+        if (first === 'n') return null
+        if (first === 'A') {
+          replaceAll = true
+          return outPath
+        }
+        if (first === 'N') {
+          skipAll = true
+          return null
+        }
+        if (first === 'r' || first === 'R') {
+          let name: Uint8Array | null = new Uint8Array(0)
+          while (name !== null && name.length === 0) {
+            errors.push(NEW_NAME)
+            name = await answer()
+          }
+          if (name !== null) {
+            // Info-ZIP maps the new name as it maps a member's, except that it
+            // puts an absolute one under the working directory instead of -d;
+            // here every name stays under the extraction root.
+            const typed = new TextDecoder().decode(name)
+            const [renamed, skipped] = mapName(typed.replace(/^\/+/, ''))
+            if (skipped) {
+              exitCode = Math.max(exitCode, WARN_EXIT)
+              if (!quiet) outputLines.push(SKIPPED_DOTDOT(typed))
+            }
+            if (renamed !== '' && !renamed.endsWith('/')) outPath = base + '/' + renamed
+          }
+          continue
+        }
+        errors.push(INVALID_RESPONSE(response(line)))
+      }
+    }
     for (const e of selected) {
-      const entryName = lstripSlash(e.name)
+      const name = lstripSlash(e.name)
+      if (name !== e.name) {
+        errors.push(STRIPPED_ABSOLUTE(e.name))
+        exitCode = Math.max(exitCode, WARN_EXIT)
+      }
+      const [entryName, skipped] = mapName(name)
+      if (skipped) {
+        exitCode = Math.max(exitCode, WARN_EXIT)
+        if (!quiet) outputLines.push(SKIPPED_DOTDOT(name))
+      }
+      if (entryName === '') {
+        if (!name.endsWith('/')) {
+          errors.push(MAPNAME_FAILED(entryName))
+          exitCode = Math.max(exitCode, MAPNAME_EXIT)
+        }
+        continue
+      }
       const outPath = base + '/' + rstripSlash(entryName)
       const isDir = e.name.endsWith('/')
       // A directory entry is the only record an empty directory leaves, so
       // it has to be recreated even though nothing is written inside it.
       const parentEnd = outPath.lastIndexOf('/')
       const chain = isDir ? outPath : parentEnd > 0 ? outPath.slice(0, parentEnd) : ''
+      let existed = false
       try {
+        existed = isDir && stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
         if (chain !== '' && chain !== '/') await makeDirs(chain)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name))
+        checkdirFailed = true
+        let blocker: string | null = null
+        if (stat !== undefined) {
+          try {
+            blocker = await fileInChain(stat, base, chain)
+          } catch (probe) {
+            if (!isFsError(probe)) throw probe
+            console.warn(`unzip: probing ${chain} failed: ${String(probe)}`)
+          }
+        }
+        errors.push(
+          blocker !== null
+            ? checkdirFile(shown(blocker), e.name)
+            : checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name),
+        )
         continue
       }
       if (isDir) {
-        if (!quiet) outputLines.push(`   creating: ${shown(outPath)}/`)
+        if (!quiet && !existed) outputLines.push(`   creating: ${shown(outPath)}/`)
         continue
+      }
+      const target = await destination(outPath)
+      if (target === null) continue
+      const renamedDir = target.slice(0, target.lastIndexOf('/'))
+      if (target !== outPath && renamedDir !== chain) {
+        try {
+          await makeDirs(renamedDir)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          checkdirFailed = true
+          errors.push(checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name))
+          continue
+        }
       }
       const content = await e.content()
       try {
-        await write(makePathSpec(outPath), content)
+        await write(makePathSpec(target), content)
       } catch (err) {
         if (!isFsError(err)) throw err
         // -o unlinks a file already there before it writes, so a refusal of
         // that is its own verb.
-        const existed = stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
+        createFailed = true
+        const existed = stat !== undefined && (await pathExists(stat, makePathSpec(target)))
         errors.push(
-          createError(existed ? 'delete old' : 'create', shown(outPath), String(fsStrerror(err))),
+          createError(existed ? 'delete old' : 'create', shown(target), String(fsStrerror(err))),
         )
         continue
       }
       // Relay writes land on whichever mount owns each path and
       // invalidate through the dispatcher; keying them here would have
       // the runner prefix them onto this mount.
-      if (!relay) writes[outPath] = content
-      if (!quiet) outputLines.push(`  inflating: ${shown(outPath)}`)
+      extracted.add(target)
+      if (!relay) writes[target] = content
+      if (!quiet) outputLines.push(extractedLine(e.method, shown(target)))
     }
     const allStderr = ENC.encode(cautions + errors.join(''))
     return [
       listing(),
       new IOResult({
-        exitCode: errors.length > 0 ? CREATE_EXIT : exitCode,
+        exitCode: createFailed ? CREATE_EXIT : checkdirFailed ? CHECKDIR_EXIT : exitCode,
         stderr: allStderr.byteLength > 0 ? allStderr : null,
         writes,
       }),
@@ -698,7 +945,9 @@ export async function unzipGeneric(
   // A mode that writes nothing says so about -d first; -t prints the
   // offset warning on stdout, every other mode on stderr.
   const writesNothing = zipinfoMode || testMode || pipeMode || listMode || verbose
-  const caution = fl.asStr('d') !== undefined && writesNothing ? D_IGNORED : ''
+  const caution =
+    (parsed.overwrite && parsed.neverOverwrite ? NO_AND_O : '') +
+    (fl.asStr('d') !== undefined && writesNothing ? D_IGNORED : '')
   const onStderr = testMode && !zipinfoMode ? '' : warning
   if ((caution === '' && onStderr === '' && slack === 0) || result === null) return result
   const [out, io] = result

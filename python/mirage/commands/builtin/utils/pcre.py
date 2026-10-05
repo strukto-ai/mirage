@@ -84,7 +84,6 @@ K_SYNTAX = "\\k is not followed by a braced, angle-bracketed, or quoted name"
 # What mirage refuses although PCRE2 accepts it: nothing on either host
 # engine can mean the same, so the pattern is refused rather than run as
 # something else.
-UNSUPPORTED = "{} is not supported in mirage"
 
 # The reserved group names synthetic groups use. A `\K` is an empty group
 # whose position becomes the reported match start (`match_start`); an
@@ -209,6 +208,10 @@ class Frame:
     atomic: int = 0
 
 
+def unsupported(what: str) -> str:
+    return f"{what} is not supported in mirage"
+
+
 def add_width(
     a: tuple[int, int | None], b: tuple[int, int | None]
 ) -> tuple[int, int | None]:
@@ -306,7 +309,7 @@ class PcreTranslator:
             )
         if self.caseless_backref and self.case_sensitive_text:
             raise self.fail(
-                UNSUPPORTED.format(
+                unsupported(
                     "a caseless back-reference in a case-sensitive pattern"
                 ),
                 0,
@@ -493,9 +496,7 @@ class PcreTranslator:
             return
         if rest.startswith("P=") or rest.startswith("P>"):
             if rest.startswith("P>"):
-                raise self.fail(
-                    UNSUPPORTED.format("(?P>name) recursion"), start
-                )
+                raise self.fail(unsupported("(?P>name) recursion"), start)
             self.pos += 2
             close = src.find(")", self.pos)
             if close < 0:
@@ -506,19 +507,17 @@ class PcreTranslator:
             self.named_backref(name, at)
             return
         if ch == "|":
-            raise self.fail(UNSUPPORTED.format("(?| branch reset"), start)
+            raise self.fail(unsupported("(?| branch reset"), start)
         if ch == "(":
-            raise self.fail(UNSUPPORTED.format("(?( conditional group"), start)
+            raise self.fail(unsupported("(?( conditional group"), start)
         if (
             ch in "R&+"
             or ch.isdigit()
             or (ch == "-" and self.peek(1).isdigit())
         ):
-            raise self.fail(UNSUPPORTED.format("recursion"), start)
+            raise self.fail(unsupported("recursion"), start)
         if ch == "*":
-            raise self.fail(
-                UNSUPPORTED.format("(?* non-atomic lookaround"), start
-            )
+            raise self.fail(unsupported("(?* non-atomic lookaround"), start)
         self.inline_flags(start)
 
     def verb(self, start: int) -> None:
@@ -543,7 +542,7 @@ class PcreTranslator:
             ):
                 self.pos = close + 1
                 return
-        raise self.fail(UNSUPPORTED.format(f"(*{name})"), start)
+        raise self.fail(unsupported(f"(*{name})"), start)
 
     def capture(self, start: int, name: str) -> None:
         """Open a capturing group.
@@ -711,7 +710,7 @@ class PcreTranslator:
                 raise self.fail(LOOKBEHIND_UNLIMITED, frame.open_at)
             if low != high:
                 raise self.fail(
-                    UNSUPPORTED.format("a variable-length lookbehind"),
+                    unsupported("a variable-length lookbehind"),
                     frame.open_at,
                 )
         bodies = []
@@ -857,9 +856,9 @@ class PcreTranslator:
             self.keep()
             return
         if ch == "G":
-            raise self.fail(UNSUPPORTED.format("\\G"), start)
+            raise self.fail(unsupported("\\G"), start)
         if ch in "XC":
-            raise self.fail(UNSUPPORTED.format("\\" + ch), start)
+            raise self.fail(unsupported("\\" + ch), start)
         if ch == "R":
             self.atom(
                 "(?:\\r\\n|" + host_class(NEWLINE_SEQUENCE) + ")", (1, 2)
@@ -939,9 +938,7 @@ class PcreTranslator:
             found = G_REFERENCE.match(src, self.pos)
             if found is None:
                 if src[self.pos : self.pos + 1] in ("<", "'"):
-                    raise self.fail(
-                        UNSUPPORTED.format("subroutine calls"), start
-                    )
+                    raise self.fail(unsupported("subroutine calls"), start)
                 raise self.fail(G_SYNTAX)
             self.pos = found.end()
             if found.group(3):
@@ -1033,7 +1030,7 @@ class PcreTranslator:
         negated = name.startswith("^")
         cs = pcre_property(name[1:] if negated else name)
         if cs is None:
-            raise self.fail(UNSUPPORTED.format(f"\\p{{{name}}}"))
+            raise self.fail(unsupported(f"\\p{{{name}}}"))
         return cs.negate() if negated else cs
 
     def char_escape(self, ch: str, in_class: bool) -> int:
@@ -1204,7 +1201,7 @@ class PcreTranslator:
         negated = name.startswith("^")
         bare = name[1:] if negated else name
         if bare in ("<", ">"):
-            raise self.fail(UNSUPPORTED.format(f"[[:{bare}:]]"), self.pos)
+            raise self.fail(unsupported(f"[[:{bare}:]]"), self.pos)
         cs = posix_set(bare, self.unicode)
         if cs is None:
             raise self.fail(

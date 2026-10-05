@@ -1,6 +1,10 @@
-std.open = (path, mode) => {
-  const fd = __mirage_open(String(path), String(mode === undefined ? 'r' : mode))
-  if (fd === -2) throw new TypeError('invalid file mode')
+std.SEEK_SET = 0
+std.SEEK_CUR = 1
+std.SEEK_END = 2
+std.open = (path, mode, errorObj) => {
+  const fd = __mirage_open(String(path), String(mode))
+  if (fd === null) throw new TypeError('invalid file mode')
+  if (errorObj !== undefined) errorObj.errno = fd < 0 ? -fd : 0
   if (fd < 0) return null
   // A chunked file holds one chunk of its bytes: fill until the read it is
   // about to answer lacks nothing (a negative size asks for the rest).
@@ -11,28 +15,36 @@ std.open = (path, mode) => {
     readAsString: (max) => {
       const size = max === undefined ? -1 : toIndex(max)
       fill(size)
-      return __mirage_read(fd, size)
+      return __text(__mirage_read(fd, size))
     },
-    read: () => {
-      fill(-1)
-      return __mirage_read(fd, -1)
+    read: (buffer, position, length) => {
+      const [pos, len] = span(buffer, position, length)
+      fill(len)
+      const got = new Uint8Array(__mirage_read_bytes(fd, len))
+      new Uint8Array(buffer, pos, got.length).set(got)
+      return got.length
     },
     getline: () => {
       while (__mirage_lacks_line(fd)) __mirage_fill(fd, 0)
-      return __mirage_getline(fd)
+      const line = __mirage_getline(fd)
+      return line === null ? null : __text(line)
     },
     puts: (s) => {
-      __mirage_write(fd, String(s))
+      __mirage_write(fd, __pieces(String(s)))
     },
-    write: (s) => {
-      __mirage_write(fd, String(s))
-      return String(s).length
+    write: (buffer, position, length) => {
+      const [pos, len] = span(buffer, position, length)
+      return __mirage_write_bytes(fd, buffer.slice(pos, pos + len))
     },
     seek: (offset, whence) => {
       __mirage_seek(fd, offset | 0, whence === undefined ? 0 : whence | 0)
       return 0
     },
     tell: () => __mirage_tell(fd),
+    error: () => __mirage_ferror(fd),
+    clearerr: () => {
+      __mirage_clearerr(fd)
+    },
     eof: () => {
       fill(1)
       return __mirage_eof(fd)
@@ -50,6 +62,14 @@ const toIndex = (value) => {
   const n = Math.trunc(Number(value)) || 0
   if (n < 0 || n > Number.MAX_SAFE_INTEGER) throw new RangeError('invalid array index')
   return n
+}
+// read and write take an ArrayBuffer and a window of it, which must fit.
+const span = (buffer, position, length) => {
+  if (!(buffer instanceof ArrayBuffer)) throw new TypeError('not an ArrayBuffer')
+  const pos = toIndex(position)
+  const len = toIndex(length)
+  if (pos + len > buffer.byteLength) throw new RangeError('read/write array buffer overflow')
+  return [pos, len]
 }
 globalThis.os = globalThis.os || {}
 os.readdir = (path) => __mirage_readdir(String(path))

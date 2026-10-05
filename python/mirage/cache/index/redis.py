@@ -76,6 +76,11 @@ local function subtree(registry, root)
   paths[#paths + 1] = root
   return paths
 end
+-- A row's kind: 'folder' or '<backend>/folder', 'file' or '<backend>/file'.
+local function is_kind(row_type, kind)
+  return type(row_type) == 'string' and (row_type == kind
+    or string.sub(row_type, -(#kind + 1)) == '/' .. kind)
+end
 """
 
 _TRACK_PATHS = (
@@ -188,8 +193,8 @@ local function drop(path, buried)
   end
   local row = redis.call('GET', ARGV[2] .. path)
   local folder = buried or redis.call('EXISTS', ARGV[3] .. path) == 1
-    or (row ~= false and cjson.decode(row).resource_type == 'folder')
-  if named[path] and not (folder and named[path] == 'file') then
+    or (row ~= false and is_kind(cjson.decode(row).resource_type, 'folder'))
+  if named[path] and not (folder and is_kind(named[path], 'file')) then
     return
   end
   seen[path] = true
@@ -260,7 +265,7 @@ if raw then
   for _, path in ipairs(listing.entries) do
     local row = redis.call('GET', ARGV[1] .. path)
     local folder = redis.call('EXISTS', ARGV[2] .. path) == 1
-      or (row ~= false and cjson.decode(row).resource_type == 'folder')
+      or (row ~= false and is_kind(cjson.decode(row).resource_type, 'folder'))
     local position = positions[path]
     if not position then
       entries[#entries + 1] = path

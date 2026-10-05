@@ -21,6 +21,8 @@ from typing import Any, TypeVar
 
 from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
 from mirage.context import (
+    RedirectOpener,
+    redirect_opener_for,
     redirect_paths_for,
     reset_admission,
     reset_op_policies,
@@ -32,6 +34,7 @@ from mirage.io.types import materialize
 from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import (
@@ -171,16 +174,16 @@ async def execute_command(
         mark = (session._parse_current, node.start_point[0])
         source = node.text or b""
         base = node.start_byte
-        rest = source[head_node.end_byte - base :].decode()
+        rest = decode_text(source[head_node.end_byte - base :])
         rewrite = alias_command_text(session, head, rest, mark)
         if rewrite is not None:
             rewritten, texts = rewrite
             at = head_node.start_byte - base
-            line = source[:at].decode() + rewritten
+            line = decode_text(source[:at]) + rewritten
             ast = parse(line)
             own: dict[str, tuple[int, int]] = {}
             for alias, text in texts:
-                own[alias] = (at, at + len(text.encode()))
+                own[alias] = (at, at + len(encode_text(text)))
                 at = own[alias][1]
             offending = find_syntax_error(
                 ast, expanding_aliases(session), own, source_offsets(line, ast)
@@ -266,14 +269,14 @@ async def execute_command(
                 ),
             )
         except PolicyDenied as exc:
-            err = f"bash: {exc.strerror}\n".encode()
+            err = encode_text(f"bash: {exc.strerror}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
                 ExecutionNode(command=name or k, exit_code=1, stderr=err),
             )
         if k in session.readonly_vars:
-            err = f"bash: {k}: readonly variable\n".encode()
+            err = encode_text(f"bash: {k}: readonly variable\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -412,7 +415,7 @@ async def _dispatch_command_body(
             clean_parts.append(
                 SimpleNamespace(
                     type=NT.WORD,
-                    text=path.encode(),
+                    text=encode_text(path),
                     children=[],
                     named_children=[],
                 )
@@ -468,6 +471,7 @@ async def _dispatch_command_body(
             row=node.start_point[0],
             agent_id=agent_id,
             redirects=redirect_paths_for(node.id),
+            opener=redirect_opener_for(node.id),
             claimant=claimant,
             sink=sink,
         )
@@ -536,6 +540,7 @@ async def _run_argv(
     row: int = 0,
     agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
+    opener: RedirectOpener | None = None,
     claimant: Claimant | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -547,7 +552,8 @@ async def _run_argv(
     ``agent_id`` is the agent the line is attributed to, which an
     approval request names. ``redirects`` are the statement's expanded
     redirect targets, judged with the line because their I/O runs on
-    the shell's own fds outside the admitted command's gate window.
+    the shell's own fds outside the admitted command's gate window, and
+    ``opener`` opens them once the line is admitted.
     """
     name = argv.name
 
@@ -622,6 +628,11 @@ async def _run_argv(
                 ),
             )
         admitted = verdict
+    # bash opens a command's write targets before it runs, so `cat f > f`
+    # reads an emptied file; here that waits for the admission above,
+    # because a command the gate refuses must leave its targets alone.
+    if opener is not None and not await opener():
+        return None, IOResult(exit_code=1), ExecutionNode(exit_code=1)
 
     # ── run ────────────────────────────────────
     # The admitted command's gate is bound for its run and reset after,
@@ -696,7 +707,7 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
     """
     if not said:
         return lines
-    spoken = {t.strip() for t in said.decode(errors="replace").split("\n")}
+    spoken = {t.strip() for t in decode_text(said).split("\n")}
     return [line for line in lines if line.strip() not in spoken]
 
 
@@ -750,7 +761,7 @@ async def _route_argv(
     # Returning a clear error lets LLMs detect a capability gap instead
     # of treating it as a missing binary or a silent no-op.
     if name in UNSUPPORTED_BUILTINS:
-        err = f"mirage: unsupported builtin: {name}\n".encode()
+        err = encode_text(f"mirage: unsupported builtin: {name}\n")
         return (
             None,
             IOResult(exit_code=2, stderr=err),
@@ -871,7 +882,7 @@ async def _route_argv(
                             IOResult(),
                             ExecutionNode(command=name, exit_code=0),
                         )
-                    err = "".join(link_errors).encode()
+                    err = encode_text("".join(link_errors))
                     return (
                         None,
                         IOResult(exit_code=1, stderr=err),
@@ -884,7 +895,7 @@ async def _route_argv(
                 if early is not None:
                     return early
         except CycleError as exc:
-            err = f"{name}: {exc.filename}: {exc.strerror}\n".encode()
+            err = encode_text(f"{name}: {exc.filename}: {exc.strerror}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -949,12 +960,12 @@ async def _route_argv(
         # bookkeeping above so the operands the backend did remove
         # still shed their node meta.
         tail = io.stderr if isinstance(io.stderr, bytes) else b""
-        err = "".join(unsaid(link_errors, tail)).encode()
+        err = encode_text("".join(unsaid(link_errors, tail)))
         io.stderr = err + tail
         if io.exit_code == 0:
             io.exit_code = 1
         node_tail = exec_node.stderr or b""
-        node_err = "".join(unsaid(link_errors, node_tail)).encode()
+        node_err = encode_text("".join(unsaid(link_errors, node_tail)))
         exec_node.stderr = node_err + node_tail
         if exec_node.exit_code == 0:
             exec_node.exit_code = 1

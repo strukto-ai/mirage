@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_diff_exclude_from",
+      "seq": 840,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xdx /data2/xdx && printf '1\\n' | tee /data/xdx/x /data/xdx/k > /dev/null && printf '2\\n' | tee /data2/xdx/x /data2/xdx/k > /dev/null && printf 'x\\n' | tee /data/xdx.ex > /dev/null && diff -r -X /data/xdx.ex /data/xdx /data2/xdx",
+      "expect": {
+        "exit": 1,
+        "stdout": "diff -r -X /data/xdx.ex /data/xdx/k /data2/xdx/k\n1c1\n< 1\n---\n> 2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

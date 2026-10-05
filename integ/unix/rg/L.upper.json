@@ -395,6 +395,44 @@
         "q",
         "sort"
       ]
+    },
+    {
+      "id": "rg_L_parallel_walk_names_a_dangling_link_once",
+      "seq": 15800045,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crw/s && echo x > /data/crw/f && ln -s nowhere /data/crw/dang && rg -L x /data/crw; echo rc=$?; rg -j1 -L x /data/crw; echo rc=$?; rg --sort path -L x /data/crw; echo rc=$?; rg -L --files /data/crw; echo rc=$?; (cd /data/crw && rg -L x; echo rc=$?); rm -r /data/crw",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/crw/f:x\nrc=2\n/data/crw/f:x\nrc=2\n/data/crw/f:x\nrc=2\n/data/crw/f\nrc=2\nf:x\nrc=2\n",
+        "stderr": "rg: /data/crw/dang: No such file or directory (os error 2)\nrg: /data/crw/dang: IO error for operation on /data/crw/dang: No such file or directory (os error 2)\nrg: /data/crw/dang: IO error for operation on /data/crw/dang: No such file or directory (os error 2)\nrg: /data/crw/dang: No such file or directory (os error 2)\nrg: ./dang: No such file or directory (os error 2)\n"
+      },
+      "flags": [
+        "L",
+        "j",
+        "sort",
+        "files"
+      ]
     }
   ]
 }

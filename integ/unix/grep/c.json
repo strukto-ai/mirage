@@ -372,6 +372,44 @@
         "c",
         "A"
       ]
+    },
+    {
+      "id": "grep_c_exits_0_when_any_file_matches",
+      "seq": 15800039,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -c hello /data/a.txt /data/b.txt; echo rc=$?; mkdir -p /data/grc && echo x > /data/grc/f && grep -rc zzz /data/grc; echo rc=$?; rm -r /data/grc",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt:1\n/data/b.txt:0\nrc=0\n/data/grc/f:0\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "r"
+      ]
     }
   ]
 }

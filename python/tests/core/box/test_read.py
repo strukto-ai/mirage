@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.index.config import IndexEntry
-from mirage.core.box.read import read, stream
+from mirage.core.box.read import read, read_stream
 from mirage.types import PathSpec
 from mirage.utils.ranges import ByteWindow
 
@@ -188,5 +188,7 @@ async def test_stream_plain_file_chunks(accessor, index):
         yield b"llo"
 
     with patch("mirage.core.box.read.download_file_stream", new=fake_stream):
-        chunks = [c async for c in stream(accessor, _spec("/a.txt"), index)]
+        chunks = [
+            c async for c in read_stream(accessor, _spec("/a.txt"), index)
+        ]
     assert b"".join(chunks) == b"hello"

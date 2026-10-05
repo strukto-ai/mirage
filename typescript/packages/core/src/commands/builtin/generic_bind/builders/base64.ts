@@ -13,19 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { base64Generic } from '../../generic/base64_cmd.ts'
-import { type Builder, dirAwareStat, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const base64: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return base64Generic(
+    resolved,
+    opts,
+    (p) => ops.readStream(accessor, p, idx),
+    dirAwareStat(ops, accessor, opts),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'base64',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return base64Generic(
-      resolved,
-      opts,
-      (p) => ops.readStream(accessor, p, idx),
-      dirAwareStat(ops, accessor, opts),
-    )
-  },
+  fn: base64,
 }

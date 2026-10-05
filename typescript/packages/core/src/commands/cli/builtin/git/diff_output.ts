@@ -365,16 +365,6 @@ export async function commitSummary(
   })
 }
 
-export async function treeOutput(
-  repo: Repo,
-  before: string | null,
-  after: string,
-  flags: DiffFlags,
-  recursive = true,
-): Promise<string> {
-  return (await block(repo, before, after, flags, recursive)) ?? ''
-}
-
 /** One parent's diff block, null when the commit does not differ from it. */
 async function block(
   repo: Repo,

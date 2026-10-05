@@ -36,7 +36,6 @@ from mirage.commands.builtin.utils.paths import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
 from mirage.context import path_allowed
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -65,7 +64,7 @@ from mirage.utils.errors import (
     DotWalkMissing,
     fs_strerror,
 )
-from mirage.utils.key_prefix import mounted_path, rekey
+from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote_always
 
@@ -81,9 +80,7 @@ class CpFlags:
     update: str | None = None
     backup: str | None = None
     suffix: str = DEFAULT_BACKUP_SUFFIX
-    # Single-mount dispatch delivers the -t value as PathSpec; the
-    # cross-mount relay's string view is wrapped against the first source.
-    target_dir: PathSpec | str | None = None
+    target_dir: PathSpec | None = None
     no_target_dir: bool = False
     dereference: CopyDeref = CopyDeref.ALWAYS
 
@@ -261,18 +258,15 @@ def suffix_flag(fl: FlagView) -> str | None:
     return fl.as_str("suffix") or None
 
 
-def target_flags(
-    cmd_name: str, fl: FlagView
-) -> tuple[PathSpec | str | None, bool]:
+def target_flags(cmd_name: str, fl: FlagView) -> tuple[PathSpec | None, bool]:
     """Resolve ``-t``/``--target-directory`` and ``-T``, rejecting both.
 
     Args:
         cmd_name (str): Command name for the conflict error.
         fl (FlagView): Parsed flag view.
     """
-    target_dir: FlagValue | None = fl.raw("target_directory")
-    if not isinstance(target_dir, (PathSpec, str)):
-        target_dir = None
+    raw = fl.raw("target_directory")
+    target_dir = raw if isinstance(raw, PathSpec) else None
     no_target = fl.as_bool("no_target_directory")
     if target_dir is not None and no_target:
         raise UsageError(
@@ -582,26 +576,25 @@ async def copy_tree_links(
 def split_operands(
     cmd_name: str,
     paths: list[PathSpec],
-    target_dir: PathSpec | str | None,
+    target_dir: PathSpec | None,
     no_target_dir: bool,
-) -> tuple[list[PathSpec], PathSpec | None]:
+) -> tuple[list[PathSpec], PathSpec]:
     """Split operands into sources and destination, GNU arity errors.
 
-    With ``-t`` every operand is a source and the returned destination is
-    None (the caller wraps the target-directory string itself). ``-T``
-    requires exactly two operands.
+    With ``-t`` every operand is a source and the target directory is
+    the destination. ``-T`` requires exactly two operands.
 
     Args:
         cmd_name (str): Command name for the usage errors.
         paths (list[PathSpec]): Positional path operands.
-        target_dir (str | None): ``--target-directory`` value.
+        target_dir (PathSpec | None): ``--target-directory`` value.
         no_target_dir (bool): ``-T``.
     """
     hint = f"Try '{cmd_name} --help' for more information."
     if not paths:
         raise UsageError(f"{cmd_name}: missing file operand\n{hint}", 1)
     if target_dir is not None:
-        return list(paths), None
+        return list(paths), target_dir
     if len(paths) == 1:
         raise UsageError(
             f"{cmd_name}: missing destination file operand after "
@@ -611,18 +604,6 @@ def split_operands(
     if no_target_dir and len(paths) > 2:
         raise extra_operand_error(cmd_name, paths[2].raw_path)
     return list(paths[:-1]), paths[-1]
-
-
-def wrap_target_dir(ref: PathSpec, virtual: str) -> PathSpec:
-    """Build the ``-t`` directory PathSpec from a same-mount reference.
-
-    Args:
-        ref (PathSpec): Any operand on the destination's mount.
-        virtual (str): Resolved virtual path of the target directory.
-    """
-    return PathSpec.from_str_path(
-        virtual, rekey(ref.virtual, ref.vfs_path, virtual)
-    )
 
 
 async def target_dir_error(
@@ -1053,36 +1034,42 @@ def transfer_line(
 
 async def _tree_lines(
     strategy: NativeCopy,
+    stat: StatFn,
     src: PathSpec,
     target: PathSpec,
     src_base: str,
     dst_base: str,
 ) -> list[str]:
-    """GNU ``-v`` lines for a natively copied tree, parents first.
+    """GNU ``-v`` lines for a tree about to be copied natively, parents first.
 
-    GNU ``cp -rv`` reports directories as well as files, including the
-    source root itself. Deliberate divergence: GNU's sibling order follows
-    readdir, which no backend can reproduce, so entries are sorted
-    lexicographically instead. That keeps every parent ahead of its
-    children (GNU's only load-bearing ordering guarantee) and is stable
-    across backends.
+    GNU ``cp -rv`` reports every file and every directory it creates,
+    including the source root itself; a directory already at the
+    destination is merged into without a line. Read before the copy, so
+    the destination still shows which directories exist. Deliberate
+    divergence: GNU's sibling order follows readdir, which no backend can
+    reproduce, so entries are sorted lexicographically instead. That keeps
+    every parent ahead of its children (GNU's only load-bearing ordering
+    guarantee) and is stable across backends.
 
     Args:
         strategy (NativeCopy): Native copy capability.
+        stat (StatFn): Stats a destination directory.
         src (PathSpec): Source root.
         target (PathSpec): Destination root.
         src_base (str): Source root's mount path, no trailing slash.
         dst_base (str): Destination root's mount path, no trailing slash.
     """
-    dirs = await strategy.find(src, type="d")
+    dirs = {src_base, *await strategy.find(src, type="d")}
     files = await strategy.find(src, type="f")
     lines: list[str] = []
-    for entry_mount in sorted({src_base, *dirs, *files}):
+    for entry_mount in sorted({*dirs, *files}):
         entry = spelled_from(mounted_path(src, entry_mount), src)
         entry_dst = spelled_from(
             mounted_path(target, dst_base + entry_mount[len(src_base) :]),
             target,
         )
+        if entry_mount in dirs and await is_directory(stat, entry_dst):
+            continue
         lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
     return lines
 
@@ -1135,8 +1122,9 @@ async def _mirror_dirs(
         errors (list[str]): Collected stderr lines, appended in place.
         into_itself (bool): Whether the destination lies inside the
             source; its subtree is then left out, as the file pass does.
-        lines (list[str] | None): Verbose sink for the directory entries
-            GNU also reports; None keeps them silent.
+        lines (list[str] | None): Verbose sink for the directories this
+            creates, which GNU also reports; one already at the
+            destination is merged into silently. None keeps them silent.
 
     Returns:
         bool: False when a directory could not be created, so the caller
@@ -1159,9 +1147,6 @@ async def _mirror_dirs(
             mounted_path(target, dst_base + entry_mount[len(src_base) :]),
             target,
         )
-        if lines is not None:
-            entry = spelled_from(mounted_path(src, entry_mount), src)
-            lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
         if await is_directory(stat, entry_dst):
             continue
         try:
@@ -1173,6 +1158,9 @@ async def _mirror_dirs(
             )
             return False
         writes[entry_dst.mount_path] = b""
+        if lines is not None:
+            entry = spelled_from(mounted_path(src, entry_mount), src)
+            lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
     return True
 
 
@@ -1391,7 +1379,7 @@ async def copy_entries(
     return copied_all, wrote_any
 
 
-async def cp(
+async def cp_generic(
     paths: list[PathSpec],
     *,
     stat: StatFn,
@@ -1442,12 +1430,7 @@ async def cp(
     sources, dst = split_operands(
         "cp", paths, flags.target_dir, flags.no_target_dir
     )
-    if dst is None:
-        dst = (
-            flags.target_dir
-            if isinstance(flags.target_dir, PathSpec)
-            else wrap_target_dir(sources[0], str(flags.target_dir))
-        )
+    if flags.target_dir is not None:
         err = await target_dir_error("cp", stat, dst)
         if err is not None:
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)
@@ -1692,18 +1675,18 @@ async def cp(
                 and not per_entry_native
                 and not into_itself
             ):
+                if flags.verbose:
+                    lines.extend(
+                        await _tree_lines(
+                            strategy, stat, src, target, src_base, dst_base
+                        )
+                    )
                 await strategy.dir_copy(src, target)
                 for entry_mount in await strategy.find(src, type="f"):
                     entry_dst = mounted_path(
                         target, dst_base + entry_mount[len(src_base) :]
                     )
                     writes[entry_dst.mount_path] = b""
-                if flags.verbose:
-                    lines.extend(
-                        await _tree_lines(
-                            strategy, src, target, src_base, dst_base
-                        )
-                    )
                 if copies is not None:
                     await copy_tree_links(
                         copies,

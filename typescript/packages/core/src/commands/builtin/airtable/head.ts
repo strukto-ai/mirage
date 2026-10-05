@@ -39,7 +39,7 @@ async function* headSource(
   yield await airtableRead(accessor, p, index, pushdown ? { limit: lines } : {})
 }
 
-async function headCommand(
+async function head(
   accessor: AirtableAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -64,5 +64,5 @@ export const AIRTABLE_HEAD = command({
   name: 'head',
   vfs: VFSName.AIRTABLE,
   spec: specOf('head'),
-  fn: headCommand,
+  fn: head,
 })

@@ -2,7 +2,7 @@
   "cases": [
     {
       "id": "refuses_a_malformed_mode",
-      "note": "qjs-libc checks a mode word character by character, so the real engine (quickjs on the python host) opens 'rr'. The TypeScript shim parses modes with the shared parser, which also holds CPython's one-base rule and refuses it.",
+      "note": "qjs-libc checks a mode word letter by letter and musl's fopen reads only its first letter, so QuickJS opens 'rr' as 'r', refuses a letter outside rwa+bx with a TypeError, and answers a first letter outside rwa with EINVAL.",
       "runtimes": [
         "monty",
         "wasi",
@@ -24,22 +24,21 @@
         {
           "program": {
             "python": "open('/data/seed.txt', 'rr')",
-            "js": "std.open('/data/seed.txt', 'rr')"
+            "js": "const f = std.open('/data/seed.txt', 'rr')\nconsole.log(JSON.stringify(f.getline()))\nf.close()"
           },
           "expect": {
-            "exit": 1,
-            "stderr_contains": "invalid mode: 'rr'"
+            "python": {
+              "exit": 1,
+              "stderr_contains": "invalid mode: 'rr'"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "\"seed\"\n"
+            }
           },
           "expect_on": {
             "monty": {
               "stderr_contains": "must have exactly one of create/read/write/append mode"
-            },
-            "quickjs": {
-              "stderr_contains": "invalid file mode"
-            },
-            "quickjs@python": {
-              "exit": 0,
-              "stderr_contains": ""
             }
           }
         },
@@ -49,16 +48,37 @@
             "js": "std.open('/data/seed.txt', 'rq')"
           },
           "expect": {
-            "exit": 1,
-            "stderr_contains": "invalid mode: 'rq'"
+            "python": {
+              "exit": 1,
+              "stderr_contains": "invalid mode: 'rq'"
+            },
+            "js": {
+              "exit": 1,
+              "stderr_contains": "invalid file mode"
+            }
           },
           "expect_on": {
             "monty": {
               "stderr_contains": "invalid mode: 'q'"
-            },
-            "quickjs": {
-              "stderr_contains": "invalid file mode"
             }
+          }
+        },
+        {
+          "program": {
+            "js": "std.open('/data/seed.txt')"
+          },
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "invalid file mode"
+          }
+        },
+        {
+          "program": {
+            "js": "const e = {}\nconsole.log(std.open('/data/seed.txt', 'br', e), e.errno)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "null 28\n"
           }
         }
       ]

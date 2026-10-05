@@ -68,6 +68,9 @@ async def _copy_into(
         await copy_folder(tm, item["id"], dst_parent, name=new_name)
     else:
         await copy_file(tm, item["id"], dst_parent, name=new_name)
+    # Each landing, not only the operand: a merge adds children to a folder
+    # whose listing an earlier stat may already hold.
+    await invalidate_after_write(dst)
 
 
 async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:

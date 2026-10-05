@@ -16,12 +16,11 @@ import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { withPathGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { IO } from './io.ts'
-import { ensureLiveTree } from '../../../core/github/tree.ts'
+import { ensureTree } from '../../../core/github/tree.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { IOResult } from '../../../io/types.ts'
-import { DEFAULT_MAX_DU_ENTRIES, runDu } from '../generic/du.ts'
+import { DEFAULT_MAX_DU_ENTRIES, duGeneric } from '../generic/du.ts'
 import { WalkBudget, walkEntries, walkSize } from '../generic_bind/builders/du.ts'
 import type { DuEntries } from '../../../vfs/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -58,7 +57,7 @@ function subtree(accessor: GitHubAccessor, path: PathSpec): [DuEntries, string[]
   return [[blobs, total], directories]
 }
 
-async function duCommand(
+async function du(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   _texts: string[],
@@ -69,10 +68,9 @@ async function duCommand(
   // after du has validated its flags: an invalid line must cost no fetch.
   // Once per line, so one du reads one tree.
   let probe: Promise<void> | undefined
-  const live = (): Promise<void> =>
-    (probe ??= ensureLiveTree(accessor, idx, opts.mountPrefix ?? ''))
+  const live = (): Promise<void> => (probe ??= ensureTree(accessor, idx, opts.mountPrefix ?? ''))
   const budget = new WalkBudget(IO.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
-  const out = await runDu(
+  return duGeneric(
     paths,
     opts,
     async (targets) => {
@@ -104,12 +102,11 @@ async function duCommand(
     () => budget.unreadable,
     () => budget.directories,
   )
-  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }
 
 export const GITHUB_DU = command({
   name: 'du',
   vfs: VFSName.GITHUB,
   spec: specOf('du'),
-  fn: duCommand,
+  fn: du,
 })

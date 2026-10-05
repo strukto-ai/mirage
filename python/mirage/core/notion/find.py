@@ -16,7 +16,7 @@ from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.find_eval import FindArgs, PredNode
-from mirage.commands.builtin.generic.find import walk_find
+from mirage.core.generic.find import walk_find
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.stat import stat
 from mirage.types import FileStat, PathSpec

@@ -18,7 +18,11 @@ from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urlsplit
 
-from mirage.commands.cli.builtin.gh.accessor import jq_lines, read_cli_file
+from mirage.commands.cli.builtin.gh.accessor import (
+    gh_bool,
+    jq_lines,
+    read_cli_file,
+)
 from mirage.commands.cli.builtin.gh.constants import HTTP_REASONS
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.errors import PartialOutputError
@@ -257,7 +261,7 @@ async def api(
         body = fields or None
 
     pages: list[_Printed] = []
-    include = fl.as_bool("include")
+    include = gh_bool(fl, "include")
     current: str | None = path
     first = True
     while current is not None:
@@ -309,7 +313,7 @@ async def api(
         first = False
         current = (
             _next_path(response.headers.get("link"), inv.config.base_url)
-            if fl.as_bool("paginate")
+            if gh_bool(fl, "paginate")
             else None
         )
 
@@ -486,16 +490,16 @@ def _render_pages(
         fl (FlagView): the invocation's flags.
         failure (_Failure | None): the failing response, if one failed.
     """
-    include = fl.as_bool("include")
+    include = gh_bool(fl, "include")
     between = "\n" if include else ""
     heads = [page.head for page in pages]
     failed: list[list[str | bytes]] = (
         [] if failure is None else [[failure.head, failure.body]]
     )
-    if fl.as_bool("silent"):
+    if gh_bool(fl, "silent"):
         every = heads + ([] if failure is None else [failure.head])
         return _bytes_of(_joined([[head] for head in every], between))
-    slurp = fl.as_bool("slurp")
+    slurp = gh_bool(fl, "slurp")
     printed: list[list[str | bytes]] = [
         [page.head, _body_text(page.data)] for page in pages
     ]

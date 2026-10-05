@@ -31,6 +31,7 @@ import {
 } from './declare.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 function exportLines(session: SessionState, flags: Set<string>): string[] {
   // The exported set, not every shell variable: `X=hello` is absent and
@@ -58,7 +59,7 @@ export async function handleExport(
 ): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, EXPORT_FLAGS)
   if (bad !== null) {
-    const err = new TextEncoder().encode(`bash: export: -${bad}: invalid option\n${EXPORT_USAGE}`)
+    const err = encodeText(`bash: export: -${bad}: invalid option\n${EXPORT_USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -67,7 +68,7 @@ export async function handleExport(
   }
   if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = exportLines(session, flags)
-    const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+    const out = encodeText(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
   }
   // -f is accepted and marks nothing: mirage carries no export attribute

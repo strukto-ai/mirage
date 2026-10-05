@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_chgrp_both_mounts",
+      "seq": 9900013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf a > /data/xm_chgrp && printf b > /data2/xm_chgrp && chgrp 789 /data/xm_chgrp /data2/xm_chgrp && stat -c \"%g\" /data/xm_chgrp /data2/xm_chgrp",
+      "expect": {
+        "exit": 0,
+        "stdout": "789\n789\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_chgrp_continues_after_missing",
+      "seq": 9900014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chgrp 789 /data/xm_chgrp_missing /data2/xm_chgrp; echo status:$?; stat -c \"%g\" /data2/xm_chgrp",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:1\n789\n",
+        "stderr": "chgrp: cannot access '/data/xm_chgrp_missing': No such file or directory\n"
+      }
+    }
+  ]
+}

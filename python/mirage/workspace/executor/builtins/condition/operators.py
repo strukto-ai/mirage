@@ -20,6 +20,7 @@ from mirage.commands.builtin.utils.paths import (
     typed_spec,
 )
 from mirage.io.types import materialize
+from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp
@@ -125,7 +126,7 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             # division by 0`, a test's grammar error being the only
             # other thing that ends it.
             raise ExitSignal(
-                1, stderr=f"bash: {exc}\n".encode(), contained_code=1
+                1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
             ) from exc
     if op in ("-L", "-h"):
         return ctx.namespace.is_link(

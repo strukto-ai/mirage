@@ -640,6 +640,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       pyodide,
       this.guestXattr.bind(this),
       this.guestProcess.bind(this),
+      () => {
+        this.journal.seal()
+      },
     )
     return this.guest
   }
@@ -691,6 +694,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    * way it ran. Returns one message per failure for the caller's stderr.
    */
   private async drainMutations(): Promise<string[]> {
+    this.journal.reopen()
     const vfs = this.vfs
     if (vfs === null) return []
     const failures = this.syncFailures.splice(0)

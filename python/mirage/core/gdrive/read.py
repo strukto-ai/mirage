@@ -43,13 +43,6 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.ranges import slice_window, window_for
 
 
-async def read_bytes(
-    token_manager: TokenManager,
-    file_id: str,
-) -> bytes:
-    return await download_file(token_manager, file_id)
-
-
 def _whole_file(offset: int, size: int | None) -> bool:
     """Whether a read returned the whole object rather than a window.
 

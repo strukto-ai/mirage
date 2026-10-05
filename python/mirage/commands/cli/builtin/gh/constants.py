@@ -142,6 +142,8 @@ SEARCH_MULTIPLE = [
     "license",
     "topic",
 ]
+# The values a gh boolean flag takes after `=`.
+BOOLEAN = ("true", "false")
 SEARCH_BOOLEAN = [
     "archived",
     "draft",
@@ -593,3 +595,30 @@ REPO_EDIT_FIELDS = (
         "base branch to be updated",
     ),
 )
+
+# The help topics `gh help` answers, in this gh's own terms. gh's other
+# topics (formatting, mintty, reference, telemetry) describe a terminal, a
+# config directory or a manual a workspace does not have, so they are
+# unknown here.
+HELP_TOPICS: dict[str, str] = {
+    "environment": (
+        "This gh reads no environment variables: `GH_TOKEN`, "
+        "`GITHUB_TOKEN`, `GH_HOST`, `GH_REPO`\n"
+        "and the rest of gh's list have no effect here.\n\n"
+        "The token, the API base URL, the default repository and the "
+        "default branch come from the\n"
+        "workspace's gh configuration: `token`, `base_url`, `repo` and "
+        "`branch`.\n"
+    ),
+    "exit-codes": (
+        "gh follows normal conventions regarding exit codes.\n\n"
+        "- If a command completes successfully, the exit code will be 0\n\n"
+        "- If a command fails for any reason, the exit code will be 1\n\n"
+        "- If the command line is refused before the command runs, such as "
+        "for an unknown flag,\n"
+        "  the exit code will be 2\n"
+    ),
+}
+
+GITHUB_HOST = "github.com"
+CONNECT_HINT = "check your internet connection or https://githubstatus.com"

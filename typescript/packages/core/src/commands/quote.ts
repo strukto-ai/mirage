@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { encodeText } from '../shell/bytes.ts'
+import { byteView } from '../shell/bytes.ts'
 
 // The seven C escapes gnulib spells by name, plus the two printable
 // characters it still escapes because they would otherwise close or
@@ -60,10 +60,13 @@ const QUOTE_ESCAPES = new Map<string, string>([
 // `unrecognized option '<w>'` prints `argv[optind]` with a plain `%s`, so
 // it carries the raw bytes and must NOT be routed here.
 //
+// `utf8` means the word is text, as a command under a UTF-8 locale holds it;
+// it is quoted per byte all the same, as the C locale quotes it.
+//
 // `quote_word` in quote.py is the twin.
-export function quoteWord(view: string): string {
+export function quoteWord(view: string, utf8 = false): string {
   let out = ''
-  for (const ch of view) {
+  for (const ch of utf8 ? byteView(view) : view) {
     const named = QUOTE_ESCAPES.get(ch)
     if (named !== undefined) {
       out += named
@@ -80,15 +83,10 @@ export function quoteWord(view: string): string {
 // view expr's parser runs on.
 //
 // The commands that refuse a flag value hold it as a plain string, so they
-// need the encode first: the rule counts bytes, and `é` must render as two
-// octal escapes rather than one. `encodeText` rather than `TextEncoder`,
-// because a raw byte reaches a command as its U+DCxx sentinel and
-// `TextEncoder` would write that as U+FFFD.
+// need the byte view first: the rule counts bytes, and `é` must render as
+// two octal escapes rather than one.
 //
 // `quote_text` in quote.py is the twin.
 export function quoteText(text: string): string {
-  const raw = encodeText(text)
-  let view = ''
-  for (const byte of raw) view += String.fromCharCode(byte)
-  return quoteWord(view)
+  return quoteWord(byteView(text))
 }

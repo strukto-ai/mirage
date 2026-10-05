@@ -23,8 +23,13 @@ HOST_KEY_NAME = "host_ed25519_key"
 AUTHORIZED_KEYS_NAME = "authorized_keys"
 
 # The module that serves the door. It imports asyncssh, which is the
-# `ssh` extra, so the daemon loads it by path only once a port is set.
+# `ssh` extra, so the daemon loads it by path only once a port is set or
+# the HTTPS route carries a connection.
 SERVER_MODULE = "mirage.server.ssh.server:start_ssh_server"
+TUNNEL_MODULE = "mirage.server.ssh.server:serve_tunnel"
+
+# How many bytes the HTTPS route relays at a time.
+TUNNEL_CHUNK = 64 * 1024
 
 # The most entry stats one listing keeps in flight. Each is a hop to the
 # workspace loop and, on a mount that keeps no listing index, a backend
@@ -35,6 +40,17 @@ LISTING_CONCURRENCY = 16
 # profiles (`mirage-profile="guarded" ssh-ed25519 AAAA...`). The server
 # reads it, never the client, so a key cannot pick a looser profile.
 PROFILE_OPTION = "mirage-profile"
+
+# The authorized_keys option naming the account a key belongs to
+# (`mirage-account="alice" ssh-ed25519 AAAA...`). The account opens only
+# the workspaces it owns; in jwt mode a key without one opens nothing.
+ACCOUNT_OPTION = "mirage-account"
+
+# A client that answers no keepalive for this many intervals is gone,
+# so its connection closes and the line it was running is cancelled
+# rather than left behind a half-open socket.
+KEEPALIVE_INTERVAL_SECONDS = 15
+KEEPALIVE_COUNT_MAX = 3
 
 # The subsystem Codex opens (`ssh ... -s codex-exec`) to run its tools in
 # a workspace. It speaks Codex's exec-server protocol: one JSON-RPC

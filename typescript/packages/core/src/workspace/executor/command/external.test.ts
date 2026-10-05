@@ -23,7 +23,8 @@ import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
-import { ScriptSource, type RouteContext } from '../../../runtime/routing/types.ts'
+import type { RouteContext } from '../../../runtime/routing/types.ts'
+import { ScriptSource } from '../../../runtime/types.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,

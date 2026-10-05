@@ -31,20 +31,82 @@ async def test_mkdir_posts_folder_with_fail_behavior():
 
 
 @pytest.mark.asyncio
-async def test_mkdir_tolerates_existing_item():
+async def test_mkdir_parents_tolerates_an_existing_folder():
     with aioresponses() as m:
+        m.post(_BASE + "/root/children", payload={"id": "1"})
         m.post(
             _BASE + "/root:/parent:/children",
             status=409,
             payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
         )
-        await mkdir(_accessor(), PathSpec.from_str_path("/parent/new"))
+        m.get(_BASE + "/root:/parent/new", payload={"id": "1", "folder": {}})
+        await mkdir(
+            _accessor(), PathSpec.from_str_path("/parent/new"), parents=True
+        )
         # Tolerating the 409 means returning after the one POST, not
         # retrying it with a different conflict behavior.
         assert (
             len(m.requests[("POST", URL(_BASE + "/root:/parent:/children"))])
             == 1
         )
+
+
+@pytest.mark.asyncio
+async def test_mkdir_refuses_a_folder_made_after_the_lookup():
+    """A folder another client made after the doors looked still 409s."""
+    with aioresponses() as m:
+        m.post(
+            _BASE + "/root:/parent:/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_BASE + "/root:/parent/new", payload={"id": "1", "folder": {}})
+        with pytest.raises(FileExistsError):
+            await mkdir(_accessor(), PathSpec.from_str_path("/parent/new"))
+
+
+@pytest.mark.asyncio
+async def test_mkdir_refuses_a_name_a_file_holds():
+    with aioresponses() as m:
+        m.post(
+            _BASE + "/root:/parent:/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_BASE + "/root:/parent/new", payload={"id": "1", "file": {}})
+        with pytest.raises(FileExistsError):
+            await mkdir(_accessor(), PathSpec.from_str_path("/parent/new"))
+
+
+@pytest.mark.asyncio
+async def test_mkdir_under_a_file_is_not_a_directory():
+    with aioresponses() as m:
+        m.post(_BASE + "/root:/f:/children", status=404, payload=_NOT_FOUND)
+        m.get(_BASE + "/root:/f", payload={"id": "1", "file": {}})
+        with pytest.raises(NotADirectoryError):
+            await mkdir(_accessor(), PathSpec.from_str_path("/f/new"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operand", "error", "named"),
+    [
+        ("/f/x/y", NotADirectoryError, "/f"),
+        ("/f", FileExistsError, "/f"),
+    ],
+)
+async def test_mkdir_parents_names_the_file_it_stops_at(operand, error, named):
+    with aioresponses() as m:
+        m.post(
+            _BASE + "/root/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_BASE + "/root:/f", payload={"id": "1", "file": {}})
+        with pytest.raises(error, match=f"^{named}$"):
+            await mkdir(
+                _accessor(), PathSpec.from_str_path(operand), parents=True
+            )
 
 
 @pytest.mark.asyncio
@@ -99,6 +161,7 @@ async def test_mkdir_creates_a_missing_mount_root_then_retries(parents):
             _BASE + "/root:/team/root:/children",
             callback=_recording(posts, 404),
         )
+        m.get(_BASE + "/root:/team/root", status=404, payload=_NOT_FOUND)
         m.post(_BASE + "/root/children", callback=_recording(posts))
         m.post(_BASE + "/root:/team:/children", callback=_recording(posts))
         m.post(
@@ -125,7 +188,8 @@ async def test_mkdir_does_not_retry_a_404_below_the_mount_root():
             _BASE + "/root:/team/root/a:/children",
             callback=_recording(posts, 404),
         )
-        with pytest.raises(GraphError):
+        m.get(_BASE + "/root:/team/root/a", status=404, payload=_NOT_FOUND)
+        with pytest.raises(FileNotFoundError):
             await mkdir(
                 _accessor(key_prefix="team/root"),
                 PathSpec.from_str_path("/a/b"),
@@ -138,6 +202,35 @@ async def test_mkdir_does_not_retry_a_404_without_a_key_prefix():
     posts: list[str] = []
     with aioresponses() as m:
         m.post(_BASE + "/root/children", callback=_recording(posts, 404))
-        with pytest.raises(GraphError):
+        m.get(_BASE + "/root", payload={"id": "root", "folder": {}})
+        with pytest.raises(FileNotFoundError):
             await mkdir(_accessor(), PathSpec.from_str_path("/new"))
     assert posts == ["404 " + _BASE + "/root/children"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("parents", "named"), [(True, "/od"), (False, "/od/lt")]
+)
+async def test_mkdir_names_a_file_in_the_hidden_prefix_as_the_root(
+    parents, named
+):
+    with aioresponses() as m:
+        m.post(
+            _BASE + "/root:/team/root:/children",
+            status=404,
+            payload=_NOT_FOUND,
+        )
+        m.get(_BASE + "/root:/team/root", status=404, payload=_NOT_FOUND)
+        m.post(
+            _BASE + "/root/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_BASE + "/root:/team", payload={"id": "1", "file": {}})
+        with pytest.raises(NotADirectoryError, match=f"^{named}$"):
+            await mkdir(
+                _accessor(key_prefix="team/root"),
+                PathSpec.from_str_path("/od/lt", "lt"),
+                parents=parents,
+            )

@@ -28,7 +28,7 @@ import {
   handleUntil,
   handleWhile,
 } from './control.ts'
-import type { ExecuteNodeFn } from './jobs.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
 
 function node(text: string, nextSibling: TSNodeLike | null = null): TSNodeLike {
   return { type: 'command', text, children: [], namedChildren: [], isNamed: true, nextSibling }

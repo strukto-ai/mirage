@@ -174,7 +174,7 @@ async def test_records(program, expected):
         (
             'BEGIN{print length("héllo"), toupper("abc"), '
             'index("hello","ll")}',
-            "5 ABC 3\n",
+            "6 ABC 3\n",
         ),
         ('BEGIN{print match("foobar",/o+/), RSTART, RLENGTH}', "2 2 2\n"),
         (
@@ -223,6 +223,19 @@ async def test_command_line_assignment_is_a_strnum():
         await run("BEGIN{print n+1, (n==5)}", assignments={"n": "5"})
         == "6 1\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_environ_holds_the_environment_as_strnums():
+    interp = Interpreter(
+        parse(
+            'BEGIN{print ENVIRON["n"]+1, (ENVIRON["n"]==5), ("m" in ENVIRON)}'
+        ),
+        FakeHost(),
+        environ={"n": "05"},
+    )
+    await interp.run_begin()
+    assert (await interp.drain())[0] == b"6 1 0\n"
 
 
 @pytest.mark.asyncio

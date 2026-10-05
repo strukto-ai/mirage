@@ -41,5 +41,5 @@ def combined_exit(
             return 1
         if 0 in codes:
             return 0
-        return max(codes, default=0)
+        return max(codes, default=1)
     return max(codes, default=0)

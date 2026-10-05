@@ -29,6 +29,7 @@ import { ShellBuiltin as SB } from '../../../../shell/types.ts'
 import { wordText } from '../../../../types.ts'
 import { sessionView } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * Evaluate test/[ (flat argv) or [[ (condition tree). `name` is the
@@ -61,7 +62,7 @@ export async function handleTest(
     // The builtin's own diagnostic is in bash's voice; the program
     // (`find -exec test`) keeps its bare one.
     const own = exc.message.startsWith(`${name}: `) && !isProgramInvocation(session)
-    const stderr = new TextEncoder().encode(`${own ? 'bash: ' : ''}${exc.message}\n`)
+    const stderr = encodeText(`${own ? 'bash: ' : ''}${exc.message}\n`)
     if (name === '[[' && exc.fatal) {
       // A bad [[ ]] operator is a bash PARSE error: the whole input
       // line dies, not just this command.
@@ -92,7 +93,7 @@ export async function testBuiltin(call: BuiltinCall): Promise<Result> {
       testArgs = testArgs.slice(0, -1)
     } else {
       const voice = isProgramInvocation(call.session) ? '' : 'bash: '
-      const err = new TextEncoder().encode(`${voice}[: missing \`]'\n`)
+      const err = encodeText(`${voice}[: missing \`]'\n`)
       return [
         null,
         new IOResult({ exitCode: 2, stderr: err }),

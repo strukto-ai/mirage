@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { DEFAULT_MAX_DU_ENTRIES } from '../commands/builtin/generic/du.ts'
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { PredNode } from '../commands/builtin/find_eval.ts'
 import { type CommandIO, makeGenericCommands } from '../commands/builtin/generic_bind/index.ts'
@@ -273,6 +274,15 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly listingsPin: string | null = null
   /**
+   * How many entries a du walk of this mount visits before it stops and
+   * reports a partial answer, null for no cap: the command table's own
+   * `maxDuEntries`, read by a walk that crosses mounts through the
+   * dispatcher, which charges each entry to the mount serving it.
+   *
+   * Mirrors Python's `BaseVFS.max_du_entries`.
+   */
+  readonly maxDuEntries: number | null = DEFAULT_MAX_DU_ENTRIES
+  /**
    * The backend handle every core function on the tables takes. A driver
    * built from a table takes it from its options; a builtin declares and
    * assigns its own. One that brings none runs over a no-op accessor.
@@ -322,6 +332,8 @@ export class BaseVFS<A extends Accessor = Accessor> {
     this.supportsSnapshot = options.supportsSnapshot ?? false
     this.readRevalidatable = options.readRevalidatable ?? false
     const table = io instanceof VFSAdapter ? io.toCommandIO() : io
+    this.maxDuEntries =
+      table.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : table.maxDuEntries
     this.#commands = [
       ...makeGenericCommands<A>(
         options.name,

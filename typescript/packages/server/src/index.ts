@@ -42,6 +42,7 @@ export {
   ENV_JWT_ISSUER,
   ENV_JWT_PUBKEY,
   ENV_JWT_PUBKEY_FILE,
+  ENV_JWT_JWKS_URL,
   JWTVerificationError,
   defaultTokenFile,
   ensureTokenFile,

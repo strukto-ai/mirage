@@ -35,11 +35,12 @@ import {
   SHELL_INPUT,
   WRITE_DESCRIPTION,
   WRITE_INPUT,
-} from '@struktoai/mirage-agents/tool_descriptions'
+} from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
 import {
   MirageToolOperations,
   type MirageToolOperationsOptions,
-} from '@struktoai/mirage-agents/tool_operations'
+} from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true }
 
@@ -95,9 +96,8 @@ export interface MirageMcpServerOptions extends MirageToolOperationsOptions {
   name?: string
   version?: string
   /**
-   * The tool table to serve, built from the workspace and these options
-   * when absent. The HTTP door builds a server per request around one
-   * table, so the read a request stamps guards the next request's edit.
+   * The tool table to serve; the session's own (`session.tools`) when
+   * absent. The HTTP door passes one that runs each call through its API.
    */
   operations?: MirageToolOperations
 }
@@ -106,7 +106,12 @@ export function createMirageMcpServer(
   workspace: Workspace,
   options: MirageMcpServerOptions = {},
 ): McpServer {
-  const operations = options.operations ?? new MirageToolOperations(workspace, options)
+  const session = new Session(workspace, options.sessionId ?? null)
+  const operations =
+    options.operations ??
+    (options.staleWriteProtection === false
+      ? new MirageToolOperations(session, false)
+      : session.tools)
   const server = new McpServer({
     name: options.name ?? 'mirage',
     version: options.version ?? VERSION,

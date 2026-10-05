@@ -144,6 +144,8 @@ model GithubCommit {
   sha           String
   // The first parent, empty at the start of a chain (the synthesized root).
   parentSha     String @default("")
+  // The parents after the first, in order, as a JSON list.
+  otherParentsJson String @default("[]")
   message       String
   authorLogin   String
   date          String

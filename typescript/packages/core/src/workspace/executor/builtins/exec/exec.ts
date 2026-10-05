@@ -46,13 +46,14 @@ import {
 } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 /** The `exec` builtin without redirects: bare `exec` is a no-op that
  * succeeds; `exec CMD` has no OS-process referent and is refused. */
 export function handleExecCommand(args: string[], _session: SessionState): Result {
   if (args.length === 0)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
-  const err = new TextEncoder().encode(
+  const err = encodeText(
     `mirage: exec: ${args[0] ?? ''}: process replacement is not supported ` +
       '(no OS process to replace)\n',
   )
@@ -66,7 +67,7 @@ export function handleExecCommand(args: string[], _session: SessionState): Resul
 /** bash's line for a redirect target it could not open. */
 function errorLine(label: string, err: unknown): Uint8Array {
   const strerror = isFsError(err) ? (fsStrerror(err) ?? '') : ''
-  return new TextEncoder().encode(strerror !== '' ? `${label}: ${strerror}\n` : `${label}\n`)
+  return encodeText(strerror !== '' ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
 /** The shell-attributed refusal of an `exec` redirect line; the line is
@@ -285,11 +286,11 @@ async function installDescriptor(
   const { fd, target } = redirect
   if (redirect.kind === RedirectKind.AMBIGUOUS) {
     const word = target instanceof PathSpec ? target.rawPath : String(target)
-    return new TextEncoder().encode(`${word}: ambiguous redirect\n`)
+    return encodeText(`${word}: ambiguous redirect\n`)
   }
   if (redirect.kind === RedirectKind.HEREDOC || redirect.kind === RedirectKind.HERESTRING) {
     const data = String(target) + (redirect.kind === RedirectKind.HERESTRING ? '\n' : '')
-    bind(session, fd, OPEN_FOR_READING, false, new SharedInput(new TextEncoder().encode(data)))
+    bind(session, fd, OPEN_FOR_READING, false, new SharedInput(encodeText(data)))
     return null
   }
   if (typeof target === 'number') {
@@ -400,7 +401,7 @@ export async function divertStatement(
     const first = command.trim().split(/\s+/)[0]
     const name = first === undefined || first === '' ? 'bash' : first
     io.exitCode = 1
-    const line = new TextEncoder().encode(`${name}: write error: Bad file descriptor\n`)
+    const line = encodeText(`${name}: write error: Bad file descriptor\n`)
     await routed(dispatch, session, Channel.STDERR, line, rest)
   } else if (unwritable && io.exitCode === 0 && stdoutToStderr(statement)) {
     // The statement's own output was what could not be written, so the write

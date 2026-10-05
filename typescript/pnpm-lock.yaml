@@ -507,6 +507,12 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
+      '@types/ssh2':
+        specifier: ^1.15.0
+        version: 1.15.5
+      ssh2:
+        specifier: ^1.16.0
+        version: 1.17.0
       tsup:
         specifier: ^8.5.0
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.23)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.3)
@@ -779,15 +785,15 @@ importers:
       '@fastify/rate-limit':
         specifier: ^10.0.0
         version: 10.3.0
+      '@fastify/websocket':
+        specifier: ^11.3.3
+        version: 11.3.3
       '@modelcontextprotocol/client':
         specifier: ^2.3.0
         version: 2.3.0
       '@modelcontextprotocol/server':
         specifier: ^2.3.0
         version: 2.3.0
-      '@struktoai/mirage-agents':
-        specifier: workspace:*
-        version: link:../agents
       '@struktoai/mirage-core':
         specifier: workspace:*
         version: link:../core
@@ -803,6 +809,9 @@ importers:
       rate-limiter-flexible:
         specifier: ^11.2.0
         version: 11.2.0
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -810,6 +819,9 @@ importers:
       '@types/ssh2':
         specifier: ^1.15.0
         version: 1.15.5
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       ssh2:
         specifier: ^1.16.0
         version: 1.17.0
@@ -1942,6 +1954,9 @@ packages:
 
   '@fastify/rate-limit@10.3.0':
     resolution: {integrity: sha512-eIGkG9XKQs0nyynatApA3EVrojHOuq4l6fhB4eeCk4PIOeadvOJz9/4w3vGI44Go17uaXOWEcPkaD8kuKm7g6Q==}
+
+  '@fastify/websocket@11.3.3':
+    resolution: {integrity: sha512-NBJoykKpFwrdX9Ezod1rt30p5NoPFu7vgeuUowSM3JVI5/hFNRPhetqkWMTiF/ifIzctwitbJut1gZ6FDg1mwQ==}
 
   '@google/genai@2.21.0':
     resolution: {integrity: sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q==}
@@ -4480,6 +4495,9 @@ packages:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
     engines: {node: '>= 0.4'}
 
+  duplexify@4.1.3:
+    resolution: {integrity: sha512-M3BmBhwJRZsSx38lZyhE53Csddgzl5R7xGJNk7CVddZD6CcmwMCH8J+7AprIrQKH7TonKxaCjcv27Qmf+sQ+oA==}
+
   e2b@2.45.0:
     resolution: {integrity: sha512-9DjhV+4xeS8/N7fQf6xz0y1apUS3CN+kOwAADzPlUEGGcgC2g5sPLExHh+GA2V1LcZZIOs387PN1DFpgAGGOhw==}
     engines: {node: '>=20.18.1 <21 || >=22'}
@@ -4510,6 +4528,9 @@ packages:
   encoding-japanese@2.2.0:
     resolution: {integrity: sha512-EuJWwlHPZ1LbADuKTClvHtwbaFn4rOD+dRAbWysqEOXRc2Uui0hJInNJrsdH0c+OhJA4nrCBdSkW4DD5YxAo6A==}
     engines: {node: '>=8.10.0'}
+
+  end-of-stream@1.4.5:
+    resolution: {integrity: sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==}
 
   engine.io-client@6.6.6:
     resolution: {integrity: sha512-iY6QdftLQ9pyiPoX082bpf/u1UewnOaJrtJIF9T0++QB34lZrj0uP+Q/bj8AlUsAxqhnkTV2BS8SBZSxOmoV5Q==}
@@ -4756,6 +4777,9 @@ packages:
 
   fastify-plugin@5.1.0:
     resolution: {integrity: sha512-FAIDA8eovSt5qcDgcBvDuX/v0Cjz0ohGhENZ/wpc3y+oZCY2afZ9Baqql3g/lC+OHRnciQol4ww7tuthOb9idw==}
+
+  fastify-plugin@6.0.0:
+    resolution: {integrity: sha512-fZOty7z3O7vOliF6d8bHE3wiEh1KcNnKEQensSgTk9C1DvN6nRLS++XVd86v33Hw/8u9Un8A1zDrQ8ujcQDHEg==}
 
   fastify@5.12.5:
     resolution: {integrity: sha512-OB2k1dlxs5/NAABqeKV2FUHkSD2BbENsCak8yULVcymn3fHIPDVa9TI3SDnJSWYSllZmSYuZXy2gTnsT+Sut1A==}
@@ -6608,6 +6632,9 @@ packages:
 
   stream-browserify@3.0.0:
     resolution: {integrity: sha512-H73RAHsVBapbim0tU2JwwOiXUj+fikfiaoYAKHF3VJfA0pe2BCzkhAHBlLG6REzE+2WNZcxOXjK7lkso+9euLA==}
+
+  stream-shift@1.0.3:
+    resolution: {integrity: sha512-76ORR0DO1o1hlKwTbi/DM3EXWGf3ZJYO8cXX5RJwnul2DEg2oyoZyjLNoQM8WsvZiFKCRfC1O0J7iCvie3RZmQ==}
 
   streamsearch@1.1.0:
     resolution: {integrity: sha512-Mcc5wHehp9aXz1ax6bZUyY5afg9u2rv5cqQI3mRrYkGC8rW2hM02jWuwjtL++LS5qinSyhj2QfLyNsuc+VsExg==}
@@ -8860,6 +8887,15 @@ snapshots:
       '@lukeed/ms': 2.0.2
       fastify-plugin: 5.1.0
       toad-cache: 3.7.0
+
+  '@fastify/websocket@11.3.3':
+    dependencies:
+      duplexify: 4.1.3
+      fastify-plugin: 6.0.0
+      ws: 8.21.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   '@google/genai@2.21.0(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))':
     dependencies:
@@ -11491,6 +11527,13 @@ snapshots:
       es-errors: 1.3.0
       gopd: 1.2.0
 
+  duplexify@4.1.3:
+    dependencies:
+      end-of-stream: 1.4.5
+      inherits: 2.0.4
+      readable-stream: 3.6.2
+      stream-shift: 1.0.3
+
   e2b@2.45.0:
     dependencies:
       '@bufbuild/protobuf': 2.13.0
@@ -11538,6 +11581,10 @@ snapshots:
   encodeurl@2.0.0: {}
 
   encoding-japanese@2.2.0: {}
+
+  end-of-stream@1.4.5:
+    dependencies:
+      once: 1.4.0
 
   engine.io-client@6.6.6:
     dependencies:
@@ -11891,6 +11938,8 @@ snapshots:
       xml-naming: 0.3.0
 
   fastify-plugin@5.1.0: {}
+
+  fastify-plugin@6.0.0: {}
 
   fastify@5.12.5:
     dependencies:
@@ -14011,6 +14060,8 @@ snapshots:
     dependencies:
       inherits: 2.0.4
       readable-stream: 3.6.2
+
+  stream-shift@1.0.3: {}
 
   streamsearch@1.1.0: {}
 

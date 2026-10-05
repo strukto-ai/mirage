@@ -53,6 +53,7 @@ dependencies = [
     "mcp>=2.3.0,<3",
     "jsonschema>=4.26.0",
     "regex>=2026.4.4",
+    "multidict>=6.0",
 ]
 
 [project.urls]
@@ -146,7 +147,7 @@ openai      = ["openai>=2.46.0", "openai-agents>=0.18.3"]
 # --- pydantic-ai ---
 pydantic-ai = [
     "pydantic-ai-slim[anthropic,openai]>=2.13.0",
-    "pydantic-ai-backend>=0.2.16",
+    "pydantic-ai-backend>=0.2.16,<0.2.30",
 ]
 
 # --- deepagents ---

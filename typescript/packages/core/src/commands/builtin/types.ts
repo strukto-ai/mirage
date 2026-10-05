@@ -57,6 +57,8 @@ export interface GrepSearchOptions {
   readonly fixedString: boolean
   readonly wholeWord: boolean
   readonly syntax: RegexSyntax
+  /** grep runs under a UTF-8 locale, so a line is matched as text rather than as its bytes. */
+  readonly utf8: boolean
 }
 
 /** Declared search dialect and fallback scan strategy for grep/rg. */

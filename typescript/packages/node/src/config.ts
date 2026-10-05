@@ -21,7 +21,7 @@ import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/index'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
 import {
@@ -708,16 +708,16 @@ interface RedisConsoleBlock {
   ttlSeconds?: number | null
 }
 
-interface RamStoreGroupBlock {
+interface RamStoreBlock {
   type?: 'ram'
 }
 
-interface DiskStoreGroupBlock {
+interface DiskStoreBlock {
   type: 'disk'
   root?: string
 }
 
-interface RedisStoreGroupBlock {
+interface RedisStoreBlock {
   type: 'redis'
   url?: string
   keyPrefix?: string
@@ -729,15 +729,11 @@ interface RedisStoreGroupBlock {
  * It hosts only the sessions+meta plane (conditional-PUT CAS), so it
  * is valid as the `workspace` override and never as the default.
  */
-interface S3StoreGroupBlock extends Partial<S3Config> {
+interface S3StoreBlock extends Partial<S3Config> {
   type: 's3'
 }
 
-type StoreGroupBlock =
-  | RamStoreGroupBlock
-  | DiskStoreGroupBlock
-  | RedisStoreGroupBlock
-  | S3StoreGroupBlock
+type StoreGroupBlock = RamStoreBlock | DiskStoreBlock | RedisStoreBlock | S3StoreBlock
 
 /**
  * The workspace state store: one block, four planes. The top-level

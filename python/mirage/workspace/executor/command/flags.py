@@ -104,7 +104,6 @@ def parse_flags(
     spec: CommandSpec | None,
     cmd_name: str,
     cwd: str,
-    str_flag_paths: bool = False,
     env: Mapping[str, str] | None = None,
     *,
     unknown_is_operand: bool = False,
@@ -129,10 +128,6 @@ def parse_flags(
             inside the parse rather than after it, or an env-supplied
             int would go unchecked and an env-supplied path would stay
             a bare string.
-        str_flag_paths (bool): keep PATH flag values as their resolved
-            virtual-path strings instead of PathSpec. Cross-mount
-            strategies read flags through FlagView, which type-checks
-            str, so they get the string view.
         unknown_is_operand (bool): whether another parser reads this
             line after mirage, passed straight to parse_command. True
             only for an installed CLI's node, whose spec is deliberately
@@ -214,49 +209,41 @@ def parse_flags(
         # `.` to the operand. A permuted line spelling one path twice,
         # once as an option's value typed after the operand, swaps the
         # two spellings and nothing else.
-        if not str_flag_paths:
-            for key, value in flag_kwargs.items():
-                raw = parsed.raw_path_flags.get(key)
-                raw_parts = raw if isinstance(raw, list) else []
-                # Only the parser's own list[str] values reach here; a
-                # PathSpec list is already promoted.
-                texts_in: list[str] = (
-                    [item for item in value if isinstance(item, str)]
-                    if isinstance(value, list)
-                    else []
-                )
-                if key in pair_path_keys and isinstance(value, list):
-                    # A pair is (name, value): only the odd slots are paths.
-                    pairs: list[str | PathSpec] = list(texts_in)
-                    for index in range(1, len(pairs), 2):
-                        pairs[index] = take_spelling(
-                            spellings,
-                            scope_map,
-                            texts_in[index],
-                            raw_parts[index],
-                        )
-                    flag_kwargs[key] = pairs
-                elif key in repeat_path_keys and isinstance(value, list):
-                    flag_kwargs[key] = [
-                        take_spelling(
-                            spellings, scope_map, part, raw_parts[index]
-                        )
-                        for index, part in enumerate(texts_in)
-                    ]
-                elif key in single_path_keys and isinstance(value, str):
-                    flag_kwargs[key] = take_spelling(
+        for key, value in flag_kwargs.items():
+            raw = parsed.raw_path_flags.get(key)
+            raw_parts = raw if isinstance(raw, list) else []
+            # Only the parser's own list[str] values reach here; a
+            # PathSpec list is already promoted.
+            texts_in: list[str] = (
+                [item for item in value if isinstance(item, str)]
+                if isinstance(value, list)
+                else []
+            )
+            if key in pair_path_keys and isinstance(value, list):
+                # A pair is (name, value): only the odd slots are paths.
+                pairs: list[str | PathSpec] = list(texts_in)
+                for index in range(1, len(pairs), 2):
+                    pairs[index] = take_spelling(
                         spellings,
                         scope_map,
-                        value,
-                        raw if isinstance(raw, str) else None,
+                        texts_in[index],
+                        raw_parts[index],
                     )
-                elif isinstance(value, str) and value in scope_map:
-                    flag_kwargs[key] = scope_map[value].virtual
-        else:
-            # The string view still takes an option's word off the queue,
-            # so the operands get the same words on both dispatch paths.
-            for value in parsed.path_flag_values:
-                take_spelling(spellings, scope_map, value)
+                flag_kwargs[key] = pairs
+            elif key in repeat_path_keys and isinstance(value, list):
+                flag_kwargs[key] = [
+                    take_spelling(spellings, scope_map, part, raw_parts[index])
+                    for index, part in enumerate(texts_in)
+                ]
+            elif key in single_path_keys and isinstance(value, str):
+                flag_kwargs[key] = take_spelling(
+                    spellings,
+                    scope_map,
+                    value,
+                    raw if isinstance(raw, str) else None,
+                )
+            elif isinstance(value, str) and value in scope_map:
+                flag_kwargs[key] = scope_map[value].virtual
 
         # Classify positional args: each operand takes its own word. The
         # spelling rides along for a word the classifier left as text

@@ -118,18 +118,6 @@ function charEnd(bytes: Uint8Array): number {
   return end
 }
 
-// Byte-accurate tail cap: keep the LAST maxBytes bytes of the encoded text,
-// re-aligned to a UTF-8 sequence boundary so the kept tail still decodes.
-export function tailCap(text: string, maxBytes: number): { text: string; truncated: boolean } {
-  const bytes = new TextEncoder().encode(text)
-  if (bytes.byteLength <= maxBytes) return { text, truncated: false }
-  const start = charBoundary(bytes, bytes.byteLength - maxBytes)
-  return {
-    text: new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(start)),
-    truncated: true,
-  }
-}
-
 /**
  * A bounded backlog of output bytes: the newest `budget` bytes, with the
  * oldest dropped as they overflow.

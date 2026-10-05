@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../accessor/base.ts'
 import { PathSpec } from '../types.ts'
 import { runWithCacheManager } from './context.ts'
+import { withCacheMutation } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { CacheManager } from './manager.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream, cacheAwareStreamEager } from './read_through.ts'
@@ -192,6 +193,68 @@ it('does not repopulate a retired mount after a read', async () => {
     return Promise.resolve(ENC.encode('old'))
   })
   live = true
+  expect(await manager.cachedBytes(spec())).toBeNull()
+})
+
+it('does not keep a fill whose keep turns false mid-fetch', async () => {
+  let keepable = true
+  const manager = new CacheManager(new RAMFileCacheStore(), null, '/s3/', true)
+  const read = await manager.fill(
+    spec(),
+    () => {
+      keepable = false
+      return Promise.resolve(ENC.encode('old'))
+    },
+    () => keepable,
+  )
+  expect(read).toEqual(ENC.encode('old'))
+  expect(await manager.cachedBytes(spec())).toBeNull()
+})
+
+function within<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`not settled within ${String(ms)}ms`))
+    }, ms)
+  })
+  return Promise.race([work, late]).finally(() => {
+    clearTimeout(timer)
+  })
+}
+
+it('asks keep only once the fill holds the mutation lock', async () => {
+  // A fill that fetched waits for the lock behind another holder; what keep
+  // answers while it waits is not the answer it must act on.
+  let keepable = true
+  const store = new RAMFileCacheStore()
+  const manager = new CacheManager(store, null, '/s3/', true)
+  let release: () => void = () => undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let fetched: () => void = () => undefined
+  const fetching = new Promise<void>((resolve) => {
+    fetched = resolve
+  })
+  const holding = withCacheMutation(store, () => held)
+  const filling = manager.fill(
+    spec(),
+    () => {
+      fetched()
+      return Promise.resolve(ENC.encode('old'))
+    },
+    () => keepable,
+  )
+  try {
+    await within(fetching, 1000)
+    keepable = false
+    release()
+    expect(await within(filling, 1000)).toEqual(ENC.encode('old'))
+  } finally {
+    release()
+    await holding
+  }
   expect(await manager.cachedBytes(spec())).toBeNull()
 })
 

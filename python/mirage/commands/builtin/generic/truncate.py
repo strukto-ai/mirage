@@ -10,6 +10,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import (
     FS_ERRORS,
@@ -128,7 +129,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags:
     return TruncateFlags(size=size, no_create=fl.as_bool("no_create"))
 
 
-async def truncate(
+async def truncate_generic(
     paths: list[PathSpec],
     *,
     flags: TruncateFlags,
@@ -155,7 +156,7 @@ async def truncate(
             await _truncate_one(path, flags, stat, truncate_fn)
         except FS_ERRORS as exc:
             errors.append(fs_error_line("truncate", path, exc))
-    err = "".join(errors).encode()
+    err = encode_text("".join(errors))
     return None, IOResult(exit_code=1 if err else 0, stderr=err or None)
 
 
@@ -209,4 +210,4 @@ async def _truncate_one(
     await truncate_fn(path, parse_size(flags.size, current), flags.no_create)
 
 
-__all__ = ["TruncateFlags", "parse_flags", "parse_size", "truncate"]
+__all__ = ["TruncateFlags", "parse_flags", "parse_size", "truncate_generic"]

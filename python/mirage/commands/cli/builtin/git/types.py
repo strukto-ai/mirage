@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import tzinfo
 from enum import StrEnum
 
 from dulwich.index import ConflictedIndexEntry, IndexEntry
 
+from mirage.commands.cli.builtin.git.errors import GitError
+from mirage.commands.cli.types import CLIInvocation
 from mirage.types import FileStat
 
 
@@ -71,6 +73,13 @@ class RepoLocation:
     commondir: str
     worktree: str
     mount_root: str
+
+
+# git's refusal for a verb a read-only mount turned down, built from the
+# line and the repository it opened, None when it opened none.
+ReadOnlyRefusal = Callable[
+    [CLIInvocation[None], RepoLocation | None], GitError
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +283,29 @@ class DateMode:
     strftime: str = ""
     now: int = 0
     zone: tzinfo | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SymbolicEnd:
+    """Where a chain of symbolic refs ends.
+
+    Args:
+        name (str): the last name reached.
+        symbolic (bool): whether any hop was symbolic.
+    """
+
+    name: str
+    symbolic: bool
+
+
+class Decoration(StrEnum):
+    """How ``log`` and ``show`` label a commit with the refs that point
+    at it, git's decoration style: not at all, by short names, or by
+    full ref names."""
+
+    NONE = "no"
+    SHORT = "short"
+    FULL = "full"
 
 
 class FieldCompare(StrEnum):

@@ -19,14 +19,20 @@ import type { CLIInvocation } from '../../types.ts'
 import { GitError } from './errors.ts'
 import { resolveCommit } from './revparse.ts'
 import { opened } from './session.ts'
-import { fatal } from './util.ts'
+import { checkOperands, fatal, maybeBool } from './util.ts'
 import { readOptional, under, writeFile } from './io.ts'
 import { HEAD } from './constants.ts'
+import { isBare } from './discover.ts'
+import { configValues } from './fs.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 
 const LOGS_DIR = 'logs'
 const HEAD_LOG = 'logs/HEAD'
 export const ZERO = '0'.repeat(40)
+// What a move of HEAD or a new branch records in the reflog. There is no
+// committer there, only a ref moving, so the stated identity commit uses is
+// reused.
+export const IDENTITY = 'mirage <mirage@localhost>'
 
 const ENC = new TextEncoder()
 
@@ -36,6 +42,7 @@ const ENC = new TextEncoder()
  * `<old> <new> <identity> <epoch> <offset>\t<message>`, with the old id all
  * zeroes when there was nothing there before. The tab is load-bearing: it is
  * what separates the fixed fields from a message that may itself contain spaces.
+ * An empty message leaves the tab out, as git does.
  *
  * @param before the id the ref held, zeroes when it held none
  * @param after the id it now holds
@@ -50,7 +57,8 @@ export function entry(
   when: number,
   message: string,
 ): Uint8Array {
-  return ENC.encode(`${before} ${after} ${who} ${String(when)} +0000\t${message}\n`)
+  const tail = message === '' ? '' : `\t${message}`
+  return ENC.encode(`${before} ${after} ${who} ${String(when)} +0000${tail}\n`)
 }
 
 /**
@@ -73,6 +81,33 @@ export async function append(
   merged.set(existing)
   merged.set(line, existing.length)
   await writeFile(dispatch, target, merged)
+}
+
+const LOGGED_PREFIXES = ['refs/heads/', 'refs/remotes/', 'refs/notes/']
+
+/**
+ * Whether an update to a ref is logged: always where its log already exists,
+ * and otherwise as `core.logAllRefUpdates` says, which defaults to HEAD and the
+ * branch, remote and notes refs outside a bare repository, and to nothing in
+ * one (`should_autocreate_reflog`).
+ *
+ * @param dispatch workspace op dispatcher
+ * @param location the discovered repository
+ * @param name the full ref name
+ * @param log the path of its log
+ */
+export async function logged(
+  dispatch: Dispatch,
+  location: RepoLocation,
+  name: string,
+  log: string,
+): Promise<boolean> {
+  if ((await readOptional(dispatch, log)) !== null) return true
+  const value = (await configValues(dispatch, location, 'core.logAllRefUpdates')).at(-1)
+  if (value?.toLowerCase() === 'always') return true
+  const normal =
+    value === undefined ? !(await isBare(dispatch, location)) : (maybeBool(value) ?? false)
+  return normal && (name === HEAD || LOGGED_PREFIXES.some((prefix) => name.startsWith(prefix)))
 }
 
 /**
@@ -151,8 +186,9 @@ async function namedLog(
 export async function reflog(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
-    const repo = await opened(fl, inv.doors ?? {})
     const texts = inv.texts[0] === 'show' ? inv.texts.slice(1) : inv.texts
+    checkOperands(inv, texts)
+    const repo = await opened(fl, inv.doors ?? {})
     const revision = texts[0] ?? HEAD
     await resolveCommit(repo, revision)
     const [name, data] = await namedLog(repo.dispatch, repo.location, revision)
@@ -166,8 +202,10 @@ export async function reflog(inv: CLIInvocation): Promise<CommandFnResult> {
     const out = rows
       .map((row, index) => {
         const tab = row.indexOf('\t')
-        const oid = row.slice(0, tab).split(' ')[1] ?? ''
-        return `${oid.slice(0, repo.abbrev)} ${name}@{${String(index)}}: ${row.slice(tab + 1)}\n`
+        const fields = tab === -1 ? row : row.slice(0, tab)
+        const message = tab === -1 ? '' : row.slice(tab + 1)
+        const oid = fields.split(' ')[1] ?? ''
+        return `${oid.slice(0, repo.abbrev)} ${name}@{${String(index)}}: ${message}\n`
       })
       .join('')
     return [ENC.encode(out), new IOResult()]

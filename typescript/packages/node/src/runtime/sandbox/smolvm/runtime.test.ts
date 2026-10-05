@@ -87,38 +87,19 @@ describe('SmolvmRuntime', () => {
     expect(runtime.calls[0]?.[0]).toEqual(['machine', 'status', '--name', 'vm', '--json'])
   })
 
-  it('connect fails loud on a stopped machine', async () => {
-    const runtime = makeRuntime()
-    runtime.state = 'stopped'
-    await expect(runtime.connect()).rejects.toThrow('not running')
-  })
-
-  it.each([
-    ['unreachable', 'guest agent is not answering'],
-    ['frozen', 'frozen fork base'],
-    ['created', 'never been started'],
-  ])('connect names why state %s cannot take a line', async (state, hint) => {
-    const runtime = makeRuntime()
-    runtime.state = state
-    await expect(runtime.connect()).rejects.toThrow(hint)
-  })
-
-  it('connect reports an unknown state verbatim', async () => {
-    const runtime = makeRuntime()
-    runtime.state = 'quiesced'
-    await expect(runtime.connect()).rejects.toThrow('state: quiesced')
-  })
-
-  it('connect fails loud when the CLI errors', async () => {
-    const runtime = makeRuntime()
-    runtime.statusCode = 1
-    await expect(runtime.connect()).rejects.toThrow("machine 'vm' not found")
-  })
-
-  it('connect fails loud on unreadable json', async () => {
-    const runtime = makeRuntime()
-    runtime.statusStdout = 'not json'
-    await expect(runtime.connect()).rejects.toThrow('unreadable json')
+  it.each<
+    [string, Partial<Pick<FakeSmolvmRuntime, 'state' | 'statusCode' | 'statusStdout'>>, string]
+  >([
+    ['a stopped machine', { state: 'stopped' }, 'not running'],
+    ['an unreachable machine', { state: 'unreachable' }, 'guest agent is not answering'],
+    ['a frozen machine', { state: 'frozen' }, 'frozen fork base'],
+    ['a created machine', { state: 'created' }, 'never been started'],
+    ['an unknown state', { state: 'quiesced' }, 'state: quiesced'],
+    ['a CLI error', { statusCode: 1 }, "machine 'vm' not found"],
+    ['unreadable json', { statusStdout: 'not json' }, 'unreadable json'],
+  ])('connect names why it refuses %s', async (_name, fake, refusal) => {
+    const runtime = Object.assign(makeRuntime(), fake)
+    await expect(runtime.connect()).rejects.toThrow(refusal)
   })
 
   it('machine is required', () => {

@@ -12,25 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.google.constants import CORPUS
+from mirage.core.google.scope import app_scopes
 from mirage.core.gsheets.constants import FILE_NAME
-from mirage.core.hierarchy.scope import Scope, Slot, make_detect_scope
-from mirage.types import ContentType
+from mirage.core.hierarchy.scope import make_detect_scope
 
-# One description of the tree: readdir, stat, read and unlink all classify
-# through it, so the file surface and the write surface cannot disagree
-# about what a path means.
-SCOPES = (
-    Scope(kind="corpus", segments=(Slot("corpus", CORPUS),), probed=False),
-    Scope(
-        kind="file",
-        segments=(
-            Slot("corpus", CORPUS),
-            Slot("name", FILE_NAME, id_key="file_id"),
-        ),
-        leaf=True,
-        filetype=ContentType.JSON,
-    ),
-)
+SCOPES = app_scopes(FILE_NAME)
 
 detect_scope = make_detect_scope(SCOPES)

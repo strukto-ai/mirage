@@ -20,7 +20,7 @@ from mirage.core.nextcloud.du import size as _du_size
 from mirage.core.nextcloud.exists import exists as _exists
 from mirage.core.nextcloud.find import find as _find
 from mirage.core.nextcloud.mkdir import mkdir as _mkdir
-from mirage.core.nextcloud.read import read_bytes as _read
+from mirage.core.nextcloud.read import read as _read
 from mirage.core.nextcloud.readdir import readdir as _readdir
 from mirage.core.nextcloud.rename import rename as _rename
 from mirage.core.nextcloud.rm import rm_r as _rm_r
@@ -29,7 +29,7 @@ from mirage.core.nextcloud.stat import stat as _stat
 from mirage.core.nextcloud.stream import read_stream as _read_stream
 from mirage.core.nextcloud.truncate import truncate as _truncate
 from mirage.core.nextcloud.unlink import unlink as _unlink
-from mirage.core.nextcloud.write import write_bytes as _write
+from mirage.core.nextcloud.write import write as _write
 from mirage.vfs.adapter import VFSAdapter, append_from_read
 from mirage.vfs.types import DuOps, NativeReadOps, ReadOps, WriteOps
 
@@ -44,7 +44,7 @@ IO = VFSAdapter(
     ),
     writes=WriteOps(
         write=_write,
-        append=append_from_read(_read, _write),
+        append=append_from_read(_read, _write, _stat),
         mkdir=_mkdir,
         unlink=_unlink,
         rmdir=_rmdir,

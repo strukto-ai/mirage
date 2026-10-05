@@ -56,7 +56,7 @@ def is_blank(text: str) -> bool:
     return WHITE_SPACE.fullmatch(text) is not None
 
 
-def byte_len(text: str) -> int:
+def byte_length(text: str) -> int:
     """Measure a string the way the filesystem does.
 
     Args:
@@ -212,7 +212,7 @@ def sanitize_label(
         return fallback
     if len(cleaned) > max_len:
         cleaned = cleaned[: max_len - len(ELLIPSIS)] + ELLIPSIS
-    if byte_len(cleaned) > max_bytes:
+    if byte_length(cleaned) > max_bytes:
         head = truncate_bytes(cleaned, max(max_bytes - len(ELLIPSIS), 0))
         trimmed = head.rstrip("_.")
         if trimmed:

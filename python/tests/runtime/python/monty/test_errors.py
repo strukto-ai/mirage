@@ -16,52 +16,50 @@ import builtins
 
 import pytest
 
-from mirage.errors.posix import POSIX
 from mirage.errors.types import FsCondition
-from mirage.runtime.python.monty.errors import CPYTHON, cpython_error
+from mirage.runtime.python.monty.errors import cpython_error
 
 
-def test_cpython_table_covers_the_whole_vocabulary():
-    # A condition cannot be half-added: the dialect table stays total
-    # over the vocabulary, keyed on exactly the enum.
-    assert set(CPYTHON) == set(FsCondition)
-
-
-def test_every_exception_name_is_a_real_python_builtin():
-    for row in CPYTHON.values():
-        exc = getattr(builtins, row.exception)
+def test_every_condition_renders_as_a_python_oserror():
+    # A condition cannot be half-added: every member of the vocabulary
+    # renders, under a real builtin a guest can `except`.
+    for cond in FsCondition:
+        exc = getattr(builtins, cpython_error(cond).exception)
         assert issubclass(exc, OSError)
 
 
 @pytest.mark.parametrize(
-    "cond,exception,number",
+    "cond,exception,number,phrase",
     [
-        (FsCondition.ENOENT, "FileNotFoundError", 2),
-        (FsCondition.ENOTDIR, "NotADirectoryError", 20),
-        (FsCondition.EISDIR, "IsADirectoryError", 21),
-        (FsCondition.EEXIST, "FileExistsError", 17),
-        (FsCondition.EACCES, "PermissionError", 13),
-        (FsCondition.EPERM, "PermissionError", 1),
-        (FsCondition.EXDEV, "OSError", 18),
-        (FsCondition.CROSS_MOUNT, "OSError", 18),
-        (FsCondition.ENOTEMPTY, "OSError", 39),
-        (FsCondition.ELOOP, "OSError", 40),
+        (
+            FsCondition.ENOENT,
+            "FileNotFoundError",
+            2,
+            "No such file or directory",
+        ),
+        (FsCondition.ENOTDIR, "NotADirectoryError", 20, "Not a directory"),
+        (FsCondition.EISDIR, "IsADirectoryError", 21, "Is a directory"),
+        (FsCondition.EEXIST, "FileExistsError", 17, "File exists"),
+        (FsCondition.EACCES, "PermissionError", 13, "Permission denied"),
+        (FsCondition.EPERM, "PermissionError", 1, "Operation not permitted"),
+        (FsCondition.EXDEV, "OSError", 18, "Invalid cross-device link"),
+        (FsCondition.ENOTEMPTY, "OSError", 39, "Directory not empty"),
+        (
+            FsCondition.ELOOP,
+            "OSError",
+            40,
+            "Too many levels of symbolic links",
+        ),
+        (FsCondition.NO_XATTR, "OSError", 61, "No data available"),
     ],
 )
-def test_rows_are_cpython_on_linux(cond, exception, number):
-    # A guest interpreter is platform-neutral, so its numbering must not
-    # wobble with the host: the rows pin CPython-on-Linux errnos, the
-    # numbering monty's TypeScript twin already used for its six codes.
+def test_rows_are_cpython_on_linux(cond, exception, number, phrase):
+    # A guest interpreter is platform-neutral, so neither its numbering
+    # nor its wording wobbles with the host: on macOS ELOOP is 62 and
+    # "attribute not set" is ENOATTR, "Attribute not found".
     row = cpython_error(cond)
-    assert (row.exception, row.errno) == (exception, number)
-
-
-def test_phrases_match_the_posix_table():
-    # One phrase per condition, not one per boundary: the guest message
-    # is CPython's, which is GNU strerror's. NO_XATTR is exempt because
-    # the posix row resolves per platform (macOS "Attribute not found")
-    # while a guest interpreter always speaks Linux.
-    for cond in FsCondition:
-        if cond is FsCondition.NO_XATTR:
-            continue
-        assert CPYTHON[cond].phrase == POSIX[cond].phrase
+    assert (row.exception, row.errno, row.phrase) == (
+        exception,
+        number,
+        phrase,
+    )

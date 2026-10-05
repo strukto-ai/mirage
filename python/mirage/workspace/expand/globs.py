@@ -17,6 +17,7 @@ import posixpath
 
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import child_mount_names, namespace_names
+from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.errors import DiscardSignal
 from mirage.types import FileStat, FileType, PathSpec
@@ -674,7 +675,7 @@ async def resolve_globs(
                     if opts.failglob:
                         word = unmark_globs(typed.raw_path)
                         raise DiscardSignal(
-                            f"bash: no match: {word}\n".encode()
+                            encode_text(f"bash: no match: {word}\n")
                         )
                     if not opts.nullglob:
                         result.append(

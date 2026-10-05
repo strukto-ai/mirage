@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteView, decodeText, fromByteView, textView } from '../../../shell/bytes.ts'
 import { isStdin, resolveSource } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -33,7 +34,6 @@ import {
   type AwkHost,
   type CommandRun,
 } from '../../../core/awk/index.ts'
-import { UsageError } from '../../errors.ts'
 import { USAGE, type AwkFlags } from './awk_types.ts'
 import { dispatchStat, typedSpec } from '../utils/paths.ts'
 import {
@@ -48,7 +48,6 @@ import { resolvePath } from '../../../utils/path.ts'
 import { shellJoin } from '../../../shell/join.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 const STDIN_NAMES: ReadonlySet<string> = new Set(['-', '/dev/stdin'])
 
@@ -69,7 +68,7 @@ function splitAssignments(raw: readonly string[]): Record<string, string> {
   const out: Record<string, string> = {}
   for (const item of raw) {
     const eq = item.indexOf('=')
-    if (eq >= 0) out[item.slice(0, eq)] = unescape(item.slice(eq + 1))
+    if (eq >= 0) out[item.slice(0, eq)] = unescape(byteView(item.slice(eq + 1)))
   }
   return out
 }
@@ -154,6 +153,7 @@ export class AwkStreams implements AwkHost {
   }
 
   openInput(name: string, index: number | null): AsyncIterable<Uint8Array> {
+    name = textView(name)
     if (index !== null && index > 0 && index <= this.operands.length) {
       const operand = this.operands[index - 1]
       if (operand?.rawPath === name) {
@@ -169,9 +169,9 @@ export class AwkStreams implements AwkHost {
   async writeFile(name: string, body: string, append: boolean): Promise<void> {
     const dispatch = this.opts.dispatch
     if (dispatch === undefined) throw new AwkRuntimeError('awk: file output requires a workspace')
-    const path = typedSpec(name, this.opts.cwd)
+    const path = typedSpec(textView(name), this.opts.cwd)
     try {
-      await dispatch(append ? 'append' : 'write', path, [ENC.encode(body)])
+      await dispatch(append ? 'append' : 'write', path, [fromByteView(body)])
     } catch (error) {
       if (!isWalkError(error)) throw error
       throw new AwkIOError(fsStrerror(error) ?? 'Cannot write output file')
@@ -189,7 +189,7 @@ export class AwkStreams implements AwkHost {
       throw new AwkRuntimeError('awk: running a command requires a workspace')
     }
     const source: ByteSource = stdin ?? this.stdinView()
-    const io = await shell(`( ${shellJoin(['eval', command])} )`, source)
+    const io = await shell(`( ${shellJoin(['eval', textView(command)])} )`, source)
     const stdout = await materialize(io.stdout)
     const stderr = await materialize(io.stderr)
     return { stdout, stderr, status: io.exitCode }
@@ -210,8 +210,11 @@ async function stage(step: Promise<void>, io: IOResult): Promise<boolean> {
 
 function addStderr(io: IOResult, err: Uint8Array): void {
   if (err.length === 0) return
-  const held = io.stderr instanceof Uint8Array ? DEC.decode(io.stderr) : ''
-  io.stderr = ENC.encode(held + DEC.decode(err))
+  const held = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+  const joined = new Uint8Array(held.length + err.length)
+  joined.set(held)
+  joined.set(err, held.length)
+  io.stderr = joined
 }
 
 async function drained(interp: Interpreter, io: IOResult): Promise<Uint8Array> {
@@ -274,7 +277,7 @@ export async function awkGeneric(
       const virtual = resolvePath(programFile, opts.cwd)
       const programSpec = PathSpec.fromStrPath(virtual, mountKey(virtual, mountPrefix))
       try {
-        pieces.push(DEC.decode(await materialize(streams.programSource(programSpec))))
+        pieces.push(decodeText(await materialize(streams.programSource(programSpec))))
       } catch (err) {
         // GNU awk exits 2 when a -f program file cannot be opened;
         // anything that is not absence keeps propagating.
@@ -294,8 +297,8 @@ export async function awkGeneric(
   try {
     parsed = parse(program)
   } catch (err) {
-    if (err instanceof AwkSyntaxError) throw new UsageError(err.message)
-    throw err
+    if (!(err instanceof AwkSyntaxError)) throw err
+    return [null, new IOResult({ exitCode: 2, stderr: fromByteView(`${err.message}\n`) })]
   }
   // An empty operand names no file and mawk skips it, as it does an
   // operand ARGV no longer holds; a `var=value` operand is assigned when
@@ -303,10 +306,13 @@ export async function awkGeneric(
   const interp = new Interpreter(
     parsed,
     streams,
-    paths.map((p) => p.rawPath),
+    paths.map((p) => byteView(p.rawPath)),
     splitAssignments(f.assignments),
+    Object.fromEntries(
+      Object.entries(opts.env ?? {}).map(([name, value]) => [byteView(name), byteView(value)]),
+    ),
   )
-  if (f.fieldSeparator !== null) interp.setVar('FS', text(unescape(f.fieldSeparator)))
+  if (f.fieldSeparator !== null) interp.setVar('FS', text(unescape(byteView(f.fieldSeparator))))
 
   const cache = paths
     .filter(

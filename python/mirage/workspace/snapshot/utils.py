@@ -14,6 +14,10 @@
 
 FORMAT_VERSION = 4
 
+# How long a capture (a snapshot, a copy, a clone) waits for the lines
+# already running to end before it answers EBUSY.
+QUIESCE_SECONDS = 30.0
+
 BLOB_REF_KEY = "__file"
 
 

@@ -74,6 +74,74 @@
         "files",
         "sort"
       ]
+    },
+    {
+      "id": "xm_rg_I_drops_and_H_restores_the_file_names",
+      "seq": 15800030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -j1 -I o /data/a.txt /data2/xm.txt; rg -j1 -I -H o /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\ncross\n/data/a.txt:hello\n/data/a.txt:world\n/data/a.txt:foo\n/data2/xm.txt:cross\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_rg_context_separators_and_heading_across_mounts",
+      "seq": 15800032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -j1 -A1 --context-separator @@ o /data/a.txt /data2/xm.txt; rg -j1 -A1 --no-context-separator o /data/a.txt /data2/xm.txt; rg -j1 --heading o /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt:hello\n/data/a.txt:world\n/data/a.txt:foo\n/data/a.txt-bar\n@@\n/data2/xm.txt:cross\n/data/a.txt:hello\n/data/a.txt:world\n/data/a.txt:foo\n/data/a.txt-bar\n/data2/xm.txt:cross\n/data/a.txt\nhello\nworld\nfoo\n\n/data2/xm.txt\ncross\n",
+        "stderr": ""
+      }
     }
   ]
 }

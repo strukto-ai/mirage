@@ -52,6 +52,7 @@ class FakeDropboxRpc:
     ) -> None:
         self.entries = list(entries or [])
         self.metadata = metadata
+        self.metadata_paths: list[str] = []
         self.move_errors = list(move_errors or [])
         # Every `limit` a caller asked for, so a test can pin that an
         # emptiness probe is bounded, and the request count, which is the
@@ -84,6 +85,7 @@ class FakeDropboxRpc:
             token = body["cursor"]
             return self._page(self._cursors.pop(token), self._limits[token])
         if endpoint == "/files/get_metadata":
+            self.metadata_paths.append(body["path"])
             if self.metadata is None:
                 raise DropboxApiError("nf", 409, "path/not_found/...")
             return self.metadata

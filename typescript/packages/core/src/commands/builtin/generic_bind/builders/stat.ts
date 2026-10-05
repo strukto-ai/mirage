@@ -13,17 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { statGeneric } from '../../generic/stat.ts'
-import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
+import { type Builder, overlaidStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const stat: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return statGeneric(
+    resolved,
+    opts,
+    overlaidStat((p) => ops.stat(accessor, p, idx), opts.ns?.statOverlay),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'stat',
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return statGeneric(
-      resolved,
-      opts,
-      overlaidStat((p) => ops.stat(accessor, p, idx), opts.ns?.statOverlay),
-    )
-  },
+  fn: stat,
 }

@@ -13,12 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
 import { getMetadata, type DropboxEntry } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
+import { CONTENT_HASH, MISS_SUMMARIES } from './constants.ts'
+import { tokenOf } from './fingerprint.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { enoent, isEnoent } from '../../utils/errors.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
@@ -39,7 +43,7 @@ function statFromEntry(entry: DropboxEntry): FileStat {
     type: FileType.FILE,
     content: contentTypeForPath(entry.name),
     modified,
-    fingerprint: modified !== '' ? modified : null,
+    fingerprint: tokenOf(entry[CONTENT_HASH]),
     extra: {
       dropbox_id: entry.id ?? entry.path_display ?? entry.name,
       resource_type: 'dropbox/file',
@@ -48,17 +52,27 @@ function statFromEntry(entry: DropboxEntry): FileStat {
 }
 
 // API-truthful stat for index-less callers (unlink/rmdir classification,
-// the wired find core): get_metadata resolves the entry directly.
+// the wired find core) and the fresh checks' throwaway store: one
+// get_metadata. Only a not_found or not_folder 409 is a miss; any other
+// (restricted_content, ...) names a path that may exist, so a fresh probe must
+// not call it gone. get_metadata matches names case-insensitively where a
+// listing is exact.
 async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
   let entry: DropboxEntry
   try {
     entry = await getMetadata(accessor.tokenManager, dropboxPathOf(accessor, path))
   } catch (err) {
-    if (err instanceof DropboxApiError && err.status === 409) {
+    if (
+      err instanceof DropboxApiError &&
+      err.status === 409 &&
+      MISS_SUMMARIES.some((miss) => err.summary.startsWith(miss))
+    ) {
       throw enoent(path.virtual)
     }
     throw err
   }
+  const key = stripSlash(path.vfsPath)
+  if (entry.name !== key.slice(key.lastIndexOf('/') + 1)) throw enoent(path.virtual)
   return statFromEntry(entry)
 }
 
@@ -71,7 +85,7 @@ export async function stat(
   const key = path.vfsPath
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
 
-  if (index === undefined) return statFromApi(accessor, path)
+  if (index === undefined || index instanceof ListingCheckStore) return statFromApi(accessor, path)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
@@ -115,7 +129,7 @@ export async function stat(
     type: FileType.FILE,
     content: contentTypeForPath(result.entry.vfsName),
     modified: result.entry.remoteTime,
-    fingerprint: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
+    fingerprint: tokenOf(result.entry.extra[CONTENT_HASH]),
     extra: {
       dropbox_id: result.entry.id,
       resource_type: result.entry.resourceType,

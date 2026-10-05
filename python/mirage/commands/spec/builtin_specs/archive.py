@@ -101,6 +101,7 @@ SPECS: dict[str, CommandSpec] = {
     "unzip": CommandSpec(
         options=(
             Option(short="-o"),
+            Option(short="-n"),
             Option(short="-l"),
             Option(short="-d", type="path"),
             Option(short="-q"),

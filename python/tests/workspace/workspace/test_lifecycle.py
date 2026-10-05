@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import io
 import os
 import threading
 from fnmatch import fnmatchcase
@@ -45,6 +46,7 @@ from mirage.types import CapacityResult, CapacityState, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.builtins.shared import expand_operands
 from mirage.workspace.executor.command.run import drop_mount_caches
 from mirage.workspace.mount.namespace import RAMNamespaceStore
@@ -1218,3 +1220,140 @@ async def test_close_releases_later_resources_after_multiple_errors(
         await ws.close()
     assert repeated.value is error.value
     assert closed == ["processes", "runtime", "vfs", "store"]
+
+
+async def _lines_running(ws: Workspace, count: int) -> None:
+    for _ in range(500):
+        if len(ws._lines) == count:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"expected {count} lines, saw {len(ws._lines)}")
+
+
+@pytest.mark.asyncio
+async def test_cancel_stops_only_the_named_sessions_lines():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    ws.create_session("a")
+    ws.create_session("b")
+    a = asyncio.create_task(ws.shell("sleep 30", session_id="a"))
+    b = asyncio.create_task(ws.shell("sleep 30", session_id="b"))
+    try:
+        await _lines_running(ws, 2)
+        assert await ws.cancel("a") == 1
+        with pytest.raises(MirageAbortError):
+            await a
+        assert not b.done()
+        assert await ws.cancel() == 1
+        with pytest.raises(MirageAbortError):
+            await b
+        assert ws._lines == {}
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaches_a_line_queued_behind_another():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    running = asyncio.create_task(ws.shell("sleep 30"))
+    queued = asyncio.create_task(ws.shell("echo late"))
+    try:
+        await _lines_running(ws, 2)
+        assert await ws.cancel(ws.default_session_id) == 2
+        for line in (running, queued):
+            with pytest.raises(MirageAbortError):
+                await line
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_kill_stops_background_jobs_and_keeps_the_session():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    ws.create_session("a")
+    try:
+        await ws.shell("sleep 30 &", session_id="a")
+        assert await ws.kill("a") == 1
+        assert ws.job_table.running_jobs("a") == []
+        io = await ws.shell("echo alive", session_id="a")
+        assert await io.stdout_str() == "alive\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_closing_a_session_cancels_its_running_line():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    ws.create_session("a")
+    line = asyncio.create_task(ws.shell("sleep 30", session_id="a"))
+    try:
+        await _lines_running(ws, 1)
+        await asyncio.wait_for(ws.close_session("a"), timeout=5)
+        with pytest.raises(MirageAbortError):
+            await line
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_capture_answers_ebusy_while_a_line_will_not_end():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    line = asyncio.create_task(ws.shell("sleep 30"))
+    try:
+        await _lines_running(ws, 1)
+        with pytest.raises(OSError) as raised:
+            async with ws._quiesced(0.1):
+                pass
+        assert raised.value.errno == errno.EBUSY
+        assert await ws.cancel() == 1
+        with pytest.raises(MirageAbortError):
+            await line
+        await ws.snapshot(io.BytesIO())
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_started_during_a_capture_runs_after_it():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    order: list[str] = []
+    try:
+        async with ws._quiesced():
+            line = asyncio.create_task(ws.shell("echo after"))
+            await asyncio.sleep(0.05)
+            assert not line.done()
+            order.append("captured")
+        io_result = await line
+        order.append(await io_result.stdout_str())
+        assert order == ["captured", "after\n"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaches_a_line_queued_behind_a_capture():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    try:
+        async with ws._quiesced():
+            line = asyncio.create_task(ws.shell("echo late > /f"))
+            await asyncio.sleep(0.05)
+            assert await ws.cancel() == 1
+            with pytest.raises(MirageAbortError):
+                await line
+        result = await ws.shell("cat /f")
+        assert result.exit_code == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_from_outside_a_line_waits_for_a_capture():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    try:
+        async with ws._quiesced():
+            write = asyncio.create_task(ws.vfs.write("/f", b"late"))
+            await asyncio.sleep(0.05)
+            assert not write.done()
+        await write
+        assert await ws.vfs.read("/f") == b"late"
+    finally:
+        await ws.close()

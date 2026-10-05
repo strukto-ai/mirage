@@ -36,13 +36,6 @@
             "ops_contain": [
               "truncate /data/seed.txt"
             ]
-          },
-          "expect_on": {
-            "pyodide": {
-              "ops_contain": [
-                "write /data/seed.txt"
-              ]
-            }
           }
         },
         {

@@ -32,6 +32,7 @@ import {
   walkedName,
 } from './metadata.ts'
 import type { Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // chmod's report for one file (GNU chmod 9.7's describe_change). Mirrors
 // Python's mode_line.
@@ -115,7 +116,7 @@ export async function handleChmod(
   const quiet = fl.asBool('silent') || fl.asBool('quiet')
   const text = out.join('')
   return result('chmod', {
-    out: text === '' ? null : new TextEncoder().encode(text),
+    out: text === '' ? null : encodeText(text),
     exitCode: errors.length > 0 ? 1 : 0,
     ...(quiet ? {} : { stderr: errors.join('') }),
   })

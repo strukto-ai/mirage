@@ -19,16 +19,22 @@ import { CANCEL_REQUEST, errorResponse } from './server.ts'
 /**
  * Relay this process's line-delimited JSON-RPC to a daemon's `/rpc`.
  * Each request is posted on its own, so answers come back as they finish
- * and `$/cancelRequest` reaches a request still running.
+ * and `$/cancelRequest` reaches a request still running. The bearer token
+ * is asked for on every request, so a login refreshed while the relay
+ * runs is sent; an empty one sends none.
  */
-export async function relayStdio(url: string, headers: Record<string, string>): Promise<void> {
+export async function relayStdio(url: string, token: () => Promise<string>): Promise<void> {
   const write = (text: string): void => {
     process.stdout.write(text + '\n')
   }
   const forward = async (line: string): Promise<void> => {
+    const bearer = await token()
     const response = await fetch(url, {
       method: 'POST',
-      headers: { ...headers, 'content-type': 'application/json' },
+      headers: {
+        ...(bearer !== '' ? { Authorization: `Bearer ${bearer}` } : {}),
+        'content-type': 'application/json',
+      },
       body: line,
     })
     if (response.status === 204) return

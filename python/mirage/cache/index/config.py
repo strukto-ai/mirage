@@ -24,6 +24,33 @@ class ResourceType(str, Enum):
     FOLDER = "folder"
 
 
+def is_folder_kind(resource_type: str) -> bool:
+    """Whether a row's type names a folder: ``folder`` or ``<backend>/folder``.
+
+    A backend may spell its kinds under its own prefix (``dropbox/folder``);
+    a type outside that convention (``wandb/directory``) is neither kind.
+
+    Args:
+        resource_type (str): the row's ``resource_type``.
+    """
+    return _is_kind(resource_type, ResourceType.FOLDER)
+
+
+def is_file_kind(resource_type: str) -> bool:
+    """Whether a row's type names a file: ``file`` or ``<backend>/file``.
+
+    Args:
+        resource_type (str): the row's ``resource_type``.
+    """
+    return _is_kind(resource_type, ResourceType.FILE)
+
+
+def _is_kind(resource_type: str, kind: ResourceType) -> bool:
+    return resource_type == kind.value or resource_type.endswith(
+        "/" + kind.value
+    )
+
+
 class IndexType(str, Enum):
     RAM = "ram"
     REDIS = "redis"

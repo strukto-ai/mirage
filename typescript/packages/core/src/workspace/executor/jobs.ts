@@ -39,34 +39,8 @@ import { failedRead, statementStdin } from './statement.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { inheritExitTrap } from './traps.ts'
-
-/** Per-call overrides a caller can layer onto the walker's deps. */
-export interface ExecuteNodeOpts {
-  /** @internal Scheduling scope; background jobs create their own. */
-  executionScope?: ExecutionScope
-  sink?: JobConsole
-  signal?: AbortSignal
-  /** The hand-off the subtree runs on: a background job's own. */
-  handed?: HandOff
-  /**
-   * The node is the whole of a child shell (a background job), which runs
-   * its EXIT action when the node ends.
-   */
-  endsShell?: boolean
-  /**
-   * False leaves what expanding the node printed to the caller, which
-   * routes it around the node's redirects.
-   */
-  ownDiagnostics?: boolean
-}
-
-export type ExecuteNodeFn = (
-  node: TSNodeLike,
-  session: SessionState,
-  stdin: ByteSource | null,
-  callStack: CallStack | null,
-  opts?: ExecuteNodeOpts,
-) => Promise<[ByteSource | null, IOResult, ExecutionNode]>
+import { encodeText } from '../../shell/bytes.ts'
+import type { ExecuteNodeOpts, ExecuteNodeFn } from './command/types.ts'
 
 export type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -238,7 +212,7 @@ export async function handleBackground(
         ;[stdout, io, execNode] = await executeNode(left, bgSession, null, bgCallStack, opts)
       } catch (err) {
         if (err instanceof CommandTimeoutError) {
-          const msg = new TextEncoder().encode(`${err.message}\n`)
+          const msg = encodeText(`${err.message}\n`)
           stdout = new Uint8Array()
           io = new IOResult({ exitCode: 124, stderr: msg })
           execNode = new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 })
@@ -309,7 +283,7 @@ export async function handleBackground(
       await decisions.revoke(session.sessionId, jobHanded)
     }
     if ((err as { code?: unknown }).code === 'EAGAIN')
-      throw new ExitSignal(FORK_FAILED_STATUS, new TextEncoder().encode(FORK_FAILED))
+      throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
     throw err
   }
   bgSession.processId = job.process?.info.pid ?? null
@@ -387,7 +361,7 @@ const DISOWN_USAGE = 'disown: usage: disown [-h] [-ar] [jobspec ... | pid ...]'
 const JOB_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 function jobResult(cmdStr: string, msg: string, code: number): JobHandlerResult {
-  const err = new TextEncoder().encode(msg)
+  const err = encodeText(msg)
   return [
     null,
     new IOResult({ exitCode: code, stderr: err }),
@@ -547,7 +521,7 @@ export async function handleWait(
     picked.push(job)
   }
   const errText = errors.length > 0 ? errors.join('\n') + '\n' : ''
-  const errBytes = errText !== '' ? new TextEncoder().encode(errText) : null
+  const errBytes = errText !== '' ? encodeText(errText) : null
   if (nextJob) {
     const candidates = specs.length > 0 ? picked : visible
     if (candidates.length === 0) {
@@ -643,7 +617,7 @@ export function handleDisown(
   if (!keep) {
     for (const job of targets) jobTable.disown(job.id, sid)
   }
-  const err = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+  const err = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
   const code = errors.length > 0 ? 1 : 0
   return [
     null,
@@ -679,7 +653,7 @@ export async function handleFg(
   if (parts.length <= 1) {
     const current = jobs.filter((j) => j.status === JobStatus.RUNNING).at(-1) ?? jobs.at(-1)
     if (current === undefined) {
-      const err = new TextEncoder().encode('bash: fg: current: no such job\n')
+      const err = encodeText('bash: fg: current: no such job\n')
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -692,7 +666,7 @@ export async function handleFg(
     const jobId = Number(raw)
     const numbered = Number.isInteger(jobId) ? jobNumbered(jobs, jobId) : null
     if (numbered === null) {
-      const err = new TextEncoder().encode(`bash: fg: ${parts[1] ?? ''}: no such job\n`)
+      const err = encodeText(`bash: fg: ${parts[1] ?? ''}: no such job\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -701,7 +675,7 @@ export async function handleFg(
     }
     target = numbered
   }
-  const header = new TextEncoder().encode(target.command + '\n')
+  const header = encodeText(target.command + '\n')
   if (sink !== undefined) await sink.emit(Channel.STDOUT, header)
   const job = await abortable(jobTable.wait(target.id, sid), signal)
   jobTable.reap(target.id, sid)
@@ -831,7 +805,7 @@ export async function handleKill(
     signalled = true
   }
   const code = signalled ? 0 : 1
-  const stderr = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+  const stderr = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
   return [
     null,
     new IOResult({ exitCode: code, stderr }),
@@ -876,7 +850,7 @@ export function handleJobs(
       if (word === '--') continue
       const bad = Array.from(word.slice(1)).find((c) => !JOBS_FLAGS.has(c))
       if (bad !== undefined) {
-        const err = new TextEncoder().encode(`bash: jobs: -${bad}: invalid option\n${JOBS_USAGE}\n`)
+        const err = encodeText(`bash: jobs: -${bad}: invalid option\n${JOBS_USAGE}\n`)
         return [
           null,
           new IOResult({ exitCode: 2, stderr: err }),
@@ -895,7 +869,7 @@ export function handleJobs(
       const raw = spec.replace(/^%+/, '')
       const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
       if (job === null) {
-        const err = new TextEncoder().encode(`bash: jobs: ${spec}: no such job\n`)
+        const err = encodeText(`bash: jobs: ${spec}: no such job\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: err }),
@@ -913,8 +887,7 @@ export function handleJobs(
     ? jobs.map((j) => String(j.pid))
     : jobs.map((j) => jobRow(j, flags.has('l')))
   jobTable.popCompleted(sid)
-  const out =
-    lines.length > 0 ? new TextEncoder().encode(`${lines.join('\n')}\n`) : new Uint8Array()
+  const out = lines.length > 0 ? encodeText(`${lines.join('\n')}\n`) : new Uint8Array()
   return [out, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
 }
 
@@ -1089,7 +1062,7 @@ export function handlePs(
     lines = processes.map((info) => `${String(info.pid)}\t${info.command}`)
   }
   const code = processes.length > 0 ? 0 : 1
-  const out = new TextEncoder().encode(lines.length > 0 ? lines.join('\n') + '\n' : '')
+  const out = encodeText(lines.length > 0 ? lines.join('\n') + '\n' : '')
   return [
     out,
     new IOResult({ exitCode: code }),
