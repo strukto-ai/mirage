@@ -248,7 +248,8 @@
    "python_only": {
     "login_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
     "logout_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
-    "whoami_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands."
+    "whoami_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
+    "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing."
    },
    "typescript_only": {
     "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd."

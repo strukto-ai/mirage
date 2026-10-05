@@ -90,6 +90,14 @@ def _challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
+class QuietHandler(BaseHTTPRequestHandler):
+    """A request handler that writes no access log, so the code the
+    browser brings back never lands on the terminal."""
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return None
+
+
 @dataclass
 class Callback:
     """A one-time listener on 127.0.0.1 that the browser comes back to.
@@ -124,7 +132,7 @@ def listen(state: str) -> Callback:
     answer: dict[str, str] = {}
     done = threading.Event()
 
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(QuietHandler):
         def do_GET(self) -> None:
             parts = urlsplit(self.path)
             query = {k: v[0] for k, v in parse_qs(parts.query).items()}
@@ -144,9 +152,6 @@ def listen(state: str) -> Callback:
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-
-        def log_message(self, format: str, *args: Any) -> None:
-            return None
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
