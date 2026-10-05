@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.ts'
+import { AuthMode, type AuthConfig } from '../auth/config.ts'
 import { relayStdio } from './relay.ts'
 
 const apps: ReturnType<typeof buildApp>[] = []
@@ -27,21 +28,36 @@ afterEach(async () => {
   for (const app of apps.splice(0)) await app.close()
 })
 
+async function daemon(
+  authConfig?: AuthConfig,
+): Promise<{ base: string; id: string; headers: Record<string, string> }> {
+  const dir = mkdtempSync(join(tmpdir(), 'mirage-rpc-relay-'))
+  const app = buildApp({
+    allowedHosts: ['*'],
+    pidFile: join(dir, 'daemon.pid'),
+    ...(authConfig !== undefined ? { authConfig } : {}),
+  })
+  apps.push(app)
+  await app.listen({ host: '127.0.0.1', port: 0 })
+  const address = app.server.address()
+  if (address === null || typeof address === 'string') throw new Error('no port')
+  const base = `http://127.0.0.1:${String(address.port)}`
+  const headers: Record<string, string> =
+    authConfig?.bearerToken !== undefined
+      ? { Authorization: `Bearer ${authConfig.bearerToken}` }
+      : {}
+  const created = await fetch(`${base}/v1/workspaces`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }),
+  })
+  const { id } = (await created.json()) as { id: string }
+  return { base, id, headers }
+}
+
 describe('relayStdio', () => {
   it('relays each line to the endpoint', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-rpc-relay-'))
-    const app = buildApp({ allowedHosts: ['*'], pidFile: join(dir, 'daemon.pid') })
-    apps.push(app)
-    await app.listen({ host: '127.0.0.1', port: 0 })
-    const address = app.server.address()
-    if (address === null || typeof address === 'string') throw new Error('no port')
-    const base = `http://127.0.0.1:${String(address.port)}`
-    const created = await fetch(`${base}/v1/workspaces`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }),
-    })
-    const { id } = (await created.json()) as { id: string }
+    const { base, id } = await daemon()
     const lines = [
       JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'shell', params: { command: 'echo hi' } }),
       JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
@@ -55,7 +71,7 @@ describe('relayStdio', () => {
       written.push(String(chunk))
       return true
     })
-    await relayStdio(`${base}/v1/workspaces/${id}/rpc`, {})
+    await relayStdio(`${base}/v1/workspaces/${id}/rpc`, () => Promise.resolve(''))
     const answers = written
       .join('')
       .split('\n')
@@ -72,5 +88,37 @@ describe('relayStdio', () => {
     expect(byId.get(1)?.result?.stdout).toBe('hi\n')
     expect(byId.get(null)?.error?.code).toBe(-32700)
     expect(answers).toHaveLength(2)
+  })
+
+  it('asks for the token on every request', async () => {
+    const { base, id } = await daemon({ mode: AuthMode.Token, bearerToken: 'secret' })
+    const lines = [1, 2, 3].map((n) =>
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: n,
+        method: 'shell',
+        params: { command: `echo ${String(n)}` },
+      }),
+    )
+    vi.spyOn(process, 'stdin', 'get').mockReturnValue(
+      Readable.from(lines.map((line) => `${line}\n`)) as unknown as typeof process.stdin,
+    )
+    const written: string[] = []
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      written.push(String(chunk))
+      return true
+    })
+    let asked = 0
+    await relayStdio(`${base}/v1/workspaces/${id}/rpc`, () => {
+      asked += 1
+      return Promise.resolve('secret')
+    })
+    const outputs = written
+      .join('')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => (JSON.parse(line) as { result: { stdout: string } }).result.stdout)
+    expect(outputs.sort()).toEqual(['1\n', '2\n', '3\n'])
+    expect(asked).toBe(3)
   })
 })

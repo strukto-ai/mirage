@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type JWTPayload, decodeProtectedHeader, importSPKI, jwtVerify } from 'jose'
+import {
+  type JWTPayload,
+  type JWTVerifyGetKey,
+  decodeProtectedHeader,
+  importSPKI,
+  jwtVerify,
+} from 'jose'
 
 import type { JWTConfig } from './config.ts'
 
@@ -26,13 +32,27 @@ export class JWTVerificationError extends Error {
 }
 
 async function loadKey(cfg: JWTConfig): Promise<VerifyKey> {
+  if (cfg.key === undefined) throw new JWTVerificationError('no JWT key configured')
   if (cfg.algorithm.startsWith('HS')) {
     return new TextEncoder().encode(cfg.key)
   }
   return importSPKI(cfg.key, cfg.algorithm)
 }
 
-export async function verifyJwt(token: string, cfg: JWTConfig): Promise<JWTPayload> {
+/**
+ * Verify a JWT against `cfg` and return its claims. A token with `aud`
+ * must name one of the configured audiences; one without must carry an
+ * `azp` in the authorized parties when any are configured, and is refused
+ * when only audiences are. So one server takes both an app's session
+ * tokens (`azp`, no `aud`) and an OAuth client's access tokens (`aud`).
+ * `keySet` checks the signature against the issuer's published keys;
+ * without it, `cfg.key` does.
+ */
+export async function verifyJwt(
+  token: string,
+  cfg: JWTConfig,
+  keySet?: JWTVerifyGetKey,
+): Promise<JWTPayload> {
   let header: ReturnType<typeof decodeProtectedHeader>
   try {
     header = decodeProtectedHeader(token)
@@ -51,15 +71,16 @@ export async function verifyJwt(token: string, cfg: JWTConfig): Promise<JWTPaylo
   }
   let payload: JWTPayload
   try {
-    const key = await loadKey(cfg)
     const verifyOpts: Parameters<typeof jwtVerify>[2] = {
       algorithms: [cfg.algorithm],
       requiredClaims: ['exp', 'sub'],
       clockTolerance: cfg.clockSkewSeconds,
     }
     if (cfg.issuer !== undefined) verifyOpts.issuer = cfg.issuer
-    if (cfg.audience !== undefined) verifyOpts.audience = cfg.audience
-    const result = await jwtVerify(token, key, verifyOpts)
+    const result =
+      keySet !== undefined
+        ? await jwtVerify(token, keySet, verifyOpts)
+        : await jwtVerify(token, await loadKey(cfg), verifyOpts)
     payload = result.payload
   } catch (e) {
     if (e instanceof JWTVerificationError) throw e
@@ -68,11 +89,19 @@ export async function verifyJwt(token: string, cfg: JWTConfig): Promise<JWTPaylo
   if (typeof payload.sub !== 'string' || payload.sub === '') {
     throw new JWTVerificationError('JWT sub must name an account')
   }
-  if (cfg.authorizedParties.length > 0) {
-    const azp = payload.azp as string | undefined
-    if (azp === undefined || !cfg.authorizedParties.includes(azp)) {
+  const aud = payload.aud
+  if (aud !== undefined) {
+    const named = typeof aud === 'string' ? [aud] : aud
+    if (!named.some((a) => cfg.audiences.includes(a))) {
+      throw new JWTVerificationError(`JWT aud ${JSON.stringify(aud)} not in audiences`)
+    }
+  } else if (cfg.authorizedParties.length > 0) {
+    const azp = payload.azp
+    if (typeof azp !== 'string' || !cfg.authorizedParties.includes(azp)) {
       throw new JWTVerificationError(`JWT azp ${JSON.stringify(azp)} not in authorized_parties`)
     }
+  } else if (cfg.audiences.length > 0) {
+    throw new JWTVerificationError('JWT has no aud')
   }
   return payload
 }

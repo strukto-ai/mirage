@@ -35,15 +35,31 @@ It answers only the `Host` names in `allowed_hosts` (`MIRAGE_ALLOWED_HOSTS`), `1
 
 ## Auth
 
-Every route but `GET /v1/health` needs `Authorization: Bearer <token>`. `MIRAGE_AUTH_MODE` decides what the server accepts:
+Every route but `GET /v1/health` and `GET /.well-known/oauth-protected-resource` needs `Authorization: Bearer <token>`. `MIRAGE_AUTH_MODE` decides what the server accepts:
 
 | Mode | Accepts | Configure |
 | --- | --- | --- |
 | `local` (default) | the token in `~/.mirage/auth_token`, which the CLI writes when it starts the server | nothing |
 | `token` | one fixed token | `MIRAGE_AUTH_TOKEN` |
-| `jwt` | a JWT your issuer signed | `MIRAGE_JWT_PUBKEY` or `MIRAGE_JWT_PUBKEY_FILE`, and `MIRAGE_JWT_ALG` |
+| `jwt` | a JWT your issuer signed | `MIRAGE_JWT_PUBKEY`, `MIRAGE_JWT_PUBKEY_FILE` or `MIRAGE_JWT_JWKS_URL`, and `MIRAGE_JWT_ALG` |
 
-In `jwt` mode the server checks the signature against that public key, accepts only the pinned algorithm, requires `exp` and `sub`, and checks `iss`, `aud` and `azp` when `MIRAGE_JWT_ISSUER`, `MIRAGE_JWT_AUDIENCE` and `MIRAGE_JWT_AUTHORIZED_PARTIES` are set. It never fetches keys, so a new key needs a restart.
+In `jwt` mode the server checks the signature against that public key, or against the key set your issuer publishes at `MIRAGE_JWT_JWKS_URL`; it keeps that set and fetches it again for a key id it does not hold, so a key rotation needs no restart (a fixed key needs one). It accepts only the pinned algorithm, requires `exp` and `sub`, and checks `iss` when `MIRAGE_JWT_ISSUER` is set. A token with `aud` must name one of `MIRAGE_JWT_AUDIENCE`, a comma-separated list. A token without `aud` must carry an `azp` in `MIRAGE_JWT_AUTHORIZED_PARTIES` when that is set, and is refused when only an audience is. So one server takes both your app's session tokens and an OAuth client's access tokens, as Clerk issues them:
+
+```bash
+MIRAGE_AUTH_MODE=jwt
+MIRAGE_JWT_ALG=RS256
+MIRAGE_JWT_JWKS_URL=https://clerk.example.com/.well-known/jwks.json
+MIRAGE_JWT_ISSUER=https://clerk.example.com
+MIRAGE_JWT_AUTHORIZED_PARTIES=https://app.example.com   # session tokens from your app
+MIRAGE_JWT_AUDIENCE=client_cli                          # OAuth tokens the CLI logs in with
+MIRAGE_LOGIN_CLIENT_ID=client_cli                       # where `mirage login` signs in
+```
+
+### CLI login
+
+With `MIRAGE_LOGIN_CLIENT_ID` set, `GET /.well-known/oauth-protected-resource` tells [`mirage login`](/home/access/cli#log-in) where to sign in: the issuer (`MIRAGE_JWT_ISSUER`) and the OAuth client. The CLI reads the issuer's endpoints from its `/.well-known/oauth-authorization-server`, opens the browser on its sign-in, and swaps the code it gets back for tokens with PKCE, so no secret is kept on the user's machine. The setting needs `jwt` mode and an issuer, and `MIRAGE_JWT_AUDIENCE` must list the client. Without it the route answers `404`, and `mirage login` reports that the server needs no login.
+
+In Clerk, create an OAuth application with no client secret and PKCE on, add the redirect `http://127.0.0.1/callback` (the CLI picks a free port), allow the `offline_access` scope so the CLI gets a refresh token, and turn the consent screen off so a signed-in user goes straight back to the CLI. Its access tokens last a day and the CLI refreshes them; it asks the user to log in again after 30 days.
 
 ### Accounts
 

@@ -50,8 +50,10 @@ from mirage.server.routers import (
     asks,
     health,
     jobs,
+    oauth,
     sessions,
     shell,
+    ssh,
     tools,
     workspaces,
 )
@@ -123,8 +125,8 @@ async def _start_ssh(app: FastAPI) -> SSHListener | None:
         SSHListener | None: the running listener, or None when SSH is
             off.
     """
-    config: SSHConfig | None = app.state.ssh_config
-    if config is None:
+    config: SSHConfig = app.state.ssh_config
+    if config.port is None:
         return None
     start = _load_ssh_starter()
     return await start(app.state.registry, config)
@@ -132,8 +134,8 @@ async def _start_ssh(app: FastAPI) -> SSHListener | None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    ssh = await _start_ssh(app)
-    app.state.ssh = ssh
+    listener = await _start_ssh(app)
+    app.state.ssh = listener
     if app.state.pid_file is not None:
         await run_blocking(_write_pid_file, app.state.pid_file)
     on_exit = app.state.on_idle_exit
@@ -147,9 +149,9 @@ async def _lifespan(app: FastAPI):
     finally:
         if exit_task is not None:
             exit_task.cancel()
-        if ssh is not None:
-            ssh.close()
-            await ssh.wait_closed()
+        if listener is not None:
+            listener.close()
+            await listener.wait_closed()
         try:
             await app.state.mcp.close()
             await app.state.jobs.close()
@@ -253,9 +255,11 @@ def build_app(
     app.include_router(sessions.router)
     app.include_router(asks.router)
     app.include_router(shell.router)
+    app.include_router(ssh.router)
     app.include_router(tools.router)
     app.include_router(jobs.router)
     app.include_router(health.router)
+    app.include_router(oauth.router)
     app.state.mcp = register_mcp_routes(
         app, app.state.registry, app.state.jobs
     )

@@ -263,7 +263,8 @@ async def test_a_removed_workspace_ends_the_shell(ssh):
     async with ssh.connect() as conn:
         process = await conn.create_process()
         process.stdin.write("echo ready\n")
-        await _read_until(process, "ready\n")
+        ready = await asyncio.wait_for(process.stdout.readline(), 5)
+        assert ready == "ready\n"
         await ssh.registry.remove("demo")
         process.stdin.write("echo hi\n")
         await asyncio.wait_for(process.wait_closed(), 5)

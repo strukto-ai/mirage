@@ -1,18 +1,18 @@
 {
  "description": "The access corpus. Every way into a workspace (in-app, HTTP, the CLI, MCP over HTTP and mirage mcp, RPC over HTTP and mirage rpc, SSH) must give the in-app answer for every case its protocol can express. The ops table says which accesses have which operation; it is the matrix on docs/home/access/overview.mdx. Each suite runs in order on a fresh workspace per access, built from the suite's config and setup lines; a suite's deployments, when given, are the only ones its server accesses run on. expect pins the in-app answer.",
  "ops": {
-  "shell": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
-  "stdin": ["inapp", "http", "cli", "rpc", "rpc_stdio", "ssh"],
+  "shell": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "stdin": ["inapp", "http", "cli", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
   "tool": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"],
-  "bytes": ["inapp", "rpc", "rpc_stdio", "ssh"],
-  "cancel": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
+  "bytes": ["inapp", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
+  "cancel": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
   "session": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
   "workspace": ["inapp", "http", "cli"],
   "session_admin": ["inapp", "http", "cli"],
   "snapshot": ["inapp", "http", "cli"],
   "ask": ["inapp", "http", "cli"],
   "job": ["http", "cli"],
-  "auth": ["http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
+  "auth": ["http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
   "server": ["http"]
  },
  "matrix": {
@@ -284,13 +284,15 @@
     "local_token": 200,
     "other_token": 401,
     "fixed_token": 401,
-    "jwt_valid": 401
+    "jwt_valid": 401,
+    "oauth_valid": 401
    },
    "token": {
     "none": 401,
     "other_token": 401,
     "fixed_token": 200,
     "jwt_valid": 401,
+    "oauth_valid": 401,
     "opaque": 401
    },
    "jwt": {
@@ -298,9 +300,12 @@
     "other_token": 401,
     "fixed_token": 401,
     "jwt_valid": 200,
+    "oauth_valid": 200,
+    "oauth_wrong_audience": 401,
     "jwt_expired": 401,
     "jwt_wrong_issuer": 401,
     "jwt_wrong_party": 401,
+    "jwt_no_party": 401,
     "jwt_wrong_key": 401,
     "jwt_alg_none": 401,
     "jwt_hs256": 401,
@@ -310,6 +315,37 @@
   "accesses": {
    "valid": "ok",
    "wrong": "refused"
+  }
+ },
+ "login": {
+  "description": "mirage login, whoami and logout per deployment, with a CLI home of its own and no token. dev and token publish no login (404); jwt publishes the issuer and client, and its browser is a user already signed in. On jwt the login then drives the CLI and SSH through ssh-proxy, refreshes an ended access token, and ends 30 days after sign-in. token takes a pasted token the server accepts.",
+  "dev": {
+   "resource": 404,
+   "login": "{url} publishes no login: a local daemon needs none, and a server with a shared token takes `mirage login --token`",
+   "whoami": 1,
+   "logout": "Not logged in."
+  },
+  "token": {
+   "resource": 404,
+   "login": "{url} publishes no login: a local daemon needs none, and a server with a shared token takes `mirage login --token`",
+   "login_wrong_token": 1,
+   "login_token": 0,
+   "whoami": null,
+   "list": "ok",
+   "logout": "Logged out of {url}.",
+   "after_logout": "daemon error 401: Unauthorized"
+  },
+  "jwt": {
+   "resource": 200,
+   "login": "Logged in to {url} as user_alice.",
+   "whoami": "user_alice",
+   "list": "ok",
+   "ssh_proxy": 0,
+   "ended_token": "ok",
+   "refreshed": true,
+   "after_30_days": "the login is 30 days old",
+   "logout": "Logged out of {url}.",
+   "after_logout": "daemon error 401: Unauthorized"
   }
  },
  "server": {

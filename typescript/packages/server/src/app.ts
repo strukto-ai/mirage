@@ -27,13 +27,16 @@ import { registerShellRoutes } from './routers/shell.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerHealthRoutes } from './routers/health.ts'
 import { registerJobsRoutes } from './routers/jobs.ts'
+import { registerOAuthRoutes } from './routers/oauth.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
+import { registerSshRoutes } from './routers/ssh.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
 import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
 import { mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { resolveSSHConfig, type SSHConfig } from './ssh/config.ts'
 import type { SSHDoor } from './ssh/types.ts'
+import websocket from '@fastify/websocket'
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
@@ -49,12 +52,12 @@ export interface BuildAppOptions {
   stateRoot?: string
   pidFile?: string
   /**
-   * The SSH door, opened when the app is ready and closed with it.
-   * Undefined resolves it from the `MIRAGE_SSH_*` env vars and the
-   * `ssh_*` config keys; it stays shut unless a port is set, and null
-   * keeps it shut regardless.
+   * The SSH settings: the TCP door opens when the app is ready and closes
+   * with it, and the HTTPS route carries SSH either way. Undefined resolves
+   * them from the `MIRAGE_SSH_*` env vars and the `ssh_*` config keys; the
+   * TCP door stays shut unless a port is set.
    */
-  sshConfig?: SSHConfig | null
+  sshConfig?: SSHConfig
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -103,6 +106,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     done(null)
   })
   registerHealthRoutes(app, { registry, startedAt, exit: exitFn })
+  registerOAuthRoutes(app, { auth: authConfig })
   registerWorkspacesRoutes(app, { registry, stateRoot, snapshotStore: options.snapshotStore })
   registerSessionsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
@@ -112,11 +116,16 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerRpcRoutes(app, registry, jobs, mcp)
   registerToolsRoutes(app, { mcp })
   const ssh: SSHDoor = {
-    config: options.sshConfig !== undefined ? options.sshConfig : resolveSSHConfig(),
+    config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,
   }
+  void app.register(websocket)
+  void app.register((scope, _opts, done) => {
+    registerSshRoutes(scope, { registry, ssh })
+    done()
+  })
   const sshConfig = ssh.config
-  if (sshConfig !== null) {
+  if (sshConfig.port !== null) {
     // A configured door that cannot open (the port is taken, ssh2 is
     // missing) fails the start rather than leaving the daemon up without
     // the door its config asked for. Loaded on demand so a daemon with no

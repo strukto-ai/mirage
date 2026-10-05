@@ -13,9 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { access, readFile } from 'node:fs/promises'
-import type { AddressInfo } from 'node:net'
+import type { AddressInfo, Socket } from 'node:net'
+import type { Duplex } from 'node:stream'
 import type * as Ssh2Mod from 'ssh2'
-import type { AuthContext, Connection, ParsedKey, PseudoTtyInfo, ServerChannel } from 'ssh2'
+import type {
+  AuthContext,
+  Connection,
+  ParsedKey,
+  PseudoTtyInfo,
+  ServerChannel,
+  ServerConfig,
+} from 'ssh2'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { SSHConfig } from './config.ts'
 import { serveCodex } from './codex.ts'
@@ -194,11 +202,28 @@ async function authenticate(
   return match
 }
 
+/** Decides a login: the profile and account it runs as, or null once refused. */
+type Admit = (ctx: AuthContext) => Promise<Pick<AuthorizedKey, 'profile' | 'account'> | null>
+
+/**
+ * Admit a login the HTTPS route already authenticated: its token was checked
+ * and its account allowed the workspace the URL names, so it needs no key,
+ * may only name that workspace, and runs as that account.
+ */
+function admitTunnel(workspaceId: string, account: string | null): Admit {
+  return (ctx) => {
+    if (ctx.username !== workspaceId) {
+      ctx.reject([])
+      return Promise.resolve(null)
+    }
+    return Promise.resolve({ profile: [], account: account === null ? [] : [account] })
+  }
+}
+
 function serveConnection(
   client: Connection,
   registry: WorkspaceRegistry,
-  config: SSHConfig,
-  utils: typeof Ssh2Mod.utils,
+  admit: Admit,
   peer: Endpoint,
   local: Endpoint,
 ): void {
@@ -206,7 +231,7 @@ function serveConnection(
   let profile: readonly string[] = []
   let account: readonly string[] = []
   client.on('authentication', (ctx) => {
-    void authenticate(ctx, config.authorizedKeysFile, utils)
+    void admit(ctx)
       .then((match) => {
         if (match !== null) {
           username = ctx.username
@@ -277,6 +302,18 @@ function serveConnection(
   })
 }
 
+/** What every SSH connection the daemon serves runs with. */
+async function serverOptions(
+  config: SSHConfig,
+  utils: typeof Ssh2Mod.utils,
+): Promise<ServerConfig> {
+  return {
+    hostKeys: [await loadHostKey(config.hostKeyFile, utils)],
+    keepaliveInterval: KEEPALIVE_INTERVAL_SECONDS * 1000,
+    keepaliveCountMax: KEEPALIVE_COUNT_MAX,
+  }
+}
+
 /**
  * Listen for SSH, serving the daemon's workspaces.
  *
@@ -290,6 +327,8 @@ export async function startSSHServer(
   registry: WorkspaceRegistry,
   config: SSHConfig,
 ): Promise<SSHListener> {
+  const listenPort = config.port
+  if (listenPort === null) throw new Error('the SSH door needs ssh_port')
   const ssh2 = await loadSsh2()
   try {
     await access(config.authorizedKeysFile)
@@ -299,27 +338,20 @@ export async function startSSHServer(
       `ssh: ${config.authorizedKeysFile} does not exist; every login will be refused until it holds a public key`,
     )
   }
-  const hostKey = await loadHostKey(config.hostKeyFile, ssh2.utils)
   const clients = new Set<Connection>()
-  let port = config.port
-  const server = new ssh2.Server(
-    {
-      hostKeys: [hostKey],
-      keepaliveInterval: KEEPALIVE_INTERVAL_SECONDS * 1000,
-      keepaliveCountMax: KEEPALIVE_COUNT_MAX,
-    },
-    (client, info) => {
-      clients.add(client)
-      client.on('close', () => {
-        clients.delete(client)
-      })
-      const peer = { address: info.ip, port: info.port }
-      serveConnection(client, registry, config, ssh2.utils, peer, { address: config.host, port })
-    },
-  )
+  let port = listenPort
+  const server = new ssh2.Server(await serverOptions(config, ssh2.utils), (client, info) => {
+    clients.add(client)
+    client.on('close', () => {
+      clients.delete(client)
+    })
+    const peer = { address: info.ip, port: info.port }
+    const admit: Admit = (ctx) => authenticate(ctx, config.authorizedKeysFile, ssh2.utils)
+    serveConnection(client, registry, admit, peer, { address: config.host, port })
+  })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(config.port, config.host, () => {
+    server.listen(listenPort, config.host, () => {
       server.off('error', reject)
       resolve()
     })
@@ -336,4 +368,30 @@ export async function startSSHServer(
       })
     },
   }
+}
+
+/**
+ * Serve one SSH connection the HTTPS route carries over `stream`. The route
+ * has checked the caller's token and that its account may use
+ * `workspaceId`, so the login needs no key: it may only name that
+ * workspace, and runs as that account. Resolves once the connection ends.
+ */
+export async function serveTunnel(
+  registry: WorkspaceRegistry,
+  config: SSHConfig,
+  stream: Duplex,
+  workspaceId: string,
+  account: string | null,
+  peer: Endpoint,
+  local: Endpoint,
+): Promise<void> {
+  const ssh2 = await loadSsh2()
+  const ended = new Promise<void>((resolve) => {
+    stream.once('close', resolve)
+  })
+  const server = new ssh2.Server(await serverOptions(config, ssh2.utils), (client) => {
+    serveConnection(client, registry, admitTunnel(workspaceId, account), peer, local)
+  })
+  server.injectSocket(stream as Socket)
+  await ended
 }

@@ -20,8 +20,10 @@ from mirage.server.auth.config import (
     ENV_JWT_AUTHORIZED_PARTIES,
     ENV_JWT_CLOCK_SKEW,
     ENV_JWT_ISSUER,
+    ENV_JWT_JWKS_URL,
     ENV_JWT_PUBKEY,
     ENV_JWT_PUBKEY_FILE,
+    ENV_LOGIN_CLIENT_ID,
 )
 from mirage.server.env import ENV_IDLE_GRACE_SECONDS
 
@@ -38,7 +40,9 @@ __all__ = [
     "ENV_JWT_AUTHORIZED_PARTIES",
     "ENV_JWT_CLOCK_SKEW",
     "ENV_JWT_ISSUER",
+    "ENV_JWT_JWKS_URL",
     "ENV_JWT_PUBKEY",
     "ENV_JWT_PUBKEY_FILE",
+    "ENV_LOGIN_CLIENT_ID",
     "ENV_TOKEN",
 ]
