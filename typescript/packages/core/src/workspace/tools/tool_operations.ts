@@ -66,6 +66,20 @@ async function ensureParents(vfs: Ops, path: string): Promise<void> {
   }
 }
 
+/**
+ * Whether a path a read just failed on is absent, which picks the
+ * failure's wording. A probe the workspace refuses means the path is
+ * there: a hidden one answers absent, never refused. The read's own
+ * error then stands rather than the probe's.
+ */
+async function missing(vfs: Ops, path: string): Promise<boolean> {
+  try {
+    return !(await vfs.exists(path))
+  } catch {
+    return false
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -152,7 +166,7 @@ export class MirageToolOperations {
     path: string,
     err: unknown,
   ): Promise<ToolResult> {
-    if (!(await versions.vfs.exists(path))) {
+    if (await missing(versions.vfs, path)) {
       return errorResult(`Error: file '${path}' not found`)
     }
     return errorResult(`Error: ${errorMessage(err)}`)
@@ -182,10 +196,10 @@ export class MirageToolOperations {
    */
   async write(path: string, content: string): Promise<ToolResult> {
     const versions = await this.versions()
-    if ((await versions.vfs.exists(path)) && !versions.hasRead(path)) {
-      return errorResult(`Error: file '${path}' exists; read all of it before overwriting it`)
-    }
     try {
+      if ((await versions.vfs.exists(path)) && !versions.hasRead(path)) {
+        return errorResult(`Error: file '${path}' exists; read all of it before overwriting it`)
+      }
       await ensureParents(versions.vfs, path)
       await versions.write(path, content)
     } catch (err) {
@@ -206,7 +220,7 @@ export class MirageToolOperations {
       content = decode(await versions.readForEdit(path))
     } catch (err) {
       if (err instanceof StaleMirageFileError) return errorResult(`Error: ${err.message}`)
-      if (!(await versions.vfs.exists(path))) {
+      if (await missing(versions.vfs, path)) {
         return errorResult(`Error: file '${path}' not found`)
       }
       return errorResult(`Error: ${errorMessage(err)}`)
@@ -273,7 +287,8 @@ export class MirageToolOperations {
    * pattern is expanded by `Session.glob`, the shell's own resolver:
    * `**` matches any number of directories, and a relative pattern is
    * matched under `path`. A symlink to a file counts; a dangling one does
-   * not.
+   * not, nor does a match the workspace refuses to stat, since nothing
+   * says what it is.
    */
   async glob(pattern: string, path = '/'): Promise<ToolResult> {
     const full =
@@ -285,7 +300,11 @@ export class MirageToolOperations {
     const matches = await this.session.glob(full)
     const files: string[] = []
     for (const match of matches) {
-      if (await this.session.vfs.isFile(match)) files.push(match)
+      try {
+        if (await this.session.vfs.isFile(match)) files.push(match)
+      } catch {
+        continue
+      }
     }
     return textResult(files.map((match) => `${match}\n`).join(''))
   }

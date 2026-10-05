@@ -19,7 +19,9 @@ import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Session } from '../workspace/handle.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { MirageToolOperations } from './tool_operations.ts'
+import type { Policy } from '../../policy/base.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
+import type { OpsContext } from '../../policy/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 
@@ -240,6 +242,31 @@ describe('a session', () => {
       expect(result.isError).toBe(true)
       expect(textOf(result)).toMatch(/^Error: /)
     }
+  })
+
+  it('answers a file refused down to its stat as a tool error', async () => {
+    await ws.shell('mkdir /d && echo l > /d/locked.txt && echo o > /d/open.txt')
+    const lockedFile: Policy = {
+      preOps(ctx: OpsContext) {
+        return ctx.path.virtual === '/d/locked.txt' ? { kind: 'deny', reason: 'locked' } : null
+      },
+    }
+    ws.policies.add(lockedFile)
+    const read = await ops.call('read', { path: '/d/locked.txt' })
+    const written = await ops.call('write', { path: '/d/locked.txt', content: 'x' })
+    const edited = await ops.call('edit', {
+      path: '/d/locked.txt',
+      old_string: 'l',
+      new_string: 'm',
+    })
+    const globbed = await ops.call('glob', { pattern: '/d/*.txt' })
+    for (const result of [read, edited]) {
+      expect(result.isError).toBe(true)
+      expect(textOf(result)).not.toContain('not found')
+    }
+    expect(written.isError).toBe(true)
+    expect(textOf(written)).toMatch(/^Error: /)
+    expect(textOf(globbed)).toBe('/d/open.txt\n')
   })
 
   it('keeps a session already bound rather than widening it', async () => {
