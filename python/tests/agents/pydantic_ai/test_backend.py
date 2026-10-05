@@ -160,3 +160,49 @@ async def test_a_default_session_ref_is_checked_on_first_use(workspace):
     backend = MirageWorkspaceBackend(workspace, ref=own)
     assert await backend.working_dir() == "/"
     assert backend.ref == own
+
+
+@pytest.mark.anyio
+async def test_paths_resolve_from_the_working_directory(workspace):
+    workspace.create_session("agent")
+    await workspace.shell("mkdir /work && cd /work", session_id="agent")
+    backend = MirageWorkspaceBackend(workspace, "agent")
+    assert await backend.realpath("notes.txt") == "/work/notes.txt"
+    for path in ("/work/", "/work/.", "/"):
+        with pytest.raises(ValueError):
+            await backend.remove(path)
+    assert await backend.exists("/work")
+
+
+@pytest.mark.anyio
+async def test_remove_sees_a_mount_through_a_link():
+    ws = Workspace(
+        {"/": RAMVFS(), "/data/inner/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("mkdir -p /data; echo k > /data/inner/keep.txt")
+    await ws.vfs.symlink("/alias", "/data")
+    with pytest.raises(OSError) as raised:
+        await MirageWorkspaceBackend(ws).remove("/alias/inner")
+    assert raised.value.errno == errno.EBUSY
+    assert await ws.vfs.read("/data/inner/keep.txt") == b"k\n"
+
+
+@pytest.mark.anyio
+async def test_a_hidden_mount_is_absent_to_remove():
+    ws = Workspace(
+        {"/": RAMVFS(), "/vault": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"guarded": {"paths": {"hide": ["/vault"]}}},
+    )
+    ws.create_session("agent", profile="guarded")
+    with pytest.raises(FileNotFoundError):
+        await MirageWorkspaceBackend(ws, "agent").remove("/vault")
+
+
+@pytest.mark.anyio
+async def test_a_link_loop_is_eloop(workspace):
+    await workspace.vfs.symlink("/a", "b")
+    await workspace.vfs.symlink("/b", "a")
+    with pytest.raises(OSError) as raised:
+        await MirageWorkspaceBackend(workspace).realpath("/a/x")
+    assert raised.value.errno == errno.ELOOP

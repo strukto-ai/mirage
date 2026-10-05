@@ -36,7 +36,7 @@ from mirage.agents.pydantic_ai.convert import (
 )
 from mirage.ops.ops import Ops
 from mirage.types import FileType
-from mirage.utils.path import MAX_SYMLINK_HOPS
+from mirage.utils.path import MAX_SYMLINK_HOPS, CycleError
 from mirage.workspace.tools.tool_operations import ensure_parents
 from mirage.workspace.workspace import Session, Workspace
 
@@ -49,9 +49,9 @@ DANGLING = (errno.ENOENT, errno.ENOTDIR, errno.ELOOP)
 async def _doomed(
     ws: Workspace, vfs: Ops, path: str
 ) -> list[tuple[str, bool]]:
+    st = await vfs.stat(path, nofollow=True)
     if ws.registry.is_mount_root(path):
         raise OSError(errno.EBUSY, os.strerror(errno.EBUSY), path)
-    st = await vfs.stat(path, nofollow=True)
     if st.type != FileType.DIRECTORY:
         return [(path, False)]
     doomed = []
@@ -66,6 +66,7 @@ async def _link(vfs: Ops, path: str) -> str | None:
         return await vfs.readlink(path)
     except OSError as exc:
         if exc.errno == errno.EINVAL or exc.errno in DANGLING:
+            logger.debug("no link at %s: %s", path, exc)
             return None
         raise
 
@@ -206,6 +207,7 @@ class MirageWorkspaceBackend:
     async def remove(self, path: str) -> None:
         session = await self._session()
         root = session.state.cwd
+        path = posixpath.normpath(posixpath.join(root, path))
         parent = await self.realpath(posixpath.dirname(path))
         target = posixpath.join(parent, posixpath.basename(path))
         if target == root or root.startswith(target.rstrip("/") + "/"):
@@ -213,7 +215,7 @@ class MirageWorkspaceBackend:
                 "refusing to remove the working directory or an ancestor"
             )
         vfs = session.vfs
-        for doomed, is_dir in await _doomed(self._ws, vfs, path):
+        for doomed, is_dir in await _doomed(self._ws, vfs, target):
             if is_dir:
                 await vfs.rmdir(doomed)
             else:
@@ -223,8 +225,11 @@ class MirageWorkspaceBackend:
         return await (await self._session()).vfs.exists(path)
 
     async def realpath(self, path: str) -> str:
-        vfs = (await self._session()).vfs
-        names = [n for n in path.split("/") if n]
+        session = await self._session()
+        vfs = session.vfs
+        names = [
+            n for n in posixpath.join(session.state.cwd, path).split("/") if n
+        ]
         resolved = ""
         hops = 0
         while names:
@@ -235,13 +240,13 @@ class MirageWorkspaceBackend:
                 resolved = resolved.rsplit("/", 1)[0]
                 continue
             here = f"{resolved}/{name}"
-            target = (
-                await _link(vfs, here) if hops < MAX_SYMLINK_HOPS else None
-            )
+            target = await _link(vfs, here)
             if target is None:
                 resolved = here
                 continue
             hops += 1
+            if hops > MAX_SYMLINK_HOPS:
+                raise CycleError(path)
             if target.startswith("/"):
                 resolved = ""
             names[:0] = [n for n in target.split("/") if n]
