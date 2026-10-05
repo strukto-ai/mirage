@@ -1882,3 +1882,24 @@ def test_gnu_numeric_operands_do_not_turn_cmp_options_into_skips():
     sequence = parse_command(SPECS["seq"], ["-1", "1"], "/", "seq")
     assert sequence.texts() == ["-1", "1"]
     assert sequence.option_error_kinds == []
+
+
+# seq's getopt string starts with `+`, and seq.c reads a dash before a
+# digit or a point as a negative number before getopt sees it, so either
+# one ends the options and every later word is an operand (coreutils
+# 9.7). Mirrored in parser.test.ts.
+@pytest.mark.parametrize(
+    "argv,texts",
+    [
+        (["-1.5", "1"], ["-1.5", "1"]),
+        (["-.5", ".5"], ["-.5", ".5"]),
+        (["1", "-0.5", "0"], ["1", "-0.5", "0"]),
+        (["1", "-w", "3"], ["1", "-w", "3"]),
+        (["-1", "-w", "1"], ["-1", "-w", "1"]),
+        (["-w", "--", "-1", "1"], ["-1", "1"]),
+    ],
+)
+def test_seq_options_end_at_its_first_operand(argv, texts):
+    parsed = parse_command(SPECS["seq"], argv, "/", "seq")
+    assert parsed.texts() == texts
+    assert parsed.option_error_kinds == []

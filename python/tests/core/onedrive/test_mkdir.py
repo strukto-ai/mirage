@@ -31,7 +31,29 @@ async def test_mkdir_posts_folder_with_fail_behavior():
 
 
 @pytest.mark.asyncio
-async def test_mkdir_tolerates_an_existing_folder():
+async def test_mkdir_parents_tolerates_an_existing_folder():
+    with aioresponses() as m:
+        m.post(_BASE + "/root/children", payload={"id": "1"})
+        m.post(
+            _BASE + "/root:/parent:/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_BASE + "/root:/parent/new", payload={"id": "1", "folder": {}})
+        await mkdir(
+            _accessor(), PathSpec.from_str_path("/parent/new"), parents=True
+        )
+        # Tolerating the 409 means returning after the one POST, not
+        # retrying it with a different conflict behavior.
+        assert (
+            len(m.requests[("POST", URL(_BASE + "/root:/parent:/children"))])
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_mkdir_refuses_a_folder_made_after_the_lookup():
+    """A folder another client made after the doors looked still 409s."""
     with aioresponses() as m:
         m.post(
             _BASE + "/root:/parent:/children",
@@ -39,13 +61,8 @@ async def test_mkdir_tolerates_an_existing_folder():
             payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
         )
         m.get(_BASE + "/root:/parent/new", payload={"id": "1", "folder": {}})
-        await mkdir(_accessor(), PathSpec.from_str_path("/parent/new"))
-        # Tolerating the 409 means returning after the one POST, not
-        # retrying it with a different conflict behavior.
-        assert (
-            len(m.requests[("POST", URL(_BASE + "/root:/parent:/children"))])
-            == 1
-        )
+        with pytest.raises(FileExistsError):
+            await mkdir(_accessor(), PathSpec.from_str_path("/parent/new"))
 
 
 @pytest.mark.asyncio

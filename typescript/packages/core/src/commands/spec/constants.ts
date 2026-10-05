@@ -151,6 +151,16 @@ export const LETTER_OPTIONS: ReadonlySet<string> = new Set(['jq'])
 // long-option branch before this is asked.
 export const DASH_LETTER = /^-[A-Za-z]/
 
+// The programs that read a dash followed by a digit or a point as a negative
+// number before each getopt call, and stop scanning options there: the word
+// and every word after it are operands. Measured on coreutils 9.7: `seq -1.5
+// 1` counts from -1.5, `seq -.5 .5` from -0.5, and `seq -1 -w 1` refuses -w
+// as LAST, while `seq -inf` is still the invalid option -i.
+export const NEGATIVE_NUMBER_OPERANDS: ReadonlySet<string> = new Set(['seq'])
+
+// The dash-led words such a program takes for a negative number.
+export const NEGATIVE_NUMBER = /^-[.0-9]/
+
 // The programs that compare a long option's whole word against their own
 // table, as strcmp does, `=` included, so `--name=value` is an unknown option,
 // value and all, rather than the option and its value. Measured on jq 1.8.2:

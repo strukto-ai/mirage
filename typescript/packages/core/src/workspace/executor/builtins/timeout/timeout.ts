@@ -14,6 +14,7 @@
 
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
+import { STRTOD, strtodDouble } from '../../../../commands/builtin/utils/strtod.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import {
@@ -50,9 +51,6 @@ import { encodeText } from '../../../../shell/bytes.ts'
 
 const SYNOPSIS = 'timeout [OPTION] DURATION COMMAND [ARG]...'
 
-const FLOAT =
-  /^[ \t\n\v\f\r]*([+-]?)(0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?|[nN][aA][nN](?:\([0-9A-Za-z_]*\))?)/
-
 const LONG = /^[ \t\n\v\f\r]*[+-]?[0-9]+$/
 
 const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
@@ -86,14 +84,6 @@ export function timeoutMissing(name: string): string {
   return `timeout: failed to run command '${quoteText(name)}': No such file or directory\n`
 }
 
-function hexFloat(body: string): number {
-  const match = /^0[xX]([0-9a-fA-F]*)(?:\.([0-9a-fA-F]*))?(?:[pP]([+-]?[0-9]+))?$/.exec(body)
-  const whole = match?.[1] ?? ''
-  const fraction = match?.[2] ?? ''
-  const mantissa = parseInt(`${whole}${fraction}` || '0', 16)
-  return mantissa * 2 ** (Number(match?.[3] ?? '0') - 4 * fraction.length)
-}
-
 /**
  * GNU timeout's parse_duration: a C float plus an optional s/m/h/d.
  *
@@ -102,20 +92,11 @@ function hexFloat(body: string): number {
  * suffix letter may follow, and a negative or NaN interval is refused.
  */
 export function parseDuration(raw: string): number | null {
-  const match = FLOAT.exec(raw)
+  const match = STRTOD.exec(raw)
   if (match === null) return null
-  const sign = match[1] ?? ''
-  const body = match[2] ?? ''
   const multiplier = UNIT_SECONDS[raw.slice(match[0].length)]
   if (multiplier === undefined) return null
-  const lowered = body.toLowerCase()
-  if (lowered.startsWith('nan')) return null
-  let value = lowered.startsWith('0x')
-    ? hexFloat(body)
-    : lowered.startsWith('inf')
-      ? Infinity
-      : Number(body)
-  if (sign === '-') value = -value
+  const value = strtodDouble(match)
   if (!(value >= 0)) return null
   return (value === 0 ? 0 : value) * multiplier
 }

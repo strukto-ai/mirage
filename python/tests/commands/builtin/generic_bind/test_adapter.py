@@ -1285,3 +1285,42 @@ async def test_dir_guard_distinguishes_empty_files_from_directory_eof(is_dir):
         assert await ops.read_bytes(None, path) == b""
         assert await _drain(ops.read_stream(None, path)) == [b""]
         assert await ops.read_range(None, path) == b""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "parents", "refused"),
+    [
+        (FileType.DIRECTORY, False, True),
+        (FileType.FILE, False, True),
+        (FileType.FILE, True, True),
+        (FileType.DIRECTORY, True, False),
+        (None, False, False),
+    ],
+)
+async def test_mode_guard_refuses_a_taken_name_on_a_writable_mount(
+    kind, parents, refused
+):
+    """mkdir(2) refuses a taken name even where the create would pass."""
+    made: list[str] = []
+
+    async def stat(accessor, path, index=None):
+        if kind is None:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(name="d", type=kind)
+
+    async def mkdir(accessor, path, parents=False):
+        made.append(path.virtual)
+
+    ops = adapter.with_mode_guard(make_io(stat=stat, mkdir=mkdir))
+    gtoken = set_mount_gate("/data", MountMode.WRITE)
+    try:
+        call = ops.mkdir(NOOPAccessor(), _spec("/data/d"), parents=parents)
+        if refused:
+            with pytest.raises(FileExistsError):
+                await call
+        else:
+            await call
+    finally:
+        reset_mount_gate(gtoken)
+    assert made == ([] if refused else ["/data/d"])

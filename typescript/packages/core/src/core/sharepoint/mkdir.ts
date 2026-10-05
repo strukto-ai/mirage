@@ -26,14 +26,21 @@ async function createDir(
   driveId: string,
   path: string,
   virtual: string,
+  existOk: boolean,
 ): Promise<void> {
   const config = accessor.config
   const parent = parentPath(path)
-  await createChildFolder(config, itemUrl(config, driveId, parent, '/children'), baseName(path), {
-    item: itemUrl(config, driveId, path),
-    parent: itemUrl(config, driveId, parent),
-    virtual,
-  })
+  await createChildFolder(
+    config,
+    itemUrl(config, driveId, parent, '/children'),
+    baseName(path),
+    {
+      item: itemUrl(config, driveId, path),
+      parent: itemUrl(config, driveId, parent),
+      virtual,
+    },
+    existOk,
+  )
 }
 
 /**
@@ -44,7 +51,8 @@ async function createDir(
  *   driveId: the drive the path lives in.
  *   itemPath: the drive-relative path, keyPrefix included.
  *   path: the operand.
- *   parents: name a file in the way rather than the operand.
+ *   parents: `-p`: a folder at the operand passes, and a file in the way is
+ *     named rather than the operand.
  */
 async function createChain(
   accessor: SharePointAccessor,
@@ -58,7 +66,13 @@ async function createChain(
   const depth = path.vfsPath.split('/').filter((part) => part !== '').length
   for (let index = 1; index <= parts.length; index++) {
     try {
-      await createDir(accessor, driveId, parts.slice(0, index).join('/'), path.virtual)
+      await createDir(
+        accessor,
+        driveId,
+        parts.slice(0, index).join('/'),
+        path.virtual,
+        parents || index < parts.length,
+      )
     } catch (error) {
       const above = parts.length - index
       if (!isEexist(error) || above === 0) throw error
@@ -100,7 +114,7 @@ export async function mkdir(
     await createChain(accessor, driveId, itemPath, path, true)
   } else {
     try {
-      await createDir(accessor, driveId, itemPath, path.virtual)
+      await createDir(accessor, driveId, itemPath, path.virtual, false)
     } catch (error) {
       const prefix = scopedPrefix(accessor)
       const missingRoot = isEnoent(error) && prefix !== '' && parentPath(itemPath) === prefix

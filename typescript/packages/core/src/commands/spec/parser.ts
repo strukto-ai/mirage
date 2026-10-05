@@ -36,6 +36,8 @@ import {
   LETTER_OPTIONS,
   LONG_OPTION_TABLES,
   LONG_SYNONYMS,
+  NEGATIVE_NUMBER,
+  NEGATIVE_NUMBER_OPERANDS,
   NO_LONG_OPTIONS,
   NUMERIC_SHORT,
   OPERAND,
@@ -586,6 +588,7 @@ export function parseCommand(
   let inOrderOperands: boolean
   let spelledWords: ReadonlySet<string>
   let letterOptions: boolean
+  let negativeNumbers: boolean
   let wholeWords: boolean
   let ownLoop: boolean
   let longTable: readonly (readonly string[])[] | undefined
@@ -606,6 +609,7 @@ export function parseCommand(
     inOrderOperands = false
     spelledWords = new Set()
     letterOptions = false
+    negativeNumbers = false
     wholeWords = false
     ownLoop = false
   } else {
@@ -637,6 +641,7 @@ export function parseCommand(
     inOrderOperands = builtin && IN_ORDER_OPERANDS.has(cmdName)
     spelledWords = (builtin ? SPELLED_WORDS[cmdName] : undefined) ?? new Set()
     letterOptions = builtin && LETTER_OPTIONS.has(cmdName)
+    negativeNumbers = builtin && NEGATIVE_NUMBER_OPERANDS.has(cmdName)
     wholeWords = builtin && WHOLE_WORD_LONG_OPTIONS.has(cmdName)
     ownLoop = builtin && OWN_OPTION_LOOP.has(cmdName)
     if (builtin) {
@@ -827,6 +832,12 @@ export function parseCommand(
     // A dash word with no letter after the dash is an operand to jq (`-1`,
     // `-.`, `- x`), so it falls through to the operands below.
     if (tok.startsWith('-') && tok.length > 1 && (!letterOptions || DASH_LETTER.test(tok))) {
+      if (negativeNumbers && NEGATIVE_NUMBER.test(tok)) {
+        recordOperand(tok)
+        endOfFlags = true
+        i += 1
+        continue
+      }
       if (cs.numericDest !== null && NUMERIC_SHORT.test(tok)) {
         flags[cs.numericDest] = tok.slice(1)
         i += 1
@@ -919,10 +930,7 @@ export function parseCommand(
         }
       }
 
-      if (
-        lenientDashOperands ||
-        (NUMERIC_SHORT.test(tok) && (!isBuiltinGrammar(cmdName, spec) || cmdName === 'seq'))
-      ) {
+      if (lenientDashOperands || (NUMERIC_SHORT.test(tok) && !isBuiltinGrammar(cmdName, spec))) {
         recordOperand(tok)
       } else if (cs.valueSpellings.includes(tok)) {
         // A declared value flag with no argument left on the line.

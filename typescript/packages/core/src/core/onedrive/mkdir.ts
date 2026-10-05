@@ -62,15 +62,18 @@ async function createDir(
   path: string,
   virtual: string,
   root: string,
+  existOk: boolean,
 ): Promise<void> {
   const config = accessor.config
   const parent = parentPath(path)
   const create = (): Promise<void> =>
-    createChildFolder(config, itemUrl(config, parent, '/children'), baseName(path), {
-      item: itemUrl(config, path),
-      parent: itemUrl(config, parent),
-      virtual,
-    })
+    createChildFolder(
+      config,
+      itemUrl(config, parent, '/children'),
+      baseName(path),
+      { item: itemUrl(config, path), parent: itemUrl(config, parent), virtual },
+      existOk,
+    )
   try {
     await create()
   } catch (error) {
@@ -95,7 +98,7 @@ export async function mkdir(
       const level = parts.slice(0, index).join('/')
       const virtual = `${prefix}/${level}`
       try {
-        await createDir(accessor, level, virtual, prefix === '' ? '/' : prefix)
+        await createDir(accessor, level, virtual, prefix === '' ? '/' : prefix, true)
       } catch (error) {
         // `mkdir -p` passes only a directory at the operand and names the
         // file it stops at above it, as GNU does.
@@ -104,7 +107,7 @@ export async function mkdir(
       }
     }
   } else {
-    await createDir(accessor, key, path.virtual, path.virtual)
+    await createDir(accessor, key, path.virtual, path.virtual, false)
   }
   await invalidateAfterWrite(path)
   if (parents) await invalidateAncestors(path)

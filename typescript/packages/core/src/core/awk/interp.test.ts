@@ -220,6 +220,18 @@ describe('awk interpreter', () => {
     expect(await run('BEGIN{print n+1, (n==5)}', { assignments: { n: '5' } })).toBe('6 1\n')
   })
 
+  it('holds the environment in ENVIRON as strnums', async () => {
+    const interp = new Interpreter(
+      parse('BEGIN{print ENVIRON["n"]+1, (ENVIRON["n"]==5), ("m" in ENVIRON)}'),
+      new FakeHost(),
+      [],
+      {},
+      { n: '05' },
+    )
+    await interp.runBegin()
+    expect(DEC.decode((await interp.drain())[0])).toBe('6 1 0\n')
+  })
+
   it('carries the exit code and still runs END', async () => {
     const interp = new Interpreter(
       parse('NR==2{exit 3} {print} END{print "end"}'),

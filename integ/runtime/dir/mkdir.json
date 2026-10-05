@@ -60,6 +60,22 @@
         },
         {
           "program": {
+            "python": "from pathlib import Path\nfor parents in (False, True):\n    try:\n        Path('/data/seed.txt').mkdir(parents=parents)\n        print('created')\n    except OSError as e:\n        print(type(e).__name__)",
+            "js": "console.log(os.mkdir('/data/seed.txt'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\nFileExistsError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-20\n"
+            }
+          }
+        },
+        {
+          "program": {
             "python": "from pathlib import Path\ntry:\n    Path('/data/x/y').mkdir()\n    print('created')\nexcept OSError as e:\n    print(type(e).__name__)",
             "js": "const r = os.mkdir('/data/x/y')\nconsole.log(r === 0 ? 'created' : r)"
           },

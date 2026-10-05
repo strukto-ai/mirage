@@ -38,11 +38,11 @@ PATH = PathSpec.from_str_path("/x/a.txt", "a.txt")
 
 
 def make_table(**kwargs) -> CommandIO:
+    kwargs.setdefault("stat", AsyncMock())
     return CommandIO(
         readdir=AsyncMock(return_value=["/x/a.txt"]),
         read_bytes=AsyncMock(return_value=b"data"),
         read_stream=AsyncMock(),
-        stat=AsyncMock(),
         is_mounted=lambda a: True,
         **kwargs,
     )
@@ -296,12 +296,45 @@ def test_emulated_truncate_requires_write():
 
 @pytest.mark.asyncio
 async def test_mkdir_parents_knob():
-    table = make_table(mkdir=AsyncMock())
+    table = make_table(
+        mkdir=AsyncMock(), stat=AsyncMock(side_effect=FileNotFoundError)
+    )
     ops = make_generic_ops("x", table, mkdir_parents=True)
     mkdir = next(o for o in ops if o.name == "mkdir")
     acc = NOOPAccessor()
     await mkdir.fn(acc, PATH)
     table.mkdir.assert_awaited_once_with(acc, PATH, parents=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "parents", "refused"),
+    [
+        (FileType.DIRECTORY, False, True),
+        (FileType.FILE, False, True),
+        (FileType.FILE, True, True),
+        (FileType.DIRECTORY, True, False),
+    ],
+)
+async def test_mkdir_refuses_a_taken_name_before_the_create(
+    kind, parents, refused
+):
+    """A backend whose create passes a taken name still answers EEXIST.
+
+    A directory under ``-p`` still reaches the create, which writes the
+    marker an implied object-store directory lacks.
+    """
+    row = FileStat(name="a.txt", type=kind)
+    table = make_table(mkdir=AsyncMock(), stat=AsyncMock(return_value=row))
+    mkdir = next(o for o in make_generic_ops("x", table) if o.name == "mkdir")
+    acc = NOOPAccessor()
+    if refused:
+        with pytest.raises(FileExistsError):
+            await mkdir.fn(acc, PATH, parents=parents)
+        table.mkdir.assert_not_awaited()
+    else:
+        await mkdir.fn(acc, PATH, parents=parents)
+        table.mkdir.assert_awaited_once_with(acc, PATH, parents=True)
 
 
 def test_native_truncate_wins_over_emulation():

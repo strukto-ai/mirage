@@ -82,6 +82,7 @@ async def awk(
         shell=opts.shell,
         ns=opts.ns,
         mount_prefix=opts.mount_prefix,
+        env=opts.env,
     )
 
 
