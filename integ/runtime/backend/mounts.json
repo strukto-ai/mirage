@@ -99,7 +99,7 @@
             "dst": "/b/y.txt"
           },
           "expect": {
-            "errno": "ENOENT"
+            "errno": "EXDEV"
           }
         },
         {

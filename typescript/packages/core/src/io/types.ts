@@ -85,6 +85,19 @@ export interface SizedRun {
   readonly directories: readonly string[]
 }
 
+/**
+ * One `wc` operand as counted, before its row is rendered.
+ *
+ * A line spanning mounts lays every mount's own counts out as one report,
+ * with one column width and one total, the way du renders every mount's
+ * `sizedRuns` as one tree. `values` are the counts the row shows, in GNU's
+ * column order; `label` the name it prints, null for none.
+ */
+export interface CountedRun {
+  readonly values: readonly number[]
+  readonly label: string | null
+}
+
 export interface IOResultInit {
   stdout?: ByteSource | null
   stderr?: ByteSource | null
@@ -97,6 +110,7 @@ export interface IOResultInit {
   producer?: Producer | null
   matchedRuns?: PathSpec[][] | null
   sizedRuns?: SizedRun[] | null
+  countedRuns?: CountedRun[] | null
   refusal?: Refusal | null
 }
 
@@ -109,6 +123,9 @@ export class IOResult {
   // du's measurement before rendering, one run per operand it could read, in
   // operand order; null when the command supplied none.
   sizedRuns: SizedRun[] | null
+  // wc's counts before rendering, one run per row it prints, in operand order
+  // and without the total; null when the command supplied none.
+  countedRuns: CountedRun[] | null
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
@@ -134,6 +151,7 @@ export class IOResult {
   constructor(init: IOResultInit = {}) {
     this.matchedRuns = init.matchedRuns ?? null
     this.sizedRuns = init.sizedRuns ?? null
+    this.countedRuns = init.countedRuns ?? null
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
@@ -197,6 +215,7 @@ export class IOResult {
       stdout: other.stdout,
       matchedRuns: other.matchedRuns,
       sizedRuns: other.sizedRuns,
+      countedRuns: other.countedRuns,
       stderr: mergedStderr,
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },

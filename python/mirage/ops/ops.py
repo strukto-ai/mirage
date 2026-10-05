@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import errno
 from dataclasses import replace
 from typing import Any
 
@@ -231,10 +230,6 @@ class Ops:
         if owner is None:
             return None
         return next(m for m in self._mounts if m.prefix == owner)
-
-    def _mount_prefix(self, path: str) -> str:
-        m = self._owner(path)
-        return "" if m is None else m.prefix.rstrip("/")
 
     @staticmethod
     def _payload_bytes(result: Any, kwargs: dict[str, Any]) -> int:
@@ -608,10 +603,9 @@ class Ops:
         """Rename file or directory within one mount.
 
         Both ends must resolve to the same mount: a mount is a
-        filesystem boundary, and the facade is where a kernel-facing
-        whole-workspace FUSE mount needs the refusal, so `mv` between
-        two backends falls back to its copy+unlink path instead of
-        corrupting one backend's key space with the other's path.
+        filesystem boundary, and the dispatcher answers EXDEV across
+        two, which a kernel-facing whole-workspace FUSE mount needs so
+        `mv` between two backends falls back to its copy+unlink path.
 
         Args:
             src (str): Source virtual path.
@@ -620,12 +614,8 @@ class Ops:
 
         Raises:
             OSError: EXDEV when the two ends resolve to different
-                mounts.
+                mounts, ENOENT when a parent directory is missing.
         """
-        if self._mount_prefix(src) != self._mount_prefix(dst):
-            raise OSError(
-                errno.EXDEV, "Invalid cross-device link", src, None, dst
-            )
         await self._call(
             "rename", src, session_id, dst=PathSpec.from_str_path(dst)
         )

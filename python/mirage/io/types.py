@@ -67,6 +67,24 @@ class SizedRun:
     directories: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class CountedRun:
+    """One ``wc`` operand as counted, before its row is rendered.
+
+    A line spanning mounts lays every mount's own counts out as one
+    report, with one column width and one total, the way du renders
+    every mount's ``sized_runs`` as one tree.
+
+    Args:
+        values (tuple[int, ...]): the counts the row shows, in GNU's
+            column order.
+        label (str | None): the name the row prints, None for none.
+    """
+
+    values: tuple[int, ...] = ()
+    label: str | None = None
+
+
 @dataclass
 class OpReport:
     """The op door's account of what actually ran, filled in place.
@@ -141,6 +159,9 @@ class IOResult:
         sized_runs (list[SizedRun] | None): ``du``'s measurement before
             rendering, one run per operand it could read, in operand
             order. None means the command supplied none.
+        counted_runs (list[CountedRun] | None): ``wc``'s counts before
+            rendering, one run per row it prints, in operand order and
+            without the total. None means the command supplied none.
         stdout (ByteSource | None): Standard output stream.
         stderr (ByteSource | None): Standard error stream.
         exit_code (int): Process exit code.
@@ -180,11 +201,13 @@ class IOResult:
         matched_runs: list[list[PathSpec]] | None = None,
         renames: list[tuple[str, str]] | None = None,
         sized_runs: list[SizedRun] | None = None,
+        counted_runs: list[CountedRun] | None = None,
     ) -> None:
         self.renames = renames if renames is not None else []
         self.stdout = stdout
         self.matched_runs = matched_runs
         self.sized_runs = sized_runs
+        self.counted_runs = counted_runs
         self.stderr = stderr
         self._exit_code = exit_code
         self.reads: dict[str, ByteSource] = reads if reads is not None else {}
@@ -236,6 +259,7 @@ class IOResult:
             stdout=other.stdout,
             matched_runs=other.matched_runs,
             sized_runs=other.sized_runs,
+            counted_runs=other.counted_runs,
             stderr=merged_stderr,
             reads={**self.reads, **other.reads},
             writes={**self.writes, **other.writes},

@@ -67,7 +67,7 @@ export async function runRelay(
   if (cmdName === 'awk') return runAwk(scopes, textArgs, flagKwargs, runSingle, stdin)
   if (cmdName === 'sed')
     return runSed(scopes, textArgs, flagKwargs, dispatch, stdin, cwd, argv, sessionView?.snapshot())
-  if (cmdName === 'wc') return runWc(scopes, flagKwargs, dispatch, runSingle)
+  if (cmdName === 'wc') return runWc(scopes, flagKwargs, dispatch, runSingle, cwd, ns, stdin)
   if (cmdName === 'ls') return runLs(scopes, flagKwargs, dispatch, ns, sessionView)
   if (cmdName === 'cp') return runCp(scopes, flagKwargs, dispatch, storageKey, ns, cwd, stdin)
   if (cmdName === 'mv') return runMv(scopes, flagKwargs, dispatch, storageKey, ns, stdin)

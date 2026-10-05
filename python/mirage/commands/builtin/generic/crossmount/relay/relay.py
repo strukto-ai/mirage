@@ -106,7 +106,9 @@ async def run_relay(
             session_view.snapshot() if session_view is not None else None,
         )
     if cmd_name == Cmd.WC:
-        return await run_wc(scopes, flag_kwargs, dispatch, run_single)
+        return await run_wc(
+            scopes, flag_kwargs, dispatch, run_single, cwd, ns, stdin
+        )
     if cmd_name == Cmd.LS:
         return await run_ls(scopes, flag_kwargs, dispatch, ns, session_view)
     if cmd_name == Cmd.CP:
