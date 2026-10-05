@@ -12,38 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import type { NamespaceView } from '../../../../../ops/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../../../types.ts'
 import { isFsError } from '../../../../../utils/errors.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
+import { runDispatch } from '../../../generic_bind/dispatch.ts'
 import { isStdin } from '../../../utils/stream.ts'
 import { formatCountRows, numberWidth, parseFlags, type WcRow } from '../../wc.ts'
+import { DISPATCH_BUILDERS } from '../constants.ts'
 import { Cmd, type CrossResult, type DispatchFn, type RunSingle } from '../types.ts'
 import { mergeOperandIos, runOperands, statOp } from '../utils.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 // GNU prints a row's counts in this order whichever flags ask for them.
 const COLUMNS = ['lines', 'words', 'chars', 'bytes', 'maxLineLength'] as const
 type Column = (typeof COLUMNS)[number]
-
-/**
- * Read one rendered wc row back into its counts and its label: the counts
- * right-aligned, then one space and the label, kept whole, spaces included.
- * Mirrors Python's parse_row.
- */
-export function parseRow(line: string, counts: number): WcRow {
-  let rest = line
-  const values: number[] = []
-  for (let i = 0; i < counts; i++) {
-    const trimmed = rest.replace(/^ +/, '')
-    const space = trimmed.indexOf(' ')
-    values.push(parseInt(space === -1 ? trimmed : trimmed.slice(0, space), 10))
-    rest = space === -1 ? '' : trimmed.slice(space + 1)
-  }
-  return { values, label: rest === '' ? null : rest }
-}
 
 /**
  * The size GNU sizes the columns by, which it takes from fstat. A stream or a
@@ -75,14 +60,20 @@ async function operandSize(
  * Count each operand on its own mount and lay the rows out together. Each
  * operand runs through its owning mount's wc, so a mount that counts without
  * reading its file (a database row count) still does, and reading mounts
- * stream. Only the layout spans the line: the rows go through the generic's
- * formatter with GNU's column width. Mirrors Python's run_wc.
+ * stream. Only the layout spans the line: the counts each run reports
+ * (`IOResult.countedRuns`) go through the generic's formatter with GNU's
+ * column width, and no mount's output text is read back. A run that succeeds
+ * without counts (a wc not built on the generic) leaves the line to one
+ * dispatcher pass. Mirrors Python's run_wc.
  */
 export async function runWc(
   scopes: PathSpec[],
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   runSingle: RunSingle,
+  cwd = '/',
+  ns?: NamespaceView,
+  stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   const parsed = parseFlags(flagKwargs)
   if (typeof parsed === 'string') {
@@ -91,21 +82,24 @@ export async function runWc(
   const asked = COLUMNS.filter((c) => parsed[c])
   const columns: readonly Column[] = asked.length > 0 ? asked : ['lines', 'words', 'bytes']
   const runs = await runOperands(runSingle, Cmd.WC, scopes, [], { ...flagKwargs, total: 'never' })
+  if (runs.some((run) => run.io.countedRuns === null && run.io.exitCode === 0)) {
+    const builder = DISPATCH_BUILDERS.get(Cmd.WC)
+    if (builder === undefined) throw new Error('No dispatch builder for wc')
+    return runDispatch(builder, scopes, [], flagKwargs, dispatch, cwd, ns, stdin)
+  }
   const rows: WcRow[] = []
   const sizes: (number | null)[] = []
   const totals = columns.map(() => 0)
   for (const run of runs) {
-    // One concrete operand per run, so its output is one row or none; the row
-    // is taken whole, whatever its name holds.
-    const text = DEC.decode(run.data).replace(/\n$/, '')
-    if (text === '') continue
-    const row = parseRow(text, columns.length)
-    rows.push(row)
-    sizes.push(await operandSize(dispatch, run.scope, row.values))
-    row.values.forEach((value, i) => {
-      const sum = totals[i] ?? 0
-      totals[i] = columns[i] === 'maxLineLength' ? Math.max(sum, value) : sum + value
-    })
+    for (const counted of run.io.countedRuns ?? []) {
+      const values = [...counted.values]
+      rows.push({ values, label: counted.label })
+      sizes.push(await operandSize(dispatch, run.scope, values))
+      values.forEach((value, i) => {
+        const sum = totals[i] ?? 0
+        totals[i] = columns[i] === 'maxLineLength' ? Math.max(sum, value) : sum + value
+      })
+    }
   }
   const width = numberWidth(sizes, scopes.length, columns.length)
   const body = formatCountRows(rows, totals, scopes.length, parsed.total, width)

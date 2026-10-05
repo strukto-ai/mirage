@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "xxd_outfile_is_replaced",
+      "seq": 963223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hi\\n' > /data/xxd_of_in; printf 'old old old\\n' > /data/xxd_of_out; xxd /data/xxd_of_in /data/xxd_of_out; echo rc=$?; cat /data/xxd_of_out; rm /data/xxd_of_in /data/xxd_of_out",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n00000000: 6869 0a                                  hi.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xxd_reverse_writes_into_outfile",
+      "seq": 963224,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ABCDEFGH' > /data/xxd_rp; printf '00000004: 6869  hi\\n' | xxd -r - /data/xxd_rp; echo rc=$?; cat /data/xxd_rp; echo; rm /data/xxd_rp",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nABCDhiGH\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xxd_reverse_stream_offsets",
+      "seq": 963225,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '00000002: 6869  hi\\n' | xxd -r | xxd -p; printf '00000000: 6869  hi\\n00000000: 4142  AB\\n' > /data/xxd_bk; xxd -r /data/xxd_bk; echo rc=$?; rm /data/xxd_bk",
+      "expect": {
+        "exit": 0,
+        "stdout": "00006869\nhirc=5\n",
+        "stderr": "xxd: Sorry, cannot seek backwards.\n"
+      }
+    },
+    {
+      "id": "xxd_reverse_stops_at_a_bad_digit",
+      "seq": 963227,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '68zz69\\n6a\\n' | xxd -r -p; echo; printf '00000000: 68zz 69  h.i\\n' | xxd -r; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "hj\nh\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

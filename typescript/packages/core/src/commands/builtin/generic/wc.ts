@@ -282,6 +282,7 @@ export async function wcGeneric(
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
       stderr: err === '' ? null : encodeText(err),
+      countedRuns: rows,
     })
     return [
       formatCountRows(rows, selectedValues(total, parsed), paths.length, parsed.total, width),

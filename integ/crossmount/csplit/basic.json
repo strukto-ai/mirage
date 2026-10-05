@@ -6,7 +6,26 @@
       "targets": [
         "ram",
         "disk",
-        "opfs"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "printf '1\\n2\\n3\\n' > /data/xm_rt_cs; csplit -f /data2/xm_rt_cs /data/xm_rt_cs 2; cat /data2/xm_rt_cs00; cat /data2/xm_rt_cs01; rm /data/xm_rt_cs /data2/xm_rt_cs00 /data2/xm_rt_cs01",
       "expect": {

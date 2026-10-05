@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { formatWcLines, type WcRow } from './generic/wc.ts'
 import { rstripNewlines } from '../../utils/text.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 
@@ -53,31 +52,4 @@ export function prefixAggregate(results: AggregateResult[]): Uint8Array {
   }
   if (lines.length === 0) return new Uint8Array(0)
   return enc.encode(lines.join('\n') + '\n')
-}
-
-export function wcAggregate(results: AggregateResult[]): Uint8Array {
-  const enc = new TextEncoder()
-  const dec = new TextDecoder()
-  const rows: WcRow[] = []
-  let totals: number[] = []
-  for (const [path, data] of results) {
-    const text = dec.decode(data).trim()
-    if (text === '') continue
-    const counts: number[] = []
-    for (const token of text.split(/\s+/)) {
-      if (!/^\d+$/.test(token)) break
-      counts.push(Number.parseInt(token, 10))
-    }
-    if (counts.length === 0) continue
-    rows.push({ values: counts, label: path })
-    if (totals.length === 0) totals = new Array<number>(counts.length).fill(0)
-    for (let idx = 0; idx < counts.length; idx++) {
-      totals[idx] = (totals[idx] ?? 0) + (counts[idx] ?? 0)
-    }
-  }
-  if (results.length > 1 && totals.length > 0) {
-    rows.push({ values: totals, label: 'total' })
-  }
-  if (rows.length === 0) return new Uint8Array(0)
-  return enc.encode(formatWcLines(rows).join('\n') + '\n')
 }

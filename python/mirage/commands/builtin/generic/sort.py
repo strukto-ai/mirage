@@ -192,16 +192,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
         if dest == "key" and isinstance(value, str):
             parse_keydef(value, KeyMods(), False)
         elif dest == "output":
-            spelled = next(typed, None)
-            path = (
-                spelled
-                if spelled is not None
-                else (
-                    value
-                    if isinstance(value, PathSpec)
-                    else PathSpec.from_str_path(str(value))
-                )
-            )
+            path = next(typed)
             if output is not None and path.raw_path != output.raw_path:
                 raise UsageError(MULTIPLE_OUTPUTS)
             output = path

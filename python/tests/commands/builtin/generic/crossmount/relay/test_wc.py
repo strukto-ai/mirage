@@ -14,23 +14,24 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.crossmount.relay.wc import (
-    parse_row,
-    run_wc,
-)
-from mirage.commands.builtin.generic.wc import WCCounts
-from mirage.io.types import IOResult, materialize
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.commands.builtin.generic.crossmount.relay.wc import run_wc
+from mirage.commands.config import command
+from mirage.commands.spec import SPECS
+from mirage.io.types import CountedRun, IOResult, materialize
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.errors import enoent
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
-# What each operand's own mount answers for `wc -l`, and what stat says.
+# What each operand's own mount counts for `wc -l`, and what stat says. The
+# printed text is never read back, so every run prints the same noise.
 ROWS = {
-    "/a/dir": (b"0 /a/dir\n", b"wc: /a/dir: Is a directory\n"),
-    "/b/name with spaces": (b"1 /b/name with spaces\n", None),
-    "/b/x": (b"1 /b/x\n", None),
-    "/pg/rows": (b"5 /pg/rows\n", None),
-    "/pg2/rows": (b"3 /pg2/rows\n", None),
-    "/gone": (b"4 /gone\n", None),
+    "/a/dir": ((0,), b"wc: /a/dir: Is a directory\n"),
+    "/b/name with spaces": ((1,), None),
+    "/b/x": ((1,), None),
+    "/pg/rows": ((5,), None),
+    "/pg2/rows": ((3,), None),
+    "/gone": ((4,), None),
 }
 SIZES = {"/b/name with spaces": 6, "/b/x": 120, "/pg/rows": None}
 
@@ -42,8 +43,12 @@ class Mounts:
 
     async def run_single(self, name, paths, texts, flags, stdin=None):
         self.runs.append((name, [p.virtual for p in paths], flags))
-        out, err = ROWS[paths[0].virtual]
-        return out, IOResult(exit_code=1 if err else 0, stderr=err)
+        values, err = ROWS[paths[0].virtual]
+        return b"9 9 9 rendered\n", IOResult(
+            exit_code=1 if err else 0,
+            stderr=err,
+            counted_runs=[CountedRun(values, paths[0].raw_path)],
+        )
 
     async def dispatch(self, op, path, **kwargs):
         self.ops.append(op)
@@ -139,17 +144,23 @@ async def test_invalid_total_fails_before_any_mount_runs():
     assert mounts.ops == []
 
 
-@pytest.mark.parametrize(
-    "line,columns,expected",
-    [
-        ("5   x", ["lines"], (WCCounts(lines=5), "  x")),
-        (
-            "  5  57 447 /m/d",
-            ["lines", "words", "bytes_"],
-            (WCCounts(lines=5, words=57, bytes_=447), "/m/d"),
-        ),
-        ("      8", ["lines"], (WCCounts(lines=8), None)),
-    ],
-)
-def test_parse_row_keeps_the_label_whole(line, columns, expected):
-    assert parse_row(line, columns) == expected
+@command("wc", vfs="ram", spec=SPECS["wc"])
+async def _uncounted(accessor, paths, texts, opts):
+    return b"777 " + paths[0].raw_path.encode() + b"\n", IOResult()
+
+
+@pytest.mark.asyncio
+async def test_a_wc_without_counts_keeps_the_one_pass():
+    first, second = RAMVFS(), RAMVFS()
+    first.load_state({"files": {"/x": b"a\nb\n"}})
+    second.load_state({"files": {"/y": b"c\n"}})
+    ws = Workspace({"/a": first, "/b": second}, mode=MountMode.WRITE)
+    ws.mount("/b").register_fns([_uncounted])
+    try:
+        result = await ws.shell("wc -l /a/x /b/y")
+        assert (await result.materialize_stdout()) == (
+            b"2 /a/x\n1 /b/y\n3 total\n"
+        )
+        assert result.exit_code == 0
+    finally:
+        await ws.close()

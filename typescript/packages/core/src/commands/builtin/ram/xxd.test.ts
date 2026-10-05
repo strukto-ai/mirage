@@ -63,6 +63,35 @@ describe('xxd', () => {
     expect(DEC.decode(r.outBytes)).toBe('AB')
   })
 
+  it('replaces OUTFILE with the dump', async () => {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/in', ENC.encode('hi\n'))
+    vfs.store.files.set('/out', ENC.encode('old old old\n'))
+    const r = await runXxd(vfs, [PathSpec.fromStrPath('/in'), PathSpec.fromStrPath('/out')])
+    expect(r.exitCode).toBe(0)
+    expect(r.out).toBe('')
+    expect(DEC.decode(vfs.store.files.get('/out'))).toBe(
+      '00000000: 6869 0a                                  hi.\n',
+    )
+  })
+
+  it('-r writes into OUTFILE at its offsets', async () => {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/out', ENC.encode('ABCDEFGH'))
+    const paths = [PathSpec.fromStrPath('-'), PathSpec.fromStrPath('/out')]
+    const r = await runXxd(vfs, paths, { r: true }, ENC.encode('00000004: 6869  hi\n'))
+    expect(r.exitCode).toBe(0)
+    expect(DEC.decode(vfs.store.files.get('/out'))).toBe('ABCDhiGH')
+  })
+
+  it('-r on a stream fills forward and refuses a backward seek', async () => {
+    const vfs = new RAMVFS()
+    const dump = ENC.encode('00000002: 6869  hi\n00000000: 4142  AB\n')
+    const r = await runXxd(vfs, [], { r: true }, dump)
+    expect([...r.outBytes]).toEqual([0, 0, 0x68, 0x69])
+    expect(r.exitCode).toBe(5)
+  })
+
   it('-u uppercase', async () => {
     const vfs = new RAMVFS()
     const r = await runXxd(vfs, [], { u: true }, new Uint8Array([0xab, 0xcd]))

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 
 import pytest
 
@@ -59,13 +60,12 @@ def test_redirect_append_after_cached_read():
     )
 
 
-def test_dispatch_rename_addresses_dst_against_the_source_mount():
-    # Mirrors the TypeScript dispatcher test. Both languages execute the
-    # rename on the source backend and address the dst key against it, so
-    # "/b/y.txt" means "b/y.txt" inside /a, a directory that does not
-    # exist there. The store-backed backends refuse (rename(2) ENOENT)
-    # instead of growing an orphan key under a directory they never
-    # recorded. Neither language crosses mounts.
+@pytest.mark.parametrize("src", ["/a/x.txt", "/a/missing.txt"])
+def test_dispatch_rename_across_mounts_is_exdev(src):
+    # Mirrors the TypeScript dispatcher test. A mount is a filesystem
+    # boundary, so rename(2) answers EXDEV across two before it looks the
+    # source up, and nothing moves: the source's backend never takes
+    # "/b/y.txt" for one of its own keys.
     ws = Workspace(
         {
             "/a": (RAMVFS(), MountMode.WRITE),
@@ -76,12 +76,13 @@ def test_dispatch_rename_addresses_dst_against_the_source_mount():
 
     async def run() -> None:
         await ws.shell("echo moved-bytes > /a/x.txt")
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(OSError) as exc:
             await ws.dispatch(
                 "rename",
-                PathSpec.from_str_path("/a/x.txt"),
+                PathSpec.from_str_path(src),
                 dst=PathSpec.from_str_path("/b/y.txt"),
             )
+        assert exc.value.errno == errno.EXDEV
         assert (await ws.shell("cat /a/x.txt")).stdout == b"moved-bytes\n"
         assert (await ws.shell("cat /a/b/y.txt")).exit_code != 0
         assert (await ws.shell("cat /b/y.txt")).exit_code != 0

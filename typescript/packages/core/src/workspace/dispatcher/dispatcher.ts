@@ -34,6 +34,7 @@ import {
   isMissError,
   isMissingOp,
   eloop,
+  exdev,
   noMount,
   noXattr,
   walkRefusal,
@@ -416,6 +417,17 @@ export class Dispatcher {
     const resolvedOwner = this.namespace.tryMountFor(p.virtual)
     const opWrite = POLICY_WRITE_OPS.has(opName)
     if (resolvedOwner !== null) {
+      // A mount is a filesystem boundary: rename(2) moves a name within one
+      // and answers EXDEV across two, before any permission is weighed, so
+      // `mv` falls back to copy and unlink instead of the source's backend
+      // taking the destination for one of its keys.
+      if (
+        opName === 'rename' &&
+        dstArg instanceof PathSpec &&
+        this.namespace.tryMountFor(dstArg.virtual) !== resolvedOwner
+      ) {
+        throw exdev(p)
+      }
       // Admission policies fire at the door, before the warm-cache early
       // return below: a cached read must be refused exactly like a cold
       // one, or the cache becomes a policy bypass. This dispatcher is the

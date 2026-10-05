@@ -55,30 +55,33 @@ describe('dispatch applies limits on the executing mount', () => {
   }, 30_000)
 })
 
-describe('dispatch rename addresses dst against the source mount', () => {
-  it('cross-mount dst is refused like Python refuses it (EXDEV is a follow-up)', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/a': new RAMVFS(), '/b': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
-    try {
-      await ws.shell('echo moved-bytes > /a/x.txt')
-      // Both languages execute the rename on the source backend and address
-      // the dst key against it, so '/b/y.txt' means 'b/y.txt' inside /a, a
-      // directory that does not exist there. The store-backed backends
-      // refuse (rename(2) ENOENT) instead of growing an orphan key under a
-      // directory they never recorded. Neither language crosses mounts.
-      await expect(
-        ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath('/b/y.txt')]),
-      ).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(DEC.decode((await ws.shell('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
-      expect((await ws.shell('cat /a/b/y.txt')).exitCode).not.toBe(0)
-      expect((await ws.shell('cat /b/y.txt')).exitCode).not.toBe(0)
-    } finally {
-      await ws.close()
-    }
-  }, 30_000)
+describe('dispatch rename across mounts', () => {
+  it.each(['/a/x.txt', '/a/missing.txt'])(
+    'answers EXDEV and moves nothing: %s',
+    async (src) => {
+      // Mirrors Python's test_dispatch_rename_across_mounts_is_exdev. A mount
+      // is a filesystem boundary, so rename(2) answers EXDEV across two before
+      // it looks the source up, and nothing moves: the source's backend never
+      // takes '/b/y.txt' for one of its own keys.
+      const parser = await getTestParser()
+      const ws = new Workspace(
+        { '/a': new RAMVFS(), '/b': new RAMVFS() },
+        { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+      )
+      try {
+        await ws.shell('echo moved-bytes > /a/x.txt')
+        await expect(
+          ws.dispatch('rename', src, [PathSpec.fromStrPath('/b/y.txt')]),
+        ).rejects.toMatchObject({ code: 'EXDEV' })
+        expect(DEC.decode((await ws.shell('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
+        expect((await ws.shell('cat /a/b/y.txt')).exitCode).not.toBe(0)
+        expect((await ws.shell('cat /b/y.txt')).exitCode).not.toBe(0)
+      } finally {
+        await ws.close()
+      }
+    },
+    30_000,
+  )
 })
 
 describe('dispatch resolves filetype-registered ops by path extension', () => {

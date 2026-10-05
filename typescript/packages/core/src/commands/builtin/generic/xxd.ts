@@ -15,15 +15,23 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
+import { fsErrorLine, isEnoent, isFsError } from '../../../utils/errors.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
-import { extraOperandError } from '../../spec/usage.ts'
+import { extraOperandError, readFailExitCode } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
+
+// xxd's exit for an OUTFILE it cannot open, and for a dump that seeks
+// backwards on a stream (vim's xxd 2024-12-07).
+const OPEN_OUTPUT_EXIT = 3
+const SEEK_BACK_EXIT = 5
+// The most NUL bytes one chunk carries when a dump's offset skips ahead.
+const GAP_CHUNK = 65536
 
 function padLeft(s: string, width: number, ch = ' '): string {
   return s.length >= width ? s : ch.repeat(width - s.length) + s
@@ -95,32 +103,115 @@ async function* xxdPlainStream(
   yield ENC.encode('\n')
 }
 
-async function* xxdReverseStream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
-  const chunks: Uint8Array[] = []
-  for await (const c of source) chunks.push(c)
-  let total = 0
-  for (const c of chunks) total += c.byteLength
-  const buf = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) {
-    buf.set(c, offset)
-    offset += c.byteLength
+/**
+ * The bytes the hex digit pairs at the start of `digits` spell: xxd stops at
+ * the first character that is not a hex digit and drops a digit left without
+ * its pair. Mirrors Python's _unhex.
+ */
+function unhex(digits: string): Uint8Array {
+  const run = /^[0-9A-Fa-f]*/.exec(digits)?.[0] ?? ''
+  const out = new Uint8Array(Math.floor(run.length / 2))
+  for (let i = 0; i < out.byteLength; i++) out[i] = Number.parseInt(run.slice(i * 2, i * 2 + 2), 16)
+  return out
+}
+
+/**
+ * One hexdump line as the offset its bytes go to and the bytes. A line
+ * without an offset continues where the last one ended (null); a line whose
+ * offset is not hex decodes to nothing, as xxd skips it. Mirrors Python's
+ * _reverse_line.
+ */
+function reverseLine(raw: string): [number | null, Uint8Array] {
+  let line = raw
+  let offset: number | null = null
+  const colon = line.indexOf(':')
+  if (colon !== -1) {
+    const head = line.slice(0, colon).trim()
+    if (!/^[0-9a-fA-F]+$/.test(head)) return [null, new Uint8Array(0)]
+    offset = Number.parseInt(head, 16)
+    line = line.slice(colon + 1)
   }
-  const text = DEC.decode(buf)
-  const hexParts: string[] = []
-  for (const rawLine of text.split('\n')) {
-    if (rawLine === '') continue
-    let line = rawLine
-    const colon = line.indexOf(':')
-    if (colon !== -1) line = line.slice(colon + 1)
-    const twoSpace = line.indexOf('  ')
-    if (twoSpace !== -1) line = line.slice(0, twoSpace)
-    hexParts.push(line.replace(/\s+/g, ''))
+  const twoSpace = line.search(/ {2,}/)
+  return [offset, unhex((twoSpace === -1 ? line : line.slice(0, twoSpace)).replace(/ /g, ''))]
+}
+
+/**
+ * Decode a hexdump into runs of bytes and the offsets they go to. A plain
+ * (-p) dump has no offsets, so its one run continues from the start; a
+ * character that is not a hex digit ends its line, and the digits pair
+ * across lines. Mirrors Python's _reverse_runs.
+ */
+async function* reverseRuns(
+  source: AsyncIterable<Uint8Array>,
+): AsyncIterable<[number | null, Uint8Array]> {
+  const text = DEC.decode(await materialize(source))
+  const lines = text.split('\n')
+  if (text.includes(':')) {
+    for (const line of lines) {
+      if (line !== '') yield reverseLine(line)
+    }
+    return
   }
-  const hex = hexParts.join('')
-  const out = new Uint8Array(Math.floor(hex.length / 2))
-  for (let i = 0; i < out.byteLength; i++) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-  yield out
+  const digits = lines.map((line) => /^[0-9A-Fa-f\s]*/.exec(line)?.[0] ?? '').join('')
+  yield [null, unhex(digits.replace(/\s+/g, ''))]
+}
+
+/**
+ * Revert a hexdump onto a stream, which can only move forward. An offset
+ * past the bytes written so far is reached with NUL bytes; one before them
+ * cannot be, so the stream stops there with xxd's refusal. Deliberate
+ * divergence: stdout is a stream here even when the line redirects it to a
+ * file, which xxd would seek. Mirrors Python's _xxd_reverse_stream.
+ */
+async function* xxdReverseStream(
+  source: AsyncIterable<Uint8Array>,
+  io: IOResult | null = null,
+): AsyncIterable<Uint8Array> {
+  let position = 0
+  for await (const [offset, data] of reverseRuns(source)) {
+    if (data.byteLength === 0) continue
+    if (offset !== null && offset < position) {
+      if (io !== null) {
+        io.exitCode = SEEK_BACK_EXIT
+        io.stderr = ENC.encode('xxd: Sorry, cannot seek backwards.\n')
+      }
+      return
+    }
+    while (offset !== null && position < offset) {
+      const gap = Math.min(offset - position, GAP_CHUNK)
+      yield new Uint8Array(gap)
+      position += gap
+    }
+    yield data
+    position += data.byteLength
+  }
+}
+
+/**
+ * Revert a hexdump into a file's bytes, as xxd writes into OUTFILE. Each
+ * run lands at its offset and the bytes around it stay, so the file grows
+ * only where a run reaches past its end, padded with NUL. Mirrors Python's
+ * _patched.
+ */
+async function patched(
+  source: AsyncIterable<Uint8Array>,
+  existing: Uint8Array,
+): Promise<Uint8Array> {
+  let buf = existing.slice()
+  let position = 0
+  for await (const [offset, data] of reverseRuns(source)) {
+    if (data.byteLength === 0) continue
+    if (offset !== null) position = offset
+    const end = position + data.byteLength
+    if (end > buf.byteLength) {
+      const grown = new Uint8Array(end)
+      grown.set(buf, 0)
+      buf = grown
+    }
+    buf.set(data, position)
+    position = end
+  }
+  return buf
 }
 
 async function* applyLimits(
@@ -150,11 +241,77 @@ async function* applyLimits(
 
 void padLeft
 
-// eslint-disable-next-line @typescript-eslint/require-await
+/**
+ * Write the dump (or with -r the bytes) to OUTFILE. Mirrors Python's
+ * _write_output.
+ */
+async function writeOutput(
+  paths: PathSpec[],
+  source: AsyncIterable<Uint8Array>,
+  cache: string[],
+  readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null,
+  writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null,
+  render: () => AsyncIterable<Uint8Array> | null,
+): Promise<CommandFnResult> {
+  const [input, target] = paths
+  if (input === undefined || target === undefined) return [null, new IOResult()]
+  const failed = (p: PathSpec, err: unknown, exitCode: number): CommandFnResult => [
+    null,
+    new IOResult({ stderr: ENC.encode(fsErrorLine('xxd', p, err)), exitCode }),
+  ]
+  const dump = render()
+  let existing: Uint8Array = new Uint8Array(0)
+  if (dump === null && readBytes !== null) {
+    try {
+      existing = await readBytes(target)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      if (!isEnoent(err)) return failed(target, err, OPEN_OUTPUT_EXIT)
+    }
+  }
+  let data: Uint8Array
+  try {
+    data = dump === null ? await patched(source, existing) : await materialize(dump)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return failed(input, err, readFailExitCode('xxd', err))
+  }
+  if (writeBytes === null) {
+    return [
+      null,
+      new IOResult({
+        stderr: ENC.encode('xxd: output is not writable on this backend\n'),
+        exitCode: OPEN_OUTPUT_EXIT,
+      }),
+    ]
+  }
+  try {
+    await writeBytes(target, data)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return failed(target, err, OPEN_OUTPUT_EXIT)
+  }
+  return [
+    null,
+    new IOResult({ writes: { [target.mountPath]: data }, cache: [...cache, target.mountPath] }),
+  ]
+}
+
+/**
+ * xxd over INFILE (or stdin) to OUTFILE (or stdout). A dump replaces
+ * OUTFILE; -r writes into it at the dump's offsets and keeps the bytes around
+ * them, as xxd does. Deliberate divergence: xxd opens OUTFILE before it
+ * reads, so an INFILE that is OUTFILE reads empty and a directory INFILE
+ * leaves an empty OUTFILE behind; this reads first and writes once. Mirrors
+ * Python's xxd.
+ */
+ 
 export async function xxdGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
+  writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null = null,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
   const fl = new FlagView(opts.flags, specOf('xxd'))
@@ -178,9 +335,17 @@ export async function xxdGeneric(
     source = applyLimits(source, skip, limit)
   }
   const uppercase = fl.asBool('u')
-  if (fl.asBool('r')) return [xxdReverseStream(source), new IOResult({ cache })]
-  if (fl.asBool('p')) return [xxdPlainStream(source, uppercase), new IOResult({ cache })]
   const cols = toInt(fl.raw('c')) > 0 ? toInt(fl.raw('c')) : 16
   const group = toInt(fl.raw('g')) > 0 ? toInt(fl.raw('g')) : 2
-  return [xxdDumpStream(source, cols, group, uppercase), new IOResult({ cache })]
+  const render = (): AsyncIterable<Uint8Array> | null => {
+    if (fl.asBool('r')) return null
+    if (fl.asBool('p')) return xxdPlainStream(source, uppercase)
+    return xxdDumpStream(source, cols, group, uppercase)
+  }
+  const target = paths[1]
+  if (target !== undefined && !isStdin(target)) {
+    return writeOutput(paths, source, cache, readBytes, writeBytes, render)
+  }
+  const io = new IOResult({ cache })
+  return [render() ?? xxdReverseStream(source, io), io]
 }
