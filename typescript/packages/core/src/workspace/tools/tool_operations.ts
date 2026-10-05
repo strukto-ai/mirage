@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Ops } from '../../ops/ops.ts'
+import { isEacces } from '../../utils/errors.ts'
 import { gnuDirname } from '../../utils/path.ts'
 import type { Session, SessionExecuteOptions } from '../workspace/handle.ts'
 import type { ExecuteResult } from '../workspace/types.ts'
@@ -75,7 +76,8 @@ async function ensureParents(vfs: Ops, path: string): Promise<void> {
 async function missing(vfs: Ops, path: string): Promise<boolean> {
   try {
     return !(await vfs.exists(path))
-  } catch {
+  } catch (err) {
+    if (!isEacces(err)) throw err
     return false
   }
 }
@@ -196,10 +198,17 @@ export class MirageToolOperations {
    */
   async write(path: string, content: string): Promise<ToolResult> {
     const versions = await this.versions()
+    let present: boolean
     try {
-      if ((await versions.vfs.exists(path)) && !versions.hasRead(path)) {
-        return errorResult(`Error: file '${path}' exists; read all of it before overwriting it`)
-      }
+      present = await versions.vfs.exists(path)
+    } catch (err) {
+      if (!isEacces(err)) throw err
+      return errorResult(`Error: ${errorMessage(err)}`)
+    }
+    if (present && !versions.hasRead(path)) {
+      return errorResult(`Error: file '${path}' exists; read all of it before overwriting it`)
+    }
+    try {
       await ensureParents(versions.vfs, path)
       await versions.write(path, content)
     } catch (err) {
@@ -288,7 +297,8 @@ export class MirageToolOperations {
    * `**` matches any number of directories, and a relative pattern is
    * matched under `path`. A symlink to a file counts; a dangling one does
    * not, nor does a match the workspace refuses to stat, since nothing
-   * says what it is.
+   * says what it is. Any other failure propagates rather than pass for a
+   * short list.
    */
   async glob(pattern: string, path = '/'): Promise<ToolResult> {
     const full =
@@ -297,13 +307,19 @@ export class MirageToolOperations {
         : path.endsWith('/')
           ? `${path}${pattern}`
           : `${path}/${pattern}`
-    const matches = await this.session.glob(full)
+    let matches: string[]
+    try {
+      matches = await this.session.glob(full)
+    } catch (err) {
+      if (!isEacces(err)) throw err
+      matches = []
+    }
     const files: string[] = []
     for (const match of matches) {
       try {
         if (await this.session.vfs.isFile(match)) files.push(match)
-      } catch {
-        continue
+      } catch (err) {
+        if (!isEacces(err)) throw err
       }
     }
     return textResult(files.map((match) => `${match}\n`).join(''))

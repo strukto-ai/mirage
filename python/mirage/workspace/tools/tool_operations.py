@@ -120,7 +120,7 @@ async def missing(vfs: Ops, path: str) -> bool:
     """
     try:
         return not await vfs.exists(path)
-    except OSError as exc:
+    except PermissionError as exc:
         logger.debug("exists probe refused for %s: %s", path, exc)
         return False
 
@@ -214,12 +214,16 @@ class MirageToolOperations:
         """
         versions = await self._versions()
         try:
-            if await versions.vfs.exists(path) and not versions.has_read(path):
-                return ToolResult(
-                    f"Error: file '{path}' exists; read all of it before "
-                    "overwriting it",
-                    True,
-                )
+            present = await versions.vfs.exists(path)
+        except PermissionError as exc:
+            return ToolResult(f"Error: {exc}", True)
+        if present and not versions.has_read(path):
+            return ToolResult(
+                f"Error: file '{path}' exists; read all of it before "
+                "overwriting it",
+                True,
+            )
+        try:
             await ensure_parents(versions.vfs, path)
             await versions.write(path, content)
         except (StaleMirageFileError, OSError, ValueError) as exc:
@@ -345,7 +349,8 @@ class MirageToolOperations:
         resolver: ``**`` matches any number of directories, and a
         relative pattern is matched under ``path``. A symlink to a file
         counts; a dangling one does not, nor does a match the workspace
-        refuses to stat, since nothing says what it is.
+        refuses to stat, since nothing says what it is. Any other failure
+        propagates rather than pass for a short list.
 
         Args:
             pattern (str): A pathname pattern such as ``**/*.py``.
@@ -354,13 +359,17 @@ class MirageToolOperations:
         Returns:
             ToolResult: One path per line, sorted.
         """
-        matches = await self._session.glob(posixpath.join(path, pattern))
+        try:
+            matches = await self._session.glob(posixpath.join(path, pattern))
+        except PermissionError as exc:
+            logger.debug("glob refused for %s: %s", pattern, exc)
+            matches = []
         files: list[str] = []
         for match in matches:
             try:
                 if await self._session.vfs.is_file(match):
                     files.append(match)
-            except OSError as exc:
+            except PermissionError as exc:
                 logger.debug("glob match refused for %s: %s", match, exc)
         return ToolResult("".join(f"{match}\n" for match in files))
 

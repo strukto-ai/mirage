@@ -362,12 +362,14 @@ async def test_a_file_refused_down_to_its_stat_is_a_tool_error():
             {"path": "/d/locked.txt", "old_string": "l", "new_string": "m"},
         )
         globbed = await ws.tools.call("glob", {"pattern": "/d/*.txt"})
+        literal = await ws.tools.call("glob", {"pattern": "/d/locked.txt"})
     finally:
         await ws.close()
     assert read.is_error and "not found" not in read.text
     assert edited.is_error and "not found" not in edited.text
     assert written.is_error and written.text.startswith("Error: ")
     assert globbed.text == "/d/open.txt\n"
+    assert literal.text == "" and not literal.is_error
 
 
 @pytest.mark.asyncio

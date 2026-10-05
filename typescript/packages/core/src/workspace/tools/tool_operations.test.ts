@@ -260,6 +260,7 @@ describe('a session', () => {
       new_string: 'm',
     })
     const globbed = await ops.call('glob', { pattern: '/d/*.txt' })
+    const literal = await ops.call('glob', { pattern: '/d/locked.txt' })
     for (const result of [read, edited]) {
       expect(result.isError).toBe(true)
       expect(textOf(result)).not.toContain('not found')
@@ -267,6 +268,8 @@ describe('a session', () => {
     expect(written.isError).toBe(true)
     expect(textOf(written)).toMatch(/^Error: /)
     expect(textOf(globbed)).toBe('/d/open.txt\n')
+    expect(textOf(literal)).toBe('')
+    expect(literal.isError).not.toBe(true)
   })
 
   it('keeps a session already bound rather than widening it', async () => {
