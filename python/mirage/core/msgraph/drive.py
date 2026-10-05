@@ -302,15 +302,18 @@ async def create_child_folder(
     name: str,
     target: FolderTarget,
     session: SessionArg = None,
+    exist_ok: bool = True,
 ) -> None:
     """Create one folder, naming a refusal the way mkdir(2) does.
 
-    mkdir is idempotent on object-store-style backends (matches the s3
-    core) and "replace" is unreliable for folders on real Graph, so the
-    create uses "fail" and a folder already holding the name is success;
-    a file holding it is EEXIST. Graph answers a create under a missing
-    parent and under a file alike with 404, so the parent is looked up
-    to tell ENOENT from ENOTDIR. Both lookups run on a refusal only.
+    "replace" is unreliable for folders on real Graph, so the create
+    uses "fail" and reads its 409: a folder already holding the name is
+    success when ``exist_ok`` (a level ``mkdir -p`` passes through) and
+    EEXIST otherwise, so a folder another client made after the doors
+    looked is still refused; a file holding it is EEXIST. Graph answers
+    a create under a missing parent and under a file alike with 404, so
+    the parent is looked up to tell ENOENT from ENOTDIR. Both lookups
+    run on a refusal only.
 
     Args:
         config (MsGraphConfig): Graph config.
@@ -318,6 +321,7 @@ async def create_child_folder(
         name (str): the folder's name.
         target (FolderTarget): the folder, its parent and its name.
         session (SessionArg): pool or live session to ride.
+        exist_ok (bool): a folder already holding the name is success.
     """
     body = {
         "name": name,
@@ -329,7 +333,7 @@ async def create_child_folder(
     except GraphError as exc:
         if exc.status == 409 or exc.code == "nameAlreadyExists":
             taken = await _url_item(config, target.item, session)
-            if taken is None or "folder" in taken:
+            if exist_ok and (taken is None or "folder" in taken):
                 return
             raise eexist(target.virtual) from exc
         if exc.status != 404:

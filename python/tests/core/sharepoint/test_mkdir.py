@@ -45,7 +45,7 @@ async def test_mkdir_posts_folder_with_fail_behavior():
 
 
 @pytest.mark.asyncio
-async def test_mkdir_tolerates_an_existing_folder():
+async def test_mkdir_parents_tolerates_an_existing_folder():
     with aioresponses() as m:
         m.post(
             _DRIVE + "/root/children",
@@ -53,8 +53,22 @@ async def test_mkdir_tolerates_an_existing_folder():
             payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
         )
         m.get(_DRIVE + "/root:/new", payload={"id": "1", "folder": {}})
-        await mkdir(_accessor(), _spec("new"))
+        await mkdir(_accessor(), _spec("new"), parents=True)
         assert len(m.requests[("POST", URL(_DRIVE + "/root/children"))]) == 1
+
+
+@pytest.mark.asyncio
+async def test_mkdir_refuses_a_folder_made_after_the_lookup():
+    """A folder another client made after the doors looked still 409s."""
+    with aioresponses() as m:
+        m.post(
+            _DRIVE + "/root/children",
+            status=409,
+            payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
+        )
+        m.get(_DRIVE + "/root:/new", payload={"id": "1", "folder": {}})
+        with pytest.raises(FileExistsError):
+            await mkdir(_accessor(), _spec("new"))
 
 
 @pytest.mark.asyncio

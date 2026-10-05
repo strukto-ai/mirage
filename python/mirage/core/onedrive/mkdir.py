@@ -57,7 +57,11 @@ async def _create_root(accessor: OneDriveAccessor, root: str) -> None:
 
 
 async def _create_dir(
-    accessor: OneDriveAccessor, path: str, virtual: str, root: str
+    accessor: OneDriveAccessor,
+    path: str,
+    virtual: str,
+    root: str,
+    exist_ok: bool,
 ) -> None:
     config = accessor.config
     parent = posixpath.dirname(path)
@@ -73,6 +77,7 @@ async def _create_dir(
                 virtual=virtual,
             ),
             session=accessor.pool,
+            exist_ok=exist_ok,
         )
 
     try:
@@ -97,7 +102,9 @@ async def mkdir(
             level = "/".join(parts[: i + 1])
             virtual = f"{prefix}/{level}"
             try:
-                await _create_dir(accessor, level, virtual, prefix or "/")
+                await _create_dir(
+                    accessor, level, virtual, prefix or "/", exist_ok=True
+                )
             except FileExistsError as exc:
                 # `mkdir -p` passes only a directory at the operand and
                 # names the file it stops at above it, as GNU does.
@@ -105,7 +112,9 @@ async def mkdir(
                     raise
                 raise enotdir(virtual) from exc
     else:
-        await _create_dir(accessor, key, path.virtual, path.virtual)
+        await _create_dir(
+            accessor, key, path.virtual, path.virtual, exist_ok=False
+        )
     await invalidate_after_write(path)
     if parents:
         await invalidate_ancestors(path)

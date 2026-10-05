@@ -277,18 +277,21 @@ export interface FolderTarget {
 /**
  * Create one folder, naming a refusal the way mkdir(2) does.
  *
- * mkdir is idempotent on object-store-style backends (matches the s3 core)
- * and "replace" is unreliable for folders on real Graph, so the create uses
- * "fail" and a folder already holding the name is success; a file holding it
- * is EEXIST. Graph answers a create under a missing parent and under a file
- * alike with 404, so the parent is looked up to tell ENOENT from ENOTDIR.
- * Both lookups run on a refusal only. Mirrors Python's `create_child_folder`.
+ * "replace" is unreliable for folders on real Graph, so the create uses
+ * "fail" and reads its 409: a folder already holding the name is success when
+ * `existOk` (a level `mkdir -p` passes through) and EEXIST otherwise, so a
+ * folder another client made after the doors looked is still refused; a file
+ * holding it is EEXIST. Graph answers a create under a missing parent and
+ * under a file alike with 404, so the parent is looked up to tell ENOENT from
+ * ENOTDIR. Both lookups run on a refusal only. Mirrors Python's
+ * `create_child_folder`.
  */
 export async function createChildFolder(
   config: MsGraphConfigResolved,
   parentUrl: string,
   name: string,
   target: FolderTarget,
+  existOk = true,
 ): Promise<void> {
   try {
     await graphPost(config, parentUrl, {
@@ -300,7 +303,7 @@ export async function createChildFolder(
     if (!(error instanceof GraphError)) throw error
     if (error.status === 409 || error.code === 'nameAlreadyExists') {
       const taken = await urlItem(config, target.item)
-      if (taken === null || 'folder' in taken) return
+      if (existOk && (taken === null || 'folder' in taken)) return
       throw eexist(target.virtual)
     }
     if (error.status !== 404) throw error
