@@ -14,7 +14,7 @@
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
-from mirage.core.gdrive.write import write_bytes
+from mirage.core.gdrive.write import write
 from mirage.core.google.drive import download_file
 from mirage.types import PathSpec
 from mirage.utils.errors import eisdir, enotsup
@@ -40,4 +40,4 @@ async def truncate(
         new = data[:length]
     else:
         new = data + b"\x00" * (length - len(data))
-    await write_bytes(accessor, path, new)
+    await write(accessor, path, new)

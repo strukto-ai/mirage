@@ -20,10 +20,10 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
 import { backendPath } from './path.ts'
-import { readBytes } from './read.ts'
+import { read } from './read.ts'
 import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 import { eisdir } from '../../utils/errors.ts'
 
 async function uploadBytes(
@@ -102,6 +102,6 @@ export async function copy(
     // Copying a file onto itself would re-upload it; skip.
     return
   }
-  const data = await readBytes(accessor, s, index)
-  await writeBytes(accessor, d, data, index)
+  const data = await read(accessor, s, index)
+  await write(accessor, d, data, index)
 }

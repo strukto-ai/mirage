@@ -21,10 +21,26 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { isStdin, resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
+
+interface Base64Flags {
+  readonly decode: boolean
+  readonly wrap: number | null
+  readonly ignoreGarbage: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): Base64Flags {
+  const fl = new FlagView(bag, specOf('base64'))
+  const wrapValue = fl.asStr('wrap')
+  return {
+    decode: fl.asBool('D') || fl.asBool('decode'),
+    wrap: typeof wrapValue === 'string' ? Number.parseInt(wrapValue, 10) : null,
+    ignoreGarbage: fl.asBool('ignore_garbage'),
+  }
+}
 
 async function* base64EncodeStream(
   source: AsyncIterable<Uint8Array>,
@@ -66,16 +82,12 @@ export async function base64Generic(
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
-  const fl = new FlagView(opts.flags, specOf('base64'))
   if (paths.length > 1) throw extraOperandError(CommandName.BASE64, paths[1]?.rawPath ?? '')
   if (paths.length === 1) {
     const [, err] = await splitReadable(paths, stdinStat(stat), 'base64')
     if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: encodeText(err) })]
   }
-  const decode = fl.asBool('D') || fl.asBool('decode')
-  const wrapValue = fl.asStr('wrap')
-  const wrap = typeof wrapValue === 'string' ? Number.parseInt(wrapValue, 10) : null
-  const ignoreGarbage = fl.asBool('ignore_garbage')
+  const parsed = parseFlags(opts.flags)
   const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {
@@ -86,6 +98,8 @@ export async function base64Generic(
   } else {
     source = resolveSource(opts.stdin)
   }
-  const out = decode ? base64DecodeStream(source, ignoreGarbage) : base64EncodeStream(source, wrap)
+  const out = parsed.decode
+    ? base64DecodeStream(source, parsed.ignoreGarbage)
+    : base64EncodeStream(source, parsed.wrap)
   return [out, new IOResult({ cache })]
 }

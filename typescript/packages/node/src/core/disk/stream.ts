@@ -21,7 +21,10 @@ import { enoent } from '@struktoai/mirage-core/utils/errors'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
-export async function* stream(accessor: DiskAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
+export async function* readStream(
+  accessor: DiskAccessor,
+  path: PathSpec,
+): AsyncIterable<Uint8Array> {
   const full = await resolveInside(accessor.root, path)
   const rec = recordStream('read', path.virtual, VFSName.DISK)
   const rs = createReadStream(full, { highWaterMark: 65536 })

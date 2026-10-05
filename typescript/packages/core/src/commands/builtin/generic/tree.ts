@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
@@ -26,6 +27,28 @@ import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
+
+interface TreeFlags {
+  readonly maxDepth: number | null
+  readonly showHidden: boolean
+  readonly ignorePattern: string | null
+  readonly dirsOnly: boolean
+  readonly matchPattern: string | null
+  readonly oneFileSystem: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): TreeFlags {
+  const fl = new FlagView(bag, specOf('tree'))
+  const depthRaw = fl.asStr('L') ?? null
+  return {
+    maxDepth: depthRaw === null ? null : Number.parseInt(depthRaw, 10),
+    showHidden: fl.asBool('a'),
+    ignorePattern: fl.asStr('args_I') ?? null,
+    dirsOnly: fl.asBool('d'),
+    matchPattern: fl.asStr('P') ?? null,
+    oneFileSystem: fl.asBool('x'),
+  }
+}
 
 interface TreeOpts {
   showHidden: boolean
@@ -194,7 +217,7 @@ export async function treeGeneric(
   readdir: (p: PathSpec) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('tree'))
+  const parsed = parseFlags(opts.flags)
   const targets =
     paths.length > 0
       ? paths
@@ -206,22 +229,19 @@ export async function treeGeneric(
             vfsPath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
           }),
         ]
-  const depthRaw = fl.asStr('L') ?? null
-  const ignoreRaw = fl.asStr('args_I') ?? null
-  const matchRaw = fl.asStr('P') ?? null
   const readdirPath = opts.readdirPath
   const statPath = opts.statPath
   const treeOpts: TreeOpts = {
-    showHidden: fl.asBool('a'),
-    maxDepth: depthRaw === null ? null : Number.parseInt(depthRaw, 10),
-    ignorePattern: ignoreRaw,
-    dirsOnly: fl.asBool('d'),
-    matchPattern: matchRaw,
+    showHidden: parsed.showHidden,
+    maxDepth: parsed.maxDepth,
+    ignorePattern: parsed.ignorePattern,
+    dirsOnly: parsed.dirsOnly,
+    matchPattern: parsed.matchPattern,
     mounts: opts.ns?.mounts ?? null,
     crossReaddir:
       readdirPath === undefined
         ? null
-        : fl.asBool('x')
+        : parsed.oneFileSystem
           ? notCrossed
           : (p: PathSpec) => readdirPath(p.virtual),
     crossStat:

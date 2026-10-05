@@ -32,7 +32,7 @@ const SPEC = new CommandSpec({
   ],
 })
 
-async function trelloCardLabelRemoveCommand(
+async function trelloCardLabelRemove(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
@@ -55,6 +55,6 @@ export const TRELLO_CARD_LABEL_REMOVE = command({
   name: 'trello card unlabel',
   vfs: VFSName.TRELLO,
   spec: SPEC,
-  fn: trelloCardLabelRemoveCommand,
+  fn: trelloCardLabelRemove,
   write: true,
 })

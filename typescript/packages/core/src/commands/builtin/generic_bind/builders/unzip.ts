@@ -15,47 +15,50 @@
 import type { PathSpec } from '../../../../types.ts'
 import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
 import { unzipGeneric } from '../../generic/unzip.ts'
-import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 
-export const BUILDER: Builder = {
-  name: 'unzip',
-  write: true,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
-    const write = requireOp(ops.write, 'write')
-    const mkdir = requireOp(ops.mkdir, 'mkdir')
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    const dispatch = opts.dispatch
-    if (dispatch !== undefined) {
-      // Extraction writes wherever cwd or -d says, which need not be
-      // this mount, so the doors are dispatch-relayed and each path
-      // routes to the mount that owns it.
-      const readBytes = readBytesOp(dispatch)
-      async function* streamOf(p: PathSpec): AsyncIterable<Uint8Array> {
-        yield await readBytes(p)
-      }
-      return unzipGeneric(
-        resolved,
-        texts,
-        opts,
-        streamOf,
-        async (p, data) => {
-          await dispatch('write', p, [data])
-        },
-        async (p) => {
-          await dispatch('mkdir', p)
-        },
-        statOp(dispatch),
-        true,
-      )
+const unzip: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+  const idx = opts.index ?? undefined
+  const write = requireOp(ops.write, 'write')
+  const mkdir = requireOp(ops.mkdir, 'mkdir')
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  const dispatch = opts.dispatch
+  if (dispatch !== undefined) {
+    // Extraction writes wherever cwd or -d says, which need not be
+    // this mount, so the doors are dispatch-relayed and each path
+    // routes to the mount that owns it.
+    const readBytes = readBytesOp(dispatch)
+    async function* streamOf(p: PathSpec): AsyncIterable<Uint8Array> {
+      yield await readBytes(p)
     }
     return unzipGeneric(
       resolved,
       texts,
       opts,
-      (p) => ops.readStream(accessor, p, idx),
-      (p, d) => write(accessor, p, d),
-      (p, parents) => mkdir(accessor, p, parents),
+      streamOf,
+      async (p, data) => {
+        await dispatch('write', p, [data])
+      },
+      async (p) => {
+        await dispatch('mkdir', p)
+      },
+      statOp(dispatch),
+      true,
     )
-  },
+  }
+  return unzipGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => ops.readStream(accessor, p, idx),
+    (p, d) => write(accessor, p, d),
+    (p, parents) => mkdir(accessor, p, parents),
+    (p) => ops.stat(accessor, p, idx),
+  )
+}
+
+export const BUILDER: Builder = {
+  name: 'unzip',
+  write: true,
+  fn: unzip,
 }

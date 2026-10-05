@@ -26,7 +26,7 @@ import { rename } from '../../../core/onedrive/rename.ts'
 import { rmR } from '../../../core/onedrive/rm.ts'
 import { rmdir } from '../../../core/onedrive/rmdir.ts'
 import { stat } from '../../../core/onedrive/stat.ts'
-import { stream } from '../../../core/onedrive/stream.ts'
+import { readStream } from '../../../core/onedrive/stream.ts'
 import { truncate } from '../../../core/onedrive/truncate.ts'
 import { unlink } from '../../../core/onedrive/unlink.ts'
 import { write } from '../../../core/onedrive/write.ts'
@@ -36,7 +36,7 @@ export const IO: CommandIO<OneDriveAccessor> = new VFSAdapter<OneDriveAccessor>(
   read: { readdir, readBytes: read, stat },
   native: {
     readRange: rangeOf(read),
-    readStream: stream,
+    readStream,
     exists,
     find,
     du: makeWalkedDu(stat, readdir),

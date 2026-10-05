@@ -9,7 +9,7 @@ from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
-async def write_bytes(
+async def write(
     accessor: NextcloudAccessor,
     path: PathSpec,
     data: bytes,

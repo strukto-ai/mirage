@@ -19,12 +19,13 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ram.dest import lookup_error
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.path import norm
 
 
-async def stream(
-    accessor: RAMAccessor, path_spec: PathSpec
+async def read_stream(
+    accessor: RAMAccessor,
+    path_spec: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
     virtual = path_spec.virtual
     path = norm(path_spec.vfs_path)
@@ -37,13 +38,3 @@ async def stream(
     if rec is not None:
         rec.bytes = len(data)
     yield data
-
-
-async def read_stream(
-    accessor: RAMAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> AsyncIterator[bytes]:
-    try:
-        async for chunk in stream(accessor, path):
-            yield chunk
-    except FileNotFoundError as exc:
-        raise enoent(path.virtual) from exc

@@ -17,7 +17,7 @@ import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
 import { readdir } from '../../core/opfs/readdir.ts'
-import { writeBytes } from '../../core/opfs/write.ts'
+import { write } from '../../core/opfs/write.ts'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 
 const resolveGlob = makeResolveGlob(readdir, SCOPE_ERROR)
@@ -25,9 +25,9 @@ const resolveGlob = makeResolveGlob(readdir, SCOPE_ERROR)
 describe('vfs/opfs resolveGlob binding', () => {
   it('expands a glob into matching paths', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/a.json'), new Uint8Array())
-    await writeBytes(accessor, spec('/b.json'), new Uint8Array())
-    await writeBytes(accessor, spec('/c.txt'), new Uint8Array())
+    await write(accessor, spec('/a.json'), new Uint8Array())
+    await write(accessor, spec('/b.json'), new Uint8Array())
+    await write(accessor, spec('/c.txt'), new Uint8Array())
     const pattern = new PathSpec({
       vfsPath: '*.json',
       virtual: '/*.json',

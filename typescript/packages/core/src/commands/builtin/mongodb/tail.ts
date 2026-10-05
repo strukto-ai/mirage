@@ -83,7 +83,7 @@ async function* tailSource(
   yield* streamAny(accessor, p, index)
 }
 
-async function tailCommand(
+async function tail(
   accessor: MongoDBAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -132,5 +132,5 @@ export const MONGODB_TAIL = command({
   name: 'tail',
   vfs: VFSName.MONGODB,
   spec: specOf('tail'),
-  fn: tailCommand,
+  fn: tail,
 })

@@ -17,18 +17,18 @@ import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
 import { truncate } from './truncate.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/truncate', () => {
   it('shrinks a file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/x'), new TextEncoder().encode('hello world'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('hello world'))
     await truncate(accessor, spec('/x'), 5)
     expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('hello')
   })
   it('zero-fills when growing', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/x'), new TextEncoder().encode('ab'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('ab'))
     await truncate(accessor, spec('/x'), 4)
     const out = await read(accessor, spec('/x'))
     expect(out.byteLength).toBe(4)

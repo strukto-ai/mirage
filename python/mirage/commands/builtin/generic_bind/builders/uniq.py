@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.uniq import uniq as generic_uniq
+from mirage.commands.builtin.generic.uniq import uniq_generic as generic_uniq
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,

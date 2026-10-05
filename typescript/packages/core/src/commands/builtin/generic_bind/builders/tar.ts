@@ -17,59 +17,61 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
 import { tarGeneric } from '../../generic/tar/tar.ts'
-import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 import { isDirOf, relayIsDirOf, walkOf } from '../archive_io.ts'
+
+const tar: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+  const idx = opts.index ?? undefined
+  const write = requireOp(ops.write, 'write')
+  const mkdir = requireOp(ops.mkdir, 'mkdir')
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  const stat = async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
+  const dispatch = opts.dispatch
+  const fl = new FlagView(opts.flags, specOf('tar'))
+  if (dispatch !== undefined && !fl.asBool('create')) {
+    // -t reads and -x writes wherever cwd or -C says, which need not
+    // be this mount, so both run on dispatch-relayed doors and each
+    // path routes to the mount that owns it. Only -c stays on the
+    // accessor: its planner walks this mount's tree.
+    const readBytes = readBytesOp(dispatch)
+    async function* streamOf(p: PathSpec): AsyncIterable<Uint8Array> {
+      yield await readBytes(p)
+    }
+    return tarGeneric(
+      resolved,
+      texts,
+      opts,
+      {
+        stream: streamOf,
+        write: async (p, data) => {
+          await dispatch('write', p, [data])
+        },
+        mkdir: async (p) => {
+          await dispatch('mkdir', p)
+        },
+        stat: statOp(dispatch),
+        walk: walkOf(ops, accessor, idx),
+        isDir: relayIsDirOf(dispatch),
+      },
+      true,
+    )
+  }
+  return tarGeneric(resolved, texts, opts, {
+    stream: (p) => ops.readStream(accessor, p, idx),
+    // Archive output follows links even when the member scan preserves them.
+    write: async (p, data) => {
+      if (dispatch !== undefined) await dispatch('write', p, [data])
+      else await write(accessor, p, data)
+    },
+    mkdir: (p, parents) => mkdir(accessor, p, parents),
+    stat,
+    walk: walkOf(ops, accessor, idx),
+    isDir: isDirOf(ops, accessor, idx),
+  })
+}
 
 export const BUILDER: Builder = {
   name: 'tar',
   write: true,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
-    const write = requireOp(ops.write, 'write')
-    const mkdir = requireOp(ops.mkdir, 'mkdir')
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    const stat = async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
-    const dispatch = opts.dispatch
-    const fl = new FlagView(opts.flags, specOf('tar'))
-    if (dispatch !== undefined && !fl.asBool('create')) {
-      // -t reads and -x writes wherever cwd or -C says, which need not
-      // be this mount, so both run on dispatch-relayed doors and each
-      // path routes to the mount that owns it. Only -c stays on the
-      // accessor: its planner walks this mount's tree.
-      const readBytes = readBytesOp(dispatch)
-      async function* streamOf(p: PathSpec): AsyncIterable<Uint8Array> {
-        yield await readBytes(p)
-      }
-      return tarGeneric(
-        resolved,
-        texts,
-        opts,
-        {
-          stream: streamOf,
-          write: async (p, data) => {
-            await dispatch('write', p, [data])
-          },
-          mkdir: async (p) => {
-            await dispatch('mkdir', p)
-          },
-          stat: statOp(dispatch),
-          walk: walkOf(ops, accessor, idx),
-          isDir: relayIsDirOf(dispatch),
-        },
-        true,
-      )
-    }
-    return tarGeneric(resolved, texts, opts, {
-      stream: (p) => ops.readStream(accessor, p, idx),
-      // Archive output follows links even when the member scan preserves them.
-      write: async (p, data) => {
-        if (dispatch !== undefined) await dispatch('write', p, [data])
-        else await write(accessor, p, data)
-      },
-      mkdir: (p, parents) => mkdir(accessor, p, parents),
-      stat,
-      walk: walkOf(ops, accessor, idx),
-      isDir: isDirOf(ops, accessor, idx),
-    })
-  },
+  fn: tar,
 }

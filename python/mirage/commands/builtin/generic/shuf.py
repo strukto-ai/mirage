@@ -417,7 +417,7 @@ def _range_lines(
     return out
 
 
-async def shuf(
+async def shuf_generic(
     paths: list[PathSpec],
     texts: list[str],
     *,
@@ -495,5 +495,5 @@ __all__ = [
     "parse_flags",
     "parse_input_range",
     "range_error",
-    "shuf",
+    "shuf_generic",
 ]

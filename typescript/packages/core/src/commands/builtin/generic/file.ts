@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { operandStat } from '../utils/operands.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { DEVICE_NUMBERS_KEY, FileType, type FileStat, type PathSpec } from '../../../types.ts'
@@ -47,6 +48,16 @@ async function linkDescription(path: PathSpec, links: LinkView): Promise<string 
   return `symbolic link to ${target}`
 }
 
+interface FileFlags {
+  readonly brief: boolean
+  readonly mime: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): FileFlags {
+  const fl = new FlagView(bag, specOf('file'))
+  return { brief: fl.asBool('b'), mime: fl.asBool('i') }
+}
+
 export async function fileGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -56,9 +67,7 @@ export async function fileGeneric(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('file: missing operand\n') })]
   }
-  const fl = new FlagView(opts.flags, specOf('file'))
-  const brief = fl.asBool('b')
-  const mime = fl.asBool('i')
+  const { brief, mime } = parseFlags(opts.flags)
   // GNU always names the operand exactly as typed, never a resolved or
   // absolutised form, so every row is labelled with rawPath.
   const lines: string[] = []

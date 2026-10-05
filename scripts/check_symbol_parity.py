@@ -56,6 +56,15 @@ TS_DESTRUCTURE = re.compile(
 )
 
 
+# A TypeScript command module registers its handler as a const built by
+# command(); Python's @command decorates the handler itself, so the
+# registration has no name of its own there. The two are matched by the
+# command each registers, so a registration one side lacks still counts.
+TS_REGISTRATION = re.compile(
+    r"^export\s+const\s+([A-Z][A-Z0-9_]*)\b[^=\n]*=\s*command\b", re.M
+)
+TS_REGISTERED_NAME = re.compile(r"\bname:\s*(['\"])(.+?)\1")
+
 ALL_CAPS = re.compile(r"[A-Z0-9_]+")
 
 
@@ -83,9 +92,10 @@ def fold(name: str) -> str:
 def python_names(path: Path) -> dict[str, str]:
     """Top-level names a python module defines, keyed by folded name.
 
-    Functions, classes and capitalized assignments, unpacked ones
-    included (constants and type aliases); a TypeVar is skipped because
-    typescript declares generics inline.
+    Functions, classes and assignments, unpacked ones included, as
+    typescript counts every top-level const. A TypeVar is skipped because
+    typescript declares generics inline, a module logger because
+    typescript has none, and a dunder because it is python's own.
 
     Args:
         path (Path): the module.
@@ -98,10 +108,12 @@ def python_names(path: Path) -> dict[str, str]:
             names[fold(node.name)] = node.name
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
-            if (
-                isinstance(value, ast.Call)
-                and isinstance(value.func, ast.Name)
-                and value.func.id in TYPE_VARS
+            if isinstance(value, ast.Call) and (
+                (
+                    isinstance(value.func, ast.Name)
+                    and value.func.id in TYPE_VARS
+                )
+                or ast.unparse(value.func) == "logging.getLogger"
             ):
                 continue
             targets = (
@@ -113,9 +125,8 @@ def python_names(path: Path) -> dict[str, str]:
                 else:
                     leaves = [target]
                 for leaf in leaves:
-                    if (
-                        isinstance(leaf, ast.Name)
-                        and leaf.id.lstrip("_")[:1].isupper()
+                    if isinstance(leaf, ast.Name) and not (
+                        leaf.id.startswith("__") and leaf.id.endswith("__")
                     ):
                         names[fold(leaf.id)] = leaf.id
     return names
@@ -147,6 +158,68 @@ def typescript_names(paths: list[Path]) -> dict[str, str]:
         for name in sorted(found - TS_CODECS):
             names[fold(name)] = name
     return names
+
+
+def _registered(call: ast.expr) -> str | None:
+    """The command a ``command("name", ...)`` call registers, if it is one.
+
+    Args:
+        call (ast.expr): a decorator, or the callee of an assignment.
+    """
+    if (
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "command"
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+        and isinstance(call.args[0].value, str)
+    ):
+        return call.args[0].value
+    return None
+
+
+def python_registrations(path: Path) -> dict[str, str | None]:
+    """The commands a python module registers, and the name holding each.
+
+    A decorated handler keeps its own name, which is compared like any
+    other (None here); ``x = command("x", ...)(handler)`` binds the
+    registration itself, as a TypeScript ``command()`` const does.
+
+    Args:
+        path (Path): the module.
+    """
+    found: dict[str, str | None] = {}
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for deco in node.decorator_list:
+                command = _registered(deco)
+                if command is not None:
+                    found[command] = None
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Call)
+        ):
+            command = _registered(node.value.func)
+            if command is not None:
+                found[command] = node.targets[0].id
+    return found
+
+
+def typescript_registrations(paths: list[Path]) -> dict[str, str | None]:
+    """Each ``command()`` const of a module's twins and the command it names.
+
+    Args:
+        paths (list[Path]): the core, node and browser files for one module.
+    """
+    found: dict[str, str | None] = {}
+    for path in paths:
+        text = path.read_text()
+        for match in TS_REGISTRATION.finditer(text):
+            named = TS_REGISTERED_NAME.search(text, match.end())
+            found[match.group(1)] = named.group(2) if named else None
+    return found
 
 
 def modules() -> dict[str, tuple[Path, list[Path]]]:
@@ -189,6 +262,13 @@ def divergences() -> dict[str, dict[str, list[str]]]:
     found: dict[str, dict[str, list[str]]] = {}
     for module, (py_path, ts_paths) in modules().items():
         py, ts = python_names(py_path), typescript_names(ts_paths)
+        registered = python_registrations(py_path)
+        for const, command in typescript_registrations(ts_paths).items():
+            if command in registered:
+                ts.pop(fold(const), None)
+                holder = registered[command]
+                if holder is not None:
+                    py.pop(fold(holder), None)
         sides = {
             "python_only": sorted(py[k] for k in py.keys() - ts.keys()),
             "typescript_only": sorted(ts[k] for k in ts.keys() - py.keys()),

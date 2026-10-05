@@ -118,7 +118,7 @@ async def _tr_stream(
         yield from_byte_view(result)
 
 
-async def tr(
+async def tr_generic(
     paths: list[PathSpec],
     texts: list[str],
     *,
@@ -181,4 +181,4 @@ async def tr(
     ), IOResult(cache=cache)
 
 
-__all__ = ["tr"]
+__all__ = ["tr_generic"]

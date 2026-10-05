@@ -26,7 +26,7 @@ import {
 } from '../../generic/du.ts'
 import { type DuEntries } from '../../../../vfs/types.ts'
 import type { MountView } from '../../../../ops/types.ts'
-import { type Builder, type CommandIO, resolveGlobOf } from '../adapter.ts'
+import { type Builder, type CommandIO, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /**
@@ -188,36 +188,38 @@ export async function walkEntries<A extends Accessor>(
   return [entries, total]
 }
 
+const du: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  // A native du sums the raw tree; under a path rule the walk is what
+  // reports a directory the rule refuses to open, where GNU does.
+  const native = pathRulesActive() ? undefined : ops.du
+  const budget = new WalkBudget(
+    ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
+    opts.ns?.mounts,
+  )
+  const computeSize: ComputeSize =
+    native === undefined
+      ? (p) => walkSize(ops, accessor, idx, budget, p)
+      : (p) => native.size(accessor, p, idx)
+  const computeEntries: ComputeEntries =
+    native === undefined
+      ? (p) => walkEntries(ops, accessor, idx, budget, p)
+      : (p) => native.entries(accessor, p, idx)
+
+  return duGeneric(
+    paths,
+    opts,
+    (targets) => resolveGlobOf(ops)(accessor, targets, idx),
+    (p) => ops.stat(accessor, p, idx),
+    computeSize,
+    computeEntries,
+    () => budget.hit,
+    () => budget.unreadable,
+    () => budget.directories,
+  )
+}
+
 export const BUILDER: Builder = {
   name: 'du',
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    // A native du sums the raw tree; under a path rule the walk is what
-    // reports a directory the rule refuses to open, where GNU does.
-    const native = pathRulesActive() ? undefined : ops.du
-    const budget = new WalkBudget(
-      ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
-      opts.ns?.mounts,
-    )
-    const computeSize: ComputeSize =
-      native === undefined
-        ? (p) => walkSize(ops, accessor, idx, budget, p)
-        : (p) => native.size(accessor, p, idx)
-    const computeEntries: ComputeEntries =
-      native === undefined
-        ? (p) => walkEntries(ops, accessor, idx, budget, p)
-        : (p) => native.entries(accessor, p, idx)
-
-    return duGeneric(
-      paths,
-      opts,
-      (targets) => resolveGlobOf(ops)(accessor, targets, idx),
-      (p) => ops.stat(accessor, p, idx),
-      computeSize,
-      computeEntries,
-      () => budget.hit,
-      () => budget.unreadable,
-      () => budget.directories,
-    )
-  },
+  fn: du,
 }

@@ -395,7 +395,7 @@ async def test_stdin_outputs_are_named_in_the_working_directory(
     async def write_bytes(path: PathSpec, data: bytes) -> None:
         specs.append(path)
 
-    _, io = await split_generic.split(
+    _, io = await split_generic.split_generic(
         [],
         read_stream=_no_read_stream,
         write_bytes=write_bytes,

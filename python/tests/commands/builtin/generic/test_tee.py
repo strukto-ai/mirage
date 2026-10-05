@@ -2,7 +2,11 @@ import errno
 
 import pytest
 
-from mirage.commands.builtin.generic.tee import TeeFlags, parse_flags, tee
+from mirage.commands.builtin.generic.tee import (
+    TeeFlags,
+    parse_flags,
+    tee_generic,
+)
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -61,7 +65,7 @@ async def test_a_write_error_is_diagnosed_and_stdout_still_copied(error):
     async def _write(_p, _d):
         raise error
 
-    source, io = await tee(
+    source, io = await tee_generic(
         [_spec("/a.txt"), _spec("/b.txt")],
         (),
         read_stream=_empty,
@@ -83,7 +87,7 @@ async def test_every_operand_is_written_and_reported():
     # used to write paths[0] and silently drop the rest, while the spec
     # declared a variadic rest operand.
     written, write = _sink()
-    source, io = await tee(
+    source, io = await tee_generic(
         [_spec("/a"), _spec("/b"), _spec("/c")],
         (),
         read_stream=_empty,
@@ -102,7 +106,7 @@ async def test_every_operand_is_written_and_reported():
 async def test_one_bad_operand_does_not_stop_the_others():
     # GNU pins: `tee p bad q` writes p and q, diagnoses bad, exits 1.
     written, write = _sink(frozenset({"/bad"}))
-    source, io = await tee(
+    source, io = await tee_generic(
         [_spec("/p"), _spec("/bad"), _spec("/q")],
         (),
         read_stream=_empty,
@@ -119,7 +123,7 @@ async def test_one_bad_operand_does_not_stop_the_others():
 @pytest.mark.asyncio
 async def test_output_error_exit_stops_at_the_first_failure():
     written, write = _sink(frozenset({"/bad"}))
-    _source, io = await tee(
+    _source, io = await tee_generic(
         [_spec("/p"), _spec("/bad"), _spec("/q")],
         (),
         read_stream=_empty,
@@ -139,7 +143,7 @@ async def test_an_output_that_fails_to_empty_is_the_one_reported():
         kind = FileType.DIRECTORY if p.virtual == "/dir" else FileType.FILE
         return FileStat(name=p.virtual[1:], type=kind)
 
-    source, io = await tee(
+    source, io = await tee_generic(
         [_spec("/good"), _spec("/denied"), _spec("/dir")],
         (),
         read_stream=_empty,
@@ -164,7 +168,7 @@ async def test_a_refused_probe_leaves_the_open_to_the_write():
             raise PermissionError(errno.EACCES, "Permission denied")
         return FileStat(name=p.virtual[1:], type=FileType.FILE)
 
-    source, io = await tee(
+    source, io = await tee_generic(
         [_spec("/good"), _spec("/locked")],
         (),
         read_stream=_empty,
@@ -211,7 +215,7 @@ async def test_an_unprobed_output_is_opened_in_order_before_any_data(
             raise FileNotFoundError(errno.ENOENT, "No such file or directory")
         return FileStat(name=p.virtual[1:], type=FileType.FILE)
 
-    source, io = await tee(
+    source, io = await tee_generic(
         [_spec(o) for o in outputs],
         (),
         read_stream=_empty,
@@ -234,7 +238,7 @@ async def test_a_native_append_skips_the_read_modify_write():
     async def _append(p, d):
         appended[p.mount_path] = d
 
-    _source, io = await tee(
+    _source, io = await tee_generic(
         [_spec("/n")],
         (),
         read_stream=_empty,
@@ -258,7 +262,7 @@ async def test_without_a_native_append_it_reads_and_rewrites():
     async def _old(_p):
         yield b"old"
 
-    _source, io = await tee(
+    _source, io = await tee_generic(
         [_spec("/n")],
         (),
         read_stream=_old,

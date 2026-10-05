@@ -19,7 +19,9 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     relay,
     transfer_primitives,
 )
-from mirage.commands.builtin.generic.csplit import csplit as generic_csplit
+from mirage.commands.builtin.generic.csplit import (
+    csplit_generic as generic_csplit,
+)
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,

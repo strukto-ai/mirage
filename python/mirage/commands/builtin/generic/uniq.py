@@ -220,7 +220,7 @@ async def _uniq_stream(
         yield _format_record(group[0], count, flags, separator)
 
 
-async def uniq(
+async def uniq_generic(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
@@ -289,4 +289,4 @@ async def uniq(
     return output, IOResult(cache=cache)
 
 
-__all__ = ["uniq"]
+__all__ = ["uniq_generic"]

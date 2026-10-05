@@ -15,7 +15,7 @@
 import { VFSAdapter } from '../../../vfs/adapter.ts'
 
 import type { GSheetsAccessor } from '../../../accessor/gsheets.ts'
-import { read as gsheetsRead, stream as gsheetsStream } from '../../../core/gsheets/read.ts'
+import { read as gsheetsRead, readStream as gsheetsStream } from '../../../core/gsheets/read.ts'
 import { readdir as gsheetsReaddir } from '../../../core/gsheets/readdir.ts'
 import { stat as gsheetsStat } from '../../../core/gsheets/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'

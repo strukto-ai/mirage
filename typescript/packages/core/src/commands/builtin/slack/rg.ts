@@ -49,7 +49,7 @@ async function* slackStream(
   yield await slackRead(accessor, p, index)
 }
 
-async function rgCommand(
+async function rg(
   accessor: SlackAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -119,5 +119,5 @@ export const SLACK_RG = command({
   name: 'rg',
   vfs: VFSName.SLACK,
   spec: specOf('rg'),
-  fn: rgCommand,
+  fn: rg,
 })

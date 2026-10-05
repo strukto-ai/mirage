@@ -16,14 +16,14 @@ import { describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../../test-utils.ts'
 import { size } from './index.ts'
 import { mkdir } from '../mkdir.ts'
-import { writeBytes } from '../write.ts'
+import { write } from '../write.ts'
 
 describe('opfs/du', () => {
   it('sums file sizes under a path', async () => {
     const accessor = makeMockAccessor()
     await mkdir(accessor, spec('/d'))
-    await writeBytes(accessor, spec('/d/a'), new Uint8Array([1, 2, 3]))
-    await writeBytes(accessor, spec('/d/b'), new Uint8Array([4, 5]))
+    await write(accessor, spec('/d/a'), new Uint8Array([1, 2, 3]))
+    await write(accessor, spec('/d/b'), new Uint8Array([4, 5]))
     expect(await size(accessor, spec('/d'))).toBe(5)
   })
   it('returns 0 for missing', async () => {

@@ -333,6 +333,34 @@ async function writeOutput(
   ]
 }
 
+interface XxdFlags {
+  readonly reverse: boolean
+  readonly plain: boolean
+  readonly uppercase: boolean
+  readonly cols: number
+  readonly group: number
+  readonly skip: number
+  readonly limit: number
+}
+
+function count(value: FlagValue | undefined, fallback: number): number {
+  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : 0
+  return parsed > 0 ? parsed : fallback
+}
+
+function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
+  const fl = new FlagView(bag, specOf('xxd'))
+  return {
+    reverse: fl.asBool('r'),
+    plain: fl.asBool('p'),
+    uppercase: fl.asBool('u'),
+    cols: count(fl.raw('c'), 16),
+    group: count(fl.raw('g'), 2),
+    skip: count(fl.raw('s'), 0),
+    limit: count(fl.raw('args_l'), 0),
+  }
+}
+
 /**
  * xxd over INFILE (or stdin) to OUTFILE (or stdout). A dump replaces
  * OUTFILE; -r writes into it at the dump's offsets and keeps the bytes around
@@ -352,7 +380,7 @@ export async function xxdGeneric(
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
-  const fl = new FlagView(opts.flags, specOf('xxd'))
+  const parsed = parseFlags(opts.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
   const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
@@ -364,21 +392,14 @@ export async function xxdGeneric(
   } else {
     source = resolveSource(opts.stdin)
   }
-  const toInt = (v: FlagValue | undefined): number =>
-    typeof v === 'string' ? Number.parseInt(v, 10) : 0
-  const skip = toInt(fl.raw('s'))
-  const limitFlag = toInt(fl.raw('args_l'))
-  if (skip > 0 || limitFlag > 0) {
-    const limit = limitFlag > 0 ? limitFlag : Number.MAX_SAFE_INTEGER
-    source = applyLimits(source, skip, limit)
+  const { skip, limit, uppercase } = parsed
+  if (skip > 0 || limit > 0) {
+    source = applyLimits(source, skip, limit > 0 ? limit : Number.MAX_SAFE_INTEGER)
   }
-  const uppercase = fl.asBool('u')
-  const cols = toInt(fl.raw('c')) > 0 ? toInt(fl.raw('c')) : 16
-  const group = toInt(fl.raw('g')) > 0 ? toInt(fl.raw('g')) : 2
   const render = (): AsyncIterable<Uint8Array> | null => {
-    if (fl.asBool('r')) return null
-    if (fl.asBool('p')) return xxdPlainStream(source, uppercase)
-    return xxdDumpStream(source, cols, group, uppercase)
+    if (parsed.reverse) return null
+    if (parsed.plain) return xxdPlainStream(source, uppercase)
+    return xxdDumpStream(source, parsed.cols, parsed.group, uppercase)
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {

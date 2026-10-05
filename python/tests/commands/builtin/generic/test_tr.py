@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.commands.builtin.generic.tr import tr
+from mirage.commands.builtin.generic.tr import tr_generic
 from mirage.io.stream import materialize
 
 
@@ -9,7 +9,7 @@ def _unused_read_stream(_path):
 
 
 async def _run(texts, flags, data):
-    source, io = await tr(
+    source, io = await tr_generic(
         [],
         tuple(texts),
         read_stream=_unused_read_stream,

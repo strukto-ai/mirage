@@ -13,9 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { basenameFn } from '../../generic/basename.ts'
-import type { Builder } from '../adapter.ts'
+import type { Builder, BuilderFn } from '../adapter.ts'
+
+const basename: BuilderFn = (_ops, accessor, paths, texts, opts) =>
+  basenameFn(accessor, paths, texts, opts)
 
 export const BUILDER: Builder = {
   name: 'basename',
-  fn: (_ops, accessor, paths, texts, opts) => basenameFn(accessor, paths, texts, opts),
+  fn: basename,
 }

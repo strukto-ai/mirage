@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
-import { stream } from './stream.ts'
+import { readStream } from './stream.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -34,7 +34,7 @@ describe('core/disk/stream', () => {
   it('yields all bytes', async () => {
     await writeFile(join(root, 'x'), 'hello stream')
     const chunks: Uint8Array[] = []
-    for await (const c of stream(accessor, spec('/x'))) chunks.push(c)
+    for await (const c of readStream(accessor, spec('/x'))) chunks.push(c)
     const total = chunks.reduce((acc, c) => acc + c.byteLength, 0)
     expect(total).toBe('hello stream'.length)
     const decoded = chunks.map((c) => new TextDecoder().decode(c)).join('')
@@ -42,7 +42,7 @@ describe('core/disk/stream', () => {
   })
 
   it('throws "file not found" on missing', async () => {
-    const it = stream(accessor, spec('/missing'))
+    const it = readStream(accessor, spec('/missing'))
     await expect(it[Symbol.asyncIterator]().next()).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
@@ -54,7 +54,7 @@ describe('core/disk/stream under a plain file', () => {
   it('is ENOTDIR against the virtual path', async () => {
     await writeFile(join(root, 'a.txt'), 'a')
     const err: unknown = await (async () => {
-      for await (const chunk of stream(accessor, spec('/a.txt/x'))) void chunk
+      for await (const chunk of readStream(accessor, spec('/a.txt/x'))) void chunk
     })().then(
       () => null,
       (e: unknown) => e,
