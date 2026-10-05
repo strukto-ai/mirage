@@ -19,6 +19,7 @@ import pytest
 
 from mirage import MountBackend, MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
+from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.config import (
     DiskStoreBlock,
     RamCacheBlock,
@@ -1319,3 +1320,38 @@ async def test_global_and_profile_command_limits_from_config():
 def test_bad_command_limit_fields_fail_at_config_door(block):
     with pytest.raises(ValueError):
         load_config({"mounts": {"/data": {"vfs": "ram"}}, **block})
+
+
+REDIS_URL = "redis://127.0.0.1:1/0"
+
+
+# The workspace index is Redis at 73, so a mount that took any of it
+# would show; the code door from `Mount(index=...)` on is tested in
+# tests/workspace.
+@pytest.mark.parametrize(
+    "block, built",
+    [
+        ({"type": "ram", "ttl": 37}, IndexConfig(ttl=37)),
+        (
+            {"type": "redis", "ttl": 41, "url": REDIS_URL, "key_prefix": "t:"},
+            RedisIndexConfig(ttl=41, url=REDIS_URL, key_prefix="t:"),
+        ),
+        ({"type": "ram"}, IndexConfig(ttl=600)),
+        (None, None),
+    ],
+    ids=["ram", "redis", "replaces-whole", "null"],
+)
+def test_a_mount_index_block_becomes_its_mount_index(block, built):
+    cfg = load_config(
+        {
+            "index": {"type": "redis", "ttl": 73, "key_prefix": "w:"},
+            "mounts": {
+                "/a": {"vfs": "ram", "index": block},
+                "/b": {"vfs": "ram"},
+            },
+        }
+    )
+    kwargs = cfg.to_workspace_kwargs()
+    index = kwargs["mounts"]["/a"].index
+    assert (type(index), index) == (type(built), built)
+    assert kwargs["mounts"]["/b"].index is None

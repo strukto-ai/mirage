@@ -15,10 +15,12 @@
 import { describe, expect, it } from 'vitest'
 import { type IndexConfig, IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
-import { ReadPolicy } from '../types.ts'
+import { MountMode, ReadPolicy, type ReadSpec } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Mount } from './mount/spec.ts'
 import { Workspace } from './workspace/workspace.ts'
+
+const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: 600 }
 
 describe('Workspace index option', () => {
   it('applies the workspace index config to mounts', async () => {
@@ -85,5 +87,35 @@ describe('Workspace index option', () => {
           { index: { ttll: 5 } as IndexConfig },
         ),
     ).toThrow(/"ttll"/)
+  })
+
+  it('runs and judges an added mount on the index it names', async () => {
+    const ws = new Workspace({}, { index: { type: IndexType.RAM, ttl: 73 } })
+    try {
+      const entry = ws.addMount('/b', new RAMVFS(), MountMode.READ, undefined, null, { ttl: 37 })
+      expect(entry.indexStore.ttl).toBe(37)
+      // A zero index leaves RAM no listing cache under the workspace's 73,
+      // so fresh is refused.
+      expect(() =>
+        ws.addMount('/d', new RAMVFS(), MountMode.READ, FRESH, null, { ttl: 0 }),
+      ).toThrow(/'\/d'.*caches reads or listings/)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Two mounts of one instance run one store, the first one's, as in the
+  // constructor: an alias's own index goes unused and fresh is judged on the
+  // shared 37 (RAM keeps no listings of its own).
+  it('shares the first mount index with an added alias', async () => {
+    const ram = new RAMVFS()
+    const ws = new Workspace({ '/a': new Mount(ram, { index: { ttl: 37 } }) })
+    try {
+      const alias = ws.addMount('/b', ram, MountMode.READ, FRESH, null, { ttl: 0 })
+      expect(alias.indexStore).toBe(ws.mount('/a').indexStore)
+      expect(alias.read.policy).toBe(ReadPolicy.FRESH)
+    } finally {
+      await ws.close()
+    }
   })
 })
