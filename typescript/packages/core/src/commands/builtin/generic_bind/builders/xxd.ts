@@ -13,14 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { xxdGeneric } from '../../generic/xxd.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 
 export const BUILDER: Builder = {
   name: 'xxd',
   read: true,
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
+    const write = requireOp(ops.write, 'write')
+    const pwrite = ops.pwrite
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return xxdGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+    return xxdGeneric(
+      resolved,
+      opts,
+      (p) => ops.readStream(accessor, p, idx),
+      (p) => ops.readBytes(accessor, p, idx),
+      (p, d) => write(accessor, p, d),
+      pwrite === undefined ? null : (p, d, offset) => pwrite(accessor, p, d, offset),
+    )
   },
 }

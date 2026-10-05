@@ -85,7 +85,7 @@ async function wcCommand(
       total += count
     }
     const out: ByteSource | null = formatCountRows(rows, [total], resolved.length, parsed.total)
-    return [out, new IOResult()]
+    return [out, new IOResult({ countedRuns: rows })]
   }
   return wcGeneric(resolved, texts, opts, (p) => readStream(accessor, p, opts.index ?? undefined))
 }

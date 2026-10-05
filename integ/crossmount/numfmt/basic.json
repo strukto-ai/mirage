@@ -6,7 +6,26 @@
       "targets": [
         "ram",
         "disk",
-        "opfs"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "printf '1024\\n2048\\n' > /data/xm_rt_nf; numfmt --to=iec < /data/xm_rt_nf > /data2/xm_rt_nf; cat /data2/xm_rt_nf; rm /data/xm_rt_nf /data2/xm_rt_nf",
       "expect": {

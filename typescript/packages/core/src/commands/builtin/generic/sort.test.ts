@@ -155,7 +155,7 @@ describe('sort -c and -C', () => {
   ])('refuses an output by the mode letter (%j)', async (flags, mode) => {
     const [, stderr, code] = await run({
       stdin: bytes('b\na\n'),
-      flags: { ...flags, output: ['/data/out.txt'] },
+      flags: { ...flags, output: [PathSpec.fromStrPath('/data/out.txt')] },
     })
     expect(stderr).toBe(`sort: options '-${mode}o' are incompatible\n`)
     expect(code).toBe(2)
@@ -164,7 +164,7 @@ describe('sort -c and -C', () => {
   it('lets a second operand outrank the output and names the mode', async () => {
     const [, stderr, code] = await run({
       paths: [spec('/data/a'), spec('/data/b')],
-      flags: { C: true, output: ['/data/out.txt'] },
+      flags: { C: true, output: [PathSpec.fromStrPath('/data/out.txt')] },
     })
     expect(stderr).toBe("sort: extra operand '/data/b' not allowed with -C\n")
     expect(code).toBe(2)
@@ -189,27 +189,34 @@ describe('sort -o', () => {
   it('refuses two outputs unless they name one file', async () => {
     const [, stderr, code] = await run({
       stdin: bytes('a\n'),
-      flags: { output: ['/data/p1', '/data/p2'] },
+      flags: { output: [PathSpec.fromStrPath('/data/p1'), PathSpec.fromStrPath('/data/p2')] },
     })
     expect(stderr).toBe('sort: multiple output files specified\n')
     expect(code).toBe(2)
-    expect(parseFlags({ output: ['/data/p1', '/data/p1'] }).output?.virtual).toBe('/data/p1')
+    expect(
+      parseFlags({ output: [PathSpec.fromStrPath('/data/p1'), PathSpec.fromStrPath('/data/p1')] })
+        .output?.virtual,
+    ).toBe('/data/p1')
   })
 
   it('refuses the first bad option on the line', async () => {
     const [, first] = await run({
       stdin: bytes('a\n'),
-      flags: { output: ['/p1', '/p2'], key: ['0'] },
+      flags: { output: [PathSpec.fromStrPath('/p1'), PathSpec.fromStrPath('/p2')], key: ['0'] },
     })
     expect(first).toBe('sort: multiple output files specified\n')
     const [, key] = await run({
       stdin: bytes('a\n'),
-      flags: { key: ['0'], output: ['/p1', '/p2'] },
+      flags: { key: ['0'], output: [PathSpec.fromStrPath('/p1'), PathSpec.fromStrPath('/p2')] },
     })
     expect(key).toContain('invalid field specification')
     const [, modes] = await run({
       stdin: bytes('a\n'),
-      flags: { c: true, C: true, output: ['/p1', '/p2'] },
+      flags: {
+        c: true,
+        C: true,
+        output: [PathSpec.fromStrPath('/p1'), PathSpec.fromStrPath('/p2')],
+      },
     })
     expect(modes).toBe("sort: options '-cC' are incompatible\n")
   })

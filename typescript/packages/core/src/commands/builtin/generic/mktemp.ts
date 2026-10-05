@@ -128,10 +128,7 @@ export async function mktempGeneric(
   const fl = new FlagView(opts.flags, specOf('mktemp'))
   if (texts.length > 1) throw extraOperandError(CommandName.MKTEMP, texts[1] ?? '')
   const directory = fl.asBool('directory')
-  const tmpdirValue = fl.asPaths('tmpdir')[0] ?? fl.asStr('tmpdir')
-  const pValue = fl.asPaths('p')[0] ?? fl.asStr('p')
-  const destValue = tmpdirValue ?? pValue
-  const destDir = destValue instanceof PathSpec ? destValue.rawPath : (destValue ?? '')
+  const destDir = (fl.asPaths('tmpdir')[0] ?? fl.asPaths('p')[0])?.rawPath ?? ''
   const useDestDir = fl.raw('tmpdir') !== undefined || fl.raw('p') !== undefined
   const t = fl.asBool('t')
   const envTmpdir = opts.env?.TMPDIR ?? ''

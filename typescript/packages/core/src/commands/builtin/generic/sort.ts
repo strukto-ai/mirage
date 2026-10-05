@@ -153,14 +153,13 @@ export function parseFlags(bag: Record<string, FlagValue>): SortFlags {
     if (dest === 'key' && typeof value === 'string') {
       parseKeydef(value, NO_MODS, false)
     } else if (dest === 'output') {
-      for (const word of typeof value === 'string' ? [value] : []) {
-        const path = typed[next] ?? PathSpec.fromStrPath(word)
-        next += 1
-        if (output !== null && path.rawPath !== output.rawPath) {
-          throw new UsageError(MULTIPLE_OUTPUTS)
-        }
-        output = path
+      const path = typed[next]
+      next += 1
+      if (path === undefined) continue
+      if (output !== null && path.rawPath !== output.rawPath) {
+        throw new UsageError(MULTIPLE_OUTPUTS)
       }
+      output = path
     } else if (dest === 'check' || value === true) {
       const letter = checkMode(value, dest)
       if (mode !== null && letter !== mode) throw new UsageError(CHECK_MODES_CONFLICT)

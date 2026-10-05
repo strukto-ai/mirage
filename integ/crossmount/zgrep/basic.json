@@ -6,7 +6,26 @@
       "targets": [
         "ram",
         "disk",
-        "opfs"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "printf 'hello\\n' > /data/xm_rt_zg; printf 'help\\nnope\\n' > /data2/xm_rt_zg; gzip /data/xm_rt_zg /data2/xm_rt_zg; zgrep hel /data/xm_rt_zg.gz /data2/xm_rt_zg.gz; rm /data/xm_rt_zg.gz /data2/xm_rt_zg.gz",
       "expect": {

@@ -9,6 +9,7 @@ from mirage.commands.builtin.generic.wc import (
     wc,
 )
 from mirage.commands.errors import UsageError
+from mirage.io.types import CountedRun
 from mirage.types import PathSpec
 
 
@@ -112,6 +113,7 @@ async def test_format_multi_accepts_a_sync_or_async_iterator_read(read):
     assert await format_multi(paths, read=read, lines=True) == (
         b"1 /a.txt\n",
         b"",
+        [CountedRun((1,), "/a.txt")],
     )
 
 
@@ -121,7 +123,7 @@ async def test_format_multi_empty_paths_returns_empty():
     async def fake_read(_path):
         return b""
 
-    out, err = await format_multi([], read=fake_read, lines=True)
+    out, err, _ = await format_multi([], read=fake_read, lines=True)
     assert out == b""
     assert err == b""
 
@@ -136,7 +138,8 @@ async def test_format_multi_all_missing_zero_total():
     async def fake_read(path):
         raise FileNotFoundError(path.virtual)
 
-    out, err = await format_multi(paths, read=fake_read, lines=True)
+    out, err, runs = await format_multi(paths, read=fake_read, lines=True)
+    assert runs == []
     assert out == b"0 total\n"
     assert err == (
         b"wc: /m1.txt: No such file or directory\n"

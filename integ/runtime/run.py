@@ -853,8 +853,11 @@ async def _run_step(
                 dst=PathSpec.from_str_path(spec["dst"]),
             )
             errno_name = "NONE"
-        except FileNotFoundError:
-            errno_name = "ENOENT"
+        except Exception as exc:
+            condition = classify(exc)
+            errno_name = (
+                condition.name if condition is not None else type(exc).__name__
+            )
         if errno_name != expect.get("errno", "NONE"):
             return [
                 f"{case_id} {label}: rename errno {errno_name}, "

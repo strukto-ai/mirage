@@ -890,11 +890,13 @@ describe('Ops rename is bounded by the mount', () => {
     expect(await ws.vfs.exists('/b/y.txt')).toBe(false)
   })
 
-  it('refuses a rename to a path no mount serves', async () => {
+  it('refuses a rename into a missing directory with ENOENT', async () => {
+    // rename(2) resolves the destination's directory before it compares
+    // filesystems, so a missing one is ENOENT, not EXDEV.
     const ws = mkTwoMounts()
     await ws.vfs.write('/a/x.txt', 'bytes')
     await expect(ws.vfs.rename('/a/x.txt', '/nowhere/y.txt')).rejects.toMatchObject({
-      code: 'EXDEV',
+      code: 'ENOENT',
     })
     expect(await ws.vfs.cat('/a/x.txt')).toBe('bytes')
   })
