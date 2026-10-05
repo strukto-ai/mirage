@@ -98,6 +98,47 @@ describe('diff headers', () => {
     )
   })
 
+  it('reads in the TZ zone with every digit of the stamp', async () => {
+    const read = async function* (): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode('x\n')
+    }
+    const backend = (p: PathSpec): Promise<FileStat> =>
+      p.virtual === '/d/gone'
+        ? Promise.reject(Object.assign(new Error(p.virtual), { code: 'ENOENT' }))
+        : Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE }))
+    const statPath = (virtual: string): Promise<FileStat | null> =>
+      Promise.resolve(
+        new FileStat({
+          name: virtual,
+          type: FileType.FILE,
+          modified: '2026-03-04T05:06:07.123456789Z',
+        }),
+      )
+    const opts = {
+      flags: { u: true, new_file: true },
+      stdin: new Uint8Array(),
+      statPath,
+      env: { TZ: 'Asia/Hong_Kong' },
+    } as unknown as CommandOpts
+    const [out] = await diffGeneric(
+      [operand('a', '/d/a'), operand('gone', '/d/gone')],
+      opts,
+      read,
+      readdir,
+      backend,
+    )
+    expect(
+      new TextDecoder()
+        .decode(out as Uint8Array)
+        .split('\n')
+        .slice(0, 2),
+    ).toEqual([
+      '--- a\t2026-03-04 13:06:07.123456789 +0800',
+      '+++ gone\t1970-01-01 08:00:00.000000000 +0800',
+    ])
+  })
+
   it('carries each side mtime in a unified header', async () => {
     const files: Record<string, string> = { '/d/a b': 'x\ny\n', '/d/c': 'x\nz\n' }
     const read = async function* (p: PathSpec): AsyncIterable<Uint8Array> {

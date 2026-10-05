@@ -34,6 +34,7 @@ import { linkDoor } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
+import { validUtf8 } from '../grep_binary.ts'
 import { prefixOf } from '../grep_offsets.ts'
 import { formatRecords } from '../utils/output.ts'
 import { splitLines } from '../utils/lines.ts'
@@ -73,7 +74,7 @@ function zgrepSearch(
   pattern: RegExp,
   opts: ZgrepOpts,
   filename: string | null,
-): [string[], boolean] {
+): [string[], boolean, boolean] {
   const reGlobal = opts.onlyMatching
     ? compilePosixRegex(
         pattern.source,
@@ -109,16 +110,24 @@ function zgrepSearch(
   if (opts.count) {
     const value =
       filename !== null ? `${filename}:${String(matched.length)}` : String(matched.length)
-    return [[value], matched.length > 0]
+    return [[value], matched.length > 0, false]
   }
+  // Under a UTF-8 locale a line or match to print that holds a byte no
+  // character owns is binary output, which grep leaves out and reports once
+  // the input is done; the third value says whether any was.
   const result: string[] = []
+  let binary = false
   for (const [idx, offset, line] of matched) {
+    if (opts.utf8 && !validUtf8(encodeText(line))) {
+      binary = true
+      continue
+    }
     let prefix = ''
     if (filename !== null) prefix = filename + ':'
     prefix += prefixOf(opts.lineNumbers ? idx : null, opts.byteOffsets ? offset : null)
     result.push(prefix + textView(line, opts.utf8))
   }
-  return [result, matched.length > 0]
+  return [result, matched.length > 0, binary]
 }
 
 export async function zgrepGeneric(
@@ -235,7 +244,7 @@ export async function zgrepGeneric(
       if (matched === filesOnly) allResults.push(p.rawPath)
       anyMatch ||= matched
     } else {
-      const [result, hadMatch] = zgrepSearch(
+      const [result, hadMatch, binary] = zgrepSearch(
         data,
         pattern,
         { invert, count: countOnly, lineNumbers, onlyMatching, maxCount, byteOffsets, utf8 },
@@ -243,6 +252,8 @@ export async function zgrepGeneric(
       )
       if (hadMatch) anyMatch = true
       for (const r of result) allResults.push(r)
+      if (binary && !quiet)
+        errors += `grep: ${operandLabel(p, '(standard input)')}: binary file matches\n`
     }
   }
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.commands.builtin.generic.decompress import decompress_inputs
+from mirage.commands.builtin.grep_binary import valid_utf8
 from mirage.commands.builtin.grep_offsets import prefix_of
 from mirage.commands.builtin.grep_pattern import (
     NEVER_MATCH,
@@ -45,8 +46,12 @@ def _zgrep_search(
     max_count: int | None,
     byte_offsets: bool = False,
     utf8: bool = False,
-) -> tuple[list[str], bool]:
+) -> tuple[list[str], bool, bool]:
     """The lines zgrep prints for one decompressed input.
+
+    Under a UTF-8 locale a line or match to print that holds a byte no
+    character owns is binary output, which grep leaves out and reports
+    once the input is done; the third value says whether any was.
 
     Args:
         data (bytes): the decompressed input.
@@ -95,15 +100,19 @@ def _zgrep_search(
         value = str(len(matched))
         if filename:
             value = f"{filename}:{value}"
-        return [value], len(matched) > 0
+        return [value], len(matched) > 0, False
     result: list[str] = []
+    binary = False
     for idx, offset, line in matched:
+        if utf8 and not valid_utf8(encode_text(line)):
+            binary = True
+            continue
         prefix = filename + ":" if filename else ""
         prefix += prefix_of(
             idx if line_numbers else None, offset if byte_offsets else None
         )
         result.append(prefix + text_view(line, utf8))
-    return result, len(matched) > 0
+    return result, len(matched) > 0, binary
 
 
 def _files_only_match(
@@ -253,7 +262,7 @@ async def zgrep_generic(
                 all_results.append(p.raw_path)
             any_match = any_match or matched
         else:
-            result, had_match = _zgrep_search(
+            result, had_match, binary = _zgrep_search(
                 data,
                 compiled,
                 f.invert,
@@ -268,6 +277,9 @@ async def zgrep_generic(
             if had_match:
                 any_match = True
             all_results.extend(result)
+            if binary and not f.quiet:
+                label = operand_label(p, "(standard input)")
+                errors.append(f"grep: {label}: binary file matches\n")
 
     # gzip's failure is exit 2 even beside a match, -q included (zgrep
     # 1.13 takes the more serious status of gzip's and grep's per file).

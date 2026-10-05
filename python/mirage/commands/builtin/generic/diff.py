@@ -2,10 +2,10 @@ import difflib
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 
 from mirage.commands.builtin.diff_format import ed_script, normal_diff
-from mirage.commands.builtin.utils.formatting import styled_time
+from mirage.commands.builtin.utils.formatting import full_iso_time
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -29,6 +29,7 @@ from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
 from mirage.utils.quote import shell_quote
+from mirage.utils.timezone import zone_from_env
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,7 @@ class _Walk:
     excluded: tuple[str, ...]
     switches: str
     stat_path: StatPath | None = None
+    zone: tzinfo | None = None
 
 
 Absent = tuple[bool, bool]
@@ -123,11 +125,11 @@ def c_escape(name: str) -> str:
 async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
     """The time a unified header gives one side, as GNU diff prints it.
 
-    The modification time as ``%Y-%m-%d %H:%M:%S.%N %z``, read through
-    the dispatcher as ``stat`` reads it, so a time ``touch`` keeps in
-    the namespace shows; the epoch for a side -N reads as absent; and
-    the present moment for standard input, as POSIX asks and diffutils
-    does.
+    The modification time as ``%Y-%m-%d %H:%M:%S.%N %z`` in the zone
+    ``TZ`` names, read through the dispatcher as ``stat`` reads it, so
+    a time ``touch`` keeps in the namespace shows; the epoch for a side
+    -N reads as absent; and the present moment for standard input, as
+    POSIX asks and diffutils does.
 
     Args:
         walk (_Walk): the reads and the parsed line.
@@ -135,9 +137,10 @@ async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
         absent (bool): whether -N reads it as absent.
     """
     if absent:
-        return styled_time(None, "full-iso")
+        return full_iso_time(None, walk.zone)
     if is_stdin(path):
-        return styled_time(datetime.now(timezone.utc).isoformat(), "full-iso")
+        now = datetime.now(timezone.utc).isoformat()
+        return full_iso_time(now, walk.zone)
     info = (
         await walk.stat_path(path.virtual)
         if walk.stat_path is not None
@@ -145,7 +148,7 @@ async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
     )
     if info is None:
         info = await walk.stat_fn(path)
-    return styled_time(info.modified, "full-iso")
+    return full_iso_time(info.modified, walk.zone)
 
 
 def _takes_value(option: Option) -> bool:
@@ -385,6 +388,7 @@ async def diff(
     stdin: ByteSource | None = None,
     argv: Sequence[str] = (),
     stat_path: StatPath | None = None,
+    zone: tzinfo | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
@@ -407,6 +411,7 @@ async def diff(
             excluded=await _excluded_patterns(flags, read_bytes),
             switches="".join(f" {shell_quote(w)}" for w in switch_words(argv)),
             stat_path=stat_path,
+            zone=zone,
         )
         if any(dashes) and not all(dashes):
             other = paths[1] if dashes[0] else paths[0]
@@ -514,4 +519,5 @@ async def diff_generic(
         stdin=opts.stdin,
         argv=opts.argv,
         stat_path=opts.stat_path,
+        zone=zone_from_env(opts.env),
     )

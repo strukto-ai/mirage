@@ -25,6 +25,21 @@
         "stdout": "diff -ru \"/data/dh d1/f g\" \"/data/dh d2/f g\"\n--- \"/data/dh d1/f g\"\t2026-01-02 03:04:05.000000000 +0000\n+++ \"/data/dh d2/f g\"\t2026-01-02 03:04:05.000000000 +0000\n@@ -1 +1 @@\n-a\n+b\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "diff_u_header_keeps_the_fraction_in_the_tz_zone",
+      "seq": 1320202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "( printf 'x\\n' > /data/dh_f; touch -d '2026-01-02 03:04:05.5' /data/dh_f; diff -uN /data/dh_f /data/dh_fx | head -2; TZ=Asia/Hong_Kong diff -uN /data/dh_f /data/dh_fx | head -2; rm /data/dh_f )",
+      "expect": {
+        "exit": 0,
+        "stdout": "--- /data/dh_f\t2026-01-02 03:04:05.500000000 +0000\n+++ /data/dh_fx\t1970-01-01 00:00:00.000000000 +0000\n--- /data/dh_f\t2026-01-02 11:04:05.500000000 +0800\n+++ /data/dh_fx\t1970-01-01 08:00:00.000000000 +0800\n",
+        "stderr": ""
+      }
     }
   ]
 }

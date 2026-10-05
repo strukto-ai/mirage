@@ -16,6 +16,7 @@ import pytest
 
 from mirage.commands.builtin.utils import formatting
 from mirage.types import FileStat, FileType
+from mirage.utils.timezone import resolve_tz
 
 
 def test_find_ls_and_ls_show_the_year_for_an_old_or_future_time():
@@ -139,3 +140,16 @@ def test_size_and_time_are_independently_unknown(size, modified, expected):
         name="file", type=FileType.FILE, size=size, modified=modified
     )
     assert formatting.format_ls_long([row])[0].endswith(expected + " file")
+
+
+def test_full_iso_time_keeps_the_stamp_digits_in_the_zone():
+    stamp = "2026-03-04T05:06:07.123456789Z"
+    assert formatting.full_iso_time(stamp) == (
+        "2026-03-04 05:06:07.123456789 +0000"
+    )
+    assert formatting.full_iso_time(stamp, resolve_tz("Asia/Hong_Kong")) == (
+        "2026-03-04 13:06:07.123456789 +0800"
+    )
+    assert formatting.full_iso_time(None, resolve_tz("UTC-8")) == (
+        "1970-01-01 08:00:00.000000000 +0800"
+    )

@@ -101,7 +101,7 @@ function binaryNotice(io: IOResult, path: string): void {
 }
 
 /** Whether every byte of `data` belongs to a UTF-8 character. */
-function validUtf8(data: Uint8Array): boolean {
+export function validUtf8(data: Uint8Array): boolean {
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(data)
     return true

@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic.diff import (
     switch_words,
 )
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.timezone import resolve_tz
 
 
 def _operand(raw: str, virtual: str) -> PathSpec:
@@ -159,3 +160,36 @@ async def test_unified_headers_read_the_time_the_namespace_keeps():
     )
     assert isinstance(out, bytes)
     assert out.splitlines()[0] == b"--- a\t2021-06-15 12:00:00.000000000 +0000"
+
+
+@pytest.mark.asyncio
+async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
+    async def read(path: PathSpec) -> bytes:
+        return b"x\n"
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return FileStat(
+            name=virtual,
+            type=FileType.FILE,
+            modified="2026-03-04T05:06:07.123456789Z",
+        )
+
+    async def missing(path: PathSpec) -> FileStat:
+        if path.virtual == "/d/gone":
+            raise FileNotFoundError(path.virtual)
+        return FileStat(name=path.virtual, type=FileType.FILE)
+
+    out, _ = await diff(
+        [_operand("a", "/d/a"), _operand("gone", "/d/gone")],
+        read_bytes=read,
+        readdir_fn=_readdir,
+        stat_fn=missing,
+        flags=DiffFlags(unified=True, new_file=True, new_first=True),
+        stat_path=stat_path,
+        zone=resolve_tz("Asia/Hong_Kong"),
+    )
+    assert isinstance(out, bytes)
+    assert out.splitlines()[:2] == [
+        b"--- a\t2026-03-04 13:06:07.123456789 +0800",
+        b"+++ gone\t1970-01-01 08:00:00.000000000 +0800",
+    ]

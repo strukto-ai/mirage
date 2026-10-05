@@ -20,13 +20,14 @@ import type { C } from '../store/client.ts'
 import type { GwsState } from '../store/state.ts'
 import { asGrid, asObj, asObjArr, asStr, asStrArr } from '../wire/json.ts'
 import { SHEET_MIME } from '../wire/mime.ts'
-import { NOT_FOUND, idVerbOf, ok, unknownRoute, verbOf } from '../wire/reply.ts'
+import { NOT_FOUND, googleError, idVerbOf, ok, unknownRoute, verbOf } from '../wire/reply.ts'
 import type { Ctx } from '../../kit/typescript/index.ts'
 import { colIndexToLetter, parseA1, rangeLabel, rangeLabelFor } from './a1.ts'
 import type { A1Range } from './a1.ts'
 import { copySheetTo, sheetsBatchUpdate } from './batch.ts'
 import { clearRange, rangeValues, tabExtent, writeValues } from './grid.ts'
-import { parseMask, pickMask } from './mask.ts'
+import { badField, parseMask, pickMask } from './mask.ts'
+import { SPREADSHEET } from './fields.ts'
 import { fmtSpreadsheet } from './spreadsheet.ts'
 import { batchClearValues, batchGetValues, batchUpdateValues, unparseable } from './values.ts'
 
@@ -212,7 +213,11 @@ export function sheetsRoutes(): KitRoute<C>[] {
         }
         const body = fmtSpreadsheet(sheet, id, ctx.query.get('includeGridData') === 'true', ranges)
         const fields = ctx.query.get('fields')
-        return ok(fields === null ? body : pickMask(body, parseMask(fields)))
+        if (fields === null) return ok(body)
+        const paths = parseMask(fields)
+        if (badField(paths, SPREADSHEET, true) !== null)
+          return googleError(400, 'Request contains an invalid argument.', 'INVALID_ARGUMENT')
+        return ok(pickMask(body, paths))
       },
       ID,
     ),

@@ -31,7 +31,8 @@ import { CommandName, type Option } from '../../spec/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { shellQuote } from '../../../utils/quote.ts'
-import { styledTime } from '../utils/formatting.ts'
+import { fullIsoTime } from '../utils/formatting.ts'
+import { UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -63,6 +64,7 @@ interface Walk {
   excluded: readonly string[]
   switches: string
   statPath: StatPath | null
+  zone: Zone
 }
 
 type Absent = readonly [boolean, boolean]
@@ -106,16 +108,16 @@ export function cEscape(name: string): string {
 }
 
 // The time a unified header gives one side, as GNU diff prints it: the
-// modification time as `%Y-%m-%d %H:%M:%S.%N %z`, read through the dispatcher
-// as `stat` reads it, so a time `touch` keeps in the namespace shows; the
+// modification time as `%Y-%m-%d %H:%M:%S.%N %z` in the zone `TZ` names, read
+// through the dispatcher as `stat` reads it, so a time `touch` keeps in the namespace shows; the
 // epoch for a side -N reads as absent; and the present moment for standard
 // input, as POSIX asks and diffutils does.
 async function headerTime(walk: Walk, path: PathSpec, absent: boolean): Promise<string> {
-  if (absent) return styledTime(null, 'full-iso')
-  if (isStdin(path)) return styledTime(new Date().toISOString(), 'full-iso')
+  if (absent) return fullIsoTime(null, walk.zone)
+  if (isStdin(path)) return fullIsoTime(new Date().toISOString(), walk.zone)
   const info =
     (walk.statPath !== null ? await walk.statPath(path.virtual) : null) ?? (await walk.stat(path))
-  return styledTime(info.modified, 'full-iso')
+  return fullIsoTime(info.modified, walk.zone)
 }
 
 function childSpec(parent: PathSpec, name: string): PathSpec {
@@ -416,6 +418,7 @@ export async function diffGeneric(
         .map((word) => ` ${shellQuote(word)}`)
         .join(''),
       statPath: opts.statPath ?? null,
+      zone: zoneFromEnv(opts.env) ?? UTC_ZONE,
     }
     if (dash0 !== dash1) {
       if ((await stat(dash0 ? p1 : p0)).type === FileType.DIRECTORY) {

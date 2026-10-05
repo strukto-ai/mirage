@@ -33,6 +33,16 @@
         "stdout": "1\n0\n c3 a9 0a\n2:a\n5:a\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "zgrep_locale_utf8_invalid_byte_is_binary_output",
+      "seq": 14480101,
+      "command": "( export LC_ALL=C.UTF-8; printf 'a1\\na\\377\\na2\\n' | gzip | zgrep a; printf 'a1\\na\\377\\na2\\n' | gzip | zgrep -c a; printf 'a1\\na\\377\\na2\\n' | gzip | zgrep -q a )",
+      "expect": {
+        "exit": 0,
+        "stdout": "a1\na2\n3\n",
+        "stderr": "grep: (standard input): binary file matches\n"
+      }
     }
   ]
 }

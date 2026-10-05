@@ -79,13 +79,23 @@ export function pickMask(value: JsonValue, paths: readonly MaskPath[]): JsonValu
 // The path live Sheets names when a mask reaches a field the message does
 // not have: the valid part as typed, then the first bad segment in
 // snake_case, and nothing after it (`textFormatX.bold` is `text_format_x`).
-export function badField(paths: readonly MaskPath[], fields: Fields): string | null {
+// A `read` mask (the `fields` of a GET) reaches through a repeated field to
+// its elements, and takes any path below a scalar or a message the tree
+// leaves out.
+export function badField(paths: readonly MaskPath[], fields: Fields, read = false): string | null {
   for (const path of paths) {
     if (path.length === 1 && path[0] === '*') continue
     let node: Field = fields
     for (let i = 0; i < path.length; i += 1) {
+      if (read && node === null) break
       const seg = path[i] ?? ''
-      const child: Field | undefined = isMessage(node) ? fieldOf(node, seg) : undefined
+      const found: Field | undefined = isMessage(node) ? fieldOf(node, seg) : undefined
+      const child: Field | undefined =
+        read && found != null && !isMessage(found)
+          ? 'list' in found
+            ? found.list
+            : found.map
+          : found
       if (child === undefined) {
         const snake = seg.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
         return [...path.slice(0, i), snake].join('.')
