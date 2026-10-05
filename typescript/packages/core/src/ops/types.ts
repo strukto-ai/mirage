@@ -80,6 +80,10 @@ export interface MountView {
   // The mount serving a path, so a walker can tell "still mine" from
   // "another backend" before it tries to read something it cannot.
   rootOf(path: string): string
+  // The du walk budget of the mount serving a path (its VFS's
+  // `maxDuEntries`, null for no cap), so a walk that crosses mounts charges
+  // each entry to its own backend's allowance.
+  maxDuEntries?(path: string): number | null
 }
 
 // The session-plane facts a command may consult, as one injected object.

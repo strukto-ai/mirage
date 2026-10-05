@@ -135,6 +135,40 @@
         "stdout": "/data/xlr:\nd\n\n/data/xlr/d:\nf\n\n/data2/xlr:\ng\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_ls_lists_links_unfollowed",
+      "seq": 15800023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xll /data2/xll && echo a > /data/xll/f && ln -s f /data/xll/lnk && ln -s loop /data/xll/loop && echo b > /data2/xll/g && ls -F /data/xll /data2/xll; ls -R /data/xll /data2/xll; echo rc=$?; rm -r /data/xll /data2/xll",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/xll:\nf\nlnk@\nloop@\n\n/data2/xll:\ng\n/data/xll:\nf\nlnk\nloop\n\n/data2/xll:\ng\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

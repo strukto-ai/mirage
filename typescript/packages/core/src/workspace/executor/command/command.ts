@@ -38,7 +38,7 @@ import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
 import { abortable, mergeSignals } from '../../abort.ts'
 import { ExecutionNode } from '../../types.ts'
-import { strategyFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
+import { aggregateFor, strategyFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../../commands/builtin/generic/crossmount/types.ts'
 import { Strategy } from '../../../commands/builtin/generic/crossmount/types.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
@@ -445,7 +445,7 @@ export async function handleCommand(
     // two things by mount count -- `cat --vers=x /ram/a` was
     // `option '--version' doesn't allow an argument` and the two-mount line
     // was `unrecognized option '--vers=x'`.
-    const sharedSpec = SPECS[cmdName]
+    const sharedSpec = SPECS[cmdName] ?? cmdMount?.specFor(cmdName) ?? undefined
     const csParsed =
       prepared ??
       parseFlags(
@@ -518,7 +518,7 @@ export async function handleCommand(
       registry,
       session.cwd,
       csNs,
-      csStat,
+      sessionView(session, registry.policies),
       mergeSignals(signal, session.abortSignal),
       dispatch,
     )
@@ -535,6 +535,7 @@ export async function handleCommand(
       sessionView(session, registry.policies),
       session.cwd,
       spelledWords(parts.slice(1)),
+      aggregateFor(cmdName, csScopes, registry),
     )
     const csExec = new ExecutionNode({
       command: cmdStr,
@@ -686,9 +687,27 @@ export async function handleCommand(
       cmdStr,
       stdin,
       singleNs,
-      singleStat,
+      sessionView(session, registry.policies),
       mergeSignals(signal, session.abortSignal),
       dispatch,
+      (name, ps, ts, fk, opts) =>
+        runOnMount(
+          {
+            registry,
+            session,
+            dispatch,
+            ...(namespace !== undefined ? { namespace } : {}),
+            ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
+            ...(routingDecision !== undefined ? { routingDecision } : {}),
+            ...(executeFn !== undefined ? { executeFn } : {}),
+            ...(signal !== undefined ? { signal } : {}),
+          },
+          name,
+          ps,
+          ts,
+          fk,
+          { ...opts, argv: spelledWords(parts.slice(1)) },
+        ),
     )
     let fanOut = fanOut0
     if (cmdName === 'find') {

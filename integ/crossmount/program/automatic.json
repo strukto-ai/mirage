@@ -1,0 +1,188 @@
+{
+  "cases": [
+    {
+      "id": "xm_auto_column_global_width",
+      "seq": 963000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a 1\\n' > /data/xm_col; printf 'long 2\\n' > /data2/xm_col; column -t /data/xm_col /data2/xm_col",
+      "expect": {
+        "exit": 0,
+        "stdout": "a     1\nlong  2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_auto_uniq_output_mount",
+      "seq": 963001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\na\\nb\\n' > /data/xm_uniq; uniq /data/xm_uniq /data2/xm_uniq; cat /data2/xm_uniq",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_auto_fold_operands",
+      "seq": 963002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abcd\\n' > /data/xm_fold; printf 'efgh\\n' > /data2/xm_fold; fold -w2 /data/xm_fold /data2/xm_fold",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab\ncd\nef\ngh\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_auto_cmp_directory_link",
+      "seq": 963003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hit\\n' > /data/xm_cmp; mkdir -p /data2/xm_cmp_dir; printf k > /data2/xm_cmp_dir/k; ln -s /data2/xm_cmp_dir /data2/xm_cmp_link; cmp /data/xm_cmp /data2/xm_cmp_link",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "cmp: /data2/xm_cmp_link: Is a directory\n"
+      }
+    },
+    {
+      "id": "xm_auto_gzip_stdout",
+      "seq": 963004,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf a > /data/xm_gz; printf b > /data2/xm_gz; gzip -c /data/xm_gz /data2/xm_gz | gunzip -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_auto_gzip_roundtrip",
+      "seq": 963005,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf a > /data/xm_gzk; printf b > /data2/xm_gzk; gzip -k /data/xm_gzk /data2/xm_gzk; zcat /data/xm_gzk.gz /data2/xm_gzk.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_auto_truncate",
+      "seq": 963006,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf abc > /data/xm_trunc; printf def > /data2/xm_trunc; truncate -s 2 /data/xm_trunc /data2/xm_trunc; cat /data/xm_trunc /data2/xm_trunc",
+      "expect": {
+        "exit": 0,
+        "stdout": "abde",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_auto_split_destination",
+      "seq": 963007,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf \"a\\nb\\n\" > /data/xm_split; split -l1 /data/xm_split /data2/xm_part; cat /data2/xm_partaa /data2/xm_partab",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -2,6 +2,8 @@ import { BaseVFS } from '../base.ts'
 import { WandbAccessor } from '../../accessor/wandb.ts'
 
 import { WANDB_COMMANDS } from '../../commands/builtin/wandb/index.ts'
+import { IO } from '../../commands/builtin/wandb/io.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '../../commands/builtin/generic/du.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
 import { redactWandbConfig } from '../../core/wandb/config.ts'
 import type { WandbConfig, WandbConfigRedacted } from '../../core/wandb/config.ts'
@@ -20,6 +22,8 @@ export interface WandbVFSState {
 export class WandbVFS extends BaseVFS {
   override readonly name: string = VFSName.WANDB
   override readonly prompt: string = PROMPT
+  override readonly maxDuEntries: number | null =
+    IO.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : IO.maxDuEntries
   readonly config: WandbConfig
   override readonly accessor: WandbAccessor
 

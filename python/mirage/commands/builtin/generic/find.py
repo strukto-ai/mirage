@@ -1066,6 +1066,55 @@ async def walk_find(
     root_path = (
         search_path.virtual.rstrip("/") if search_path.virtual != "/" else "/"
     )
+    prune_tree = find_eval.bind_tree(
+        find_eval.args_to_tree(args),
+        prefix,
+        search_path.virtual,
+        search_path.raw_path,
+    )
+
+    async def read_directory(
+        spec: PathSpec, cache: IndexCacheStore | None
+    ) -> list[str]:
+        if find_eval.tree_has_prune(prune_tree):
+            key = spec.mount_path.rstrip("/") or "/"
+            depth = len(spec.virtual.rstrip("/").split("/")) - len(
+                root_path.rstrip("/").split("/")
+            )
+            info = await _stat_entry(
+                stat, spec.virtual, prefix, cache, unstatted
+            )
+            empty = (
+                await _is_empty_entry(
+                    readdir,
+                    stat,
+                    spec.virtual,
+                    True,
+                    prefix,
+                    cache,
+                    links,
+                    unstatted,
+                    unreadable,
+                )
+                if find_eval.tree_has_empty(prune_tree)
+                else None
+            )
+            find_eval.keep(
+                find_eval.FindEntry(
+                    key=key,
+                    name=spec.virtual.rstrip("/").rsplit("/", 1)[-1],
+                    kind="d",
+                    depth=depth,
+                    is_empty=empty,
+                    mtime=_modified_ts(info.modified) if info else None,
+                ),
+                prune_tree,
+                args.mindepth,
+            )
+            if key in find_eval.pruned_keys(prune_tree):
+                return []
+        return await readdir(spec, cache)
+
     root_stat = await _stat_entry(stat, root_path, prefix, index)
     if root_stat is not None:
         collected.append((root_path, printf_kind(root_stat)))
@@ -1075,7 +1124,7 @@ async def walk_find(
     # (Box answers ENOTDIR) or a wasted round trip everywhere else.
     if root_stat is None or root_stat.type == FileType.DIRECTORY:
         await _walk_collect(
-            readdir,
+            read_directory,
             stat,
             search_path,
             index,
@@ -1273,6 +1322,9 @@ async def find_walk_generic(
         stat (Callable): Bound overlaid stat called as ``stat(p, index)``.
     """
     parsed = parse_flags(opts.flags)
+    flags = FlagView(opts.flags, spec=SPECS["find"])
+    bounded = flags.as_bool("xdev") or flags.as_bool("mount")
+    mounts = opts.ns.mounts if opts.ns else None
     stat_path = opts.stat_path
     links = opts.ns.links if opts.ns is not None else None
     searches = (
@@ -1319,9 +1371,22 @@ async def find_walk_generic(
             else:
                 unreadable: list[str] = []
                 unstatted: dict[str, Exception] = {}
+
+                async def read_directory(
+                    path: PathSpec, index: IndexCacheStore | None
+                ) -> list[str]:
+                    if (
+                        bounded
+                        and mounts is not None
+                        and mounts.root_of(path.virtual)
+                        != mounts.root_of(search.virtual)
+                    ):
+                        return []
+                    return await readdir(path, index)
+
                 walked = await walk_find(
                     search,
-                    readdir=readdir,
+                    readdir=read_directory,
                     stat=stat,
                     index=opts.index,
                     args=args,

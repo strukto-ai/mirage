@@ -27,6 +27,8 @@ import {
   settlePrunes,
   startBasename,
   treeHasEmpty,
+  treeHasPrune,
+  prunedKeys,
   treeHasType,
   type FindEntry,
   type PredNode,
@@ -192,6 +194,32 @@ export async function walkFind(
   // root), so `-maxdepth 0` prints just the root and `-name` can match
   // the root's own basename.
   const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
+  const pruneTree = bindTree(optionsTree(options), prefix, path.virtual, path.rawPath)
+  const readDirectory = async (spec: PathSpec, cache?: IndexCacheStore): Promise<string[]> => {
+    if (treeHasPrune(pruneTree)) {
+      const key = rstripSlash(spec.mountPath) || '/'
+      const depth =
+        rstripSlash(spec.virtual).split('/').length - rstripSlash(rootPath).split('/').length
+      const info = await statEntry(deps, spec.virtual, prefix, cache)
+      const isEmpty = treeHasEmpty(pruneTree)
+        ? await isEmptyEntry(deps, spec.virtual, true, prefix, cache)
+        : null
+      keep(
+        {
+          key,
+          name: rstripSlash(spec.virtual).split('/').pop() ?? '',
+          kind: 'd',
+          depth,
+          isEmpty,
+          mtime: info === null ? null : modifiedTs(info.modified),
+        },
+        pruneTree,
+        options.minDepth,
+      )
+      if (prunedKeys(pruneTree).includes(key)) return []
+    }
+    return deps.readdir(spec, cache)
+  }
   let rootStat: FileStat | null = null
   try {
     rootStat = await deps.stat(path, index)
@@ -207,7 +235,14 @@ export async function walkFind(
   // is either an error the walk would have to swallow (Box answers
   // ENOTDIR) or a wasted round trip everywhere else.
   if (rootStat === null || rootStat.type === FileType.DIRECTORY) {
-    await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
+    await walk(
+      { ...deps, readdir: readDirectory },
+      path,
+      index,
+      options.maxDepth ?? null,
+      1,
+      collected,
+    )
   }
   const results: string[] = []
   const tree = bindTree(optionsTree(options), prefix, path.virtual, path.rawPath)

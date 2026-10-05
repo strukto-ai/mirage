@@ -16,10 +16,11 @@ from collections.abc import Sequence
 
 from mirage.commands.builtin.generic.crossmount.constants import (
     CROSS_MOUNT_COMMANDS,
-    RELAY_COMMANDS,
+    FANOUT_COMMANDS,
     STREAM_COMMANDS,
 )
 from mirage.commands.builtin.generic.crossmount.types import Cmd, Strategy
+from mirage.commands.builtin.generic_bind.adapter import AggregateFn
 from mirage.types import PathSpec
 
 
@@ -29,11 +30,11 @@ def strategy_for(cmd_name: str) -> Strategy:
     Args:
         cmd_name (str): Command name, must be in CROSS_MOUNT_COMMANDS.
     """
-    if cmd_name in RELAY_COMMANDS:
-        return Strategy.RELAY
     if cmd_name in STREAM_COMMANDS:
         return Strategy.STREAM
-    return Strategy.FANOUT
+    if cmd_name in FANOUT_COMMANDS:
+        return Strategy.FANOUT
+    return Strategy.RELAY
 
 
 def is_cross_mount(
@@ -42,7 +43,10 @@ def is_cross_mount(
     registry,
     flag_scopes: Sequence[PathSpec] = (),
 ) -> bool:
-    if cmd_name not in CROSS_MOUNT_COMMANDS or len(scopes) < 2:
+    if len(scopes) < 2 or (
+        cmd_name not in CROSS_MOUNT_COMMANDS
+        and aggregate_for(cmd_name, scopes, registry) is None
+    ):
         return False
     mounts = set()
     for s in scopes:
@@ -63,3 +67,30 @@ def is_cross_mount(
             if s.virtual not in landing
         )
     )
+
+
+def aggregate_for(
+    cmd_name: str, scopes: list[PathSpec], registry
+) -> AggregateFn | None:
+    """Use an existing, shared registration reducer for a custom command.
+
+    Different reducers cannot safely compose one invocation. Known command
+    families retain their flag-aware reduction instead.
+
+    Args:
+        cmd_name (str): Command name.
+        scopes (list[PathSpec]): Path operands in command-line order.
+        registry (MountRegistry): Registry resolving each operand's mount.
+    """
+    if cmd_name in CROSS_MOUNT_COMMANDS:
+        return None
+    aggregate = None
+    for scope in scopes:
+        mount = registry.try_mount_for(scope.virtual)
+        handler = mount.resolve_command(cmd_name) if mount else None
+        if handler is None or handler.aggregate is None:
+            return None
+        if aggregate is not None and handler.aggregate is not aggregate:
+            return None
+        aggregate = handler.aggregate
+    return aggregate
