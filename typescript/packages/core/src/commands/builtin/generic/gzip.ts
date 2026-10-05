@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { flagKwargName } from '../../spec/constants.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import type { StatFn } from './archive/walk.ts'
@@ -44,6 +45,19 @@ interface GzipFlags {
   readonly toStdout: boolean
   readonly quiet: boolean
   readonly suffix: string
+  readonly level: number | null
+}
+
+// -1..-9, the last one typed, as GNU's option loop keeps it; -1 parses to
+// args_1 (AMBIGUOUS_NAMES). Read off the flag tape: an object lists its
+// integer-like keys first and in numeric order, so typedOrder cannot rank
+// the digits.
+function extractLevel(fl: FlagView): number | null {
+  const names = new Map<string, number>()
+  for (let n = 1; n <= 9; n++) names.set(flagKwargName(String(n)), n)
+  const typed = fl.occurrences(...names.keys()).filter(([, value]) => value === true)
+  const last = typed.at(-1)
+  return last === undefined ? null : (names.get(last[0]) ?? null)
 }
 
 function parseFlags(bag: Record<string, FlagValue>): GzipFlags {
@@ -55,6 +69,7 @@ function parseFlags(bag: Record<string, FlagValue>): GzipFlags {
     toStdout: fl.asBool('c'),
     quiet: fl.asBool('q'),
     suffix: fl.asStr('S') ?? GZIP_SUFFIX,
+    level: extractLevel(fl),
   }
 }
 
@@ -66,7 +81,15 @@ export async function gzipGeneric(
   unlink: (p: PathSpec) => Promise<void>,
   stat?: StatFn,
 ): Promise<CommandFnResult> {
-  const { decompress, keep, force, toStdout: stdoutMode, quiet, suffix } = parseFlags(opts.flags)
+  const {
+    decompress,
+    keep,
+    force,
+    toStdout: stdoutMode,
+    quiet,
+    suffix,
+    level,
+  } = parseFlags(opts.flags)
 
   const door = linkDoor(opts)
 
@@ -86,7 +109,7 @@ export async function gzipGeneric(
       door,
     })
   if (paths.length === 0) {
-    const result: ByteSource = await gzip(await materialize(resolveSource(opts.stdin)))
+    const result: ByteSource = await gzip(await materialize(resolveSource(opts.stdin)), '', level)
     return [result, new IOResult()]
   }
   const read = stdinStream(stream, opts.stdin)
@@ -141,7 +164,7 @@ export async function gzipGeneric(
       }
       link = found.link
     }
-    const data = await gzip(raw, p.rawPath === '-' ? '' : gnuBasename(p.rawPath))
+    const data = await gzip(raw, p.rawPath === '-' ? '' : gnuBasename(p.rawPath), level)
     if (!inPlace) {
       stdout.push(data)
       continue
