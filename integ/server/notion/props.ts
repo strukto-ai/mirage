@@ -30,8 +30,11 @@ export function titleProp(title: string, column = 'title'): Json {
   }
 }
 
+// A page outside a database has one property, its title, under `title`: "If
+// the new page is a child of another page, title is the only valid property"
+// (API reference, create a page).
 export function schemaOf(database: DatabaseRow | null): Json {
-  if (database === null) return {}
+  if (database === null) return { title: { id: 'title', name: 'title', type: 'title', title: {} } }
   return asObject(JSON.parse(database.propertiesJson))
 }
 
@@ -134,10 +137,16 @@ function normalizeValue(column: Json, kind: string, value: JsonValue): JsonValue
 // treats it as optional and the official SDK's own examples omit it) stored an
 // untyped object, which every reader renders blank because the type is what
 // says which key holds the value. Key order matches the fixture's, so a
-// written row and a seeded one look alike.
-export function normalizeProperties(properties: Json, schema: Json): Json {
-  const out: Json = {}
-  for (const [key, value] of Object.entries(properties)) {
+// written row and a seeded one look alike. A key names a column by its name or
+// its id, either spelling of the id as `propByRef` takes it, and the value
+// lands under the column's name. A key that names no column is refused with
+// live's words, and the caller writes nothing: "property names or IDs must
+// match the parent data source's schema" (API reference, create a page).
+export function normalizeProperties(properties: Json, schema: Json): Array<[string, Json]> | Reply {
+  const out: Array<[string, Json]> = []
+  for (const [ref, value] of Object.entries(properties)) {
+    const key = columnNameOf(schema, ref)
+    if (key === undefined) return validation(`${ref} is not a property that exists.`)
     const column = asObject(schema[key])
     const columnType = typeof column.type === 'string' ? column.type : undefined
     // A bare array under the column name is a shorthand the fake accepts; it
@@ -147,7 +156,7 @@ export function normalizeProperties(properties: Json, schema: Json): Json {
       : asObject(value)
     const kind = propertyKind(prop, columnType)
     if (kind === undefined) {
-      out[key] = prop
+      out.push([key, prop])
       continue
     }
     const copy: Json = {}
@@ -155,9 +164,19 @@ export function normalizeProperties(properties: Json, schema: Json): Json {
     else if (kind === 'title') copy.id = 'title'
     copy.type = kind
     copy[kind] = normalizeValue(column, kind, prop[kind] ?? null)
-    out[key] = copy
+    out.push([key, copy])
   }
   return out
+}
+
+function columnNameOf(schema: Json, ref: string): string | undefined {
+  if (Object.hasOwn(schema, ref)) return ref
+  const encoded = encodeURIComponent(ref)
+  for (const [name, spec] of Object.entries(schema)) {
+    const id = asObject(spec).id
+    if (id === ref || id === encoded) return name
+  }
+  return undefined
 }
 
 // The value an unset column answers with. A computed column (formula, rollup,
@@ -177,7 +196,8 @@ function emptyValue(type: string, meta: MetaRow): JsonValue | undefined {
 // A database row carries every column of its schema, an unset one empty, in
 // the schema's order: that is what live Notion answers a create with (API
 // reference), and it is what every row in the MCP-Atlas recordings carries. A
-// written property the schema does not name is kept, after the columns.
+// property the schema does not name, which only a seeded row can hold, is kept
+// after the columns.
 export function fillSchema(properties: Json, schema: Json, meta: MetaRow): Json {
   const out: Json = {}
   for (const [name, spec] of Object.entries(schema)) {
