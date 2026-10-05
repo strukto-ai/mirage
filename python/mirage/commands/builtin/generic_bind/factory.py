@@ -25,8 +25,9 @@ from mirage.cache.read_through import (
 )
 from mirage.commands.builtin.generic_bind.adapter import (
     CommandIO,
+    scoped_io,
+    with_command_guards,
     with_dir_guard,
-    with_path_guards,
     with_policy_guard,
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
@@ -257,14 +258,17 @@ async def _run_with_namespace_globs(
         glob_children=children,
         glob_target_stat=(links.target_stat if links is not None else None),
     )
-    # The policy guard sits outside the cache wraps (`finish`) so a
-    # coded pre_ops deny fires before a warm serve, the dispatcher's
-    # own order at the op door. A probe answer is served below the path
-    # guards (`with_probe_answers` on the raw adapter), so they still
-    # judge every path before it.
+    # Command path restrictions speak first, then the coded pre_ops
+    # hooks, both outside the cache wraps (`finish`) so a refusal fires
+    # before a warm serve, the dispatcher's own order at the op door. A
+    # probe answer is served below them (`with_probe_answers` on the
+    # raw adapter), so they still judge every path before it. Under a
+    # hide or a path rule the native subtree ops are set aside
+    # (`scoped_io`), so every entry passes through the guarded walk.
     bound = with_dir_guard(
-        with_policy_guard(finish(with_path_guards(stamped)))
+        with_command_guards(with_policy_guard(finish(stamped)))
     )
+    bound = scoped_io(bound, paths or [opts.cwd], opts.mount_prefix)
     return await fn(bound, accessor, paths, texts, opts)
 
 

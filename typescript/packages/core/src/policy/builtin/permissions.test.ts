@@ -289,4 +289,13 @@ describe('PermissionsPolicy', () => {
     ).toEqual({ kind: 'deny', reason: 'history is read-only here', policy: 'PermissionsPolicy' })
     expect(policies.wants('preOps')).toBe(true)
   })
+
+  it('speaks at the op door only through a pure path rule', async () => {
+    const p = policy()
+    expect(await p.wantsFor('preOps', 's')).toBe(true)
+    expect(await p.wantsFor('preOps', 'rev')).toBe(false)
+    expect(await p.wantsFor('preOps', 'nobody')).toBe(false)
+    expect(await p.wantsFor('preCommand', 'rev')).toBe(true)
+    expect(await new Policies([p]).wantsFor('preOps', 'rev')).toBe(false)
+  })
 })

@@ -25,7 +25,7 @@ from mirage.commands.builtin.generic.find import (
 )
 from mirage.commands.builtin.generic_bind.adapter import (
     CommandIO,
-    with_path_guards,
+    with_command_guards,
     with_policy_guard,
 )
 from mirage.commands.builtin.utils.output import format_records
@@ -143,9 +143,9 @@ def make_find(
     """
     find_full = make_search_backed_find(tree.resolve, stat, tree.walk)
     find_light = make_search_backed_find(tree.resolve, stat_light, tree.walk)
-    walk_full = with_policy_guard(with_path_guards(io))
-    walk_light = with_policy_guard(
-        with_path_guards(replace(io, stat=stat_light))
+    walk_full = with_command_guards(with_policy_guard(io))
+    walk_light = with_command_guards(
+        with_policy_guard(replace(io, stat=stat_light))
     )
 
     @command("find", vfs=vfs, spec=SPECS["find"])

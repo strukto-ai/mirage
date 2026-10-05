@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.find import (
     find_walk_generic,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
-    with_path_guards,
+    with_command_guards,
     with_policy_guard,
 )
 from mirage.commands.builtin.github.io import IO, resolve_glob
@@ -33,7 +33,7 @@ from mirage.core.github.tree import ensure_tree
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-_WALK_IO = with_policy_guard(with_path_guards(IO))
+_WALK_IO = with_command_guards(with_policy_guard(IO))
 
 
 @command("find", vfs="github", spec=SPECS["find"])

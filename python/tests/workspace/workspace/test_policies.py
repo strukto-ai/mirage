@@ -1371,3 +1371,86 @@ async def test_a_policys_own_read_passes_the_door_its_op_hook_guards():
         assert b"Permission denied" in refused.stderr
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "exit_code"),
+    [
+        ("find /data/src", 1),
+        ("du -a /data/src", 1),
+        ("du -s /data/src", 1),
+        ("grep -r PRIVATE_SENTINEL /data/src", 2),
+        ("rg PRIVATE_SENTINEL /data/src", 2),
+    ],
+)
+async def test_recursive_commands_enforce_admitted_path_rules(
+    command, exit_code
+):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /data/src/cache")
+        await ws.vfs.write(
+            "/data/src/cache/private.txt", b"PRIVATE_SENTINEL\n"
+        )
+        await ws.vfs.write("/data/src/public.txt", b"public\n")
+        ws.create_session(
+            "restricted",
+            profile=SessionProfile(
+                commands=CommandsBlock(
+                    deny=(
+                        CommandRule(
+                            reason="sealed", paths=("/data/src/cache",)
+                        ),
+                    )
+                )
+            ),
+        )
+
+        result = await ws.shell(command, session_id="restricted")
+
+        assert result.exit_code == exit_code
+        assert b"private.txt" not in (result.stdout or b"")
+        assert b"PRIVATE_SENTINEL" not in (result.stdout or b"")
+        assert b"/data/src/cache" in result.stderr
+        assert b"Permission denied" in result.stderr
+    finally:
+        await ws.close()
+
+
+class SealedSubtree(Policy):
+    """Refuse listing /data/sec, as a mode 0300 directory does."""
+
+    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+        if ctx.op == "readdir" and ctx.path.virtual.startswith("/data/sec"):
+            return Deny("sealed")
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command_line, refusal",
+    [
+        ("find /data", b"find: '/data/sec': Permission denied\n"),
+        ("find /data/sec", b"find: '/data/sec': Permission denied\n"),
+        (
+            "du -a /data",
+            b"du: cannot read directory '/data/sec': Permission denied\n",
+        ),
+        (
+            "du -a /data/sec",
+            b"du: cannot read directory '/data/sec': Permission denied\n",
+        ),
+    ],
+)
+async def test_native_walks_meet_a_coded_pre_ops_deny(command_line, refusal):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /data/sec && echo SECRET > /data/sec/k.txt")
+        ws.policies.add(SealedSubtree())
+        result = await ws.shell(command_line)
+        assert result.exit_code == 1
+        assert b"/data/sec/k.txt" not in (result.stdout or b"")
+        assert result.stderr == refusal
+    finally:
+        await ws.close()

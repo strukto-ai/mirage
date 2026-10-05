@@ -13,18 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Mapping
 from functools import partial
 from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import api_request
+from mirage.core.api.client import ApiResponse, api_request, lowered_headers
 from mirage.core.api.oauth import TokenManager as OAuthTokenManager
 from mirage.core.dropbox.constants import (
     DROPBOX_API_BASE,
     DROPBOX_CONTENT_BASE,
     DROPBOX_TOKEN_URL,
+    RESULT_HEADER,
     TOKEN_BUFFER_SECONDS,
 )
 from mirage.utils.ranges import ByteWindow
@@ -44,11 +45,17 @@ class DropboxApiError(RuntimeError):
 
 
 def summary_of(text: str) -> str:
+    """An error body's ``error_summary``, or "" when it carries no string.
+
+    Args:
+        text (str): the response body.
+    """
     try:
-        summary: str = json.loads(text).get("error_summary", "")
+        body = json.loads(text)
     except ValueError:
         return ""
-    return summary
+    summary = body.get("error_summary") if isinstance(body, dict) else None
+    return summary if isinstance(summary, str) else ""
 
 
 def _token_url_of(config: DropboxConfig) -> str:
@@ -170,8 +177,11 @@ def _download_error(
 
 async def dropbox_download(
     tm: DropboxTokenManager, path: str, window: ByteWindow | None = None
-) -> bytes:
-    """Download a file, optionally only a byte range of it.
+) -> tuple[bytes, str | None]:
+    """Download a file, or a byte range of it, with its result header.
+
+    The second value is the raw ``Dropbox-API-Result`` header, or None when
+    the response carries none; ``fingerprint.result_token`` reads it.
 
     Args:
         tm (DropboxTokenManager): token manager.
@@ -181,23 +191,34 @@ async def dropbox_download(
     """
     headers = await dropbox_auth_headers(tm)
     headers["Dropbox-API-Arg"] = json.dumps({"path": path})
-    data: bytes = await api_request(
+    resp: ApiResponse = await api_request(
         "POST",
         f"{tm.content_base}/files/download",
         error_of=partial(_download_error, path=path),
         headers=headers,
-        read="bytes",
+        read="bytes_response",
         window=window,
         session=tm.pool,
     )
-    return data
+    return resp.data, resp.headers.get(RESULT_HEADER.lower())
 
 
 async def dropbox_download_stream(
     tm: DropboxTokenManager,
     path: str,
     chunk_size: int = 65536,
+    on_response: Callable[[Mapping[str, str]], None] | None = None,
 ) -> AsyncIterator[bytes]:
+    """Stream a file's bytes.
+
+    Args:
+        tm (DropboxTokenManager): token manager.
+        path (str): Dropbox path of the file.
+        chunk_size (int): bytes per yielded chunk.
+        on_response (Callable[[Mapping[str, str]], None] | None): handed
+            the response's headers, lower-cased as ``bytes_response`` hands
+            them, before the first chunk.
+    """
     headers = await dropbox_auth_headers(tm)
     headers["Dropbox-API-Arg"] = json.dumps({"path": path})
     url = f"{tm.content_base}/files/download"
@@ -208,5 +229,7 @@ async def dropbox_download_stream(
             raise DropboxApiError(
                 f"Dropbox download {path} → {resp.status} {text}", resp.status
             )
+        if on_response is not None:
+            on_response(lowered_headers(resp.headers))
         async for chunk in resp.content.iter_chunked(chunk_size):
             yield chunk

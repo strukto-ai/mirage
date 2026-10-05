@@ -20,6 +20,8 @@ import type { PathSpec } from '../../types.ts'
 import { listingError } from '../../utils/errors.ts'
 import { DropboxApiError } from './client.ts'
 import { getMetadata, listFolder, type DropboxEntry } from './api.ts'
+import { CONTENT_HASH } from './constants.ts'
+import { tokenOf } from './fingerprint.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 function resourceTypeFor(entry: DropboxEntry): string {
@@ -99,6 +101,7 @@ export async function readdir(
     const filename = f.name
     const modified = f.server_modified ?? f.client_modified ?? ''
     const size = typeof f.size === 'number' ? f.size : null
+    const token = isDir ? null : tokenOf(f[CONTENT_HASH])
     const entry = new IndexEntry({
       id: f.id ?? f.path_display ?? filename,
       name: filename,
@@ -106,6 +109,7 @@ export async function readdir(
       remoteTime: modified,
       vfsName: filename,
       size: !isDir ? size : null,
+      extra: token === null ? {} : { [CONTENT_HASH]: token },
     })
     entries.push({ name: filename, entry, isDir })
   }

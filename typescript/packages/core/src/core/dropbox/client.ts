@@ -17,8 +17,9 @@ import {
   DROPBOX_CONTENT_BASE,
   DROPBOX_TOKEN_URL,
   TOKEN_BUFFER_SECONDS,
+  RESULT_HEADER,
 } from './constants.ts'
-import { apiRequest } from '../api/client.ts'
+import { type ApiResponse, apiRequest, loweredHeaders } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
@@ -59,12 +60,17 @@ export class DropboxApiError extends Error {
   }
 }
 
+/** An error body's `error_summary`, or '' when it carries no string. */
 function summaryOf(text: string): string {
+  let body: unknown
   try {
-    return (JSON.parse(text) as { error_summary?: string }).error_summary ?? ''
+    body = JSON.parse(text)
   } catch {
     return ''
   }
+  if (typeof body !== 'object' || body === null) return ''
+  const summary = (body as Record<string, unknown>).error_summary
+  return typeof summary === 'string' ? summary : ''
 }
 
 function tokenUrlOf(config: DropboxConfig): string {
@@ -163,25 +169,35 @@ export async function dropboxUpload(
   })
 }
 
+/**
+ * Download a file, or a byte range of it, with its result header: the raw
+ * `Dropbox-API-Result`, or null when the response carries none
+ * (`fingerprint.resultToken` reads it).
+ */
 export async function dropboxDownload(
   tm: DropboxTokenManager,
   path: string,
   window?: ByteWindow,
-): Promise<Uint8Array> {
+): Promise<[Uint8Array, string | null]> {
   const headers = await dropboxAuthHeaders(tm)
-  const data = await apiRequest('POST', `${tm.contentBase}/files/download`, {
+  const resp = (await apiRequest('POST', `${tm.contentBase}/files/download`, {
     errorOf: (r, text) =>
       new DropboxApiError(`Dropbox download ${path} → ${String(r.status)} ${text}`, r.status),
     headers: { ...headers, 'Dropbox-API-Arg': headerJson({ path }) },
-    read: 'bytes',
+    read: 'bytes_response',
     window,
-  })
-  return data as Uint8Array
+  })) as ApiResponse
+  return [resp.data as Uint8Array, resp.headers[RESULT_HEADER.toLowerCase()] ?? null]
 }
 
+/**
+ * Stream a file's bytes; `onResponse` is handed its headers, lower-cased as
+ * `bytes_response` hands them, before the first chunk.
+ */
 export async function* dropboxDownloadStream(
   tm: DropboxTokenManager,
   path: string,
+  onResponse?: (headers: Record<string, string>) => void,
 ): AsyncIterable<Uint8Array> {
   const headers = await dropboxAuthHeaders(tm)
   const url = `${tm.contentBase}/files/download`
@@ -193,6 +209,7 @@ export async function* dropboxDownloadStream(
     const text = await r.text().catch(() => '')
     throw new DropboxApiError(`Dropbox download ${path} → ${String(r.status)} ${text}`, r.status)
   }
+  onResponse?.(loweredHeaders(r.headers))
   if (r.body === null) return
   const reader = r.body.getReader()
   for (;;) {

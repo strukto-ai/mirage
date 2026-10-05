@@ -38,6 +38,8 @@ import * as onedriveIo from '@struktoai/mirage-core/commands/builtin/onedrive/io
 import * as sharepointIo from '@struktoai/mirage-core/commands/builtin/sharepoint/io'
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
+import * as dropboxIo from '@struktoai/mirage-core/commands/builtin/dropbox/io'
+import type { DropboxAccessor } from '@struktoai/mirage-core/accessor/dropbox'
 import * as gdocsIo from '@struktoai/mirage-core/commands/builtin/gdocs/io'
 import * as gdriveIo from '@struktoai/mirage-core/commands/builtin/gdrive/io'
 import * as gsheetsIo from '@struktoai/mirage-core/commands/builtin/gsheets/io'
@@ -96,6 +98,7 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { checkReadCapability } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { DEFAULT_READ_TTL, ReadPolicy } from '@struktoai/mirage-core/types'
+import { InlineDropbox } from './fixtures/dropbox.ts'
 import { InlineGitHub, blobSha } from './fixtures/github.ts'
 
 interface GDriveItem {
@@ -480,6 +483,7 @@ type Family =
   | 'gdocs'
   | 'gsheets'
   | 'gslides'
+  | 'dropbox'
 
 const HARNESSES: Record<string, Family> = {
   ...Object.fromEntries(S3_FAMILY.map((name) => [name, 's3' as const])),
@@ -493,6 +497,7 @@ const HARNESSES: Record<string, Family> = {
   gdocs: 'gdocs',
   gsheets: 'gsheets',
   gslides: 'gslides',
+  dropbox: 'dropbox',
 }
 
 // The mounts that render a Drive file through its editor API: the mime type
@@ -518,6 +523,7 @@ const S3_CONFIG = { bucket: 'b', region: 'us-east-1', endpoint_url: 'http://127.
 const S3_EXTRA: Record<string, Record<string, string>> = { oci: { namespace: 'ns' } }
 const GRIDFS_CONFIG = { uri: 'mongodb://127.0.0.1:27017', database: 'd' }
 const GDRIVE_CONFIG = { client_id: 'i', client_secret: 's', refresh_token: 'r' }
+const DROPBOX_CONFIG = { client_id: 'i', client_secret: 's', refresh_token: 'r' }
 
 const PREFIX = 'pfx/'
 
@@ -679,6 +685,37 @@ function gdriveAdd(
 }
 
 async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<Fake> {
+  if (HARNESSES[name] === 'dropbox') {
+    // Dropbox has no key_prefix; the prefixed shape mounts a root_path
+    // instead, with a decoy at the same key outside it.
+    const key = KEYS[shape]
+    const root = shape === 'prefixed' ? `/${PREFIX.replace(/\/+$/, '')}` : '/'
+    const stored = `${root.replace(/\/+$/, '')}/${key}`
+    const dropbox = new InlineDropbox({ [stored]: data })
+    if (shape === 'prefixed') dropbox.write(`/${key}`, DECOY)
+    vi.stubGlobal('fetch', dropbox.fetch)
+    const vfs = await buildVfs('dropbox', {
+      ...DROPBOX_CONFIG,
+      root_path: root,
+      endpoint: dropbox.url,
+    })
+    const accessor = vfs.accessor as DropboxAccessor
+    expect(vfs.readRevalidatable).toBe(true)
+    const index = new RAMIndexCacheStore()
+    return {
+      vfs,
+      accessor,
+      key,
+      fetches: () => dropbox.count('download'),
+      rewrite: (next) => {
+        dropbox.write(stored, next)
+      },
+      readBytes: (p) => dropboxIo.IO.readBytes(accessor, p, index),
+      readStream: (p) => dropboxIo.IO.readStream(accessor, p, index),
+      stat: (p) => dropboxIo.IO.stat(accessor, p, index),
+      streamSlot: 'stream',
+    }
+  }
   if (HARNESSES[name] === 'github') {
     // The nested key's parent is two or more lowercase letters, the spelling
     // Octokit rewrites when the point request goes unencoded; the python twin
@@ -1140,7 +1177,15 @@ describe('the read-token contract', () => {
       'onedrive-listed-stream',
       'sharepoint-listed-stream',
     ])
-    for (const family of ['s3', 'gridfs', 'hf_models', 'onedrive', 'sharepoint', 'hf_buckets'])
+    for (const family of [
+      's3',
+      'gridfs',
+      'hf_models',
+      'onedrive',
+      'sharepoint',
+      'hf_buckets',
+      'dropbox',
+    ])
       for (const shape of shapes) for (const row of rows) expectedA.add(`${family}-${shape}-${row}`)
     for (const n of aliases) for (const row of rows) expectedA.add(`${n}-root-${row}`)
     for (const family of ['github', 'gdrive'])
@@ -1307,6 +1352,59 @@ describe('the read-token contract', () => {
       }
     })
   }
+
+  // The probe stats through a throwaway store, so dropbox answers it with one
+  // get_metadata rather than listing the whole folder into it.
+  it('a dropbox fresh probe asks for the file, not its folder', async () => {
+    const files: Record<string, Uint8Array> = { '/d/a.txt': SEED }
+    for (let i = 0; i < 5; i++) files[`/d/f${String(i)}.txt`] = DECOY
+    const dropbox = new InlineDropbox(files)
+    vi.stubGlobal('fetch', dropbox.fetch)
+    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
+    const ws = freshWorkspace(vfs)
+    try {
+      await line(ws, 'cat /m/d/a.txt')
+      const before = dropbox.log.length
+      expect(await line(ws, 'cat /m/d/a.txt')).toEqual(SEED)
+      const routes = dropbox.log.slice(before).filter((r) => r !== 'token')
+      expect(routes).not.toContain('list_folder')
+      expect(routes).not.toContain('download')
+      expect(routes).toContain('get_metadata')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // A 409 other than not_found cannot verify the copy: the read fails but the
+  // file is not called gone, so chmod's 600 stays. A real miss drops it, so it
+  // never carries over to a file re-created at the path.
+  it.each([
+    ['restricted', false],
+    ['deleted', true],
+  ])('a dropbox probe drops an overlay only on a miss (%s)', async (_id, gone) => {
+    const dropbox = new InlineDropbox({ '/d/a.txt': SEED })
+    vi.stubGlobal('fetch', dropbox.fetch)
+    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
+    const ws = freshWorkspace(vfs)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await line(ws, 'cat /m/d/a.txt')
+      await line(ws, 'chmod 600 /m/d/a.txt')
+      if (gone) dropbox.files.delete('/d/a.txt')
+      else dropbox.restricted.add('/d/a.txt')
+      const result = await ws.shell('cat /m/d/a.txt')
+      dropbox.restricted.clear()
+      dropbox.write('/d/a.txt', SEED)
+      expect(result.exitCode).toBe(1)
+      expect(new TextDecoder().decode(result.stderr).includes('No such file')).toBe(gone)
+      expect(new TextDecoder().decode(await line(ws, 'stat -c %a /m/d/a.txt'))).toBe(
+        gone ? '644\n' : '600\n',
+      )
+    } finally {
+      warn.mockRestore()
+      await ws.close()
+    }
+  })
 
   it('the contract goes red on a backend with two token kinds', async () => {
     // s3 forced to stat a timestamp while its read stamps the ETag: both

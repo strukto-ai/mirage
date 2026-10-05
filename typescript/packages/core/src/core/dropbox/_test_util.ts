@@ -39,6 +39,7 @@ export class FakeDropboxRpc {
   listRequests = 0
   deleted: string[] = []
   moves: [string, string][] = []
+  metadataPaths: string[] = []
   private cursors = new Map<string, DropboxEntry[]>()
   private limits = new Map<string, number>()
 
@@ -81,6 +82,7 @@ export class FakeDropboxRpc {
       return Promise.resolve(this.page(rest, this.limits.get(token) ?? 2000))
     }
     if (endpoint === '/files/get_metadata') {
+      this.metadataPaths.push(String(req.path))
       if (this.metadata === null) throw new DropboxApiError('nf', 409, 'path/not_found/...')
       return Promise.resolve(this.metadata)
     }

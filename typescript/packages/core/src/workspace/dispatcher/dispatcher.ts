@@ -17,7 +17,7 @@ import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
-import { applyOpLimit, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { dispatchStat, dotRefusal, walkSpelling } from '../../commands/builtin/utils/paths.ts'
 import { getExtension } from '../../commands/resolve.ts'
 import { IOResult, type OpReport } from '../../io/types.ts'
@@ -40,7 +40,8 @@ import {
   walkRefusal,
   type FsError,
 } from '../../utils/errors.ts'
-import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../../policy/index.ts'
+import { Policies, PolicyDenied } from '../../policy/index.ts'
+import { OpBoundary } from '../../ops/boundary.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
@@ -87,7 +88,6 @@ import {
   SETATTR_KEYS,
   XATTR_OPS,
 } from './constants.ts'
-import { requireTurfWritable } from './lineage.ts'
 import {
   effectivePathMode,
   getCurrentSession,
@@ -426,6 +426,7 @@ export class Dispatcher {
     if (opName === 'statfs') return [await this.statfs(p, issuer), new IOResult()]
     const resolvedOwner = this.namespace.tryMountFor(p.virtual)
     const opWrite = POLICY_WRITE_OPS.has(opName)
+    const boundary = this.boundary(resolvedOwner)
     if (resolvedOwner !== null) {
       // A mount is a filesystem boundary: rename(2) moves a name within one
       // and answers EXDEV across two, before any permission is weighed, so
@@ -449,27 +450,26 @@ export class Dispatcher {
       // one, or the cache becomes a policy bypass. This dispatcher is the
       // one door in TypeScript: shell internals, programmatic access, the
       // op facade, and FUSE all end up here.
-      await preOpsGate(this.policies, opName, p, opWrite, resolvedOwner.prefix, sessionId(), issuer)
+      await boundary.admit(
+        opName,
+        p,
+        opWrite,
+        { create: HIDDEN_CREATE_OPS.has(opName), subtree: opName === 'rename' },
+        issuer,
+      )
       // A rename's destination is a create there: it passes the same gate
       // as the source, so a path rule holds against moving into a
       // protected scope (or onto the directory that holds one) the way it
-      // holds against writing there.
+      // holds against writing there, under the mode of the mount that
+      // owns it.
       if (opName === 'rename' && dstArg instanceof PathSpec) {
-        await preOpsGate(
-          this.policies,
+        await this.boundary(this.namespace.tryMountFor(dstArg.virtual)).admit(
           opName,
           dstArg,
           true,
-          resolvedOwner.prefix,
-          sessionId(),
+          { create: true, subtree: true },
           issuer,
         )
-      }
-      if (opWrite) {
-        requireTurfWritable(resolvedOwner, p)
-        if (opName === 'rename' && dstArg instanceof PathSpec) {
-          requireTurfWritable(this.namespace.tryMountFor(dstArg.virtual), dstArg)
-        }
       }
     }
     let resolved: [BaseVFS, PathSpec, MountMode]
@@ -490,12 +490,12 @@ export class Dispatcher {
       // above every mount still takes chown -h), gated exactly like
       // the mounted overlay write; an ungranted mount is not that
       // case and keeps the canonical denial.
+      const bare = this.boundary(null)
       if (opName === 'setattr' && isMissingPath(err)) {
-        await preOpsGate(this.policies, opName, p, true, '', sessionId(), issuer)
-        requireTurfWritable(null, p)
+        await bare.admit(opName, p, true, {}, issuer)
         const stored = await this.overlaySetattr(p, kwargs ?? {})
         memoryAnswered(report)
-        await postOpsGate(this.policies, opName, p, true, '', stored)
+        await bare.complete(opName, p, true, stored)
         return [stored, new IOResult()]
       }
       const eligible = isMissingPath(err)
@@ -505,15 +505,14 @@ export class Dispatcher {
         fallback = visibleEntries(fallback, p.virtual)
       }
       const fallbackWrite = POLICY_WRITE_OPS.has(opName)
-      await preOpsGate(this.policies, opName, p, fallbackWrite, '', sessionId(), issuer)
+      await bare.admit(opName, p, fallbackWrite, {}, issuer)
       // A synthetic namespace answer (a directory that exists only
       // because a mount or a link sits below it) contacts nothing, so
       // attributing it to the mount that lexically owns the path would
       // invent a network op against that backend. Stamped before the
       // gate and the cap, so whatever they throw cannot erase it.
       memoryAnswered(report)
-      const fallbackBound = await postOpsGate(this.policies, opName, p, fallbackWrite, '', fallback)
-      const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
+      const gated = await bare.complete(opName, p, fallbackWrite, fallback)
       return [gated, new IOResult()]
     }
     const [vfs, scope, mode] = resolved
@@ -566,10 +565,7 @@ export class Dispatcher {
         // refused warm read is recorded against the backend and counted
         // as traffic that never happened.
         memoryAnswered(report, window.byteLength)
-        const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, window)
-        const served = (
-          warmBound !== null ? await applyOpLimit(window, warmBound) : window
-        ) as Uint8Array
+        const served = (await boundary.complete(opName, p, opWrite, window)) as Uint8Array
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
@@ -717,13 +713,10 @@ export class Dispatcher {
     if (opName === 'stat' && result instanceof FileStat) {
       result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
     }
-    const bound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, result)
-    if (bound !== null) {
-      // The transfer already happened, so the limit changes what the
-      // caller receives, not what the backend moved; the report above
-      // already carries the moved count.
-      result = await applyOpLimit(result, bound)
-    }
+    // The transfer already happened, so a limit changes what the caller
+    // receives, not what the backend moved; the report above already
+    // carries the moved count.
+    result = await boundary.complete(opName, p, opWrite, result)
     return [result, new IOResult()]
   }
 
@@ -909,12 +902,25 @@ export class Dispatcher {
     return index !== undefined ? { index } : {}
   }
 
+  /** The policy boundary for an op on a path `mount` owns: the mount's
+   * prefix and mode, or for a path above every mount an empty prefix and
+   * full write, governed by `/` (`MountModePolicy`). Mirrors Python's
+   * Dispatcher._boundary. */
+  private boundary(mount: MountEntry | null): OpBoundary {
+    return new OpBoundary(
+      this.policies,
+      mount?.prefix ?? '',
+      mount?.mode ?? MountMode.WRITE,
+      sessionId(),
+    )
+  }
+
   /**
    * The door's own channel for internal walks: the TS twin of Python's
    * Mount.execute_op plus the dispatcher-side duties around it. The
    * same mode fence, index stamping and mount-prefix context normal
-   * dispatch applies, plus the pre-ops admission for writes (Python
-   * spells this on the channel as `_admit_cascade`) and the
+   * dispatch applies, plus the boundary's admission and completion for
+   * writes (Python's `_MountChannel` holds the same `OpBoundary`) and the
    * dispatcher's own write invalidation, because raw registry calls
    * run outside the cache context dispatch establishes, so the cores'
    * invalidation cannot land. Invalidation runs even when the op
@@ -936,6 +942,7 @@ export class Dispatcher {
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
     const write = this.opsRegistry.find(opName, vfs)?.write === true
+    const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId())
     if (write) {
       // The same pre-ops admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -945,10 +952,7 @@ export class Dispatcher {
       // caller folds the denial into its original refusal, so a
       // policy's protection of a hidden path never surfaces as its own
       // denial.
-      await preOpsGate(this.policies, opName, spec, true, mountPrefix, sessionId(), issuer)
-      if (effectivePathMode(spec.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofsReadOnly(`mount at '${spec.virtual}' is read-only`, spec)
-      }
+      await boundary.admit(opName, spec, true, { checkHidden: false }, issuer)
     }
     // The fence reruns backend ops outside `dispatch`, so the revision
     // pins have to ride here as on the main path above, or a cascade
@@ -956,7 +960,7 @@ export class Dispatcher {
     // Python's twin gets both bindings from `Mount.execute_op`.
     await mount.ensureReady()
     try {
-      return await mount.use(async () => {
+      const result = await mount.use(async () => {
         const answer = await runWithMountContext(
           () =>
             runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
@@ -969,6 +973,9 @@ export class Dispatcher {
         )
         return wrapOpStream(answer, mount.mountId, mount.activity)
       })
+      // A deletion is not completed through postOps, which could only
+      // refuse after the entry is gone and strand the cascade.
+      return result
     } finally {
       if (write) await this.invalidateAfterWriteByPath(spec.virtual)
     }
@@ -1148,10 +1155,10 @@ export class Dispatcher {
    * (the same ownership rule the link read filter uses), session grants
    * and both gates run, and the write leaves an OpRecord — a scoped
    * kernel mount refuses exactly like a scoped shell. The turf's mode
-   * gates the write too (`requireTurfWritable`), so a read-only mount
-   * or grant answers EROFS for a link exactly as for a file; a link
-   * above every mount is bare namespace structure, gated with an empty
-   * prefix and governed by `/` (see `lineage.ts`). A rename's
+   * gates the write too (`MountModePolicy` at the `OpBoundary`), so a
+   * read-only mount or grant answers EROFS for a link exactly as for a
+   * file; a link above every mount is bare namespace structure, gated
+   * with an empty prefix and governed by `/`. A rename's
    * destination is judged on its own turf, since the endpoints need not
    * share one. Also answers the `unlink`, `rename` and no-follow
    * `stat` of a path the node table holds a link for. Mirrors Python's
@@ -1167,10 +1174,9 @@ export class Dispatcher {
   ): Promise<string | FileStat | null> {
     const timer = startOp()
     const mount = this.namespace.tryMountFor(path.virtual)
-    const owner = mount?.prefix ?? null
+    const boundary = this.boundary(mount)
     const write = POLICY_WRITE_OPS.has(opName)
-    await preOpsGate(this.policies, opName, path, write, owner ?? '', sessionId(), issuer)
-    if (write) requireTurfWritable(mount, path)
+    await boundary.admit(opName, path, write, { create: HIDDEN_CREATE_OPS.has(opName) }, issuer)
     let target: string
     let result: string | FileStat | null = null
     if (opName === 'unlink') {
@@ -1185,16 +1191,7 @@ export class Dispatcher {
       // rename. It is then replaced as rename(2) replaces it: any node
       // the table holds at that name (a link, an attr overlay) goes.
       const dstMount = this.namespace.tryMountFor(dst.virtual)
-      await preOpsGate(
-        this.policies,
-        opName,
-        dst,
-        true,
-        dstMount?.prefix ?? '',
-        sessionId(),
-        issuer,
-      )
-      requireTurfWritable(dstMount, dst)
+      await this.boundary(dstMount).admit(opName, dst, true, { create: true }, issuer)
       // The name the link moves to must have a directory above it, as for
       // a new link: the table alone would file it under an absent parent
       // and synthesize the directories above it.
@@ -1233,9 +1230,7 @@ export class Dispatcher {
     }
     record(opName, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
     memoryAnswered(report)
-    const bound = await postOpsGate(this.policies, opName, path, write, owner ?? '', result)
-    if (bound !== null) return (await applyOpLimit(result, bound)) as string | null
-    return result
+    return (await boundary.complete(opName, path, write, result)) as string | FileStat | null
   }
 
   /**
@@ -1431,7 +1426,8 @@ export class Dispatcher {
   ): Promise<unknown> {
     const [vfs, scope] = resolved
     const mount = this.namespace.tryMountFor(scope.virtual)
-    await preOpsGate(this.policies, opName, scope, false, mount?.prefix ?? '', sessionId(), issuer)
+    const boundary = this.boundary(mount)
+    await boundary.admit(opName, scope, false, {}, issuer)
     await mount?.ensureReady()
     const filetype = getExtension(scope.virtual)
     try {
@@ -1440,7 +1436,8 @@ export class Dispatcher {
           ...this.indexKwargs(mount),
           ...(filetype !== null ? { filetype } : {}),
         })
-      return await (mount === null ? call() : mount.use(call))
+      const result = await (mount === null ? call() : mount.use(call))
+      return await boundary.complete(opName, scope, false, result)
     } catch (err) {
       // Final on every channel: a plain file above the path means nothing
       // can be at it or under it, and symlink(2) and readlink(2) answer
@@ -1484,10 +1481,9 @@ export class Dispatcher {
   ): Promise<unknown> {
     const timer = startOp()
     const mount = this.namespace.tryMountFor(path.virtual)
-    const owner = mount?.prefix ?? ''
+    const boundary = this.boundary(mount)
     const write = POLICY_WRITE_OPS.has(opName)
-    await preOpsGate(this.policies, opName, path, write, owner, sessionId(), issuer)
-    if (write) requireTurfWritable(mount, path)
+    await boundary.admit(opName, path, write, {}, issuer)
     await this.xattrTarget(mount, path)
     const stored = this.namespace.xattrs(path.virtual)
     const name = typeof kwargs.name === 'string' ? kwargs.name : ''
@@ -1515,8 +1511,7 @@ export class Dispatcher {
       timer,
     )
     report?.served(null, null)
-    const bound = await postOpsGate(this.policies, opName, path, write, owner, result)
-    return bound !== null ? await applyOpLimit(result, bound) : result
+    return boundary.complete(opName, path, write, result)
   }
 
   /**
@@ -1532,8 +1527,8 @@ export class Dispatcher {
    */
   private async statfs(path: PathSpec, issuer?: symbol): Promise<[string, CapacityResult]> {
     const mount = this.namespace.tryMountFor(path.virtual)
-    const owner = mount?.prefix ?? ''
-    await preOpsGate(this.policies, 'statfs', path, false, owner, sessionId(), issuer)
+    const boundary = this.boundary(mount)
+    await boundary.admit('statfs', path, false, {}, issuer)
     await this.xattrTarget(mount, path)
     const answer: [string, CapacityResult] =
       mount === null
@@ -1541,7 +1536,7 @@ export class Dispatcher {
         : [mount.vfs.name, await mount.use(() => mount.vfs.capacity())]
     // A policy may deny the reply as it may any op's; a capacity is no bytes,
     // so a bound has nothing to cap.
-    await postOpsGate(this.policies, 'statfs', path, false, owner, answer)
+    await boundary.complete('statfs', path, false, answer)
     return answer
   }
 

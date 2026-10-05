@@ -32,6 +32,11 @@ _mutation_locks: WeakKeyDictionary[FileCacheMixin, asyncio.Lock] = (
     WeakKeyDictionary()
 )
 
+# The drain each read went to; a nested line hands its outer line them too.
+_draining: WeakKeyDictionary[CachableAsyncIterator, asyncio.Task[Any]] = (
+    WeakKeyDictionary()
+)
+
 
 def mutation_lock(cache: FileCacheMixin) -> asyncio.Lock:
     """Serialize cache fills with mount ownership changes."""
@@ -171,8 +176,10 @@ async def apply_io(
     cache_facts: Callable[[str], CacheFacts] | None = None,
     records: list[OpRecord] | None = None,
 ) -> None:
-    cache_set = set(io.cache)
-    for path in io.cache:
+    # A path both read and written is dropped: neither side is the file.
+    kept = [p for p in io.cache if p not in io.reads or p not in io.writes]
+    cache_set = set(kept)
+    for path in kept:
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
         data = io.reads.get(path)
@@ -219,12 +226,21 @@ async def apply_io(
                     task.add_done_callback(
                         partial(_drop_drain_task, cache, path)
                     )
+                    _draining[data] = task
     for path in io.writes:
         if path in cache_set:
             continue
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
         await cache.remove(path)
+    # An unfinished read no drain owns is closed; unmount waits on it.
+    drains = getattr(cache, "_drain_tasks", {})
+    for path, data in io.reads.items():
+        if not isinstance(data, CachableAsyncIterator) or data.exhausted:
+            continue
+        owner = _draining.get(data)
+        if owner is None or drains.get(path) is not owner:
+            await data.discard()
 
 
 async def _background_drain(

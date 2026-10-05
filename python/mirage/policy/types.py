@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import Any, ClassVar, Protocol
 
 from mirage.runtime.types import ScriptSource
-from mirage.types import Limit, PathSpec, Producer, Refusal
+from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
 
 
 class MountRootQuery(Protocol):
@@ -83,6 +83,8 @@ class Deny:
             stamped by the chain so no policy names itself.
         failed (bool): True when the chain refused on a policy's
             behalf because it raised.
+        error (OSError | None): an op refusal with a specific errno; None
+            uses the normal permission-denied error.
     """
 
     kind: ClassVar[str] = "deny"
@@ -91,6 +93,7 @@ class Deny:
     scope: DenyScope = DenyScope.COMMAND
     policy: str = ""
     failed: bool = False
+    error: OSError | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -641,6 +644,10 @@ class OpsContext:
         session_id (str): the session the door serves, set by the door
             from the session it already resolves for hides and modes;
             empty for the unbound host view.
+        mode (MountMode | None): the owning mount's authorization ceiling,
+            None at a door that judges the mode itself.
+        create (bool): the op creates this path.
+        subtree (bool): the op mutates the path's descendants too.
     """
 
     op: str
@@ -648,6 +655,9 @@ class OpsContext:
     write: bool
     prefix: str
     session_id: str = ""
+    mode: MountMode | None = None
+    create: bool = False
+    subtree: bool = False
 
 
 @dataclass(frozen=True, slots=True)

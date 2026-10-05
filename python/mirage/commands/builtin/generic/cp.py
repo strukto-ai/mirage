@@ -1371,7 +1371,7 @@ async def copy_entries(
             continue
         wrote_any = True
         if reads is not None:
-            reads[entry.virtual] = data
+            reads[entry.mount_path] = data
         if writes is not None:
             writes[entry_dst.mount_path] = b""
         if lines is not None:
@@ -1795,7 +1795,7 @@ async def cp_generic(
                     f"'{target.raw_path}': {fs_strerror(exc)}"
                 )
                 continue
-            reads[src.virtual] = data
+            reads[src.mount_path] = data
         else:
             try:
                 await strategy.copy(src, target)

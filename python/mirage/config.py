@@ -24,6 +24,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictFloat,
     field_validator,
     model_validator,
 )
@@ -166,14 +167,14 @@ class RamIndexBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["ram"] = "ram"
-    ttl: float = 600
+    ttl: StrictFloat = 600
 
 
 class RedisIndexBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["redis"]
-    ttl: float = 600
+    ttl: StrictFloat = 600
     url: str = "redis://localhost:6379/0"
     key_prefix: str = "mirage:index:"
 
@@ -354,11 +355,12 @@ class MountBlock(BaseModel):
     backend: MountBackend = MountBackend.WORKSPACE
     mountpoint: str | None = None
     # How cached bytes for this mount are revalidated, and the bound
-    # that goes with `bounded`. The bound lives only here, where no
-    # other `ttl` does: at workspace level it would sit beside
-    # `index: {ttl:}` and mean a different thing.
+    # that goes with `bounded`. The bound lives only in a mount block:
+    # at workspace level it would sit beside `index: {ttl:}`.
     read: ReadPolicy | None = None
     ttl: int | None = None
+    # Replaces the workspace `index:` whole; nothing is inherited.
+    index: IndexBlock | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -762,6 +764,11 @@ class WorkspaceConfig(BaseModel):
                 command_limits=block.command_limits,
                 read=read,
                 vfs_ref=block.vfs,
+                index=(
+                    _build_index_config(block.index)
+                    if block.index is not None
+                    else None
+                ),
             )
         kwargs: dict[str, Any] = {
             "mounts": mounts,

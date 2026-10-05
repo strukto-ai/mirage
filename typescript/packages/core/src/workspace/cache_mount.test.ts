@@ -400,3 +400,78 @@ describe('a renderer registered beside the VFS', () => {
     }
   })
 })
+
+describe('a line touching a file twice', () => {
+  it.each([
+    ["cat /d/f; printf 'z\\n' >> /d/f", null, 'b\na\nz\n'],
+    ['awk 1 /d/f | tee -a /d/f > /dev/null', null, 'b\na\nb\na\n'],
+    ["sort -o /d/f /d/f; printf 'z\\n' >> /d/f", null, 'a\nb\nz\n'],
+    ["printf 'q\\n' | tee /d/f >> /d/f", null, 'q\nq\n'],
+    ["printf 'q\\n' | tee /d/f >> /d/f 2>> /d/f", null, 'q\nq\n'],
+    ['cat /d/f; sort -o /d/f /d/f', 'a\nb\n', 'a\nb\n'],
+    ['cat /d/f | sort -o /d/f', 'a\nb\n', 'a\nb\n'],
+  ])('%s caches %j', async (line, cached, stored) => {
+    // An append, or a read before a write, leaves no entry; a whole write
+    // after a read is kept. Mirrors Python's
+    // test_a_line_touching_a_file_twice_caches_only_a_whole_file.
+    const ram = new RAMVFS()
+    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
+    const ws = new Workspace(
+      { '/d': ram },
+      {
+        mode: MountMode.WRITE,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+    try {
+      await ws.shell("printf 'b\\na\\n' > /d/f")
+      await ws.shell('cat /d/f')
+      await ws.shell(line)
+      const entry = await ws.cache.get('/d/f')
+      expect(entry === null ? null : DEC.decode(entry)).toBe(cached)
+      expect(DEC.decode((await ws.shell('cat /d/f')).stdout)).toBe(stored)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a read given up on', () => {
+  it.each([
+    [true, "cat /d/big | head -c 1; printf 'z\\n' >> /d/big"],
+    [false, 'cat /d/big | head -c 1'],
+  ])(
+    'leaves the mount free to unmount (caching %s): %s',
+    async (caching, line) => {
+      // A read the line gave up on is closed, or unmount waits on it. Mirrors
+      // Python's test_a_read_given_up_on_leaves_the_mount_free_to_unmount.
+      const ram = new RAMVFS()
+      ;(ram as unknown as { cachesReads: boolean }).cachesReads = caching
+      const ws = new Workspace(
+        { '/d': ram },
+        {
+          mode: MountMode.WRITE,
+          shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+        },
+      )
+      try {
+        await ws.shell('seq 1 200000 > /d/big')
+        await ws.shell(line)
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const outcome = await Promise.race([
+          ws.unmount('/d').then(() => 'unmounted'),
+          new Promise<string>((resolve) => {
+            timer = setTimeout(() => {
+              resolve('still busy')
+            }, 10000)
+          }),
+        ])
+        clearTimeout(timer)
+        expect(outcome).toBe('unmounted')
+      } finally {
+        await ws.close()
+      }
+    },
+    20000,
+  )
+})

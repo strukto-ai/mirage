@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from functools import partial
 
 from mirage.accessor.dropbox import DropboxAccessor
@@ -24,7 +24,10 @@ from mirage.core.dropbox.client import (
     dropbox_download,
     dropbox_download_stream,
 )
+from mirage.core.dropbox.constants import RESULT_HEADER
+from mirage.core.dropbox.fingerprint import result_token
 from mirage.core.dropbox.readdir import readdir
+from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -93,22 +96,30 @@ async def read(
         # Index-less callers (the ops factory's emulated truncate)
         # download directly; the API 409s on missing paths and folders.
         prefix = mount_prefix_of(path.virtual, path.vfs_path)
-        dropbox_path = dropbox_path_from_virtual(
-            accessor.root_path, path.virtual, prefix
-        )
-        try:
-            return await dropbox_download(
-                accessor.token_manager, dropbox_path, window
-            )
-        except DropboxApiError as exc:
-            if exc.status == 409:
-                raise enoent(path.virtual) from exc
-            raise
-    _, virtual_key, prefix = await _resolve_entry(accessor, path, index)
+        virtual_key = path.virtual
+    else:
+        _, virtual_key, prefix = await _resolve_entry(accessor, path, index)
     dropbox_path = dropbox_path_from_virtual(
         accessor.root_path, virtual_key, prefix
     )
-    return await dropbox_download(accessor.token_manager, dropbox_path, window)
+    timer = start_op()
+    try:
+        data, result = await dropbox_download(
+            accessor.token_manager, dropbox_path, window
+        )
+    except DropboxApiError as exc:
+        if index is NULL_INDEX and exc.status == 409:
+            raise enoent(path.virtual) from exc
+        raise
+    record(
+        "read",
+        path.virtual,
+        "dropbox",
+        len(data),
+        timer,
+        fingerprint=result_token(result),
+    )
+    return data
 
 
 async def read_stream(
@@ -116,11 +127,26 @@ async def read_stream(
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
+    """Stream a file, stamped with its content_hash.
+
+    Args:
+        accessor (DropboxAccessor): Dropbox accessor.
+        path (PathSpec): the path to read.
+        index (IndexCacheStore): listing cache, consulted for the entry.
+    """
     _, virtual_key, prefix = await _resolve_entry(accessor, path, index)
     dropbox_path = dropbox_path_from_virtual(
         accessor.root_path, virtual_key, prefix
     )
+    rec = record_stream("read", path.virtual, "dropbox")
+
+    def stamp(headers: Mapping[str, str]) -> None:
+        if rec is not None:
+            rec.fingerprint = result_token(headers.get(RESULT_HEADER.lower()))
+
     async for chunk in dropbox_download_stream(
-        accessor.token_manager, dropbox_path
+        accessor.token_manager, dropbox_path, on_response=stamp
     ):
+        if rec is not None:
+            rec.bytes += len(chunk)
         yield chunk

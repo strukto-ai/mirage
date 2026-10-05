@@ -591,9 +591,15 @@ async def _du_one(
             _norm(d) == r or _norm(d).startswith(r + "/") for r in roots
         )
     ]
-    if not entries and not leaves and not dirs:
+    walked = directories is not None and any(
+        _norm(d) == root_key for d in directories()
+    )
+    if not entries and not leaves and not dirs and not walked:
         # A backend that can only produce a size degrades to one total;
         # it cannot enumerate, so shadowed keys cannot be excluded either.
+        # A walk that opened the operand already said all it can: an
+        # empty directory, or one a rule refused, which a second walk
+        # would report twice.
         total = await compute_size(path)
         return (
             [_line(total, flags.h, label)],

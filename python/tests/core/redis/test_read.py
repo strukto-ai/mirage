@@ -183,3 +183,9 @@ async def test_read_bytes_window_on_a_missing_key_still_raises(accessor):
             offset=1,
             size=2,
         )
+
+
+@pytest.mark.asyncio
+async def test_read_bytes_directory_is_eisdir(accessor):
+    with pytest.raises(IsADirectoryError):
+        await read(accessor, PathSpec.from_str_path("/sub"))

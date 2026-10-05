@@ -27,6 +27,7 @@ from mirage.policy import (
     CommandRule,
     Deny,
     OpsContext,
+    OpsResultContext,
     Policies,
     Policy,
     PolicyDenied,
@@ -64,6 +65,11 @@ class DenyRemnantUnlink(Policy):
         if ctx.op == "unlink" and ctx.path.virtual == "/a/d/sec/k":
             return Deny("protected\n")
         return None
+
+
+class DenyUnlinkAfter(Policy):
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        return Deny("too late") if ctx.op == "unlink" else None
 
 
 def _path(virtual: str) -> PathSpec:
@@ -678,13 +684,16 @@ async def test_the_remnant_channel_invalidates_each_deletion():
     seen: list[str] = []
     admitted: list[tuple[str, str]] = []
 
-    async def admit(op: str, spec: PathSpec) -> None:
+    async def admit(op: str, spec: PathSpec, write: bool, **kwargs) -> None:
         admitted.append((op, spec.virtual))
 
     async def invalidate(spec: PathSpec) -> None:
         seen.append(spec.virtual)
 
-    channel = _MountChannel(mount, admit, invalidate)
+    boundary = MagicMock()
+    boundary.admit = admit
+    boundary.complete = AsyncMock()
+    channel = _MountChannel(mount, boundary, invalidate)
     await channel.readdir(_path("/data/d"))
     await channel.stat(_path("/data/d/h"))
     assert seen == []
@@ -753,6 +762,26 @@ async def test_a_policy_denied_remnant_keeps_the_refusal():
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
+
+
+@pytest.mark.asyncio
+async def test_a_post_ops_deny_does_not_strand_the_cascade():
+    # A deletion is done by the time post_ops could speak, so the
+    # cascade never asks it: the rmdir takes the hidden remnant and the
+    # directory, rather than refusing with a child already gone.
+    ws = Workspace(
+        {"/a": RAMVFS()}, mode=MountMode.WRITE, policies=[DenyUnlinkAfter()]
+    )
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+    assert io.exit_code == 0, io.stderr
+    sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
+    token = set_current_session(sess)
+    try:
+        await ws.vfs.rmdir("/a/d")
+    finally:
+        reset_current_session(token)
+    gone = await ws.shell("test -e /a/d")
+    assert gone.exit_code == 1
 
 
 @pytest.mark.asyncio

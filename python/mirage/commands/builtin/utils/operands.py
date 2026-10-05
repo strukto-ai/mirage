@@ -321,9 +321,7 @@ async def read_operands(
     return ok, err
 
 
-def operands_io(
-    err: bytes, cache: list[str] | None = None, exit_code: int = 1
-) -> IOResult:
+def operands_io(err: bytes, exit_code: int = 1) -> IOResult:
     """IOResult carrying operand-split stderr lines.
 
     Exit ``exit_code`` when any operand failed, exit 0 otherwise; mirrors
@@ -333,13 +331,11 @@ def operands_io(
 
     Args:
         err (bytes): Concatenated stderr lines, ``b""`` for none.
-        cache (list[str] | None): Paths worth caching, if any.
         exit_code (int): The code to report when ``err`` is non-empty.
     """
     return IOResult(
         exit_code=0 if not err else exit_code,
         stderr=err or None,
-        cache=cache if cache is not None else [],
     )
 
 

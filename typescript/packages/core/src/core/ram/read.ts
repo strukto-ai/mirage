@@ -17,6 +17,7 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
 import { lookupError } from './dest.ts'
+import { eisdir } from '../../utils/errors.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 
@@ -45,6 +46,7 @@ export function read(
   const p = norm(path.mountPath)
   const whole = accessor.store.files.get(p)
   if (whole === undefined) {
+    if (accessor.store.dirs.has(p)) throw eisdir(path)
     throw lookupError(accessor, path, p)
   }
   const data = offset === 0 && size === null ? whole : sliceWindow(whole, offset, size)

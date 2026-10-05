@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { pathRulesActive } from '../../../../context/session_context.ts'
 import { isEacces, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
 import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
@@ -190,9 +189,9 @@ export async function walkEntries<A extends Accessor>(
 
 const du: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
-  // A native du sums the raw tree; under a path rule the walk is what
-  // reports a directory the rule refuses to open, where GNU does.
-  const native = pathRulesActive() ? undefined : ops.du
+  // Hides and path rules turn the native du off upstream (scopedIo),
+  // so the walk is what reports a directory a rule refuses to open.
+  const native = ops.du
   const budget = new WalkBudget(
     ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
     opts.ns?.mounts,

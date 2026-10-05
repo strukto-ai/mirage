@@ -63,6 +63,70 @@
       "flags": [
         "a"
       ]
+    },
+    {
+      "id": "tee_a_after_a_read_of_the_file",
+      "seq": 601055,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee6 && printf 'a\\nb\\n' > /data/ptee6/t.txt && x=$(cat /data/ptee6/t.txt; printf 'z\\n' | tee -a /data/ptee6/t.txt > /dev/null) && cat /data/ptee6/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "a"
+      ]
+    },
+    {
+      "id": "tee_a_fed_by_a_reader_of_the_file",
+      "seq": 601056,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee7 && printf 'a\\nb\\n' > /data/ptee7/t.txt && x=$(awk 1 /data/ptee7/t.txt | tee -a /data/ptee7/t.txt) && cat /data/ptee7/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\na\nb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "a"
+      ]
     }
   ]
 }

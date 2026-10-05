@@ -52,6 +52,15 @@ describe('stream (RAM)', () => {
     }).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('throws EISDIR for a directory', async () => {
+    const store = new RAMStore()
+    store.dirs.add('/sub')
+    const it = readStream(new RAMAccessor(store), mkPath('/sub'))
+    await expect(async () => {
+      for await (const _ of it) void _
+    }).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
   it('records bytes under active recording context', async () => {
     const store = new RAMStore()
     store.files.set('/a.txt', encode('abcd'))

@@ -194,9 +194,3 @@ function joinWith(parts: readonly Uint8Array[], sep: number): Uint8Array {
   }
   return out
 }
-
-export function countNewlines(data: Uint8Array): number {
-  let n = 0
-  for (let i = 0; i < data.byteLength; i++) if (data[i] === 0x0a) n += 1
-  return n
-}

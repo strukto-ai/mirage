@@ -234,9 +234,8 @@ export async function readOperands(
 // operand failed, exit 0 otherwise. The default is 1, which is every GNU
 // command in this family except the gzip one, whose code depends on the errno
 // and which passes the number readOperandsCoded reports.
-export function operandsIo(err: string, init?: { cache?: string[]; exitCode?: number }): IOResult {
+export function operandsIo(err: string, init?: { exitCode?: number }): IOResult {
   return new IOResult({
-    ...(init?.cache !== undefined ? { cache: init.cache } : {}),
     exitCode: err === '' ? 0 : (init?.exitCode ?? 1),
     stderr: err === '' ? null : encodeText(err),
   })

@@ -62,6 +62,11 @@ silent allow.
   thousands of ops under one recursive command — so keep it cheap;
   expensive decisions belong at `pre_command` or precomputed into
   policy state.
+  A denied directory reads like a mode-000 one: it still lists and
+  stats, and a walk (`find`, `du`, `ls -R`, `grep -r`) reports
+  `Permission denied` for it. A command you register yourself and
+  that reads its accessor directly never reaches a door, so this hook
+  never sees those reads; that handler is trusted host code.
 - **`pre_session`** — once per session-state write, before it lands.
   `export`, a plain assignment, `${X:=default}`, `$((X=5))` and
   `printf -v` all clear the same gate, because every writer goes

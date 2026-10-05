@@ -1349,6 +1349,22 @@
         "stdout": "rc=3\n",
         "stderr": "xxd: /data/xxd_od: Is a directory\n"
       }
+    },
+    {
+      "id": "readfail_redirect_from_a_dir_is_eisdir",
+      "seq": 15600652,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/rfredir && cat < /data/rfredir",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/rfredir: Is a directory\n"
+      },
+      "note": "Every backend now reads a directory as EISDIR. GNU bash opens it and lets cat fail the read (`cat: -: Is a directory`); Mirage refuses at the redirect, as it does on disk."
     }
   ]
 }

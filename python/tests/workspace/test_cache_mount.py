@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.commands.config import command
@@ -215,3 +217,54 @@ async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
     assert served == "v1\n", (
         "the guarded walk overwrote the entry it read past"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "cached", "stored"),
+    [
+        ("cat /d/f; printf 'z\\n' >> /d/f", None, b"b\na\nz\n"),
+        ("awk 1 /d/f | tee -a /d/f > /dev/null", None, b"b\na\nb\na\n"),
+        ("sort -o /d/f /d/f; printf 'z\\n' >> /d/f", None, b"a\nb\nz\n"),
+        ("printf 'q\\n' | tee /d/f >> /d/f", None, b"q\nq\n"),
+        ("printf 'q\\n' | tee /d/f >> /d/f 2>> /d/f", None, b"q\nq\n"),
+        ("cat /d/f; sort -o /d/f /d/f", b"a\nb\n", b"a\nb\n"),
+        ("cat /d/f | sort -o /d/f", b"a\nb\n", b"a\nb\n"),
+    ],
+)
+async def test_a_line_touching_a_file_twice_caches_only_a_whole_file(
+    line, cached, stored
+):
+    """An append, or a read before a write, leaves no entry; a whole write
+    after a read is kept."""
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ws = Workspace({"/d": ram}, mode=MountMode.WRITE)
+    await ws.shell("printf 'b\\na\\n' > /d/f")
+    await (await ws.shell("cat /d/f")).materialize_stdout()
+    await (await ws.shell(line)).materialize_stdout()
+    entry = await ws.cache.get("/d/f")
+    out = await (await ws.shell("cat /d/f")).materialize_stdout()
+    await ws.close()
+    assert (entry, out) == (cached, stored)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("caching", "line"),
+    [
+        (True, "cat /d/big | head -c 1; printf 'z\\n' >> /d/big"),
+        (False, "cat /d/big | head -c 1"),
+    ],
+)
+async def test_a_read_given_up_on_leaves_the_mount_free_to_unmount(
+    caching, line
+):
+    """A read the line gave up on is closed, or unmount waits on it."""
+    ram = RAMVFS()
+    ram.caches_reads = caching
+    ws = Workspace({"/d": ram}, mode=MountMode.WRITE)
+    await ws.shell("seq 1 200000 > /d/big")
+    await (await ws.shell(line)).materialize_stdout()
+    await asyncio.wait_for(ws.unmount("/d"), 10)
+    await ws.close()

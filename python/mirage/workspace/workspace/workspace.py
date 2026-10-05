@@ -727,6 +727,7 @@ class Workspace:
         mode: MountMode = MountMode.READ,
         read: ReadSpec | None = None,
         vfs_ref: str | None = None,
+        index: IndexConfig | None = None,
     ) -> MountEntry:
         """Add a VFS to a running workspace, mirroring TS ``addMount``.
 
@@ -742,6 +743,10 @@ class Workspace:
                 the workspace default.
             vfs_ref (str | None): the ``vfs:`` value the driver was built
                 from, recorded for snapshots; None for one built in code.
+            index (IndexConfig | None): the mount's own index; None takes
+                the workspace's. A VFS already mounted elsewhere keeps
+                the index of that mount, as in the constructor, and this
+                one goes unused.
 
         Returns:
             MountEntry: the installed mount, with its normalized prefix.
@@ -757,11 +762,12 @@ class Workspace:
         alias = next(
             (m for m in self._registry.mounts() if m.vfs is vfs), None
         )
+        own = index if index is not None else self._index_config
         check_read_capability(
             prefix,
             vfs,
             resolved_read,
-            alias.index_config if alias is not None else self._index_config,
+            alias.index_config if alias is not None else own,
         )
         self._registry.check_vfs_available(vfs)
         previous = self._registry.mounts()
@@ -770,7 +776,7 @@ class Workspace:
             vfs,
             mode,
             resolved_read,
-            index=self._index_config,
+            index=own,
             vfs_ref=vfs_ref,
         )
         prepare_added_mount(self._registry, entry, previous)

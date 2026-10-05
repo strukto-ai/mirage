@@ -13,12 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+import posixpath
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.dropbox.api import get_metadata
 from mirage.core.dropbox.client import DropboxApiError
+from mirage.core.dropbox.constants import CONTENT_HASH, MISS_SUMMARIES
+from mirage.core.dropbox.fingerprint import token_of
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.readdir import readdir
 from mirage.types import FileStat, FileType, PathSpec
@@ -49,7 +53,7 @@ def _stat_from_entry(entry: dict[str, Any]) -> FileStat:
         type=FileType.FILE,
         content=content_type_for_path(name),
         modified=modified,
-        fingerprint=modified or None,
+        fingerprint=token_of(entry.get(CONTENT_HASH)),
         extra={
             "dropbox_id": entry_id,
             "resource_type": "dropbox/file",
@@ -61,15 +65,21 @@ async def _stat_from_api(
     accessor: DropboxAccessor, path: PathSpec
 ) -> FileStat:
     # API-truthful stat for index-less callers (unlink/rmdir
-    # classification, walk fallbacks): get_metadata resolves directly.
+    # classification, walk fallbacks) and the fresh checks' throwaway
+    # store: one get_metadata. Only a not_found or not_folder 409 is a
+    # miss; any other (restricted_content, ...) names a path that may
+    # exist, so a fresh probe must not call it gone. get_metadata matches
+    # names case-insensitively where a listing is exact.
     try:
         entry = await get_metadata(
             accessor.token_manager, dropbox_path_of(accessor, path)
         )
     except DropboxApiError as exc:
-        if exc.status == 409:
+        if exc.status == 409 and exc.summary.startswith(MISS_SUMMARIES):
             raise enoent(path.virtual) from exc
         raise
+    if entry.get("name") != posixpath.basename(path.vfs_path.strip("/")):
+        raise enoent(path.virtual)
     return _stat_from_entry(entry)
 
 
@@ -83,7 +93,7 @@ async def stat(
     key = path.vfs_path
     if not key:
         return FileStat(name="/", type=FileType.DIRECTORY)
-    if index is NULL_INDEX:
+    if index is NULL_INDEX or isinstance(index, ListingCheckStore):
         return await _stat_from_api(accessor, path)
     virtual_key = prefix + "/" + key if prefix else "/" + key
 
@@ -126,7 +136,7 @@ async def stat(
         type=FileType.FILE,
         content=content_type_for_path(result.entry.vfs_name),
         modified=result.entry.remote_time,
-        fingerprint=result.entry.remote_time or None,
+        fingerprint=token_of(result.entry.extra.get(CONTENT_HASH)),
         extra={
             "dropbox_id": result.entry.id,
             "resource_type": result.entry.resource_type,

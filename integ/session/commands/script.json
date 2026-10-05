@@ -377,6 +377,50 @@
       }
     },
     {
+      "id": "scriptops_find_meets_a_refused_listing",
+      "seq": 923292,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "mkdir -p /scratch/vault && echo SECRET > /scratch/vault/k && find /scratch/vault",
+      "note": "GNU on a mode 0300 dir (debian:stable-slim, uid 1000): the dir prints, its listing is refused, exit 1.",
+      "expect": {
+        "exit": 1,
+        "stdout": "/scratch/vault\n",
+        "stderr": "find: '/scratch/vault': Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptops_du_meets_a_refused_listing",
+      "seq": 923293,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "mkdir -p /scratch/vault && echo SECRET > /scratch/vault/k && du -a /scratch/vault",
+      "note": "GNU (debian:stable-slim, a mode 0300 dir as uid 1000) prints the error, then the dir row, and exits 1; its row is 4 blocks where mirage counts bytes.",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\t/scratch/vault\n",
+        "stderr": "du: cannot read directory '/scratch/vault': Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptops_a_refused_listing_still_reads_a_named_file",
+      "seq": 923294,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "mkdir -p /scratch/vault && echo SECRET > /scratch/vault/k && cat /scratch/vault/k",
+      "expect": {
+        "exit": 0,
+        "stdout": "SECRET\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "scriptopsjs_prep",
       "seq": 923278,
       "targets": [
@@ -512,6 +556,50 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptopsjs_find_meets_a_refused_listing",
+      "seq": 923295,
+      "targets": [
+        "ram-scripted"
+      ],
+      "session": "scriptedopsjs",
+      "command": "mkdir -p /scratch/vault && echo SECRET > /scratch/vault/k && find /scratch/vault",
+      "note": "GNU on a mode 0300 dir (debian:stable-slim, uid 1000): the dir prints, its listing is refused, exit 1.",
+      "expect": {
+        "exit": 1,
+        "stdout": "/scratch/vault\n",
+        "stderr": "find: '/scratch/vault': Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptopsjs_du_meets_a_refused_listing",
+      "seq": 923296,
+      "targets": [
+        "ram-scripted"
+      ],
+      "session": "scriptedopsjs",
+      "command": "mkdir -p /scratch/vault && echo SECRET > /scratch/vault/k && du -a /scratch/vault",
+      "note": "GNU (debian:stable-slim, a mode 0300 dir as uid 1000) prints the error, then the dir row, and exits 1; its row is 4 blocks where mirage counts bytes.",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\t/scratch/vault\n",
+        "stderr": "du: cannot read directory '/scratch/vault': Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptopsjs_a_refused_listing_still_reads_a_named_file",
+      "seq": 923297,
+      "targets": [
+        "ram-scripted"
+      ],
+      "session": "scriptedopsjs",
+      "command": "mkdir -p /scratch/vault && echo SECRET > /scratch/vault/k && cat /scratch/vault/k",
+      "expect": {
+        "exit": 0,
+        "stdout": "SECRET\n",
         "stderr": ""
       }
     },

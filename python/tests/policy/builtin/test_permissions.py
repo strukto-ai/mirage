@@ -370,3 +370,13 @@ async def test_seeded_in_a_policies_chain_after_the_builtins():
         "history is read-only here", policy="PermissionsPolicy"
     )
     assert policies.wants("pre_ops")
+
+
+@pytest.mark.asyncio
+async def test_speaks_at_the_op_door_only_through_a_pure_path_rule():
+    p = _policy()
+    assert await p.wants_for("pre_ops", "s")
+    assert not await p.wants_for("pre_ops", "rev")
+    assert not await p.wants_for("pre_ops", "nobody")
+    assert await p.wants_for("pre_command", "rev")
+    assert not await Policies([p]).wants_for("pre_ops", "rev")
