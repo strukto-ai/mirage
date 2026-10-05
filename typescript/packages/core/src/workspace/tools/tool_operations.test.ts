@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Ops } from '../../ops/ops.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Session } from '../workspace/handle.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { MirageToolOperations } from './tool_operations.ts'
+import type { Policy } from '../../policy/base.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
+import type { OpsContext } from '../../policy/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 
@@ -239,6 +242,54 @@ describe('a session', () => {
     for (const result of [written, edited, hidden]) {
       expect(result.isError).toBe(true)
       expect(textOf(result)).toMatch(/^Error: /)
+    }
+  })
+
+  it('answers a file refused down to its stat as a tool error', async () => {
+    await ws.shell('mkdir /d && echo l > /d/locked.txt && echo o > /d/open.txt')
+    const lockedFile: Policy = {
+      preOps(ctx: OpsContext) {
+        return ctx.path.virtual === '/d/locked.txt' ? { kind: 'deny', reason: 'locked' } : null
+      },
+    }
+    ws.policies.add(lockedFile)
+    const read = await ops.call('read', { path: '/d/locked.txt' })
+    const written = await ops.call('write', { path: '/d/locked.txt', content: 'x' })
+    const edited = await ops.call('edit', {
+      path: '/d/locked.txt',
+      old_string: 'l',
+      new_string: 'm',
+    })
+    const globbed = await ops.call('glob', { pattern: '/d/*.txt' })
+    const literal = await ops.call('glob', { pattern: '/d/locked.txt' })
+    for (const result of [read, edited]) {
+      expect(result.isError).toBe(true)
+      expect(textOf(result)).not.toContain('not found')
+    }
+    expect(written.isError).toBe(true)
+    expect(textOf(written)).toMatch(/^Error: /)
+    expect(textOf(globbed)).toBe('/d/open.txt\n')
+    expect(textOf(literal)).toBe('')
+    expect(literal.isError).not.toBe(true)
+  })
+
+  it('answers a probe that fails with the tool error', async () => {
+    // A backend that cannot answer the existence probe proves nothing, so
+    // the tool reports the failure as its result instead of raising it.
+    await ws.shell('mkdir /d')
+    const spy = vi
+      .spyOn(Ops.prototype, 'exists')
+      .mockRejectedValue(Object.assign(new Error('Input/output error'), { code: 'EIO' }))
+    try {
+      const read = await ops.call('read', { path: '/d/flaky.txt' })
+      const written = await ops.call('write', { path: '/d/flaky.txt', content: 'x' })
+      // The read's own error stands, never the probe's.
+      expect(read.isError).toBe(true)
+      expect(textOf(read)).toBe('Error: /d/flaky.txt')
+      expect(written.isError).toBe(true)
+      expect(textOf(written)).toContain('Input/output error')
+    } finally {
+      spy.mockRestore()
     }
   })
 

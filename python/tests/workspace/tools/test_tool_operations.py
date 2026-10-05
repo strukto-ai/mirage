@@ -1,10 +1,14 @@
+import errno
+
 import pytest
 
-from mirage import RAMVFS, MountMode, Session, Workspace
+from mirage import RAMVFS, Deny, MountMode, Policy, Session, Workspace
 from mirage.context.session_context import (
     reset_current_session,
     set_current_session,
 )
+from mirage.ops.ops import Ops
+from mirage.policy import OpsContext
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 from mirage.workspace.tools.tool_operations import number_lines
 
@@ -333,6 +337,68 @@ async def test_a_refused_write_or_edit_is_a_tool_error():
     assert written.is_error and written.text.startswith("Error: ")
     assert edited.is_error and edited.text.startswith("Error: ")
     assert hidden.is_error and hidden.text.startswith("Error: ")
+
+
+class LockedFile(Policy):
+    """Refuse every op on one file, a stat included."""
+
+    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+        if ctx.path.virtual == "/d/locked.txt":
+            return Deny("locked")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_file_refused_down_to_its_stat_is_a_tool_error():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell(
+        "mkdir /d && echo l > /d/locked.txt && echo o > /d/open.txt"
+    )
+    ws.policies.add(LockedFile())
+    try:
+        read = await ws.tools.call("read", {"path": "/d/locked.txt"})
+        written = await ws.tools.call(
+            "write", {"path": "/d/locked.txt", "content": "x"}
+        )
+        edited = await ws.tools.call(
+            "edit",
+            {"path": "/d/locked.txt", "old_string": "l", "new_string": "m"},
+        )
+        globbed = await ws.tools.call("glob", {"pattern": "/d/*.txt"})
+        literal = await ws.tools.call("glob", {"pattern": "/d/locked.txt"})
+    finally:
+        await ws.close()
+    assert read.is_error and "not found" not in read.text
+    assert edited.is_error and "not found" not in edited.text
+    assert written.is_error and written.text.startswith("Error: ")
+    assert globbed.text == "/d/open.txt\n"
+    assert literal.text == "" and not literal.is_error
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_fails_leaves_the_tool_error(monkeypatch):
+    # A backend that cannot answer the existence probe proves nothing, so
+    # the tool reports the failure as its result instead of raising it.
+    real = Ops.exists
+
+    async def flaky(self, path, *, session_id=None):
+        if path == "/d/flaky.txt":
+            raise OSError(errno.EIO, "Input/output error", path)
+        return await real(self, path, session_id=session_id)
+
+    monkeypatch.setattr(Ops, "exists", flaky)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /d")
+    try:
+        read = await ws.tools.call("read", {"path": "/d/flaky.txt"})
+        written = await ws.tools.call(
+            "write", {"path": "/d/flaky.txt", "content": "x"}
+        )
+    finally:
+        await ws.close()
+    # The read's own error stands, never the probe's.
+    assert read.is_error and read.text == "Error: /d/flaky.txt"
+    assert written.is_error and "Input/output error" in written.text
 
 
 @pytest.mark.asyncio
