@@ -779,6 +779,7 @@ export async function unzipGeneric(
     let checkdirFailed = false
     let createFailed = false
     let answers: AsyncLineIterator | null = null
+    const extracted = new Set<string>()
     let replaceAll = parsed.overwrite && !parsed.neverOverwrite
     let skipAll = parsed.neverOverwrite
     const answer = async (): Promise<Uint8Array | null> => {
@@ -793,8 +794,13 @@ export async function unzipGeneric(
     const destination = async (start: string): Promise<string | null> => {
       let outPath = start
       for (;;) {
-        if (replaceAll || stat === undefined) return outPath
-        if (!(await pathExists(stat, makePathSpec(outPath)))) return outPath
+        if (replaceAll) return outPath
+        // Two members can map to one path, so what this run wrote counts as
+        // there even without a stat to ask.
+        const exists =
+          extracted.has(outPath) ||
+          (stat !== undefined && (await pathExists(stat, makePathSpec(outPath))))
+        if (!exists) return outPath
         if (skipAll) return null
         const prompt = REPLACE_PROMPT(shown(outPath))
         const line = await answer()
@@ -920,6 +926,7 @@ export async function unzipGeneric(
       // Relay writes land on whichever mount owns each path and
       // invalidate through the dispatcher; keying them here would have
       // the runner prefix them onto this mount.
+      extracted.add(target)
       if (!relay) writes[target] = content
       if (!quiet) outputLines.push(extractedLine(e.method, shown(target)))
     }

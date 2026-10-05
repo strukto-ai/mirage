@@ -53,6 +53,7 @@ const unzip: BuilderFn = async (ops, accessor, paths, texts, opts) => {
     (p) => ops.readStream(accessor, p, idx),
     (p, d) => write(accessor, p, d),
     (p, parents) => mkdir(accessor, p, parents),
+    (p) => ops.stat(accessor, p, idx),
   )
 }
 

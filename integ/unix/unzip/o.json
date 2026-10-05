@@ -426,6 +426,42 @@
         "stderr": "replace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: new name: "
       },
       "flags": []
+    },
+    {
+      "id": "unzip_two_members_mapped_to_one_path_meet_the_prompt",
+      "seq": 16100127,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzdup && printf %s 'UEsDBBQAAAAAAAAAIVwqs0rHBgAAAAYAAAAHAAAAYS9iLnR4dGZpcnN0ClBLAwQUAAAAAAAAACFcfsAPBgcAAAAHAAAACgAAAGEvLi4vYi50eHRzZWNvbmQKUEsBAhQDFAAAAAAAAAAhXCqzSscGAAAABgAAAAcAAAAAAAAAAAAAAIABAAAAAGEvYi50eHRQSwECFAMUAAAAAAAAACFcfsAPBgcAAAAHAAAACgAAAAAAAAAAAAAAgAErAAAAYS8uLi9iLnR4dFBLBQYAAAAAAgACAG0AAABaAAAAAAA=' | base64 -d > /data/uzdup/m.zip && cd /data/uzdup && unzip -d d1 m.zip </dev/null; echo rc=$?; cat d1/a/b.txt; unzip -n -d d2 m.zip; echo rc=$?; cat d2/a/b.txt; unzip -o -d d3 m.zip; echo rc=$?; cat d3/a/b.txt; cd / && rm -r /data/uzdup)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  m.zip\n extracting: d1/a/b.txt              \nwarning:  skipped \"../\" path component(s) in a/../b.txt\nrc=1\nfirst\nArchive:  m.zip\n extracting: d2/a/b.txt              \nwarning:  skipped \"../\" path component(s) in a/../b.txt\nrc=1\nfirst\nArchive:  m.zip\n extracting: d3/a/b.txt              \nwarning:  skipped \"../\" path component(s) in a/../b.txt\n extracting: d3/a/b.txt              \nrc=1\nsecond\n",
+        "stderr": "replace d1/a/b.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename:  NULL\n(EOF or read error, treating as \"[N]one\" ...)\n"
+      },
+      "flags": [
+        "n",
+        "o",
+        "d"
+      ]
     }
   ]
 }

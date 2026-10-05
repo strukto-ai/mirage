@@ -812,6 +812,7 @@ async def _run(
     checkdir_failed = False
     create_failed = False
     answers: AsyncLineIterator | None = None
+    extracted: set[str] = set()
     replace_all = overwrite
     skip_all = never
 
@@ -836,9 +837,16 @@ async def _run(
         """
         nonlocal replace_all, skip_all, exit_code
         while True:
-            if replace_all or stat is None:
+            if replace_all:
                 return out_path
-            if not await path_exists(stat, PathSpec.from_str_path(out_path)):
+            # Two members can map to one path, so what this run wrote
+            # counts as there even without a stat to ask.
+            exists = out_path in extracted
+            if not exists and stat is not None:
+                exists = await path_exists(
+                    stat, PathSpec.from_str_path(out_path)
+                )
+            if not exists:
                 return out_path
             if skip_all:
                 return None
@@ -963,6 +971,7 @@ async def _run(
                 )
             )
             continue
+        extracted.add(out_path)
         if not relay:
             # Relay writes land on whichever mount owns each path and
             # invalidate through the dispatcher; keying them here would
