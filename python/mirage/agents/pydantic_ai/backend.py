@@ -12,258 +12,179 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import logging
+import posixpath
 import shlex
-from collections.abc import Awaitable
-from typing import TypeVar
+from collections.abc import Mapping
 
-from pydantic_ai_backends.protocol import SandboxProtocol
-from pydantic_ai_backends.types import (
-    EditResult,
-    ExecuteResponse,
-    FileInfo,
-    GrepMatch,
-    WriteResult,
+from pydantic_ai.workspaces import (
+    CommandResult,
+    FileEntry,
+    WorkspaceCommand,
+    WorkspaceRef,
+    WorkspaceTimeoutError,
+    WorkspaceUnavailableError,
 )
 
+from mirage.agents.pydantic_ai.constants import PROVIDER
 from mirage.agents.pydantic_ai.convert import (
-    io_to_execute_response,
-    io_to_file_infos,
-    io_to_grep_matches,
+    io_to_command_result,
+    stat_to_entry,
 )
-from mirage.bridge.sync import run_async_from_sync
-from mirage.io.types import IOResult
 from mirage.ops.ops import Ops
-from mirage.workspace.tools.io_text import replace_text
+from mirage.types import FileType
+from mirage.workspace.tools.tool_operations import ensure_parents
 from mirage.workspace.workspace import Session, Workspace
 
-T = TypeVar("T")
+logger = logging.getLogger(__name__)
 
 
-class PydanticAIWorkspace(SandboxProtocol):
-    """Pydantic AI backend backed by a Mirage Workspace.
+async def _remove(vfs: Ops, path: str) -> None:
+    st = await vfs.stat(path, nofollow=True)
+    if st.type != FileType.DIRECTORY:
+        await vfs.unlink(path)
+        return
+    for child in await vfs.readdir(path):
+        await _remove(vfs, child.rstrip("/"))
+    await vfs.rmdir(path)
 
-    File operations (read, write, edit, ls) go through the Ops layer directly.
-    Shell operations (execute, grep, glob) go through Workspace.shell()
-    for pipe and flag support. Both run as the session, so its profile
-    judges every call.
+
+class MirageWorkspaceBackend:
+    """A Mirage session as the environment a Pydantic AI run works in.
+
+    Commands run in Mirage's shell and files go through its op facade,
+    both as the session, so its profile judges every call. A command
+    runs in a clone of the session at its working directory, as a
+    subshell does: a ``cd`` or an ``export`` in one command does not
+    reach the next. The ref names the session; a session that is gone
+    answers ``WorkspaceUnavailableError``, and none is ever created.
 
     Args:
         workspace (Workspace): The workspace to operate on.
-        sandbox_id (str): The id the backend reports.
-        session_id (str | None): The session the backend acts as; None
-            is the workspace's default session.
+        session_id (str | None): The session to act as; None is the
+            workspace's default session, named in the ref on first use.
     """
 
     def __init__(
-        self,
-        workspace: Workspace,
-        sandbox_id: str = "mirage",
-        session_id: str | None = None,
+        self, workspace: Workspace, session_id: str | None = None
     ) -> None:
         self._ws = workspace
-        self._id = sandbox_id
-        self._session_id = session_id
-
-    def _run(self, coro: Awaitable[T]) -> T:
-        return run_async_from_sync(coro)
-
-    @property
-    def _vfs(self) -> Ops:
-        """The op facade run as this backend's session."""
-        if self._session_id is None:
-            return self._ws.vfs
-        return Session(self._ws, self._session_id).vfs
+        self._ref = (
+            None
+            if session_id is None
+            else WorkspaceRef(provider=PROVIDER, id=session_id)
+        )
 
     @property
-    def id(self) -> str:
-        return self._id
+    def ref(self) -> WorkspaceRef | None:
+        return self._ref
 
-    async def _exec(self, command: str) -> IOResult:
-        return await self._ws.shell(command, session_id=self._session_id)
-
-    def _read_bytes(self, path: str) -> bytes:
-        return self.read_bytes(path)
-
-    async def _aread_bytes(self, path: str) -> bytes:
-        return await self.aread_bytes(path)
-
-    def read_bytes(self, path: str) -> bytes:
-        return self._run(self.aread_bytes(path))
-
-    async def aread_bytes(self, path: str) -> bytes:
-        ops = self._vfs
-        return await ops.read(path)
-
-    def exists(self, path: str) -> bool:
-        return self._run(self.aexists(path))
-
-    async def aexists(self, path: str) -> bool:
+    async def _session(self) -> Session:
+        await self._ws.ensure_sessions_loaded()
+        if self._ref is None:
+            self._ref = WorkspaceRef(
+                provider=PROVIDER, id=self._ws.default_session_id
+            )
         try:
-            await self._vfs.stat(path)
-        except (FileNotFoundError, NotADirectoryError, ValueError):
-            return False
-        return True
+            self._ws.get_session(self._ref.id)
+        except KeyError:
+            raise WorkspaceUnavailableError(
+                f"mirage session {self._ref.id!r} does not exist"
+            ) from None
+        return Session(self._ws, self._ref.id)
 
-    # -- execute -------------------------------------------------------
+    async def working_dir(self) -> str:
+        return (await self._session()).state.cwd
 
-    def execute(
-        self, command: str, timeout: int | None = None
-    ) -> ExecuteResponse:
-        return self._run(self.aexecute(command, timeout=timeout))
+    async def run(
+        self,
+        command: WorkspaceCommand,
+        *,
+        shell: bool = False,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> CommandResult:
+        if shell != isinstance(command, str):
+            raise TypeError(
+                "a shell string needs shell=True, an argv sequence shell=False"
+            )
+        line = command if isinstance(command, str) else shlex.join(command)
+        session = await self._session()
+        try:
+            io = await asyncio.wait_for(
+                session.shell(
+                    line,
+                    cwd=session.state.cwd,
+                    env=dict(env) if env else None,
+                ),
+                timeout,
+            )
+        except TimeoutError:
+            raise WorkspaceTimeoutError(
+                f"command timed out after {timeout}s"
+            ) from None
+        return await io_to_command_result(io)
 
-    async def aexecute(
-        self, command: str, timeout: int | None = None
-    ) -> ExecuteResponse:
-        io = await self._exec(command)
-        return io_to_execute_response(io)
+    async def read_bytes(self, path: str) -> bytes:
+        return await (await self._session()).vfs.read(path)
 
-    # -- ls_info -------------------------------------------------------
+    async def write_bytes(self, path: str, data: bytes) -> None:
+        vfs = (await self._session()).vfs
+        await ensure_parents(vfs, path)
+        await vfs.write(path, data)
 
-    def ls_info(self, path: str) -> list[FileInfo]:
-        return self._run(self.als_info(path))
+    async def stat(self, path: str) -> FileEntry:
+        vfs = (await self._session()).vfs
+        return stat_to_entry(path, await vfs.stat(path))
 
-    async def als_info(self, path: str) -> list[FileInfo]:
-        io = await self._exec(f"ls {shlex.quote(path)}")
-        stdout = (await io.stdout_str()).strip()
-        if not stdout:
-            return []
-        base = path.rstrip("/")
-        result: list[FileInfo] = []
-        for name in stdout.split("\n"):
-            name = name.strip()
-            if not name:
-                continue
-            is_dir = name.endswith("/")
-            clean = name.rstrip("/")
-            result.append(
-                FileInfo(
-                    name=clean,
-                    path=f"{base}/{clean}",
-                    is_dir=is_dir,
-                    size=None,
+    async def list_dir(self, path: str) -> list[FileEntry]:
+        vfs = (await self._session()).vfs
+        entries = []
+        for child in await vfs.readdir(path):
+            child = child.rstrip("/")
+            try:
+                entries.append(stat_to_entry(child, await vfs.stat(child)))
+            except OSError as exc:
+                logger.debug("listing %s: %s", child, exc)
+                entries.append(
+                    FileEntry(
+                        name=posixpath.basename(child),
+                        path=child,
+                        is_dir=False,
+                        size=None,
+                    )
                 )
+        return entries
+
+    async def make_dir(self, path: str) -> None:
+        vfs = (await self._session()).vfs
+        await ensure_parents(vfs, path)
+        try:
+            await vfs.mkdir(path)
+        except FileExistsError:
+            if not await vfs.is_dir(path):
+                raise
+
+    async def remove(self, path: str) -> None:
+        session = await self._session()
+        root = session.state.cwd
+        parent = await self.realpath(posixpath.dirname(path))
+        target = posixpath.join(parent, posixpath.basename(path))
+        if target == root or root.startswith(target.rstrip("/") + "/"):
+            raise ValueError(
+                "refusing to remove the working directory or an ancestor"
             )
-        return result
+        await _remove(session.vfs, path)
 
-    # -- read ----------------------------------------------------------
+    async def exists(self, path: str) -> bool:
+        return await (await self._session()).vfs.exists(path)
 
-    def read(self, path: str, offset: int = 0, limit: int = 2000) -> str:
-        return self._run(self.aread(path, offset, limit))
-
-    async def aread(
-        self, path: str, offset: int = 0, limit: int = 2000
-    ) -> str:
-        ops = self._vfs
-        try:
-            data = await ops.read(path)
-        except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
-            return f"Error: {exc}"
-        text = data.decode("utf-8", errors="replace")
-        lines = text.splitlines(keepends=True)
-        sliced = lines[offset : offset + limit]
-        numbered = []
-        for i, line in enumerate(sliced, start=offset + 1):
-            numbered.append(f"{i:>6}\t{line}")
-        return "".join(numbered)
-
-    # -- write ---------------------------------------------------------
-
-    def write(self, path: str, content: str | bytes) -> WriteResult:
-        return self._run(self.awrite(path, content))
-
-    async def awrite(self, path: str, content: str | bytes) -> WriteResult:
-        ops = self._vfs
-        try:
-            await ops.stat(path)
-            return WriteResult(error=f"Error: file '{path}' already exists")
-        except (FileNotFoundError, NotADirectoryError, ValueError):
-            # missing file is the good path: the write may proceed
-            pass
-        parent = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
-        try:
-            await ops.mkdir(parent)
-        except (FileExistsError, ValueError):
-            # mkdir -p semantics: an existing parent is success
-            pass
-        data = content.encode("utf-8") if isinstance(content, str) else content
-        await ops.write(path, data)
-        return WriteResult(path=path)
-
-    # -- edit ----------------------------------------------------------
-
-    def edit(
-        self,
-        path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        return self._run(self.aedit(path, old_string, new_string, replace_all))
-
-    async def aedit(
-        self,
-        path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        ops = self._vfs
-        try:
-            data = await ops.read(path)
-        except (FileNotFoundError, NotADirectoryError, ValueError):
-            return EditResult(error=f"Error: file '{path}' not found")
-        content = data.decode("utf-8", errors="replace")
-        new_content, count = replace_text(
-            content, old_string, new_string, replace_all
+    async def realpath(self, path: str) -> str:
+        session = await self._session()
+        io = await session.shell(
+            shlex.join(["realpath", "-m", "--", path]), record=False
         )
-        if count == 0:
-            return EditResult(
-                error=f"Error: string not found in file: '{old_string}'"
-            )
-        if count > 1 and not replace_all:
-            return EditResult(
-                error=f"Error: string '{old_string}' appears {count} times. "
-                f"Use replace_all=True"
-            )
-        await ops.write(path, new_content.encode("utf-8"))
-        return EditResult(path=path, occurrences=count if replace_all else 1)
-
-    # -- grep_raw ------------------------------------------------------
-
-    def grep_raw(
-        self,
-        pattern: str,
-        path: str | None = None,
-        glob: str | None = None,
-        ignore_hidden: bool = True,
-    ) -> list[GrepMatch] | str:
-        return self._run(self.agrep_raw(pattern, path, glob, ignore_hidden))
-
-    async def agrep_raw(
-        self,
-        pattern: str,
-        path: str | None = None,
-        glob: str | None = None,
-        ignore_hidden: bool = True,
-    ) -> list[GrepMatch] | str:
-        parts = ["grep", "-rn"]
-        if glob:
-            parts.extend(["--include", shlex.quote(glob)])
-        parts.append(shlex.quote(pattern))
-        parts.append(shlex.quote(path or "/"))
-        io = await self._exec(" ".join(parts))
-        return io_to_grep_matches(io)
-
-    # -- glob_info -----------------------------------------------------
-
-    def glob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
-        return self._run(self.aglob_info(pattern, path))
-
-    async def aglob_info(
-        self, pattern: str, path: str = "/"
-    ) -> list[FileInfo]:
-        name = pattern.split("/")[-1] if "/" in pattern else pattern
-        io = await self._exec(
-            f"find {shlex.quote(path)} -name {shlex.quote(name)}"
-        )
-        return io_to_file_infos(io)
+        if io.exit_code != 0:
+            raise OSError((await io.stderr_str()).strip())
+        return (await io.stdout_str()).removesuffix("\n")

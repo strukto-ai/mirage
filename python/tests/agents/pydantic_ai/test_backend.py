@@ -13,9 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
+from pydantic_ai.workspaces import WorkspaceRef, WorkspaceUnavailableError
+from pydantic_ai.workspaces.conformance import WorkspaceBackendSuite
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.agents.pydantic_ai.backend import PydanticAIWorkspace
+from mirage.agents.pydantic_ai.backend import MirageWorkspaceBackend
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 @pytest.fixture
@@ -23,112 +30,51 @@ def workspace():
     return Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 
-@pytest.fixture
-def backend(workspace):
-    return PydanticAIWorkspace(workspace)
+class TestConformance(WorkspaceBackendSuite):
+    @pytest.fixture
+    def backend(self, workspace):
+        return MirageWorkspaceBackend(workspace)
+
+    @pytest.fixture
+    def fresh_backend(self, workspace):
+        return lambda: MirageWorkspaceBackend(workspace)
+
+    @pytest.fixture
+    def attach_backend(self, workspace):
+        return lambda ref: MirageWorkspaceBackend(workspace, ref.id)
+
+    @pytest.fixture
+    def filesystem_honors_shell_permissions(self):
+        return False
 
 
-def test_id(backend):
-    assert backend.id == "mirage"
+@pytest.mark.anyio
+async def test_a_command_runs_in_a_clone_of_the_session(workspace):
+    backend = MirageWorkspaceBackend(workspace)
+    await backend.run("mkdir /sub && cd /sub && export X=1", shell=True)
+    result = await backend.run('pwd; echo "x=$X"', shell=True)
+    assert result.stdout == "/\nx=\n"
+    assert await backend.working_dir() == "/"
 
 
-def test_custom_id(workspace):
-    b = PydanticAIWorkspace(workspace, sandbox_id="custom")
-    assert b.id == "custom"
-
-
-@pytest.mark.asyncio
-async def test_aexecute_echo(backend):
-    resp = await backend.aexecute("echo hello")
-    assert resp.exit_code == 0
-    assert "hello" in resp.output
-
-
-@pytest.mark.asyncio
-async def test_aexecute_failing_command(backend):
-    resp = await backend.aexecute("cat /nonexistent")
-    assert resp.exit_code != 0
-
-
-@pytest.mark.asyncio
-async def test_awrite_and_aread(backend):
-    result = await backend.awrite("/test.txt", "hello world")
-    assert result.error is None
-
-    content = await backend.aread("/test.txt")
-    assert "hello world" in content
-
-
-@pytest.mark.asyncio
-async def test_awrite_existing_file_errors(backend):
-    await backend.awrite("/exists.txt", "first")
-    result = await backend.awrite("/exists.txt", "second")
-    assert result.error is not None
-
-
-@pytest.mark.asyncio
-async def test_aedit(backend):
-    await backend.awrite("/edit.txt", "foo bar baz")
-    result = await backend.aedit("/edit.txt", "bar", "qux")
-    assert result.error is None
-    content = await backend.aread("/edit.txt")
-    assert "qux" in content
-    assert "bar" not in content
-
-
-@pytest.mark.asyncio
-async def test_als_info(backend):
-    await backend.awrite("/dir/a.txt", "a")
-    await backend.awrite("/dir/b.txt", "b")
-    entries = await backend.als_info("/dir")
-    paths = [e["path"] for e in entries]
-    assert len(paths) == 2
-
-
-@pytest.mark.asyncio
-async def test_agrep_raw(backend):
-    await backend.awrite(
-        "/search.txt", "hello world\ngoodbye world\nhello again"
+@pytest.mark.anyio
+async def test_a_refusal_is_appended_to_stderr():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        route_policy=lambda ctx: (
+            {"deny": "no lists"} if ctx.command == "ls" else None
+        ),
     )
-    result = await backend.agrep_raw("hello", path="/")
-    assert isinstance(result, list)
-    assert len(result) >= 2
+    result = await MirageWorkspaceBackend(ws).run(["ls", "/"])
+    assert (result.exit_code, result.stderr) == (
+        126,
+        "ls: Permission denied\npolicy denied: no lists\n",
+    )
 
 
-@pytest.mark.asyncio
-async def test_aglob_info(backend):
-    await backend.awrite("/data/a.txt", "a")
-    await backend.awrite("/data/b.py", "b")
-    entries = await backend.aglob_info("*.txt", path="/data")
-    paths = [e["path"] for e in entries]
-    assert any("a.txt" in p for p in paths)
-    assert not any("b.py" in p for p in paths)
-
-
-@pytest.mark.asyncio
-async def test_execute_pipe(backend):
-    await backend.awrite("/pipe.txt", "aaa\nbbb\nccc\naaa\n")
-    resp = await backend.aexecute("cat /pipe.txt | sort | uniq | wc -l")
-    assert resp.exit_code == 0
-    assert "3" in resp.output
-
-
-@pytest.mark.asyncio
-async def test_read_bytes(backend):
-    await backend.awrite("/bytes.txt", "binary content")
-    data = await backend.aread_bytes("/bytes.txt")
-    assert data == b"binary content"
-
-
-@pytest.mark.asyncio
-async def test_exists(backend):
-    assert not await backend.aexists("/missing.txt")
-    await backend.awrite("/exists.txt", "content")
-    assert await backend.aexists("/exists.txt")
-
-
-@pytest.mark.asyncio
-async def test_file_operations_act_as_the_session():
+@pytest.mark.anyio
+async def test_files_act_as_the_session():
     ws = Workspace(
         {"/": RAMVFS(), "/vault": RAMVFS()},
         mode=MountMode.WRITE,
@@ -136,11 +82,18 @@ async def test_file_operations_act_as_the_session():
     )
     await ws.shell("echo key > /vault/key.txt")
     ws.create_session("agent", profile="guarded")
-    backend = PydanticAIWorkspace(ws, session_id="agent")
-    try:
-        exists = await backend.aexists("/vault/key.txt")
-        read = await backend.aread("/vault/key.txt")
-    finally:
-        await ws.close()
-    assert exists is False
-    assert read.startswith("Error: ")
+    backend = MirageWorkspaceBackend(ws, "agent")
+    assert backend.ref == WorkspaceRef(provider="mirage", id="agent")
+    with pytest.raises(FileNotFoundError):
+        await backend.read_bytes("/vault/key.txt")
+    assert "vault" not in {e.name for e in await backend.list_dir("/")}
+
+
+@pytest.mark.anyio
+async def test_a_closed_session_is_unavailable(workspace):
+    workspace.create_session("agent")
+    backend = MirageWorkspaceBackend(workspace, "agent")
+    await backend.working_dir()
+    await workspace.close_session("agent")
+    with pytest.raises(WorkspaceUnavailableError):
+        await backend.working_dir()

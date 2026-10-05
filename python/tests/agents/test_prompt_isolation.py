@@ -65,7 +65,7 @@ def deepagents_blocked():
 def test_pydantic_ai_package_imports_without_deepagents(deepagents_blocked):
     mod = importlib.import_module("mirage.agents.pydantic_ai")
     assert isinstance(mod.MIRAGE_SYSTEM_PROMPT, str)
-    assert mod.PydanticAIWorkspace is not None
+    assert mod.MirageWorkspace is not None
 
 
 def test_openai_agents_package_imports_without_deepagents(deepagents_blocked):

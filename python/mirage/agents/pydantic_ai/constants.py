@@ -12,13 +12,4 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.agents.prompt import MIRAGE_SYSTEM_PROMPT, build_system_prompt
-from mirage.agents.pydantic_ai.backend import MirageWorkspaceBackend
-from mirage.agents.pydantic_ai.capability import MirageWorkspace
-
-__all__ = [
-    "MirageWorkspace",
-    "MirageWorkspaceBackend",
-    "MIRAGE_SYSTEM_PROMPT",
-    "build_system_prompt",
-]
+PROVIDER = "mirage"
