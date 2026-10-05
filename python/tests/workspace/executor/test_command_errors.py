@@ -14,7 +14,6 @@ from mirage.workspace.mount.mount import MountEntry
 
 
 def failing_command(name, error, lazy=True):
-
     async def stream():
         yield b"/bad/visible\n"
         raise error

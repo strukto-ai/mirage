@@ -16,7 +16,6 @@ async def _drain(gen):
     ],
 )
 async def test_head_reads_across_chunks(chunks, flags, expected):
-
     async def src():
         for chunk in chunks:
             yield chunk

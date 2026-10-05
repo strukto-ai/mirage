@@ -35,7 +35,6 @@ async def test_output_is_read_inside_the_running_command():
     seen: list[int | None] = []
 
     async def fn(ops, accessor, paths, texts, opts):
-
         async def walk():
             seen.append(command_started())
             yield b"hit\n"

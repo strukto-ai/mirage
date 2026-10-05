@@ -76,7 +76,6 @@ def test_an_unknown_state_is_pending_rather_than_failed():
 
 @pytest.mark.asyncio
 async def test_a_cancelled_check_does_not_fail_the_command(monkeypatch):
-
     async def checks(config, ref, number):
         return [{"name": "t", "conclusion": "cancelled"}]
 
@@ -89,7 +88,6 @@ async def test_a_cancelled_check_does_not_fail_the_command(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_failing_check_still_exits_one(monkeypatch):
-
     async def checks(config, ref, number):
         return [{"name": "t", "conclusion": "failure"}]
 
@@ -119,7 +117,6 @@ NAME_ONLY_DIFF = (
 
 @pytest.mark.asyncio
 async def test_name_only_prints_the_b_side_of_each_header(monkeypatch):
-
     async def diff(config, ref, number):
         return NAME_ONLY_DIFF
 
@@ -353,7 +350,6 @@ async def test_a_paged_connection_is_read_to_its_end(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_status_checks_come_from_the_one_commit_gh_rolls_up(monkeypatch):
-
     def rollup(nodes, following):
         return {
             "statusCheckRollup": {

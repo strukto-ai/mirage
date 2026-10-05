@@ -91,17 +91,15 @@ import {
 import {
   effectivePathMode,
   getCurrentSession,
-  hiddenPathsIntersect,
   hiddenRefusal,
-  liveSessions,
-  pathAllowed,
+  sessionVisibility,
 } from '../../context/session_context.ts'
-import { moveReveals } from '../../utils/hidden.ts'
+import { hiddenUnder, moveReveals, pathVisible } from '../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
 /**
- * Drop listing entries the current session's spec hides.
+ * Drop listing entries the bound session hides.
  *
  * Entry shapes vary by backend (bare names, trailing-slash names, full
  * paths), so each is keyed by its final segment against the listed
@@ -109,10 +107,11 @@ import { encodeText } from '../../shell/bytes.ts'
  */
 function visibleEntries(entries: string[], parent: string): string[] {
   const base = rstripSlash(parent)
+  const vis = sessionVisibility()
   return entries.filter((e) => {
     const trimmed = rstripSlash(e)
     const name = trimmed.slice(trimmed.lastIndexOf('/') + 1)
-    return pathAllowed(`${base}/${name}`)
+    return pathVisible(vis, `${base}/${name}`)
   })
 }
 
@@ -266,11 +265,12 @@ export class Dispatcher {
    * namespace knows nothing at `virtual`.
    */
   private namespaceResult(opName: string, virtual: string): string[] | FileStat | null {
+    const vis = sessionVisibility()
     if (opName === 'readdir') {
-      return namespaceListing(this.namespace.mountPrefixes(), this.namespace, virtual)
+      return namespaceListing(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
     }
     if (opName === 'stat') {
-      return namespaceStat(this.namespace.mountPrefixes(), this.namespace, virtual)
+      return namespaceStat(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
     }
     return null
   }
@@ -309,12 +309,13 @@ export class Dispatcher {
     // checked so a link inside hidden space cannot be followed out of
     // it, the followed path is re-checked so a visible link cannot
     // lead in, and a rename destination is a create.
-    if (!pathAllowed(path.virtual)) {
-      throw hiddenRefusal(path.virtual, HIDDEN_CREATE_OPS.has(opName))
+    const vis = sessionVisibility()
+    if (!pathVisible(vis, path.virtual)) {
+      throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(opName))
     }
     let dstArg = args?.[0]
-    if (opName === 'rename' && dstArg instanceof PathSpec && !pathAllowed(dstArg.virtual)) {
-      throw hiddenRefusal(dstArg.virtual, true)
+    if (opName === 'rename' && dstArg instanceof PathSpec && !pathVisible(vis, dstArg.virtual)) {
+      throw hiddenRefusal(vis, dstArg.virtual, true)
     }
     // An operand the walk already refused (the empty name, a link loop)
     // names nothing an op can reach, whatever `virtual` says.
@@ -364,13 +365,11 @@ export class Dispatcher {
       // (rmR, the remnant rmdir below); relocating it into view is
       // refused. Only a directory has anything below it to re-anchor,
       // so a file source passes.
-      for (const sess of liveSessions()) {
-        if (
-          moveReveals(sess.hiddenPaths, sess.shownPaths, path.virtual, dstArg.virtual) &&
-          (await this.movedSourceIsDir(path, issuer))
-        ) {
-          throw eacces(path.virtual)
-        }
+      if (
+        moveReveals(vis, path.virtual, dstArg.virtual) &&
+        (await this.movedSourceIsDir(path, issuer))
+      ) {
+        throw eacces(path.virtual)
       }
     }
     if (
@@ -406,7 +405,9 @@ export class Dispatcher {
       const followed = followOrLoop(this.namespace, path, true)
       if (followed !== path.virtual) {
         p = PathSpec.fromStrPath(followed)
-        if (!pathAllowed(p.virtual)) throw hiddenRefusal(p.virtual, HIDDEN_CREATE_OPS.has(opName))
+        if (!pathVisible(vis, p.virtual)) {
+          throw hiddenRefusal(vis, p.virtual, HIDDEN_CREATE_OPS.has(opName))
+        }
       }
     }
     if (ruleGate != null && !noFollow) judge(ruleGate, typed, path, p)
@@ -513,7 +514,7 @@ export class Dispatcher {
     const mountPrefix = mount.prefix
     if (
       opName === 'rmdir' &&
-      this.namespace.linkStatsBelow(p.virtual).some(([link]) => pathAllowed(link))
+      this.namespace.linkStatsBelow(p.virtual).some(([link]) => pathVisible(vis, link))
     ) {
       throw enotempty(p.virtual)
     }
@@ -693,7 +694,7 @@ export class Dispatcher {
     served(report, result)
     if (opName === 'readdir' && Array.isArray(result)) {
       result = visibleEntries(
-        mergeReaddir(result, this.namespace.mountPrefixes(), this.namespace, p.virtual),
+        mergeReaddir(vis, result, this.namespace.mountPrefixes(), this.namespace, p.virtual),
         p.virtual,
       )
     }
@@ -828,8 +829,9 @@ export class Dispatcher {
         // its parents), and the purge taking the directory's hidden nodes
         // must not take it too.
         const arrived = new Set<string>()
+        const vis = sessionVisibility()
         for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
-          if (pathAllowed(link)) arrived.add(link)
+          if (pathVisible(vis, link)) arrived.add(link)
         }
         await this.namespace.purgeUnder(p.virtual, arrived)
       }
@@ -1056,7 +1058,8 @@ export class Dispatcher {
     refusal: unknown,
     issuer?: symbol,
   ): Promise<void> {
-    if (!hiddenPathsIntersect(path.virtual)) throw refusal
+    const vis = sessionVisibility()
+    if (!hiddenUnder(vis, path.virtual)) throw refusal
     let entries: unknown
     try {
       entries = await this.fencedCall(vfs, mountPrefix, mode, 'readdir', path, issuer)
@@ -1067,8 +1070,15 @@ export class Dispatcher {
     }
     if (!Array.isArray(entries)) throw refusal
     const names = entries.map(String)
-    const merged = mergeReaddir(names, this.namespace.mountPrefixes(), this.namespace, path.virtual)
-    if (names.length === 0 || visibleBelow(path.virtual, merged, pathAllowed)) throw refusal
+    const merged = mergeReaddir(
+      vis,
+      names,
+      this.namespace.mountPrefixes(),
+      this.namespace,
+      path.virtual,
+    )
+    const visible = (virtual: string): boolean => pathVisible(vis, virtual)
+    if (names.length === 0 || visibleBelow(path.virtual, merged, visible)) throw refusal
     const channel: RemnantChannel = {
       readdir: async (at) => {
         const listed = await this.fencedCall(vfs, mountPrefix, mode, 'readdir', at, issuer)
@@ -1083,7 +1093,7 @@ export class Dispatcher {
       },
     }
     try {
-      await removeRemnants(channel, pathAllowed, path)
+      await removeRemnants(channel, visible, path)
     } catch {
       throw refusal
     }
@@ -1100,7 +1110,7 @@ export class Dispatcher {
     // destroyed, as `rm` does.
     const base = rstripSlash(path.virtual) + '/'
     for (const link of this.namespace.symlinkTargets().keys()) {
-      if (link.startsWith(base) && pathAllowed(link)) throw refusal
+      if (link.startsWith(base) && pathVisible(vis, link)) throw refusal
     }
     await this.namespace.purgeUnder(path.virtual)
   }
@@ -1119,7 +1129,8 @@ export class Dispatcher {
     let walked = followOrLoop(this.namespace, path, false, spelled)
     if (spelled !== path.virtual) walked = posixNormpath(walked)
     if (walked === path.virtual) return path
-    if (!pathAllowed(walked)) throw hiddenRefusal(walked, create)
+    const vis = sessionVisibility()
+    if (!pathVisible(vis, walked)) throw hiddenRefusal(vis, walked, create)
     return PathSpec.fromStrPath(walked)
   }
 
@@ -1266,7 +1277,8 @@ export class Dispatcher {
     issuer?: symbol,
   ): Promise<[boolean, readonly string[] | null]> {
     if (this.namespace.isLink(path.virtual)) return [true, null]
-    if (namespaceStat(this.namespace.mountPrefixes(), this.namespace, path.virtual) !== null) {
+    const prefixes = this.namespace.mountPrefixes()
+    if (namespaceStat(sessionVisibility(), prefixes, this.namespace, path.virtual) !== null) {
       return [true, null]
     }
     const mount = this.namespace.tryMountFor(path.virtual)
@@ -1355,7 +1367,8 @@ export class Dispatcher {
    */
   private async entryType(virtual: string, issuer?: symbol): Promise<FileType | null> {
     if (virtual === '/') return FileType.DIRECTORY
-    if (namespaceStat(this.namespace.mountPrefixes(), this.namespace, virtual) !== null) {
+    const prefixes = this.namespace.mountPrefixes()
+    if (namespaceStat(sessionVisibility(), prefixes, this.namespace, virtual) !== null) {
       return FileType.DIRECTORY
     }
     const mount = this.namespace.tryMountFor(virtual)

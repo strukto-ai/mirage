@@ -139,6 +139,7 @@ async def run_cp(
                 cwd=cwd,
                 relay=strategy,
                 relay_stat=primitives["stat"],
+                visibility=ns.visibility if ns is not None else None,
             )
             if links is not None
             else None

@@ -66,7 +66,6 @@ def test_required_flags():
 
 @pytest.mark.asyncio
 async def test_installed_tree_dispatches_send_message(monkeypatch):
-
     async def fake_post(config, channel, text):
         return {"ok": True, "channel": channel, "ts": "1.2", "text": text}
 

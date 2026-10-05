@@ -42,7 +42,6 @@ def _spec(path: str) -> PathSpec:
 
 
 def _fs(files: dict[str, str]):
-
     async def read_bytes(p: PathSpec) -> bytes:
         if p.virtual not in files:
             raise FileNotFoundError(p.virtual)
@@ -115,7 +114,6 @@ async def test_check_reports_a_missing_recorded_file(flags, expected):
 
 @pytest.mark.asyncio
 async def test_non_fs_read_failure_propagates():
-
     async def read_bytes(p: PathSpec) -> bytes:
         return b"5aabc000000000000000000000000000  /f.txt\n"
 

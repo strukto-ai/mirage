@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { hiddenPathsIntersect, pathRulesActive } from '../../../context/session_context.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { find as githubFind } from '../../../core/github/find.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -43,11 +43,7 @@ async function find(
   // classifies through the guarded readdir/stat, the fork the factory
   // builder takes. A truncated tree names only some paths and is never
   // refetched, so it takes the same folder-by-folder walk.
-  if (
-    accessor.truncated ||
-    pathRulesActive() ||
-    resolved.some((p) => hiddenPathsIntersect(p.virtual))
-  ) {
+  if (accessor.truncated || pathsScoped(opts.ns, resolved)) {
     return findWalk(WALK_IO, accessor, resolved, texts, opts)
   }
   return findGeneric(resolved, texts, opts, (root, options) => githubFind(accessor, root, options))

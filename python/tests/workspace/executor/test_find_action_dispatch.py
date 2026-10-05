@@ -59,7 +59,6 @@ async def _setup_html_files(ws: Workspace) -> None:
 
 
 def test_delete_removes_matched_files() -> None:
-
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
@@ -78,7 +77,6 @@ def test_delete_removes_matched_files() -> None:
 
 
 def test_delete_silent_unless_print() -> None:
-
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
@@ -89,7 +87,6 @@ def test_delete_silent_unless_print() -> None:
 
 
 def test_delete_with_print_emits_matches() -> None:
-
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
@@ -142,7 +139,6 @@ def test_delete_deepest_first() -> None:
 
 
 def test_print0_separates_with_nul() -> None:
-
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
@@ -219,7 +215,6 @@ def test_mount_entries_filtered_by_name() -> None:
 
 
 def test_delete_removes_emptied_directories() -> None:
-
     async def _go():
         ws = _ws()
         ws.create_session("s")
@@ -987,9 +982,10 @@ async def test_delete_admits_a_directory_as_rmdir():
             "find /data/rd/e -delete; echo rc=$?; test -d /data/rd/e; echo $?"
         )
         assert await io.stdout_str() == "rc=0\nrc=1\n0\n"
-        assert "find: cannot delete '/data/rd/e': no rmdir" in (
+        assert "find: cannot delete '/data/rd/e': Permission denied" in (
             await io.stderr_str()
         )
+        assert io.refusal is not None and io.refusal.reason == "no rmdir"
     finally:
         await ws.close()
 

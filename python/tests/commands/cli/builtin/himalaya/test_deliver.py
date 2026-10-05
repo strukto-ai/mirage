@@ -168,7 +168,6 @@ async def test_a_failed_copy_warns_but_the_send_still_counts(imap, smtp):
 async def test_a_broken_connection_warns_rather_than_raising(
     monkeypatch, smtp
 ):
-
     async def fake_get_imap(self):
         raise ConnectionError("IMAP login failed for u on h")
 

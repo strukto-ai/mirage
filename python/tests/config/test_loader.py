@@ -486,7 +486,11 @@ profiles:
     hidden, refused, where, readonly = asyncio.run(run())
     assert hidden.exit_code != 0
     assert refused.exit_code == 1
-    assert refused.stderr == b"rm: /repo/f: no deletes in the repo\n"
+    assert (
+        refused.stderr == b"rm: cannot remove '/repo/f': Permission denied\n"
+    )
+    assert refused.refusal is not None
+    assert refused.refusal.reason == "no deletes in the repo"
     assert where == "/repo\n"
     assert readonly.exit_code != 0
 

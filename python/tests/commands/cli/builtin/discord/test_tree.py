@@ -67,7 +67,6 @@ def test_poll_answer_flag_is_repeatable():
 
 @pytest.mark.asyncio
 async def test_installed_tree_dispatches_send(monkeypatch):
-
     async def fake_send(config, channel, text, reply_to):
         return {"id": "M1", "channel_id": channel, "content": text}
 

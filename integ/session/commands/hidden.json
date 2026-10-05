@@ -23,7 +23,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: private\n"
+        "stderr": "cat: /scratch/private/k: Permission denied\n"
       }
     },
     {

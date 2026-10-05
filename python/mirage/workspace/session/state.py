@@ -82,7 +82,7 @@ def env_snapshot(session: SessionState) -> dict[str, str]:
         for name, var in session.vars.items()
         if isinstance(var.value, str)
         and VarAttr.EXPORT in var.attrs
-        and not var_hidden(session.hidden_vars, name)
+        and not var_hidden(session.visibility, name)
     }
 
 
@@ -102,7 +102,7 @@ def exported_names(session: SessionState) -> list[str]:
         name
         for name, var in session.vars.items()
         if VarAttr.EXPORT in var.attrs
-        and not var_hidden(session.hidden_vars, name)
+        and not var_hidden(session.visibility, name)
     )
 
 
@@ -163,7 +163,7 @@ def env_get(session: SessionState, name: str) -> str | None:
         name (str): variable name.
     """
     name = deref(session, name)
-    if var_hidden(session.hidden_vars, name):
+    if var_hidden(session.visibility, name):
         return None
     var = session.vars.get(name)
     return (
@@ -183,7 +183,7 @@ def env_is_readonly(session: SessionState, name: str) -> bool:
         name (str): variable name.
     """
     name = deref(session, name)
-    if var_hidden(session.hidden_vars, name):
+    if var_hidden(session.visibility, name):
         return False
     var = session.vars.get(name)
     return var is not None and VarAttr.READONLY in var.attrs
@@ -204,7 +204,7 @@ class _VisibleEnv(Mapping[str, str]):
 
     def __getitem__(self, name: str) -> str:
         name = deref(self._session, name)
-        if var_hidden(self._session.hidden_vars, name):
+        if var_hidden(self._session.visibility, name):
             raise KeyError(name)
         var = self._session.vars[name]
         if not isinstance(var.value, str):
@@ -212,7 +212,7 @@ class _VisibleEnv(Mapping[str, str]):
         return var.value
 
     def __iter__(self) -> Iterator[str]:
-        hidden = self._session.hidden_vars
+        hidden = self._session.visibility
         for name, var in self._session.vars.items():
             if isinstance(var.value, str) and not var_hidden(hidden, name):
                 yield name
@@ -252,7 +252,7 @@ class _VisibleArrays(Mapping[str, ShellArray]):
 
     def __getitem__(self, name: str) -> ShellArray:
         name = deref(self._session, name)
-        if var_hidden(self._session.hidden_vars, name):
+        if var_hidden(self._session.visibility, name):
             raise KeyError(name)
         if name == PIPESTATUS:
             return [str(code) for code in self._session.pipe_status]
@@ -269,7 +269,7 @@ class _VisibleArrays(Mapping[str, ShellArray]):
         # `declare -p PIPESTATUS` is `not found`, and an assignment to
         # either is ignored, which this view honors by answering the
         # session's record before the store.
-        hidden = self._session.hidden_vars
+        hidden = self._session.visibility
         for name, var in self._session.vars.items():
             if isinstance(var.value, list) and not var_hidden(hidden, name):
                 yield name
@@ -303,7 +303,7 @@ class _VisibleAssocs(Mapping[str, dict[str, str]]):
 
     def __getitem__(self, name: str) -> dict[str, str]:
         name = deref(self._session, name)
-        if var_hidden(self._session.hidden_vars, name):
+        if var_hidden(self._session.visibility, name):
             raise KeyError(name)
         var = self._session.vars[name]
         if not isinstance(var.value, dict):
@@ -311,7 +311,7 @@ class _VisibleAssocs(Mapping[str, dict[str, str]]):
         return var.value
 
     def __iter__(self) -> Iterator[str]:
-        hidden = self._session.hidden_vars
+        hidden = self._session.visibility
         for name, var in self._session.vars.items():
             if isinstance(var.value, dict) and not var_hidden(hidden, name):
                 yield name
@@ -713,7 +713,7 @@ class RandomReader:
         session = self.session
         return (
             name == RANDOM
-            and not var_hidden(session.hidden_vars, name)
+            and not var_hidden(session.visibility, name)
             and session._random_seed != RANDOM_UNSET
         )
 
@@ -846,7 +846,7 @@ def ensure_var_visible(session: SessionState, name: str) -> None:
     Raises:
         PolicyDenied: the name is hidden for this session.
     """
-    if var_hidden(session.hidden_vars, name):
+    if var_hidden(session.visibility, name):
         raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
 
 
@@ -1050,7 +1050,7 @@ async def unset_var(
     """
     if follow_ref:
         name = deref(session, name) or name
-    if var_hidden(session.hidden_vars, name):
+    if var_hidden(session.visibility, name):
         # Hidden reads as unset and bash's unset of a missing name is
         # a quiet no-op; popping the real value would let a session
         # mutate state it cannot see.

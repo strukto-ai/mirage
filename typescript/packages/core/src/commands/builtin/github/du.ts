@@ -14,7 +14,8 @@
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { hiddenPathsIntersect, pathRulesActive } from '../../../context/session_context.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import type { NamespaceView } from '../../../ops/types.ts'
 import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { IO } from './io.ts'
 import { ensureTree } from '../../../core/github/tree.ts'
@@ -63,8 +64,8 @@ function subtree(accessor: GitHubAccessor, path: PathSpec): [DuEntries, string[]
  * and under a hide or a path rule the raw sum would count what the session
  * cannot see and never report a refused directory. Mirrors Python's
  * `_walked`. */
-function walked(accessor: GitHubAccessor, path: PathSpec): boolean {
-  return accessor.truncated || pathRulesActive() || hiddenPathsIntersect(path.virtual)
+function walked(accessor: GitHubAccessor, ns: NamespaceView | undefined, path: PathSpec): boolean {
+  return accessor.truncated || pathsScoped(ns, [path])
 }
 
 async function du(
@@ -96,13 +97,13 @@ async function du(
     // a subtree under a hide or a path rule (`walked`).
     async (p) => {
       await live()
-      if (walked(accessor, p))
+      if (walked(accessor, opts.ns, p))
         return walkSize(withCommandGuards(withPolicyGuard(IO)), accessor, idx, budget, p)
       return subtree(accessor, p)[0][1]
     },
     async (p) => {
       await live()
-      if (walked(accessor, p))
+      if (walked(accessor, opts.ns, p))
         return walkEntries(withCommandGuards(withPolicyGuard(IO)), accessor, idx, budget, p)
       const [entries, directories] = subtree(accessor, p)
       const mount = mountPrefixOf(p.virtual, p.vfsPath)

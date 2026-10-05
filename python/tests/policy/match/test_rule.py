@@ -15,6 +15,7 @@
 from mirage.policy.match.rule import (
     RuleMatch,
     Subject,
+    io_reach,
     io_refusal,
     match_io,
     match_op,
@@ -22,6 +23,7 @@ from mirage.policy.match.rule import (
     op_refusal,
     rule_reach,
     rule_scope,
+    skipped_at_op_doors,
     subjects,
 )
 from mirage.policy.types import (
@@ -451,3 +453,41 @@ def test_io_refusal_orders_by_anchor_depth_like_the_admission_gate():
     assert io_refusal(rules, tokens, "/repo/sealed/secret", ()) == "sealed"
     # Outside the carve-out the broad deny is what is left.
     assert io_refusal(rules, tokens, "/repo/other/x", (ask,)) == "ro repo"
+
+
+def test_io_reach_reads_each_start_point_on_its_own():
+    # A native walk asks per operand whether a rule could reach anything
+    # under it: a rule on /repo/.env holds the walk of /repo, and leaves
+    # the walk of /s3 its native op.
+    env = CommandRule(reason="secrets", paths=("/repo/.env",))
+    rm_only = CommandRule(
+        reason="no deletes", commands=("rm",), paths=("/data/*",)
+    )
+    rules = AdmissionRules(deny=(env,), ask=(rm_only,))
+    find = ("find", "/repo", "/s3", "/data")
+    assert io_reach(rules, find, "/repo")
+    assert io_reach(rules, find, "/repo/.env")
+    assert not io_reach(rules, find, "/s3")
+    # A rule naming another command does not reach this line's walk.
+    assert not io_reach(rules, find, "/data")
+    assert io_reach(rules, ("rm", "-r", "/data"), "/data")
+    # A whole-line rule has no paths to reach an entry with.
+    whole = AdmissionRules(deny=(CommandRule(reason="no", commands=("rm",)),))
+    assert not io_reach(whole, ("rm", "-r", "/data"), "/data")
+    assert not io_reach(None, find, "/repo")
+
+
+def test_skipped_at_op_doors_names_the_command_level_rules():
+    keys = CommandRule(reason="keys", paths=("/k/*",))
+    rules = AdmissionRules(
+        allow=("ls",),
+        deny=(keys, CommandRule(reason="no rm", commands=("rm",))),
+        ask=(CommandRule(reason="nod", commands=("cp",), paths=("/x/*",)),),
+    )
+    assert skipped_at_op_doors(rules) == (
+        "commands.allow",
+        "commands.deny: no rm",
+        "commands.ask: nod",
+    )
+    assert skipped_at_op_doors(AdmissionRules(deny=(keys,))) == ()
+    assert skipped_at_op_doors(None) == ()

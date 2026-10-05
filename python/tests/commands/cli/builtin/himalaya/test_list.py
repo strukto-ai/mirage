@@ -90,7 +90,6 @@ async def test_pages_count_from_one(patched):
 
 @pytest.mark.asyncio
 async def test_empty_result_skips_the_header_fetch(patched, monkeypatch):
-
     async def boom(accessor, folder, uids):
         raise AssertionError("fetch_headers must not run for zero uids")
 

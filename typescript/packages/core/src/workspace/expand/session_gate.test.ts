@@ -72,7 +72,7 @@ describe('every session writer clears the pre_session gate', () => {
       try {
         const result = await ws.shell(line)
         expect(result.exitCode, `${line} was not refused`).not.toBe(0)
-        expect(DEC.decode(result.stderr)).toContain('not yours to set')
+        expect(result.refusal?.reason, line).toContain('not yours to set')
         const after = await ws.shell(`echo [$${name}]`)
         expect(DEC.decode(after.stdout).trim(), `${line} wrote anyway`).toBe('[]')
       } finally {
@@ -105,7 +105,7 @@ describe('a session write states itself as a whole variable', () => {
     try {
       const result = await ws.shell("printf -v 'AWS_KEY[0]' %s x")
       expect(result.exitCode).not.toBe(0)
-      expect(DEC.decode(result.stderr)).toContain('not yours to set')
+      expect(result.refusal?.reason).toContain('not yours to set')
       const after = await ws.shell('echo "[${AWS_KEY[0]}]"')
       expect(DEC.decode(after.stdout).trim()).toBe('[]')
     } finally {
@@ -141,7 +141,7 @@ it('does not expand length after a refused offset', async () => {
   try {
     const result = await ws.shell('v=abcdef; echo "${v:(AWS_LIMIT=1):${OTHER:=2}}"')
     expect(result.exitCode).toBe(1)
-    expect(DEC.decode(result.stderr)).toContain('not yours to set')
+    expect(result.refusal?.reason).toContain('not yours to set')
     for (const name of ['AWS_LIMIT', 'OTHER']) {
       const after = await ws.shell(`echo [$${name}]`)
       expect(DEC.decode(after.stdout).trim()).toBe('[]')

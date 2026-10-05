@@ -44,7 +44,7 @@ import {
   type DecisionJSON,
   type ScriptJSON,
 } from './serialize.ts'
-import type { HiddenPaths, HiddenVars, ShowEntry, ShownPaths } from '../../types.ts'
+import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types.ts'
 import { type JobOutput, Terminal } from '../../shell/console/index.ts'
 import type { JobWaits } from '../../shell/job_table/index.ts'
 import type { MountMode } from '../../types.ts'
@@ -160,17 +160,12 @@ export interface SessionInit {
    */
   mountModes?: ReadonlyMap<string, MountMode> | null
   /**
-   * Per-session visibility narrowing, siblings of mountModes: null
-   * means unrestricted, the doors enforce (data door for paths, the
-   * session door for vars), fork carries them, toJSON serializes.
+   * What exists for this session: the profile's hides, shows, hidden
+   * variables, process scope and allow list, compiled once. The views
+   * and the op boundary read it; fork carries it, toJSON serializes.
+   * A field left out hides nothing, as `DEFAULT_VISIBILITY` says.
    */
-  hiddenPaths?: HiddenPaths | null
-  /**
-   * The show half of the path axis: re-opened subtrees and per-subtree
-   * modes, resolved against hiddenPaths by anchor depth.
-   */
-  shownPaths?: ShownPaths | null
-  hiddenVars?: HiddenVars | null
+  visibility?: Partial<Visibility>
   /**
    * The operator's reasons for grouped hides: never rendered to the
    * agent (a reason on ENOENT would confirm the path exists),
@@ -180,7 +175,7 @@ export interface SessionInit {
   /**
    * The session's own command tier (`profiles.<n>.commands` tightened
    * by the inline document): allow patterns, ask and deny rules. A
-   * durable restriction like hiddenPaths, so it persists.
+   * durable restriction like visibility, so it persists.
    */
   commands?: AdmissionRules | null
   /**
@@ -534,9 +529,7 @@ export class SessionState {
   // function's extent, and the generator resumes when it returns.
   localRandom: (string | null)[] = []
   mountModes: ReadonlyMap<string, MountMode> | null
-  hiddenPaths: HiddenPaths | null
-  shownPaths: ShownPaths | null
-  hiddenVars: HiddenVars | null
+  visibility: Visibility
   hideReasons: readonly HideReason[]
   commands: AdmissionRules | null
   script: ProfileScript | null
@@ -566,9 +559,7 @@ export class SessionState {
     this.scriptName = init.scriptName ?? null
     this.shellOptions = init.shellOptions ?? {}
     this.mountModes = init.mountModes ?? null
-    this.hiddenPaths = init.hiddenPaths ?? null
-    this.shownPaths = init.shownPaths ?? null
-    this.hiddenVars = init.hiddenVars ?? null
+    this.visibility = { ...DEFAULT_VISIBILITY, ...init.visibility }
     this.hideReasons = init.hideReasons ?? []
     this.commands = init.commands ?? null
     this.script = init.script ?? null
@@ -636,9 +627,7 @@ export class SessionState {
       scriptName: overrides.scriptName ?? this.scriptName,
       shellOptions: overrides.shellOptions ?? { ...this.shellOptions },
       mountModes: overrides.mountModes ?? this.mountModes,
-      hiddenPaths: overrides.hiddenPaths ?? this.hiddenPaths,
-      shownPaths: overrides.shownPaths ?? this.shownPaths,
-      hiddenVars: overrides.hiddenVars ?? this.hiddenVars,
+      visibility: overrides.visibility ?? this.visibility,
       hideReasons: overrides.hideReasons ?? this.hideReasons,
       commands: overrides.commands ?? this.commands,
       script: overrides.script ?? this.script,
@@ -895,15 +884,16 @@ export class SessionState {
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
-    if (this.hiddenPaths !== null) {
+    const vis = this.visibility
+    if (vis.paths !== null) {
       data.hidden_paths = {
-        paths: [...(this.hiddenPaths.paths ?? [])],
-        patterns: [...(this.hiddenPaths.patterns ?? [])],
+        paths: [...(vis.paths.paths ?? [])],
+        patterns: [...(vis.paths.patterns ?? [])],
       }
     }
-    if (this.shownPaths !== null) {
+    if (vis.shown !== null) {
       data.shown_paths = {
-        entries: this.shownPaths.entries.map((e) =>
+        entries: vis.shown.entries.map((e) =>
           e.mode == null ? { path: e.path } : { path: e.path, mode: e.mode },
         ),
       }
@@ -914,10 +904,10 @@ export class SessionState {
         reason: g.reason,
       }))
     }
-    if (this.hiddenVars !== null) {
+    if (vis.vars !== null) {
       data.hidden_vars = {
-        names: [...(this.hiddenVars.names ?? [])],
-        patterns: [...(this.hiddenVars.patterns ?? [])],
+        names: [...(vis.vars.names ?? [])],
+        patterns: [...(vis.vars.patterns ?? [])],
       }
     }
     if (this.commands !== null) data.commands = commandsToJSON(this.commands)
@@ -951,6 +941,8 @@ export class SessionState {
     decisions?: DecisionJSON[] | null
     generation?: number
   }): SessionState {
+    const commands = data.commands != null ? commandsFromJSON(data.commands) : null
+    const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     return new SessionState({
       sessionId: data.session_id,
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
@@ -965,32 +957,36 @@ export class SessionState {
       ...(data.created_at !== undefined ? { createdAt: data.created_at } : {}),
       ...(data.generation !== undefined ? { generation: data.generation } : {}),
       mountModes: data.mount_modes != null ? new Map(Object.entries(data.mount_modes)) : null,
-      hiddenPaths:
-        data.hidden_paths != null
-          ? { paths: data.hidden_paths.paths ?? [], patterns: data.hidden_paths.patterns ?? [] }
-          : null,
-      shownPaths:
-        data.shown_paths != null
-          ? {
-              entries: (data.shown_paths.entries ?? []).map((e): ShowEntry => ({
-                path: e.path,
-                mode: e.mode ?? null,
-              })),
-            }
-          : null,
-      hiddenVars:
-        data.hidden_vars != null
-          ? { names: data.hidden_vars.names ?? [], patterns: data.hidden_vars.patterns ?? [] }
-          : null,
+      visibility: {
+        paths:
+          data.hidden_paths != null
+            ? { paths: data.hidden_paths.paths ?? [], patterns: data.hidden_paths.patterns ?? [] }
+            : null,
+        shown:
+          data.shown_paths != null
+            ? {
+                entries: (data.shown_paths.entries ?? []).map((e): ShowEntry => ({
+                  path: e.path,
+                  mode: e.mode ?? null,
+                })),
+              }
+            : null,
+        vars:
+          data.hidden_vars != null
+            ? { names: data.hidden_vars.names ?? [], patterns: data.hidden_vars.patterns ?? [] }
+            : null,
+        processes: processes.list,
+        commands: commands?.allow ?? null,
+      },
       hideReasons:
         data.hide_reasons != null
           ? data.hide_reasons.map((g) => ({ patterns: g.patterns ?? [], reason: g.reason ?? '' }))
           : [],
-      commands: data.commands != null ? commandsFromJSON(data.commands) : null,
+      commands,
       script: data.script != null ? scriptFromJSON(data.script) : null,
       profile: data.profile ?? null,
       commandLimits: parseCommandLimits(data.command_limits),
-      processes: parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS),
+      processes,
       decisions: data.decisions != null ? data.decisions.map(decisionFromJSON) : [],
     })
   }

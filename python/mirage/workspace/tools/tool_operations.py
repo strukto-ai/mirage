@@ -26,7 +26,12 @@ from mirage.workspace.tools.file_version import (
     FileVersionTracker,
     StaleMirageFileError,
 )
-from mirage.workspace.tools.io_text import decode, io_to_str, replace_text
+from mirage.workspace.tools.io_text import (
+    decode,
+    error_text,
+    io_to_str,
+    replace_text,
+)
 
 if TYPE_CHECKING:
     from mirage.workspace.workspace.handle import Session
@@ -191,7 +196,7 @@ class MirageToolOperations:
         except (OSError, ValueError) as exc:
             if await missing(versions.vfs, path):
                 return ToolResult(f"Error: file '{path}' not found", True)
-            return ToolResult(f"Error: {exc}", True)
+            return ToolResult(error_text(exc), True)
         text = decode(data)
         lines = text.count("\n") + (1 if text and text[-1] != "\n" else 0)
         if offset <= 0 and offset + limit >= lines:
@@ -217,7 +222,7 @@ class MirageToolOperations:
         try:
             present = await versions.vfs.exists(path)
         except OSError as exc:
-            return ToolResult(f"Error: {exc}", True)
+            return ToolResult(error_text(exc), True)
         if present and not versions.has_read(path):
             return ToolResult(
                 f"Error: file '{path}' exists; read all of it before "
@@ -228,7 +233,7 @@ class MirageToolOperations:
             await ensure_parents(versions.vfs, path)
             await versions.write(path, content)
         except (StaleMirageFileError, OSError, ValueError) as exc:
-            return ToolResult(f"Error: {exc}", True)
+            return ToolResult(error_text(exc), True)
         return ToolResult(f"Written: {path}")
 
     async def edit(
@@ -253,11 +258,11 @@ class MirageToolOperations:
         try:
             content = decode(await versions.read_for_edit(path))
         except StaleMirageFileError as exc:
-            return ToolResult(f"Error: {exc}", True)
+            return ToolResult(error_text(exc), True)
         except (OSError, ValueError) as exc:
             if await missing(versions.vfs, path):
                 return ToolResult(f"Error: file '{path}' not found", True)
-            return ToolResult(f"Error: {exc}", True)
+            return ToolResult(error_text(exc), True)
         new_content, count = replace_text(
             content, old_string, new_string, replace_all
         )
@@ -273,7 +278,7 @@ class MirageToolOperations:
         try:
             await versions.write_edit(path, new_content)
         except (StaleMirageFileError, OSError, ValueError) as exc:
-            return ToolResult(f"Error: {exc}", True)
+            return ToolResult(error_text(exc), True)
         occurrences = count if replace_all else 1
         return ToolResult(f"Edited: {path} ({occurrences} occurrence(s))")
 

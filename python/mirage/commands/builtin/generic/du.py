@@ -12,15 +12,12 @@ from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.context import (
-    hidden_paths_intersect,
-    path_allowed,
-    path_rules_active,
-)
 from mirage.io.types import IOResult, SizedRun
-from mirage.ops.types import LinkView, MountView, StatPath
-from mirage.types import FileStat, PathSpec
+from mirage.ops.namespace_view import paths_scoped
+from mirage.ops.types import LinkView, MountView, NamespaceView, StatPath
+from mirage.types import FileStat, PathSpec, Visibility
 from mirage.utils.errors import ZERO_LENGTH_NAME, DotWalkError, fs_strerror
+from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
 from mirage.vfs.types import DuEntries
@@ -253,9 +250,16 @@ async def du_operands(
             continue
         except (FileNotFoundError, ValueError):
             stattable = False
-        if not await du_operand_exists(
-            path, stattable, has_content, stat_path
-        ):
+        try:
+            exists = await du_operand_exists(
+                path, stattable, has_content, stat_path
+            )
+        except PermissionError as exc:
+            # The door refuses to stat it: GNU names the errno it got
+            # (`du: cannot access 'P': Permission denied`).
+            missing.append((path.raw_path, fs_strerror(exc) or str(exc)))
+            continue
+        if not exists:
             missing.append((path.raw_path, ENOENT_TEXT))
             continue
         present.append(path)
@@ -299,7 +303,7 @@ async def du_operand_exists(
 
 
 async def du_has_content(
-    compute_entries: ComputeEntries, path: PathSpec
+    vis: Visibility | None, compute_entries: ComputeEntries, path: PathSpec
 ) -> bool:
     """Whether an operand holds anything the session may see.
 
@@ -310,12 +314,15 @@ async def du_has_content(
     virtual paths first, since that is the space a hide is written in.
 
     Args:
+        vis (Visibility | None): the session's visibility.
         compute_entries (ComputeEntries): per-file breakdown.
         path (PathSpec): the operand to probe.
     """
     try:
         entries, _ = await compute_entries(path)
-        return any(path_allowed(leaf) for leaf, _ in to_virtual(entries, path))
+        return any(
+            path_visible(vis, leaf) for leaf, _ in to_virtual(entries, path)
+        )
     except Exception as exc:
         # This runs only after stat already failed, to tell an implicit
         # directory from an absent path. Backends raise their own error
@@ -542,8 +549,10 @@ async def _du_one(
     links: LinkView | None = None,
     mounts: MountView | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
+    ns: NamespaceView | None = None,
 ) -> tuple[list[str], int, SizedRun | None]:
     label = path.raw_path
+    vis = ns.visibility if ns is not None else None
 
     link_row = links.stat_at(path.virtual) if links is not None else None
     if link_row is not None:
@@ -562,13 +571,7 @@ async def _du_one(
         leaves = drop_shadowed(leaves, roots)
     link_total = sum(size for _, size in leaves)
 
-    if (
-        flags.s
-        and not flags.S
-        and not roots
-        and not hidden_paths_intersect(path.virtual)
-        and not path_rules_active()
-    ):
+    if flags.s and not flags.S and not roots and not paths_scoped(ns, [path]):
         # The one-total fast path trusts the backend's own sum, which a
         # session hiding paths under this operand cannot: hidden leaves
         # would be counted into a total their names never justify, so
@@ -586,7 +589,7 @@ async def _du_one(
         d
         for d in (directories() if directories is not None else ())
         if _norm(d).startswith(under)
-        and path_allowed(d)
+        and path_visible(vis, d)
         and not any(
             _norm(d) == r or _norm(d).startswith(r + "/") for r in roots
         )
@@ -608,7 +611,9 @@ async def _du_one(
         )
 
     virtual = to_virtual(entries, path) + leaves
-    visible = [(leaf, size) for leaf, size in virtual if path_allowed(leaf)]
+    visible = [
+        (leaf, size) for leaf, size in virtual if path_visible(vis, leaf)
+    ]
     if len(visible) != len(virtual):
         # Same honesty rule as shadowed leaves: the total is the sum of
         # what the session may see, never the backend's own number.
@@ -661,6 +666,7 @@ async def du(
     mounts: MountView | None = None,
     unreadable: Callable[[], Sequence[str]] | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
+    ns: NamespaceView | None = None,
 ) -> DuOutput:
     """Render ``du`` output for a list of operands.
 
@@ -691,6 +697,9 @@ async def du(
         directories (Callable[[], Sequence[str]] | None): read after each
             operand's walk for every directory it met, so one no file
             points at (empty, or refused) still gets GNU's row.
+        ns (NamespaceView | None): the command's namespace view: the
+            session's hides drop leaves from every row and total, and
+            a judged subtree skips the one-total fast path.
     """
     lines: list[str] = []
     totals: list[int] = []
@@ -704,6 +713,7 @@ async def du(
             links,
             mounts,
             directories,
+            ns,
         )
         lines.extend(block)
         totals.append(total)
@@ -804,7 +814,11 @@ async def du_generic(
         opts.cwd,
         resolve_glob,
         stat,
-        partial(du_has_content, compute_entries),
+        partial(
+            du_has_content,
+            opts.ns.visibility if opts.ns is not None else None,
+            compute_entries,
+        ),
         links=links,
         stat_path=opts.stat_path,
     )
@@ -819,6 +833,7 @@ async def du_generic(
         directories=directories,
         links=links,
         mounts=opts.ns.mounts if opts.ns is not None else None,
+        ns=opts.ns,
     )
     return out.stdout, IOResult(
         stderr=out.stderr, exit_code=out.exit_code, sized_runs=out.runs

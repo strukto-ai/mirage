@@ -21,18 +21,14 @@ import {
   getCurrentSessionFor,
   getCurrentSessionUnlessForeign,
   getOpPolicies,
-  hiddenPathsActive,
-  hiddenPathsIntersect,
   hiddenRefusal,
-  pathAllowed,
-  pathRulesActive,
+  sessionVisibility,
   readonlyBelow,
   requireMountWritable,
   runWithAdmission,
   runWithMountGate,
   runWithOpPolicies,
   runWithSession,
-  sessionPathAllowed,
   strongestModeUnder,
 } from './session_context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
@@ -40,6 +36,11 @@ import { Policies } from '../policy/policies.ts'
 import { MountMode, weakerMode } from '../types.ts'
 import { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
+import { hiddenUnder, pathVisible } from '../utils/hidden.ts'
+
+const visible = (virtual: string): boolean => pathVisible(sessionVisibility(), virtual)
+const refused = (virtual: string, create: boolean) =>
+  hiddenRefusal(sessionVisibility(), virtual, create)
 
 function narrowedSession(): SessionState {
   return new SessionState({
@@ -188,18 +189,19 @@ describe('hides', () => {
     // patterns told apart once by `classifyPaths`.
     const sess = new SessionState({
       sessionId: 'agent',
-      hiddenPaths: {
-        paths: ['/a/secrets', '/shared/finance'],
-        patterns: ['/repo/*.pem'],
+      visibility: {
+        paths: {
+          paths: ['/a/secrets', '/shared/finance'],
+          patterns: ['/repo/*.pem'],
+        },
       },
     })
     await runWithSession(sess, () => {
-      expect(hiddenPathsActive()).toBe(true)
-      expect(pathAllowed('/a/secrets/x')).toBe(false)
-      expect(pathAllowed('/shared/finance/q1.csv')).toBe(false)
-      expect(pathAllowed('/repo/certs/k.pem')).toBe(false)
-      expect(pathAllowed('/repo/README')).toBe(true)
-      expect(pathAllowed('/shared/public')).toBe(true)
+      expect(visible('/a/secrets/x')).toBe(false)
+      expect(visible('/shared/finance/q1.csv')).toBe(false)
+      expect(visible('/repo/certs/k.pem')).toBe(false)
+      expect(visible('/repo/README')).toBe(true)
+      expect(visible('/shared/public')).toBe(true)
       return Promise.resolve()
     })
   })
@@ -210,16 +212,16 @@ describe('hides', () => {
     // session, and no session bound means nothing is hidden.
     const sess = new SessionState({
       sessionId: 'agent',
-      hiddenPaths: { paths: ['/a/secrets'], patterns: ['*.pem'] },
+      visibility: { paths: { paths: ['/a/secrets'], patterns: ['*.pem'] } },
     })
     expect(getCurrentSession()).toBeNull()
-    expect(sessionPathAllowed(sess, '/a/secrets/x')).toBe(false)
-    expect(sessionPathAllowed(sess, '/repo/k.pem')).toBe(false)
-    expect(sessionPathAllowed(sess, '/a/public')).toBe(true)
-    expect(pathAllowed('/a/secrets/x')).toBe(true)
+    expect(pathVisible(sess.visibility, '/a/secrets/x')).toBe(false)
+    expect(pathVisible(sess.visibility, '/repo/k.pem')).toBe(false)
+    expect(pathVisible(sess.visibility, '/a/public')).toBe(true)
+    expect(visible('/a/secrets/x')).toBe(true)
     await runWithSession(sess, () => {
-      expect(pathAllowed('/a/secrets/x')).toBe(false)
-      expect(pathAllowed('/a/public')).toBe(true)
+      expect(visible('/a/secrets/x')).toBe(false)
+      expect(visible('/a/public')).toBe(true)
       return Promise.resolve()
     })
   })
@@ -231,35 +233,36 @@ describe('hides', () => {
     // is EACCES, the way an existing file the session cannot write is.
     const sess = new SessionState({
       sessionId: 'agent',
-      hiddenPaths: { paths: ['/w/vault', '/w/open/file.txt'], patterns: ['*.key'] },
+      visibility: { paths: { paths: ['/w/vault', '/w/open/file.txt'], patterns: ['*.key'] } },
     })
     await runWithSession(sess, () => {
-      expect(hiddenRefusal('/w/vault/new.txt', true)).toMatchObject({
+      expect(refused('/w/vault/new.txt', true)).toMatchObject({
         code: 'ENOENT',
         message: '/w/vault/new.txt',
       })
-      expect(hiddenRefusal('/w/vault/a/b', true)).toMatchObject({ code: 'ENOENT' })
-      expect(hiddenRefusal('/w/vault', true)).toMatchObject({ code: 'EACCES' })
-      expect(hiddenRefusal('/w/vault/', true)).toMatchObject({ code: 'EACCES' })
-      expect(hiddenRefusal('/w/open/file.txt', true)).toMatchObject({ code: 'EACCES' })
-      expect(hiddenRefusal('/w/open/new.key', true)).toMatchObject({ code: 'EACCES' })
-      expect(hiddenRefusal('/w/vault/new.txt', false)).toMatchObject({ code: 'ENOENT' })
-      expect(hiddenRefusal('/w/open/file.txt', false)).toMatchObject({ code: 'ENOENT' })
+      expect(refused('/w/vault/a/b', true)).toMatchObject({ code: 'ENOENT' })
+      expect(refused('/w/vault', true)).toMatchObject({ code: 'EACCES' })
+      expect(refused('/w/vault/', true)).toMatchObject({ code: 'EACCES' })
+      expect(refused('/w/open/file.txt', true)).toMatchObject({ code: 'EACCES' })
+      expect(refused('/w/open/new.key', true)).toMatchObject({ code: 'EACCES' })
+      expect(refused('/w/vault/new.txt', false)).toMatchObject({ code: 'ENOENT' })
+      expect(refused('/w/open/file.txt', false)).toMatchObject({ code: 'ENOENT' })
       return Promise.resolve()
     })
   })
 
   it('a hide activates the gate and a profile without one does not', async () => {
-    const sess = new SessionState({ sessionId: 'agent', hiddenPaths: { paths: ['/repo/.env'] } })
+    const sess = new SessionState({
+      sessionId: 'agent',
+      visibility: { paths: { paths: ['/repo/.env'] } },
+    })
     await runWithSession(sess, () => {
-      expect(hiddenPathsActive()).toBe(true)
-      expect(pathAllowed('/repo/.env')).toBe(false)
-      expect(pathAllowed('/repo/.envrc')).toBe(true)
+      expect(visible('/repo/.env')).toBe(false)
+      expect(visible('/repo/.envrc')).toBe(true)
       return Promise.resolve()
     })
     await runWithSession(new SessionState({ sessionId: 'free' }), () => {
-      expect(hiddenPathsActive()).toBe(false)
-      expect(pathAllowed('/repo/.env')).toBe(true)
+      expect(visible('/repo/.env')).toBe(true)
       return Promise.resolve()
     })
   })
@@ -270,11 +273,13 @@ describe('the path axis modes', () => {
     const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/repo', MountMode.READ]]),
-      shownPaths: {
-        entries: [
-          { path: '/repo/build', mode: MountMode.WRITE },
-          { path: '/repo/tools', mode: MountMode.EXEC },
-        ],
+      visibility: {
+        shown: {
+          entries: [
+            { path: '/repo/build', mode: MountMode.WRITE },
+            { path: '/repo/tools', mode: MountMode.EXEC },
+          ],
+        },
       },
     })
     await runWithSession(sess, () => {
@@ -297,7 +302,7 @@ describe('the path axis modes', () => {
     const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/repo', MountMode.EXEC]]),
-      shownPaths: { entries: [{ path: '/repo', mode: MountMode.READ }] },
+      visibility: { shown: { entries: [{ path: '/repo', mode: MountMode.READ }] } },
     })
     await runWithSession(sess, () => {
       expect(effectivePathMode('/repo/x', '/repo', MountMode.EXEC)).toBe(MountMode.READ)
@@ -309,7 +314,7 @@ describe('the path axis modes', () => {
     const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/repo', MountMode.READ]]),
-      shownPaths: { entries: [{ path: '/repo/build', mode: MountMode.WRITE }] },
+      visibility: { shown: { entries: [{ path: '/repo/build', mode: MountMode.WRITE }] } },
     })
     await runWithSession(sess, () => {
       // The mount-wide mode is READ, but a deeper grant makes a write
@@ -325,11 +330,13 @@ describe('the path axis modes', () => {
   it('readonlyBelow blames the carved anchor', async () => {
     const sess = new SessionState({
       sessionId: 'agent',
-      shownPaths: {
-        entries: [
-          { path: '/repo/tree/locked', mode: MountMode.READ },
-          { path: '/repo/tree/locked/pub', mode: MountMode.WRITE },
-        ],
+      visibility: {
+        shown: {
+          entries: [
+            { path: '/repo/tree/locked', mode: MountMode.READ },
+            { path: '/repo/tree/locked/pub', mode: MountMode.WRITE },
+          ],
+        },
       },
     })
     await runWithSession(sess, () => {
@@ -349,7 +356,7 @@ describe('the path axis modes', () => {
   it('readonlyBelow blames the operand for a pattern', async () => {
     const sess = new SessionState({
       sessionId: 'agent',
-      shownPaths: { entries: [{ path: '/repo/*/locked', mode: MountMode.READ }] },
+      visibility: { shown: { entries: [{ path: '/repo/*/locked', mode: MountMode.READ }] } },
     })
     await runWithSession(sess, () => {
       // A pattern names no single anchor, so the operand is blamed
@@ -364,7 +371,7 @@ describe('the path axis modes', () => {
     const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/trello', MountMode.READ]]),
-      shownPaths: { entries: [{ path: '/trello/board', mode: MountMode.WRITE }] },
+      visibility: { shown: { entries: [{ path: '/trello/board', mode: MountMode.WRITE }] } },
     })
     await runWithSession(sess, () =>
       runWithMountGate('/trello', MountMode.WRITE, () => {
@@ -387,29 +394,31 @@ describe('the path axis modes', () => {
 })
 
 describe('the per-operand hide gate', () => {
-  it('hiddenPathsIntersect answers per operand', async () => {
+  it('hiddenUnder answers per operand', async () => {
     const sess = new SessionState({
       sessionId: 'agent',
-      hiddenPaths: { paths: ['/repo/.env'] },
+      visibility: { paths: { paths: ['/repo/.env'] } },
     })
     await runWithSession(sess, () => {
-      expect(hiddenPathsIntersect('/repo')).toBe(true)
-      expect(hiddenPathsIntersect('/repo/.env')).toBe(true)
-      expect(hiddenPathsIntersect('/s3')).toBe(false)
+      expect(hiddenUnder(sessionVisibility(), '/repo')).toBe(true)
+      expect(hiddenUnder(sessionVisibility(), '/repo/.env')).toBe(true)
+      expect(hiddenUnder(sessionVisibility(), '/s3')).toBe(false)
       return Promise.resolve()
     })
-    expect(hiddenPathsIntersect('/repo')).toBe(false)
+    expect(hiddenUnder(sessionVisibility(), '/repo')).toBe(false)
   })
 
   it('a show reaches the session predicate', () => {
     const sess = new SessionState({
       sessionId: 'agent',
-      hiddenPaths: { paths: ['/repo'] },
-      shownPaths: { entries: [{ path: '/repo/public', mode: null }] },
+      visibility: {
+        paths: { paths: ['/repo'] },
+        shown: { entries: [{ path: '/repo/public', mode: null }] },
+      },
     })
-    expect(sessionPathAllowed(sess, '/repo/public/index.html')).toBe(true)
-    expect(sessionPathAllowed(sess, '/repo')).toBe(true)
-    expect(sessionPathAllowed(sess, '/repo/secrets')).toBe(false)
+    expect(pathVisible(sess.visibility, '/repo/public/index.html')).toBe(true)
+    expect(pathVisible(sess.visibility, '/repo')).toBe(true)
+    expect(pathVisible(sess.visibility, '/repo/secrets')).toBe(false)
   })
 })
 
@@ -417,27 +426,24 @@ describe('the admission binding', () => {
   it('is scoped to one command and hands the outer one back', async () => {
     const gate = (scoped: boolean) => ({
       scoped,
+      scopes: () => scoped,
       granted: [],
       check: () => undefined,
       refuses: () => false,
     })
     expect(getAdmission()).toBeNull()
-    expect(pathRulesActive()).toBe(false)
     const outer = gate(true)
     await runWithAdmission(outer, async () => {
       expect(getAdmission()).toBe(outer)
-      expect(pathRulesActive()).toBe(true)
       // A nested line binds its own and hands the outer one back.
       const inner = gate(false)
       await runWithAdmission(inner, () => {
         expect(getAdmission()).toBe(inner)
-        expect(pathRulesActive()).toBe(false)
         return Promise.resolve()
       })
       expect(getAdmission()).toBe(outer)
     })
     expect(getAdmission()).toBeNull()
-    expect(pathRulesActive()).toBe(false)
   })
 })
 

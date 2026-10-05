@@ -762,4 +762,26 @@ describe('MountCore chunks', () => {
     reads.mockRestore()
     await core.release(fd)
   })
+
+  it('tells a session the command rules a door of ops skips', () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const keys = { reason: 'keys', paths: ['/data/*.key'] }
+      const ruled = ws.createSession('agent', {
+        profile: { commands: { deny: [{ reason: 'no rm', commands: ['rm'] }, keys] } },
+      })
+      expect(new MountCore(ws.vfs, { session: ruled })).toBeInstanceOf(MountCore)
+      expect(warn).toHaveBeenCalledTimes(1)
+      const said = String(warn.mock.calls[0]?.[0])
+      expect(said).toContain('commands.deny: no rm')
+      expect(said).not.toContain('keys')
+      warn.mockClear()
+      const pathed = ws.createSession('pathed', { profile: { commands: { deny: [keys] } } })
+      expect(new MountCore(ws.vfs, { session: pathed })).toBeInstanceOf(MountCore)
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })

@@ -87,13 +87,17 @@ silent allow.
   reads `<command>: Permission denied` at exit 126, bash's own wording,
   and the reason travels as the result's `refusal` record
   (`kind: deny`, the reason, the policy's class name, the scope); the
-  `OPERAND` scope keeps the GNU operand voice instead —
-  `<command>: <reason>` at the command's own operand exit code, the
-  reason naming the operand
-  (`cat: /vault/aws.token: credentials are never read by hand`,
-  exit 1). Exit codes derive from the plane and the scope, never from
-  a number a policy returns. At the op and session doors a Deny is
-  `EACCES`.
+  `OPERAND` scope keeps the GNU operand voice instead: the command's
+  own line for an operand it may not open, at its operand exit code
+  (`cat: /vault/aws.token: Permission denied`, exit 1), the reason
+  again on the record. Exit codes derive from the plane and the scope,
+  never from a number a policy returns. At the op and session doors a
+  Deny is `EACCES` (`<NAME>: permission denied` for a session write),
+  and the reason rides the raised `PolicyDenied`'s `refusal` and the
+  line's record. A surface that hands the agent text appends the record
+  as one line, `policy denied: <reason>`.
+- **`Hide`** is the hidden-paths answer: the op answers as absent
+  (`ENOENT`) before any other policy is asked, and leaves no record.
 - **`Ask(reason)`** (`pre_command` only): the line does not run, the
   agent reads `<command>: Permission denied` at exit 126 with a
   `pending` refusal record naming the ask id, and the question lands in

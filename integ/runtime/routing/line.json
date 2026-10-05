@@ -121,7 +121,7 @@
           "command": "'cat' \"/ram/secret\"",
           "expect": {
             "exit": 1,
-            "stderr": "cat: /ram/secret: sealed\n"
+            "stderr": "cat: /ram/secret: Permission denied\n"
           }
         },
         {
@@ -225,7 +225,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: secret.py: sealed\n"
+            "stderr": "python3: secret.py: Permission denied\n"
           }
         },
         {
@@ -233,7 +233,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "node: secret.js: sealed\n"
+            "stderr": "node: secret.js: Permission denied\n"
           }
         },
         {
@@ -241,7 +241,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: /ram/secret.py: sealed\n"
+            "stderr": "python3: /ram/secret.py: Permission denied\n"
           }
         },
         {
@@ -299,7 +299,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python: ./-: sealed\n"
+            "stderr": "python: ./-: Permission denied\n"
           }
         },
         {
@@ -307,7 +307,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: /ram/-: sealed\n"
+            "stderr": "python3: /ram/-: Permission denied\n"
           }
         },
         {
@@ -315,7 +315,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "js: ./-: sealed\n"
+            "stderr": "js: ./-: Permission denied\n"
           }
         },
         {
@@ -323,7 +323,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "node: /ram/-: sealed\n"
+            "stderr": "node: /ram/-: Permission denied\n"
           }
         },
         {
@@ -331,7 +331,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: /ram/secret.py: sealed\n"
+            "stderr": "python3: /ram/secret.py: Permission denied\n"
           }
         }
       ]

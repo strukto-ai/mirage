@@ -58,7 +58,6 @@ async def test_send_forwards_reply_to(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_read_defaults_limit(monkeypatch):
-
     async def fake_fetch(config, channel, limit):
         return [{"id": "1", "content": f"{channel}:{limit}"}]
 
@@ -69,7 +68,6 @@ async def test_read_defaults_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_edit_and_delete(monkeypatch):
-
     async def fake_edit(config, channel, message, text):
         return {"id": message, "content": text}
 
@@ -92,7 +90,6 @@ async def test_edit_and_delete(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_react_returns_ok(monkeypatch):
-
     async def fake_react(config, channel, message, emoji):
         return None
 
@@ -125,7 +122,6 @@ async def test_search_forwards_channel_filter(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_thread_create_and_poll(monkeypatch):
-
     async def fake_thread(config, channel, name, message_id=None):
         return {"id": "T1", "name": name, "from": message_id}
 
@@ -161,7 +157,6 @@ async def test_thread_create_and_poll(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_members_and_server_info(monkeypatch):
-
     async def fake_list(config, guild):
         return [{"user": {"id": "U1"}}]
 

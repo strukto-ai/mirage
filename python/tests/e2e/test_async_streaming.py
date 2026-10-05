@@ -68,7 +68,6 @@ async def test_pipe_cat_grep_sort(ws):
 
 
 def test_execute_via_asyncio_run(ws):
-
     async def _run():
         io = await ws.shell("cat /data/small.txt")
         return await io.stdout_str()

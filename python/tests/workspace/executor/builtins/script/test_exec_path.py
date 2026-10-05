@@ -144,11 +144,13 @@ def test_path_guard_sees_the_executed_file():
     )
     result = _run(ws, "/data/prod/run.sh")
     assert result.exit_code == 1
-    assert b"production scripts are sealed" in result.stderr
+    assert result.refusal is not None
+    assert "production scripts are sealed" in result.refusal.reason
     assert result.stdout == b""
     relative = _run(ws, "cd /data/prod && ./run.sh")
     assert relative.exit_code == 1
-    assert b"production scripts are sealed" in relative.stderr
+    assert relative.refusal is not None
+    assert "production scripts are sealed" in relative.refusal.reason
     outside = _run(ws, "/data/ok.sh")
     assert outside.exit_code == 0
     assert outside.stdout == b"fine\n"

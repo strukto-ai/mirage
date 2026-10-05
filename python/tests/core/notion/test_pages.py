@@ -63,7 +63,6 @@ async def test_block_tree_threads_one_session_through_every_level(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_one_page_query_refuses_an_incomplete_page(monkeypatch):
-
     async def post(*_args, **_kwargs) -> dict[str, Any]:
         return {
             "results": [{"id": "partial"}],

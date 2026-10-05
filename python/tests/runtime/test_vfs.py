@@ -568,7 +568,6 @@ def test_symlink_sends_the_target_verbatim():
 
 
 def test_readlink_returns_the_stored_target():
-
     class LinkVFS(RecordingVFS):
         def _raw(self, op, path, **kwargs):
             super()._raw(op, path, **kwargs)

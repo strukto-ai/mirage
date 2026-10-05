@@ -14,7 +14,9 @@
 
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
+import type { Refusal } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/utils/errors'
+import { withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 export function assertNotAborted(signal: AbortSignal | undefined, operation: string): void {
   if (signal?.aborted === true) {
@@ -73,7 +75,9 @@ export function mapMirageError(err: unknown, operation: string, displayPath: str
     return new FsError(`${operation} aborted`, 'FS_ABORTED', { cause: err })
   }
   const message = err instanceof Error ? err.message : String(err)
-  return new FsError(`cannot ${operation} "${displayPath}": ${message}`, codeFor(err), {
-    cause: err,
-  })
+  // A policy's refusal reads as a plain EACCES; its reason is one more
+  // line, as on every other surface that hands the agent text.
+  const refusal = (err as { refusal?: Refusal | null } | null)?.refusal ?? null
+  const text = withRefusal(`cannot ${operation} "${displayPath}": ${message}`, refusal)
+  return new FsError(text.trimEnd(), codeFor(err), { cause: err })
 }

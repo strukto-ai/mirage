@@ -41,6 +41,14 @@ import { DIFY_COMMANDS } from '../dify/index.ts'
 import { CHROMA_COMMANDS } from '../chroma/index.ts'
 import { parseFindExpression } from '../find_parse.ts'
 import { readsSizes, readsTimes } from './find.ts'
+import type { NamespaceView } from '../../../ops/types.ts'
+import type { Visibility } from '../../../types.ts'
+import { hiddenUnder } from '../../../utils/hidden.ts'
+
+// The command's view as the workspace builds it for a session.
+function viewOf(vis: Visibility): NamespaceView {
+  return { visibility: vis, scoped: (virtual: string) => hiddenUnder(vis, virtual) }
+}
 
 function doc(id: string, name: string, slug: string): Record<string, unknown> {
   return {
@@ -85,13 +93,14 @@ describe('slug-tree find under a hide', () => {
       vfsPath: mountKey('/knowledge/guides', '/knowledge'),
     })
     const sess = new SessionState({ sessionId: 'veiled' })
-    sess.hiddenPaths = { paths: ['/knowledge/guides/deep/note.md'] }
+    sess.visibility = { ...sess.visibility, paths: { paths: ['/knowledge/guides/deep/note.md'] } }
     const opts = {
       stdin: null,
       flags: {},
       filetypeFns: null,
       cwd: '/',
       index: new RAMIndexCacheStore(),
+      ns: viewOf(sess.visibility),
     }
     const result = await runWithSession(sess, async () =>
       find.fn(accessor, [guides], ['-empty'], opts),
@@ -158,13 +167,14 @@ describe('chroma find', () => {
         vfsPath: mountKey('/knowledge', '/knowledge'),
       })
       const sess = new SessionState({ sessionId: 'veiled' })
-      sess.hiddenPaths = { paths: hidden === null ? [] : [hidden] }
+      sess.visibility = { ...sess.visibility, paths: { paths: hidden === null ? [] : [hidden] } }
       const opts = {
         stdin: null,
         flags,
         filetypeFns: null,
         cwd: '/',
         index: new RAMIndexCacheStore(),
+        ns: viewOf(sess.visibility),
       }
       const [stdout, io] = await runWithSession(sess, async () => {
         const result = await find.fn(chromaAccessor(gets), [root], texts, opts)

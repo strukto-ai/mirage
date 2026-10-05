@@ -136,7 +136,6 @@ def _stage_disk_files(
 
 
 def _make_reader(tar, stream: bool = False):
-
     def reader(blob_path: str):
         if not is_safe_blob_path(blob_path):
             raise ValueError(f"Unsafe blob path: {blob_path!r}")

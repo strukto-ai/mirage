@@ -15,7 +15,7 @@
 import asyncio
 
 from mirage.shell.variable import VarAttr, with_attr
-from mirage.types import HiddenVars
+from mirage.types import HiddenVars, Visibility
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element, element_is_set
 from mirage.workspace.session.state import seed_var
@@ -77,7 +77,7 @@ def test_assign_element_assoc_and_append():
 def test_assign_element_indexed_scalar_and_statuses():
     session = _session()
     session.vars["ro"] = with_attr(session.vars.pop("s5"), VarAttr.READONLY)
-    session.hidden_vars = HiddenVars(names=("h",), patterns=())
+    session.visibility = Visibility(vars=HiddenVars(names=("h",)))
 
     async def run():
         assert await assign_element(session, None, "arr", "1", "X") == "ok"

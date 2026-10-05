@@ -74,7 +74,6 @@ async def test_readdir_root_marks_folders_with_slash(index):
 
 @pytest.mark.asyncio
 async def test_readdir_scopes_under_subfolder_root(index):
-
     async def fake_list(tm, path):
         if path == "/Team/data":
             return [
@@ -142,7 +141,6 @@ async def test_readdir_honors_mount_prefix(index):
 
 
 def _metadata(entries: dict[str, str]):
-
     async def fake(_tm, path: str):
         tag = entries.get(path)
         if tag is None:

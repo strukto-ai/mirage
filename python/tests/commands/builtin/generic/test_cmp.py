@@ -31,7 +31,6 @@ DEV_STDIN = PathSpec.from_str_path("/dev/stdin", "")
 
 
 def _reader(first: bytes, second: bytes):
-
     async def read_bytes(path: PathSpec) -> bytes:
         return first if path.virtual == P1.virtual else second
 

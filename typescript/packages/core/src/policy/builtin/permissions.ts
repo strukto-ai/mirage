@@ -15,7 +15,7 @@
 import { getAdmission, redirectTargetJudged } from '../../context/session_context.ts'
 import type { Policy } from '../base.ts'
 import { decide } from '../match/decide.ts'
-import { opRefusal, ruleScope } from '../match/rule.ts'
+import { opRefusal, posixLevel } from '../match/rule.ts'
 import { SESSION_SCOPED, type SessionScoped } from '../mixin.ts'
 import {
   Outcome,
@@ -69,7 +69,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
       return { kind: 'ask', reason: rule.reason, rule, rules: decision.asks }
     }
     if (decision.matchedPath === null) return { kind: 'deny', reason: rule.reason }
-    return { kind: 'deny', reason: `${decision.matchedPath}: ${rule.reason}`, scope: 'operand' }
+    return { kind: 'deny', reason: rule.reason, scope: 'operand', path: decision.matchedPath }
   }
 
   preOps(ctx: OpsContext): Action | null {
@@ -92,10 +92,6 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     if (hook !== 'preOps') return Promise.resolve(true)
     const rules = this.sessions.commandsOf(sessionId)
     if (rules === null) return Promise.resolve(false)
-    return Promise.resolve(
-      [...rules.deny, ...rules.ask].some(
-        (rule) => (rule.commands ?? []).length === 0 && ruleScope(rule) !== null,
-      ),
-    )
+    return Promise.resolve([...rules.deny, ...rules.ask].some(posixLevel))
   }
 }

@@ -30,7 +30,6 @@ class ChildProcess:
         output: ProcessOutput,
         cancel: Callable[[], None],
     ) -> None:
-
         def finished(_: asyncio.Task[int]) -> None:
             stdin.stop()
             output.end()
@@ -62,7 +61,6 @@ class ChildProcess:
         return await self._process.join()
 
     async def communicate(self, data: bytes = b"") -> ProcessResult:
-
         async def feed() -> None:
             try:
                 await self.stdin.write(data)

@@ -317,7 +317,6 @@ def _gridfs_doc(key: str, data: bytes, oid: str, year: int) -> dict:
 
 
 def _stray(reach: list[str], name: str) -> Callable[..., None]:
-
     def refuse(*_args, **_kwargs) -> None:
         reach.append(name)
         raise AssertionError(f"stray reach: {name}")

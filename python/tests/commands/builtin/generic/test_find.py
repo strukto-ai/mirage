@@ -189,7 +189,6 @@ async def test_apply_mtime_filter_windows(
 
 @pytest.mark.asyncio
 async def test_apply_mtime_filter_silently_skips_stat_errors():
-
     async def stat(_spec: PathSpec) -> FileStat:
         raise FileNotFoundError("gone")
 
@@ -400,7 +399,6 @@ async def test_walk_find_propagates_a_timeout_even_when_collecting():
 
 @pytest.mark.asyncio
 async def test_walk_find_empty_matches_empty_files_and_dirs():
-
     async def readdir(spec: PathSpec, _index):
         table = {
             "/": ["/empty.txt", "/full.txt", "/empty-dir", "/full-dir"],
@@ -524,7 +522,6 @@ def _file_spec(virtual: str = "/mnt/a.txt", key: str = "a.txt") -> PathSpec:
 
 
 def _stat_path(stat: FileStat | None):
-
     async def fn(_virtual: str) -> FileStat | None:
         return stat
 
@@ -688,7 +685,6 @@ async def test_find_missing_start_point_falls_back_to_backend_stat():
 
 @pytest.mark.asyncio
 async def test_find_directory_start_point_still_walks():
-
     async def core(*_a, **_kw) -> list[str]:
         return ["/", "/a.txt"]
 
@@ -826,7 +822,6 @@ async def test_find_without_stat_path_walks_as_before():
 
 
 def _stat_map(stats: dict[str, FileStat | None]):
-
     async def fn(virtual: str) -> FileStat | None:
         return stats.get(virtual)
 
@@ -869,7 +864,6 @@ async def test_find_walks_every_start_point_in_operand_order():
 
 @pytest.mark.asyncio
 async def test_find_no_operands_defaults_to_the_mount_root():
-
     async def core(path: PathSpec, **_kw) -> list[str]:
         assert path.virtual == "/"
         return ["/a.txt"]

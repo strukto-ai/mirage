@@ -186,7 +186,6 @@ async def _never_exists(path: str) -> bool:
 
 
 def _links_view(links: dict[str, str]) -> LinkView:
-
     def stat_of(path: str) -> FileStat:
         target = links[path]
         return FileStat(

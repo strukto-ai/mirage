@@ -158,7 +158,12 @@ async def cp(
             partial(typed_link, links, cwd=cwd) if links is not None else None
         ),
         copies=(
-            transfer_links_of(links, opts.dispatch, cwd)
+            transfer_links_of(
+                links,
+                opts.dispatch,
+                cwd,
+                opts.ns.visibility if opts.ns is not None else None,
+            )
             if links is not None and opts.dispatch is not None
             else None
         ),

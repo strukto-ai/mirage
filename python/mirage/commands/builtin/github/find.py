@@ -26,11 +26,11 @@ from mirage.commands.builtin.generic_bind.adapter import (
 from mirage.commands.builtin.github.io import IO, resolve_glob
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
-from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.core.github.find import find as find_core
 from mirage.core.github.stat import stat as stat_core
 from mirage.core.github.tree import ensure_tree
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 
 _WALK_IO = with_command_guards(with_policy_guard(IO))
@@ -53,11 +53,7 @@ async def find(
     # readdir/stat, the same fork the factory builder takes (rung 0).
     # A truncated tree names only some paths and is never refetched, so it
     # takes the same folder-by-folder walk, which readdir answers per folder.
-    if (
-        accessor.truncated
-        or path_rules_active()
-        or any(hidden_paths_intersect(p.virtual) for p in paths)
-    ):
+    if accessor.truncated or paths_scoped(opts.ns, paths):
         return await find_walk_generic(
             paths,
             list(texts),

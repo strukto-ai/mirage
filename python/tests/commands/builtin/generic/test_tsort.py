@@ -15,7 +15,6 @@ def _spec(path: str) -> PathSpec:
 
 
 def _read_bytes(files: dict[str, bytes]):
-
     async def read_bytes(path: PathSpec) -> bytes:
         if path.virtual not in files:
             raise FileNotFoundError(path.virtual)

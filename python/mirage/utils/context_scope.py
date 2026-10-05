@@ -36,7 +36,6 @@ class ContextScope:
         return await self.call(lambda: asyncio.ensure_future(fn()))
 
     def wrap(self, fn: Callable[P, T]) -> Callable[P, T]:
-
         def call(*args: P.args, **kwargs: P.kwargs) -> T:
             return self.call(fn, *args, **kwargs)
 
@@ -45,7 +44,6 @@ class ContextScope:
     def wrap_async(
         self, fn: Callable[P, Awaitable[T]]
     ) -> Callable[P, Awaitable[T]]:
-
         async def call(*args: P.args, **kwargs: P.kwargs) -> T:
             return await self.run(lambda: fn(*args, **kwargs))
 

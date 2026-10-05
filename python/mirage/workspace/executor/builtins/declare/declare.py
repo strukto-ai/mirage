@@ -368,7 +368,7 @@ def declare_line(session: SessionState, name: str) -> str | None:
         str | None: the rendered line, or None when unset and
         unattributed, hidden, or absent.
     """
-    if var_hidden(session.hidden_vars, name):
+    if var_hidden(session.visibility, name):
         return None
     var = session.vars.get(name)
     if var is None:

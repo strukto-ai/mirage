@@ -211,7 +211,7 @@ describe('an asked line with an approval channel', () => {
     const { shell, ws } = await world(ASK_RM, outcome)
     const run = await runOn(shell, shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(run.exitCode).toBe(126)
-    expect(run.stderr.text).toBe('rm: Permission denied\n')
+    expect(run.stderr.text).toBe('rm: Permission denied\npolicy denied: deletes are reviewed\n')
     expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
     // A refusal is a refusal however it was reached: no pending question
     // is left behind for a host to answer instead.
@@ -234,7 +234,9 @@ describe('an asked line with no approval channel', () => {
     expect(run.exitCode).toBe(126)
     // The operator's document said `ask`; the refusal says so too, and
     // names the approval a host can grant.
-    expect(run.stderr.text).toBe('rm: Permission denied\n')
+    expect(run.stderr.text).toMatch(
+      /^rm: Permission denied\nrequires approval: deletes are reviewed \(ask [0-9a-f]+\)\n$/,
+    )
     expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
     const pending = ws.decisions.pending('agent')
     expect(pending).toHaveLength(1)
@@ -261,7 +263,7 @@ describe('an asked line with no approval channel', () => {
     await ws.decisions.answer(waiting?.id ?? '', Outcome.DENY, Scope.ONCE)
     const retry = await runOn(shell, shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(retry.exitCode).toBe(126)
-    expect(retry.stderr.text).toBe('rm: Permission denied\n')
+    expect(retry.stderr.text).toBe('rm: Permission denied\npolicy denied: deletes are reviewed\n')
     expect(retry.sandbox?.denied).toBe(true)
     expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
   })
@@ -388,7 +390,7 @@ describe('a refusal the line redirected away from stderr', () => {
     })
     const run = await runOn(shell, shell.resolve({ command: 'rm /data/notes.txt 2>&1' }))
     expect(run.exitCode).toBe(126)
-    expect(run.stderr.text).toBe('')
+    expect(run.stderr.text).toBe('policy denied: no removes\n')
     expect(run.stdout.text).toBe('rm: Permission denied\n')
     // The ruling rides the result, not the streams, so where the line
     // sent its diagnostics changes nothing.

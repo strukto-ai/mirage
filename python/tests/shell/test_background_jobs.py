@@ -91,7 +91,6 @@ def test_kill_settles_a_runner_that_ignores_the_cancel():
 
 
 def test_wait_handles_task_exception():
-
     async def _run():
         table = JobTable()
         table.submit(command="bad_cmd", run=_failing_run, cwd="/")
@@ -105,7 +104,6 @@ def test_wait_handles_task_exception():
 
 
 def test_wait_all_survives_failing_task():
-
     async def _run():
         table = JobTable()
         table.submit(command="bad", run=_failing_run, cwd="/")
@@ -122,7 +120,6 @@ def test_wait_all_survives_failing_task():
 
 
 def test_wait_successful_task():
-
     async def _run():
         table = JobTable()
         table.submit(command="echo hello", run=_successful_run, cwd="/")
@@ -135,7 +132,6 @@ def test_wait_successful_task():
 
 
 def test_kill_keeps_output_produced_before_the_kill():
-
     async def _run():
         table = JobTable()
         job = table.submit(command="noisy", run=_never_ending_run, cwd="/")
@@ -168,7 +164,6 @@ def test_kill_returns_a_settled_job():
 
 
 def test_kill_is_false_for_unknown_and_finished_jobs():
-
     async def _run():
         table = JobTable()
         table.submit(command="echo hello", run=_successful_run, cwd="/")
@@ -181,7 +176,6 @@ def test_kill_is_false_for_unknown_and_finished_jobs():
 
 
 def test_kill_all_stops_every_running_job():
-
     async def _run():
         table = JobTable()
         table.submit(command="a", run=_never_ending_run, cwd="/")
@@ -196,7 +190,6 @@ def test_kill_all_stops_every_running_job():
 
 
 def test_background_does_not_consume_stdin():
-
     async def _run():
         mem = RAMVFS()
         ws = Workspace(

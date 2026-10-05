@@ -26,6 +26,7 @@ from mirage.types import (
     MountMode,
     ReadPolicy,
     ReadSpec,
+    Visibility,
 )
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -334,8 +335,8 @@ def _warm_stat(line: str, session_id: str | None = None):
     session, ws = _always_mount(objects)
     client = session._client
     if session_id is not None:
-        ws.create_session(session_id).hidden_paths = HiddenPaths(
-            paths=("/s3/a.txt",)
+        ws.create_session(session_id).visibility = Visibility(
+            paths=HiddenPaths(paths=("/s3/a.txt",))
         )
 
     async def run() -> tuple[int, bytes, str]:

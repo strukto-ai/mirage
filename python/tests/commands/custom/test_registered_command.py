@@ -20,7 +20,6 @@ from mirage.io.types import IOResult
 
 
 def test_registered_command_dataclass():
-
     async def dummy(backend, paths, *texts, stdin=None, **flags):
         return b"ok", IOResult()
 
@@ -38,7 +37,6 @@ def test_registered_command_dataclass():
 
 
 def test_command_decorator_attaches_metadata():
-
     @command("myls", vfs="s3", spec=CommandSpec(rest=Operand(type="path")))
     async def my_ls(backend, paths, *texts, stdin=None, **flags):
         return b"ok", IOResult()
@@ -52,7 +50,6 @@ def test_command_decorator_attaches_metadata():
 
 
 def test_command_decorator_stacking():
-
     @command("cat", vfs="s3", spec=SPECS["cat"])
     @command("cat", vfs="ram", spec=SPECS["cat"])
     async def cat_impl(backend, paths, *texts, stdin=None, **flags):
@@ -64,7 +61,6 @@ def test_command_decorator_stacking():
 
 
 def test_command_decorator_with_filetype():
-
     @command(
         "cat",
         vfs="s3",

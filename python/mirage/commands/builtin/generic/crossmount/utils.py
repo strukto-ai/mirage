@@ -49,7 +49,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.types import FileType, PathSpec, PrimitiveCopy
+from mirage.types import FileType, PathSpec, PrimitiveCopy, Visibility
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 
@@ -217,7 +217,10 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
 
 
 def transfer_links_of(
-    links: LinkView, dispatch: DispatchFn, cwd: str
+    links: LinkView,
+    dispatch: DispatchFn,
+    cwd: str,
+    visibility: Visibility | None,
 ) -> TransferLinks:
     """Namespace links with the dispatcher primitives shared by cp and mv.
 
@@ -225,6 +228,7 @@ def transfer_links_of(
         links (LinkView): the namespace's symlink facts.
         dispatch (DispatchFn): the op door.
         cwd (str): the directory a typed operand resolves against.
+        visibility (Visibility | None): the session's visibility.
     """
     prim = transfer_primitives(dispatch)
     return TransferLinks(
@@ -238,6 +242,7 @@ def transfer_links_of(
             readdir=prim["readdir"],
         ),
         relay_stat=prim["stat"],
+        visibility=visibility,
     )
 
 

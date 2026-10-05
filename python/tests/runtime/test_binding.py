@@ -39,7 +39,7 @@ from mirage.context import (
 )
 from mirage.fuse.core import MountCore
 from mirage.observe.context import RecordingScope, record, start_op
-from mirage.policy import Deny, Policy
+from mirage.policy import Deny, Policy, PolicyDenied
 from mirage.runtime.binding import WorkspaceBinding, capture_binding
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
@@ -137,8 +137,10 @@ async def test_callbacks_retain_session_and_gate_after_capture():
         assert context.session_view.get("PUBLIC") == "agent"
         assert other.session_view.get("PUBLIC") is None
         assert "PUBLIC" not in context.env  # launch environment is a copy
-        with pytest.raises(PermissionError, match="protected"):
+        with pytest.raises(PolicyDenied) as refused:
             await context.session_view.set("SECRET", "no")
+        assert refused.value.refusal is not None
+        assert "protected" in refused.value.refusal.reason
         # A captured scope carries the owner as well as the session.
         assert (
             context.scope.call(

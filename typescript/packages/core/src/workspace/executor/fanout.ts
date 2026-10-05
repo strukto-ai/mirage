@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { pathAllowed } from '../../context/session_context.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { DISPATCH_BUILDERS } from '../../commands/builtin/generic/crossmount/constants.ts'
 import { runDu } from '../../commands/builtin/generic/crossmount/du.ts'
 import { runFind } from '../../commands/builtin/generic/crossmount/find.ts'
@@ -181,10 +181,11 @@ export async function fanOutTraversal(
   // Only the mounts the walk can reach bound its output: a hidden one never
   // contributes a row, so its stricter limit must not apply.
   const prefixes = new Set([primaryMount.prefix])
+  const vis = ns?.visibility
   for (const path of paths) {
     if (path.walkError !== null) continue
     for (const mount of registry.descendantMounts(path.virtual))
-      if (pathAllowed('/' + stripSlash(mount.prefix))) prefixes.add(mount.prefix)
+      if (pathVisible(vis, '/' + stripSlash(mount.prefix))) prefixes.add(mount.prefix)
   }
   io.producer = {
     command: cmdName,

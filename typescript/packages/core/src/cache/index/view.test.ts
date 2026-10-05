@@ -89,7 +89,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         })
         const session = new SessionState({
           sessionId: 'agent',
-          hiddenPaths: { paths: ['/data/source/private'] },
+          visibility: { paths: { paths: ['/data/source/private'] } },
         })
         const reading = runWithSession(session, () =>
           ws.dispatch(

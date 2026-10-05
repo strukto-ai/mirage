@@ -17,7 +17,11 @@ import asyncio
 import pytest
 
 from mirage.policy.match import Outcome
-from mirage.policy.profile import CompiledProfile
+from mirage.policy.profile import (
+    CompiledProfile,
+    ProfilePolicies,
+    ProfileSetup,
+)
 from mirage.policy.types import (
     AdmissionRules,
     CommandRule,
@@ -34,6 +38,7 @@ from mirage.types import (
     MountMode,
     ShowEntry,
     ShownPaths,
+    Visibility,
 )
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -237,10 +242,10 @@ async def test_manager_default_adopts_stored_hidden_specs():
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     default = mgr.get("default")
-    assert default.hidden_paths == HiddenPaths(
+    assert default.visibility.paths == HiddenPaths(
         paths=("/s3/secrets",), patterns=("*.key",)
     )
-    assert default.hidden_vars == HiddenVars(names=("SLACK_TOKEN",))
+    assert default.visibility.vars == HiddenVars(names=("SLACK_TOKEN",))
 
 
 @pytest.mark.asyncio
@@ -277,7 +282,7 @@ async def test_manager_default_adopts_stored_path_axis():
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     default = mgr.get("default")
-    assert default.shown_paths == ShownPaths(
+    assert default.visibility.shown == ShownPaths(
         entries=(
             ShowEntry("/repo/public", MountMode.READ),
             ShowEntry("/repo/notes", None),
@@ -327,16 +332,17 @@ async def test_manager_default_adopts_stored_script():
 def test_manager_default_profile_shapes_the_default_session():
     mgr = SessionManager("default")
     mgr.default_profile = CompiledProfile(
-        mount_modes={"/s3": MountMode.READ},
-        hidden_paths=HiddenPaths(paths=("/s3/secrets",)),
-        hidden_vars=HiddenVars(names=("SLACK_TOKEN",)),
-        env={"PAGER": "cat"},
-        cwd="/s3",
+        setup=ProfileSetup(env={"PAGER": "cat"}, cwd="/s3"),
+        visibility=Visibility(
+            paths=HiddenPaths(paths=("/s3/secrets",)),
+            vars=HiddenVars(names=("SLACK_TOKEN",)),
+        ),
+        policies=ProfilePolicies(mount_modes={"/s3": MountMode.READ}),
     )
     default = mgr.get("default")
     assert default.mount_modes == {"/s3": MountMode.READ}
-    assert default.hidden_paths == HiddenPaths(paths=("/s3/secrets",))
-    assert default.hidden_vars == HiddenVars(names=("SLACK_TOKEN",))
+    assert default.visibility.paths == HiddenPaths(paths=("/s3/secrets",))
+    assert default.visibility.vars == HiddenVars(names=("SLACK_TOKEN",))
     assert default.env["PAGER"] == "cat"
     assert default.cwd == "/s3"
     # None is "no default profile", not "clear the session".
@@ -362,18 +368,16 @@ async def test_manager_default_profile_outranks_a_stale_record():
     )
     mgr = SessionManager("default", store=store)
     mgr.default_profile = CompiledProfile(
-        mount_modes={"/s3": MountMode.READ},
-        hidden_paths=HiddenPaths(paths=("/s3/secrets",)),
-        hidden_vars=None,
-        env=None,
-        cwd="/s3",
+        setup=ProfileSetup(cwd="/s3"),
+        visibility=Visibility(paths=HiddenPaths(paths=("/s3/secrets",))),
+        policies=ProfilePolicies(mount_modes={"/s3": MountMode.READ}),
     )
     await mgr.ensure_loaded()
     default = mgr.get("default")
     assert default.cwd == "/w"
     assert default.env["A"] == "1"
     assert default.mount_modes == {"/s3": MountMode.READ}
-    assert default.hidden_paths == HiddenPaths(paths=("/s3/secrets",))
+    assert default.visibility.paths == HiddenPaths(paths=("/s3/secrets",))
     await mgr.flush()
     stored = (await store.load())["default"]
     assert stored["mount_modes"] == {"/s3": "read"}
@@ -475,7 +479,6 @@ def test_flush_conflict_adopts_stored_generation_and_retries():
 
 
 def test_flush_exhausted_retries_raise():
-
     class AlwaysConflict(RAMSessionStore):
         async def cas_set(self, session_id, fields, expected_generation):
             return False
@@ -526,12 +529,7 @@ def test_commands_of_answers_the_sessions_own_rules():
     # With a default profile compiled in, an unknown id answers its rules
     # rather than nothing, so an unbound door still fails toward refusal.
     mgr.default_profile = CompiledProfile(
-        mount_modes=None,
-        hidden_paths=None,
-        hidden_vars=None,
-        env=None,
-        cwd=None,
-        commands=AdmissionRules(allow=("cat",)),
+        policies=ProfilePolicies(commands=AdmissionRules(allow=("cat",)))
     )
     assert mgr.commands_of("nobody") == AdmissionRules(allow=("cat",))
     assert mgr.commands_of("") == AdmissionRules(allow=("cat",))
@@ -728,16 +726,18 @@ async def test_profile_changes_publish_only_after_persistence(
     store = RAMSessionStore()
     mgr = SessionManager("default", store=store)
     original = CompiledProfile(
-        mount_modes={"/data": MountMode.READ},
-        hidden_paths=HiddenPaths(paths=("/data/secret",)),
-        hidden_vars=HiddenVars(names=("TOKEN",)),
-        env=None,
-        cwd=None,
-        commands=AdmissionRules(allow=("cat",)),
-        script=ProfileScript(
-            profile="judge",
-            script=ScriptSource("None", language="python"),
-            runtime="monty",
+        visibility=Visibility(
+            paths=HiddenPaths(paths=("/data/secret",)),
+            vars=HiddenVars(names=("TOKEN",)),
+        ),
+        policies=ProfilePolicies(
+            mount_modes={"/data": MountMode.READ},
+            commands=AdmissionRules(allow=("cat",)),
+            script=ProfileScript(
+                profile="judge",
+                script=ScriptSource("None", language="python"),
+                runtime="monty",
+            ),
         ),
     )
     mgr.default_profile = original
@@ -756,20 +756,13 @@ async def test_profile_changes_publish_only_after_persistence(
         return await cas_set(*args)
 
     monkeypatch.setattr(store, "cas_set", delayed_write)
-    cleared = CompiledProfile(
-        mount_modes=None,
-        hidden_paths=None,
-        hidden_vars=None,
-        env=None,
-        cwd=None,
-        commands=None,
-    )
+    cleared = CompiledProfile()
     updating = asyncio.create_task(mgr.set_profile("default", cleared))
     try:
         await asyncio.wait_for(entered.wait(), 5)
         assert session.to_dict() == before
-        assert mgr.commands_of("") == original.commands
-        assert mgr.script_of("") == original.script
+        assert mgr.commands_of("") == original.policies.commands
+        assert mgr.script_of("") == original.policies.script
         session.cwd = "/changed-during-write"
         release.set()
         if failure:
@@ -778,12 +771,12 @@ async def test_profile_changes_publish_only_after_persistence(
             before["cwd"] = session.cwd
             assert session.to_dict() == before
             assert await store.load() == persisted
-            assert mgr.commands_of("") == original.commands
-            assert mgr.script_of("") == original.script
+            assert mgr.commands_of("") == original.policies.commands
+            assert mgr.script_of("") == original.policies.script
         else:
             assert await updating is session
             assert session.mount_modes is None
-            assert session.hidden_paths is None
+            assert session.visibility.paths is None
             assert mgr.commands_of("") is None
             assert mgr.script_of("") is None
         assert session.cwd == "/changed-during-write"
@@ -814,14 +807,7 @@ async def test_session_close_waits_for_profile_persistence(
         return await cas_set(*args)
 
     monkeypatch.setattr(store, "cas_set", delayed_write)
-    cleared = CompiledProfile(
-        mount_modes=None,
-        hidden_paths=None,
-        hidden_vars=None,
-        env=None,
-        cwd=None,
-        commands=None,
-    )
+    cleared = CompiledProfile()
     updating = asyncio.create_task(mgr.set_profile("agent", cleared))
     closing = None
     try:

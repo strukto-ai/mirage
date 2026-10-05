@@ -163,7 +163,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: /repo/letters.txt: no deletes in the repo\n"
+        "stderr": "rm: cannot remove '/repo/letters.txt': Permission denied\n"
       }
     },
     {
@@ -177,7 +177,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/locked/x: frozen\n"
+        "stderr": "cat: /scratch/locked/x: Permission denied\n"
       }
     },
     {

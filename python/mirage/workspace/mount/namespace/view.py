@@ -13,13 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+from typing import TYPE_CHECKING
 
-from mirage.context import path_allowed
+from mirage.context import get_admission
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import namespace_names
 from mirage.ops.types import LinkView, MountView, NamespaceView
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat
+from mirage.types import FileStat, Visibility
+from mirage.utils.hidden import hidden_under, path_visible
 from mirage.workspace.mount.namespace.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.mount.namespace.probe import (
@@ -29,9 +31,15 @@ from mirage.workspace.mount.namespace.probe import (
 )
 from mirage.workspace.mount.registry import MountRegistry
 
+if TYPE_CHECKING:
+    from mirage.workspace.session import SessionState
+
 
 def registry_child_mounts(
-    registry: MountRegistry, links: NamespaceLinks | None, parent: str
+    registry: MountRegistry,
+    links: NamespaceLinks | None,
+    vis: Visibility | None,
+    parent: str,
 ) -> list[str]:
     """Child names the namespace owes ``parent``: mounts and links.
 
@@ -43,10 +51,11 @@ def registry_child_mounts(
     Args:
         registry (MountRegistry): registry holding the mount table.
         links (NamespaceLinks | None): the namespace symlink table.
+        vis (Visibility | None): the session's visibility.
         parent (str): directory whose child segments to enumerate.
     """
     return namespace_names(
-        [m.prefix for m in registry.mounts()], links, parent
+        vis, [m.prefix for m in registry.mounts()], links, parent
     )
 
 
@@ -95,7 +104,7 @@ def mount_roots_below(registry: MountRegistry, virtual: str) -> list[str]:
 
 
 def visible_mount_roots_below(
-    registry: MountRegistry, virtual: str
+    registry: MountRegistry, vis: Visibility | None, virtual: str
 ) -> list[str]:
     """The mount roots under a path this session may be told about.
 
@@ -107,12 +116,13 @@ def visible_mount_roots_below(
 
     Args:
         registry (MountRegistry): registry holding the mount table.
+        vis (Visibility | None): the session's visibility.
         virtual (str): absolute virtual path to scan beneath.
     """
     return [
         root
         for root in mount_roots_below(registry, virtual)
-        if path_allowed(root)
+        if path_visible(vis, root)
     ]
 
 
@@ -144,7 +154,7 @@ def mount_max_du_entries(registry: MountRegistry, virtual: str) -> int | None:
     return mount.vfs.max_du_entries if mount is not None else None
 
 
-def mount_view(registry: MountRegistry) -> MountView:
+def mount_view(registry: MountRegistry, vis: Visibility | None) -> MountView:
     """The mount-boundary facts on offer to every command.
 
     Offered to every command as ``opts.ns.mounts``, the same way
@@ -153,11 +163,12 @@ def mount_view(registry: MountRegistry) -> MountView:
 
     Args:
         registry (MountRegistry): registry holding the mount table.
+        vis (Visibility | None): the session's visibility.
     """
     return MountView(
         descendants=functools.partial(mount_roots_below, registry),
         visible_descendants=functools.partial(
-            visible_mount_roots_below, registry
+            visible_mount_roots_below, registry, vis
         ),
         is_root=registry.is_mount_root,
         root_of=functools.partial(mount_root_of, registry),
@@ -169,13 +180,18 @@ def namespace_view_of(
     registry: MountRegistry,
     namespace: Namespace | None,
     dispatch: DispatchFn | None,
+    session: "SessionState | None",
 ) -> NamespaceView:
-    """The name plane's facts on offer, bundled as one view.
+    """The name plane's facts on offer to one session, bundled as one
+    view.
 
     Stamped on every invocation's ``CommandOpts`` as ``ns``, whether or
     not the handler looks; a command opts in by reading the field it
     wants, and one that grows a new name-plane need reads another field
-    instead of threading a new keyword through ``execute_cmd``.
+    instead of threading a new keyword through ``execute_cmd``. Bound
+    per session, the way the session view is: its listings come
+    filtered by that session's hides, and ``scoped`` answers for the
+    command being admitted, whose gate is bound while it runs.
 
     Args:
         registry (MountRegistry): registry holding the mount table.
@@ -183,19 +199,31 @@ def namespace_view_of(
             link table and attr overlay, None outside a workspace.
         dispatch (DispatchFn | None): op dispatcher, which answers
             existence across mounts rather than within one backend.
+        session (SessionState | None): the session the command runs as,
+            None for an unrestricted view.
     """
+    vis = session.visibility if session is not None else None
+    gate = get_admission()
+
+    def scoped(virtual: str) -> bool:
+        return hidden_under(vis, virtual) or (
+            gate is not None and gate.scopes(virtual)
+        )
+
     return NamespaceView(
         links=link_view(namespace, dispatch),
-        mounts=mount_view(registry),
+        mounts=mount_view(registry, vis),
         stat_overlay=(
             functools.partial(namespace_stat_overlay, namespace)
             if namespace is not None
             else None
         ),
         child_mounts=functools.partial(
-            registry_child_mounts, registry, namespace
+            registry_child_mounts, registry, namespace, vis
         ),
         user=namespace.user if namespace is not None else None,
+        visibility=vis,
+        scoped=scoped,
     )
 
 

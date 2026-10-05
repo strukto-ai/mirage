@@ -52,7 +52,6 @@ def test_readdir_root(ws):
 
 
 def test_readdir_glob_expansion(ws):
-
     async def _run():
         io = await ws.shell("echo /mnt/data/dir/*.txt")
         return await io.stdout_str()

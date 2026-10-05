@@ -16,7 +16,9 @@ from mirage.commands.config import CommandOpts
 from mirage.context import reset_current_session, set_current_session
 from mirage.core.dify import tree
 from mirage.io.types import IOResult, materialize
-from mirage.types import HiddenPaths, PathSpec
+from mirage.ops.types import NamespaceView
+from mirage.types import HiddenPaths, PathSpec, Visibility
+from mirage.utils.hidden import hidden_under
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.session import SessionState
 from tests.commands.builtin.dify.conftest import document
@@ -47,6 +49,12 @@ async def list_documents(config):
 @pytest.fixture(autouse=True)
 def documents(monkeypatch):
     monkeypatch.setattr(tree, "list_all_documents", list_documents)
+
+
+def view(vis: Visibility) -> NamespaceView:
+    return NamespaceView(
+        visibility=vis, scoped=lambda virtual: hidden_under(vis, virtual)
+    )
 
 
 async def run(
@@ -176,17 +184,15 @@ async def test_chroma_scans_chunks_only_for_a_size_test(
     hidden, texts, flags, rows, scans
 ):
     collection = seeded_collection()
-    session = SessionState(
-        session_id="veiled",
-        hidden_paths=HiddenPaths(paths=(hidden,) if hidden else ()),
-    )
+    vis = Visibility(paths=HiddenPaths(paths=(hidden,) if hidden else ()))
+    session = SessionState(session_id="veiled", visibility=vis)
     token = set_current_session(session)
     try:
         stdout, io = await chroma_find(
             accessor_for(collection),
             [spec("/knowledge")],
             texts,
-            CommandOpts(index=RAMIndexCacheStore(), flags=flags),
+            CommandOpts(index=RAMIndexCacheStore(), flags=flags, ns=view(vis)),
         )
         stdout = await materialize(stdout)
     finally:
@@ -199,13 +205,15 @@ async def test_chroma_scans_chunks_only_for_a_size_test(
 
 @pytest.mark.asyncio
 async def test_a_hidden_child_leaves_its_directory_empty():
-    session = SessionState(
-        session_id="veiled",
-        hidden_paths=HiddenPaths(paths=("/knowledge/guides/deep/note.md",)),
+    vis = Visibility(
+        paths=HiddenPaths(paths=("/knowledge/guides/deep/note.md",))
     )
+    session = SessionState(session_id="veiled", visibility=vis)
     token = set_current_session(session)
     try:
-        stdout, io = await run([spec("/knowledge/guides")], ["-empty"])
+        stdout, io = await run(
+            [spec("/knowledge/guides")], ["-empty"], ns=view(vis)
+        )
     finally:
         reset_current_session(token)
 

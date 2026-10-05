@@ -27,7 +27,6 @@ import type {
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
 import { DiskVFS } from '@struktoai/mirage-node'
-import { sessionPathAllowed } from '@struktoai/mirage-core/context/session_context'
 import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
@@ -35,6 +34,7 @@ import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/utils/errors'
+import { pathVisible } from '@struktoai/mirage-core/utils/hidden'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { assertNotAborted, mapMirageError } from './errors.ts'
 import {
@@ -251,7 +251,7 @@ export class MirageFileSystem extends FileSystem {
    * visible target it points at), and never listed.
    */
   private visible(path: string): boolean {
-    return sessionPathAllowed(this.session(), path)
+    return pathVisible(this.session().visibility, path)
   }
 
   /**

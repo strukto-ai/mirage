@@ -101,11 +101,11 @@ describe('Session', () => {
     }
     const first = build()
     const created = await first.session('reviewer', { profile: 'reviewer' })
-    expect(created.state.hiddenPaths).not.toBeNull()
+    expect(created.state.visibility.paths).not.toBeNull()
     await first.flushSessions()
     const second = build()
     const adopted = await second.session('reviewer')
-    expect(adopted.state.hiddenPaths).not.toBeNull()
+    expect(adopted.state.visibility.paths).not.toBeNull()
     await expect(second.session('reviewer', { profile: 'reviewer' })).rejects.toThrow(/exists/)
   })
 

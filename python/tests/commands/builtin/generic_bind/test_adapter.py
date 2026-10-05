@@ -40,6 +40,7 @@ from mirage.types import (
     PathSpec,
     ShowEntry,
     ShownPaths,
+    Visibility,
 )
 from mirage.utils.errors import OperationNotSupportedError, format_fs_error
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
@@ -344,12 +345,11 @@ def test_scoped_io_sets_a_content_index_aside():
     index = ContentSearchOps(narrow_paths=fake_readdir, enabled=lambda a: True)
     io = make_io(content_search=index)
     roots = [_spec("/data")]
-    assert adapter.scoped_io(io, roots, "/data/").content_search is index
-    token = set_admission(_Gate(refused="/data/sec"))
-    try:
-        scoped = adapter.scoped_io(io, roots, "/data/")
-    finally:
-        reset_admission(token)
+    free = NamespaceView(scoped=lambda _virtual: False)
+    judged = NamespaceView(scoped=lambda virtual: virtual == "/data")
+    assert adapter.scoped_io(io, free, roots, "/data/").content_search is index
+    assert adapter.scoped_io(io, None, roots, "/data/").content_search is index
+    scoped = adapter.scoped_io(io, judged, roots, "/data/")
     assert scoped.content_search is None
 
 
@@ -700,8 +700,8 @@ async def test_guarded_rmdir_threads_the_index_to_the_fallback_listing(
         files.discard(path.virtual)
         removed.append(("unlink", path.virtual))
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
-    monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
+    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     await adapter._guarded_rmdir(
         rmdir,
@@ -739,8 +739,8 @@ async def test_guarded_rmdir_answers_a_cascade_failure_with_the_refusal(
             errno.EROFS, "Read-only file system", path.virtual
         )
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
-    monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
+    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -766,8 +766,8 @@ async def test_guarded_rmdir_folds_a_non_oserror_cascade_failure(monkeypatch):
     async def unlink(_accessor, _path):
         raise RuntimeError("api exploded")
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
-    monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
+    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -793,8 +793,8 @@ async def test_guarded_rmdir_folds_a_failed_fallback_listing(monkeypatch):
     async def unlink(_accessor, _path):
         raise AssertionError("never reached")
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
-    monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
+    monkeypatch.setattr(adapter, "path_visible", lambda _vis, v: v == "/m/d")
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(
@@ -825,9 +825,9 @@ async def test_guarded_rmdir_counts_a_visible_mounted_child_as_content(
     async def unlink(_accessor, path):
         removed.append(path.virtual)
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
     monkeypatch.setattr(
-        adapter, "path_allowed", lambda v: v in ("/m/d", "/m/d/m")
+        adapter, "path_visible", lambda _vis, v: v in ("/m/d", "/m/d/m")
     )
     spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
@@ -867,9 +867,9 @@ async def test_hidden_guard_rmdir_reads_the_stamped_children(monkeypatch):
     async def unused(*_args):
         raise AssertionError("not used")
 
-    monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
+    monkeypatch.setattr(adapter, "hidden_under", lambda _vis, _v: True)
     monkeypatch.setattr(
-        adapter, "path_allowed", lambda v: v in ("/m/d", "/m/d/m")
+        adapter, "path_visible", lambda _vis, v: v in ("/m/d", "/m/d/m")
     )
     base = CommandIO(
         readdir=readdir,
@@ -891,7 +891,6 @@ async def test_hidden_guard_rmdir_reads_the_stamped_children(monkeypatch):
 
 
 def _glob_ops(mounted: bool) -> CommandIO:
-
     async def readdir(_accessor, path, _index):
         return ["/a.txt", "/b.txt"]
 
@@ -965,9 +964,11 @@ async def test_capability_and_mode_share_path_guards(
     session = SessionState(
         session_id="guard-matrix",
         mount_modes={"/data": MountMode.READ},
-        hidden_paths=HiddenPaths(paths=("/data/hidden",)),
-        shown_paths=ShownPaths(
-            entries=(ShowEntry("/data/build", MountMode.WRITE),)
+        visibility=Visibility(
+            paths=HiddenPaths(paths=("/data/hidden",)),
+            shown=ShownPaths(
+                entries=(ShowEntry("/data/build", MountMode.WRITE),)
+            ),
         ),
     )
 
@@ -1027,10 +1028,12 @@ async def test_copy_reads_source_but_rename_mutates_source_and_subtrees(
 
     session = SessionState(
         session_id="pair-guards",
-        shown_paths=ShownPaths(
-            entries=(
-                ShowEntry("/data/src", MountMode.READ),
-                ShowEntry("/data/tree/locked", MountMode.READ),
+        visibility=Visibility(
+            shown=ShownPaths(
+                entries=(
+                    ShowEntry("/data/src", MountMode.READ),
+                    ShowEntry("/data/tree/locked", MountMode.READ),
+                )
             )
         ),
     )

@@ -111,11 +111,13 @@ describe('SessionState', () => {
   it('round-trips the path axis through toJSON/fromJSON', () => {
     const original = new SessionState({
       sessionId: 'x',
-      shownPaths: {
-        entries: [
-          { path: '/repo/public', mode: MountMode.READ },
-          { path: '/repo/notes', mode: null },
-        ],
+      visibility: {
+        shown: {
+          entries: [
+            { path: '/repo/public', mode: MountMode.READ },
+            { path: '/repo/notes', mode: null },
+          ],
+        },
       },
       hideReasons: [{ patterns: ['/repo/vendor'], reason: 'licensing noise' }],
     })
@@ -131,10 +133,10 @@ describe('SessionState', () => {
         hide_reasons?: { patterns?: string[]; reason?: string }[] | null
       },
     )
-    expect(restored.shownPaths).toEqual(original.shownPaths)
+    expect(restored.visibility.shown).toEqual(original.visibility.shown)
     expect(restored.hideReasons).toEqual(original.hideReasons)
     const forked = restored.fork({ sessionId: 'y' })
-    expect(forked.shownPaths).toEqual(original.shownPaths)
+    expect(forked.visibility.shown).toEqual(original.visibility.shown)
     expect(forked.hideReasons).toEqual(original.hideReasons)
   })
 
@@ -142,7 +144,7 @@ describe('SessionState', () => {
     const s = new SessionState({ sessionId: 'x' })
     expect('shown_paths' in s.toJSON()).toBe(false)
     expect('hide_reasons' in s.toJSON()).toBe(false)
-    expect(SessionState.fromJSON({ session_id: 'x' }).shownPaths).toBeNull()
+    expect(SessionState.fromJSON({ session_id: 'x' }).visibility.shown).toBeNull()
     expect(SessionState.fromJSON({ session_id: 'x' }).hideReasons).toEqual([])
   })
 })

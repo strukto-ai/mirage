@@ -210,7 +210,7 @@ function pendingOf(session: SessionState): Map<string, ManagedRef> {
   const out = new Map<string, ManagedRef>()
   for (const [name, v] of Object.entries(session.vars)) {
     if (v.managed === undefined || v.value !== null) continue
-    if (varHidden(session.hiddenVars, name)) continue
+    if (varHidden(session.visibility, name)) continue
     out.set(name, v.managed)
   }
   return out

@@ -305,7 +305,6 @@ async def test_a_bootstrap_field_named_after_a_dunder_is_absent(monkeypatch):
 
 
 def counting_fields():
-
     async def fetch(config: DotenvConfig, ref: str) -> ResolvedSecret:
         return ResolvedSecret(fields={"A": "a"})
 

@@ -303,13 +303,15 @@ async function predictedRefusal(ws: ExecWorkspace, c: Case): Promise<[number, st
  * nobody typed. A refusal it predicts must be the refusal that arrives.
  * And the harder direction: a refusal that arrives must have been
  * predicted, which is checked by looking for one of the document's own
- * rule reasons in what the run printed. That last one is the direction a
- * prediction cannot check on its own, and it is where the bugs were:
- * reading a line without its redirect target answered ALLOW for a line
- * the run refused.
+ * rule reasons on an operand refusal's record, the one a rule naming the
+ * line's operand writes (the streams keep bash's words, and a walk's
+ * refusal below the operand is the command's). That last one is the
+ * direction a prediction cannot check on its own, and it is where the
+ * bugs were: reading a line without its redirect target answered ALLOW
+ * for a line the run refused.
  *
- * The message is looked for on either stream because the line's own
- * redirections still apply to the run and not to the prediction:
+ * The predicted message is looked for on either stream because the line's
+ * own redirections still apply to the run and not to the prediction:
  * `rm /denied 2>&1` is refused on stdout.
  */
 export function explainNotes(
@@ -319,12 +321,13 @@ export function explainNotes(
   out: string,
   err: string,
   reasons: readonly string[],
+  refused: string,
 ): string[] {
   const notes: string[] = []
   if (recorded !== 0) {
     notes.push(`explain: recorded ${recorded} question(s), must record none`)
   }
-  const spoke = reasons.find((r) => r !== '' && (err.includes(r) || out.includes(r)))
+  const spoke = reasons.find((r) => r !== '' && refused.includes(r))
   if (predicted === null) {
     if (spoke !== undefined) {
       notes.push(`explain: said the line runs, but a rule refused it with ${JSON.stringify(spoke)}`)
@@ -413,7 +416,17 @@ export async function runCase(
     checkOut,
     notes: [
       ...undecodable({ stdout: result.stdout, stderr: result.stderr }),
-      ...(checks ? explainNotes(predicted, recorded, result.exitCode, out, err, reasons) : []),
+      ...(checks
+        ? explainNotes(
+            predicted,
+            recorded,
+            result.exitCode,
+            out,
+            err,
+            reasons,
+            result.refusal?.scope === 'operand' ? result.refusal.reason : '',
+          )
+        : []),
     ],
   }
 }

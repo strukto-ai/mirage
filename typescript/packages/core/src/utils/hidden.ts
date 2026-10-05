@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { HiddenPaths, HiddenVars, MountMode, ShowEntry, ShownPaths } from '../types.ts'
+import type {
+  HiddenPaths,
+  HiddenVars,
+  MountMode,
+  ShowEntry,
+  ShownPaths,
+  Visibility,
+} from '../types.ts'
 import { weakerMode } from '../types.ts'
 import { fnmatch } from './fnmatch.ts'
 import { stripSlash } from './slash.ts'
@@ -249,13 +256,11 @@ export function showDepth(shown: ShownPaths | null | undefined, virtual: string)
  * to a carve-out exists (`hide /repo` + `show /repo/public` keeps
  * `/repo` listable, holding only the carve-out).
  */
-export function pathVisible(
-  hidden: HiddenPaths | null | undefined,
-  shown: ShownPaths | null | undefined,
-  virtual: string,
-): boolean {
-  const deepestHide = hideDepth(hidden, virtual)
+export function pathVisible(vis: Visibility | null | undefined, virtual: string): boolean {
+  if (vis == null) return true
+  const deepestHide = hideDepth(vis.paths, virtual)
   if (deepestHide === null) return true
+  const shown = vis.shown
   const deepestShow = showDepth(shown, virtual)
   if (deepestShow !== null && deepestShow > deepestHide) return true
   if (shown == null) return false
@@ -270,7 +275,7 @@ export function pathVisible(
       if (head !== entry.path && anchorDepth(entry.path) > deepestHide) return true
       continue
     }
-    if ((norm === '/' || head.startsWith(norm + '/')) && pathVisible(hidden, shown, head)) {
+    if ((norm === '/' || head.startsWith(norm + '/')) && pathVisible(vis, head)) {
       return true
     }
   }
@@ -315,7 +320,17 @@ export function classifyShows(entries: readonly ShowEntry[]): ShownPaths | null 
 }
 
 /**
- * Whether the spec could hide anything at or under this path.
+ * Whether the session could hide anything at or under this path: the
+ * session form of `hidesIntersect`, for the view a native walk asks
+ * before it trusts the raw tree.
+ */
+export function hiddenUnder(vis: Visibility | null | undefined, virtual: string): boolean {
+  return hidesIntersect(vis?.paths, virtual)
+}
+
+/**
+ * Whether a spec (a session's hides or a rule's paths) could cover
+ * anything at or under this path.
  *
  * The per-operand gate for a native fast path: a backend's find op or
  * du total classifies the raw tree, so it must not be trusted when a
@@ -363,12 +378,8 @@ export function hidesIntersect(hidden: HiddenPaths | null | undefined, virtual: 
  * `src` refuses, failing toward refusal the way `readonlyBelow` blames
  * a pattern.
  */
-export function moveReveals(
-  hidden: HiddenPaths | null | undefined,
-  shown: ShownPaths | null | undefined,
-  src: string,
-  dst: string,
-): boolean {
+export function moveReveals(vis: Visibility | null | undefined, src: string, dst: string): boolean {
+  const hidden = vis?.paths
   if (hidden == null) return false
   const paths = hidden.paths ?? []
   const patterns = hidden.patterns ?? []
@@ -380,7 +391,7 @@ export function moveReveals(
     const e = normAbs(entry)
     if (!e.startsWith(s + '/')) continue
     const mapped = (d === '/' ? '' : d) + e.slice(s.length)
-    if (pathVisible(hidden, shown, mapped)) return true
+    if (pathVisible(vis, mapped)) return true
   }
   for (const pat of patterns) {
     if (!pat.includes('/')) continue
@@ -392,8 +403,9 @@ export function moveReveals(
   return false
 }
 
-/** Whether the session's spec hides this variable name. */
-export function varHidden(hidden: HiddenVars | null | undefined, name: string): boolean {
+/** Whether the session hides this variable name. */
+export function varHidden(vis: Visibility | null | undefined, name: string): boolean {
+  const hidden = vis?.vars
   if (hidden == null) return false
   if ((hidden.names ?? []).includes(name)) return true
   for (const pat of hidden.patterns ?? []) {

@@ -108,7 +108,7 @@ export const BUILDER: Builder = {
       links === null ? undefined : (p: PathSpec) => typedLink(links, p, cwd),
       links === null || opts.dispatch === undefined
         ? undefined
-        : transferLinksOf(links, opts.dispatch, cwd),
+        : transferLinksOf(links, opts.dispatch, cwd, opts.ns?.visibility),
       opts.stdin,
     )
   },

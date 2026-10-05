@@ -189,7 +189,6 @@ def test_register_runtime_refuses_a_builtin_name():
 
 
 def test_register_runtime_replaces_a_custom_name():
-
     class Other(FakeRuntime):
         name = "fake"
 

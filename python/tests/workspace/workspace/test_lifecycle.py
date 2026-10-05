@@ -85,7 +85,6 @@ async def test_close_keeps_loop_responsive_while_kernel_unmount_blocks(
     ["glob", "midpath", "metadata", "touch", "chmod", "chown", "chgrp"],
 )
 async def test_first_mount_access_prepares_expansion(action):
-
     class IndexedRAM(RAMVFS):
         def __init__(self, shared):
             super().__init__()
@@ -180,7 +179,6 @@ async def test_first_mount_access_prepares_expansion(action):
 
 @pytest.mark.asyncio
 async def test_unmount_waits_for_an_inflight_cache_write(monkeypatch):
-
     class CachedRAM(RAMVFS):
         caches_reads = True
 
@@ -651,7 +649,6 @@ async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(
 
 @pytest.mark.asyncio
 async def test_unmount_preserves_operations_of_each_surviving_vfs():
-
     class LabeledRAM(RAMVFS):
         def __init__(self, label, specialized=False):
             super().__init__()

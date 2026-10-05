@@ -20,6 +20,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from mirage.commands.errors import CommandTimeoutError
+from mirage.context import reset_refusal_sink, set_refusal_sink
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
@@ -587,6 +588,14 @@ async def run_prepared_line(
             routing_decision,
         )
         nested = NestedRefusal()
+
+        def note(refusal: Refusal) -> None:
+            nested.latest = refusal
+
+        # An op a policy refuses inside a command prints the command's
+        # own GNU line, so the door notes the record here, for the line
+        # to carry on its result.
+        sink_token = set_refusal_sink(note)
         # The line's hand-off: the grants its passes and gates claim
         # for its commands, which the gates run on and the line's end
         # spends. A nested evaluation runs on one made under the
@@ -671,6 +680,8 @@ async def run_prepared_line(
                     ws._dispatcher.invalidate_all_after_remote,
                     ws._registry.command_limits,
                 )
+                if io.refusal is None:
+                    io.refusal = nested.latest
                 record_status(session, io.exit_code)
                 return io
             # The line is the unit a rule judges, so every command in it is
@@ -806,6 +817,7 @@ async def run_prepared_line(
             # would be taken by the first spelling the pass reads.
             held = is_pending_refusal(io.refusal)
         finally:
+            reset_refusal_sink(sink_token)
             if held:
                 ws._registry.decisions.release(
                     effective_session.session_id, handed

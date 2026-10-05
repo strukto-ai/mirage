@@ -36,7 +36,7 @@ const mv: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
     refuseReveal,
     opts.ns?.links == null || opts.dispatch == null
       ? undefined
-      : transferLinksOf(opts.ns.links, opts.dispatch, opts.cwd),
+      : transferLinksOf(opts.ns.links, opts.dispatch, opts.cwd, opts.ns.visibility),
     opts.stdin,
   )
 }

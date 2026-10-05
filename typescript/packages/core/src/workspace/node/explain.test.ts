@@ -248,7 +248,7 @@ describe('explain', () => {
     const w = await ws()
     const ran = await w.shell('rm /data/a.txt && rm /data/prod/x.txt', { sessionId: 's' })
     expect(ran.exitCode).toBe(1)
-    expect(DEC.decode(ran.stderr)).toBe('rm: /data/prod/x.txt: production data is protected\n')
+    expect(DEC.decode(ran.stderr)).toBe("rm: cannot remove '/data/prod/x.txt': Permission denied\n")
     expect(await w.vfs.readdir('/data')).toContain('/data/a.txt')
   })
 
@@ -289,7 +289,7 @@ describe('explain', () => {
     const w = await ws()
     const ran = await w.shell('cd /data/prod && rm x.txt', { sessionId: 's' })
     expect(ran.exitCode).toBe(1)
-    expect(DEC.decode(ran.stderr)).toBe('rm: x.txt: production data is protected\n')
+    expect(DEC.decode(ran.stderr)).toBe("rm: cannot remove 'x.txt': Permission denied\n")
   })
 
   it('reads a cd the same way the run does', async () => {
@@ -393,7 +393,7 @@ describe('prejudge', () => {
     const w = await sealedWs()
     const ran = await w.shell('rm /data/a.txt && echo x > /data/prod/x.txt', { sessionId: 's' })
     expect(ran.exitCode).not.toBe(0)
-    expect(DEC.decode(ran.stderr)).toContain('sealed until review')
+    expect(ran.refusal?.reason).toContain('sealed until review')
     expect(await w.vfs.readdir('/data')).toContain('/data/a.txt')
   })
 
@@ -427,7 +427,7 @@ describe('prejudge', () => {
     const w = await inlineWs(answering([], Outcome.ALLOW))
     const ran = await w.shell('cat /data/secret.txt && rm /data/prod/x.txt', { sessionId: 's' })
     expect(ran.exitCode).not.toBe(0)
-    expect(DEC.decode(ran.stderr)).toContain('production data is protected')
+    expect(ran.refusal?.reason).toContain('production data is protected')
     expect(DEC.decode(ran.stdout)).not.toContain('s')
     expect(await w.vfs.readdir('/data/prod')).toContain('/data/prod/x.txt')
   })
@@ -838,7 +838,7 @@ describe('prejudge', () => {
     await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
     const retry = await w.shell(line, { sessionId: 's' })
     expect(retry.exitCode).not.toBe(0)
-    expect(DEC.decode(retry.stderr)).toContain('production data is protected')
+    expect(retry.refusal?.reason).toContain('production data is protected')
     expect(w.decisions.list('s')).toEqual([])
     const again = await w.shell('cat /data/secret.txt', { sessionId: 's' })
     expect(again.exitCode).toBe(126)
@@ -855,7 +855,7 @@ describe('prejudge scope', () => {
     const w = await ws()
     const ran = await w.shell('(cd /data/prod && rm x.txt)', { sessionId: 's' })
     expect(ran.exitCode).toBe(1)
-    expect(DEC.decode(ran.stderr)).toBe('rm: x.txt: production data is protected\n')
+    expect(DEC.decode(ran.stderr)).toBe("rm: cannot remove 'x.txt': Permission denied\n")
     expect(await w.vfs.readdir('/data/prod')).toContain('/data/prod/x.txt')
   })
 
@@ -869,7 +869,7 @@ describe('prejudge scope', () => {
     const w = await ws()
     const ran = await w.shell('rm /data/prod/x.txt 2>&1', { sessionId: 's' })
     expect(ran.exitCode).toBe(1)
-    expect(DEC.decode(ran.stdout)).toBe('rm: /data/prod/x.txt: production data is protected\n')
+    expect(DEC.decode(ran.stdout)).toBe("rm: cannot remove '/data/prod/x.txt': Permission denied\n")
     expect(DEC.decode(ran.stderr)).toBe('')
   })
 

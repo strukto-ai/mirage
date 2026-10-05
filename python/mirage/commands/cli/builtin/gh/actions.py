@@ -256,7 +256,6 @@ def _log_segments(
     fetchers = 0
 
     def read_entry(entry: str) -> Callable[[], Awaitable[bytes]]:
-
         async def read() -> bytes:
             return archive.read(entry)
 

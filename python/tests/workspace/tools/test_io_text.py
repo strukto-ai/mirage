@@ -1,7 +1,11 @@
+import errno
+
 from mirage.io.types import IOResult
+from mirage.policy import PolicyDenied
 from mirage.types import Refusal
 from mirage.workspace.tools.io_text import (
     decode,
+    error_text,
     io_to_str,
     replace_text,
     with_refusal_bytes,
@@ -196,3 +200,18 @@ def test_replace_text_writes_dollar_patterns_literally():
 
 def test_replace_text_miss_is_a_zero_count():
     assert replace_text("abc", "z", "y", False) == ("abc", 0)
+
+
+def test_error_text_adds_the_policy_line_to_a_plain_eacces():
+    refused = PolicyDenied(
+        errno.EACCES,
+        "Permission denied",
+        "/data/x",
+        refusal=Refusal(kind="deny", reason="sealed"),
+    )
+    assert error_text(refused) == (
+        "Error: [Errno 13] Permission denied: '/data/x'\n"
+        "policy denied: sealed\n"
+    )
+    missing = FileNotFoundError(errno.ENOENT, "No such file or directory")
+    assert error_text(missing) == "Error: [Errno 2] No such file or directory"

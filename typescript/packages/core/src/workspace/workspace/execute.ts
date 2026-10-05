@@ -27,7 +27,11 @@ import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
 import { Terminal } from '../../shell/console/index.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
+import {
+  getCurrentSessionFor,
+  runWithRefusalSink,
+  runWithSession,
+} from '../../context/session_context.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import {
   syntaxErrorResult,
@@ -678,6 +682,12 @@ async function runParsedLine(
 ): Promise<ExecuteResult> {
   const cacheFacts = env.dispatcher.captureCacheFacts()
   const callAgentId = options.agentId ?? env.agentId ?? ''
+  // An op a policy refuses inside a command prints the command's own GNU
+  // line, so the door notes the record here, for the line to carry on its
+  // result.
+  const note = (refusal: Refusal): void => {
+    nested.latest = refusal
+  }
   // The line-reader decision (GNU: history is appended where the typed
   // line is read, never inside the evaluator). Internal evaluations run
   // with record:false: no new recording scope, so their ops land in the
@@ -817,25 +827,28 @@ async function runParsedLine(
         if (filled !== null) return filled
       }
       const result = await abortable(
-        runWholeLine(
-          lineRuntime,
-          command,
-          stdin,
-          effectiveSession,
-          env.registry.allMounts(),
-          env.registry.policies,
-          () => env.invalidateAllAfterRemote(),
-          killed,
-          env.registry.commandLimits,
+        runWithRefusalSink(note, () =>
+          runWholeLine(
+            lineRuntime,
+            command,
+            stdin,
+            effectiveSession,
+            env.registry.allMounts(),
+            env.registry.policies,
+            () => env.invalidateAllAfterRemote(),
+            killed,
+            env.registry.commandLimits,
+          ),
         ),
         killed,
       )
+      const refusal = result.refusal ?? nested.latest
       recordStatus(targetSession, result.exitCode)
       if (isLine) {
         const lineIo = new IOResult({
           exitCode: result.exitCode,
           stdout: result.stdout,
-          refusal: result.refusal,
+          refusal,
           ...(result.stderr !== null ? { stderr: result.stderr } : {}),
         })
         // Joined like the tree's record: a stalled store releases the
@@ -856,7 +869,7 @@ async function runParsedLine(
         result.stdout,
         result.stderr ?? new Uint8Array(),
         result.exitCode,
-        result.refusal,
+        refusal,
       )
     }
     // The line is the unit a rule judges, so every command in it is
@@ -931,7 +944,9 @@ async function runParsedLine(
       }
     }
     try {
-      execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
+      execResult = await runWithRefusalSink(note, async () =>
+        isLine ? runWithRecording(runBody) : [await runBody(), []],
+      )
       // A record a nested line earned is the line's to report when its
       // own tree earned none (see NestedRefusal). A question a gate left
       // waiting holds the line exactly as one the pass left waiting

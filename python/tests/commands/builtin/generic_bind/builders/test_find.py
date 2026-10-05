@@ -29,7 +29,6 @@ DIRS = {"/mnt", "/mnt/table1"}
 
 
 def _ops(stat_calls: list[str], find_op=None) -> CommandIO:
-
     async def readdir(_accessor, path, _index):
         return TREE.get(path.virtual.rstrip("/") or "/", [])
 

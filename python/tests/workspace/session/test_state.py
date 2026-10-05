@@ -23,7 +23,7 @@ from mirage.shell.array import make_array
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ManagedRef, ShellVar, TempEnv, VarAttr
-from mirage.types import HiddenVars
+from mirage.types import HiddenVars, Visibility
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import vars_from_env
@@ -75,7 +75,6 @@ def test_get_and_snapshot_read_the_session():
 
 
 def test_set_and_unset_write_the_session():
-
     async def run():
         view, session = _view()
         await view.set("B", "2")
@@ -119,7 +118,6 @@ def test_an_array_write_renders_the_gate_value_as_words():
 
 
 def test_unset_of_a_missing_name_is_quiet():
-
     async def run():
         view, _session = _view()
         await view.unset("NEVER_SET")
@@ -145,7 +143,6 @@ def test_readonly_refusal_is_typed():
 
 
 def test_pre_session_gate_vetoes_a_write():
-
     async def run():
         policies = Policies()
         policies.add(DenySecrets())
@@ -186,7 +183,9 @@ def _hidden_view(
         vars=vars_from_env(
             {"PUBLIC": "1", "SLACK_TOKEN": "xoxb", "AWS_SECRET_KEY": "k"}
         ),
-        hidden_vars=HiddenVars(names=("SLACK_TOKEN",), patterns=("AWS_*",)),
+        visibility=Visibility(
+            vars=HiddenVars(names=("SLACK_TOKEN",), patterns=("AWS_*",))
+        ),
     )
     return session_view(session, policies), session
 
@@ -416,7 +415,6 @@ def _managed(value: str | None) -> ShellVar:
 
 
 def test_set_var_detaches_a_fetched_managed_var():
-
     async def run():
         view, session = _view()
         session.vars["TOKEN"] = _managed("s3cr3t")
@@ -430,7 +428,6 @@ def test_set_var_detaches_a_fetched_managed_var():
 
 
 def test_set_var_detaches_an_unfetched_managed_var():
-
     async def run():
         view, session = _view()
         session.vars["TOKEN"] = _managed(None)
@@ -443,7 +440,6 @@ def test_set_var_detaches_an_unfetched_managed_var():
 
 
 def test_unset_var_deletes_a_managed_name_quietly():
-
     async def run():
         view, session = _view()
         session.vars["TOKEN"] = _managed("s3cr3t")
@@ -499,7 +495,6 @@ async def test_gate_restored_vars_refuses_a_denied_name():
 # `seed_var`, ungated) stay the shell's on a restore too.
 @pytest.mark.asyncio
 async def test_gate_restored_vars_leaves_the_shell_bookkeeping_alone():
-
     class DenyAll(Policy):
         async def pre_session(self, ctx: SessionContext) -> Action | None:
             return Deny("nothing may be set\n")

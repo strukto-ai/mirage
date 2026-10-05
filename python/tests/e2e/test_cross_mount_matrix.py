@@ -135,7 +135,6 @@ class CrossMountEnv:
             asyncio.run(_ls_for_index(self.ws, state, name))
 
     def run(self, cmd: str) -> str:
-
         async def _inner():
             io = await self.ws.shell(cmd)
             return await io.stdout_str()

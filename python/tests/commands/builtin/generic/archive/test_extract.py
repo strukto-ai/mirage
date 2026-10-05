@@ -40,7 +40,6 @@ def test_extract_dest_string_cwd_defaults_to_root():
 
 
 def _stat_factory(dirs: set[str]):
-
     async def stat(path: PathSpec) -> FileStat:
         if path.virtual in dirs:
             return FileStat(

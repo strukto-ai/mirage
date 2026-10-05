@@ -22,7 +22,10 @@ import asyncssh
 from asyncssh.editor import SSHLineEditorChannel
 
 from mirage.io.cooperative import chunks
-from mirage.io.types import ByteSource
+from mirage.io.types import IOResult
+from mirage.server.ssh.constants import REFUSAL_WINDOW
+from mirage.shell.bytes import decode_text, encode_text
+from mirage.workspace.tools.io_text import refusal_line
 
 logger = logging.getLogger(__name__)
 
@@ -440,19 +443,57 @@ def loop_sender(
     return send
 
 
-async def deliver(
-    stdout: ByteSource | None, stderr: ByteSource | None, send: Send
-) -> None:
-    """Stream a line's stdout, then its stderr, through ``send``.
+def head_window(prefix: bytes, total: int) -> bytes:
+    """A stream's first ``REFUSAL_WINDOW`` bytes, then on to the end of
+    the line that window cuts (at most a window more), whole lines only
+    unless the stream ends inside them.
 
     Args:
-        stdout (ByteSource | None): the line's stdout.
-        stderr (ByteSource | None): the line's stderr.
+        prefix (bytes): the stream's first ``2 * REFUSAL_WINDOW`` bytes.
+        total (int): the stream's whole length.
+    """
+    if total <= REFUSAL_WINDOW:
+        return prefix
+    end = prefix.find(b"\n", REFUSAL_WINDOW - 1)
+    if end != -1:
+        return prefix[: end + 1]
+    if total <= 2 * REFUSAL_WINDOW:
+        return prefix
+    return prefix[: prefix.rfind(b"\n", 0, REFUSAL_WINDOW) + 1]
+
+
+async def deliver(io: IOResult, send: Send) -> None:
+    """Stream a line's stdout, then its stderr, through ``send``, then
+    the refusal's line on stderr when a policy refused part of it.
+
+    The terminal's output goes out as the line printed it; the policy's
+    reason is the one line ``refusal_line`` appends, read once both
+    streams are drained, since an op a streaming command reads late is
+    refused only then. Whether the output already says why is read off
+    each stream's first and last ``REFUSAL_WINDOW`` bytes: the first runs
+    on to the end of the line it cuts (at most a window more) and keeps
+    whole lines only, so a line split at a cut can neither pose as the
+    diagnostic nor hide one. A diagnostic deep inside a long output may
+    be missed, which repeats the reason and never drops it.
+
+    Args:
+        io (IOResult): the line's result.
         send (Send): where each chunk goes.
     """
-    for source, is_stderr in ((stdout, False), (stderr, True)):
+    said: list[bytes] = []
+    for source, is_stderr in ((io.stdout, False), (io.stderr, True)):
         if source is None:
             continue
+        prefix = tail = b""
+        total = 0
         async for chunk in chunks(source):
             if chunk:
+                total += len(chunk)
+                if len(prefix) < 2 * REFUSAL_WINDOW:
+                    prefix += chunk[: 2 * REFUSAL_WINDOW - len(prefix)]
+                tail = (tail + chunk[-REFUSAL_WINDOW:])[-REFUSAL_WINDOW:]
                 await send(chunk, is_stderr)
+        said += [head_window(prefix, total), tail]
+    line = refusal_line(decode_text(b"\n".join(said)), io.refusal)
+    if line:
+        await send(encode_text(line), True)

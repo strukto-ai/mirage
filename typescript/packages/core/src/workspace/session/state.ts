@@ -74,7 +74,7 @@ export function envSnapshot(session: SessionState): Record<string, string> {
     if (
       typeof v.value === 'string' &&
       v.attrs.has(VarAttr.Export) &&
-      !varHidden(session.hiddenVars, name)
+      !varHidden(session.visibility, name)
     ) {
       out[name] = v.value
     }
@@ -94,7 +94,7 @@ export function envSnapshot(session: SessionState): Record<string, string> {
 export function exportedNames(session: SessionState): string[] {
   const out: string[] = []
   for (const [name, v] of Object.entries(session.vars)) {
-    if (v.attrs.has(VarAttr.Export) && !varHidden(session.hiddenVars, name)) {
+    if (v.attrs.has(VarAttr.Export) && !varHidden(session.visibility, name)) {
       out.push(name)
     }
   }
@@ -139,7 +139,7 @@ export function deref(session: SessionState, name: string): string {
  * the hidden check. A name reference reads its target. */
 export function envGet(session: SessionState, name: string): string | null {
   const resolved = deref(session, name)
-  if (varHidden(session.hiddenVars, resolved)) return null
+  if (varHidden(session.visibility, resolved)) return null
   const v = sessionEntry(session.vars, resolved)
   return v !== undefined && typeof v.value === 'string' ? v.value : null
 }
@@ -153,7 +153,7 @@ export function envGet(session: SessionState, name: string): string | null {
  */
 function envIsReadonly(session: SessionState, name: string): boolean {
   const resolved = deref(session, name)
-  if (varHidden(session.hiddenVars, resolved)) return false
+  if (varHidden(session.visibility, resolved)) return false
   const v = sessionEntry(session.vars, resolved)
   return v?.attrs.has(VarAttr.Readonly) ?? false
 }
@@ -180,7 +180,7 @@ function envIsReadonly(session: SessionState, name: string): boolean {
 export function visibleEnv(session: SessionState): Record<string, string> {
   const out = ownRecord<string>()
   for (const [name, v] of Object.entries(session.vars)) {
-    if (typeof v.value === 'string' && !varHidden(session.hiddenVars, name)) {
+    if (typeof v.value === 'string' && !varHidden(session.visibility, name)) {
       out[name] = v.value
     }
   }
@@ -197,17 +197,17 @@ export function visibleEnv(session: SessionState): Record<string, string> {
 export function visibleArrays(session: SessionState): Record<string, ShellArray> {
   const out = ownRecord<ShellArray>()
   for (const [name, v] of Object.entries(session.vars)) {
-    if (Array.isArray(v.value) && !varHidden(session.hiddenVars, name)) {
+    if (Array.isArray(v.value) && !varHidden(session.visibility, name)) {
       out[name] = v.value
     }
   }
   // PIPESTATUS and FUNCNAME are the session's records, never the store's:
   // an assignment to either is ignored, as bash ignores one, because the
   // record answers before the store.
-  if (!varHidden(session.hiddenVars, PIPESTATUS)) {
+  if (!varHidden(session.visibility, PIPESTATUS)) {
     out[PIPESTATUS] = session.pipeStatus.map((code) => String(code))
   }
-  if (session.functionNames !== null && !varHidden(session.hiddenVars, FUNCNAME)) {
+  if (session.functionNames !== null && !varHidden(session.visibility, FUNCNAME)) {
     out[FUNCNAME] = [...session.functionNames]
   }
   return out
@@ -227,7 +227,7 @@ export function visibleAssocs(session: SessionState): Record<string, Record<stri
       v.value !== null &&
       typeof v.value === 'object' &&
       !Array.isArray(v.value) &&
-      !varHidden(session.hiddenVars, name)
+      !varHidden(session.visibility, name)
     ) {
       out[name] = v.value
     }
@@ -537,7 +537,7 @@ export class RandomReader {
   private special(name: string): boolean {
     const session = this.session
     return (
-      name === RANDOM && !varHidden(session.hiddenVars, name) && session.randomSeed !== RANDOM_UNSET
+      name === RANDOM && !varHidden(session.visibility, name) && session.randomSeed !== RANDOM_UNSET
     )
   }
 
@@ -672,7 +672,7 @@ async function landCoercion(
 }
 
 export function ensureVarVisible(session: SessionState, name: string): void {
-  if (varHidden(session.hiddenVars, name)) {
+  if (varHidden(session.visibility, name)) {
     throw new PolicyDenied(`${name}: permission denied`, name)
   }
 }
@@ -771,7 +771,7 @@ async function unsetVar(
   followRef = true,
 ): Promise<void> {
   if (followRef) name = deref(session, name) || name
-  if (varHidden(session.hiddenVars, name)) return
+  if (varHidden(session.visibility, name)) return
   if (envIsReadonly(session, name)) {
     throw new ReadonlyVariableError(name)
   }

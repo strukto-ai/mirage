@@ -14,6 +14,7 @@
 
 import { PassThrough } from 'node:stream'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
+import { REFUSAL_WINDOW } from './constants.ts'
 import type { ServerChannel } from 'ssh2'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -199,6 +200,38 @@ describe('ChannelOutput', () => {
     await deliver(new ExecuteResult(enc.encode('out\n'), enc.encode('err\n'), 0), output)
     expect(chan.written).toEqual(['out\r\n', 'err\r\n'])
   })
+
+  const W = REFUSAL_WINDOW
+  const said = "rm: cannot remove '/data': Device or resource busy\n"
+  const busy = "cannot remove '/data': Device or resource busy"
+  const more = 'y'.repeat(W * 4)
+  it.each([
+    ['appended', '', "rm: cannot remove 'x': Permission denied\n", 'sealed', false],
+    // A mount root's EBUSY lets the rest of the line run, so its
+    // diagnostic can sit at either end of a long output, or end right at
+    // the first window with its newline the next byte.
+    ['end', more, more + said, busy, true],
+    ['start', more, said + more, busy, true],
+    ['window edge', more, 'f'.repeat(W - said.length) + '\n' + said + more, busy, true],
+    // A long line cut right after the reason's words says nothing.
+    ['cut line', 'a'.repeat(W - 8) + ': sealed' + 'z'.repeat(64) + '\n', '', 'sealed', false],
+  ] as const)(
+    'appends the refusal unless the output says why: %s',
+    async (_case, stdout, stderr, reason, saysWhy) => {
+      const chan = new FakeChannel()
+      const output = new ChannelOutput(chan.asChannel(), false)
+      const refused = new ExecuteResult(enc.encode(stdout), enc.encode(stderr), 1, {
+        kind: 'deny',
+        reason,
+        policy: '',
+        scope: 'operand',
+        askId: null,
+      })
+      await deliver(refused, output)
+      await new Promise((r) => setImmediate(r))
+      expect(chan.errors.at(-1) === `policy denied: ${reason}\n`).toBe(!saysWhy)
+    },
+  )
 })
 
 describe('input limits', () => {

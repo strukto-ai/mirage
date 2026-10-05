@@ -446,7 +446,7 @@ describe('the session plane reaches a CLI leaf', () => {
     ws.registerCli('stash', STASH)
     const denied = await ws.shell('stash AWS_PROFILE prod')
     expect(denied.exitCode).not.toBe(0)
-    expect(dec.decode(denied.stderr)).toContain('not yours to set')
+    expect(denied.refusal?.reason).toContain('not yours to set')
     expect(dec.decode((await ws.shell('echo $AWS_PROFILE')).stdout)).toBe('\n')
     expect((await ws.shell('stash OTHER fine')).exitCode).toBe(0)
   })

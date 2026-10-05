@@ -389,7 +389,7 @@ describe('fillEnv through execute', () => {
     const ws = await makeWs({ TOKEN: { from: 'fake-hidden', ref: 'r', fetch: 'eager' } })
     try {
       const session = ws.getSession(ws.defaultSessionId)
-      session.hiddenVars = { names: ['TOKEN'] }
+      session.visibility = { ...session.visibility, vars: { names: ['TOKEN'] } }
       const io = await ws.shell('env')
       expect(io.exitCode).toBe(0)
       expect(stdoutStr(io)).not.toContain('TOKEN')

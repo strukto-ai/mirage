@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
-import { hiddenPathsIntersect, pathRulesActive } from '../../../context/session_context.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
 import type { SearchQuery } from '../../../vfs/types.ts'
@@ -134,8 +134,7 @@ export async function runSearch<A extends Accessor>(
     meta !== null &&
     pattern !== null &&
     operand !== null &&
-    !hiddenPathsIntersect(operand.virtual) &&
-    !pathRulesActive()
+    !pathsScoped(opts.ns, [operand])
   ) {
     const query: SearchQuery = {
       query: pattern,

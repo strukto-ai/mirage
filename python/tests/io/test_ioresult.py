@@ -24,7 +24,6 @@ def test_default_exit_code():
 
 
 def test_merge_combines_stderr():
-
     async def _run():
         a = IOResult(stderr=b"err1")
         b = IOResult(stderr=b"err2")
@@ -35,7 +34,6 @@ def test_merge_combines_stderr():
 
 
 def test_merge_combines_cache():
-
     async def _run():
         a = IOResult(cache=["/a"], renames=[("/dst", "/dst~")])
         b = IOResult(cache=["/b"], renames=[("/src", "/dst")], exit_code=1)
@@ -68,7 +66,6 @@ def test_merged_read_follows_a_late_settling_origin():
 
 
 def test_explicit_exit_code_wins_and_detaches_issue_43():
-
     async def _run():
         inner = IOResult(exit_code=1)
         outer = await IOResult().merge(inner)
@@ -82,7 +79,6 @@ def test_explicit_exit_code_wins_and_detaches_issue_43():
 
 
 def test_explicit_exit_code_survives_chain_with_failing_leaf_issue_43():
-
     async def _run():
         a = IOResult(exit_code=0)
         b = IOResult(exit_code=1)
@@ -97,7 +93,6 @@ def test_explicit_exit_code_survives_chain_with_failing_leaf_issue_43():
 
 
 def test_chain_of_merges_stays_fresh_end_to_end():
-
     async def _run():
         origin = IOResult()
         step = await IOResult().merge(origin)
@@ -109,7 +104,6 @@ def test_chain_of_merges_stays_fresh_end_to_end():
 
 
 def test_merge_keeps_the_latest_refusal():
-
     async def _run():
         refused = Refusal(kind="deny", reason="no deletes", policy="Rule")
         merged = await IOResult(refusal=refused).merge(IOResult())

@@ -58,7 +58,6 @@ class ShellTestEnv:
         return result.stdout.decode(errors="replace")
 
     def mirage(self, cmd: str, stdin: bytes | None = None) -> str:
-
         async def _run():
             io = await self.ws.shell(cmd, stdin=stdin)
             return await io.stdout_str()
@@ -72,7 +71,6 @@ class ShellTestEnv:
     def mirage_result(
         self, cmd: str, stdin: bytes | None = None
     ) -> tuple[int, str, str]:
-
         async def _run():
             io = await self.ws.shell(cmd, stdin=stdin)
             return io.exit_code, await io.stdout_str(), await io.stderr_str()

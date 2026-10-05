@@ -43,9 +43,9 @@ class _FakeLinks:
 
 def test_registry_child_mounts_derives_from_the_mount_table():
     reg = _FakeRegistry(["/base/", "/base/inner/", "/dev/"])
-    assert registry_child_mounts(reg, None, "/base") == ["inner"]
-    assert registry_child_mounts(reg, None, "/") == ["base", "dev"]
-    assert registry_child_mounts(reg, None, "/dev") == []
+    assert registry_child_mounts(reg, None, None, "/base") == ["inner"]
+    assert registry_child_mounts(reg, None, None, "/") == ["base", "dev"]
+    assert registry_child_mounts(reg, None, None, "/dev") == []
 
 
 def test_registry_child_mounts_includes_link_ancestors():
@@ -54,8 +54,8 @@ def test_registry_child_mounts_includes_link_ancestors():
     # the way to it.
     reg = _FakeRegistry(["/base/"])
     links = _FakeLinks({"/ghost/deep/lnk": "/base"})
-    assert registry_child_mounts(reg, links, "/") == ["base", "ghost"]
-    assert registry_child_mounts(reg, links, "/ghost") == ["deep"]
+    assert registry_child_mounts(reg, links, None, "/") == ["base", "ghost"]
+    assert registry_child_mounts(reg, links, None, "/ghost") == ["deep"]
 
 
 class _FakeNamespace:

@@ -958,7 +958,6 @@ async def test_create_workspace_rolls_back_on_fuse_failure(monkeypatch):
 
 
 def test_registry_zero_grace_fires_immediately():
-
     async def _run():
         registry = WorkspaceRegistry(idle_grace_seconds=0)
         from mirage import MountMode, Workspace

@@ -51,7 +51,8 @@ describe('python3: a rule on the script', () => {
         const io = await ws.shell(line)
         expect(io.exitCode).toBe(1)
         expect(stdoutStr(io)).toBe('')
-        expect(stderrStr(io)).toBe(`python3: ${shown}: protected\n`)
+        expect(stderrStr(io)).toBe(`python3: ${shown}: Permission denied\n`)
+        expect(io.refusal?.reason).toBe('protected')
       } finally {
         await ws.close()
       }

@@ -20,11 +20,12 @@ from typing import Any, Protocol
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.context import dotglob_active, path_allowed
+from mirage.context import dotglob_active, session_visibility
 from mirage.ops.types import ChildMounts, LinkTargetStat
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey
 
 logger = logging.getLogger(__name__)
@@ -643,6 +644,7 @@ async def resolve_glob_with(
             it a trailing slash keeps every owed name.
     """
     result: list[PathSpec] = []
+    vis = session_visibility()
     for p in paths:
         if p.resolved:
             result.append(p)
@@ -670,7 +672,7 @@ async def resolve_glob_with(
                 for m in await expand_pattern(
                     readdir, accessor, word, index, children
                 )
-                if path_allowed(m.virtual)
+                if path_visible(vis, m.virtual)
             ]
             if dirs_only:
                 kept: list[PathSpec] = []

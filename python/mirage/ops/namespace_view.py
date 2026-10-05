@@ -12,15 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
-from mirage.context import path_allowed
 from mirage.ops.config import NamespaceLinks
-from mirage.types import FileStat, FileType
+from mirage.ops.types import NamespaceView
+from mirage.types import FileStat, FileType, PathSpec, Visibility
+from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm_dir
 
 
-def visible_child_segments(paths: Iterable[str], parent: str) -> list[str]:
+def visible_child_segments(
+    vis: Visibility | None, paths: Iterable[str], parent: str
+) -> list[str]:
     """The child segments of ``parent`` that some allowed path runs through.
 
     The one session filter both namespace enumerations share, because
@@ -39,6 +42,7 @@ def visible_child_segments(paths: Iterable[str], parent: str) -> list[str]:
     a directory that answers ENOENT to every verb applied to it.
 
     Args:
+        vis (Visibility | None): the session's visibility.
         paths (Iterable[str]): full paths owing ``parent`` a segment,
             mount prefixes or link paths.
         parent (str): directory whose child segments to enumerate.
@@ -49,13 +53,15 @@ def visible_child_segments(paths: Iterable[str], parent: str) -> list[str]:
         if not path.startswith(norm):
             continue
         name = path[len(norm) :].split("/", 1)[0]
-        if not name or name in out or not path_allowed(path):
+        if not name or name in out or not path_visible(vis, path):
             continue
         out.add(name)
     return sorted(out)
 
 
-def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
+def child_mount_names(
+    vis: Visibility | None, prefixes: Iterable[str], parent: str
+) -> list[str]:
     """Immediate child segments of mounts strictly under ``parent``.
 
     Session-filtered by :func:`visible_child_segments`: a child name
@@ -66,6 +72,7 @@ def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
     as for backend entries.
 
     Args:
+        vis (Visibility | None): the session's visibility.
         prefixes (Iterable[str]): the mount prefixes to derive from.
         parent (str): directory whose child mounts to enumerate.
     """
@@ -75,10 +82,12 @@ def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
         for prefix in prefixes
         if norm_dir(prefix) != norm and norm_dir(prefix).startswith(norm)
     ]
-    return visible_child_segments(below, parent)
+    return visible_child_segments(vis, below, parent)
 
 
-def _link_names(links: NamespaceLinks | None, parent: str) -> list[str]:
+def _link_names(
+    vis: Visibility | None, links: NamespaceLinks | None, parent: str
+) -> list[str]:
     """Immediate child segments owed to links at or below ``parent``.
 
     Derived from every link path, not just direct children, exactly as
@@ -91,16 +100,20 @@ def _link_names(links: NamespaceLinks | None, parent: str) -> list[str]:
     only link the session hides is not named either.
 
     Args:
+        vis (Visibility | None): the session's visibility.
         links (NamespaceLinks | None): the namespace symlink table.
         parent (str): directory whose child segments to enumerate.
     """
     if links is None:
         return []
-    return visible_child_segments(links.symlink_targets(), parent)
+    return visible_child_segments(vis, links.symlink_targets(), parent)
 
 
 def namespace_names(
-    prefixes: Iterable[str], links: NamespaceLinks | None, parent: str
+    vis: Visibility | None,
+    prefixes: Iterable[str],
+    links: NamespaceLinks | None,
+    parent: str,
 ) -> list[str]:
     """Every child segment the namespace owes ``parent``: mounts + links.
 
@@ -110,16 +123,19 @@ def namespace_names(
     about what a directory holds.
 
     Args:
+        vis (Visibility | None): the session's visibility.
+        prefixes (Iterable[str]): the mount prefixes to derive from.
         links (NamespaceLinks | None): the namespace symlink table.
         parent (str): directory whose child segments to enumerate.
     """
     return sorted(
-        set(child_mount_names(prefixes, parent))
-        | set(_link_names(links, parent))
+        set(child_mount_names(vis, prefixes, parent))
+        | set(_link_names(vis, links, parent))
     )
 
 
 def merge_readdir(
+    vis: Visibility | None,
     entries: list[str],
     prefixes: Iterable[str],
     links: NamespaceLinks | None,
@@ -135,6 +151,7 @@ def merge_readdir(
     paths).
 
     Args:
+        vis (Visibility | None): the session's visibility.
         entries (list[str]): the backend's own listing.
         prefixes (Iterable[str]): the mount prefixes to derive from.
         links (NamespaceLinks | None): the namespace symlink table.
@@ -143,7 +160,7 @@ def merge_readdir(
     present = {e.rstrip("/").rsplit("/", 1)[-1] for e in entries}
     base = parent.rstrip("/")
     merged = list(entries)
-    for name in namespace_names(prefixes, links, parent):
+    for name in namespace_names(vis, prefixes, links, parent):
         if name in present:
             continue
         present.add(name)
@@ -152,7 +169,10 @@ def merge_readdir(
 
 
 def namespace_listing(
-    prefixes: Iterable[str], links: NamespaceLinks | None, parent: str
+    vis: Visibility | None,
+    prefixes: Iterable[str],
+    links: NamespaceLinks | None,
+    parent: str,
 ) -> list[str] | None:
     """A listing for a directory that exists only as namespace structure.
 
@@ -162,17 +182,21 @@ def namespace_listing(
     either, so a caller re-raises the backend's miss.
 
     Args:
+        vis (Visibility | None): the session's visibility.
         prefixes (Iterable[str]): the mount prefixes to derive from.
         links (NamespaceLinks | None): the namespace symlink table.
         parent (str): the directory that was listed, as a virtual path.
     """
-    if not namespace_names(prefixes, links, parent):
+    if not namespace_names(vis, prefixes, links, parent):
         return None
-    return merge_readdir([], prefixes, links, parent)
+    return merge_readdir(vis, [], prefixes, links, parent)
 
 
 def namespace_stat(
-    prefixes: Iterable[str], links: NamespaceLinks | None, path: str
+    vis: Visibility | None,
+    prefixes: Iterable[str],
+    links: NamespaceLinks | None,
+    path: str,
 ) -> FileStat | None:
     """A directory stat for a path that exists only as namespace structure.
 
@@ -181,11 +205,36 @@ def namespace_stat(
     directory, or ``os.walk`` and ``Path.is_dir`` break on it.
 
     Args:
+        vis (Visibility | None): the session's visibility.
         prefixes (Iterable[str]): the mount prefixes to derive from.
         links (NamespaceLinks | None): the namespace symlink table.
         path (str): the path that was statted, as a virtual path.
     """
-    if namespace_listing(prefixes, links, path) is None:
+    if namespace_listing(vis, prefixes, links, path) is None:
         return None
     name = path.rstrip("/").rsplit("/", 1)[-1] or "/"
     return FileStat(name=name, type=FileType.DIRECTORY)
+
+
+def paths_scoped(
+    ns: NamespaceView | None, paths: Sequence[PathSpec], prefix: str = ""
+) -> bool:
+    """Whether a hide, a path rule or a pre_ops policy judges anything a
+    command's operands reach, so a native walk that classifies the raw
+    tree gives way to the checked one.
+
+    Per operand, not per session: a hidden ``.env`` under ``/repo`` must
+    not force ``find`` on ``/s3`` off its native op.
+
+    Args:
+        ns (NamespaceView | None): the command's namespace view, whose
+            ``scoped`` answers per path; None judges nothing.
+        paths (Sequence[PathSpec]): the operands, a default cwd
+            included.
+        prefix (str): the mount root, judged in place of a glob operand.
+    """
+    scoped = ns.scoped if ns is not None else None
+    return scoped is not None and any(
+        scoped(prefix or "/" if path.pattern is not None else path.virtual)
+        for path in paths
+    )
