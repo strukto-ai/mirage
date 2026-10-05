@@ -14,11 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { specOf } from '../../spec/builtins.ts'
-import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { CommandOpts } from '../../config.ts'
+import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import {
   MAX_OUTPUT_LINES,
   MEMORY_EXHAUSTED,
@@ -256,7 +256,7 @@ describe('shuf parseFlags is the one flag read', () => {
       zero_terminated: true,
       repeat: true,
       input_range: '1-3',
-      output: '/data/out.txt',
+      output: [PathSpec.fromStrPath('/data/out.txt')],
     })
     expect(parsed).toEqual({
       count: 2n,
@@ -512,7 +512,7 @@ describe('shuf decides the emitted count before anything is built', () => {
 // second -i where GNU names the count.
 describe('shuf refuses in command-line order', () => {
   function parseLine(...argv: string[]): ShufFlags | string {
-    return parseFlags(parseToKwargs(parseCommand(specOf('shuf'), argv, '/')))
+    return parseFlags(parseLineFlags(argv, specOf('shuf'), 'shuf', '/').flagKwargs)
   }
 
   it.each([

@@ -6,7 +6,26 @@
       "targets": [
         "ram",
         "disk",
-        "opfs"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "printf 'ab' > /data/xm_rt_od; printf 'c' > /data2/xm_rt_od; od -c /data/xm_rt_od /data2/xm_rt_od; rm /data/xm_rt_od /data2/xm_rt_od",
       "expect": {

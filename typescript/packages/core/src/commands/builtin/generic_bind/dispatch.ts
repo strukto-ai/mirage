@@ -88,6 +88,10 @@ export function dispatchIO(
       await dispatch('write', path, [data])
       if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
     },
+    pwrite: async (_accessor, path, data, offset) => {
+      await dispatch('pwrite', path, [data, offset])
+      if (reads !== undefined) Reflect.deleteProperty(reads.reads, path.virtual)
+    },
   }
 }
 

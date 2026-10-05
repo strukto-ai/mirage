@@ -120,7 +120,7 @@ export function planTemplate(
  */
 interface MktempFlags {
   readonly directory: boolean
-  readonly tmpdir: string | PathSpec | null
+  readonly tmpdir: PathSpec | null
   readonly useDestDir: boolean
   readonly templateMode: boolean
   readonly dryRun: boolean
@@ -130,11 +130,9 @@ interface MktempFlags {
 
 function parseFlags(bag: Record<string, FlagValue>): MktempFlags {
   const fl = new FlagView(bag, specOf('mktemp'))
-  const tmpdirValue = fl.asPaths('tmpdir')[0] ?? fl.asStr('tmpdir')
-  const pValue = fl.asPaths('p')[0] ?? fl.asStr('p')
   return {
     directory: fl.asBool('directory'),
-    tmpdir: tmpdirValue ?? pValue ?? null,
+    tmpdir: fl.asPaths('tmpdir')[0] ?? fl.asPaths('p')[0] ?? null,
     useDestDir: fl.raw('tmpdir') !== undefined || fl.raw('p') !== undefined,
     templateMode: fl.asBool('t'),
     dryRun: fl.asBool('dry_run'),
@@ -153,7 +151,7 @@ export async function mktempGeneric(
   const parsed = parseFlags(opts.flags)
   if (texts.length > 1) throw extraOperandError(CommandName.MKTEMP, texts[1] ?? '')
   const { directory, tmpdir, useDestDir, templateMode: t } = parsed
-  const destDir = tmpdir instanceof PathSpec ? tmpdir.rawPath : (tmpdir ?? '')
+  const destDir = tmpdir?.rawPath ?? ''
   const envTmpdir = opts.env?.TMPDIR ?? ''
   const [template, xCount, suffixLen] = planTemplate(
     texts[0],

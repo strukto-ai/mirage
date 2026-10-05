@@ -63,6 +63,7 @@ from mirage.utils.errors import (
     eisdir,
     eloop,
     enoent,
+    exdev,
     no_mount,
     no_xattr,
     walk_refusal,
@@ -524,6 +525,20 @@ class Dispatcher:
                 await self._gated_namespace(op, path, fallback, report),
                 IOResult(),
             )
+        # A mount is a filesystem boundary: rename(2) moves a name within
+        # one and answers EXDEV across two, before any permission is
+        # weighed, so `mv` falls back to copy and unlink instead of the
+        # source's backend taking the destination for one of its keys. It
+        # resolves both parent directories first, so a missing one is
+        # ENOENT (ENOTDIR through a file) ahead of EXDEV.
+        if (
+            op == "rename"
+            and isinstance(dst, PathSpec)
+            and self._namespace.try_mount_for(dst.virtual) is not mount
+        ):
+            refusal = await self._parent_refusal(path)
+            refusal = refusal or await self._parent_refusal(dst)
+            raise refusal or exdev(path)
         # Admission policies fire at the door, before the warm-cache
         # early return below: a cached read must be refused exactly
         # like a cold one, or the cache becomes a policy bypass.

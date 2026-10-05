@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { wcAggregate } from '../../aggregators.ts'
 import { wcGeneric } from '../../generic/wc.ts'
 import { type Builder, dirAwareStream, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 
@@ -25,6 +24,5 @@ const wc: BuilderFn = async (ops, accessor, paths, texts, opts) => {
 export const BUILDER: Builder = {
   name: 'wc',
   read: true,
-  aggregate: wcAggregate,
   fn: wc,
 }
