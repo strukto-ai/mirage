@@ -30,8 +30,9 @@ def verify_jwt(token: str, cfg: JWTConfig) -> dict[str, Any]:
     """Verify a JWT against ``cfg`` and return its claims on success.
 
     Performs signature verification, algorithm pinning, mandatory
-    ``exp`` check, and (when configured) ``iss``/``aud``/``azp``
-    checks. ``typ`` header, if present, must be ``"JWT"``.
+    ``exp`` and ``sub`` (the account the token speaks for) checks, and
+    (when configured) ``iss``/``aud``/``azp`` checks. ``typ`` header, if
+    present, must be ``"JWT"``.
 
     Args:
         token (str): the raw bearer value (already stripped of any
@@ -43,7 +44,7 @@ def verify_jwt(token: str, cfg: JWTConfig) -> dict[str, Any]:
 
     Raises:
         JWTVerificationError: any failure (signature, algorithm,
-            ``exp``, ``iss``, ``aud``, ``azp``, ``typ``).
+            ``exp``, ``sub``, ``iss``, ``aud``, ``azp``, ``typ``).
     """
     try:
         claims = pyjwt.decode(
@@ -52,7 +53,7 @@ def verify_jwt(token: str, cfg: JWTConfig) -> dict[str, Any]:
             algorithms=[cfg.algorithm],
             audience=cfg.audience,
             issuer=cfg.issuer,
-            options={"require": ["exp"]},
+            options={"require": ["exp", "sub"]},
             leeway=cfg.clock_skew_seconds,
         )
     except pyjwt.PyJWTError as e:
@@ -66,6 +67,9 @@ def verify_jwt(token: str, cfg: JWTConfig) -> dict[str, Any]:
         raise JWTVerificationError(
             f"JWT typ header must be 'JWT' when present, got {typ!r}"
         )
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub:
+        raise JWTVerificationError("JWT sub must name an account")
     if cfg.authorized_parties:
         azp = claims.get("azp")
         if azp not in cfg.authorized_parties:

@@ -18,7 +18,7 @@ import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -278,16 +278,24 @@ class Dispatcher:
     workspace state. The snapshot drift queue rides along because this
     is the one door: a strict restore's pending fingerprint checks must
     run before ANY op can touch a mount, and FUSE and the ops facade
-    reach here without passing Workspace.dispatch.
+    reach here without passing Workspace.dispatch. So does the
+    workspace's write admission, which holds a write while a capture
+    reads.
     """
 
     def __init__(
-        self, namespace: Namespace, cache, drift: DriftQueue | None = None
+        self,
+        namespace: Namespace,
+        cache,
+        drift: DriftQueue | None = None,
+        admit_write: Callable[[], AbstractAsyncContextManager[None]]
+        | None = None,
     ) -> None:
         self._namespace = namespace
         self._cache = cache
         self._reconciler = Reconciler(cache, namespace)
         self._drift = drift
+        self._admit_write = admit_write
         self._writers = KeyLock()
 
     @property
@@ -349,6 +357,19 @@ class Dispatcher:
         return fallback
 
     async def dispatch(
+        self,
+        op: str,
+        path: PathSpec,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[Any, IOResult]:
+        if self._admit_write is None or op not in POLICY_WRITE_OPS:
+            return await self._dispatch(op, path, report=report, **kwargs)
+        async with self._admit_write():
+            return await self._dispatch(op, path, report=report, **kwargs)
+
+    async def _dispatch(
         self,
         op: str,
         path: PathSpec,

@@ -46,9 +46,10 @@ class AnswerAskRequest(BaseModel):
 
 def _require_entry(request: Request, workspace_id: str) -> WorkspaceEntry:
     registry: WorkspaceRegistry = request.app.state.registry
-    if workspace_id not in registry:
+    entry = registry.visible(workspace_id, request.state.account)
+    if entry is None:
         raise HTTPException(status_code=404, detail="workspace not found")
-    return registry.get(workspace_id)
+    return entry
 
 
 def _to_response(record: Decision) -> AskResponse:

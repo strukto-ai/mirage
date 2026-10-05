@@ -127,21 +127,24 @@ async def snapshot(
     Returns:
         int: the tar's size in bytes.
     """
-    state = await to_state_dict(ws)
-    manifest, blobs = split_manifest_and_blobs(state)
-    if s3 is None and not hasattr(target, "write"):
+    async with ws._quiesced():
+        state = await to_state_dict(ws)
+        manifest, blobs = split_manifest_and_blobs(state)
+        if s3 is None and not hasattr(target, "write"):
+            await run_blocking(
+                write_tar, target, manifest, blobs, compress=compress
+            )
+            return (await run_blocking(Path(target).stat)).st_size
+        if s3 is None:
+            counted = _Counted(target)
+            await run_blocking(
+                write_tar, counted, manifest, blobs, compress=compress
+            )
+            return counted.size
+        buffer = io.BytesIO()
         await run_blocking(
-            write_tar, target, manifest, blobs, compress=compress
+            write_tar, buffer, manifest, blobs, compress=compress
         )
-        return (await run_blocking(Path(target).stat)).st_size
-    if s3 is None:
-        counted = _Counted(target)
-        await run_blocking(
-            write_tar, counted, manifest, blobs, compress=compress
-        )
-        return counted.size
-    buffer = io.BytesIO()
-    await run_blocking(write_tar, buffer, manifest, blobs, compress=compress)
     accessor = _s3_accessor(s3)
     try:
         await write_bytes(accessor, _key_path(target), buffer.getvalue())
@@ -151,7 +154,7 @@ async def snapshot(
 
 
 async def read_snapshot(
-    source, *, s3: S3Config | None = None
+    source, *, s3: S3Config | None = None, staging: Path | None = None
 ) -> dict[str, Any]:
     """Read a snapshot tar back into a state dict.
 
@@ -159,6 +162,9 @@ async def read_snapshot(
         source: filesystem path (str/Path) OR a readable file-like
             object; with ``s3``, the object key.
         s3 (S3Config | None): the S3-like store the tar is in.
+        staging (Path | None): a directory disk mount files are
+            extracted into, so the state names them by path rather
+            than holding their bytes.
 
     Returns:
         dict[str, Any]: the resolved state dict.
@@ -169,4 +175,4 @@ async def read_snapshot(
             source = io.BytesIO(await read_bytes(accessor, _key_path(source)))
         finally:
             await accessor.close()
-    return await run_blocking(read_tar, source)
+    return await run_blocking(read_tar, source, staging)
