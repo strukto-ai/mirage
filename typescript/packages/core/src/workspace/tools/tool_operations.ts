@@ -81,6 +81,7 @@ async function missing(vfs: Ops, path: string): Promise<boolean> {
     // An errno-stamped error is the TypeScript shape of Python's OSError;
     // anything else (an unknown session) is not a probe answer.
     if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
+    console.warn(`exists probe failed for ${path}: ${String(err)}`)
     return false
   }
 }

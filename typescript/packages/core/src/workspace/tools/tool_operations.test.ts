@@ -283,8 +283,9 @@ describe('a session', () => {
     try {
       const read = await ops.call('read', { path: '/d/flaky.txt' })
       const written = await ops.call('write', { path: '/d/flaky.txt', content: 'x' })
+      // The read's own error stands, never the probe's.
       expect(read.isError).toBe(true)
-      expect(textOf(read)).not.toContain('not found')
+      expect(textOf(read)).toBe('Error: /d/flaky.txt')
       expect(written.isError).toBe(true)
       expect(textOf(written)).toContain('Input/output error')
     } finally {

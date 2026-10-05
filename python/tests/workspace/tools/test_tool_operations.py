@@ -396,7 +396,8 @@ async def test_a_probe_that_fails_leaves_the_tool_error(monkeypatch):
         )
     finally:
         await ws.close()
-    assert read.is_error and "not found" not in read.text
+    # The read's own error stands, never the probe's.
+    assert read.is_error and read.text == "Error: /d/flaky.txt"
     assert written.is_error and "Input/output error" in written.text
 
 
