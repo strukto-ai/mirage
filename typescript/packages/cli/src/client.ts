@@ -23,7 +23,7 @@ import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/d
 import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
-import { freshToken } from './credentials.ts'
+import { LoginError, freshToken, readLogin } from './credentials.ts'
 import { isLocalUrl, type DaemonSettings } from './settings.ts'
 
 const requireFromHere = createRequire(import.meta.url)
@@ -45,13 +45,22 @@ export class DaemonClient {
 
   /**
    * The bearer token to send: the settings' own, else the login's,
-   * refreshed when it is about to end; empty when there is none. Requests
-   * sent at once share one read of the login, so they refresh it once.
+   * refreshed when it is about to end; empty when there is none. The login
+   * is read from its file each time, so a process that outlives `mirage
+   * logout` stops sending it, and requests sent at once share one read, so
+   * they refresh it once. Throws `LoginError` when the login was removed
+   * or cannot give a token.
    */
   async token(): Promise<string> {
     const login = this.settings.login
     if (this.settings.authToken !== '' || login === undefined) return this.settings.authToken
-    this.refreshing ??= freshToken(login).finally(() => {
+    this.refreshing ??= (async () => {
+      const stored = readLogin()
+      if (stored?.url !== login.url) {
+        throw new LoginError(`not logged in to ${login.url} any more; run \`mirage login\``)
+      }
+      return freshToken(stored)
+    })().finally(() => {
       this.refreshing = undefined
     })
     return this.refreshing

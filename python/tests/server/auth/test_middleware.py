@@ -212,6 +212,43 @@ async def test_jwt_mode_checks_a_token_against_the_published_key_set(
 
 @pytest.mark.no_auth_override
 @pytest.mark.asyncio
+async def test_jwt_mode_refuses_a_token_when_the_key_set_is_not_json(
+    rsa_keys,
+):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"<html>not a key set</html>")
+
+        def log_message(self, *args) -> None:
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/jwks.json"
+    app = build_app(
+        idle_grace_seconds=10.0,
+        auth_config=AuthConfig(
+            mode="jwt", jwt=JWTConfig(algorithm="RS256", jwks_url=url)
+        ),
+    )
+    signed = pyjwt.encode(
+        {"sub": "agent", "exp": int(time.time()) + 60},
+        rsa_keys.private_pem,
+        algorithm="RS256",
+        headers={"kid": "k1"},
+    )
+    try:
+        async with _client(app, {"Authorization": f"Bearer {signed}"}) as c:
+            assert (await c.get("/v1/workspaces")).status_code == 401
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
 async def test_jwt_mode_rejects_opaque_bearer(rsa_keys):
     jwt_cfg = JWTConfig(key=rsa_keys.public_pem.decode(), algorithm="RS256")
     app = build_app(

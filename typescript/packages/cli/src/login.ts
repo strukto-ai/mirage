@@ -242,6 +242,7 @@ export async function tokenLogin(url: string, token: string): Promise<Login> {
     throw new LoginError(`could not reach ${url}: ${String(error)}`)
   }
   if (reply.status === 401) throw new LoginError(`${url} refused the token`)
+  if (!reply.ok) throw new LoginError(`${url} answered ${String(reply.status)}`)
   const exp = tokenClaims(token).exp
   return {
     url,
@@ -258,13 +259,21 @@ export function registerLoginCommands(program: Command): void {
   program
     .command('login')
     .description('Log in to the server the CLI points at.')
-    .option('--token <token>', 'Keep this token instead of using the browser')
+    .option(
+      '--token <token>',
+      'Keep this token instead of using the browser; - reads it from stdin',
+    )
     .action(async (opts: { token?: string }) => {
+      let token = opts.token
+      if (token === '-') {
+        const chunks: Buffer[] = []
+        for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
+        token = Buffer.concat(chunks).toString('utf-8').trim()
+        if (token === '') fail('no token on stdin')
+      }
       const url = rstripSlash(loadDaemonSettings().url)
       const login =
-        opts.token !== undefined && opts.token !== ''
-          ? await tokenLogin(url, opts.token)
-          : await browserLogin(url)
+        token !== undefined && token !== '' ? await tokenLogin(url, token) : await browserLogin(url)
       if (login === null) {
         process.stdout.write(noLogin(url) + '\n')
         return

@@ -18,6 +18,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { Command } from 'commander'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LoginError, readLogin, writeLogin } from './credentials.ts'
@@ -102,7 +103,8 @@ class FakeClerk {
         }
         reply(302, {}, { Location: `${query.redirect_uri ?? ''}?${answer.toString()}` })
       } else if (parts.pathname === '/v1/workspaces') {
-        reply(req.headers.authorization === 'Bearer good' ? 200 : 401, [])
+        const status: Record<string, number> = { 'Bearer good': 200, 'Bearer boom': 500 }
+        reply(status[req.headers.authorization ?? ''] ?? 401, [])
       } else {
         reply(404, {})
       }
@@ -174,6 +176,7 @@ describe('mirage login', () => {
 
   afterEach(async () => {
     await clerk.stop()
+    vi.restoreAllMocks()
     vi.unstubAllEnvs()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -266,6 +269,22 @@ describe('mirage login', () => {
     expect(login.access_token).toBe('good')
     expect(login.refresh_token).toBeNull()
     await expect(tokenLogin(clerk.url, 'bad')).rejects.toThrow(LoginError)
+    await expect(tokenLogin(clerk.url, 'boom')).rejects.toThrow(/answered 500/)
+  })
+
+  it('reads a dash token from stdin', async () => {
+    vi.spyOn(process, 'stdin', 'get').mockReturnValue(
+      Readable.from([Buffer.from('good\n')]) as unknown as typeof process.stdin,
+    )
+    const done = await run(['login', '--token', '-'])
+    expect(done.exitCode).toBe(0)
+    expect(readLogin()?.access_token).toBe('good')
+    vi.spyOn(process, 'stdin', 'get').mockReturnValue(
+      Readable.from([]) as unknown as typeof process.stdin,
+    )
+    const empty = await run(['login', '--token', '-'])
+    expect(empty.exitCode).toBe(1)
+    expect(empty.stderr).toContain('no token on stdin')
   })
 
   it('logs in, says who, and logs out', async () => {

@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from mirage.cli.credentials import fresh_token
+from mirage.cli.credentials import LoginError, fresh_token, read_login
 from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN
 from mirage.cli.settings import (
     DaemonSettings,
@@ -64,16 +64,28 @@ class DaemonClient:
 
     def token(self) -> str:
         """The bearer token to send: the settings' own, else the
-        login's, refreshed when it is about to end. One caller at a time
-        reads the login, so requests sent at once refresh it once.
+        login's, refreshed when it is about to end.
+
+        The login is read from its file each time, so a process that
+        outlives ``mirage logout`` stops sending it, and one caller at a
+        time reads it, so requests sent at once refresh it once.
 
         Returns:
             str: the token; empty when there is none.
+
+        Raises:
+            LoginError: the login was removed, or cannot give a token.
         """
         if self.settings.auth_token or self.settings.login is None:
             return self.settings.auth_token
+        url = self.settings.login.url
         with self._refreshing:
-            return fresh_token(self.settings.login)
+            login = read_login()
+            if login is None or login.url != url:
+                raise LoginError(
+                    f"not logged in to {url} any more; run `mirage login`"
+                )
+            return fresh_token(login)
 
     def _headers(self) -> dict[str, str]:
         token = self.token()

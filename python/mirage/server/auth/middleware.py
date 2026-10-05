@@ -136,8 +136,8 @@ class AuthMiddleware:
             token (str): the bearer JWT.
 
         Raises:
-            JWTVerificationError: the key set cannot be fetched or holds
-                no key for the token.
+            JWTVerificationError: the key set cannot be fetched, is not
+                JSON, or holds no key for the token.
         """
         if self._jwks is None:
             return None
@@ -145,7 +145,7 @@ class AuthMiddleware:
             found = await run_blocking(
                 self._jwks.get_signing_key_from_jwt, token
             )
-        except pyjwt.PyJWTError as e:
+        except (pyjwt.PyJWTError, ValueError) as e:
             raise JWTVerificationError(f"JWT key lookup failed: {e}") from e
         return found.key
 

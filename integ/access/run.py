@@ -53,11 +53,18 @@ import httpx
 from adapters import (
     SSH_OPTIONS,
     Answer,
+    Cli,
+    Http,
     InAppPython,
     InAppTypeScript,
+    Mcp,
+    McpStdio,
     Recorder,
+    Rpc,
+    RpcStdio,
     RpcStream,
     Server,
+    Ssh,
     SshProxy,
     io_answer,
     run,
@@ -80,6 +87,9 @@ from deploy import (
     snapshot_store,
 )
 from issuer import Issuer
+from starlette.routing import WebSocketRoute
+
+from mirage.server.app import build_app
 
 CASES = json.loads(Path(__file__).with_name("cases.json").read_text())
 OVERVIEW = ROOT / "docs" / "home" / "access" / "overview.mdx"
@@ -842,10 +852,6 @@ async def lifecycle(
 
 
 def python_routes() -> set[tuple[str, str]]:
-    from starlette.routing import WebSocketRoute
-
-    from mirage.server.app import build_app
-
     found = set()
     for route in build_app().routes:
         methods = getattr(route, "methods", None) or (
@@ -956,17 +962,6 @@ def gate_commands(
 
 
 def gate_ops(report: Report) -> None:
-    from adapters import (
-        Cli,
-        Http,
-        Mcp,
-        McpStdio,
-        Rpc,
-        RpcStdio,
-        Ssh,
-        SshProxy,
-    )
-
     table = CASES["ops"]
     implemented = {
         cls.name: cls.OPS

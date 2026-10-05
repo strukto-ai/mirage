@@ -51,11 +51,22 @@ export async function relaySsh(url: string, headers: Record<string, string>): Pr
       resolve()
     })
   })
+  // Each side waits for the other to take its bytes: the socket is paused
+  // while stdout drains, and stdin while a chunk is being sent, so a slow
+  // reader never piles a transfer up in memory.
   ws.on('message', (data: Buffer) => {
-    process.stdout.write(data)
+    if (!process.stdout.write(data)) {
+      ws.pause()
+      process.stdout.once('drain', () => {
+        ws.resume()
+      })
+    }
   })
   const forward = (chunk: Buffer): void => {
-    ws.send(chunk)
+    process.stdin.pause()
+    ws.send(chunk, () => {
+      if (ws.readyState === WebSocket.OPEN) process.stdin.resume()
+    })
   }
   const finish = (): void => {
     ws.close()

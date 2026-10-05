@@ -16,6 +16,7 @@ import base64
 import hashlib
 import html
 import secrets
+import sys
 import threading
 import time
 import webbrowser
@@ -285,7 +286,8 @@ def token_login(url: str, token: str) -> Login:
         Login: the login.
 
     Raises:
-        LoginError: the server is out of reach or refused the token.
+        LoginError: the server is out of reach or did not take the
+            token.
     """
     try:
         reply = httpx.get(
@@ -297,6 +299,8 @@ def token_login(url: str, token: str) -> Login:
         raise LoginError(f"could not reach {url}: {e}") from e
     if reply.status_code == 401:
         raise LoginError(f"{url} refused the token")
+    if not reply.is_success:
+        raise LoginError(f"{url} answered {reply.status_code}")
     exp = token_claims(token).get("exp")
     return Login(
         url=url,
@@ -308,15 +312,23 @@ def token_login(url: str, token: str) -> Login:
 
 def login_cmd(
     token: str | None = typer.Option(
-        None, "--token", help="Keep this token instead of using the browser."
+        None,
+        "--token",
+        help="Keep this token instead of using the browser; - reads it "
+        "from stdin.",
     ),
 ) -> None:
     """Log in to the server the CLI points at.
 
-    Opens the browser on the server's sign-in, or keeps ``--token``.
-    Every command then sends the login's token to that server, and
-    to no other; the login lasts 30 days.
+    Opens the browser on the server's sign-in, or keeps ``--token``
+    (``-`` reads it from stdin, out of the shell's history). Every
+    command then sends the login's token to that server, and to no
+    other; the login lasts 30 days.
     """
+    if token == "-":
+        token = sys.stdin.read().strip()
+        if not token:
+            fail("no token on stdin")
     url = load_daemon_settings().url.rstrip("/")
     login = token_login(url, token) if token else browser_login(url)
     if login is None:

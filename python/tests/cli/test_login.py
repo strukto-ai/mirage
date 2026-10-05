@@ -119,8 +119,9 @@ class FakeClerk:
                     location = f"{query['redirect_uri']}?{urlencode(answer)}"
                     self.reply(302, {}, Location=location)
                 elif parts.path == "/v1/workspaces":
-                    good = self.headers.get("Authorization") == "Bearer good"
-                    self.reply(200 if good else 401, [])
+                    sent = self.headers.get("Authorization")
+                    status = {"Bearer good": 200, "Bearer boom": 500}
+                    self.reply(status.get(sent, 401), [])
                 else:
                     self.reply(404, {})
 
@@ -265,6 +266,19 @@ def test_a_pasted_token_is_kept_once_the_server_takes_it(clerk):
     assert login.refresh_token is None
     with pytest.raises(LoginError, match="refused the token"):
         token_login(clerk.url, "bad")
+    with pytest.raises(LoginError, match="answered 500"):
+        token_login(clerk.url, "boom")
+
+
+def test_login_reads_a_dash_token_from_stdin(clerk, tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.setenv("MIRAGE_DAEMON_URL", clerk.url)
+    done = CliRunner().invoke(app, ["login", "--token", "-"], input="good\n")
+    assert done.exit_code == 0, done.output
+    assert read_login().access_token == "good"
+    empty = CliRunner().invoke(app, ["login", "--token", "-"], input="")
+    assert empty.exit_code == 1
+    assert "no token on stdin" in empty.output
 
 
 def test_login_whoami_logout(clerk, browser, tmp_path, monkeypatch):

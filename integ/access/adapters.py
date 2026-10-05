@@ -34,7 +34,8 @@ from typing import Any
 
 import httpx
 import httpx2
-from deploy import ROOT, Deployment, mirage_cli
+import websockets
+from deploy import ROOT, SEED, Deployment, mirage_cli
 from mcp import Client, StdioServerParameters
 from mcp.client.streamable_http import streamable_http_client
 
@@ -1917,10 +1918,26 @@ class SshProxy(Ssh):
     async def suite(
         self, suite: dict[str, Any], prefix: str, config: dict[str, Any]
     ) -> list[Answer]:
-        wid = prefix.rstrip("-")
-        seen = self.server.recorder.requests.setdefault(self.server.key, set())
-        seen.add(("GET", f"/v1/workspaces/{wid}/ssh"))
+        await self.reach_route()
         return await super().suite(suite, prefix, config)
+
+    async def reach_route(self) -> None:
+        """Open the SSH route as the proxy does, and record it only once
+        the server's SSH banner comes back over it."""
+        d = self.server.d
+        route = f"/v1/workspaces/{SEED}/ssh"
+        token = self.token or d.bearer()
+        async with websockets.connect(
+            f"ws://127.0.0.1:{d.port}{route}",
+            additional_headers={"Authorization": f"Bearer {token}"},
+        ) as ws:
+            banner = await asyncio.wait_for(ws.recv(), 10)
+        raw = banner.encode() if isinstance(banner, str) else bytes(banner)
+        if raw.startswith(b"SSH-"):
+            seen = self.server.recorder.requests.setdefault(
+                self.server.key, set()
+            )
+            seen.add(("GET", route))
 
 
 def server_accesses(server: Server, scratch: Path) -> list[Any]:

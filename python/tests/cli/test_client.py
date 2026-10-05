@@ -20,7 +20,13 @@ import pytest
 
 from mirage.cli import credentials
 from mirage.cli.client import DaemonClient, DaemonUnreachable
-from mirage.cli.credentials import Login, LoginError
+from mirage.cli.credentials import (
+    Login,
+    LoginError,
+    read_login,
+    remove_login,
+    write_login,
+)
 from mirage.cli.settings import DaemonSettings
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import ENV_HOME
@@ -144,6 +150,7 @@ def test_the_token_is_the_settings_own_else_the_login(tmp_path, monkeypatch):
         access_token="from-login",
         logged_in_at=time.time(),
     )
+    write_login(login)
     with DaemonClient(
         DaemonSettings(url=login.url, auth_token="set", login=login)
     ) as client:
@@ -162,6 +169,7 @@ def test_an_ended_login_stops_the_command(tmp_path, monkeypatch):
         access_token="from-login",
         logged_in_at=time.time() - 31 * 24 * 60 * 60,
     )
+    write_login(login)
     with DaemonClient(DaemonSettings(url=login.url, login=login)) as client:
         with pytest.raises(LoginError, match="30 days old"):
             client.token()
@@ -190,8 +198,42 @@ def test_requests_at_once_refresh_the_login_once(tmp_path, monkeypatch):
         client_id="client_cli",
         token_endpoint="https://clerk.example.com/oauth/token",
     )
+    write_login(login)
     with DaemonClient(DaemonSettings(url=login.url, login=login)) as client:
         with ThreadPoolExecutor(4) as pool:
             got = list(pool.map(lambda _: client.token(), range(4)))
     assert got == ["new"] * 4
     assert len(posted) == 1
+
+
+def test_a_process_that_outlives_logout_stops_sending_the_login(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    posted = []
+
+    def post(url, data, timeout):
+        posted.append(url)
+        return httpx.Response(
+            200,
+            json={"access_token": "new", "expires_in": 86400},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(credentials.httpx, "post", post)
+    login = Login(
+        url="https://mirage.example.com",
+        access_token="old",
+        logged_in_at=time.time(),
+        refresh_token="r1",
+        expires_at=time.time() - 1,
+        client_id="client_cli",
+        token_endpoint="https://clerk.example.com/oauth/token",
+    )
+    write_login(login)
+    with DaemonClient(DaemonSettings(url=login.url, login=login)) as client:
+        remove_login()
+        with pytest.raises(LoginError, match="not logged in to"):
+            client.token()
+    assert posted == []
+    assert read_login() is None

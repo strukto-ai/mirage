@@ -177,6 +177,37 @@ describe('AuthMiddleware integration', () => {
       }
     })
 
+    it('refuses a token when the key set is not JSON', async () => {
+      const keySet = createServer((_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end('<html>not a key set</html>')
+      })
+      await new Promise<void>((resolve) => keySet.listen(0, '127.0.0.1', resolve))
+      const port = (keySet.address() as AddressInfo).port
+      const app = buildApp({
+        authConfig: {
+          mode: 'jwt',
+          jwt: {
+            algorithm: 'RS256',
+            jwksUrl: `http://127.0.0.1:${String(port)}/jwks.json`,
+            audiences: [],
+            authorizedParties: [],
+            clockSkewSeconds: 5,
+          },
+        },
+      })
+      const signing = await importPKCS8(keys.privatePem, 'RS256')
+      try {
+        const signed = await new SignJWT({ sub: 'agent', exp: Math.floor(Date.now() / 1000) + 60 })
+          .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
+          .sign(signing)
+        expect((await inject(app, '/v1/workspaces', `Bearer ${signed}`)).statusCode).toBe(401)
+      } finally {
+        await app.close()
+        keySet.close()
+      }
+    })
+
     it('accepts valid signed', async () => {
       const jwt: JWTConfig = {
         key: keys.publicPem,

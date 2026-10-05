@@ -131,7 +131,7 @@ mirage config set url https://mirage.example.com
 mirage login
 ```
 
-`mirage login` asks the server where to sign in, opens your browser there, and waits. If you are already signed in, the browser comes straight back. The CLI then keeps the tokens in `~/.mirage/login.json`, readable only by you. A machine with no browser can use `mirage login --token TOKEN` instead, which keeps a token you paste once the server accepts it.
+`mirage login` asks the server where to sign in, opens your browser there, and waits. If you are already signed in, the browser comes straight back. The CLI then keeps the tokens in `~/.mirage/login.json`, readable only by you. A machine with no browser can use `mirage login --token TOKEN` instead, which keeps a token you paste once the server accepts it; `--token -` reads it from stdin, so it stays out of your shell history.
 
 | Command | Does |
 | --- | --- |

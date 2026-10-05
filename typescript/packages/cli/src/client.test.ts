@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DaemonClient, DaemonUnreachable } from './client.ts'
-import { LoginError, type Login } from './credentials.ts'
+import { LoginError, readLogin, removeLogin, writeLogin, type Login } from './credentials.ts'
 
 describe('DaemonClient spawn config validation', () => {
   let home: string
@@ -69,56 +69,66 @@ describe('DaemonClient token', () => {
     client_id: null,
     token_endpoint: null,
   }
+  const ending: Login = {
+    ...login,
+    access_token: 'old',
+    refresh_token: 'r1',
+    expires_at: Date.now() / 1000 - 1,
+    client_id: 'client_cli',
+    token_endpoint: 'https://clerk.example.com/oauth/token',
+  }
+  let home: string
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'mirage-cli-client-'))
+    vi.stubEnv('MIRAGE_HOME', home)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  function client(kept: Login): DaemonClient {
+    return new DaemonClient({ url: login.url, idleGraceSeconds: 30, authToken: '', login: kept })
+  }
 
   it("is the settings' own, else the login's", async () => {
+    writeLogin(login)
     const base = { url: login.url, idleGraceSeconds: 30 }
     expect(await new DaemonClient({ ...base, authToken: 'set', login }).token()).toBe('set')
-    expect(await new DaemonClient({ ...base, authToken: '', login }).token()).toBe('from-login')
+    expect(await client(login).token()).toBe('from-login')
     expect(await new DaemonClient({ ...base, authToken: '' }).token()).toBe('')
   })
 
   it('stops the command when the login has ended', async () => {
     const old = { ...login, logged_in_at: Date.now() / 1000 - 31 * 24 * 60 * 60 }
-    const client = new DaemonClient({
-      url: login.url,
-      idleGraceSeconds: 30,
-      authToken: '',
-      login: old,
-    })
-    await expect(client.token()).rejects.toThrow(LoginError)
+    writeLogin(old)
+    await expect(client(old).token()).rejects.toThrow(LoginError)
   })
 
   it('refreshes the login once for requests sent at once', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'mirage-cli-client-'))
-    vi.stubEnv('MIRAGE_HOME', home)
     let posted = 0
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       posted += 1
       await new Promise((resolve) => setTimeout(resolve, 50))
       return Response.json({ access_token: 'new', expires_in: 86400 })
     })
-    const ending = {
-      ...login,
-      access_token: 'old',
-      refresh_token: 'r1',
-      expires_at: Date.now() / 1000 - 1,
-      client_id: 'client_cli',
-      token_endpoint: 'https://clerk.example.com/oauth/token',
-    }
-    const client = new DaemonClient({
-      url: login.url,
-      idleGraceSeconds: 30,
-      authToken: '',
-      login: ending,
-    })
-    try {
-      const got = await Promise.all([1, 2, 3, 4].map(() => client.token()))
-      expect(got).toEqual(['new', 'new', 'new', 'new'])
-      expect(posted).toBe(1)
-    } finally {
-      vi.restoreAllMocks()
-      vi.unstubAllEnvs()
-      rmSync(home, { recursive: true, force: true })
-    }
+    writeLogin(ending)
+    const running = client(ending)
+    const got = await Promise.all([1, 2, 3, 4].map(() => running.token()))
+    expect(got).toEqual(['new', 'new', 'new', 'new'])
+    expect(posted).toBe(1)
+  })
+
+  it('stops sending the login once it is logged out', async () => {
+    const fetched = vi.spyOn(globalThis, 'fetch')
+    writeLogin(ending)
+    const running = client(ending)
+    removeLogin()
+    await expect(running.token()).rejects.toThrow(/not logged in to/)
+    expect(fetched).not.toHaveBeenCalled()
+    expect(readLogin()).toBeNull()
   })
 })
