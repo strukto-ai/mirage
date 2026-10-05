@@ -152,7 +152,7 @@ describe('eaccesOnDenied', () => {
   })
 })
 
-it.each(['missing', 'file'])(
+it.each(['missing', 'file', 'file/sub'])(
   'resolveParent names the full operand for %s parents',
   async (parent) => {
     fake.add('file', 'root', undefined, ENC.encode('x'))

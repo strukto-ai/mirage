@@ -181,7 +181,7 @@ async def test_eacces_on_denied_maps_403():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("parent", ["missing", "file"])
+@pytest.mark.parametrize("parent", ["missing", "file", "file/sub"])
 async def test_resolve_parent_error_names_full_operand(
     fake_drive, gdrive_accessor, parent
 ):

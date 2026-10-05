@@ -15,10 +15,17 @@
 import argparse
 import ast
 import json
+import re
 import shlex
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+# The operators and keywords after which a shell word runs as a command.
+CONTROL = frozenset(
+    {";", "|", "||", "&&", "&", "(", ")", "{", "}", "!"}
+    | {"if", "then", "elif", "else", "while", "until", "do"}
+)
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 NAMESPACE_COMMANDS = {
     "chmod",
     "chown",
@@ -50,13 +57,35 @@ def registered_commands(root: Path) -> set[str]:
     }
 
 
+def invoked_commands(line: str) -> set[str]:
+    """The words a shell line runs as commands, not as their arguments.
+
+    A word is in command position at the start of the line or after a
+    control operator or keyword, past any ``NAME=value`` assignments.
+
+    Args:
+        line (str): One case's command line.
+    """
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    names: set[str] = set()
+    expect = True
+    for token in lexer:
+        if token in CONTROL:
+            expect = True
+        elif expect and not ASSIGNMENT.match(token):
+            names.add(token)
+            expect = False
+    return names
+
+
 def coverage_errors(
     commands: set[str], cases: dict[str, list[dict]]
 ) -> list[str]:
     """Require an executable success case in each command's own folder.
 
     This is a registration gate, not proof of every flag or backend. A case
-    must name the command, contain both mount prefixes (possibly in a
+    must run the command, contain both mount prefixes (possibly in a
     symlink setup), assert all three result channels, and run on RAM and
     disk. Topology suites can supplement but cannot replace this case.
 
@@ -76,9 +105,8 @@ def coverage_errors(
         for case in cases.get(command, []):
             line = case["command"]
             expected = case.get("expect", {})
-            tokens = shlex.split(line, posix=True)
             if (
-                command in tokens
+                command in invoked_commands(line)
                 and "/data/" in line
                 and "/data2/" in line
                 and expected.get("exit") == 0
@@ -105,7 +133,12 @@ def selftest() -> None:
     assert coverage_errors({"cp", "mv"}, {"cp": [case]})
     assert coverage_errors({"cp"}, {"misc": [case]})
     assert coverage_errors({"cp"}, {"cp": [case, case]})
+    for line in ("FOO=1 cp /data/a /data2/a", "true && cp /data/a /data2/a"):
+        assert (
+            coverage_errors({"cp"}, {"cp": [case | {"command": line}]}) == []
+        )
     for change in (
+        {"command": "echo cp /data/a /data2/a"},
         {"command": "cp --help"},
         {"command": "cp /data/a /data/b"},
         {"targets": ["ram"]},

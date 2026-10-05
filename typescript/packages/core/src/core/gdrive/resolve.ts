@@ -180,19 +180,25 @@ export async function resolveDir(
   virtual: string,
 ): Promise<[string, string | null]> {
   if (key === '') return rootContext(accessor)
-  const node = await resolveKey(accessor, key)
+  let node: DriveNode | null
+  try {
+    node = await resolveKey(accessor, key)
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ENOTDIR') throw enotdir(virtual)
+    throw error
+  }
   if (node === null) throw enoent(virtual)
   if (!isFolder(node)) throw enotdir(virtual)
   return [node.id, node.driveId]
 }
 
-// Resolve the parent directory of a path for a create-style op.
+// Resolve the parent directory of a path for a create-style op. A missing or
+// non-directory parent, at any depth, names the operand, as mkdir(2) does.
 export async function resolveParent(
   accessor: GDriveAccessor,
   path: PathSpec,
 ): Promise<[string, string | null]> {
   const key = path.vfsPath
   const parentKey = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : ''
-  // Resolve the parent key, but report the operand the caller tried to create.
   return resolveDir(accessor, parentKey, path.virtual)
 }

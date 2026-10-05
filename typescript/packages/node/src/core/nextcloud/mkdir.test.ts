@@ -84,14 +84,23 @@ describe('nextcloud mkdir', () => {
     expect(fake.directories.has('newdir/')).toBe(true)
   })
 
-  // opendal's createDir is MKCOL over the whole chain either way, so the
-  // ancestor walk cannot be gated on `parents`: a bare `mkdir a/b/c`
-  // materializes `a` and `a/b` too, and their cached listings hid the new
-  // levels until the index TTL expired.
-  it('invalidates every ancestor without parents', async () => {
-    const recorder = await record('/a/b/c')
+  // opendal's createDir is MKCOL over the whole chain either way, so a bare
+  // `mkdir a/b/c` looks `a/b` up first, as mkdir(2) does.
+  it('refuses a missing parent without parents', async () => {
+    const fake = new FakeNextcloudOperator()
+    await expect(mkdir(accessorWith(fake), PathSpec.fromStrPath('/a/b/c'))).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/a/b/c',
+    })
+    expect(fake.directories.size).toBe(0)
+  })
+
+  it('creates one level without parents', async () => {
+    const recorder = new RecordingInvalidator()
+    const accessor = accessorWith(new FakeNextcloudOperator({ 'a/b/x': '' }))
+    await runWithCacheManager(recorder, () => mkdir(accessor, PathSpec.fromStrPath('/a/b/c')))
     expect(recorder.writes).toEqual(['/a/b/c'])
-    expect(recorder.ancestors).toEqual(['/a/b/c'])
+    expect(recorder.ancestors).toEqual([])
   })
 
   it('invalidates the same chain with parents', async () => {
@@ -111,8 +120,15 @@ describe('nextcloud mkdir', () => {
   it('answers ENOTDIR under a file', async () => {
     const fake = refusingCreate({ 'mkp/f': 'x' })
     await expect(mkdir(accessorWith(fake), PathSpec.fromStrPath('/mkp/f/g'))).rejects.toMatchObject(
-      { code: 'ENOTDIR' },
+      { code: 'ENOTDIR', virtualPath: '/mkp/f/g' },
     )
+  })
+
+  it('names the operand under a deeper file', async () => {
+    const fake = new FakeNextcloudOperator({ 'mkp/f': 'x' })
+    await expect(
+      mkdir(accessorWith(fake), PathSpec.fromStrPath('/mkp/f/g/h')),
+    ).rejects.toMatchObject({ code: 'ENOTDIR', virtualPath: '/mkp/f/g/h' })
   })
 
   it('names the file a -p walk stops at', async () => {
@@ -123,7 +139,7 @@ describe('nextcloud mkdir', () => {
   })
 
   it('keeps a refusal no file explains', async () => {
-    const fake = refusingCreate({})
+    const fake = refusingCreate({ 'mkp/x': '' })
     await expect(mkdir(accessorWith(fake), PathSpec.fromStrPath('/mkp/g'))).rejects.toThrow(
       'status 409',
     )
@@ -141,6 +157,6 @@ describe('nextcloud mkdir', () => {
     ).rejects.toThrow('status 503')
     expect(fake.directories.has('newdir/')).toBe(true)
     expect(recorder.writes).toEqual(['/newdir'])
-    expect(recorder.ancestors).toEqual(['/newdir'])
+    expect(recorder.ancestors).toEqual([])
   })
 })

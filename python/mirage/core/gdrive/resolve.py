@@ -252,7 +252,10 @@ async def resolve_dir(
     """
     if not key:
         return await root_context(accessor)
-    node = await resolve_key(accessor, key)
+    try:
+        node = await resolve_key(accessor, key)
+    except NotADirectoryError as exc:
+        raise NotADirectoryError(virtual) from exc
     if node is None:
         raise enoent(virtual)
     if not node.is_folder:
@@ -265,6 +268,9 @@ async def resolve_parent(
 ) -> tuple[str, str | None]:
     """Resolve the parent directory of a path for a create-style op.
 
+    A missing or non-directory parent, at any depth, names the operand,
+    as mkdir(2) does.
+
     Args:
         accessor (GDriveAccessor): backend accessor.
         path (PathSpec): target path whose parent must exist.
@@ -274,5 +280,4 @@ async def resolve_parent(
     """
     key = path.vfs_path
     parent_key = posixpath.dirname(key)
-    # Resolve the parent key, but report the operand the caller tried to create.
     return await resolve_dir(accessor, parent_key, path.virtual)

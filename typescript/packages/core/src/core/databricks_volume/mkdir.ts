@@ -53,7 +53,13 @@ export async function mkdir(
   if (await exists(accessor, p)) {
     throw alreadyExistsError(p.virtual)
   }
-  const parentStat = await stat(accessor, parentPath(p), index)
+  let parentStat
+  try {
+    parentStat = await stat(accessor, parentPath(p), index)
+  } catch (exc) {
+    if ((exc as { code?: string }).code === 'ENOENT') throw notFoundError(p.virtual)
+    throw exc
+  }
   if (parentStat.type !== FileType.DIRECTORY) {
     throw notADirectoryError(p.virtual)
   }

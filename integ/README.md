@@ -45,56 +45,30 @@ semantics.
 
 ## Cross-mount commands
 
-`crossmount/<command>/<behavior>.json` owns command scenarios. Keep their
-IDs, `seq` values and targets when moving them: both runners sort the whole
-corpus by `seq`, so fixture setup can live in `seed/`. `alias/`, `nested/`,
-`readonly/` and `program/` own topology, policy and program scenarios that
-span several commands. A checksum directory uses the executable name
-(`sha256sum/`, for example). Avoid issue-number or catch-all command folders.
+`crossmount/<command>/<behavior>.json` owns one command's scenarios; a
+checksum folder takes the executable's name (`sha256sum/`). `alias/`,
+`nested/`, `readonly/`, `service/` and `program/` own the topology, policy,
+command-service and program scenarios that span commands, and `seed/` the
+fixtures later cases read. Keep a case's ID, `seq` and targets when moving
+it: both runners sort the whole corpus by `seq`.
 
-The routing vocabulary lives in the mirrored `crossmount/types` and
-`crossmount/constants` modules. Every registered command belongs to exactly
-one strategy; an unknown strategy or relay command fails explicitly.
+Routing lives in the mirrored `crossmount/types` and `crossmount/constants`
+modules. Every routed command belongs to exactly one strategy, and a command
+outside them fails explicitly rather than falling into one:
 
-| Owner     | Commands                                                                                                                                    | Execution contract                                                                                       |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Stream    | cat, nl, cut                                                                                                                                | Consume operands in order through one command stream.                                                    |
-| Fanout    | rev, head, tail, du, file, md5, md5sum, sha1sum, sha256sum, sha384sum, sha512sum, stat, strings, tac, find, rm, rmdir, unlink, touch, mkdir | Run each operand on its owning mount; combine diagnostics and status with command semantics.             |
-| Relay     | cp, mv, tee, diff, cmp, paste, comm, join, tar, unzip, zip, ls, sort, wc, awk, sed, realpath, grep, rg                                      | One operation sees all operands and dispatches filesystem primitives to their mounts.                    |
-| Namespace | chmod, chown, chgrp, getfattr, setfattr, ln, readlink                                                                                       | Resolve namespace metadata and links above the backends; do not add a second cross-mount implementation. |
+| Strategy  | Commands                                                                                              | Contract                                                                      |
+| --------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Stream    | cat, nl, cut                                                                                          | One command stream over the operands in order.                                |
+| Fanout    | rev, head, tail, file, md5, the `sha*sum`s, stat, strings, tac, find, rm, rmdir, unlink, touch, mkdir | Each operand runs on its own mount; diagnostics and status combine.           |
+| Relay     | cp, mv, tee, tar, unzip, zip, ls, sed, and every other generic builder (`DISPATCH_BUILDERS`)          | One generic sees every operand and reaches each mount through the dispatcher. |
+| Namespace | chmod, chown, chgrp, getfattr, setfattr, ln, readlink                                                 | Answered above the backends, with no cross-mount implementation of its own.   |
 
-`unlink` takes one operand. Its cross-mount case follows an intermediate
-symlink and removes a final symlink without deleting its target. Recursive
-walks, nested mounts, same-store aliases and read-only mounts remain separate
-scenarios; two paths on two RAM mounts are not proof of all topologies.
-
-`runners/tools/check_crossmount_coverage.py --selftest` requires a named
-success case for every registered command plus the namespace commands above,
-with both mount prefixes, RAM/disk targets and exact result assertions. It
-also rejects duplicate cross-mount IDs. This is a minimum registration gate,
-not proof of every option or backend. Unit tests pin strategy membership;
-`check_case_targets.py --strict` separately guards backend omissions. Add a
-new command's JSON case with its registration, including failure continuation
-where meaningful. Both gates run in CI; `integ/runners/**` and the moved case
-paths are included by the existing `integ/**` core and TypeScript filters.
-
-The Google Drive parent resolver reports the requested destination on a missing
-parent, so `mkdir` and other create operations keep the full operand in their
-diagnostics. The multi-operand `mkdir` case also proves that a later operand on
-another mount still executes after that failure.
-
-The implementation remains async: await backend operations and preserve
-operand order for mutations. Mirrored relay tests cancel a move during an
-awaited read/write and assert that it never unlinks a source or starts the
-next transfer; a destination write failure also preserves the source.
-TypeScript additionally checks a late operation completion after abort.
-These checks do not promise rollback of a backend write already in flight.
-The transfer primitive still accepts whole-file bytes, so bounded-memory
-streaming/backpressure for large copies needs a separate primitive contract.
-
-The new checksum and operand-continuation goldens were checked against the
-same Debian image digest above. Metadata uses the namespace overlay; the
-existing xattr contract is shared across both hosts.
+`runners/tools/check_crossmount_coverage.py --selftest` requires, for every
+command the `Cmd` vocabulary names plus the namespace commands, a success
+case in that command's folder that runs it with operands on both `/data`
+and `/data2`, asserts all three result channels, and targets RAM and disk;
+it also rejects duplicate IDs. It is a registration floor, not proof of
+every option or backend.
 
 ## Runs and tenants
 
