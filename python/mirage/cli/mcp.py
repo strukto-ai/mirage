@@ -118,7 +118,7 @@ def relay_workspace(
     workspace_id: str | None,
     session_id: str | None,
     endpoint: str,
-    relay: Callable[[str, dict[str, str]], Coroutine[Any, Any, None]],
+    relay: Callable[[str, Callable[[], str]], Coroutine[Any, Any, None]],
 ) -> None:
     """Relay this process's stdio to one of a workspace's endpoints.
 
@@ -132,8 +132,9 @@ def relay_workspace(
         session_id (str | None): the session to act as; None is the
             workspace's default.
         endpoint (str): ``mcp`` or ``rpc``, the route to relay to.
-        relay (Callable[[str, dict[str, str]], Coroutine[Any, Any, None]]):
-            relays stdio to a URL with the given headers.
+        relay (Callable[[str, Callable[[], str]], Coroutine[Any, Any, None]]):
+            relays stdio to a URL, asking for the bearer token on every
+            request.
     """
     minted = False
     with make_client() as client:
@@ -161,14 +162,13 @@ def relay_workspace(
         url = f"{client.settings.url}{workspace_path}/{endpoint}"
         if session_id is not None:
             url += f"?session_id={quote(session_id, safe='')}"
-        token = client.settings.auth_token
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
+        token = client.token
     try:
         if session_id is not None and not has_session(
             workspace_path, session_id
         ):
             fail(f"session not found: {session_id}", exit_code=2)
-        asyncio.run(relay(url, headers))
+        asyncio.run(relay(url, token))
     finally:
         if minted:
             with make_client() as client:

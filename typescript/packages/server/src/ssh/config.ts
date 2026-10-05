@@ -34,10 +34,11 @@ export type SSHSettingKey = keyof typeof SSH_ENV_KEYS
  * `hostKeyFile` is minted on first start and kept, so clients'
  * known_hosts stay valid; `authorizedKeysFile` holds OpenSSH-format public
  * keys and is re-read on every connection, so adding a key needs no
- * restart. A port of 0 asks the OS for a free one.
+ * restart. A port of 0 asks the OS for a free one; null keeps the TCP door
+ * shut, while the HTTPS route carries SSH whatever the port says.
  */
 export interface SSHConfig {
-  port: number
+  port: number | null
   host: string
   hostKeyFile: string
   authorizedKeysFile: string
@@ -82,25 +83,24 @@ function parsePort(raw: string): number {
 }
 
 /**
- * Resolve the SSH door's settings, or null when it is off.
+ * Resolve the SSH settings.
  *
  * Per key the environment variable wins over the `[daemon]` table in
- * `config.toml`, which wins over the default. The door is off unless a
+ * `config.toml`, which wins over the default. The TCP door is off unless a
  * port is set, so a daemon nobody configured for SSH never listens on a
  * second port. An explicit `env` with no `table` stays hermetic and reads
  * no file.
  */
-export function resolveSSHConfig(opts?: ResolveSSHOptions): SSHConfig | null {
+export function resolveSSHConfig(opts?: ResolveSSHOptions): SSHConfig {
   const env = opts?.env ?? process.env
   const table = opts?.table ?? (opts?.env !== undefined ? {} : readDaemonTable(mirageHome()))
   const rawPort = setting('ssh_port', env, table)
-  if (rawPort === '') return null
   const dir = defaultSSHDir(opts?.home)
   const hostKey = setting('ssh_host_key_file', env, table)
   const authorized = setting('ssh_authorized_keys', env, table)
   const host = setting('ssh_host', env, table)
   return {
-    port: parsePort(rawPort),
+    port: rawPort === '' ? null : parsePort(rawPort),
     host: host !== '' ? host : DEFAULT_SSH_HOST,
     hostKeyFile: hostKey !== '' ? expandHome(hostKey) : join(dir, HOST_KEY_NAME),
     authorizedKeysFile:

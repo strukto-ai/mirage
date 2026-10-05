@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { generateKeyPairSync } from 'node:crypto'
-import { SignJWT, importPKCS8 } from 'jose'
+import { createPublicKey, generateKeyPairSync } from 'node:crypto'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { SignJWT, exportJWK, importPKCS8 } from 'jose'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -138,10 +140,48 @@ describe('AuthMiddleware integration', () => {
       keys = rsaKeys()
     })
 
+    it('checks a token against the published key set', async () => {
+      const jwk = { ...(await exportJWK(createPublicKey(keys.publicPem))), kid: 'k1', use: 'sig' }
+      const keySet = createServer((_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ keys: [jwk] }))
+      })
+      await new Promise<void>((resolve) => keySet.listen(0, '127.0.0.1', resolve))
+      const port = (keySet.address() as AddressInfo).port
+      const app = buildApp({
+        authConfig: {
+          mode: 'jwt',
+          jwt: {
+            algorithm: 'RS256',
+            jwksUrl: `http://127.0.0.1:${String(port)}/jwks.json`,
+            audiences: [],
+            authorizedParties: [],
+            clockSkewSeconds: 5,
+          },
+        },
+      })
+      const signing = await importPKCS8(keys.privatePem, 'RS256')
+      const claims = { sub: 'agent', exp: Math.floor(Date.now() / 1000) + 60 }
+      try {
+        const signed = await new SignJWT(claims)
+          .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
+          .sign(signing)
+        const unknown = await new SignJWT(claims)
+          .setProtectedHeader({ alg: 'RS256', kid: 'k9' })
+          .sign(signing)
+        expect((await inject(app, '/v1/workspaces', `Bearer ${signed}`)).statusCode).toBe(200)
+        expect((await inject(app, '/v1/workspaces', `Bearer ${unknown}`)).statusCode).toBe(401)
+      } finally {
+        await app.close()
+        keySet.close()
+      }
+    })
+
     it('accepts valid signed', async () => {
       const jwt: JWTConfig = {
         key: keys.publicPem,
         algorithm: 'RS256',
+        audiences: [],
         authorizedParties: [],
         clockSkewSeconds: 5,
       }
@@ -162,6 +202,7 @@ describe('AuthMiddleware integration', () => {
       const jwt: JWTConfig = {
         key: keys.publicPem,
         algorithm: 'RS256',
+        audiences: [],
         authorizedParties: [],
         clockSkewSeconds: 5,
       }
@@ -178,6 +219,7 @@ describe('AuthMiddleware integration', () => {
       const jwt: JWTConfig = {
         key: keys.publicPem,
         algorithm: 'RS256',
+        audiences: [],
         authorizedParties: [],
         clockSkewSeconds: 0,
       }
@@ -216,6 +258,7 @@ describe('AuthMiddleware integration', () => {
           jwt: {
             key: keys.publicPem,
             algorithm: 'RS256',
+            audiences: [],
             authorizedParties: [],
             clockSkewSeconds: 5,
           },
@@ -356,6 +399,7 @@ describe('AuthMiddleware integration', () => {
           jwt: {
             key: keys.publicPem,
             algorithm: 'RS256',
+            audiences: [],
             authorizedParties: [],
             clockSkewSeconds: 5,
           },

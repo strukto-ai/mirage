@@ -12,8 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
+import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import jwt as pyjwt
 import pytest
@@ -156,6 +160,54 @@ async def test_jwt_mode_accepts_valid_signed(rsa_keys):
     async with _client(app, {"Authorization": f"Bearer {token}"}) as c:
         r = await c.get("/v1/workspaces")
         assert r.status_code == 200
+
+
+@pytest.fixture
+def key_set(rsa_keys) -> Iterator[str]:
+    """Serve the issuer's public key as a JWKS, as Clerk publishes one."""
+    public = serialization.load_pem_public_key(rsa_keys.public_pem)
+    jwk = pyjwt.algorithms.RSAAlgorithm.to_jwk(public, as_dict=True)
+    body = json.dumps({"keys": [{**jwk, "kid": "k1", "use": "sig"}]}).encode()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args) -> None:
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/jwks.json"
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+async def test_jwt_mode_checks_a_token_against_the_published_key_set(
+    rsa_keys, key_set
+):
+    jwt_cfg = JWTConfig(algorithm="RS256", jwks_url=key_set)
+    app = build_app(
+        idle_grace_seconds=10.0,
+        auth_config=AuthConfig(mode="jwt", jwt=jwt_cfg),
+    )
+    claims = {"sub": "agent", "exp": int(time.time()) + 60}
+    signed = pyjwt.encode(
+        claims, rsa_keys.private_pem, algorithm="RS256", headers={"kid": "k1"}
+    )
+    unknown = pyjwt.encode(
+        claims, rsa_keys.private_pem, algorithm="RS256", headers={"kid": "k9"}
+    )
+    async with _client(app, {"Authorization": f"Bearer {signed}"}) as c:
+        assert (await c.get("/v1/workspaces")).status_code == 200
+    async with _client(app, {"Authorization": f"Bearer {unknown}"}) as c:
+        assert (await c.get("/v1/workspaces")).status_code == 401
 
 
 @pytest.mark.no_auth_override

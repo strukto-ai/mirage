@@ -25,6 +25,7 @@ import asyncio
 import base64
 import json
 import os
+import shlex
 import signal
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -1703,6 +1704,15 @@ class Ssh:
         self.server = server
         self.scratch = scratch
 
+    def env(self) -> dict[str, str] | None:
+        """The environment ssh, sftp and scp run in; None inherits ours."""
+        return None
+
+    async def run(
+        self, argv: list[str], stdin: bytes | None = b""
+    ) -> tuple[int, str, str]:
+        return await run(argv, env=self.env(), stdin=stdin)
+
     def argv(self, program: str, key: str = "plain") -> list[str]:
         port = "-P" if program in ("sftp", "scp") else "-p"
         return [
@@ -1732,12 +1742,12 @@ class Ssh:
     ) -> Answer:
         login = f"{wid}@127.0.0.1"
         if op in ("shell", "session"):
-            code, out, err = await run(
+            code, out, err = await self.run(
                 [*self.argv("ssh", key), "-T", login, step["command"]]
             )
             return shell_answer(out, err, code)
         if op == "stdin" and "stream" not in step:
-            code, out, err = await run(
+            code, out, err = await self.run(
                 [*self.argv("ssh", key), "-T", login, step["command"]],
                 stdin=stdin_bytes(step["stdin"]),
             )
@@ -1762,6 +1772,7 @@ class Ssh:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=self.env(),
         )
         assert process.stdin is not None
         process.stdin.write(first.encode())
@@ -1781,7 +1792,7 @@ class Ssh:
         )
 
     async def sftp(self, login: str, batch: str) -> tuple[int, str, str]:
-        return await run(
+        return await self.run(
             [*self.argv("sftp"), "-b", "-", login], stdin=batch.encode()
         )
 
@@ -1793,7 +1804,7 @@ class Ssh:
         if call == "write":
             local.write_bytes(base64.b64decode(step["data_base64"]))
             if step.get("via") == "scp":
-                code, _, err = await run(
+                code, _, err = await self.run(
                     [*self.argv("scp"), str(local), f"{login}:{path}"]
                 )
             else:
@@ -1802,7 +1813,7 @@ class Ssh:
         if call == "read":
             local.unlink(missing_ok=True)
             if step.get("via") == "scp":
-                code, _, err = await run(
+                code, _, err = await self.run(
                     [*self.argv("scp"), f"{login}:{path}", str(local)]
                 )
             else:
@@ -1854,7 +1865,7 @@ class Ssh:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "TERM": "xterm"},
+            env={**(self.env() or os.environ), "TERM": "xterm"},
         )
         assert process.stdin is not None and process.stdout is not None
         process.stdin.write(f"{command}\n".encode())
@@ -1878,8 +1889,42 @@ class Ssh:
         )
 
 
+class SshProxy(Ssh):
+    """SSH over the HTTPS route: ``mirage ssh-proxy`` is ssh's ProxyCommand.
+
+    The CLI's token logs in, so there is no key and no SSH port; on
+    ``jwt`` it is an OAuth access token, as a CLI that logged in through
+    the issuer holds. The tunnel runs under the workspace's default
+    profile, so the session suite, which binds a key to a profile, is
+    not its.
+    """
+
+    name = "ssh_proxy"
+    OPS = frozenset({"shell", "stdin", "bytes", "cancel"})
+
+    def __init__(self, server: Server, scratch: Path) -> None:
+        super().__init__(server, scratch)
+        d = server.d
+        self.token = d.issuer.oauth_token() if d.name == "jwt" else None
+
+    def env(self) -> dict[str, str] | None:
+        return self.server.env(self.token)
+
+    def argv(self, program: str, key: str = "plain") -> list[str]:
+        proxy = shlex.join(self.server.cli("ssh-proxy", "%r"))
+        return [program, *SSH_OPTIONS, "-o", f"ProxyCommand={proxy}"]
+
+    async def suite(
+        self, suite: dict[str, Any], prefix: str, config: dict[str, Any]
+    ) -> list[Answer]:
+        wid = prefix.rstrip("-")
+        seen = self.server.recorder.requests.setdefault(self.server.key, set())
+        seen.add(("GET", f"/v1/workspaces/{wid}/ssh"))
+        return await super().suite(suite, prefix, config)
+
+
 def server_accesses(server: Server, scratch: Path) -> list[Any]:
     return [
         cls(server, scratch)
-        for cls in (Http, Cli, Mcp, McpStdio, Rpc, RpcStdio, Ssh)
+        for cls in (Http, Cli, Mcp, McpStdio, Rpc, RpcStdio, Ssh, SshProxy)
     ]

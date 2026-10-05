@@ -15,12 +15,14 @@
 import os
 import subprocess
 import sys
+import threading
 import time
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from mirage.cli.credentials import fresh_token
 from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN
 from mirage.cli.settings import (
     DaemonSettings,
@@ -52,6 +54,7 @@ class DaemonClient:
     def __init__(self, settings: DaemonSettings) -> None:
         self.settings = settings
         self._client = httpx.Client(base_url=settings.url, timeout=60.0)
+        self._refreshing = threading.Lock()
 
     def __enter__(self) -> "DaemonClient":
         return self
@@ -59,10 +62,22 @@ class DaemonClient:
     def __exit__(self, *exc_info) -> None:
         self._client.close()
 
+    def token(self) -> str:
+        """The bearer token to send: the settings' own, else the
+        login's, refreshed when it is about to end. One caller at a time
+        reads the login, so requests sent at once refresh it once.
+
+        Returns:
+            str: the token; empty when there is none.
+        """
+        if self.settings.auth_token or self.settings.login is None:
+            return self.settings.auth_token
+        with self._refreshing:
+            return fresh_token(self.settings.login)
+
     def _headers(self) -> dict[str, str]:
-        if self.settings.auth_token:
-            return {"Authorization": f"Bearer {self.settings.auth_token}"}
-        return {}
+        token = self.token()
+        return {"Authorization": f"Bearer {token}"} if token else {}
 
     def request(self, method: str, path: str, **kwargs) -> httpx.Response:
         headers = {**self._headers(), **kwargs.pop("headers", {})}

@@ -23,8 +23,13 @@ HOST_KEY_NAME = "host_ed25519_key"
 AUTHORIZED_KEYS_NAME = "authorized_keys"
 
 # The module that serves the door. It imports asyncssh, which is the
-# `ssh` extra, so the daemon loads it by path only once a port is set.
+# `ssh` extra, so the daemon loads it by path only once a port is set or
+# the HTTPS route carries a connection.
 SERVER_MODULE = "mirage.server.ssh.server:start_ssh_server"
+TUNNEL_MODULE = "mirage.server.ssh.server:serve_tunnel"
+
+# How many bytes the HTTPS route relays at a time.
+TUNNEL_CHUNK = 64 * 1024
 
 # The most entry stats one listing keeps in flight. Each is a hop to the
 # workspace loop and, on a mount that keeps no listing index, a backend

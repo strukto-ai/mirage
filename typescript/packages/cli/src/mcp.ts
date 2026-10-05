@@ -99,7 +99,7 @@ export async function relayWorkspace(
   workspace: string | undefined,
   session: string | undefined,
   endpoint: 'mcp' | 'rpc',
-  relay: (url: string, headers: Record<string, string>) => Promise<void>,
+  relay: (url: string, token: () => Promise<string>) => Promise<void>,
 ): Promise<void> {
   const client = makeClient(loadDaemonSettings())
   try {
@@ -125,8 +125,6 @@ export async function relayWorkspace(
   const workspacePath = `/v1/workspaces/${encodeURIComponent(workspaceId)}`
   const query = session === undefined ? '' : `?session_id=${encodeURIComponent(session)}`
   const url = `${client.settings.url}${workspacePath}/${endpoint}${query}`
-  const token = client.settings.authToken
-  const headers: Record<string, string> = token === '' ? {} : { Authorization: `Bearer ${token}` }
   let refusal: string | undefined
   try {
     if (session !== undefined) {
@@ -135,7 +133,7 @@ export async function relayWorkspace(
         (error: unknown) => (error instanceof Error ? error.message : String(error)),
       )
     }
-    if (refusal === undefined) await relay(url, headers)
+    if (refusal === undefined) await relay(url, () => client.token())
   } finally {
     if (minted) await client.request('DELETE', workspacePath)
   }

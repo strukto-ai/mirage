@@ -15,15 +15,17 @@
 import asyncio
 import json
 import sys
+from collections.abc import AsyncGenerator, Callable
 
 import anyio
 import httpx
 
+from mirage.concurrency.limiter import run_blocking
 from mirage.server.rpc.constants import RPC_PARSE_ERROR
 from mirage.server.rpc.server import CANCEL_REQUEST, error_response
 
 
-async def relay_stdio(url: str, headers: dict[str, str]) -> None:
+async def relay_stdio(url: str, token: Callable[[], str]) -> None:
     """Relay this process's line-delimited JSON-RPC to a daemon's ``/rpc``.
 
     Each request is posted on its own, so answers come back as they
@@ -31,9 +33,20 @@ async def relay_stdio(url: str, headers: dict[str, str]) -> None:
 
     Args:
         url (str): the workspace's ``/v1/workspaces/{id}/rpc`` URL.
-        headers (dict[str, str]): request headers, the bearer token among
-            them.
+        token (Callable[[], str]): the bearer token, asked for on every
+            request, so a login refreshed while the relay runs is sent;
+            empty sends none.
     """
+
+    class Bearer(httpx.Auth):
+        async def async_auth_flow(
+            self, request: httpx.Request
+        ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+            value = await run_blocking(token)
+            if value:
+                request.headers["Authorization"] = f"Bearer {value}"
+            yield request
+
     lock = asyncio.Lock()
     running: set[asyncio.Task[None]] = set()
 
@@ -42,7 +55,7 @@ async def relay_stdio(url: str, headers: dict[str, str]) -> None:
             sys.stdout.write(text + "\n")
             sys.stdout.flush()
 
-    async with httpx.AsyncClient(headers=headers, timeout=None) as http:
+    async with httpx.AsyncClient(auth=Bearer(), timeout=None) as http:
 
         async def forward(line: str) -> None:
             response = await http.post(
