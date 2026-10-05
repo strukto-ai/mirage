@@ -22,6 +22,7 @@ from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.routing.types import RouteDecision
 from mirage.runtime.types import ProcessExecution, RunResult, ShellExecution
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
@@ -43,7 +44,7 @@ async def run_external(
     runtime = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
     command = shlex.join(argv.tokens)
     if runtime is None:
-        err = f"{argv.name}: no runtime accepted this line\n".encode()
+        err = encode_text(f"{argv.name}: no runtime accepted this line\n")
         return (
             None,
             IOResult(exit_code=126, stderr=err),

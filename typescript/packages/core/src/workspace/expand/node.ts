@@ -36,6 +36,7 @@ import { expandBraces, isAtSplat, landArithWrites, parameterChunks } from './var
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { ExecutionScope } from '../execution.ts'
+import { decodeText, encodeText } from '../../shell/bytes.ts'
 
 /**
  * The executor's door for a nested line. `node` is the node whose text
@@ -104,7 +105,7 @@ async function expandBacktickRegion(
       offset + segment.start,
       offset + segment.end,
     ])
-    out += (await io.stdoutStr()).replace(/\n+$/, '')
+    out += decodeText(await io.materializeStdout()).replace(/\n+$/, '')
     session.diagnostics.push(await io.materializeStderr())
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
@@ -202,7 +203,7 @@ async function substituteDollarRefs(
  * same shape `(( ))` reports.
  */
 export function arithExit(expr: string, err: ArithError): DiscardSignal {
-  return new DiscardSignal(new TextEncoder().encode(`bash: ${expr.trim()}: ${err.message}\n`))
+  return new DiscardSignal(encodeText(`bash: ${expr.trim()}: ${err.message}\n`))
 }
 
 /**
@@ -590,7 +591,7 @@ async function substitution(
   // The substitution names its own node: the nested line's commands
   // stand under it, which is where the pass placed them.
   const io = await childLine(session, executeFn, inner, tsNode, callStack)
-  const text = (await io.stdoutStr()).replace(/\n+$/, '')
+  const text = decodeText(await io.materializeStdout()).replace(/\n+$/, '')
   // Record the substitution's status: an assignment-only statement
   // whose value ran substitutions reports the last one's status as
   // its own (see assignmentStatus).

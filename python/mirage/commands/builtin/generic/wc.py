@@ -21,6 +21,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 from mirage.utils.quote import shell_quote
@@ -317,7 +318,7 @@ def format_count_rows(
             chars=flags.chars,
             max_line_length=flags.max_line_length,
         )
-        return (" ".join(str(value) for value in values) + "\n").encode()
+        return encode_text(" ".join(str(value) for value in values) + "\n")
     output_rows = list(rows)
     include_total = flags.total == "always" or (
         flags.total == "auto" and operand_count > 1
@@ -407,12 +408,12 @@ async def format_multi(
         except IsADirectoryError as exc:
             # GNU opens a directory and fails only to read it, so it prints
             # a row of zeros beside the error and pads as for a stream.
-            err += fs_error_line("wc", path, exc).encode()
+            err += encode_text(fs_error_line("wc", path, exc))
             rows.append((WCCounts(), path.raw_path))
             sizes.append(None)
             continue
         except FS_ERRORS as exc:
-            err += fs_error_line("wc", path, exc).encode()
+            err += encode_text(fs_error_line("wc", path, exc))
             continue
         rows.append((counts, path.raw_path))
         sizes.append(None if is_stdin(path) else counts.bytes_)
@@ -447,10 +448,10 @@ async def wc_generic(
         parsed = parse_flags(opts.flags)
     except UsageError as exc:
         return None, IOResult(
-            exit_code=exc.exit_code, stderr=(str(exc) + "\n").encode()
+            exit_code=exc.exit_code, stderr=encode_text(str(exc) + "\n")
         )
     except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
+        return None, IOResult(exit_code=1, stderr=encode_text(str(exc) + "\n"))
     stream = stdin_stream(stream, opts.stdin)
     if paths:
         body, err = await format_multi(
@@ -479,7 +480,7 @@ def format_stdin(counts: WCCounts, flags: WCFlags) -> bytes:
             chars=flags.chars,
             max_line_length=flags.max_line_length,
         )
-        return (" ".join(str(value) for value in values) + "\n").encode()
+        return encode_text(" ".join(str(value) for value in values) + "\n")
     rows: list[tuple[WCCounts, str | None]] = [(counts, None)]
     if flags.total == "always":
         rows.append((counts, "total"))

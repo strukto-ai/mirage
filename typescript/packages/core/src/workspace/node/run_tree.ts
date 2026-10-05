@@ -35,6 +35,7 @@ import { Admitted, admit } from './admission.ts'
 import { claimantFor } from './occurrence.ts'
 import { PathSpec } from '../../types.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -120,7 +121,7 @@ export async function runCommandTree(
     // surface that as a failed command, not a crash.
     const msg = err instanceof Error ? err.message : String(err)
     const existing = await materialize(io.stderr)
-    const added = new TextEncoder().encode(`${msg}\n`)
+    const added = encodeText(`${msg}\n`)
     const merged = new Uint8Array(existing.byteLength + added.byteLength)
     merged.set(existing, 0)
     merged.set(added, existing.byteLength)

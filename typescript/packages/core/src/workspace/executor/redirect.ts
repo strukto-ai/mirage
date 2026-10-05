@@ -615,7 +615,7 @@ function describe(output: FdDest, source: Input, owner: Recorder | null): Descri
 function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
   const strerror = fsStrerror(err)
   const label = scope.rawPath
-  return new TextEncoder().encode(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
+  return encodeText(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
 /** GNU's line for a write onto a closed stdout, in the command's name. */
@@ -624,7 +624,7 @@ function closedWriteLine(command: TSNodeLike): Uint8Array {
     .split(/\s+/)
     .filter((w) => w !== '')
   const name = words[0] ?? 'redirect'
-  return new TextEncoder().encode(`${name}: write error: Bad file descriptor\n`)
+  return encodeText(`${name}: write error: Bad file descriptor\n`)
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */
@@ -724,7 +724,7 @@ async function openRefusal(
     if (scope.rawPath.endsWith('/')) {
       const earlier = await applyPendingOpens(dispatch, pending)
       if (earlier !== null) return earlier
-      return shellFailure(new TextEncoder().encode(`${scope.rawPath}: Is a directory\n`))
+      return shellFailure(encodeText(`${scope.rawPath}: Is a directory\n`))
     }
     const path = scope.virtual
     let exists = opened.has(path)
@@ -746,7 +746,7 @@ async function openRefusal(
       const earlier = await applyPendingOpens(dispatch, pending)
       if (earlier !== null) return earlier
       const detail = isDir ? 'Is a directory' : 'cannot overwrite existing file'
-      return shellFailure(new TextEncoder().encode(`${scope.rawPath}: ${detail}\n`))
+      return shellFailure(encodeText(`${scope.rawPath}: ${detail}\n`))
     }
     // This open succeeds, so the target exists for every redirect after
     // it, and a truncating one leaves it empty to be found. Without the

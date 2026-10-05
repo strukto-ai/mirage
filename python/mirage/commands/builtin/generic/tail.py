@@ -31,6 +31,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
 from mirage.io.stream import async_chain, ensure_stream
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line, fs_strerror
 from mirage.utils.quote import shell_quote
@@ -294,7 +295,7 @@ async def _tail_multi(
             header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
             if i > 0:
                 header = "\n" + header
-            yield header.encode()
+            yield encode_text(header)
         if p.virtual in unread:
             continue
         source = read(p)
@@ -319,7 +320,7 @@ def _note(io: IOResult, message: str) -> None:
         message (str): the ``tail: ...`` line, newline included.
     """
     prior = io.stderr if isinstance(io.stderr, bytes) else b""
-    io.stderr = prior + message.encode()
+    io.stderr = prior + encode_text(message)
 
 
 async def _counted(source: Any, box: list[int]) -> AsyncIterator[bytes]:
@@ -492,7 +493,7 @@ async def _follow(
         if p.virtual in unread:
             if show_headers:
                 header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-                yield (("\n" if last is not None else "") + header).encode()
+                yield encode_text(("\n" if last is not None else "") + header)
             last = slot
             active.remove((slot, p))
             continue
@@ -523,7 +524,7 @@ async def _follow(
             continue
         if show_headers:
             header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-            yield (("\n" if last is not None else "") + header).encode()
+            yield encode_text(("\n" if last is not None else "") + header)
         last = slot
         for chunk in chunks:
             yield chunk
@@ -604,7 +605,7 @@ async def _follow(
             if data:
                 if show_headers and last != slot:
                     label = operand_label(p, STDIN_HEADER_NAME)
-                    yield f"\n==> {label} <==\n".encode()
+                    yield encode_text(f"\n==> {label} <==\n")
                 last = slot
                 yield data
     _note(io, "tail: no files remaining\n")
@@ -691,10 +692,10 @@ async def tail_generic(
         parsed = parse_flags(opts.flags)
     except UsageError as exc:
         return None, IOResult(
-            exit_code=exc.exit_code, stderr=f"{exc}\n".encode()
+            exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
         )
     except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=str(exc).encode())
+        return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     counts = parsed.counts
     if (
         parsed.follow
@@ -764,5 +765,7 @@ async def tail_generic(
     )
     if parsed.verbose and not parsed.quiet:
         # -v heads a stdin nobody named with the name it gives `-`.
-        body = async_chain([f"==> {STDIN_HEADER_NAME} <==\n".encode(), body])
+        body = async_chain(
+            [encode_text(f"==> {STDIN_HEADER_NAME} <==\n"), body]
+        )
     return body, IOResult(stderr=retry_warning or None)

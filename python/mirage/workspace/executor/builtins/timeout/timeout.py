@@ -35,6 +35,7 @@ from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io import IOResult
 from mirage.io.stream import ensure_stream, materialize, yield_bytes
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.workspace.executor.builtins.timeout.constants import (
     CONTINUE_SIGNALS,
@@ -71,7 +72,9 @@ _Run = asyncio.Future[tuple[bytes | None, IOResult]]
 def _usage_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
     # GNU timeout reserves 125 for its own failures; 124 means the
     # command was killed at the deadline.
-    return _refuse(f"timeout: {message}\n{usage_hint('timeout')}\n".encode())
+    return _refuse(
+        encode_text(f"timeout: {message}\n{usage_hint('timeout')}\n")
+    )
 
 
 def _refuse(
@@ -223,9 +226,11 @@ async def handle_timeout(
     kill_after = 0.0
     for name, value in parse.given:
         if name == "help":
-            text = render_help(
-                "timeout", SHELL_SPECS["timeout"], synopsis=_SYNOPSIS
-            ).encode()
+            text = encode_text(
+                render_help(
+                    "timeout", SHELL_SPECS["timeout"], synopsis=_SYNOPSIS
+                )
+            )
             return (
                 yield_bytes(text),
                 IOResult(),
@@ -263,7 +268,7 @@ async def handle_timeout(
     if parse.needs_value is not None:
         return _refuse(*missing_value_error("timeout", parse.needs_value))
     if len(parse.operands) < 2:
-        return _refuse(f"{usage_hint('timeout')}\n".encode())
+        return _refuse(encode_text(f"{usage_hint('timeout')}\n"))
     raw = parse.operands[0]
     seconds = parse_duration(raw)
     if seconds is None:
@@ -271,7 +276,7 @@ async def handle_timeout(
 
     command = parse.operands[1:]
     if registry is not None and not execs(command[0], session, registry):
-        return _refuse(timeout_missing(command[0]).encode(), 127)
+        return _refuse(encode_text(timeout_missing(command[0])), 127)
     return await _supervise(
         execute_fn,
         shell_join(command),
@@ -452,7 +457,7 @@ async def _ended(
     stderr = held[0].stderr if held else None
     if finished:
         stderr = await materialize(stderr)
-    tail = "".join(said).encode()
+    tail = encode_text("".join(said))
     head = stderr if isinstance(stderr, bytes) else b""
     out = b"".join(drained) or None
     return (

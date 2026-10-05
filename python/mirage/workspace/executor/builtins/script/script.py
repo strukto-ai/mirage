@@ -15,6 +15,7 @@
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileType
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_strerror
 from mirage.utils.path import resolve_path
@@ -40,7 +41,7 @@ def script_error(
         command (str | None): what to record the failure under, when
             that is not the prefix.
     """
-    err = f"{prefix}: {message}\n".encode()
+    err = encode_text(f"{prefix}: {message}\n")
     return (
         None,
         IOResult(exit_code=code, stderr=err),
@@ -92,9 +93,7 @@ async def read_script_text(dispatch: DispatchFn, path: str, cwd: str) -> str:
         path (str): the script operand, as typed.
         cwd (str): working directory a relative operand resolves against.
     """
-    return (await read_script_bytes(dispatch, path, cwd)).decode(
-        errors="replace"
-    )
+    return decode_text(await read_script_bytes(dispatch, path, cwd))
 
 
 async def read_script_file(

@@ -23,7 +23,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.shell.bytes import byte_view, text_view
+from mirage.shell.bytes import byte_view, decode_text, encode_text, text_view
 from mirage.types import PathSpec, StatFn
 
 
@@ -224,7 +224,7 @@ async def zgrep_generic(
             door=door,
         )
         data = await materialize(body)
-        errors.append(await io.stderr_str())
+        errors.append(decode_text(await io.materialize_stderr()))
         failed = failed or io.exit_code == 1
         if compiled is None:
             if f.files_without_match:
@@ -260,7 +260,7 @@ async def zgrep_generic(
     # gzip's failure is exit 2 even beside a match, -q included (zgrep
     # 1.13 takes the more serious status of gzip's and grep's per file).
     exit_code = 2 if failed else 0 if any_match else 1
-    stderr = "".join(errors).encode() or None
+    stderr = encode_text("".join(errors)) or None
     # Under -m0, GNU still prints -L's operands even with -q.
     if (f.quiet and f.max_count != 0) or not all_results:
         return None, IOResult(exit_code=exit_code, stderr=stderr)

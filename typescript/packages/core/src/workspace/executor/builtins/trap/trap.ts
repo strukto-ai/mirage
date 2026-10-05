@@ -18,8 +18,7 @@ import { SIGNAL_NAMES } from '../timeout/constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { EXIT_EVENT, PSEUDO_SIGNALS, SIGNAL_MAX, USAGE } from './constants.ts'
 import { TrapEvent } from './types.ts'
-
-const DEC = new TextDecoder()
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * What a signal spec names: EXIT, another signal bash knows (which mirage
@@ -68,7 +67,7 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
       else if (flag === 'l') {
         return result('trap', { exitCode: 2, stderr: 'mirage: trap: -l: not supported\n' })
       } else {
-        const message = DEC.decode(builtinError('trap', `-${flag}: invalid option`))
+        const message = decodeText(builtinError('trap', `-${flag}: invalid option`))
         return result('trap', { exitCode: 2, stderr: message + USAGE })
       }
     }
@@ -79,14 +78,14 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
     for (const spec of words.length > 0 ? words : [EXIT_EVENT]) {
       const event = eventOf(spec)
       if (event === null) {
-        errors.push(DEC.decode(builtinError('trap', `${spec}: invalid signal specification`)))
+        errors.push(decodeText(builtinError('trap', `${spec}: invalid signal specification`)))
       } else if (event === TrapEvent.Exit && session.exitTrap !== null) {
         out.push(listing(session.exitTrap))
       }
     }
     const text = out.join('')
     return result('trap', {
-      out: text !== '' ? new TextEncoder().encode(text) : null,
+      out: text !== '' ? encodeText(text) : null,
       exitCode: errors.length > 0 ? 1 : 0,
       stderr: errors.join(''),
     })
@@ -100,7 +99,7 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
   for (const spec of specs) {
     const event = eventOf(spec)
     if (event === null) {
-      errors.push(DEC.decode(builtinError('trap', `${spec}: invalid signal specification`)))
+      errors.push(decodeText(builtinError('trap', `${spec}: invalid signal specification`)))
     } else if (event === TrapEvent.Exit) {
       session.exitTrap = action === '-' ? null : action
       session.exitTrapInherited = false

@@ -24,11 +24,19 @@ import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { arithRefusal, isValidName, readonlyRefusal, refusal, requireView } from '../shared.ts'
+import {
+  arithRefusal,
+  isValidName,
+  readonlyRefusal,
+  recordDelimiter,
+  refusal,
+  requireView,
+} from '../shared.ts'
 import { TARGET_RE } from '../constants.ts'
 import { READ_USAGE, READ_VALUE_LETTERS } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 /** Split on whitespace runs with a maxsplit, like Python's split(None, n). */
 function splitOnWhitespace(text: string, maxsplit: number): string[] {
@@ -50,7 +58,7 @@ function splitOnWhitespace(text: string, maxsplit: number): string[] {
 }
 
 function readRefusal(msg: string): Result {
-  const err = new TextEncoder().encode(msg)
+  const err = encodeText(msg)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: err }),
@@ -145,14 +153,13 @@ async function readRaw(
   exact: number | null,
   signal?: AbortSignal,
 ): Promise<[string, boolean]> {
-  const dec = new TextDecoder()
   if (exact !== null) {
     const [data, complete] = await buffer.readChars(exact, null, signal)
-    return [dec.decode(data), complete]
+    return [decodeText(data), complete]
   }
   if (nchars !== null) {
     let [data, complete] = await buffer.readChars(nchars, delim, signal)
-    let text = dec.decode(data)
+    let text = decodeText(data)
     while (
       !raw &&
       complete &&
@@ -161,12 +168,12 @@ async function readRaw(
       text.length < nchars
     ) {
       ;[data, complete] = await buffer.readChars(nchars - text.length, delim, signal)
-      text += dec.decode(data)
+      text += decodeText(data)
     }
     return [text, complete]
   }
   let [data, complete] = await buffer.readUntil(delim, signal)
-  let text = dec.decode(data)
+  let text = decodeText(data)
   while (
     !raw &&
     complete &&
@@ -174,7 +181,7 @@ async function readRaw(
     (text.length - text.replace(/\\+$/, '').length) % 2 === 1
   ) {
     ;[data, complete] = await buffer.readUntil(delim, signal)
-    text += '\n' + dec.decode(data)
+    text += '\n' + decodeText(data)
   }
   return [text, complete]
 }
@@ -211,7 +218,7 @@ export async function handleRead(
   const parse = parseShellOptions(SHELL_SPECS.read, args)
   if (parse.invalid !== null) {
     const token = parse.invalid.startsWith('--') ? parse.invalid : `-${parse.invalid}`
-    const err = new TextEncoder().encode(`bash: read: ${token}: invalid option\n${READ_USAGE}`)
+    const err = encodeText(`bash: read: ${token}: invalid option\n${READ_USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -219,7 +226,7 @@ export async function handleRead(
     ]
   }
   if (parse.needsValue !== null) {
-    const err = new TextEncoder().encode(
+    const err = encodeText(
       `bash: read: -${parse.needsValue}: option requires an argument\n${READ_USAGE}`,
     )
     return [
@@ -230,10 +237,7 @@ export async function handleRead(
   }
   const flags = parse.flags
   const raw = flags.r === true
-  let delim = 10
-  if (typeof flags.d === 'string') {
-    delim = flags.d.length > 0 ? flags.d.charCodeAt(0) : 0
-  }
+  const delim = recordDelimiter(typeof flags.d === 'string' ? flags.d : null)
   for (const key of ['n', 'N'] as const) {
     if (typeof flags[key] === 'string' && readCount(flags[key]) === null) {
       return readRefusal(`bash: read: ${flags[key]}: invalid number\n`)
@@ -358,7 +362,7 @@ async function readStore(
   }
   if (status === 'readonly') return readonlyRefusal('read', base)
   if (status === 'denied') {
-    const err = new TextEncoder().encode(`bash: ${base}: permission denied\n`)
+    const err = encodeText(`bash: ${base}: permission denied\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -366,7 +370,7 @@ async function readStore(
     ]
   }
   if (status !== 'ok') {
-    const err = new TextEncoder().encode(`bash: read: ${varName}: bad array subscript\n`)
+    const err = encodeText(`bash: read: ${varName}: bad array subscript\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),

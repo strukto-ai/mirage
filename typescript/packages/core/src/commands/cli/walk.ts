@@ -23,8 +23,7 @@ import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../shell/bytes.ts'
 
 /** A subcommand's row label: `name (alias, ...)` like argparse. */
 function verbDisplay(child: CLISpec): string {
@@ -305,7 +304,7 @@ function usageError(
   if (style === UsageStyle.CLAP) {
     const first = token === undefined ? message : clapUnexpectedArgument(token)
     return new WalkResult({
-      output: ENC.encode(clapGroupRefusal(name, listedNode(node), rowsOf(node), first)),
+      output: encodeText(clapGroupRefusal(name, listedNode(node), rowsOf(node), first)),
       stream: 'stderr',
       exitCode: CLAP_EXIT,
     })
@@ -315,25 +314,25 @@ function usageError(
     const path = space === -1 ? '' : name.slice(space + 1)
     // `git -h` is git's own help, as `git --help` is, and exits 0.
     if (path === '' && token === HELP_SWITCH) {
-      return new WalkResult({ output: ENC.encode(nodeHelp(name, node, style)) })
+      return new WalkResult({ output: encodeText(nodeHelp(name, node, style)) })
     }
     if (path === '') {
       const synopsis = GIT_SYNOPSES.get('')?.[0] ?? ''
       return new WalkResult({
-        output: ENC.encode(`unknown option: ${token}\nusage: ${synopsis}\n`),
+        output: encodeText(`unknown option: ${token}\nusage: ${synopsis}\n`),
         stream: 'stderr',
         exitCode: USAGE_EXIT,
       })
     }
     const [shown, refused] = gitOptionRefusal(token, path, node)
     return new WalkResult({
-      output: ENC.encode(shown !== '' ? shown : refused),
+      output: encodeText(shown !== '' ? shown : refused),
       stream: shown !== '' ? 'stdout' : 'stderr',
       exitCode: USAGE_EXIT,
     })
   }
   return new WalkResult({
-    output: ENC.encode(`${message}\n\n${nodeHelp(name, node, style)}`),
+    output: encodeText(`${message}\n\n${nodeHelp(name, node, style)}`),
     stream: 'stderr',
     exitCode: USAGE_EXIT,
   })
@@ -342,7 +341,7 @@ function usageError(
 /** git's unknown-command refusal, with the group path in the noun. */
 function unknownVerb(head: string, name: string, word: string): WalkResult {
   return new WalkResult({
-    output: ENC.encode(`${head}: '${word}' is not a ${name} command. See '${name} --help'.\n`),
+    output: encodeText(`${head}: '${word}' is not a ${name} command. See '${name} --help'.\n`),
     stream: 'stderr',
     exitCode: 1,
   })
@@ -650,7 +649,7 @@ export function walk(
           if (attached !== null) {
             return usageError(name, node, `error: option '${spelling}' takes no value`, style)
           }
-          return new WalkResult({ output: ENC.encode(nodeHelp(name, node, style)) })
+          return new WalkResult({ output: encodeText(nodeHelp(name, node, style)) })
         } else {
           return usageError(
             name,
@@ -725,7 +724,7 @@ export function walk(
     const refused = finishNode(name, node, cs, flags, cwd, style, env)
     if (refused !== null) return refused
     return new WalkResult({
-      output: ENC.encode(nodeHelp(name, node, style)),
+      output: encodeText(nodeHelp(name, node, style)),
       stream: 'stdout',
       exitCode: 1,
     })

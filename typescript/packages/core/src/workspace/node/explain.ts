@@ -64,8 +64,7 @@ import {
   segmentFrames,
   wholeOccurrence,
 } from './occurrence.ts'
-
-const DECODER = new TextDecoder()
+import { decodeText } from '../../shell/bytes.ts'
 
 /**
  * Nodes that run their commands in a child shell: a `cd` inside one
@@ -169,7 +168,7 @@ function unreadableWord(raw: string): Explanation {
     matchedPath: null,
     paths: [],
     exitCode,
-    stderr: DECODER.decode(stderr),
+    stderr: decodeText(stderr),
     refusal: refusalOf(deny),
   }
 }
@@ -195,7 +194,7 @@ function fromRefusal(
     matchedPath: null,
     paths: [],
     exitCode: refusal.exitCode,
-    stderr: missing ?? DECODER.decode(refusal.stderr),
+    stderr: missing ?? decodeText(refusal.stderr),
     refusal: refusal.refusal,
   }
 }
@@ -239,7 +238,7 @@ async function explained(
     ...base,
     reason: base.reason === '' ? action.reason : base.reason,
     exitCode,
-    stderr: DECODER.decode(stderr),
+    stderr: decodeText(stderr),
     refusal: refusalOf(action),
   }
 }

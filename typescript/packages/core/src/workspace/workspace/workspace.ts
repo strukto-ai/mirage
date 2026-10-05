@@ -134,6 +134,7 @@ import { MirageToolOperations } from '../tools/tool_operations.ts'
 import type { ExecuteOptions, ExecuteResult, MountSpec, WorkspaceOptions } from './types.ts'
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
@@ -1652,7 +1653,7 @@ export class Workspace {
       return {
         value: null,
         stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(`python3: ${msg}\n`),
+        stderr: encodeText(`python3: ${msg}\n`),
         exitCode: unavailable ? 127 : 1,
         status: 'complete',
       }

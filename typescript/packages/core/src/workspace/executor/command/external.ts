@@ -27,6 +27,7 @@ import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 /** Execute one admitted program; its surrounding shell stays in Mirage. */
 export async function runExternal(
@@ -51,7 +52,7 @@ export async function runExternal(
       : routing.bindings[key]
   const command = shellJoin(argv.tokens)
   if (runtime == null) {
-    const stderr = new TextEncoder().encode(`${argv.name}: no runtime accepted this line\n`)
+    const stderr = encodeText(`${argv.name}: no runtime accepted this line\n`)
     return [
       null,
       new IOResult({ exitCode: 126, stderr }),

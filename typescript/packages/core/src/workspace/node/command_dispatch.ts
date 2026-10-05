@@ -27,7 +27,7 @@ import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch, mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
-import { encodeText } from '../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import {
   getCommandName,
@@ -195,7 +195,7 @@ export async function executeCommand(
         parser.sourceOffsets(line, ast),
       )
       if (offending !== null) {
-        const errBytes = new TextEncoder().encode(syntaxErrorMessage(offending, ast))
+        const errBytes = encodeText(syntaxErrorMessage(offending, ast))
         return [
           null,
           new IOResult({ exitCode: 2, stderr: errBytes }),
@@ -277,7 +277,7 @@ export async function executeCommand(
       })
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
-      const stderr = new TextEncoder().encode(`bash: ${err.message}\n`)
+      const stderr = encodeText(`bash: ${err.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr }),
@@ -285,7 +285,7 @@ export async function executeCommand(
       ]
     }
     if (session.readonlyVars.has(k)) {
-      const err = new TextEncoder().encode(`bash: ${k}: readonly variable\n`)
+      const err = encodeText(`bash: ${k}: readonly variable\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -695,8 +695,7 @@ async function runArgv(
 export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
   if (said.byteLength === 0) return [...lines]
   const spoken = new Set(
-    new TextDecoder()
-      .decode(said)
+    decodeText(said)
       .split('\n')
       .map((t) => t.trim()),
   )
@@ -762,7 +761,7 @@ async function routeArgv(
   // executor cannot honor. Returning a clear error lets LLMs detect a
   // capability gap instead of treating it as a missing binary.
   if (UNSUPPORTED_BUILTINS.has(name)) {
-    const err = new TextEncoder().encode(`mirage: unsupported builtin: ${name}\n`)
+    const err = encodeText(`mirage: unsupported builtin: ${name}\n`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -890,7 +889,7 @@ async function routeArgv(
           if (linkErrors.length === 0) {
             return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
           }
-          const err = new TextEncoder().encode(linkErrors.join(''))
+          const err = encodeText(linkErrors.join(''))
           return [
             null,
             new IOResult({ exitCode: 1, stderr: err }),
@@ -904,9 +903,7 @@ async function routeArgv(
       }
     } catch (err) {
       if (err instanceof CycleError) {
-        const errBytes = new TextEncoder().encode(
-          `${name}: ${err.path}: Too many levels of symbolic links\n`,
-        )
+        const errBytes = encodeText(`${name}: ${err.path}: Too many levels of symbolic links\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: errBytes }),
@@ -975,12 +972,11 @@ async function routeArgv(
     // success stays a partial one. Merged after the bookkeeping above
     // so the operands the backend did remove still shed their node
     // meta.
-    const enc = new TextEncoder()
     const tail = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array(0)
-    io.stderr = concat([enc.encode(unsaid(linkErrors, tail).join('')), tail])
+    io.stderr = concat([encodeText(unsaid(linkErrors, tail).join('')), tail])
     if (io.exitCode === 0) io.exitCode = 1
     const nodeTail = execNode.stderr
-    execNode.stderr = concat([enc.encode(unsaid(linkErrors, nodeTail).join('')), nodeTail])
+    execNode.stderr = concat([encodeText(unsaid(linkErrors, nodeTail).join('')), nodeTail])
     if (execNode.exitCode === 0) execNode.exitCode = 1
   }
   return [stdout, io, execNode]

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.parse.heredoc.constants import DQUOTE_ESCAPABLE
 from mirage.shell.parse.heredoc.line import (
@@ -57,8 +58,8 @@ def literal_construct_end(token: str, start: int) -> int | None:
     """
     if token[start] not in ("$", "`"):
         return None
-    data = token.encode()
-    offset = len(token[:start].encode())
+    data = encode_text(token)
+    offset = len(encode_text(token[:start]))
     closer = (
         construct_closer(data, offset, False) if token[start] == "$" else None
     )
@@ -68,7 +69,7 @@ def literal_construct_end(token: str, start: int) -> int | None:
         end = quote_end(data, offset)
     else:
         return None
-    return None if end is None else len(data[:end].decode())
+    return None if end is None else len(decode_text(data[:end]))
 
 
 def clean_delimiter(token: str) -> str:

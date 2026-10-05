@@ -40,6 +40,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, PrimitiveCopy
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
@@ -122,7 +123,9 @@ async def run_operands(
             # operand mid-drain); report it like the native run would and
             # keep the remaining operands, GNU-style.
             existing = await materialize(io.stderr) if io.stderr else b""
-            io.stderr = existing + fs_error_line(cmd_name, scope, exc).encode()
+            io.stderr = existing + encode_text(
+                fs_error_line(cmd_name, scope, exc)
+            )
             # The command's own code for a failed read, not the catch-all:
             # a lazy operand that fails here is the same failure the
             # single-mount run reports eagerly, and it must answer the

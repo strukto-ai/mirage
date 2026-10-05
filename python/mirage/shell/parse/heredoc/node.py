@@ -14,6 +14,7 @@
 
 from typing import Any
 
+from mirage.shell.bytes import encode_text
 from mirage.shell.parse.heredoc.types import Heredoc, HeredocSource
 from mirage.shell.types import TSNodeLike
 
@@ -82,12 +83,15 @@ class HeredocNode:
 
     @property
     def warnings(self) -> bytes:
-        return "".join(
-            f"mirage: line {doc.eof_line}: warning: here-document at line "
-            f"{doc.line} delimited by end-of-file (wanted `{doc.delimiter}')\n"
-            for _, doc in self._source.documents
-            if not doc.terminated
-        ).encode()
+        return encode_text(
+            "".join(
+                f"mirage: line {doc.eof_line}: warning: here-document at "
+                f"line {doc.line} delimited by end-of-file (wanted "
+                f"`{doc.delimiter}')\n"
+                for _, doc in self._source.documents
+                if not doc.terminated
+            )
+        )
 
     @property
     def offsets(self) -> tuple[int, ...]:

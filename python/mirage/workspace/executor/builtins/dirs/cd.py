@@ -20,6 +20,7 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.path import CycleError, dotted_spelling, resolve_path
@@ -212,7 +213,9 @@ async def handle_cd(
         return _cd_success(
             session, resolved, logical, spelled, raw, print_path or announce
         )
-    err = (error or f"bash: cd: {named}: No such file or directory\n").encode()
+    err = encode_text(
+        error or f"bash: cd: {named}: No such file or directory\n"
+    )
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -244,7 +247,7 @@ def _cd_success(
         print_path (bool): whether GNU announces this move at all.
     """
     change_dir(session, resolved, logical)
-    out = (spelled + "\n").encode() if print_path else None
+    out = encode_text(spelled + "\n") if print_path else None
     return out, IOResult(), ExecutionNode(command=f"cd {raw}", exit_code=0)
 
 
@@ -266,7 +269,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
         list(call.argv.operands), default=shell_physical
     )
     if bad_opt is not None:
-        err = f"bash: cd: -{bad_opt}: invalid option\n{CD_USAGE}".encode()
+        err = encode_text(f"bash: cd: -{bad_opt}: invalid option\n{CD_USAGE}")
         return (
             None,
             IOResult(exit_code=2, stderr=err),

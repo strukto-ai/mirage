@@ -22,6 +22,7 @@ from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import fetch_secret
 from mirage.secrets.summary import field_summary
 from mirage.secrets.types import ResolvedSource
+from mirage.shell.bytes import decode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.parse import (
     arith_reads,
@@ -73,7 +74,7 @@ def _defined_bodies(node: TSNodeLike) -> dict[str, list[TSNodeLike]]:
             body = current.child_by_field_name("body")
             text = name_node.text if name_node is not None else None
             if text and body is not None:
-                out.setdefault(text.decode(), []).append(body)
+                out.setdefault(decode_text(text), []).append(body)
         stack.extend(current.named_children)
     return out
 
@@ -270,7 +271,7 @@ def _assignment_masks(stmt: TSNodeLike) -> frozenset[str] | None:
             return None
         if _replacement_blocked(part):
             return None
-        names.add(text.decode())
+        names.add(decode_text(text))
     return frozenset(names)
 
 
@@ -317,13 +318,13 @@ def _unset_masks(stmt: TSNodeLike) -> frozenset[str] | None:
     for child in stmt.named_children:
         if child.type == "word":
             text = child.text
-            if not text or text.decode() not in ("-v", "--"):
+            if not text or decode_text(text) not in ("-v", "--"):
                 return None
         elif child.type == "variable_name":
             text = child.text
             if not text:
                 return None
-            names.add(text.decode())
+            names.add(decode_text(text))
         else:
             return None
     return frozenset(names)

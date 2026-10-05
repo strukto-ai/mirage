@@ -40,6 +40,7 @@ import type { HandOff } from '../../policy/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -175,7 +176,7 @@ async function runProgram(
       if (session.shellOptions.verbose === true && last >= first) {
         const text = sourceLines.slice(first, last + 1).join('\n')
         mergedIo = await land(
-          [[Channel.STDERR, new TextEncoder().encode(`${text}\n`), false]],
+          [[Channel.STDERR, encodeText(`${text}\n`), false]],
           sink,
           allStdout,
           mergedIo,
@@ -319,7 +320,7 @@ async function runProgram(
         else {
           ioResult.stderr = concat([
             await materialize(ioResult.stderr),
-            new TextEncoder().encode(`${err instanceof Error ? err.message : String(err)}\n`),
+            encodeText(`${err instanceof Error ? err.message : String(err)}\n`),
           ])
           ioResult.exitCode = 1
         }

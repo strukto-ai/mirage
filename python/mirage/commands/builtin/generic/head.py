@@ -32,6 +32,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain, ensure_stream
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, PolymorphicReadFn, StatFn
 
 
@@ -190,7 +191,7 @@ async def _head_multi(
             header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
             if i > 0:
                 header = "\n" + header
-            yield header.encode()
+            yield encode_text(header)
         if p.virtual in unread:
             continue
         source = read(p)
@@ -232,7 +233,7 @@ async def head_generic(
     try:
         parsed = parse_flags(opts.flags)
     except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=str(exc).encode())
+        return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     if paths:
         show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
         opened, unread, err = await split_opened(paths, stat, "head")
@@ -278,5 +279,7 @@ async def head_generic(
     )
     if parsed.verbose and not parsed.quiet:
         # -v heads a stdin nobody named with the name it gives `-`.
-        body = async_chain([f"==> {STDIN_HEADER_NAME} <==\n".encode(), body])
+        body = async_chain(
+            [encode_text(f"==> {STDIN_HEADER_NAME} <==\n"), body]
+        )
     return body, IOResult()

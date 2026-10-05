@@ -24,6 +24,7 @@ import { lastOf, scanOptions } from '../getopt.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { fail } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 const USAGE = 'shopt: usage: shopt [-pqsu] [-o] [optname ...]'
 
@@ -69,7 +70,7 @@ export function handleShopt(args: string[], session: SessionState): Result {
       if (setting !== null && on !== setting) continue
       if (!quiet) lines.push(row(name, on, reusable, setO))
     }
-    const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
+    const out = lines.length > 0 ? encodeText(lines.join('\n') + '\n') : null
     return [out, new IOResult(), new ExecutionNode({ command: 'shopt', exitCode: 0 })]
   }
   for (const name of names) {
@@ -91,8 +92,8 @@ export function handleShopt(args: string[], session: SessionState): Result {
     }
     store[name] = setting
   }
-  const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-  const err = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+  const out = lines.length > 0 ? encodeText(lines.join('\n') + '\n') : null
+  const err = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
   return [
     out,
     new IOResult({ exitCode: status, stderr: err }),

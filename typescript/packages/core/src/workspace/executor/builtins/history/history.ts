@@ -20,8 +20,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { FlagValue } from '../../../../commands/spec/types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../../shell/bytes.ts'
 
 const USAGE =
   'history: usage: history [-c] [-d offset] [n] or ' +
@@ -29,7 +28,7 @@ const USAGE =
 const OPTION_CHARS = 'cdanrwsp'
 
 function usageError(message: string): Result {
-  const err = ENC.encode(message + USAGE)
+  const err = encodeText(message + USAGE)
   return [
     null,
     new IOResult({ exitCode: 2, stderr: err }),
@@ -105,11 +104,11 @@ export async function handleHistory(
   // bash abandons everything still to run, as `exit 1 2` does; `-p` and
   // `-s` take any number of words.
   if (Object.keys(flags).length === 0 && texts.length > 1) {
-    throw new ExitSignal(1, ENC.encode('bash: history: too many arguments\n'))
+    throw new ExitSignal(1, encodeText('bash: history: too many arguments\n'))
   }
   const mount = registry.tryMountFor(HISTORY_PREFIX)
   if (mount === null) {
-    const err = ENC.encode('bash: history: not enabled for this workspace\n')
+    const err = encodeText('bash: history: not enabled for this workspace\n')
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),

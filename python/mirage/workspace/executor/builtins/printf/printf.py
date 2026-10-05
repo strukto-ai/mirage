@@ -169,8 +169,8 @@ async def handle_printf(
         if parsed is None:
             # bash validates the name before formatting, so a bad name
             # suppresses the conversion errors the format would report.
-            err = (
-                f"bash: printf: `{target}': not a valid identifier\n".encode()
+            err = encode_text(
+                f"bash: printf: `{target}': not a valid identifier\n"
             )
             return (
                 None,
@@ -187,7 +187,7 @@ async def handle_printf(
                 # than an empty one (bash 5.2.21: `printf --` is exit 2
                 # with the usage, where `printf -- --zzz` prints
                 # `--zzz`).
-                err = _USAGE.encode()
+                err = encode_text(_USAGE)
                 return (
                     None,
                     IOResult(exit_code=2, stderr=err),
@@ -201,7 +201,7 @@ async def handle_printf(
             # takes the invalid-option path below (bash 5.2.37). The
             # page is the BUILTIN's, in bash's own words and layout,
             # because that is whose printf this is; see _HELP.
-            page = _HELP.encode()
+            page = encode_text(_HELP)
             return (
                 yield_bytes(page),
                 IOResult(exit_code=2),
@@ -219,8 +219,8 @@ async def handle_printf(
             # `-v` short of its NAME is left to the format path, where
             # bash's own `option requires an argument` is a separate
             # change.
-            err = (
-                f"bash: printf: -{first[1]}: invalid option\n{_USAGE}".encode()
+            err = encode_text(
+                f"bash: printf: -{first[1]}: invalid option\n{_USAGE}"
             )
             return (
                 None,
@@ -232,7 +232,7 @@ async def handle_printf(
         # options.
         args = args[1:]
     if not args and program_invocation(session):
-        err = f"printf: missing operand\n{usage_hint('printf')}\n".encode()
+        err = encode_text(f"printf: missing operand\n{usage_hint('printf')}\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
@@ -240,7 +240,7 @@ async def handle_printf(
         )
     if not args:
         # A format is required: bash's usage error, `printf -v x` too.
-        err = _USAGE.encode()
+        err = encode_text(_USAGE)
         return (
             None,
             IOResult(exit_code=2, stderr=err),
@@ -248,7 +248,7 @@ async def handle_printf(
         )
     output, messages, failed, excess = run_printf(args[0], args[1:])
     voice = "" if program_invocation(session) else "bash: "
-    err_bytes = "".join(voice + message for message in messages).encode()
+    err_bytes = encode_text("".join(voice + message for message in messages))
     exit_code = 1 if failed else 0
     if target is not None and parsed is not None:
         base, subscript = parsed.group(1), parsed.group(2)
@@ -257,7 +257,7 @@ async def handle_printf(
                 session, view, base, subscript, output
             )
         except PolicyDenied as exc:
-            err_bytes += f"bash: {exc.strerror}\n".encode()
+            err_bytes += encode_text(f"bash: {exc.strerror}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err_bytes),
@@ -266,7 +266,7 @@ async def handle_printf(
         except ArithError as exc:
             # The target carries `-i` and the formatted text does not
             # evaluate; bash voices the evaluator after the text.
-            err_bytes += f"bash: printf: {exc}\n".encode()
+            err_bytes += encode_text(f"bash: printf: {exc}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err_bytes),
@@ -279,7 +279,7 @@ async def handle_printf(
                 refusal = f"bash: {base}: permission denied\n"
             else:
                 refusal = f"bash: {target}: bad array subscript\n"
-            err_bytes += refusal.encode()
+            err_bytes += encode_text(refusal)
             return (
                 None,
                 IOResult(exit_code=1, stderr=err_bytes),
@@ -295,10 +295,10 @@ async def handle_printf(
         # coreutils printf names the first argument a format that takes
         # none left over, where bash's builtin drops them silently; a
         # warning, so the status stays the format's own.
-        err_bytes += (
+        err_bytes += encode_text(
             "printf: warning: ignoring excess arguments, "
             f"starting with '{quote_text(excess)}'\n"
-        ).encode()
+        )
     if err_bytes:
         return (
             out,

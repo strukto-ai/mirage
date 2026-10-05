@@ -27,6 +27,7 @@ import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { expandOperands, result } from '../shared.ts'
 import type { Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 export function parseOwner(text: string): [number | string | null, number | string | null] {
   const sep = text.indexOf(':')
@@ -395,7 +396,7 @@ export async function changeOwner(
   const quiet = fl.asBool('silent') || fl.asBool('quiet')
   const text = out.join('')
   return result(cmd, {
-    out: text === '' ? null : new TextEncoder().encode(text),
+    out: text === '' ? null : encodeText(text),
     exitCode: errors.length > 0 ? 1 : 0,
     ...(quiet ? {} : { stderr: errors.join('') }),
   })

@@ -228,6 +228,31 @@ describe('tail -f', () => {
     )
   })
 
+  it('names a raw-byte file in its first header', async () => {
+    // A name byte that is not UTF-8 is written as that byte, as GNU tail writes
+    // the name it was given. Mirrors test_tail.py.
+    const name = `/d/x${String.fromCharCode(0xdcff)}`
+    const fs = new Growing(new Map())
+    fs.set(name, 'l1\n')
+    const abort = new AbortController()
+    const [stream] = (await tailGeneric(
+      [spec(name)],
+      [],
+      followOpts(abort, { v: true }),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+    )) as [AsyncIterable<Uint8Array>, IOResult]
+    const chunks: Uint8Array[] = []
+    const drain = (async () => {
+      for await (const chunk of stream) chunks.push(chunk)
+    })()
+    await sleep(60)
+    abort.abort()
+    await drain
+    expect(Buffer.concat(chunks).toString('latin1')).toBe('==> /d/x\xff <==\nl1\n')
+  })
+
   it('reads past the read-through cache while following', async () => {
     // A warm cache holds the body the last one-shot read saw; a follow
     // polls for exactly what that body does not have yet, so it reads

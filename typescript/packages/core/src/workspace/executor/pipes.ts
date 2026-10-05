@@ -54,6 +54,7 @@ import { runWithSession } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, makeAbortError, mergeSignals } from '../abort.ts'
 import { concat } from '../../io/cachable_iterator.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -176,7 +177,7 @@ export async function handlePipe(
       })
     } catch (error) {
       if ((error as { code?: unknown }).code === 'EAGAIN')
-        throw new ExitSignal(FORK_FAILED_STATUS, new TextEncoder().encode(FORK_FAILED))
+        throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
     child.processId = process.info.pid

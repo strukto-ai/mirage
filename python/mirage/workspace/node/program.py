@@ -20,6 +20,7 @@ from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
@@ -181,7 +182,7 @@ async def _run_program(
             if session.shell_options.get("verbose") and last >= first:
                 text = "\n".join(source_lines[first : last + 1])
                 merged_io = await land(
-                    [(Channel.STDERR, text.encode() + b"\n", False)],
+                    [(Channel.STDERR, encode_text(text) + b"\n", False)],
                     sink,
                     all_stdout,
                     merged_io,
@@ -334,7 +335,7 @@ async def _run_program(
                 stdout = None
             except Exception as exc:
                 existing = await materialize(io.stderr) or b""
-                io.stderr = existing + f"{exc}\n".encode()
+                io.stderr = existing + encode_text(f"{exc}\n")
                 io.exit_code = 1
                 stdout = None
             record_status(

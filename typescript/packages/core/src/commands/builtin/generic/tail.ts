@@ -44,8 +44,7 @@ import { splitOpened } from '../utils/operands.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { quoteText } from '../../quote.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -108,7 +107,7 @@ export function followFlags(fl: FlagView): FollowFlags | string {
 // stream ends; a notice raised mid-follow lands there.
 function note(io: IOResult, message: string): void {
   const prior = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
-  io.stderr = concat([prior, ENC.encode(message)])
+  io.stderr = concat([prior, encodeText(message)])
 }
 
 // Whether the caller's signal has fired; a call rather than a read so a
@@ -241,7 +240,7 @@ async function* follow(
     const [slot, p] = entry
     if (unread.has(p.virtual)) {
       if (showHeaders) {
-        yield ENC.encode(
+        yield encodeText(
           `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
         )
       }
@@ -266,7 +265,7 @@ async function* follow(
       continue
     }
     if (showHeaders) {
-      yield ENC.encode(
+      yield encodeText(
         `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
       )
     }
@@ -344,7 +343,7 @@ async function* follow(
       const [data, pos] = grown
       if (data.byteLength > 0) {
         if (showHeaders && last !== slot)
-          yield ENC.encode(`\n==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
+          yield encodeText(`\n==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
         last = slot
         yield data
       }
@@ -432,10 +431,10 @@ export async function tailGeneric(
   const nRaw = fl.asStr('n') ?? null
   const cRaw = fl.asStr('c') ?? null
   const numErr = numberFlagError('tail', nRaw, cRaw)
-  if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(numErr) })]
+  if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: encodeText(numErr) })]
   const following = followFlags(fl)
   if (typeof following === 'string')
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(following) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(following) })]
   // The last of -q and -v decides, as in GNU tail.
   const headers = fl.typedOrder('q', 'v').at(-1)
   const qFlag = headers === 'q'
@@ -446,7 +445,7 @@ export async function tailGeneric(
     following.byName &&
     (paths.length === 0 || paths.some((p) => isStdin(p)))
   ) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(STDIN_BY_NAME) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(STDIN_BY_NAME) })]
   }
   // GNU warns first, then tails as if --retry were not there; a descriptor
   // it follows only after the initial open says so too.
@@ -462,7 +461,7 @@ export async function tailGeneric(
     const readable = opened.filter((p) => !unread.has(p.virtual))
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
-      stderr: retryWarning + err === '' ? null : ENC.encode(retryWarning + err),
+      stderr: retryWarning + err === '' ? null : encodeText(retryWarning + err),
     })
     const pending = await unfollowable(
       paths,
@@ -512,7 +511,7 @@ export async function tailGeneric(
         const code = (e as { code?: string }).code
         if (showHeaders && code !== undefined && READ_FAILURES.has(code)) {
           const label = operandLabel(p, STDIN_HEADER_NAME)
-          chunks.push(ENC.encode(`${printed > 0 ? '\n' : ''}==> ${label} <==\n`))
+          chunks.push(encodeText(`${printed > 0 ? '\n' : ''}==> ${label} <==\n`))
           printed += 1
         }
         continue
@@ -524,7 +523,7 @@ export async function tailGeneric(
           printed > 0
             ? `\n==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`
             : `==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`
-        chunks.push(ENC.encode(header))
+        chunks.push(encodeText(header))
       }
       printed += 1
       chunks.push(tailBytes(raw, counts))
@@ -533,7 +532,7 @@ export async function tailGeneric(
     const io = new IOResult({
       cache,
       exitCode: err === '' ? 0 : 1,
-      stderr: retryWarning + err === '' ? null : ENC.encode(retryWarning + err),
+      stderr: retryWarning + err === '' ? null : encodeText(retryWarning + err),
     })
     if (printed === 0 && err !== '') return [null, io]
     const out: ByteSource = concat(chunks)
@@ -542,9 +541,9 @@ export async function tailGeneric(
   const raw = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
   const body = tailBytes(raw, counts)
   // -v heads a stdin nobody named with the name it gives `-`.
-  const header = ENC.encode(`==> ${STDIN_HEADER_NAME} <==\n`)
+  const header = encodeText(`==> ${STDIN_HEADER_NAME} <==\n`)
   return [
     vFlag && !qFlag ? concat([header, body]) : body,
-    new IOResult({ stderr: retryWarning === '' ? null : ENC.encode(retryWarning) }),
+    new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) }),
   ]
 }
