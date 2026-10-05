@@ -226,17 +226,28 @@ export async function copyTree(
   }
 }
 
+/** What a renameReplace moved, and what it replaced. */
+export interface MovedItem {
+  moved: Record<string, unknown>
+  replacedNonFile: boolean
+}
+
+/**
+ * Move `src` to `dst`, replacing a file or an empty folder there. Answers
+ * the moved driveItem and whether the move replaced something at `dst`
+ * that was not positively a file.
+ */
 export async function renameReplace(
   config: MsGraphConfigResolved,
   src: DriveLoc,
   dst: DriveLoc,
-): Promise<void> {
+): Promise<MovedItem> {
   const body: Record<string, unknown> = { name: baseName(dst.path) }
   if (src.parent() !== dst.parent() || src.drive !== dst.drive) {
     body.parentReference = { path: dst.reference(dst.parent()) }
   }
   try {
-    await graphPatch(config, src.item(), body)
+    return { moved: await graphPatch(config, src.item(), body), replacedNonFile: false }
   } catch (error) {
     if (
       !(error instanceof GraphError) ||
@@ -250,7 +261,8 @@ export async function renameReplace(
       if (children.length > 0) throw error
     }
     await graphDelete(config, dst.item())
-    await graphPatch(config, src.item(), body)
+    const replacedNonFile = !('file' in destination)
+    return { moved: await graphPatch(config, src.item(), body), replacedNonFile }
   }
 }
 

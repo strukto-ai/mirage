@@ -21,7 +21,9 @@ vi.mock('../google/drive.ts', async () => {
   return driveModuleMock(actual)
 })
 
+import { runWithCacheManager } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
+import { FakeManager } from '../object_store/fakes.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { rename } from './rename.ts'
@@ -94,5 +96,45 @@ describe('gdrive rename', () => {
     const id = fake.add('Report', 'root', DOC_MIME)
     await rename(accessor, spec('/Report.gdoc.json'), spec('/Plan.gdoc.json'))
     expect(fake.items.get(id)?.name).toBe('Plan')
+  })
+
+  async function managed(src: string, dst: string): Promise<FakeManager> {
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, () => rename(accessor, spec(src), spec(dst)))
+    return manager
+  }
+
+  it('renaming a file drops no subtree', async () => {
+    fake.add('old.txt', 'root', undefined, ENC.encode('x'))
+    const manager = await managed('/old.txt', '/new.txt')
+    expect(manager.unlinks).toEqual(['/new.txt', '/old.txt'])
+    expect(manager.subtrees).toEqual([])
+  })
+
+  it('renaming a folder drops both subtrees', async () => {
+    const a = fake.folder('a')
+    fake.add('f.txt', a, undefined, ENC.encode('x'))
+    const manager = await managed('/a', '/b')
+    expect(manager.subtrees).toEqual(['/b', '/a'])
+    expect(manager.unlinks).toEqual([])
+  })
+
+  it('a file replacing an empty folder drops its subtree', async () => {
+    // The rename deleted the folder at dst, so whatever is still cached
+    // under that name (children removed outside mirage, say) goes too.
+    fake.add('src.txt', 'root', undefined, ENC.encode('x'))
+    fake.folder('d')
+    const manager = await managed('/src.txt', '/d')
+    expect(manager.subtrees).toEqual(['/d'])
+    expect(manager.unlinks).toEqual(['/src.txt'])
+    expect(manager.writes).toEqual([])
+  })
+
+  it('a file replacing a file drops no subtree', async () => {
+    fake.add('src.txt', 'root', undefined, ENC.encode('x'))
+    fake.add('dst.txt', 'root', undefined, ENC.encode('y'))
+    const manager = await managed('/src.txt', '/dst.txt')
+    expect(manager.unlinks).toEqual(['/dst.txt', '/src.txt'])
+    expect(manager.subtrees).toEqual([])
   })
 })

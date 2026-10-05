@@ -14,6 +14,8 @@
 
 from typing import TypeAlias
 
+from mirage.utils.key_prefix import under_path
+
 Stamp: TypeAlias = tuple[int, int]
 
 
@@ -36,11 +38,12 @@ class Invalidation:
     await from silently reopening the window. A test stages it by taking
     the key's lock itself, which forces the writer to park.
 
-    Two counters, because invalidations have two reaches. The store-wide
-    epoch answers ``clear`` and a prefix eviction, whose victims cannot
-    be enumerated (a fill in flight has no entry yet). The per-key
-    counter answers a removal of one key, so a large fill for one key is
-    not thrown away because an unrelated key was removed. Per-key
+    Two counters, because invalidations have different reaches. The
+    store-wide epoch answers ``clear``. The per-key counter answers a
+    removal of one key and a prefix eviction, so a large fill is not
+    thrown away because an unrelated key or folder was dropped. A prefix
+    eviction can name its victims although a fill in flight has no entry
+    yet: every writer registers here in ``enter`` before it waits. Per-key
     counters exist only while a writer for that key is in flight, which
     bounds the map by concurrent writers, not by every key ever removed.
     """
@@ -92,6 +95,22 @@ class Invalidation:
         """
         if key in self._writers:
             self._keys[key] = self._keys.get(key, 0) + 1
+
+    def invalidate_prefix(
+        self, prefix: str, excluded: tuple[str, ...] = ()
+    ) -> None:
+        """Record a prefix eviction for the writers in flight under it.
+
+        Args:
+            prefix (str): the evicted key prefix, matched as the stores
+                match it (``startswith``).
+            excluded (tuple[str, ...]): roots whose writers it spares.
+        """
+        for key in self._writers:
+            if key.startswith(prefix) and not any(
+                under_path(key, root) for root in excluded
+            ):
+                self._keys[key] = self._keys.get(key, 0) + 1
 
     def invalidate_all(self) -> None:
         """Record an invalidation whose victims cannot be enumerated."""

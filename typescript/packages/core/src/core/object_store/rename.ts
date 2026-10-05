@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { evictAfter, invalidateAncestors, invalidateSubtree } from '../../cache/context.ts'
+import { evictAfter, invalidateAfterMove, invalidateAncestors } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { enoent } from '../../utils/errors.ts'
 import * as kp from '../../utils/key_prefix.ts'
@@ -73,13 +73,13 @@ export function makeRename<A extends Accessor, C>(
       // stops being free if either carries a token.
       record(op, src.virtual, driver.vfs, 0, timer)
       record(op, dst.virtual, driver.vfs, 0, timer)
-      // The eviction rides with the records, as in unlink. Subtrees, not
-      // single paths: movePrefix relocates every key under src, so each
-      // listing and body cached below the old name names something that
-      // is no longer there, and each one below the new name predates the
-      // move.
-      await invalidateSubtree(dst)
-      await invalidateSubtree(src)
+      // The eviction rides with the records, as in unlink. Only a clean
+      // moveFile names a file, which has nothing beneath it; movePrefix
+      // relocates every key under src, and a rejection leaves the kind
+      // unknown, so those evict both subtrees.
+      const folder = op !== 'rename' || moved === undefined
+      await invalidateAfterMove(dst, folder)
+      await invalidateAfterMove(src, folder)
       // The move can create the destination's missing ancestors and erase
       // the source's prefix-only ones in the same call.
       await invalidateAncestors(dst)

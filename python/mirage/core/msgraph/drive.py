@@ -242,15 +242,36 @@ def _move_body(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
     return body
 
 
+@dataclass(frozen=True)
+class MovedItem:
+    """What a rename_replace moved, and what it replaced."""
+
+    moved: dict[str, Any]
+    replaced_non_file: bool
+
+
 async def rename_replace(
     config: MsGraphConfig,
     src: DriveLoc,
     dst: DriveLoc,
     session: SessionArg = None,
-) -> None:
+) -> MovedItem:
+    """Move ``src`` to ``dst``, replacing a file or an empty folder there.
+
+    Args:
+        config (MsGraphConfig): Graph credentials and endpoints.
+        src (DriveLoc): the item to move.
+        dst (DriveLoc): where it lands.
+        session (SessionArg): the shared HTTP session, if any.
+
+    Returns:
+        MovedItem: the moved driveItem and whether the move replaced
+        something at ``dst`` that was not positively a file.
+    """
     body = _move_body(src, dst)
+    replaced_non_file = False
     try:
-        await graph_patch(config, src.item(), body, session=session)
+        moved = await graph_patch(config, src.item(), body, session=session)
     except GraphError as exc:
         if exc.status != 409 and exc.code != "nameAlreadyExists":
             raise
@@ -267,7 +288,12 @@ async def rename_replace(
             if children:
                 raise
         await graph_delete(config, dst.item(), session=session)
-        await graph_patch(config, src.item(), body, session=session)
+        replaced_non_file = "file" not in dst_item
+        moved = await graph_patch(config, src.item(), body, session=session)
+    return MovedItem(
+        moved=moved if isinstance(moved, dict) else {},
+        replaced_non_file=replaced_non_file,
+    )
 
 
 async def _url_item(

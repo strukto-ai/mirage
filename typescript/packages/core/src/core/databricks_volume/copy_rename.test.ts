@@ -223,6 +223,19 @@ describe('rename', () => {
     expect(err.code).toBe('ENOENT')
   })
 
+  it('renaming a file narrows only the source', async () => {
+    // The source end is a file, so it drops no subtree. The destination
+    // keeps one: the upload overwrites whatever stands at dst and nothing
+    // here checks that it is not a non-empty directory.
+    const { fetch } = routedFetch(fileRoutes)
+    vi.stubGlobal('fetch', fetch)
+    const manager = new FakeManager()
+    await runWithCacheManager(manager, () =>
+      rename(makeAccessor(), spec('/volume/a.txt'), spec('/volume/b.txt')),
+    )
+    expect(manager.subtrees).toEqual(['/b.txt'])
+  })
+
   it('refuses moving a directory into its own subtree and never deletes', async () => {
     const { fetch, calls } = routedFetch((call) => {
       if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()

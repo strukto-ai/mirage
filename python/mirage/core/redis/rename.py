@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.context import invalidate_subtree
+from mirage.cache.context import invalidate_after_move
 from mirage.core.redis.dest import check_dest_parents, lookup_error
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
@@ -77,6 +77,8 @@ async def rename(
     s, d = norm(src), norm(dst)
     now = now_iso()
     await check_dest_parents(store, dst_spec, d)
+    # Only a folder carries a subtree; a file takes the unlink flavor.
+    folder = False
     if await store.has_file(s):
         data = await store.get_file(s) or b""
         mod = await store.get_modified(s)
@@ -89,6 +91,7 @@ async def rename(
         if attrs:
             await store.set_attrs(d, attrs)
     elif await store.has_dir(s):
+        folder = True
         mod = await store.get_modified(s)
         attrs = await store.get_attrs(s)
         await store.remove_dir(s)
@@ -101,5 +104,5 @@ async def rename(
         await _move_subtree(store, s, d)
     else:
         raise await lookup_error(store, src_spec, s)
-    await invalidate_subtree(dst_spec)
-    await invalidate_subtree(src_spec)
+    await invalidate_after_move(dst_spec, folder)
+    await invalidate_after_move(src_spec, folder)

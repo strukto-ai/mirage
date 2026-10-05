@@ -26,6 +26,19 @@ from mirage.vfs.redis.redis import RedisVFS
 # Shipped next to this module; byte-identical to the TypeScript add.lua.
 ADD_LUA = (files("mirage.cache.file") / "add.lua").read_text(encoding="utf-8")
 
+# Hash slots one SCAN call visits. A prefix drop walks the whole server,
+# so this sets both the round trips (dbsize / SCAN_COUNT) and how long
+# each call holds the server: about 1-2 ms at 1000, against the 10 ms
+# slowlog default. The client default of 10 made one drop at 1M server
+# keys take 191k round trips.
+SCAN_COUNT = 1000
+
+# Keys one DEL names. Freeing memory is what a DEL costs, and a body has
+# no size bound: one DEL per page freed up to SCAN_COUNT bodies at once,
+# about 10 ms for 100 bodies of 512 KB and 1.5 ms for 10. A page goes out
+# as one pipeline of DELs this size, so it is still one round trip.
+DEL_BATCH = 10
+
 
 class RedisFileCacheStore(RedisVFS, FileCacheMixin):
     def __init__(
@@ -46,6 +59,7 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         self._cache_client = self._store._client
         self._data_prefix = f"{key_prefix}data:"
         self._meta_prefix = f"{key_prefix}meta:"
+        self._entry_pattern = f"{glob_escape(key_prefix)}[dm][ae]ta:"
         self.max_drain_bytes: int | None = max_drain_bytes
         # Local invalidation discards a fill whose key was dropped while
         # it was in flight. Dormant on this host: nothing suspends between
@@ -155,20 +169,12 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         for task in self._drain_tasks.values():
             task.cancel()
         self._drain_tasks.clear()
-        for pattern in (
-            f"{self._data_prefix}*",
-            f"{self._meta_prefix}*",
-        ):
-            keys: list[Any] = []
-            async for k in self._cache_client.scan_iter(pattern):
-                keys.append(k)
-            if keys:
-                await self._cache_client.delete(*keys)
+        await self._drop_matching("")
 
     async def evict_prefix(
         self, prefix: str, *, excluded: tuple[str, ...] = ()
     ) -> None:
-        self._invalidation.invalidate_all()
+        self._invalidation.invalidate_prefix(prefix, excluded)
         for key in [
             k
             for k in self._drain_tasks
@@ -177,15 +183,60 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         ]:
             task = self._drain_tasks.pop(key)
             task.cancel()
-        escaped = glob_escape(prefix)
+        await self._drop_matching(prefix, excluded)
+
+    async def _drop_matching(
+        self, prefix: str, excluded: tuple[str, ...] = ()
+    ) -> None:
+        """Delete the data and meta keys of every entry under ``prefix``.
+
+        One SCAN pass covers both kinds, and each page is deleted as it
+        arrives, in DELs of at most ``DEL_BATCH`` keys, so no single call
+        holds the server for the whole subtree. Deleting keys a SCAN
+        already returned is safe: SCAN still returns every key present for
+        the whole iteration.
+
+        Args:
+            prefix (str): cache-key prefix to drop; empty drops all.
+            excluded (tuple[str, ...]): roots whose keys stay.
+        """
+        match = f"{self._entry_pattern}{glob_escape(prefix)}*"
+        cursor = 0
+        while True:
+            cursor, page = await self._cache_client.scan(
+                cursor, match=match, count=SCAN_COUNT
+            )
+            doomed = [k for k in page if self._owned(k, excluded)]
+            if doomed:
+                pipe = self._cache_client.pipeline(transaction=False)
+                for start in range(0, len(doomed), DEL_BATCH):
+                    pipe.delete(*doomed[start : start + DEL_BATCH])
+                await pipe.execute()
+            if cursor == 0:
+                return
+
+    def _owned(self, raw: bytes | str, excluded: tuple[str, ...]) -> bool:
+        """Whether a SCAN match is this cache's entry and not excluded.
+
+        The MATCH class ``[dm][ae]ta:`` also admits ``deta:`` and
+        ``mata:``, which are not the cache's. A shared server may hold any
+        bytes as a key, so the name is decoded without failing on bytes
+        that are not UTF-8; the DEL still names the raw key.
+
+        Args:
+            raw (bytes | str): the key SCAN returned.
+            excluded (tuple[str, ...]): roots whose keys stay.
+        """
+        name = (
+            raw.decode(errors="surrogateescape")
+            if isinstance(raw, bytes)
+            else raw
+        )
         for base in (self._data_prefix, self._meta_prefix):
-            keys: list[Any] = []
-            async for k in self._cache_client.scan_iter(f"{base}{escaped}*"):
-                key = (k.decode() if isinstance(k, bytes) else k)[len(base) :]
-                if not any(under_path(key, p) for p in excluded):
-                    keys.append(k)
-            if keys:
-                await self._cache_client.delete(*keys)
+            if name.startswith(base):
+                key = name[len(base) :]
+                return not any(under_path(key, p) for p in excluded)
+        return False
 
     async def close(self) -> None:
         await self._store.close()

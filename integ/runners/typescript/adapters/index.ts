@@ -29,6 +29,7 @@ import {
 } from '@aws-sdk/client-s3'
 import { OPFSVFS, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
 import type { ReadSpec } from '@struktoai/mirage-node'
+import type { RedisCacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import {
   AIRTABLE,
   AirtableVFS,
@@ -279,6 +280,18 @@ function consoleFactoryFor(target: Target): ConsoleFactory | undefined {
     )
 }
 
+// Where a target declares cache: {type: 'redis'}, the file cache rides
+// REDIS_URL under this open's own key prefix. Only the ram opener
+// consults this (main.ts refuses a cache block on any other VFS).
+function cacheFor(target: Target): RedisCacheConfig | undefined {
+  if (target.cache?.type !== 'redis') return undefined
+  return {
+    type: 'redis',
+    url: process.env.REDIS_URL ?? 'redis://localhost:6379/0',
+    keyPrefix: `mirage-integ-cache-${randomBytes(4).toString('hex')}:`,
+  }
+}
+
 // The target's profiles, and which one shapes a session that names none.
 // A profile is the whole permission document, so this is every permission
 // the target states, including the per-mount ones; the parser is the
@@ -338,16 +351,19 @@ async function openRam(target: Target): Promise<Open> {
       (['command-service', 'metadata-service'].includes(m.backend ?? '')
         ? new CommandService(m.backend === 'metadata-service')
         : new RAMVFS())
+    if (m.caches_reads === true) (vfs as unknown as { cachesReads: boolean }).cachesReads = true
     built[m.path] = vfs
     mounts[m.path] =
       m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
   }
   const secretsEnv = target.secrets !== undefined ? buildSecretsEnv(target.secrets) : null
   const consoleFactory = consoleFactoryFor(target)
+  const cache = cacheFor(target)
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
     ...(target.agentId !== undefined ? { agentId: target.agentId } : {}),
     ...(consoleFactory !== undefined ? { consoleFactory } : {}),
+    ...(cache !== undefined ? { cache } : {}),
     ...(secretsEnv !== null ? { env: secretsEnv.env } : {}),
     ...permissionOptions(target),
   })

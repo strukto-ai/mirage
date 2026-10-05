@@ -30,11 +30,15 @@ import type { DropboxEntry } from './api.ts'
  * walk actually made. `pageSize` cannot express a bound on the walk: it
  * caps the page, not the walk, so a small page turns a listing of a large
  * folder into more requests rather than fewer.
+ *
+ * A successful `/files/move_v2` answers `{ metadata: moved }`, or, with a
+ * null `moved`, an empty body, which the transport reads as null.
  */
 export class FakeDropboxRpc {
   entries: DropboxEntry[]
   metadata: DropboxEntry | null
   moveErrors: (DropboxApiError | null)[]
+  moved: DropboxEntry | null
   listLimits: number[] = []
   listRequests = 0
   deleted: string[] = []
@@ -48,11 +52,13 @@ export class FakeDropboxRpc {
       entries?: DropboxEntry[]
       metadata?: DropboxEntry | null
       moveErrors?: (DropboxApiError | null)[]
+      moved?: DropboxEntry | null
     } = {},
   ) {
     this.entries = opts.entries ?? []
     this.metadata = opts.metadata ?? null
     this.moveErrors = opts.moveErrors ?? []
+    this.moved = opts.moved ?? null
   }
 
   private page(rest: DropboxEntry[], limit: number): unknown {
@@ -94,7 +100,7 @@ export class FakeDropboxRpc {
       this.moves.push([String(req.from_path), String(req.to_path)])
       const error = this.moveErrors.shift() ?? null
       if (error !== null) throw error
-      return Promise.resolve({})
+      return Promise.resolve(this.moved === null ? null : { metadata: this.moved })
     }
     throw new Error(`unexpected endpoint ${endpoint}`)
   }

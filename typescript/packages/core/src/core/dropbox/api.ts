@@ -156,8 +156,24 @@ export async function deletePath(tm: DropboxTokenManager, path: string): Promise
   await dropboxRpc(tm, '/files/delete_v2', { path })
 }
 
-export async function movePath(tm: DropboxTokenManager, from: string, to: string): Promise<void> {
-  await dropboxRpc(tm, '/files/move_v2', { from_path: from, to_path: to, autorename: false })
+/**
+ * Move one entry with `/files/move_v2`. Answers the moved entry's metadata
+ * (`.tag` names its kind), or an empty object when the reply carries none.
+ */
+export async function movePath(
+  tm: DropboxTokenManager,
+  from: string,
+  to: string,
+): Promise<Partial<DropboxEntry>> {
+  const reply = (await dropboxRpc(tm, '/files/move_v2', {
+    from_path: from,
+    to_path: to,
+    autorename: false,
+  })) as { metadata?: unknown } | null
+  const metadata = reply?.metadata
+  return metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? (metadata as Partial<DropboxEntry>)
+    : {}
 }
 
 export async function copyPath(tm: DropboxTokenManager, from: string, to: string): Promise<void> {

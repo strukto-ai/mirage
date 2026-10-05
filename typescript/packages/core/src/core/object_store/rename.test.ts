@@ -40,7 +40,10 @@ describe('object_store rename', () => {
       renameFor(store)(accessor, spec('/a/src.txt'), spec('/b/dst.txt')),
     )
     expect(store.contents()).toEqual({ 'b/dst.txt': 'hi' })
-    expect(manager.subtrees).toEqual(['/b/dst.txt', '/a/src.txt'])
+    // A file has nothing beneath it, so neither end walks the caches for a
+    // subtree: both take the unlink flavor.
+    expect(manager.subtrees).toEqual([])
+    expect(manager.unlinks).toEqual(['/b/dst.txt', '/a/src.txt'])
     expect(manager.writes).toEqual([])
     expect(manager.ancestors).toEqual(['/mnt/b/dst.txt', '/mnt/a/src.txt'])
   })

@@ -23,6 +23,7 @@ import { PathSpec } from '../types.ts'
 import {
   activeCacheManager,
   evictAfter,
+  invalidateAfterMove,
   invalidateAfterUnlink,
   invalidateAfterWrite,
   invalidateAncestors,
@@ -85,10 +86,12 @@ describe('cache context', () => {
       await invalidateAfterWrite('/a.txt')
       await invalidateAfterUnlink('/b.txt')
       await invalidateSubtree('/c')
+      await invalidateAfterMove('/d', true)
+      await invalidateAfterMove('/e', false)
     })
     expect(manager.writes).toEqual(['/a.txt'])
-    expect(manager.unlinks).toEqual(['/b.txt'])
-    expect(manager.subtrees).toEqual(['/c'])
+    expect(manager.unlinks).toEqual(['/b.txt', '/e'])
+    expect(manager.subtrees).toEqual(['/c', '/d'])
   })
 
   it('no-ops without an active manager', async () => {

@@ -180,9 +180,9 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
     async def evict_prefix(
         self, prefix: str, *, excluded: tuple[str, ...] = ()
     ) -> None:
-        # Store-wide: a fill in flight under the prefix has no entry yet,
-        # so its key cannot be enumerated below.
-        self._invalidation.invalidate_all()
+        # Before the removals below: a fill in flight under the prefix has
+        # no entry yet, so only its registration can name it.
+        self._invalidation.invalidate_prefix(prefix, excluded)
         # A pending fill may not have installed an entry yet.
         keys = self._entries.keys() | self._drain_tasks.keys()
         for key in [
