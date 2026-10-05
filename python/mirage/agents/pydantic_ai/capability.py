@@ -31,8 +31,9 @@ class MirageWorkspace(AbstractCapability[AgentDepsT]):
     Every tool that works in ``ctx.workspace`` then reaches the
     session's mounts: pydantic-ai-backend's ``ConsoleCapability``, or
     the harness's file and shell tools. A ref from message history only
-    continues in the configured session; one naming any other session
-    is declined.
+    continues in the configured session: one naming another session is
+    declined, and for the default session, whose id the session store
+    may still adopt, the backend checks it on first use.
 
     Example:
         ```python
@@ -60,12 +61,9 @@ class MirageWorkspace(AbstractCapability[AgentDepsT]):
     def get_workspace(
         self, ctx: RunContext[AgentDepsT], *, ref: WorkspaceRef | None
     ) -> WorkspaceBackend | None:
-        if ref is not None:
-            session = (
-                self.session_id
-                if self.session_id is not None
-                else self.workspace.default_session_id
-            )
-            if ref != WorkspaceRef(provider=PROVIDER, id=session):
-                return None
-        return MirageWorkspaceBackend(self.workspace, self.session_id)
+        if ref is not None and (
+            ref.provider != PROVIDER
+            or (self.session_id is not None and ref.id != self.session_id)
+        ):
+            return None
+        return MirageWorkspaceBackend(self.workspace, self.session_id, ref=ref)

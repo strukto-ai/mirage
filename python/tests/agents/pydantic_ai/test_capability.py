@@ -65,6 +65,13 @@ def test_declines_a_ref_naming_another_session(workspace):
     assert backend is not None and backend.ref == own
 
 
+def test_the_default_session_keeps_a_ref_for_first_use(workspace):
+    capability = MirageWorkspace(workspace)
+    ref = WorkspaceRef(provider="mirage", id="adopted-on-load")
+    backend = capability.get_workspace(None, ref=ref)
+    assert backend is not None and backend.ref == ref
+
+
 @pytest.mark.anyio
 async def test_console_tools_reach_the_mounts(workspace):
     agent = Agent(

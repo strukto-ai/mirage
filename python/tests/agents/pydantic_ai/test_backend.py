@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+
 import pytest
 from pydantic_ai.workspaces import WorkspaceRef, WorkspaceUnavailableError
 from pydantic_ai.workspaces.conformance import WorkspaceBackendSuite
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.pydantic_ai.backend import MirageWorkspaceBackend
+from mirage.ops.ops import Ops
 
 
 @pytest.fixture
@@ -97,3 +100,63 @@ async def test_a_closed_session_is_unavailable(workspace):
     await workspace.close_session("agent")
     with pytest.raises(WorkspaceUnavailableError):
         await backend.working_dir()
+
+
+@pytest.mark.anyio
+async def test_remove_never_crosses_into_a_mount():
+    ws = Workspace(
+        {"/": RAMVFS(), "/data/inner/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell(
+        "mkdir -p /data; echo a > /data/a.txt; echo k > /data/inner/keep.txt"
+    )
+    backend = MirageWorkspaceBackend(ws)
+    for path in ("/data", "/data/inner"):
+        with pytest.raises(OSError) as raised:
+            await backend.remove(path)
+        assert raised.value.errno == errno.EBUSY
+    assert await ws.vfs.read("/data/a.txt") == b"a\n"
+    assert await ws.vfs.read("/data/inner/keep.txt") == b"k\n"
+
+
+@pytest.mark.anyio
+async def test_files_and_links_need_no_commands():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        route_policy=lambda ctx: {"deny": "no commands"},
+    )
+    backend = MirageWorkspaceBackend(ws)
+    await backend.make_dir("/real")
+    await ws.vfs.symlink("/link", "/real")
+    await backend.write_bytes("/link/f.txt", b"x")
+    assert await backend.realpath("/link/f.txt") == "/real/f.txt"
+    await backend.remove("/real/f.txt")
+    assert not await backend.exists("/real/f.txt")
+
+
+@pytest.mark.anyio
+async def test_a_refused_child_stat_fails_the_listing(workspace, monkeypatch):
+    backend = MirageWorkspaceBackend(workspace)
+    await backend.write_bytes("/d/a.txt", b"a")
+    real = Ops.stat
+
+    async def refusing(self, path, **kwargs):
+        if path == "/d/a.txt":
+            raise PermissionError(errno.EACCES, "Permission denied", path)
+        return await real(self, path, **kwargs)
+
+    monkeypatch.setattr(Ops, "stat", refusing)
+    with pytest.raises(PermissionError):
+        await backend.list_dir("/d")
+
+
+@pytest.mark.anyio
+async def test_a_default_session_ref_is_checked_on_first_use(workspace):
+    gone = WorkspaceRef(provider="mirage", id="not-the-default")
+    with pytest.raises(WorkspaceUnavailableError):
+        await MirageWorkspaceBackend(workspace, ref=gone).working_dir()
+    own = WorkspaceRef(provider="mirage", id=workspace.default_session_id)
+    backend = MirageWorkspaceBackend(workspace, ref=own)
+    assert await backend.working_dir() == "/"
+    assert backend.ref == own

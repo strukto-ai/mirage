@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import logging
+import os
 import posixpath
 import shlex
 from collections.abc import Mapping
@@ -34,20 +36,38 @@ from mirage.agents.pydantic_ai.convert import (
 )
 from mirage.ops.ops import Ops
 from mirage.types import FileType
+from mirage.utils.path import MAX_SYMLINK_HOPS
 from mirage.workspace.tools.tool_operations import ensure_parents
 from mirage.workspace.workspace import Session, Workspace
 
 logger = logging.getLogger(__name__)
 
 
-async def _remove(vfs: Ops, path: str) -> None:
+DANGLING = (errno.ENOENT, errno.ENOTDIR, errno.ELOOP)
+
+
+async def _doomed(
+    ws: Workspace, vfs: Ops, path: str
+) -> list[tuple[str, bool]]:
+    if ws.registry.is_mount_root(path):
+        raise OSError(errno.EBUSY, os.strerror(errno.EBUSY), path)
     st = await vfs.stat(path, nofollow=True)
     if st.type != FileType.DIRECTORY:
-        await vfs.unlink(path)
-        return
+        return [(path, False)]
+    doomed = []
     for child in await vfs.readdir(path):
-        await _remove(vfs, child.rstrip("/"))
-    await vfs.rmdir(path)
+        doomed.extend(await _doomed(ws, vfs, child.rstrip("/")))
+    doomed.append((path, True))
+    return doomed
+
+
+async def _link(vfs: Ops, path: str) -> str | None:
+    try:
+        return await vfs.readlink(path)
+    except OSError as exc:
+        if exc.errno == errno.EINVAL or exc.errno in DANGLING:
+            return None
+        raise
 
 
 class MirageWorkspaceBackend:
@@ -64,14 +84,22 @@ class MirageWorkspaceBackend:
         workspace (Workspace): The workspace to operate on.
         session_id (str | None): The session to act as; None is the
             workspace's default session, named in the ref on first use.
+        ref (WorkspaceRef | None): For the default session, the ref a
+            run continues from; it must still name the default session
+            once the session store is loaded.
     """
 
     def __init__(
-        self, workspace: Workspace, session_id: str | None = None
+        self,
+        workspace: Workspace,
+        session_id: str | None = None,
+        *,
+        ref: WorkspaceRef | None = None,
     ) -> None:
         self._ws = workspace
+        self._default = session_id is None
         self._ref = (
-            None
+            ref
             if session_id is None
             else WorkspaceRef(provider=PROVIDER, id=session_id)
         )
@@ -82,10 +110,18 @@ class MirageWorkspaceBackend:
 
     async def _session(self) -> Session:
         await self._ws.ensure_sessions_loaded()
-        if self._ref is None:
-            self._ref = WorkspaceRef(
+        if self._default:
+            current = WorkspaceRef(
                 provider=PROVIDER, id=self._ws.default_session_id
             )
+            if self._ref is None:
+                self._ref = current
+            elif self._ref != current:
+                raise WorkspaceUnavailableError(
+                    f"mirage session {self._ref.id!r} is not the "
+                    f"workspace's default session"
+                )
+        assert self._ref is not None
         try:
             self._ws.get_session(self._ref.id)
         except KeyError:
@@ -111,20 +147,19 @@ class MirageWorkspaceBackend:
             )
         line = command if isinstance(command, str) else shlex.join(command)
         session = await self._session()
-        try:
-            io = await asyncio.wait_for(
-                session.shell(
-                    line,
-                    cwd=session.state.cwd,
-                    env=dict(env) if env else None,
-                ),
-                timeout,
+
+        async def finish() -> CommandResult:
+            io = await session.shell(
+                line, cwd=session.state.cwd, env=dict(env) if env else None
             )
+            return await io_to_command_result(io)
+
+        try:
+            return await asyncio.wait_for(finish(), timeout)
         except TimeoutError:
             raise WorkspaceTimeoutError(
                 f"command timed out after {timeout}s"
             ) from None
-        return await io_to_command_result(io)
 
     async def read_bytes(self, path: str) -> bytes:
         return await (await self._session()).vfs.read(path)
@@ -146,6 +181,8 @@ class MirageWorkspaceBackend:
             try:
                 entries.append(stat_to_entry(child, await vfs.stat(child)))
             except OSError as exc:
+                if exc.errno not in DANGLING:
+                    raise
                 logger.debug("listing %s: %s", child, exc)
                 entries.append(
                     FileEntry(
@@ -175,16 +212,37 @@ class MirageWorkspaceBackend:
             raise ValueError(
                 "refusing to remove the working directory or an ancestor"
             )
-        await _remove(session.vfs, path)
+        vfs = session.vfs
+        for doomed, is_dir in await _doomed(self._ws, vfs, path):
+            if is_dir:
+                await vfs.rmdir(doomed)
+            else:
+                await vfs.unlink(doomed)
 
     async def exists(self, path: str) -> bool:
         return await (await self._session()).vfs.exists(path)
 
     async def realpath(self, path: str) -> str:
-        session = await self._session()
-        io = await session.shell(
-            shlex.join(["realpath", "-m", "--", path]), record=False
-        )
-        if io.exit_code != 0:
-            raise OSError((await io.stderr_str()).strip())
-        return (await io.stdout_str()).removesuffix("\n")
+        vfs = (await self._session()).vfs
+        names = [n for n in path.split("/") if n]
+        resolved = ""
+        hops = 0
+        while names:
+            name = names.pop(0)
+            if name == ".":
+                continue
+            if name == "..":
+                resolved = resolved.rsplit("/", 1)[0]
+                continue
+            here = f"{resolved}/{name}"
+            target = (
+                await _link(vfs, here) if hops < MAX_SYMLINK_HOPS else None
+            )
+            if target is None:
+                resolved = here
+                continue
+            hops += 1
+            if target.startswith("/"):
+                resolved = ""
+            names[:0] = [n for n in target.split("/") if n]
+        return resolved or "/"
