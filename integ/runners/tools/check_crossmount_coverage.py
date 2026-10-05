@@ -40,26 +40,55 @@ NAMESPACE_COMMANDS = {
 }
 
 
-def invoked_commands(line: str) -> set[str]:
-    """The words a shell line runs as commands, not as their arguments.
+def invocations(line: str) -> list[tuple[str, list[str]]]:
+    """Each command a shell line runs, with the words that follow it.
 
     A word is in command position at the start of the line or after a
-    control operator or keyword, past any ``NAME=value`` assignments.
+    control operator or keyword, past any ``NAME=value`` assignments;
+    its invocation runs to the next control operator, redirections
+    included.
 
     Args:
         line (str): One case's command line.
     """
     lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
-    names: set[str] = set()
-    expect = True
+    found: list[tuple[str, list[str]]] = []
+    words: list[str] | None = None
     for token in lexer:
         if token in CONTROL:
-            expect = True
-        elif expect and not ASSIGNMENT.match(token):
-            names.add(token)
-            expect = False
-    return names
+            words = None
+        elif words is None and not ASSIGNMENT.match(token):
+            words = []
+            found.append((token, words))
+        elif words is not None:
+            words.append(token)
+    return found
+
+
+def reaches_both(command: str, line: str) -> bool:
+    """Whether one run of ``command`` names a path on each mount.
+
+    A path is named directly, or through a symlink an ``ln -s`` earlier
+    on the line made to the other mount.
+
+    Args:
+        command (str): The command the case covers.
+        line (str): The case's command line.
+    """
+    links: dict[str, str] = {}
+    for name, words in invocations(line):
+        operands = [w for w in words if not w.startswith("-")]
+        if name == "ln" and "-s" in words and len(operands) == 2:
+            links[operands[1]] = operands[0]
+        if name != command:
+            continue
+        named = set(words) | {links[w] for w in words if w in links}
+        if any("/data/" in w for w in named) and any(
+            "/data2/" in w for w in named
+        ):
+            return True
+    return False
 
 
 def coverage_errors(
@@ -68,9 +97,9 @@ def coverage_errors(
     """Require an executable success case in each command's own folder.
 
     This is a registration gate, not proof of every flag or backend. A case
-    must run the command, contain both mount prefixes (possibly in a
-    symlink setup), assert all three result channels, and run on RAM and
-    disk. Topology suites can supplement but cannot replace this case.
+    must run the command on paths of both mounts (directly, or through a
+    symlink the line makes), assert all three result channels, and run on
+    RAM and disk. Topology suites can supplement but cannot replace this case.
 
     Args:
         commands (set[str]): Registered and namespace command names.
@@ -89,9 +118,7 @@ def coverage_errors(
             line = case["command"]
             expected = case.get("expect", {})
             if (
-                command in invoked_commands(line)
-                and "/data/" in line
-                and "/data2/" in line
+                reaches_both(command, line)
                 and expected.get("exit") == 0
                 and {"stdout", "stderr"} <= expected.keys()
                 and {"ram", "disk"} <= set(case.get("targets", []))
@@ -116,12 +143,18 @@ def selftest() -> None:
     assert coverage_errors({"cp", "mv"}, {"cp": [case]})
     assert coverage_errors({"cp"}, {"misc": [case]})
     assert coverage_errors({"cp"}, {"cp": [case, case]})
-    for line in ("FOO=1 cp /data/a /data2/a", "true && cp /data/a /data2/a"):
+    for line in (
+        "FOO=1 cp /data/a /data2/a",
+        "true && cp /data/a /data2/a",
+        "ln -s /data2/a /data/l && cp /data/l /data/b",
+        "cp /data/a > /data2/log",
+    ):
         assert (
             coverage_errors({"cp"}, {"cp": [case | {"command": line}]}) == []
         )
     for change in (
         {"command": "echo cp /data/a /data2/a"},
+        {"command": "cp /data/a /data/b && mv /data/b /data2/b"},
         {"command": "cp --help"},
         {"command": "cp /data/a /data/b"},
         {"targets": ["ram"]},

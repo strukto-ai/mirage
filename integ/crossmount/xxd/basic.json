@@ -55,10 +55,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab' > /data/xm_rt_xx; printf 'c' > /data2/xm_rt_xx; xxd /data/xm_rt_xx; xxd -p /data2/xm_rt_xx; rm /data/xm_rt_xx /data2/xm_rt_xx",
+      "command": "printf 'ab' > /data/xm_rt_xx; xxd /data/xm_rt_xx > /data2/xm_rt_xx.hex; cat /data2/xm_rt_xx.hex; xxd -r /data2/xm_rt_xx.hex; rm /data/xm_rt_xx /data2/xm_rt_xx.hex",
       "expect": {
         "exit": 0,
-        "stdout": "00000000: 6162                                     ab\n63\n",
+        "stdout": "00000000: 6162                                     ab\nab",
         "stderr": ""
       }
     }

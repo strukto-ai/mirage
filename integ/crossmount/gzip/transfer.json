@@ -30,6 +30,37 @@
         "stdout": "gzcross\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_gzip_across_mounts",
+      "seq": 963220,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' > /data/xm_rt_gz; printf 'b\\n' > /data2/xm_rt_gz; gzip -c /data/xm_rt_gz /data2/xm_rt_gz > /data2/xm_rt_gz.gz; gunzip -c /data2/xm_rt_gz.gz; rm /data/xm_rt_gz /data2/xm_rt_gz /data2/xm_rt_gz.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
     }
   ]
 }

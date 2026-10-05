@@ -23,8 +23,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import type { LinkView, MountView, NamespaceView } from '../../../ops/types.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
-import { flagKwargName } from '../../spec/constants.ts'
-import { BUILTIN_SPECS, specOf } from '../../spec/builtins.ts'
+import { specOf } from '../../spec/builtins.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { Builder, CommandIO } from './adapter.ts'
 
@@ -96,40 +95,6 @@ function noneBelow(): string[] {
   return []
 }
 
-/** The flags with each path option's value as a PathSpec. A line parsed for a
- * cross-mount strategy keeps a path option's resolved string; the generic
- * reads the option as a single-mount line hands it over, a PathSpec, which
- * the dispatcher serves from its own mount (`shuf -o`, `iconv -o`,
- * `patch -i`). Mirrors Python's `path_flags`. */
-export function pathFlags(name: string, bag: Record<string, FlagValue>): Record<string, FlagValue> {
-  const spec = BUILTIN_SPECS[name]
-  if (spec === undefined) return bag
-  const keys = new Set(
-    spec.options
-      .filter((opt) => opt.type === 'path' && !opt.pair)
-      .flatMap((opt) => [opt.short, opt.long])
-      .filter((word): word is string => word !== null && word !== '')
-      .map(flagKwargName),
-  )
-  const promote = (item: string | PathSpec): PathSpec =>
-    typeof item === 'string'
-      ? new PathSpec({
-          virtual: item,
-          directory: item.slice(0, item.lastIndexOf('/') + 1) || '/',
-          vfsPath: stripSlash(item),
-          rawPath: item,
-        })
-      : item
-  const out: Record<string, FlagValue> = { ...bag }
-  flagOccurrences(out).push(...flagOccurrences(bag))
-  for (const key of keys) {
-    const value = out[key]
-    if (typeof value === 'string') out[key] = promote(value)
-    else if (Array.isArray(value)) out[key] = value.map(promote)
-  }
-  return out
-}
-
 /** Run the existing builder once over the full virtual namespace. Mirrors
  * Python's run_dispatch. The dispatcher lists the mounts below a directory
  * itself, so `ns` offers no descendant to avoid; where each mount begins
@@ -157,27 +122,35 @@ export async function runDispatch(
           ...ns,
           mounts: { ...ns.mounts, descendants: noneBelow, visibleDescendants: noneBelow },
         }
+  // The dispatcher keys every path by its whole virtual path, a path
+  // option's value as well as an operand.
+  const whole = (p: PathSpec): PathSpec =>
+    new PathSpec({
+      virtual: p.virtual,
+      directory: p.directory,
+      vfsPath: stripSlash(p.virtual),
+      pattern: p.pattern,
+      resolved: p.resolved,
+      rawPath: p.rawPath,
+      dotted: p.dotted,
+      walkError: p.walkError,
+    })
+  const rebased: Record<string, FlagValue> = { ...bag }
+  flagOccurrences(rebased).push(...flagOccurrences(bag))
+  for (const [key, value] of Object.entries(bag)) {
+    if (value instanceof PathSpec) rebased[key] = whole(value)
+    else if (Array.isArray(value))
+      rebased[key] = value.map((item) => (item instanceof PathSpec ? whole(item) : item))
+  }
   const reads = new IOResult()
   const result = await builder.fn(
     dispatchIO(dispatch, reads, ns?.links, bounded ? ns?.mounts : undefined),
     new NOOPAccessor(),
-    paths.map(
-      (p) =>
-        new PathSpec({
-          virtual: p.virtual,
-          directory: p.directory,
-          vfsPath: stripSlash(p.virtual),
-          pattern: p.pattern,
-          resolved: p.resolved,
-          rawPath: p.rawPath,
-          dotted: p.dotted,
-          walkError: p.walkError,
-        }),
-    ),
+    paths.map(whole),
     [...texts],
     {
       stdin,
-      flags: pathFlags(builder.name, bag),
+      flags: rebased,
       filetypeFns: null,
       mountPrefix: '',
       cwd,

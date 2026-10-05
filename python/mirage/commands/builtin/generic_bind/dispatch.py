@@ -20,7 +20,7 @@ from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec import SPECS, flag_kwarg_name
+from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import ensure_stream, materialize
@@ -151,43 +151,6 @@ def dispatch_io(
     )
 
 
-def path_flags(name: str, flags: dict[str, FlagValue]) -> dict[str, FlagValue]:
-    """The flags with each path option's value as a PathSpec.
-
-    A line parsed for a cross-mount strategy keeps a path option's
-    resolved string; the generic reads the option as a single-mount
-    line hands it over, a PathSpec, which the dispatcher serves from
-    its own mount (``shuf -o``, ``iconv -o``, ``patch -i``).
-
-    Args:
-        name (str): the command whose spec types the options.
-        flags (dict[str, FlagValue]): the parsed flags and their tape.
-    """
-    spec = SPECS.get(name)
-    if spec is None:
-        return flags
-    keys = {
-        flag_kwarg_name(word)
-        for opt in spec.options
-        if opt.type == "path" and not opt.pair
-        for word in (opt.short, opt.long)
-        if word
-    }
-    bag = FlagBag(flags)
-    for key in keys & bag.keys():
-        value = bag[key]
-        if isinstance(value, str):
-            bag[key] = replace(PathSpec.from_str_path(value), raw_path=value)
-        elif isinstance(value, list):
-            bag[key] = [
-                replace(PathSpec.from_str_path(item), raw_path=item)
-                if isinstance(item, str)
-                else item
-                for item in value
-            ]
-    return bag
-
-
 async def run_dispatch(
     builder: Builder,
     paths: list[PathSpec],
@@ -227,8 +190,21 @@ async def run_dispatch(
             ns.mounts, descendants=_none_below, visible_descendants=_none_below
         )
         ns = replace(ns, mounts=mounts)
+    # The dispatcher keys every path by its whole virtual path, a path
+    # option's value as well as an operand.
+    rebased = FlagBag(flag_kwargs)
+    for key, value in rebased.items():
+        if isinstance(value, PathSpec):
+            rebased[key] = replace(value, vfs_path=value.virtual.strip("/"))
+        elif isinstance(value, list):
+            rebased[key] = [
+                replace(item, vfs_path=item.virtual.strip("/"))
+                if isinstance(item, PathSpec)
+                else item
+                for item in value
+            ]
     opts = CommandOpts(
-        flags=path_flags(builder.name, flag_kwargs),
+        flags=rebased,
         stdin=stdin,
         cwd=PathSpec(virtual=cwd, directory=cwd, vfs_path=cwd.strip("/")),
         ns=ns,

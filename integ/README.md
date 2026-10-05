@@ -66,9 +66,9 @@ outside them fails explicitly rather than falling into one:
 `runners/tools/check_crossmount_coverage.py --selftest` requires, for every
 command the routing table names (`CROSS_MOUNT_COMMANDS`, every generic
 builder included) plus the namespace commands, a success case in that
-command's folder that runs it with operands on both `/data` and `/data2`,
-asserts all three result channels, and targets RAM and disk; it also rejects
-duplicate IDs. It is a registration floor, not proof of every option or
+command's folder whose run of it names paths on both `/data` and `/data2`
+(directly, or through a symlink the line makes), asserts all three result
+channels, and targets RAM and disk; it also rejects duplicate IDs. It is a registration floor, not proof of every option or
 backend.
 
 ## Runs and tenants

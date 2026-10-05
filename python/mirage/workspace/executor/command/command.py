@@ -478,7 +478,6 @@ async def handle_command(
             else None,
             cmd_name,
             session.cwd,
-            str_flag_paths=cmd_name not in ("tar", "diff"),
         )
         cross_texts = (
             find_expr_tokens

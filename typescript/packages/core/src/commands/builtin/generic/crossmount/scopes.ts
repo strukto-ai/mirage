@@ -111,7 +111,8 @@ export async function reached(
       try {
         await dispatch('readdir', PathSpec.fromStrPath(virtual))
         known = true
-      } catch {
+      } catch (err) {
+        console.warn(`cannot list ${virtual}: ${String(err)}`)
         known = false
       }
       listed.set(virtual, known)

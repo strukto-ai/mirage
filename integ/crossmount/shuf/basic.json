@@ -14,6 +14,21 @@
         "stdout": "a\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_shuf_two_spellings_are_two_outputs",
+      "seq": 963222,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf 'a\\n' > /data2/xm_rt_so; (cd /data && shuf -o ./xm_rt_so -o xm_rt_so /data2/xm_rt_so; echo rc=$?); test -e /data/xm_rt_so || echo none; rm /data2/xm_rt_so",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nnone\n",
+        "stderr": "shuf: multiple output files specified\n"
+      }
     }
   ]
 }
