@@ -89,11 +89,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cp /data/missing.txt /data/guard/g.txt /data/guard/sub",
+      "command": "cp /data/missing.txt /data/guard/g.txt /data/guard/sub; echo rc=$?; cp /data/missing.txt /data/missing.txt; echo rc=$?",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "cp: cannot stat '/data/missing.txt': No such file or directory\n"
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "cp: cannot stat '/data/missing.txt': No such file or directory\ncp: cannot stat '/data/missing.txt': No such file or directory\n"
       }
     },
     {
@@ -103,7 +103,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "databricks",
+        "databricks-prefix"
       ],
       "command": "cp /data/guard/g.txt /data/guard/nodir/g.txt",
       "expect": {

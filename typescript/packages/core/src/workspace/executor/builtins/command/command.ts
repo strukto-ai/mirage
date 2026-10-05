@@ -25,6 +25,7 @@ import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
 import { sessionEntry } from '../../../session/session.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 const USAGE = 'command: usage: command [-pVv] command [arg ...]\n'
 
@@ -66,9 +67,8 @@ function probe(
             : name
     outLines.push(line)
   }
-  const enc = new TextEncoder()
-  const out = outLines.length > 0 ? enc.encode(`${outLines.join('\n')}\n`) : null
-  const err = errLines.length > 0 ? enc.encode(`${errLines.join('\n')}\n`) : new Uint8Array()
+  const out = outLines.length > 0 ? encodeText(`${outLines.join('\n')}\n`) : null
+  const err = errLines.length > 0 ? encodeText(`${errLines.join('\n')}\n`) : new Uint8Array()
   const code = rest.length === 0 || anyFound ? 0 : 1
   return [
     out,
@@ -102,7 +102,7 @@ export async function handleCommandBuiltin(
 ): Promise<Result> {
   const scan = scanOptions(args, 'pvV')
   if (scan.bad !== null) {
-    const err = new TextEncoder().encode(`bash: command: ${scan.bad}: invalid option\n${USAGE}`)
+    const err = encodeText(`bash: command: ${scan.bad}: invalid option\n${USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

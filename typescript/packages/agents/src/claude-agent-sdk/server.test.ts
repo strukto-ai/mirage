@@ -19,8 +19,7 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import * as shared from '../tool_descriptions.ts'
-import { MirageToolOperations } from '../tool_operations.ts'
+import * as shared from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
 import { MirageServer } from './server.ts'
 
 function mkWs(): Workspace {
@@ -36,7 +35,7 @@ function firstText(r: { content: { text: string }[] }): string {
 
 describe('shell', () => {
   it('echoes', async () => {
-    const result = await new MirageToolOperations(mkWs()).shell('echo hello')
+    const result = await mkWs().tools.shell('echo hello')
     expect(firstText(result)).toContain('hello')
     expect(result.isError).not.toBe(true)
   })
@@ -44,7 +43,7 @@ describe('shell', () => {
   it('runs a pipe', async () => {
     const ws = mkWs()
     await ws.vfs.write('/pipe.txt', 'aaa\nbbb\naaa\n')
-    const result = await new MirageToolOperations(ws).shell('cat /pipe.txt | sort | uniq | wc -l')
+    const result = await ws.tools.shell('cat /pipe.txt | sort | uniq | wc -l')
     expect(firstText(result)).toContain('2')
   })
 })
@@ -53,7 +52,7 @@ describe('read', () => {
   it('reads a file', async () => {
     const ws = mkWs()
     await ws.vfs.write('/hello.txt', 'line1\nline2\nline3\n')
-    const result = await new MirageToolOperations(ws).read('/hello.txt')
+    const result = await ws.tools.read('/hello.txt')
     expect(firstText(result)).toContain('line1')
     expect(firstText(result)).toContain('line2')
     expect(result.isError).not.toBe(true)
@@ -62,7 +61,7 @@ describe('read', () => {
   it('honors offset and limit', async () => {
     const ws = mkWs()
     await ws.vfs.write('/multi.txt', 'a\nb\nc\nd\ne\n')
-    const result = await new MirageToolOperations(ws).read('/multi.txt', 1, 2)
+    const result = await ws.tools.read('/multi.txt', 1, 2)
     const text = firstText(result)
     expect(text).toContain('b')
     expect(text).toContain('c')
@@ -71,7 +70,7 @@ describe('read', () => {
   })
 
   it('errors on missing file', async () => {
-    const result = await new MirageToolOperations(mkWs()).read('/nonexistent.txt')
+    const result = await mkWs().tools.read('/nonexistent.txt')
     expect(result.isError).toBe(true)
     expect(firstText(result)).toContain('not found')
   })
@@ -80,7 +79,7 @@ describe('read', () => {
 describe('write', () => {
   it('writes a new file', async () => {
     const ws = mkWs()
-    const result = await new MirageToolOperations(ws).write('/new.txt', 'hello world')
+    const result = await ws.tools.write('/new.txt', 'hello world')
     expect(result.isError).not.toBe(true)
     expect(await ws.vfs.cat('/new.txt')).toBe('hello world')
   })
@@ -88,14 +87,14 @@ describe('write', () => {
   it('refuses an unread file', async () => {
     const ws = mkWs()
     await ws.vfs.write('/exists.txt', 'first')
-    const result = await new MirageToolOperations(ws).write('/exists.txt', 'second')
+    const result = await ws.tools.write('/exists.txt', 'second')
     expect(result.isError).toBe(true)
     expect(firstText(result)).toContain('read all of it before overwriting it')
   })
 
   it('creates parent directories', async () => {
     const ws = mkWs()
-    const result = await new MirageToolOperations(ws).write('/nested/deep/file.txt', 'hi')
+    const result = await ws.tools.write('/nested/deep/file.txt', 'hi')
     expect(result.isError).not.toBe(true)
     expect(await ws.vfs.cat('/nested/deep/file.txt')).toBe('hi')
   })
@@ -105,13 +104,13 @@ describe('edit', () => {
   it('replaces a string', async () => {
     const ws = mkWs()
     await ws.vfs.write('/edit.txt', 'foo bar baz')
-    const result = await new MirageToolOperations(ws).edit('/edit.txt', 'bar', 'qux')
+    const result = await ws.tools.edit('/edit.txt', 'bar', 'qux')
     expect(result.isError).not.toBe(true)
     expect(await ws.vfs.cat('/edit.txt')).toBe('foo qux baz')
   })
 
   it('errors on missing file', async () => {
-    const result = await new MirageToolOperations(mkWs()).edit('/missing.txt', 'x', 'y')
+    const result = await mkWs().tools.edit('/missing.txt', 'x', 'y')
     expect(result.isError).toBe(true)
     expect(firstText(result)).toContain('not found')
   })
@@ -119,7 +118,7 @@ describe('edit', () => {
   it('errors when the string is not found', async () => {
     const ws = mkWs()
     await ws.vfs.write('/nostr.txt', 'hello world')
-    const result = await new MirageToolOperations(ws).edit('/nostr.txt', 'xyz', 'abc')
+    const result = await ws.tools.edit('/nostr.txt', 'xyz', 'abc')
     expect(result.isError).toBe(true)
     expect(firstText(result)).toContain('not found')
   })
@@ -127,7 +126,7 @@ describe('edit', () => {
   it('errors on multiple occurrences without replace_all', async () => {
     const ws = mkWs()
     await ws.vfs.write('/multi.txt', 'aa bb aa')
-    const result = await new MirageToolOperations(ws).edit('/multi.txt', 'aa', 'cc')
+    const result = await ws.tools.edit('/multi.txt', 'aa', 'cc')
     expect(result.isError).toBe(true)
     expect(firstText(result)).toContain('replace_all')
   })
@@ -135,7 +134,7 @@ describe('edit', () => {
   it('replaces all occurrences', async () => {
     const ws = mkWs()
     await ws.vfs.write('/all.txt', 'aa bb aa')
-    const result = await new MirageToolOperations(ws).edit('/all.txt', 'aa', 'cc', true)
+    const result = await ws.tools.edit('/all.txt', 'aa', 'cc', true)
     expect(result.isError).not.toBe(true)
     expect(await ws.vfs.cat('/all.txt')).toBe('cc bb cc')
   })
@@ -144,9 +143,9 @@ describe('edit', () => {
 describe('ls', () => {
   it('lists a directory', async () => {
     const ws = mkWs()
-    await new MirageToolOperations(ws).write('/dir/a.txt', 'a')
-    await new MirageToolOperations(ws).write('/dir/b.txt', 'b')
-    const result = await new MirageToolOperations(ws).ls('/dir')
+    await ws.tools.write('/dir/a.txt', 'a')
+    await ws.tools.write('/dir/b.txt', 'b')
+    const result = await ws.tools.ls('/dir')
     expect(firstText(result)).toContain('a.txt')
     expect(firstText(result)).toContain('b.txt')
   })
@@ -156,7 +155,7 @@ describe('grep', () => {
   it('searches recursively', async () => {
     const ws = mkWs()
     await ws.vfs.write('/search.txt', 'hello world\ngoodbye world\nhello again\n')
-    const result = await new MirageToolOperations(ws).grep('hello', '/')
+    const result = await ws.tools.grep('hello', '/')
     expect(firstText(result)).toContain('hello')
   })
 })

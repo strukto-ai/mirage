@@ -14,6 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.shell.constants import (
     SET_OPTION_DEFAULTS,
     SET_OPTION_NAMES,
@@ -106,7 +107,7 @@ async def handle_shopt(
                 continue
             if not quiet:
                 lines.append(_row(name, on, reusable, set_o))
-        out = ("\n".join(lines) + "\n").encode() if lines else None
+        out = encode_text("\n".join(lines) + "\n") if lines else None
         return out, IOResult(), ExecutionNode(command="shopt", exit_code=0)
     for name in names:
         if name not in table or (set_o and name not in SET_OPTION_NAMES):
@@ -126,8 +127,8 @@ async def handle_shopt(
             status = 1
             continue
         store[name] = setting
-    out = ("\n".join(lines) + "\n").encode() if lines else None
-    err = ("\n".join(errors) + "\n").encode() if errors else None
+    out = encode_text("\n".join(lines) + "\n") if lines else None
+    err = encode_text("\n".join(errors) + "\n") if errors else None
     return (
         out,
         IOResult(exit_code=status, stderr=err or b""),

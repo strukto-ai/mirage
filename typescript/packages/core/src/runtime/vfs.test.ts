@@ -141,11 +141,6 @@ describe('RuntimeVFS transport', () => {
     expect(st).toEqual({ size: 8, isDir: false, mode: LINK_MODE, mtimeMs: 0, isLink: true })
   })
 
-  it('refuses an answer that is not a stat row', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve({ size: 4 }))
-    await expect(new RuntimeVFS(dispatch).stat('/ram/a.txt')).rejects.toThrow('bad shape')
-  })
-
   // A backend that slash-marks its directories has already said what the
   // entry is, so the door does not pay a stat to hear it again.
   it('takes a trailing slash as the answer and skips the stat', async () => {
@@ -311,11 +306,6 @@ describe('RuntimeVFS transport', () => {
     expect(out).toBe('../t.txt')
   })
 
-  it('refuses a readlink answer that is not a string', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(7))
-    await expect(new RuntimeVFS(dispatch).readlink('/ram/link')).rejects.toThrow(/expected string/)
-  })
-
   it('forwards setattr with the fields it was given', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
     await new RuntimeVFS(dispatch).setattr('/ram/f', { mode: 0o600, nofollow: true })
@@ -330,37 +320,20 @@ describe('RuntimeVFS transport', () => {
     await expect(new RuntimeVFS(dispatch).read('/x')).rejects.toThrow(/boom/)
   })
 
-  it('throws TypeError when read returns non-Uint8Array', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve('not bytes' as unknown as Uint8Array),
-    )
-    await expect(new RuntimeVFS(dispatch).read('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when readdir returns non-array', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve({ not: 'array' } as unknown as never[]),
-    )
-    await expect(new RuntimeVFS(dispatch).readdir('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when a readdir entry is not a name', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve([{ path: '/x' }] as unknown as never[]),
-    )
-    await expect(new RuntimeVFS(dispatch).readdir('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when write dispatch returns non-undefined', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve('unexpected' as unknown))
-    await expect(new RuntimeVFS(dispatch).write('/x', new Uint8Array([1]))).rejects.toThrow(
-      TypeError,
-    )
-  })
-
-  it('throws TypeError when stat returns a bad shape', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve({ size: 1 }))
-    await expect(new RuntimeVFS(dispatch).stat('/x')).rejects.toThrow(TypeError)
+  // A bridge answer of the wrong shape is a TypeError, never a value a
+  // guest encoder would then misread.
+  it.each<[string, unknown, (vfs: RuntimeVFS) => Promise<unknown>, RegExp]>([
+    ['read', 'not bytes', (vfs) => vfs.read('/x'), /./],
+    ['readdir', { not: 'array' }, (vfs) => vfs.readdir('/x'), /./],
+    ['a readdir entry', [{ path: '/x' }], (vfs) => vfs.readdir('/x'), /./],
+    ['write', 'unexpected', (vfs) => vfs.write('/x', new Uint8Array([1])), /./],
+    ['stat', { size: 4 }, (vfs) => vfs.stat('/ram/a.txt'), /bad shape/],
+    ['readlink', 7, (vfs) => vfs.readlink('/ram/link'), /expected string/],
+  ])('refuses a %s answer of the wrong shape', async (_op, answer, call, message) => {
+    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(answer as never))
+    const refused = call(new RuntimeVFS(dispatch))
+    await expect(refused).rejects.toThrow(TypeError)
+    await expect(refused).rejects.toThrow(message)
   })
 
   it('forwards create and truncate as their own ops, never a write', async () => {

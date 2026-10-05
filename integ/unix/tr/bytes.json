@@ -1,0 +1,98 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "tr_bytes_spellings",
+      "seq": 14470300,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\302\\240C\\n' > /data/bytes.txt; tr -d $'\\xc2\\xa0' < /data/bytes.txt; tr -d '\\302\\240' < /data/bytes.txt; tr -d ' ' < /data/bytes.txt )",
+      "expect": {
+        "exit": 0,
+        "stdout": "ABC\nABC\nABC\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_bytes_translate",
+      "seq": 14470301,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\377\\n' | tr $'\\xc2\\xa0' AB | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 41 42 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_bytes_partial",
+      "seq": 14470302,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\377\\n' | tr -d '\\240' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c2 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_bytes_complement",
+      "seq": 14470303,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240\\377\\n' | tr -cd $'\\xa0\\xff' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " a0 ff\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_bytes_squeeze",
+      "seq": 14470304,
+      "command": "( export LC_ALL=C; printf '\\302\\302\\240\\240\\377\\n' | tr -s '\\302\\240' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c2 a0 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_bytes_roundtrip",
+      "seq": 14470305,
+      "command": "( export LC_ALL=C; printf '\\303\\251\\377\\000\\n' | tr x y | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c3 a9 ff 00 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_bytes_invalid_class",
+      "seq": 14470306,
+      "command": "( export LC_ALL=C; tr -d '[:alphé:]' < /dev/null; echo rc=$?; tr -d $'[:x\\xff:]' < /dev/null; echo rc=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "tr: invalid character class 'alph\\\\303\\\\251'\ntr: invalid character class 'x\\\\377'\n"
+      }
+    }
+  ]
+}

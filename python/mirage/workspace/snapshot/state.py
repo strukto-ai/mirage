@@ -576,6 +576,9 @@ async def _restore_sessions(
     ws, state: dict[str, Any], tables: list[SessionState]
 ) -> None:
     default_sid = state.get(StateKey.DEFAULT_SESSION_ID)
+    # Every session the snapshot restores is a new one to the agent
+    # tools, so none keeps what was read before.
+    ws._reads.clear()
     if default_sid is not None:
         # The snapshot's default session identity wins over the live
         # one, and the discovery record's pointer follows it.

@@ -53,22 +53,6 @@
       "types": "./dist/pi/index.d.ts",
       "import": "./dist/pi/index.js"
     },
-    "./tool_operations": {
-      "types": "./dist/tool_operations.d.ts",
-      "import": "./dist/tool_operations.js"
-    },
-    "./tool_descriptions": {
-      "types": "./dist/tool_descriptions.d.ts",
-      "import": "./dist/tool_descriptions.js"
-    },
-    "./file_version": {
-      "types": "./dist/file_version.d.ts",
-      "import": "./dist/file_version.js"
-    },
-    "./io_text": {
-      "types": "./dist/io_text.d.ts",
-      "import": "./dist/io_text.js"
-    },
     "./vercel": {
       "types": "./dist/vercel/index.d.ts",
       "import": "./dist/vercel/index.js"

@@ -36,11 +36,12 @@
             "js": "console.log(os.rename('/data/d/a.txt', '/data/d/b.txt'), os.stat('/data/d/b.txt')[0].size, os.stat('/data/d/a.txt')[1])"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "3 False\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "3 False\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "0 3 44\n"
             }
           }
@@ -54,10 +55,17 @@
         },
         {
           "program": {
-            "python": "import os, shutil\nos.rename('/data/d/b.txt', '/data/d/c.txt')\nos.replace('/data/d/c.txt', '/data/d/e.txt')\nshutil.move('/data/d/e.txt', '/data/d/f.txt')"
+            "python": "import os, shutil\nos.rename('/data/d/b.txt', '/data/d/c.txt')\nos.replace('/data/d/c.txt', '/data/d/e.txt')\nshutil.move('/data/d/e.txt', '/data/d/f.txt')",
+            "js": "console.log(os.rename('/data/d/b.txt', '/data/d/c.txt'), os.rename('/data/d/c.txt', '/data/d/e.txt'), os.rename('/data/d/e.txt', '/data/d/f.txt'))"
           },
           "expect": {
-            "exit": 0
+            "python": {
+              "exit": 0
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 0 0\n"
+            }
           },
           "expect_on": {
             "monty": {
@@ -75,9 +83,6 @@
           "expect_on": {
             "monty": {
               "stdout": "b.txt\n"
-            },
-            "quickjs": {
-              "stdout": "b.txt\n"
             }
           }
         },
@@ -87,11 +92,12 @@
             "js": "console.log(os.rename('/data/zz', '/data/yy'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "-44\n"
             }
           }
@@ -102,18 +108,18 @@
             "js": "console.log(os.rename('/data/cross.txt', '/other/cross.txt'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "EXDEV\n"
+            "python": {
+              "exit": 0,
+              "stdout": "EXDEV\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-75\n"
+            }
           },
           "expect_on": {
             "monty": {
               "stdout": "OSError\n"
-            },
-            "wasi": {
-              "stdout": "ENOENT\n"
-            },
-            "quickjs": {
-              "stdout": "-44\n"
             }
           }
         },
@@ -177,18 +183,18 @@
             "js": "console.log(os.rename('/data/top.txt', '/data/inner/moved.txt'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "EXDEV\n"
+            "python": {
+              "exit": 0,
+              "stdout": "EXDEV\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-75\n"
+            }
           },
           "expect_on": {
             "monty": {
               "stdout": "OSError\n"
-            },
-            "wasi": {
-              "stdout": "ENOENT\n"
-            },
-            "quickjs": {
-              "stdout": "-44\n"
             }
           }
         },

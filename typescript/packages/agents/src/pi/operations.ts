@@ -25,10 +25,11 @@ import type {
   WriteOperations,
 } from '@earendil-works/pi-coding-agent'
 import picomatch from 'picomatch'
-import { FileVersionTracker } from '../file_version.ts'
-import { decode, refusalLine } from '../io_text.ts'
+import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { decode, refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 
-export { StaleMirageFileError } from '../file_version.ts'
+export { StaleMirageFileError } from '@struktoai/mirage-core/workspace/tools/file_version'
 
 export interface MirageOperationsOptions {
   staleWriteProtection?: boolean
@@ -92,7 +93,10 @@ export function mirageOperations(
   options: MirageOperationsOptions = {},
 ): MirageOperationsBundle {
   const sessionId = options.sessionId
-  const versions = new FileVersionTracker(ws, options.staleWriteProtection ?? true, sessionId)
+  const versions = new FileVersionTracker(
+    sessionId === undefined ? ws.vfs : new Session(ws, sessionId).vfs,
+    options.staleWriteProtection ?? true,
+  )
   const vfs = versions.vfs
   const read: ReadOperations = {
     readFile: async (absolutePath: string) => Buffer.from(await versions.read(absolutePath)),

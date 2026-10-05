@@ -243,13 +243,84 @@
         "s3-prefix",
         "gridfs-prefix",
         "hf",
-        "hf-prefix"
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "nextcloud",
+        "box"
       ],
       "command": "mkdir -p /data/mkuf && touch /data/mkuf/f.txt && mkdir /data/mkuf/f.txt/sub; echo rc=$?; mkdir -p /data/mkuf/f.txt/x/y; echo rc=$?; ls /data/mkuf",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nf.txt\n",
         "stderr": "mkdir: cannot create directory '/data/mkuf/f.txt/sub': Not a directory\nmkdir: cannot create directory '/data/mkuf/f.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "mkdir_refuses_a_taken_name_on_every_backend",
+      "seq": 601085,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix"
+      ],
+      "command": "mkdir -p /data/mkt/d && printf y > /data/mkt/d/g && printf x > /data/mkt/f; mkdir /data/mkt/d; echo rc=$?; mkdir /data/mkt/f; echo rc=$?; mkdir -p /data/mkt/f; echo rc=$?; mkdir -p /data/mkt/d; echo rc=$?; mkdir /data/mkt/f /data/mkt/d; echo rc=$?; ls /data/mkt; rm -r /data/mkt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=0\nrc=1\nd\nf\n",
+        "stderr": "mkdir: cannot create directory '/data/mkt/d': File exists\nmkdir: cannot create directory '/data/mkt/f': File exists\nmkdir: cannot create directory '/data/mkt/f': File exists\nmkdir: cannot create directory '/data/mkt/f': File exists\nmkdir: cannot create directory '/data/mkt/d': File exists\n"
+      }
+    },
+    {
+      "id": "mkdir_p_on_an_implied_directory_keeps_it",
+      "seq": 601086,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix"
+      ],
+      "command": "mkdir -p /data/imp/a/b && mkdir -p /data/imp/a && rmdir /data/imp/a/b && ls /data/imp; rm -r /data/imp",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
       }
     }
   ]

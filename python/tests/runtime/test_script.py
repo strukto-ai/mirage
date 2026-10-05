@@ -73,19 +73,19 @@ def test_script_engine_builds_the_named_runtime():
     assert isinstance(engine, EvaluatorMixin)
 
 
-def test_script_engine_refuses_a_runtime_that_cannot_evaluate():
-    for runtime in ("local", "sandlock", "wasi"):
-        with pytest.raises(ValueError, match="cannot evaluate one"):
-            script_engine(ScriptSource("..."), runtime)
-
-
-def test_script_engine_refuses_an_unknown_runtime():
-    with pytest.raises(ValueError, match="unknown runtime"):
-        script_engine(ScriptSource("..."), "nope")
-
-
-def test_script_engine_refuses_a_runtime_of_the_wrong_language():
-    # Answered from the table before building, so a config naming the
-    # wrong engine reads as that, not as the engine's install hint.
-    with pytest.raises(ValueError, match="python, but names runtime"):
-        script_engine(ScriptSource("..."), "quickjs")
+# The wrong language is answered from the table before building, so a
+# config naming the wrong engine reads as that, not as the engine's
+# install hint.
+@pytest.mark.parametrize(
+    ("runtime", "refusal"),
+    [
+        ("local", "cannot evaluate one"),
+        ("sandlock", "cannot evaluate one"),
+        ("wasi", "cannot evaluate one"),
+        ("nope", "unknown runtime"),
+        ("quickjs", "python, but names runtime"),
+    ],
+)
+def test_script_engine_refuses_a_runtime_it_cannot_use(runtime, refusal):
+    with pytest.raises(ValueError, match=refusal):
+        script_engine(ScriptSource("..."), runtime)

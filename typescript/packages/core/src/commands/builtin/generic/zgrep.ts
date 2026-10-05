@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteView, decodeText, encodeText, textView } from '../../../shell/bytes.ts'
 import { compilePosixRegex } from '../../../utils/posix.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -33,15 +34,14 @@ import { linkDoor } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
-import { lineOffsets, matchOffset, prefixOf } from '../grep_offsets.ts'
-import { decodeText } from '../../../shell/bytes.ts'
+import { prefixOf } from '../grep_offsets.ts'
 import { formatRecords } from '../utils/output.ts'
 import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 
 function anyLineSelected(data: Uint8Array, pattern: RegExp, invert: boolean): boolean {
-  for (const line of splitLines(decodeText(data))) {
+  for (const line of splitLines(byteView(data))) {
     let hit = pattern.test(line)
     if (invert) hit = !hit
     if (hit) return true
@@ -56,7 +56,8 @@ interface ZgrepOpts {
   onlyMatching: boolean
   maxCount: number | null
   // -b: the byte offset of each line's start or, under -o, of the match
-  // itself, in the field order GNU grep prints (name, line, byte).
+  // itself, in the field order GNU grep prints (name, line, byte). A line
+  // is matched as its byte view, so its length is already its byte count.
   byteOffsets: boolean
 }
 
@@ -66,8 +67,6 @@ function zgrepSearch(
   opts: ZgrepOpts,
   filename: string | null,
 ): [string[], boolean] {
-  const lines = splitLines(decodeText(data))
-  const offsets = opts.byteOffsets ? lineOffsets(lines) : []
   const reGlobal = opts.onlyMatching
     ? compilePosixRegex(
         pattern.source,
@@ -75,9 +74,8 @@ function zgrepSearch(
       )
     : null
   const matched: [number, number, string][] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    const start = opts.byteOffsets ? (offsets[i] ?? 0) : 0
+  let start = 0
+  for (const [i, line] of splitLines(byteView(data)).entries()) {
     if (opts.onlyMatching && !opts.invert && reGlobal !== null) {
       reGlobal.lastIndex = 0
       let m: RegExpExecArray | null
@@ -88,7 +86,7 @@ function zgrepSearch(
       }
       if (hits.length > 0) {
         for (const h of hits) {
-          matched.push([i + 1, matchOffset(start, line, matchStart(h)), matchText(h)])
+          matched.push([i + 1, start + matchStart(h), matchText(h)])
           if (opts.maxCount !== null && matched.length >= opts.maxCount) break
         }
       }
@@ -98,6 +96,7 @@ function zgrepSearch(
       if (hit) matched.push([i + 1, start, line])
     }
     if (opts.maxCount !== null && matched.length >= opts.maxCount) break
+    start += line.length + 1
   }
   if (opts.count) {
     const value =
@@ -109,7 +108,7 @@ function zgrepSearch(
     let prefix = ''
     if (filename !== null) prefix = filename + ':'
     prefix += prefixOf(opts.lineNumbers ? idx : null, opts.byteOffsets ? offset : null)
-    result.push(prefix + line)
+    result.push(prefix + textView(line))
   }
   return [result, matched.length > 0]
 }
@@ -179,7 +178,7 @@ export async function zgrepGeneric(
       ? null
       : neverMatch
         ? new RegExp(NEVER_MATCH)
-        : compilePattern(rawPattern, ignoreCase, fixedString, wholeWord, syntax)
+        : compilePattern(byteView(rawPattern), ignoreCase, fixedString, wholeWord, syntax)
 
   const multi = paths.length > 1
   const showFilename = forceH || (multi && !hideH)
@@ -203,7 +202,7 @@ export async function zgrepGeneric(
       door,
     })
     const data = await materialize(body)
-    errors += await io.stderrStr()
+    errors += decodeText(await io.materializeStderr())
     failed ||= io.exitCode === 1
     if (pattern === null) {
       if (filesWithoutMatch) allResults.push(p.rawPath)
@@ -234,7 +233,7 @@ export async function zgrepGeneric(
   // gzip's failure is exit 2 even beside a match, -q included (zgrep 1.13
   // takes the more serious status of gzip's and grep's per file).
   const exitCode = failed ? 2 : anyMatch ? 0 : 1
-  const stderr = errors === '' ? null : ENC.encode(errors)
+  const stderr = errors === '' ? null : encodeText(errors)
   // Under -m0, GNU still prints -L's operands even with -q.
   if ((quiet && maxCount !== 0) || allResults.length === 0)
     return [null, new IOResult({ exitCode, stderr })]

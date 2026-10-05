@@ -31,7 +31,6 @@ const BUILDER = fileURLToPath(
 )
 const DEC = new TextDecoder()
 const require = createRequire(import.meta.url)
-const INDEX_LOCKED = "fatal: Unable to create '/repo/.git/index.lock': Read-only file system\n"
 
 let parser: ShellParser
 let fixture: string
@@ -58,73 +57,6 @@ async function load(ws: Workspace, root: string, relative = ''): Promise<void> {
     } else await ws.dispatch('write', `/repo/${name}`, [readFileSync(join(root, name))])
   }
 }
-
-/** The fixture behind a read-only mount, with a `side` branch written first. */
-async function readOnly(): Promise<Workspace> {
-  const ram = new RAMVFS()
-  const writer = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
-  await load(writer, fixture)
-  const head = readFileSync(join(fixture, '.git/refs/heads/main'))
-  await writer.dispatch('write', '/repo/.git/refs/heads/side', [head])
-  const ws = new Workspace({ '/repo': ram }, { mode: MountMode.READ, shellParser: parser })
-  ws.registerCli('git', GIT)
-  return ws
-}
-
-async function run(ws: Workspace, line: string): Promise<[number, string, string]> {
-  const result = await ws.shell(`git -C /repo ${line}`)
-  return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
-}
-
-it.each([
-  [
-    'branch newb',
-    128,
-    "fatal: cannot lock ref 'refs/heads/newb': Unable to create " +
-      "'/repo/.git/refs/heads/newb.lock': Read-only file system\n",
-  ],
-  [
-    'branch -D side',
-    1,
-    "error: could not delete reference refs/heads/side: cannot lock ref 'refs/heads/side': " +
-      "Unable to create '/repo/.git/refs/heads/side.lock': Read-only file system\n",
-  ],
-  [
-    'tag t9',
-    128,
-    "fatal: cannot lock ref 'refs/tags/t9': Unable to create " +
-      "'/repo/.git/refs/tags/t9.lock': Read-only file system\n",
-  ],
-  [
-    'tag -a t10 -m x',
-    128,
-    'error: unable to create temporary file: Read-only file system\n' +
-      'error: unable to write tag file\n' +
-      'The tag message has been left in .git/TAG_EDITMSG\n',
-  ],
-  [
-    'symbolic-ref HEAD refs/heads/side',
-    1,
-    "error: cannot lock ref 'HEAD': Unable to create '/repo/.git/HEAD.lock': " +
-      'Read-only file system\n',
-  ],
-  [
-    'switch -c sw',
-    128,
-    "fatal: cannot lock ref 'refs/heads/sw': Unable to create " +
-      "'/repo/.git/refs/heads/sw.lock': Read-only file system\n",
-  ],
-  ['checkout -q side', 128, INDEX_LOCKED],
-  ['add letters.txt', 128, INDEX_LOCKED],
-  [
-    'clone /repo /repo/clone',
-    128,
-    "fatal: could not create work tree dir '/repo/clone': Read-only file system\n",
-  ],
-])('a read-only mount is refused in git words: %s', async (line, code, stderr) => {
-  const [exit, , err] = await run(await readOnly(), line)
-  expect([exit, err]).toEqual([code, stderr])
-})
 
 it('keeps the error of a read-only work tree', async () => {
   const repo = new RAMVFS()

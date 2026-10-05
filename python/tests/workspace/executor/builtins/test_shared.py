@@ -35,6 +35,7 @@ from mirage.workspace.executor.builtins.shared import (
     ok,
     operand_text,
     readonly_refusal,
+    record_delimiter,
     refusal,
     require_view,
     split_flags,
@@ -196,3 +197,20 @@ def test_is_count_word():
     assert is_count_word("+3")
     assert not is_count_word("x")
     assert not is_count_word("-")
+
+
+# bash 5.2 stops `read -d` and `mapfile -d` at the first byte of the
+# argument, not its first character. Mirrored in shared.test.ts.
+@pytest.mark.parametrize(
+    "text,delimiter",
+    [
+        (None, b"\n"),
+        ("", b"\0"),
+        (":", b":"),
+        ("ab", b"a"),
+        (chr(0xDCFF), b"\xff"),
+        ("\u00e9", b"\xc3"),
+    ],
+)
+def test_record_delimiter_is_the_first_byte(text, delimiter):
+    assert record_delimiter(text) == delimiter

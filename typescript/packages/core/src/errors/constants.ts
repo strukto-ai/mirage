@@ -28,7 +28,6 @@ export const CODE_ARMS: Record<string, FsCondition> = {
   EPERM: 'EPERM',
   ENOTEMPTY: 'ENOTEMPTY',
   EXDEV: 'EXDEV',
-  CROSS_MOUNT: 'CROSS_MOUNT',
   ENOTSUP: 'ENOTSUP',
   EOPNOTSUPP: 'ENOTSUP',
   ELOOP: 'ELOOP',

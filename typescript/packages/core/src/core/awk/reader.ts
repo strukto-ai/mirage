@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteView } from '../../shell/bytes.ts'
 import { takeRecord } from './builtins.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
@@ -26,7 +27,6 @@ import { YieldBudget } from '../../io/yield_budget.ts'
 export class RecordReader {
   private readonly pulled: AsyncIterator<Uint8Array>
   private readonly separator: () => string
-  private readonly decoder = new TextDecoder('utf-8', { fatal: false })
   private readonly budget = new YieldBudget()
   private buffer = ''
   private start = 0
@@ -48,10 +48,7 @@ export class RecordReader {
       if (this.final) return null
       const next = await this.pulled.next()
       this.final = next.done === true
-      const decoded =
-        next.done === true
-          ? this.decoder.decode()
-          : this.decoder.decode(next.value, { stream: true })
+      const decoded = next.done === true ? '' : byteView(next.value)
       this.buffer = this.buffer.slice(this.start) + decoded
       this.start = 0
     }

@@ -16,6 +16,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec, StatFn
 
 # GNU's `delimit_method_string` and `grouping_method_string`, in
@@ -132,7 +133,7 @@ def _skip_fields(text: str, count: int) -> str:
 
 
 def _comparison_key(line: bytes, flags: UniqFlags) -> str:
-    text = _skip_fields(line.decode(errors="replace"), flags.skip_fields)
+    text = _skip_fields(decode_text(line), flags.skip_fields)
     if flags.skip_chars > 0:
         text = text[flags.skip_chars :]
     if flags.check_chars is not None:
@@ -159,7 +160,7 @@ def _format_record(
     line: bytes, count: int, flags: UniqFlags, separator: bytes
 ) -> bytes:
     if flags.count:
-        return f"{count:>7} ".encode() + line + separator
+        return encode_text(f"{count:>7} ") + line + separator
     return line + separator
 
 
@@ -255,10 +256,10 @@ async def uniq(
         )
     except UsageError as exc:
         return None, IOResult(
-            exit_code=exc.exit_code, stderr=(str(exc) + "\n").encode()
+            exit_code=exc.exit_code, stderr=encode_text(str(exc) + "\n")
         )
     except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
+        return None, IOResult(exit_code=1, stderr=encode_text(str(exc) + "\n"))
     read_stream = stdin_stream(read_stream, stdin)
     if paths and stat is not None:
         # The input is stat'ed before the lazy stream starts, so a missing

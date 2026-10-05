@@ -33,18 +33,26 @@
             "js": "const f = std.open('/data/seed.txt', 'wx')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileExistsError\n",
-            "ops_absent": [
-              "create /data/seed.txt",
-              "truncate /data/seed.txt",
-              "write /data/seed.txt"
-            ]
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\n",
+              "ops_absent": [
+                "create /data/seed.txt",
+                "truncate /data/seed.txt",
+                "write /data/seed.txt"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /data/seed.txt",
+                "truncate /data/seed.txt",
+                "write /data/seed.txt"
+              ]
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "refused\n"
-            },
             "monty": {
               "exit": 1,
               "stdout": "",
@@ -104,11 +112,6 @@
               "exit": 1,
               "ops_contain": [],
               "stderr_contains": "exclusive creation mode is not supported"
-            },
-            "pyodide": {
-              "ops_contain": [
-                "write /data/fresh.txt"
-              ]
             }
           }
         },
@@ -167,24 +170,34 @@
             "js": "const f = std.open('/data/lnk', 'wx')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileExistsError\n",
-            "ops_absent": [
-              "create /data/lnk",
-              "create /data/gone"
-            ]
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\n",
+              "ops_absent": [
+                "create /data/lnk",
+                "create /data/gone"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /data/lnk",
+                "create /data/gone"
+              ]
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "refused\n"
-            },
             "monty": {
               "exit": 1,
               "stdout": "",
               "stderr_contains": "exclusive creation mode is not supported"
             },
             "pyodide": {
-              "stdout": "opened\n"
+              "stdout": "opened\n",
+              "ops_absent": [
+                "create /data/lnk"
+              ]
             }
           }
         }

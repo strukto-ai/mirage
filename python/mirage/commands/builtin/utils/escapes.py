@@ -43,11 +43,10 @@ def interpret_escapes(text: str) -> str:
 
     Not covered: GNU also writes a warning to stderr for that ambiguous
     case (exit status is unaffected), which this pure reader has no channel
-    for. Values 128-255 name a byte in GNU and a code point here, which is
-    the same str-vs-bytes limit the rest of tr already carries.
+    for. The caller supplies a byte view so each character names one byte.
 
     Args:
-        text (str): One SET operand as typed on the command line.
+        text (str): One SET operand in its byte view.
 
     Returns:
         str: The operand with every escape sequence resolved.

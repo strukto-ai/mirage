@@ -27,12 +27,13 @@ import {
   textSearchResults,
 } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
 import { grepLines } from '@struktoai/mirage-core/commands/builtin/grep_scan'
+import { formatRecords } from '@struktoai/mirage-core/commands/builtin/utils/output'
 import type { GrepLinesOptions } from '@struktoai/mirage-core/commands/builtin/grep_scan'
 import { FlagView, specOf } from '@struktoai/mirage-core/commands/spec/index'
 import { command } from '@struktoai/mirage-core/commands/config'
 import type { CommandFnResult, CommandOpts } from '@struktoai/mirage-core/commands/config'
 import { IOResult } from '@struktoai/mirage-core/io/types'
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import { byteView, textView } from '@struktoai/mirage-core/shell/bytes'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
@@ -45,8 +46,6 @@ import { searchAndFormat } from '../../../core/email/search.ts'
 import { IO } from './io.ts'
 
 const resolveGlob = resolveGlobOf(IO)
-
-const ENC = new TextEncoder()
 
 // The email push-down is not a "print the provider's answer" push-down: IMAP
 // search only picks the candidate messages, and `grepLines` then runs the
@@ -127,8 +126,16 @@ async function grepCommand(
       )
       if (textSearchResults(pairs.map(([, text]) => text))) {
         // The same dialect the literal was read off: a basic expression
-        // compiled as an extended one matches a different language.
-        const pat = compilePattern(pattern, fl.asBool('i'), fl.asBool('F'), fl.asBool('w'), syntax)
+        // compiled as an extended one matches a different language. grep
+        // runs in the C locale, so the pattern and each line meet as byte
+        // views, as they do in the generic scan.
+        const pat = compilePattern(
+          byteView(pattern),
+          fl.asBool('i'),
+          fl.asBool('F'),
+          fl.asBool('w'),
+          syntax,
+        )
         const lineOpts: GrepLinesOptions = {
           invert: false,
           lineNumbers: fl.asBool('n'),
@@ -139,17 +146,16 @@ async function grepCommand(
         }
         const lines: string[] = []
         for (const [vfsPath, msgText] of pairs) {
-          const matched = grepLines(vfsPath, messageLines(msgText), pat, lineOpts)
+          const matched = grepLines(vfsPath, messageLines(msgText).map(byteView), pat, lineOpts)
           if (matched.length === 0) continue
           if (lineOpts.filesOnly) {
             lines.push(vfsPath)
             continue
           }
-          for (const line of matched) lines.push(`${vfsPath}:${line}`)
+          for (const line of matched) lines.push(`${vfsPath}:${textView(line)}`)
         }
         if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-        const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-        return [out, new IOResult()]
+        return [formatRecords(lines), new IOResult()]
       }
     }
   }

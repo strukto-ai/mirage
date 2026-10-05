@@ -6,6 +6,7 @@ import glob
 import importlib
 import io
 import json
+import operator
 import os
 import shutil
 import subprocess
@@ -15,18 +16,54 @@ import types
 import warnings
 from contextlib import contextmanager
 
+import _mirage_exit
 import _mirage_process
 import _mirage_xattr
 
 _process_active = False
 _inherited_inputs = {}
 _process_stdio = None
+_exit_status = None
 _FLAG_FIELDS = tuple(
     name
     for name, field in vars(type(sys.flags)).items()
     if isinstance(field, types.MemberDescriptorType)
 )
 _FLAG_INDEX = {name: index for index, name in enumerate(_FLAG_FIELDS)}
+
+
+class ProgramExit(BaseException):
+    """``os._exit`` inside a run.
+
+    Emscripten's exit unwinds the C stack past every Python frame, so a
+    run that let it through would never restore what it swapped in. A run
+    swaps ``os._exit`` for :func:`program_exit` and ends with the code
+    this carries.
+
+    Python cannot raise an exception a guest is unable to catch, so what
+    a real exit guarantees is kept another way: once a guest calls it,
+    nothing it writes reaches the mount or its output, and the run ends
+    with this code whatever the guest does after.
+
+    Args:
+        code (int): the exit status.
+    """
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def program_exit(code):
+    """End the run with ``code``, as ``os._exit`` ends a process.
+
+    Args:
+        code (int): the exit status.
+    """
+    global _exit_status
+    _exit_status = operator.index(code)
+    _mirage_exit.seal()
+    raise ProgramExit(_exit_status)
 
 
 def _process_call(op, **params):
@@ -427,14 +464,16 @@ class OutputCapture(io.RawIOBase):
 
     def write(self, data):
         self._checkClosed()
-        self.data.extend(data)
+        if _exit_status is None:
+            self.data.extend(data)
         return len(data)
 
     def diagnostic(self, text):
         # Host diagnostics remain available even after the guest closes stderr.
         if self.text.buffer is not None and not self.text.closed:
             self.text.flush()
-        self.data.extend(text.encode("utf-8", errors="replace"))
+        if _exit_status is None:
+            self.data.extend(text.encode("utf-8", errors="replace"))
 
     def __exit__(self, *exc):
         try:
@@ -592,7 +631,8 @@ def interpreter_state(flags, filename, script, stderr):
 
 
 def run(request, arm_interrupt, disarm_interrupt):
-    global _process_stdio, _process_active
+    global _process_stdio, _process_active, _exit_status
+    _exit_status = None
     user_code = request["code"]
     init_flags = request["flags"]
     argv = request["argv"]
@@ -605,6 +645,7 @@ def run(request, arm_interrupt, disarm_interrupt):
     saved_getcwd = os.getcwd
     saved_cwd = saved_getcwd()
     saved_chdir = os.chdir
+    saved_exit = os._exit
     saved_env = dict(os.environ)
     saved_stdin = sys.stdin
     saved_stdout = sys.stdout
@@ -657,6 +698,7 @@ def run(request, arm_interrupt, disarm_interrupt):
                         if stdin_bytes is not None
                         else None,
                     )
+                os._exit = program_exit
                 try:
                     try:
                         arm_interrupt()
@@ -684,6 +726,8 @@ def run(request, arm_interrupt, disarm_interrupt):
                     else:
                         err_bytes.diagnostic(str(code) + "\n")
                         exit_code = 1
+                except ProgramExit as e:
+                    exit_code = e.code
                 except BaseException as e:
                     err_bytes.diagnostic(
                         "".join(
@@ -716,8 +760,12 @@ def run(request, arm_interrupt, disarm_interrupt):
             sys.argv = saved_argv
             os.chdir = saved_chdir
             os.getcwd = saved_getcwd
+            os._exit = saved_exit
             saved_chdir(saved_cwd)
 
+    if _exit_status is not None:
+        exit_code = _exit_status
+        _exit_status = None
     return (out_bytes.to_list(), err_bytes.to_list(), exit_code)
 
 
@@ -770,6 +818,7 @@ def evaluate(user_code, eval_inputs, cwd=""):
 
 
 def repl(user_code, repl_session_id, repl_inputs, cwd=""):
+    global _exit_status
     sid = repl_session_id
     if sid not in repl_session_globals:
         repl_session_cwds[sid] = cwd or os.getcwd()
@@ -808,11 +857,13 @@ def repl(user_code, repl_session_id, repl_inputs, cwd=""):
             saved_stdout = sys.stdout
             saved_stderr = sys.stderr
             saved_stdin = sys.stdin
+            saved_exit = os._exit
             sys.stdout = out_text
             sys.stderr = err_text
             sys.stdin = io.TextIOWrapper(
                 io.BytesIO(b""), encoding="utf-8", errors="replace"
             )
+            os._exit = program_exit
             try:
                 with working_directory(repl_session_cwds[sid], sid):
                     exec(codeobj, repl_globals)
@@ -828,6 +879,9 @@ def repl(user_code, repl_session_id, repl_inputs, cwd=""):
                     err_bytes.diagnostic(str(code) + "\n")
                     exit_code = 1
                 status = "exit"
+            except ProgramExit as e:
+                exit_code = e.code
+                status = "exit"
             except BaseException:
                 err_bytes.diagnostic(traceback.format_exc())
                 exit_code = 1
@@ -835,7 +889,11 @@ def repl(user_code, repl_session_id, repl_inputs, cwd=""):
                 sys.stdout = saved_stdout
                 sys.stderr = saved_stderr
                 sys.stdin = saved_stdin
+                os._exit = saved_exit
 
+    if _exit_status is not None:
+        exit_code, status = _exit_status, "exit"
+        _exit_status = None
     return (out_bytes.to_list(), err_bytes.to_list(), exit_code, status)
 
 

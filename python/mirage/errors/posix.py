@@ -34,11 +34,6 @@ POSIX: dict[FsCondition, PosixErrno] = {
     FsCondition.EPERM: PosixErrno(errno.EPERM, "Operation not permitted"),
     FsCondition.ENOTEMPTY: PosixErrno(errno.ENOTEMPTY, "Directory not empty"),
     FsCondition.EXDEV: PosixErrno(errno.EXDEV, "Invalid cross-device link"),
-    # A cross-mount rename is EXDEV to every POSIX consumer: the kernel
-    # reads it as "not one filesystem" and mv falls back to copy+unlink.
-    FsCondition.CROSS_MOUNT: PosixErrno(
-        errno.EXDEV, "Invalid cross-device link"
-    ),
     FsCondition.ENOTSUP: PosixErrno(errno.ENOTSUP, "Operation not supported"),
     FsCondition.ELOOP: PosixErrno(
         errno.ELOOP, "Too many levels of symbolic links"
@@ -63,7 +58,6 @@ LINUX_ERRNO: dict[FsCondition, int] = {
     FsCondition.EPERM: 1,
     FsCondition.ENOTEMPTY: 39,
     FsCondition.EXDEV: 18,
-    FsCondition.CROSS_MOUNT: 18,
     FsCondition.ENOTSUP: 95,
     FsCondition.ELOOP: 40,
     FsCondition.EINVAL: 22,

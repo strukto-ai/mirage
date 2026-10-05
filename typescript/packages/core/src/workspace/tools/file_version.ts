@@ -12,10 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Ops } from '@struktoai/mirage-core/ops/ops'
-import { encodeBase64 } from '@struktoai/mirage-core/utils/base64'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
-import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { Ops } from '../../ops/ops.ts'
+import { encodeBase64 } from '../../utils/base64.ts'
 
 export class StaleMirageFileError extends Error {
   readonly path: string
@@ -51,22 +49,15 @@ export class FileVersionTracker {
   private readonly writes = new Map<string, number>()
   private readonly seen = new Set<string>()
 
-  /** The op facade reads and writes run through, as the tracker's session. */
-  readonly vfs: Ops
-
   /**
-   * @param ws The workspace to read and write through.
+   * @param vfs The file API to read and write through, run as the
+   *   session whose reads are tracked.
    * @param enabled False serves every call unchecked.
-   * @param sessionId The session the reads and writes run as; the
-   *   workspace's default session when absent.
    */
   constructor(
-    private readonly ws: Workspace,
+    readonly vfs: Ops,
     private readonly enabled = true,
-    sessionId?: string,
-  ) {
-    this.vfs = sessionId === undefined ? ws.vfs : new Session(ws, sessionId).vfs
-  }
+  ) {}
 
   // The stamp key for a path: one key per file, not per spelling.
   // readFile and writeFile follow the namespace symlink table, so
@@ -75,7 +66,7 @@ export class FileVersionTracker {
   // through the other name would find no prior version and skip the
   // staleness check entirely.
   private key(path: string): string {
-    return this.ws.namespace.follow(path)
+    return this.vfs.links === null ? path : this.vfs.links.follow(path)
   }
 
   private async currentVersion(path: string): Promise<string | null> {

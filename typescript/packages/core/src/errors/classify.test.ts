@@ -50,9 +50,8 @@ describe('classify', () => {
   })
 
   it('names a cross-mount rename its own condition', () => {
-    // The per-boundary number is the table's decision: POSIX says
-    // EXDEV, the WASI wire deliberately says ENOENT (finding 8).
-    expect(classify(new CrossMountError('/a/x', '/b/x'))).toBe('CROSS_MOUNT')
+    // The per-boundary number is each dialect table's decision.
+    expect(classify(new CrossMountError('/a/x', '/b/x'))).toBe('EXDEV')
   })
 
   it('reads the constructors built by utils/errors', () => {

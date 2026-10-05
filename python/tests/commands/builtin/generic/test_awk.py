@@ -155,23 +155,37 @@ async def test_awk_runs_a_program_on_stdin(program, stdin, expected):
     assert await _run_stdin(program, stdin) == expected
 
 
+@pytest.mark.asyncio
+async def test_awk_without_a_program_raises_usage():
+    rb, rs = _make_backend({})
+    with pytest.raises(UsageError, match="usage"):
+        await awk([], (), None, read_bytes=rb, read_stream=rs, stdin=b"a\n")
+
+
 @pytest.mark.parametrize(
-    "texts, match",
+    "program, message",
     [
-        ((), "usage"),
         (
-            ("$1 ~ /(a/ {print}",),
-            r"awk: syntax error in regular expression \(a at source line 1",
+            "$1 ~ /(a/ {print}",
+            b"awk: syntax error in regular expression (a at source line 1\n",
         ),
-        (("/(a/",), "syntax error in regular expression"),
-        (("{print $(}",), "syntax error"),
+        (
+            "/\u00e9(/",
+            b"awk: syntax error in regular expression \xc3\xa9( at source "
+            b"line 1\n",
+        ),
+        (
+            "BEGIN{print 1 \udcff}",
+            b"awk: syntax error: unexpected character '\xff'\n",
+        ),
+        ("{print $(}", b"awk: syntax error at '}': expected an expression\n"),
     ],
 )
 @pytest.mark.asyncio
-async def test_awk_usage_errors_raise(texts, match):
-    rb, rs = _make_backend({})
-    with pytest.raises(UsageError, match=match):
-        await awk([], texts, None, read_bytes=rb, read_stream=rs, stdin=b"a\n")
+async def test_awk_syntax_errors_exit_2_naming_the_program_bytes(
+    program, message
+):
+    assert await _run_io(program, b"a\n") == ("", 2, message)
 
 
 async def _run_io(program: str, stdin: bytes) -> tuple[str, int, bytes]:

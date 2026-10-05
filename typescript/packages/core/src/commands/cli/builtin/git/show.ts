@@ -23,7 +23,7 @@ import { concat } from '../../../../io/cachable_iterator.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { GitError } from './errors.ts'
+import { GitError, UsageError } from './errors.ts'
 import {
   FULL_SHA,
   oneline,
@@ -46,7 +46,15 @@ import { identDate } from './ref_fields.ts'
 import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit, resolveObject } from './revparse.ts'
-import { checkOperands, escaped, fatal, revisionArg, splitMarked, startPoint } from './util.ts'
+import {
+  checkOperands,
+  fatal,
+  optionOperand,
+  revisionArg,
+  splitMarked,
+  startPoint,
+  verbUsage,
+} from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
@@ -219,7 +227,7 @@ export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands(texts, undefined, escaped(inv.argv))
+    checkOperands(inv, texts)
     const [revisions, paths] = splitMarked(texts, inv.argv)
     const repo = await opened(fl, doors)
     const base = parseShowFlags(
@@ -293,6 +301,7 @@ export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
 export async function diffTree(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
+    if (optionOperand(inv, inv.texts) !== null) throw new UsageError('', verbUsage(inv))
     const repo = await opened(fl, inv.doors ?? {})
     const parsed = parseDiffFlags(
       fl,

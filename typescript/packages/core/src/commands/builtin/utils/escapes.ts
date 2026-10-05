@@ -41,8 +41,7 @@ const MAX_OCTAL = 0o400
  *
  * Not covered: GNU also writes a warning to stderr for that ambiguous case
  * (exit status is unaffected), which this pure reader has no channel for.
- * Values 128-255 name a byte in GNU and a code point here, which is the
- * same string-vs-bytes limit the rest of tr already carries.
+ * The caller supplies a byte view so each character names one byte.
  *
  * Mirrors Python's `interpret_escapes`.
  */

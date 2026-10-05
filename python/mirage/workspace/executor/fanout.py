@@ -27,6 +27,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.utils.errors import FS_ERRORS, format_fs_error
 from mirage.workspace.mount import (
@@ -121,7 +122,7 @@ async def _fan_out_traversal(
     except UsageError as exc:
         stdout, io = (
             None,
-            IOResult(exit_code=exc.exit_code, stderr=f"{exc}\n".encode()),
+            IOResult(exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")),
         )
     except FS_ERRORS as exc:
         stdout, io = (

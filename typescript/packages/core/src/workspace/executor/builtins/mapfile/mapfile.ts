@@ -23,9 +23,10 @@ import type { SessionView } from '../../../../ops/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionView, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { fail, requireView } from '../shared.ts'
+import { fail, recordDelimiter, requireView } from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat } from '../../../../io/cachable_iterator.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 
 const USAGE =
   'mapfile: usage: mapfile [-d delim] [-n count] [-O origin] [-s count] [-t] [-u fd] [-C callback] [-c quantum] [array]'
@@ -65,8 +66,7 @@ export async function handleMapfile(
     )
   }
   const flags = parse.flags
-  let delim = 10
-  if (typeof flags.d === 'string') delim = flags.d.length > 0 ? flags.d.charCodeAt(0) : 0
+  const delim = recordDelimiter(typeof flags.d === 'string' ? flags.d : null)
   let limit = 0
   let origin = 0
   let skip = 0
@@ -102,7 +102,6 @@ export async function handleMapfile(
   const buffer = stdin !== null ? lineBuffer(stdin) : null
   const existing = visibleArrays(session)[name]
   const arr: ShellArray = existing !== undefined && 'O' in flags ? [...existing] : []
-  const dec = new TextDecoder()
   let index = origin
   let stored = 0
   let seen = 0
@@ -113,8 +112,7 @@ export async function handleMapfile(
     if (!found && data.byteLength === 0) break
     seen++
     if (seen <= skip) continue
-    let text = dec.decode(data)
-    if (found && !strip) text += String.fromCharCode(delim)
+    const text = decodeText(found && !strip ? concat([data, Uint8Array.of(delim)]) : data)
     arraySet(arr, index, text)
     stored++
     if (callback !== null && stored % quantum === 0) {

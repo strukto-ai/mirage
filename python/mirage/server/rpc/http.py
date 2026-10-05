@@ -24,7 +24,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from mirage.agents.tool_operations import MirageToolOperations
 from mirage.server.inflight import InFlight
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.jobs import JobStatus, JobTable
@@ -46,6 +45,7 @@ from mirage.server.rpc.server import (
 from mirage.server.rpc.server import Response as RpcResponse
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
+from mirage.workspace.tools.tool_operations import MirageToolOperations
 
 RPC_PATH = "/v1/workspaces/{workspace_id}/rpc"
 

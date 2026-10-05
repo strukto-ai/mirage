@@ -24,7 +24,11 @@ from mirage.commands.cli.builtin.git.repo import config_values
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.commands.cli.builtin.git.util import fatal, maybe_bool
+from mirage.commands.cli.builtin.git.util import (
+    check_operands,
+    fatal,
+    maybe_bool,
+)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -207,10 +211,11 @@ async def reflog(
     """
     fl = FlagView(inv.flags)
     try:
+        texts = inv.texts[1:] if inv.texts[:1] == ("show",) else inv.texts
+        check_operands(inv, texts)
         doors = inv.doors or CLIDoors()
         repo, location = await opened(fl, doors)
         assert doors.dispatch is not None
-        texts = inv.texts[1:] if inv.texts[:1] == ("show",) else inv.texts
         revision = texts[0] if texts else HEAD
         await asyncio.to_thread(resolve_commit, repo, revision)
         name, data = await _named_log(doors.dispatch, location, revision)

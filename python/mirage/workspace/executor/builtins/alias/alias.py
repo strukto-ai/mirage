@@ -14,6 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.alias.constants import (
@@ -87,8 +88,8 @@ async def handle_alias(
             lines.append(f"alias {name}={single_quote(session.aliases[name])}")
         else:
             errors.append(f"bash: alias: {name}: not found")
-    out = ("\n".join(lines) + "\n").encode() if lines else None
-    err = ("\n".join(errors) + "\n").encode() if errors else None
+    out = encode_text("\n".join(lines) + "\n") if lines else None
+    err = encode_text("\n".join(errors) + "\n") if errors else None
     code = 1 if errors else 0
     return (
         out,
@@ -131,7 +132,7 @@ async def handle_unalias(
             session._alias_marks.pop(name, None)
         else:
             errors.append(f"bash: unalias: {name}: not found")
-    err = ("\n".join(errors) + "\n").encode() if errors else None
+    err = encode_text("\n".join(errors) + "\n") if errors else None
     code = 1 if errors else 0
     return (
         None,

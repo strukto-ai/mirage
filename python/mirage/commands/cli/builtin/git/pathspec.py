@@ -21,6 +21,7 @@ from mirage.commands.cli.builtin.git.errors import (
     UnsupportedPathspecError,
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.shell.bytes import byte_view
 from mirage.utils.fnmatch import fnmatch
 
 MAGIC = ":"
@@ -163,13 +164,4 @@ def _selects(path: str, pattern: str, directory: bool) -> bool:
         return True
     if directory and (path == stem or under(stem, path)):
         return True
-    return fnmatch(_byte_text(path), _byte_text(pattern))
-
-
-def _byte_text(text: str) -> str:
-    """A path's bytes one character each, for a byte-wise glob.
-
-    Args:
-        text (str): surrogate-escaped text.
-    """
-    return text.encode("utf-8", "surrogateescape").decode("latin-1")
+    return fnmatch(byte_view(path), byte_view(pattern))

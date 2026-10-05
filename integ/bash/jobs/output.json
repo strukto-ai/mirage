@@ -95,7 +95,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(sleep 0.1; echo a) & (echo b) & wait",
+      "command": "(sleep 1; echo a) & (echo b) & wait",
       "expect": {
         "exit": 0,
         "stdout": "b\na\n",
@@ -129,7 +129,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( (sleep 0.05; echo first) & echo second & wait ) & wait",
+      "command": "( (sleep 1; echo first) & echo second & wait ) & wait",
       "expect": {
         "exit": 0,
         "stdout": "second\nfirst\n",
@@ -231,7 +231,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=$( (sleep 0.05; echo in) & echo out ); echo \"[$x]\"",
+      "command": "x=$( (sleep 1; echo in) & echo out ); echo \"[$x]\"",
       "expect": {
         "exit": 0,
         "stdout": "[out\nin]\n",
@@ -367,7 +367,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( { (sleep 0.05; echo j) & echo s; } | cat )",
+      "command": "( { (sleep 1; echo j) & echo s; } | cat )",
       "expect": {
         "exit": 0,
         "stdout": "s\nj\n",
@@ -469,7 +469,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=$( (sleep 0.1; echo j >&3) 3>&1 >/dev/null & echo r); echo \"$x\"",
+      "command": "x=$( (sleep 1; echo j >&3) 3>&1 >/dev/null & echo r); echo \"$x\"",
       "expect": {
         "exit": 0,
         "stdout": "r\nj\n",

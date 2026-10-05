@@ -24,10 +24,10 @@ import { result } from '../shared.ts'
 import type { Result } from '../types.ts'
 import { GETFATTR_USAGE, attrError, attrOperands, attrUsageRefusal } from './xattr.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 const ENCODINGS = new Set(['text', 'hex', 'base64'])
 const DEFAULT_MATCH = '^user\\.'
-const ENC = new TextEncoder()
 
 /**
  * One value the way getfattr prints it after `name=`. With no `-e` the
@@ -45,13 +45,13 @@ export function encodeValue(value: Uint8Array, encoding: string | null): Uint8Ar
     chosen = body.length >= unprintable * 8 ? 'text' : 'base64'
   }
   if (chosen === 'hex') {
-    return ENC.encode('0x' + [...value].map((b) => b.toString(16).padStart(2, '0')).join(''))
+    return encodeText('0x' + [...value].map((b) => b.toString(16).padStart(2, '0')).join(''))
   }
-  if (chosen === 'base64') return ENC.encode('0s' + encodeBase64(value))
+  if (chosen === 'base64') return encodeText('0s' + encodeBase64(value))
   const out: number[] = [0x22]
   for (const b of body) {
     if (b === 0 || b === 0x0a || b === 0x0d)
-      out.push(...ENC.encode('\\' + b.toString(8).padStart(3, '0')))
+      out.push(...encodeText('\\' + b.toString(8).padStart(3, '0')))
     else if (b === 0x22 || b === 0x5c) out.push(0x5c, b)
     else out.push(b)
   }
@@ -133,7 +133,7 @@ async function fileBlock(
   let missing = false
   for (const attr of names) {
     if (!want.dump && !want.onlyValues) {
-      block.push(...ENC.encode(`${attr}\n`))
+      block.push(...encodeText(`${attr}\n`))
       continue
     }
     let value: Uint8Array
@@ -149,9 +149,9 @@ async function fileBlock(
       continue
     }
     if (want.onlyValues) out.push(...value)
-    else block.push(...ENC.encode(`${attr}=`), ...encodeValue(value, want.encoding), 0x0a)
+    else block.push(...encodeText(`${attr}=`), ...encodeValue(value, want.encoding), 0x0a)
   }
-  if (block.length > 0) out.push(...ENC.encode(`# file: ${header}\n`), ...block, 0x0a)
+  if (block.length > 0) out.push(...encodeText(`# file: ${header}\n`), ...block, 0x0a)
   return [Uint8Array.from(out), missing]
 }
 

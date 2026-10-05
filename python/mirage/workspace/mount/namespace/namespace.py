@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from mirage.shell.bytes import encode_text
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, MountMode
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.path import ancestors, glob_prefix_match, resolve_symlinks
@@ -138,7 +139,7 @@ def link_stat(name: str, meta: NodeMeta) -> FileStat:
     target = meta.target or ""
     return FileStat(
         name=name,
-        size=len(target.encode("utf-8")),
+        size=len(encode_text(target)),
         modified=epoch_to_iso(meta.mtime) if meta.mtime is not None else None,
         type=FileType.SYMLINK,
         uid=meta.uid,

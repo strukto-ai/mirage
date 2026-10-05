@@ -284,6 +284,10 @@ def as_os_error(err: Exception) -> OSError:
     code = classify_error(err)
     if code == errno.EIO and not isinstance(err, (OSError, ValueError)):
         logger.warning("sftp: unclassified error: %r", err)
+    if code in (errno.EROFS, errno.EPERM):
+        # SFTP v3 says permission denied for every refused write; asyncssh
+        # would send EROFS as write-protect, which a v3 client cannot read.
+        return OSError(errno.EACCES, os.strerror(code))
     return OSError(code, os.strerror(code))
 
 

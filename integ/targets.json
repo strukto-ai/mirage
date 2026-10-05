@@ -2752,7 +2752,14 @@
           "backend": "tmpdir",
           "fixture": "git"
         }
-      ]
+      ],
+      "sessions": {
+        "reader": {
+          "mounts": {
+            "/repo": "read"
+          }
+        }
+      }
     },
     {
       "id": "git-ram",
@@ -2770,7 +2777,14 @@
           "backend": "memory",
           "fixture": "git"
         }
-      ]
+      ],
+      "sessions": {
+        "reader": {
+          "mounts": {
+            "/repo": "read"
+          }
+        }
+      }
     },
     {
       "id": "ram-commands",

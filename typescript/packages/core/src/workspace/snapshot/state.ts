@@ -576,6 +576,7 @@ async function restoreSessions(
   // and the discovery record's pointer follows it. A state without the
   // pointer (older commit metas) keeps the live default, mirroring the
   // Python None-guard.
+  ws.forgetReads()
   if (state.default_session_id != null) {
     await ws.adoptDefaultSession(state.default_session_id)
   }

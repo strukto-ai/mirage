@@ -59,11 +59,6 @@
           "expect": {
             "exit": 0,
             "stdout": "bytes"
-          },
-          "expect_on": {
-            "quickjs@typescript": {
-              "stdout": "[object ArrayBuffer]"
-            }
           }
         },
         {
@@ -134,23 +129,20 @@
             "js": "const e = {}\nconst w = std.open('/ro/x.txt', 'w', e)\nconsole.log(w === null, e.errno)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "PermissionError\n"
-          },
-          "expect_on": {
-            "monty@typescript": {
+            "python": {
+              "exit": 0,
               "stdout": "OSError\n"
             },
+            "js": {
+              "exit": 0,
+              "stdout": "true 69\n"
+            }
+          },
+          "expect_on": {
             "pyodide": {
               "exit": 1,
               "stdout": "",
-              "stderr_contains": "failed to write /ro/x.txt on mount: mount /ro/ is read-only"
-            },
-            "quickjs": {
-              "stdout": "true 2\n"
-            },
-            "quickjs@typescript": {
-              "stdout": "true undefined\n"
+              "stderr_contains": "failed to create /ro/x.txt on mount: mount /ro/ is read-only"
             }
           }
         },
@@ -160,16 +152,13 @@
           },
           "expect": {
             "exit": 0,
-            "stdout": "PermissionError\n"
+            "stdout": "OSError\n"
           },
           "expect_on": {
-            "monty@typescript": {
-              "stdout": "OSError\n"
-            },
             "pyodide": {
               "exit": 1,
               "stdout": "",
-              "stderr_contains": "failed to write /ro/y.txt on mount: mount /ro/ is read-only"
+              "stderr_contains": "failed to create /ro/y.txt on mount: mount /ro/ is read-only"
             }
           }
         },
@@ -242,6 +231,133 @@
               "stdout": "",
               "stderr_contains": "No such file or directory: '/f.txt'"
             }
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_write_loop_reaches_the_mount_as_one_op",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "with open('/data/log.txt', 'w') as f:\n    for _ in range(200):\n        f.write('x')",
+            "js": "const f = std.open('/data/log.txt', 'w')\nfor (let i = 0; i < 200; i++) f.puts('x')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "ops_count": {
+              "write /data/log.txt": 0,
+              "pwrite /data/log.txt": 1,
+              "append /data/log.txt": 0
+            }
+          },
+          "expect_on": {
+            "s3": {
+              "ops_count": {
+                "write /data/log.txt": 1,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            },
+            "redis": {
+              "ops_count": {
+                "write /data/log.txt": 1,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            },
+            "monty": {
+              "ops_count": {
+                "write /data/log.txt": 0,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 200
+              }
+            },
+            "monty@redis": {
+              "ops_count": {
+                "write /data/log.txt": 0,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 200
+              }
+            },
+            "monty@s3": {
+              "ops_count": {
+                "write /data/log.txt": 200,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            }
+          }
+        },
+        {
+          "command": "wc -c /data/log.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "200 /data/log.txt\n"
+          }
+        },
+        {
+          "program": {
+            "python": "with open('/data/log.txt', 'a') as f:\n    for _ in range(200):\n        f.write('y')",
+            "js": "const f = std.open('/data/log.txt', 'a')\nfor (let i = 0; i < 200; i++) f.puts('y')\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "ops_count": {
+              "write /data/log.txt": 0,
+              "pwrite /data/log.txt": 0,
+              "append /data/log.txt": 1
+            }
+          },
+          "expect_on": {
+            "s3": {
+              "ops_count": {
+                "write /data/log.txt": 1,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            },
+            "monty": {
+              "ops_count": {
+                "write /data/log.txt": 0,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 200
+              }
+            },
+            "monty@s3": {
+              "ops_count": {
+                "write /data/log.txt": 200,
+                "pwrite /data/log.txt": 0,
+                "append /data/log.txt": 0
+              }
+            }
+          }
+        },
+        {
+          "command": "wc -c /data/log.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "400 /data/log.txt\n"
           }
         }
       ]

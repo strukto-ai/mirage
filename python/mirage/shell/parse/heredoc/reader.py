@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.heredoc import constants
 from mirage.shell.parse.heredoc.delimiter import (
     clean_delimiter,
@@ -134,7 +135,7 @@ def read_heredocs(
         end = delimiter_end(data, operator.word_start)
         if end is None:
             continue
-        token = data[operator.word_start : end].decode()
+        token = decode_text(data[operator.word_start : end])
         delimiter = clean_delimiter(token)
         quoted = delimiter_quoted(token)
         line_end = operator_line_end(data, end)
@@ -146,7 +147,7 @@ def read_heredocs(
             else min(line_end + 1, len(data))
         )
         result = read_body(
-            data, start, delimiter.encode(), quoted, operator.allows_indent
+            data, start, encode_text(delimiter), quoted, operator.allows_indent
         )
         cursor = result.end
         line = (
@@ -242,7 +243,7 @@ def discover_heredocs(
                     HeredocOperator(
                         start,
                         end,
-                        clean_delimiter(data[start:end].decode()),
+                        clean_delimiter(decode_text(data[start:end])),
                         dash,
                     )
                 )

@@ -96,9 +96,15 @@ GNU_READ_EXIT = {
 # silently, because zgrep runs gzip with -q, which keeps the directory
 # warning to itself. jq 1.7 was silent too, but jq 1.8.2, which both
 # hosts follow, opens the directory, fails at its first read and says so
-# without naming it.
+# without naming it. glibc's iconv does the same: a directory opens and
+# the read fails as "error while reading the input".
 SILENT_HERE = {"zgrep x {p}"}
-BARE_HERE = {"jq . {p}": "jq: error: Is a directory\n"}
+BARE_HERE = {
+    "jq . {p}": "jq: error: Is a directory\n",
+    "iconv -f utf-8 -t utf-8 {p}": (
+        "iconv: error while reading the input: Is a directory\n"
+    ),
+}
 
 
 # `diff` is absent on purpose. GNU diff DESCENDS into a directory

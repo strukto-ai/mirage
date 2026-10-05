@@ -22,6 +22,7 @@ import type { FlagValue } from '../../commands/spec/types.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { NamespaceView, SessionView } from '../../ops/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import type { PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { formatFsError, isFsError } from '../../utils/errors.ts'
@@ -106,7 +107,7 @@ export async function fanOutTraversal(
       stdout = null
       io = new IOResult({
         exitCode: err.exitCode,
-        stderr: new TextEncoder().encode(`${err.message}\n`),
+        stderr: encodeText(`${err.message}\n`),
       })
     } else if (isFsError(err)) {
       stdout = null

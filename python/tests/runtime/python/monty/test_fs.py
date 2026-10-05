@@ -15,6 +15,8 @@
 import asyncio
 import errno
 
+import pytest
+
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.resolver import PrefixResolver
@@ -284,43 +286,31 @@ def test_monty_append_falls_back_when_the_mount_has_no_append_op():
     assert [p for p, _ in dispatch.writes] == ["/s3/log.txt", "/s3/log.txt"]
 
 
-def test_monty_mkdir_on_a_file_raises_even_under_exist_ok():
+@pytest.mark.parametrize(
+    "read_first", [True, False], ids=["read-first", "never-read"]
+)
+def test_monty_mkdir_on_a_file_raises_even_under_exist_ok(read_first):
     """`exist_ok` forgives a directory, never a file.
 
     Pinned against CPython: `Path('a.txt').mkdir(exist_ok=True)` over a
     regular file raises FileExistsError, and only an existing directory
-    is quiet.
+    is quiet. The file need not be in the tree yet for mkdir to refuse
+    it.
+
+    Args:
+        read_first (bool): whether the guest reads the file before the
+            mkdir.
     """
     dispatch = FakeDispatch({"/s3/a.txt": b"hi"})
     runtime = MontyRuntime()
     runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: ["/s3/"])))
-    result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="from pathlib import Path\n"
-                "Path('/s3/a.txt').read_text()\n"
-                "Path('/s3/a.txt').mkdir(exist_ok=True)"
-            )
-        )
+    read = "Path('/s3/a.txt').read_text()\n" if read_first else ""
+    code = (
+        "from pathlib import Path\n"
+        + read
+        + "Path('/s3/a.txt').mkdir(exist_ok=True)"
     )
-    assert result.exit_code == 1
-    assert b"FileExistsError" in result.stderr
-    assert dispatch.dirs == []
-
-
-def test_monty_mkdir_on_an_unread_mount_file_still_raises():
-    """The file need not be in the tree yet for mkdir to refuse it."""
-    dispatch = FakeDispatch({"/s3/a.txt": b"hi"})
-    runtime = MontyRuntime()
-    runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: ["/s3/"])))
-    result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="from pathlib import Path\n"
-                "Path('/s3/a.txt').mkdir(exist_ok=True)"
-            )
-        )
-    )
+    result = asyncio.run(runtime.run(RunArgs(code=code)))
     assert result.exit_code == 1
     assert b"FileExistsError" in result.stderr
     assert dispatch.dirs == []

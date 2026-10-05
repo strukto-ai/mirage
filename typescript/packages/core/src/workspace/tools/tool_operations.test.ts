@@ -13,18 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { Session } from '../workspace/handle.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { MirageToolOperations } from './tool_operations.ts'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { runWithSession } from '@struktoai/mirage-core/context/session_context'
-import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
+import { parseSessionProfile } from '../../policy/profile.ts'
+import { runWithSession } from '../../context/session_context.ts'
+import { RAMWorkspaceStateStore } from '../store/ram.ts'
 
 let ws: Workspace
 let ops: MirageToolOperations
 
+const shellParser = await getTestParser()
+
 beforeEach(() => {
-  ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-  ops = new MirageToolOperations(ws)
+  ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser })
+  ops = ws.tools
 })
 
 describe('grep', () => {
@@ -72,7 +78,7 @@ describe('edit', () => {
   })
 
   it('overwrites when stale-write protection is off', async () => {
-    const unchecked = new MirageToolOperations(ws, { staleWriteProtection: false })
+    const unchecked = new MirageToolOperations(new Session(ws, ws.defaultSessionId), false)
     await ws.vfs.write('/a.txt', 'hello world')
     await unchecked.read('/a.txt')
     await ws.vfs.write('/a.txt', 'hello there')
@@ -184,6 +190,7 @@ async function guardedWs(): Promise<Workspace> {
     { '/': new RAMVFS(), '/vault': new RAMVFS(), '/ro': new RAMVFS() },
     {
       mode: MountMode.WRITE,
+      shellParser,
       profiles: {
         guarded: parseSessionProfile({
           paths: { hide: ['/vault'] },
@@ -203,13 +210,13 @@ const textOf = (result: { content: { text: string }[] }): string =>
 describe('a session', () => {
   it('confines every tool to its profile', async () => {
     const guarded = await guardedWs()
-    const ops = new MirageToolOperations(guarded, { sessionId: 'agent' })
+    const ops = new Session(guarded, 'agent').tools
     const read = await ops.call('read', { path: '/vault/key.txt' })
     const listed = await ops.call('ls', { path: '/' })
     const globbed = await ops.call('glob', { pattern: '/*/*.txt' })
     const found = await ops.call('grep', { pattern: 'key', path: '/vault' })
     const shown = await ops.call('read', { path: '/ro/r.txt' })
-    const fallback = await new MirageToolOperations(guarded).call('read', {
+    const fallback = await guarded.tools.call('read', {
       path: '/vault/key.txt',
     })
     await guarded.close()
@@ -223,7 +230,7 @@ describe('a session', () => {
 
   it('answers a refused write or edit as a tool error', async () => {
     const guarded = await guardedWs()
-    const ops = new MirageToolOperations(guarded, { sessionId: 'agent' })
+    const ops = new Session(guarded, 'agent').tools
     await ops.call('read', { path: '/ro/r.txt' })
     const written = await ops.call('write', { path: '/ro/r.txt', content: 'x' })
     const edited = await ops.call('edit', { path: '/ro/r.txt', old_string: 'r', new_string: 'R' })
@@ -237,7 +244,7 @@ describe('a session', () => {
 
   it('keeps a session already bound rather than widening it', async () => {
     const guarded = await guardedWs()
-    const wide = new MirageToolOperations(guarded, { sessionId: guarded.defaultSessionId })
+    const wide = guarded.tools
     const read = await runWithSession(guarded.getSession('agent'), () =>
       wide.call('read', { path: '/vault/key.txt' }),
     )
@@ -249,17 +256,20 @@ describe('a session', () => {
     const store = new RAMWorkspaceStateStore()
     const ram = new RAMVFS()
     const open = (): Workspace =>
-      new Workspace({ '/': ram }, { mode: MountMode.WRITE, workspaceId: 'shared', store })
+      new Workspace(
+        { '/': ram },
+        { mode: MountMode.WRITE, workspaceId: 'shared', store, shellParser },
+      )
     const writer = open()
     writer.createSession('agent')
     await writer.ensureSessionsLoaded()
     await writer.flushSessions()
     const attached = open()
     try {
-      const written = await new MirageToolOperations(attached, { sessionId: 'agent' }).call(
-        'write',
-        { path: '/a.txt', content: 'x\n' },
-      )
+      const written = await new Session(attached, 'agent').tools.call('write', {
+        path: '/a.txt',
+        content: 'x\n',
+      })
       expect(textOf(written)).toBe('Written: /a.txt')
     } finally {
       await writer.close()

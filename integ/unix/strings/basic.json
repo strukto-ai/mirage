@@ -67,6 +67,40 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "strings_n_drops_a_short_run",
+      "seq": 16100007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hi\\0longer_string\\0abcd\\0' | strings -n 5; printf 'hi\\0longer_string\\0abcd\\0' | strings -n 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "longer_string\nlonger_string\nabcd\n",
+        "stderr": ""
+      }
     }
   ]
 }

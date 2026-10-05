@@ -16,7 +16,6 @@ import errno
 
 import pytest
 
-from mirage.agents.io_text import with_refusal
 from mirage.policy import PolicyDenied
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import AdmissionRules, CommandRule
@@ -31,6 +30,7 @@ from mirage.workspace.node.admission import (
     admit_line,
     policy_scopes,
 )
+from mirage.workspace.tools.io_text import with_refusal
 
 DOC = {
     "commands": {

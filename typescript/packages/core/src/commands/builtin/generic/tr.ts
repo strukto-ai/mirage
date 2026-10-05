@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteView, fromByteView } from '../../../shell/bytes.ts'
 import { classCharacters } from '../../../utils/posix.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -20,14 +21,36 @@ import { interpretEscapes } from '../utils/escapes.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { extraOperandError, usageHint } from '../../spec/usage.ts'
 import { UsageError } from '../../errors.ts'
-import { quoteText } from '../../quote.ts'
+import { quoteText, quoteWord } from '../../quote.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 const TRY_HELP = `\n${usageHint('tr')}`
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const PRINTABLE_ESCAPES: Readonly<Record<string, string>> = {
+  '\\': '\\',
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\f': '\\f',
+  '\n': '\\n',
+  '\r': '\\r',
+  '\t': '\\t',
+  '\v': '\\v',
+}
+
+// A piece of an operand as GNU tr's `make_printable_str` spells it. Its
+// diagnostics quote this spelling, so a byte outside ASCII shows as an
+// octal escape whose backslash the quoting doubles.
+function printable(view: string): string {
+  let out = ''
+  for (const ch of view) {
+    out +=
+      PRINTABLE_ESCAPES[ch] ??
+      (ch >= ' ' && ch <= '~' ? ch : '\\' + ch.charCodeAt(0).toString(8).padStart(3, '0'))
+  }
+  return out
+}
 
 function expandRanges(s: string): string {
   let out = ''
@@ -35,7 +58,11 @@ function expandRanges(s: string): string {
   while (i < s.length) {
     if (s.startsWith('[:', i) && s.includes(':]', i + 2)) {
       const end = s.indexOf(':]', i + 2)
-      out += classCharacters(s.slice(i + 2, end))
+      const name = s.slice(i + 2, end)
+      const members = classCharacters(name)
+      if (members === null)
+        throw new Error(`tr: invalid character class '${quoteWord(printable(name))}'`)
+      out += members
       i = end + 2
     } else if (i + 2 < s.length && s[i + 1] === '-') {
       const start = s.charCodeAt(i)
@@ -70,7 +97,7 @@ async function* trStream(
         : new Set()
   let prevChar = ''
   for await (const chunk of source) {
-    const text = DEC.decode(chunk)
+    const text = byteView(chunk)
     let result: string
     if (opts.del) {
       const set1Set = new Set(opts.set1)
@@ -95,7 +122,7 @@ async function* trStream(
     } else if (result.length > 0) {
       prevChar = result[result.length - 1] ?? ''
     }
-    yield ENC.encode(result)
+    yield fromByteView(result)
   }
 }
 
@@ -118,16 +145,16 @@ function buildOptions(texts: readonly string[], bag: Record<string, FlagValue>):
     }
     throw extraOperandError(CommandName.TR, texts[maxOperands] ?? '')
   }
-  let set1 = expandRanges(interpretEscapes(texts[0] ?? ''))
+  let set1 = expandRanges(interpretEscapes(byteView(texts[0] ?? '')))
   if (complement) {
     let allChars = ''
-    for (let i = 0; i < 128; i++) allChars += String.fromCharCode(i)
+    for (let i = 0; i < 256; i++) allChars += String.fromCharCode(i)
     const s1 = new Set(set1)
     set1 = Array.from(allChars)
       .filter((c) => !s1.has(c))
       .join('')
   }
-  let set2 = texts.length >= 2 ? expandRanges(interpretEscapes(texts[1] ?? '')) : ''
+  let set2 = texts.length >= 2 ? expandRanges(interpretEscapes(byteView(texts[1] ?? ''))) : ''
   if (set2 !== '' && truncateSet1) {
     set1 = set1.slice(0, set2.length)
   } else if (set2 !== '' && set2.length < set1.length) {

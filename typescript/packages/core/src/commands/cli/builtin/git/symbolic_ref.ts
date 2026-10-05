@@ -30,8 +30,7 @@ import {
   NotSymbolicDeleteError,
   SymbolicRefLockError,
   SymbolicRefReadOnlyError,
-  SymbolicRefSwitchError,
-  SymbolicRefUsageError,
+  UsageError,
 } from './errors.ts'
 import { removeFile, under, writeFile } from './io.ts'
 import { shortenRef } from './ref_fields.ts'
@@ -49,7 +48,7 @@ import {
 import type { Repo } from './repo.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { opened } from './session.ts'
-import { checkOperands, escaped, fatal, switches } from './util.ts'
+import { checkSwitches, fatal, verbUsage } from './util.ts'
 
 const ENC = new TextEncoder()
 const REFS_PREFIX = 'refs/'
@@ -139,7 +138,7 @@ async function setSymbolic(
 export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands(inv.texts, SymbolicRefSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, inv.texts)
     const repo = await opened(fl, inv.doors ?? {})
     const message = fl.asStr('m')
     if (message === '') throw new EmptyUpdateMessageError()
@@ -147,7 +146,7 @@ export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> 
     const table = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
     const [name = '', target] = inv.texts
     if (switched(fl, 'delete', false)) {
-      if (inv.texts.length !== 1) throw new SymbolicRefUsageError()
+      if (inv.texts.length !== 1) throw new UsageError('', verbUsage(inv))
       const found = await resolveSymbolic(repo.dispatch, repo.location.gitdir, table, name, false)
       if (found === null) throw new NoSuchRefError(name)
       if (!found.symbolic) throw new NotSymbolicDeleteError(name)
@@ -164,7 +163,7 @@ export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> 
       await setSymbolic(repo, table, name, target, who, message ?? '')
       return [null, new IOResult()]
     }
-    if (inv.texts.length !== 1) throw new SymbolicRefUsageError()
+    if (inv.texts.length !== 1) throw new UsageError('', verbUsage(inv))
     const found = await resolveSymbolic(
       repo.dispatch,
       repo.location.gitdir,

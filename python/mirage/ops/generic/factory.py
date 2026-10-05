@@ -20,7 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.ops.generic.types import OpFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import einval, enotsup
+from mirage.utils.errors import eexist, einval, enotsup
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.ranges import (
     is_unsatisfiable_range,
@@ -249,14 +249,46 @@ def _make_path_write(fn: OpFn) -> OpFn:
     return mutate
 
 
-def _make_mkdir_parents(fn: OpFn, force_parents: bool = True) -> OpFn:
+async def refuse_taken(
+    stat: OpFn, accessor: Accessor, path: PathSpec, parents: bool
+) -> None:
+    """Refuse a mkdir of a name that is taken, as mkdir(2) does.
+
+    mkdir(2) refuses a name that exists, file or directory, and ``mkdir
+    -p`` passes only a directory. Not every backend's create says so (a
+    Graph 409 on a folder, Nextcloud's MKCOL 405, SFTP under ``-p``), so
+    both doors look the name up before the create. A directory under
+    ``-p`` still reaches the create, which keeps it durable (an object
+    store writes the marker of a directory only a key implied), and a
+    name that cannot be looked up is left to it too, to answer ENOENT or
+    ENOTDIR. Mirrors TS ``refuseTaken``.
+
+    Args:
+        stat (OpFn): the backend's stat.
+        accessor (Accessor): the call's accessor.
+        path (PathSpec): the directory to make.
+        parents (bool): ``-p``.
+
+    Raises:
+        FileExistsError: the name is taken and ``-p`` does not pass it.
+    """
+    try:
+        row = await stat(accessor, path)
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    if parents and row.type == FileType.DIRECTORY:
+        return
+    raise eexist(path)
+
+
+def _make_mkdir_parents(
+    fn: OpFn, stat: OpFn, force_parents: bool = True
+) -> OpFn:
 
     async def mkdir(accessor: Accessor, path: PathSpec, **kwargs) -> None:
-        await fn(
-            accessor,
-            path,
-            parents=force_parents or kwargs.get("parents") is True,
-        )
+        parents = kwargs.get("parents") is True
+        await refuse_taken(stat, accessor, path, parents)
+        await fn(accessor, path, parents=force_parents or parents)
 
     return mkdir
 
@@ -484,7 +516,7 @@ def make_generic_ops(
             skip,
         )
     if table.mkdir is not None:
-        mkdir_fn = _make_mkdir_parents(table.mkdir, mkdir_parents)
+        mkdir_fn = _make_mkdir_parents(table.mkdir, table.stat, mkdir_parents)
         _emit(ops, vfs_names, "mkdir", mkdir_fn, True, None, skip)
     if table.unlink is not None:
         _emit(

@@ -48,7 +48,7 @@ import {
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { splitRevisions } from './revparse.ts'
-import { checkOperands, escaped, fatal } from './util.ts'
+import { checkOperands, fatal } from './util.ts'
 import { HEAD } from './constants.ts'
 import { Decoration } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -214,7 +214,7 @@ export async function log(inv: CLIInvocation): Promise<CommandFnResult> {
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands(texts, undefined, escaped(inv.argv))
+    checkOperands(inv, texts)
     const flags = parseFlags(fl, inv.env)
     const repo = await opened(fl, doors)
     const parsed = {

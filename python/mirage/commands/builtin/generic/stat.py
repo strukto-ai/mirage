@@ -24,6 +24,7 @@ from mirage.commands.spec.usage import missing_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,
@@ -646,7 +647,7 @@ async def _file_systems(
             _render_fs_directive, kind=kind, cap=cap, name=p.raw_path
         )
         lines.append(_format(fmt, "", render))
-    io = IOResult(exit_code=1 if err else 0, stderr=err.encode() or None)
+    io = IOResult(exit_code=1 if err else 0, stderr=encode_text(err) or None)
     if not lines:
         return None, io
     return format_records(lines), io
@@ -723,7 +724,7 @@ async def stat(
             )
         except FS_ERRORS as exc:
             # GNU stat keeps reporting the remaining operands, exit 1.
-            err += fs_error_line("stat", p, exc).encode()
+            err += encode_text(fs_error_line("stat", p, exc))
             continue
         if c is not None:
             lines.append(_format_stat(c, s, p.raw_path, identity))

@@ -33,6 +33,16 @@ implementations cannot drift apart.
 - `prisma/`: one schema per kit fake.
 - `fixtures/`: the seed data cases assume.
 
+The `unix/{grep,zgrep,sed,awk,tr}/bytes.json` cases pin C-locale byte
+semantics against `debian:stable-slim` at digest
+`sha256:5bc3287b25407c965a30f38e32603dc253a3869e1b12a21ac09bfc27fd8b13ce`
+(GNU grep 3.11, sed 4.9, mawk 1.3.4). Literal UTF-8, shell byte escapes,
+command-specific escapes, and `-f` program files must address the same
+bytes. Matching, string positions, and `tr` sets count bytes; a partial
+character or invalid UTF-8 byte survives output unchanged. These commands
+use this deterministic C-locale contract; `rg` retains its Unicode regex
+semantics.
+
 ## Runs and tenants
 
 A run is an isolated world; a tenant is an account inside it. The runner mints

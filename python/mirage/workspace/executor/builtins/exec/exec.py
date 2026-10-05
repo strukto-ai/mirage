@@ -21,6 +21,7 @@ from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel
 from mirage.shell.constants import (
     FD_BOTH,
@@ -81,10 +82,10 @@ async def handle_exec_command(
     """
     if not args:
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
-    err = (
+    err = encode_text(
         f"mirage: exec: {args[0]}: process replacement is not supported "
         "(no OS process to replace)\n"
-    ).encode()
+    )
     return (
         None,
         IOResult(exit_code=2, stderr=err),
@@ -152,12 +153,18 @@ async def _install_descriptor(
     target = redirect.target
     if redirect.kind == RedirectKind.AMBIGUOUS:
         word = target.raw_path if isinstance(target, PathSpec) else str(target)
-        return f"{word}: ambiguous redirect\n".encode()
+        return encode_text(f"{word}: ambiguous redirect\n")
     if redirect.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
         text = str(target) + (
             "\n" if redirect.kind == RedirectKind.HERESTRING else ""
         )
-        _bind(session, fd, OPEN_FOR_READING, False, SharedInput(text.encode()))
+        _bind(
+            session,
+            fd,
+            OPEN_FOR_READING,
+            False,
+            SharedInput(encode_text(text)),
+        )
         return None
     if isinstance(target, int):
         if target == fd:
@@ -279,7 +286,7 @@ def _error_line(label: str, exc: OSError) -> bytes:
         exc (OSError): what the dispatcher raised.
     """
     strerror = fs_strerror(exc)
-    return (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode()
+    return encode_text(f"{label}: {strerror}\n" if strerror else f"{label}\n")
 
 
 def _exec_failure(
@@ -547,10 +554,10 @@ async def divert_statement(
             unwritable = unwritable or channel == Channel.STDERR
     if failed:
         words = command.split()
-        line = (
+        line = encode_text(
             f"{words[0] if words else 'bash'}: write error: "
             "Bad file descriptor\n"
-        ).encode()
+        )
         io.exit_code = 1
         await _routed(dispatch, session, Channel.STDERR, line, rest)
     elif unwritable and io.exit_code == 0 and _stdout_to_stderr(statement):

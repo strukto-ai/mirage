@@ -9,7 +9,7 @@ from mirage.commands.builtin.sed_exec import (
     list_line,
 )
 from mirage.commands.builtin.sed_script import SedScriptPiece, compile_script
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import byte_view, from_byte_view
 
 
 def _run(
@@ -37,7 +37,10 @@ def _run(
         ),
     )
     machine.process(
-        [SedInput("-", inputs)] if isinstance(inputs, str) else inputs, True
+        [SedInput("-", byte_view(inputs))]
+        if isinstance(inputs, str)
+        else inputs,
+        True,
     )
     wfiles = {
         name: "".join(out.chunks) for name, out in machine.wfiles.items()
@@ -102,7 +105,7 @@ def test_text_decodes_numeric_and_control_escapes():
 
 def test_text_numeric_escapes_above_ascii_are_raw_bytes():
     out = _sed("a [\\xff][\\d200][\\o377][\\x80][\\xc3\\xa9][\\o400]", "x\n")
-    assert encode_text(out) == (
+    assert from_byte_view(out) == (
         b"x\n[\xff][\xc8][\xff][\x80][\xc3\xa9][\x00]\n"
     )
 
@@ -186,14 +189,36 @@ def test_branch_and_label_end_at_newline(script, text, expected):
     assert _sed(script, text) == expected
 
 
+@pytest.mark.parametrize(
+    "expr,text,expected",
+    [
+        ("s/.*/\\U&/", "hello world\n", "HELLO WORLD\n"),
+        ("s/\\w\\+/\\u&/g", "hello world\n", "Hello World\n"),
+        ("s/\\(o\\) \\(w\\)/\\U\\1\\E \\2/", "hello world\n", "hellO world\n"),
+        ("s/.*/\\u\\L&/", "hELLO\n", "hello\n"),
+        ("s/.*/\\L\\u&/", "hELLO\n", "Hello\n"),
+        ("s/\\(x*\\)\\(a\\)/\\u\\1\\2/", "ab\n", "Ab\n"),
+        ("s/abc/\\u\\lX/", "abc\n", "x\n"),
+        ("s/\\(x*\\)a/\\u\\1\\Lz/", "a\n", "z\n"),
+        ("s/\\(x*\\)a/\\l\\1\\UZz/", "a\n", "ZZ\n"),
+        ("s/\\(x*\\)a\\(b\\)/\\u\\1\\E\\2/", "ab\n", "b\n"),
+        ("s/\\(x*\\)a/\\u\\1\\l\\1\\Uq/", "ab\n", "Qb\n"),
+        ("s/\\(x*\\)\\(y*\\)\\(a\\)/\\u\\1\\2\\3/", "ab\n", "ab\n"),
+        ("s/.*/\\U&/", "a\u00e9\n", byte_view("A\u00e9\n")),
+    ],
+)
+def test_s_case_conversion(expr, text, expected):
+    assert _sed(expr, text) == expected
+
+
 def test_l_escapes_and_octal():
     assert list_line("a\tb\\c\x01", 70) == "a\\tb\\\\c\\001$\n"
     assert (
         list_line("x\x7f\x1b\r\f\v\b\x07", 70)
         == "x\\177\\033\\r\\f\\v\\b\\a$\n"
     )
-    assert list_line("caf\u00e9", 70) == "caf\\303\\251$\n"
-    assert list_line("\udcff", 70) == "\\377$\n"
+    assert list_line(byte_view("caf\u00e9"), 70) == "caf\\303\\251$\n"
+    assert list_line(byte_view(b"\xff"), 70) == "\\377$\n"
 
 
 def test_l_folds_at_69_and_a_backslash():

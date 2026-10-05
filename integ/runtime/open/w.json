@@ -33,16 +33,21 @@
             "js": "const f = std.open('/data/sub', 'w')\nif (f !== null) f.close()\nconsole.log(f === null ? 'refused' : 'opened')"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "IsADirectoryError\n",
-            "ops_absent": [
-              "create /data/sub",
-              "truncate /data/sub"
-            ]
-          },
-          "expect_on": {
-            "quickjs": {
-              "stdout": "refused\n"
+            "python": {
+              "exit": 0,
+              "stdout": "IsADirectoryError\n",
+              "ops_absent": [
+                "create /data/sub",
+                "truncate /data/sub"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "refused\n",
+              "ops_absent": [
+                "create /data/sub",
+                "truncate /data/sub"
+              ]
             }
           }
         }
@@ -90,14 +95,6 @@
               "write /data/new.txt",
               "append /data/new.txt"
             ]
-          },
-          "expect_on": {
-            "pyodide": {
-              "ops_contain": [
-                "write /data/new.txt"
-              ],
-              "ops_absent": []
-            }
           }
         },
         {

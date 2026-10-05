@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { encodeText } from '../../shell/bytes.ts'
+import { byteView, fromByteView, textView } from '../../shell/bytes.ts'
 import { compilePosixRegex } from '../../utils/posix.ts'
 import {
   SED_STDERR,
@@ -27,10 +27,6 @@ import {
 // GNU's default `l` line length.
 export const SED_LINE_LENGTH = 70
 
-const SURROGATE_BASE = 0xdc00
-const SURROGATE_LOW = 0xdc80
-const SURROGATE_HIGH = 0xdcff
-
 const LIST_ESCAPES: Record<number, string> = {
   0x07: '\\a',
   0x08: '\\b',
@@ -39,18 +35,6 @@ const LIST_ESCAPES: Record<number, string> = {
   0x0d: '\\r',
   0x09: '\\t',
   0x0b: '\\v',
-}
-
-/**
- * The bytes one pattern-space character stands for: a raw byte carried
- * as its surrogate escape is that byte, anything else its UTF-8 form.
- */
-function charBytes(ch: string): Uint8Array {
-  const code = ch.charCodeAt(0)
-  if (ch.length === 1 && code >= SURROGATE_LOW && code <= SURROGATE_HIGH) {
-    return new Uint8Array([code - SURROGATE_BASE])
-  }
-  return encodeText(ch)
 }
 
 /**
@@ -67,7 +51,7 @@ export function listLine(text: string, width: number): string {
   let out = ''
   let col = 0
   for (const ch of text) {
-    for (const byte of charBytes(ch)) {
+    for (const byte of fromByteView(ch)) {
       let piece: string
       if (byte >= 0x20 && byte < 0x7f) piece = byte === 0x5c ? '\\\\' : String.fromCharCode(byte)
       else piece = LIST_ESCAPES[byte] ?? '\\' + byte.toString(8).padStart(3, '0')
@@ -239,7 +223,7 @@ export class SedMachine {
 
   /** What the program wrote to /dev/stderr, then the error lines. */
   stderr(): string {
-    return this.specialErr.chunks.join('') + this.stderrLines.join('')
+    return textView(this.specialErr.chunks.join('')) + this.stderrLines.join('')
   }
 
   /** The exit status GNU would end with after the runs so far. */
@@ -674,7 +658,7 @@ export class SedMachine {
             break
           case 'F':
             this.main.flushNewline()
-            this.main.raw(`${this.fileName}\n`)
+            this.main.raw(byteView(`${this.fileName}\n`))
             break
           default:
             break
@@ -687,19 +671,62 @@ export class SedMachine {
   }
 }
 
-/** Expand against the original captures, preserving boundary context and case. */
+/** `text` with its ASCII letters mapped, as the C locale maps them. Mirrors Python's `_case_mapped`. */
+function caseMapped(text: string, upper: boolean): string {
+  return upper
+    ? text.replace(/[a-z]+/g, (run) => run.toUpperCase())
+    : text.replace(/[A-Z]+/g, (run) => run.toLowerCase())
+}
+
+/**
+ * Expand a GNU sed replacement against a match: `&` is the whole match,
+ * `\1`..`\9` are groups, `\n`/`\t` are newline/tab and `\X` is a literal
+ * X. `\U` and `\L` map everything after them to upper or lower case until
+ * `\E` or the other one; `\u` and `\l` map only the next character, and one
+ * that lands on an empty group passes to what directly follows the group.
+ * Every case escape drops a one-shot still waiting, written before it or
+ * carried to it, so the later of two one-shots wins: GNU sed 4.9's
+ * `setup_replacement` cuts the replacement at each escape and
+ * `append_replacement` hands a carried one-shot to the next piece only. The C
+ * locale maps ASCII letters only, so a byte above 0x7f is written as it is;
+ * GNU 4.9 writes 0xff for it, which is not copied. Mirrors Python's
+ * `_apply_repl`.
+ */
 function applyReplacement(repl: string, groups: readonly (string | undefined)[]): string {
   let out = ''
+  let sticky: boolean | null = null
+  let pending: boolean | null = null
+  let carried: boolean | null = null
+  const emit = (piece: string, group = false): void => {
+    const first = pending ?? carried
+    const own = pending !== null
+    pending = carried = null
+    if (piece === '') {
+      if (group && own) carried = first
+      return
+    }
+    if (first !== null) {
+      out += caseMapped(piece.charAt(0), first)
+      piece = piece.slice(1)
+    }
+    out += sticky === null ? piece : caseMapped(piece, sticky)
+  }
   for (let i = 0; i < repl.length; i++) {
-    const ch = repl[i]
-    if (ch === '&') out += groups[0] ?? ''
+    const ch = repl[i] ?? ''
+    if (ch === '&') emit(groups[0] ?? '', true)
     else if (ch === '\\' && i + 1 < repl.length) {
       const next = repl[++i] ?? ''
-      if (/[0-9]/.test(next)) out += groups[Number(next)] ?? ''
-      else if (next === 'n') out += '\n'
-      else if (next === 't') out += '\t'
-      else out += next
-    } else out += ch ?? ''
+      if (/[0-9]/.test(next)) emit(groups[Number(next)] ?? '', true)
+      else if (next === 'U' || next === 'L' || next === 'E') {
+        sticky = next === 'E' ? null : next === 'U'
+        pending = carried = null
+      } else if (next === 'u' || next === 'l') {
+        pending = next === 'u'
+        carried = null
+      } else if (next === 'n') emit('\n')
+      else if (next === 't') emit('\t')
+      else emit(next)
+    } else emit(ch)
   }
   return out
 }

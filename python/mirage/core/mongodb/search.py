@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.hierarchy.search import Searcher, query_matcher
+from mirage.core.hierarchy.search import LineMatcher, Searcher, query_matcher
 from mirage.core.mongodb._schema_json import (
     build_collection_schema_json,
     build_database_json,
@@ -39,10 +38,8 @@ from mirage.vfs.types import SearchQuery
 # and stopped at `default_search_limit` documents per collection.
 
 
-def _matched(rel: str, text: str, matcher: re.Pattern[str]) -> list[str]:
-    return [
-        f"{rel}:{line}" for line in text.splitlines() if matcher.search(line)
-    ]
+def _matched(rel: str, text: str, matcher: LineMatcher) -> list[str]:
+    return [f"{rel}:{line}" for line in text.splitlines() if matcher(line)]
 
 
 async def search_entity(
@@ -50,7 +47,7 @@ async def search_entity(
     database: str,
     kind: EntityKind,
     name: str,
-    matcher: re.Pattern[str],
+    matcher: LineMatcher,
 ) -> list[str]:
     rel = f"{database}/{KIND_TO_DIR[kind]}/{name}"
     docs = f"{rel}/documents.jsonl"
@@ -68,7 +65,7 @@ async def _kind_lines(
     accessor: MongoDBAccessor,
     database: str,
     kind: EntityKind,
-    matcher: re.Pattern[str],
+    matcher: LineMatcher,
 ) -> list[str]:
     lines: list[str] = []
     for name in await list_collections(accessor.client, database, kind=kind):
@@ -79,7 +76,7 @@ async def _kind_lines(
 
 
 async def search_database(
-    accessor: MongoDBAccessor, database: str, matcher: re.Pattern[str]
+    accessor: MongoDBAccessor, database: str, matcher: LineMatcher
 ) -> list[str]:
     payload = render_doc(await build_database_json(accessor, database))
     return (

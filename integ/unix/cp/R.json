@@ -69,6 +69,38 @@
       "flags": [
         "r"
       ]
+    },
+    {
+      "id": "cp_r_merge_after_a_missing_stat_lists_the_new_entries",
+      "seq": 16100016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "(cd /data && mkdir -p r10rm/s/n r10rm/d/s && echo a > r10rm/s/n/f && stat -c %n r10rm/d/s/n; cp -r r10rm/s r10rm/d; echo rc=$?; find r10rm/d | sort; rm -r r10rm)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nr10rm/d\nr10rm/d/s\nr10rm/d/s/n\nr10rm/d/s/n/f\n",
+        "stderr": "stat: cannot statx 'r10rm/d/s/n': No such file or directory\n"
+      }
     }
   ]
 }

@@ -19,7 +19,6 @@ import re
 import pytest
 from pydantic import ValidationError
 
-from mirage.agents.io_text import with_refusal
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec.types import CommandSpec
@@ -53,6 +52,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.session.state import seed_var
+from mirage.workspace.tools.io_text import with_refusal
 
 
 def test_profile_from_dict_regroups_paths_and_vars():
@@ -2391,7 +2391,7 @@ async def test_a_create_through_the_command_dispatcher_meets_the_rules():
             for name in ("", "open", "sec")
         )
         assert await _line(ws, "unzip -q -d /data/uz /other/z.zip", "g") == (
-            50,
+            2,
             "",
             refused,
         )

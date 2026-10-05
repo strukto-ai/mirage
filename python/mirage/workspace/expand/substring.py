@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
+from mirage.shell.bytes import decode_text
 from mirage.shell.errors import named
 from mirage.shell.escapes import unescape_unquoted
 from mirage.shell.helpers import get_text
@@ -77,13 +78,15 @@ async def substring_operands(
     for begin, stop in spans:
         pieces = []
         cursor = begin
-        word = data[begin:stop].decode()
+        word = decode_text(data[begin:stop])
         for atom in atoms:
             left = atom.start_byte - node.start_byte
             right = atom.end_byte - node.start_byte
             if begin <= left and right <= stop:
-                pieces.append(unescape_unquoted(data[cursor:left].decode()))
+                pieces.append(
+                    unescape_unquoted(decode_text(data[cursor:left]))
+                )
                 pieces.append(await named(word, expand_child(atom)))
                 cursor = right
-        pieces.append(unescape_unquoted(data[cursor:stop].decode()))
+        pieces.append(unescape_unquoted(decode_text(data[cursor:stop])))
         yield "".join(pieces)

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { encodeText } from './bytes.ts'
+
 // Characters that force quoting, mirroring Python's shlex.quote.
 const UNSAFE = /[^\w@%+=:,./-]/
 
@@ -28,12 +30,12 @@ function traceQuote(word: string): string {
  * need it are single-quoted like bash's trace output.
  */
 export function traceCommand(words: readonly string[]): Uint8Array {
-  return new TextEncoder().encode('+ ' + words.map(traceQuote).join(' ') + '\n')
+  return encodeText('+ ' + words.map(traceQuote).join(' ') + '\n')
 }
 
 /** Render one `set -x` trace line for a scalar assignment. */
 export function traceAssignment(key: string, val: string, append: boolean): Uint8Array {
   const op = append ? '+=' : '='
   const rendered = val === '' ? '' : traceQuote(val)
-  return new TextEncoder().encode(`+ ${key}${op}${rendered}\n`)
+  return encodeText(`+ ${key}${op}${rendered}\n`)
 }

@@ -25,13 +25,16 @@
             "js": "console.log(['getxattr', 'listxattr', 'removexattr', 'setxattr'].filter((n) => n in os).length)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "[]\n"
+            "python": {
+              "exit": 0,
+              "stdout": "[]\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0\n"
+            }
           },
           "expect_on": {
-            "quickjs": {
-              "stdout": "0\n"
-            },
             "pyodide": {
               "stdout": "['getxattr', 'listxattr', 'removexattr', 'setxattr']\n"
             }

@@ -15,11 +15,13 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
+import { eisdir } from '../../utils/errors.ts'
 import { norm } from '../../utils/path.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 
 export async function unlink(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.mountPath)
+  if (accessor.store.dirs.has(p)) throw eisdir(path)
   if (!accessor.store.files.has(p)) throw lookupError(accessor, path, p)
   accessor.store.files.delete(p)
   accessor.store.modified.delete(p)

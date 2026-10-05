@@ -918,7 +918,6 @@ class InAppPython:
     async def suite(
         self, suite: dict[str, Any], prefix: str, config: dict[str, Any]
     ) -> list[Answer]:
-        from mirage.agents.tool_operations import MirageToolOperations
         from mirage.server.workspace_config import build_workspace_from_config
 
         scratch = self.scratch / prefix
@@ -940,7 +939,7 @@ class InAppPython:
                 if spec
                 else await ws.session(ws.default_session_id)
             )
-            tools = MirageToolOperations(ws, session_id=session.session_id)
+            tools = session.tools
             answers = []
             for case in suite["cases"]:
                 answers.append(

@@ -44,7 +44,7 @@ IO = VFSAdapter(
     ),
     writes=WriteOps(
         write=_write,
-        append=append_from_read(_read, _write),
+        append=append_from_read(_read, _write, _stat),
         mkdir=_mkdir,
         unlink=_unlink,
         rmdir=_rmdir,

@@ -456,7 +456,10 @@ export function walkProbeFor(virtual: string): WalkProbe | null {
   return best
 }
 
-const redirectStorage = createAsyncContext<[object, readonly PathSpec[]]>()
+/** Opens a statement's write targets as bash does before the command runs; false when one cannot be opened. */
+export type RedirectOpener = () => Promise<boolean>
+
+const redirectStorage = createAsyncContext<[object, readonly PathSpec[], RedirectOpener | null]>()
 
 /**
  * Bind a statement's expanded redirect targets to the command node they
@@ -468,13 +471,18 @@ const redirectStorage = createAsyncContext<[object, readonly PathSpec[]]>()
  * Keyed by the node object itself so a nested line expanded on the way
  * to the command (a `$()` operand, an `eval`) never inherits the outer
  * statement's targets.
+ *
+ * The opener empties the targets bash opens for writing before the command
+ * runs; dispatch calls it once the line is admitted, so a command the gate
+ * refuses leaves its targets as they were.
  */
 export function runWithRedirectPaths<T>(
   node: object,
   paths: readonly PathSpec[],
   fn: () => Promise<T>,
+  opener: RedirectOpener | null = null,
 ): Promise<T> {
-  return Promise.resolve(redirectStorage.run([node, paths], fn))
+  return Promise.resolve(redirectStorage.run([node, paths, opener], fn))
 }
 
 const programStorage = createAsyncContext<SessionState | null>()
@@ -538,6 +546,19 @@ export function redirectPathsFor(node: object): readonly PathSpec[] {
     if (bound?.[0] === node) return bound[1]
   }
   return []
+}
+
+/**
+ * The opener bound with this command node's redirect targets, null for any
+ * other node or when none is bound.
+ */
+export function redirectOpenerFor(node: object): RedirectOpener | null {
+  const bindings = redirectStorage.liveStores()
+  for (let at = bindings.length - 1; at >= 0; at--) {
+    const bound = bindings[at]
+    if (bound?.[0] === node) return bound[2]
+  }
+  return null
 }
 
 /**

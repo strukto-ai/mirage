@@ -1,0 +1,128 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "sed_bytes_stderr",
+      "seq": 14470100,
+      "command": "( export LC_ALL=C; printf '\\303\\251\\377\\n' | sed -n 'w /dev/stderr' 2>&1 | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c3 a9 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_spellings",
+      "seq": 14470101,
+      "command": "( export LC_ALL=C; printf 'A\\302\\240B\\302\\240C\\n' > /data/bytes.txt; sed $'s/\\xc2\\xa0/ /g' /data/bytes.txt; sed 's/\\xc2\\xa0/ /g' /data/bytes.txt; sed 's/\\o302\\o240/ /g' /data/bytes.txt; sed 's/ / /g' /data/bytes.txt )",
+      "expect": {
+        "exit": 0,
+        "stdout": "A B C\nA B C\nA B C\nA B C\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_widths",
+      "seq": 14470102,
+      "command": "( export LC_ALL=C; printf 'A\\303\\251B\\342\\202\\254C\\360\\237\\230\\200D\\n' | sed 's/\\xc3\\xa9/1/g;s/\\xe2\\x82\\xac/2/g;s/\\xf0\\x9f\\x98\\x80/3/g' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "A1B2C3D\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_partial",
+      "seq": 14470103,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\377\\n' | sed 's/\\xa0/X/g' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c2 58 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_quantifier",
+      "seq": 14470104,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\240X\\n' | sed 's/\\xc2\\xa0\\+/Y/g' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "YX\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_replacement",
+      "seq": 14470105,
+      "command": "( export LC_ALL=C; printf 'x\\n' | sed 's/x/\\xc2\\xa0/' | od -An -tx1; printf 'x\\n' | sed 's/x/\\x26\\x5c1/' )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c2 a0 0a\n&\\1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_transliterate",
+      "seq": 14470106,
+      "command": "( export LC_ALL=C; printf '\\302\\240\\377\\n' | sed 'y/\\xc2\\xa0/AB/' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 41 42 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_inplace_script_file",
+      "seq": 14470107,
+      "command": "( export LC_ALL=C; printf 's/\\302\\240/ /g\\n' > /data/bytes.sed; printf 'A\\302\\240B\\377\\n' > /data/bytes.txt; sed -i -f /data/bytes.sed /data/bytes.txt; od -An -tx1 /data/bytes.txt )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 41 20 42 ff 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_roundtrip_list",
+      "seq": 14470108,
+      "command": "( export LC_ALL=C; printf '\\303\\251\\377\\n' | sed '' | od -An -tx1; printf '\\303\\251\\377\\n' | sed -n l )",
+      "expect": {
+        "exit": 0,
+        "stdout": " c3 a9 ff 0a\n\\303\\251\\377$\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_bytes_script_file",
+      "seq": 14470109,
+      "command": "( export LC_ALL=C; printf 's/\\351/E/\\n' > /data/bytes.sed; printf 'caf\\351\\n' | sed -f /data/bytes.sed | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 63 61 66 45 0a\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

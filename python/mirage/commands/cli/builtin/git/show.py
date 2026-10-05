@@ -32,7 +32,11 @@ from mirage.commands.cli.builtin.git.diff_output import (
     parse_diff_flags,
     renames_enabled,
 )
-from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
+from mirage.commands.cli.builtin.git.errors import (
+    GitError,
+    NoWorkspaceError,
+    UsageError,
+)
 from mirage.commands.cli.builtin.git.format import (
     DEFAULT_DATE,
     FULL_SHA,
@@ -64,11 +68,12 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.util import (
     check_operands,
-    escaped,
     fatal,
+    option_operand,
     revision_arg,
     split_marked,
     start_point,
+    verb_usage,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -356,7 +361,7 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts, marked=escaped(inv.argv))
+        check_operands(inv, texts)
         revisions, paths = split_marked(tuple(texts), inv.argv)
         repo, location = await opened(fl, doors)
         parsed = parse_show_flags(
@@ -438,6 +443,8 @@ async def diff_tree(
     try:
         if doors.dispatch is None:
             raise NoWorkspaceError()
+        if option_operand(inv, inv.texts) is not None:
+            raise UsageError("", verb_usage(inv))
         repo, location = await opened(fl, doors)
         fully = await config_bool(
             doors.dispatch, location, b"core", b"quotepath", True

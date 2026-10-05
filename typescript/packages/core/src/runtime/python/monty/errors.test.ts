@@ -15,43 +15,45 @@
 import { describe, expect, it } from 'vitest'
 
 import { FS_CONDITIONS } from '../../../errors/index.ts'
-import { POSIX } from '../../../errors/posix.ts'
 import { CrossMountError } from '../../errors.ts'
-import { asGuestError, CPYTHON, cpythonError, guestError } from './errors.ts'
+import { asGuestError, cpythonError, guestError } from './errors.ts'
 
 describe('the CPython table', () => {
-  it('covers the whole vocabulary', () => {
-    // A condition cannot be half-added: the dialect table stays total
-    // over the vocabulary, keyed on exactly the union.
-    expect(Object.keys(CPYTHON).sort()).toEqual([...FS_CONDITIONS].sort())
+  it('renders every condition of the vocabulary', () => {
+    // A condition cannot be half-added: each one renders as an OSError
+    // or one of the subclasses CPython raises for its errno.
+    const builtins = [
+      'OSError',
+      'FileNotFoundError',
+      'NotADirectoryError',
+      'IsADirectoryError',
+      'FileExistsError',
+      'PermissionError',
+    ]
+    for (const cond of FS_CONDITIONS) {
+      const row = cpythonError(cond)
+      expect(builtins).toContain(row.exception)
+      expect(row.errno).toBeGreaterThan(0)
+    }
   })
 
   it.each([
-    ['ENOENT', 'FileNotFoundError', 2],
-    ['ENOTDIR', 'NotADirectoryError', 20],
-    ['EISDIR', 'IsADirectoryError', 21],
-    ['EEXIST', 'FileExistsError', 17],
-    ['EACCES', 'PermissionError', 13],
-    ['EPERM', 'PermissionError', 1],
-    ['EXDEV', 'OSError', 18],
-    ['CROSS_MOUNT', 'OSError', 18],
-    ['ENOTEMPTY', 'OSError', 39],
-    ['ELOOP', 'OSError', 40],
-  ] as const)('renders %s as CPython on Linux', (cond, exception, errno) => {
-    // A guest interpreter is platform-neutral, so the numbering must
-    // not wobble with the host. Mirrors the python
+    ['ENOENT', 'FileNotFoundError', 2, 'No such file or directory'],
+    ['ENOTDIR', 'NotADirectoryError', 20, 'Not a directory'],
+    ['EISDIR', 'IsADirectoryError', 21, 'Is a directory'],
+    ['EEXIST', 'FileExistsError', 17, 'File exists'],
+    ['EACCES', 'PermissionError', 13, 'Permission denied'],
+    ['EPERM', 'PermissionError', 1, 'Operation not permitted'],
+    ['EXDEV', 'OSError', 18, 'Invalid cross-device link'],
+    ['ENOTEMPTY', 'OSError', 39, 'Directory not empty'],
+    ['ELOOP', 'OSError', 40, 'Too many levels of symbolic links'],
+    ['NO_XATTR', 'OSError', 61, 'No data available'],
+  ] as const)('renders %s as CPython on Linux', (cond, exception, errno, phrase) => {
+    // A guest interpreter is platform-neutral, so neither its numbering
+    // nor its wording wobbles with the host. Mirrors the python
     // tests/runtime/python/monty/test_errors.py pins.
     const row = cpythonError(cond)
-    expect([row.exception, row.errno]).toEqual([exception, errno])
-  })
-
-  it('speaks one phrase per condition, shared with the posix table', () => {
-    // NO_XATTR is exempt: the posix row may resolve to macOS's
-    // "Attribute not found" while a guest always speaks Linux.
-    for (const cond of FS_CONDITIONS) {
-      if (cond === 'NO_XATTR') continue
-      expect(CPYTHON[cond].phrase).toBe(POSIX[cond].phrase)
-    }
+    expect([row.exception, row.errno, row.phrase]).toEqual([exception, errno, phrase])
   })
 })
 
@@ -69,34 +71,54 @@ describe('guestError', () => {
 })
 
 describe('asGuestError', () => {
-  it('converts every named condition, not a private six', () => {
-    // ENOTEMPTY had no row in the old table, so a non-empty rmdir
-    // reached guest code as a raw JS error it could not `except`.
-    const raw = Object.assign(new Error('directory not empty: /d'), {
-      code: 'ENOTEMPTY',
-    })
-    const guest = asGuestError(raw, '/d') as Error
+  // Every named condition converts, not a private six: ENOTEMPTY had no
+  // row in the old table, so a non-empty rmdir reached guest code as a
+  // raw JS error it could not `except`. A cross-mount rename speaks
+  // pathlib, and an error the vocabulary does not name is EIO.
+  it.each<[string, Error, string, string]>([
+    [
+      'a non-empty directory',
+      Object.assign(new Error('directory not empty: /d'), { code: 'ENOTEMPTY' }),
+      '/d',
+      "[Errno 39] Directory not empty: '/d'",
+    ],
+    [
+      'a symlink loop',
+      Object.assign(new Error('too many levels of symbolic links: /a'), { code: 'ELOOP' }),
+      '/a',
+      "[Errno 40] Too many levels of symbolic links: '/a'",
+    ],
+    [
+      'a cross-mount rename',
+      new CrossMountError('/a/x', '/b/x'),
+      '/a/x',
+      "[Errno 18] Invalid cross-device link: '/a/x'",
+    ],
+    [
+      'an unnamed error',
+      new Error('transport exploded'),
+      '/x',
+      "[Errno 5] Input/output error: '/x'",
+    ],
+    [
+      'a backend error that only shares a CPython name',
+      Object.assign(new Error('gone'), { name: 'OSError' }),
+      '/x',
+      "[Errno 5] Input/output error: '/x'",
+    ],
+  ])('converts %s to an OSError', (_name, raw, path, message) => {
+    const guest = asGuestError(raw, path) as Error
     expect(guest.name).toBe('OSError')
-    expect(guest.message).toBe("[Errno 39] Directory not empty: '/d'")
+    expect(guest.message).toBe(message)
   })
 
-  it('converts a symlink loop to ELOOP', () => {
-    const raw = Object.assign(new Error('too many levels of symbolic links: /a'), {
-      code: 'ELOOP',
-    })
-    const guest = asGuestError(raw, '/a') as Error
-    expect(guest.name).toBe('OSError')
-    expect(guest.message).toBe("[Errno 40] Too many levels of symbolic links: '/a'")
+  it('keeps a guest error this door already built', () => {
+    const built = guestError('ENOENT', '/x')
+    expect(asGuestError(built, '/y')).toBe(built)
   })
 
-  it('speaks pathlib for a cross-mount rename', () => {
-    const guest = asGuestError(new CrossMountError('/a/x', '/b/x'), '/a/x') as Error
-    expect(guest.name).toBe('OSError')
-    expect(guest.message).toBe("[Errno 18] Invalid cross-device link: '/a/x'")
-  })
-
-  it('passes an unnamed error through untouched', () => {
-    const raw = new Error('transport exploded')
-    expect(asGuestError(raw, '/x')).toBe(raw)
+  it('classifies a backend error by its code, whatever its name', () => {
+    const raw = Object.assign(new Error('gone'), { name: 'OSError', code: 'ENOENT' })
+    expect((asGuestError(raw, '/x') as Error).name).toBe('FileNotFoundError')
   })
 })

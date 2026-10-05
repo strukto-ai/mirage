@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -32,7 +34,7 @@ from mirage.policy import (
 from mirage.policy.rule import RulePolicy
 from mirage.types import FileStat, FileType, HiddenPaths, MountMode, PathSpec
 from mirage.utils.errors import ReadOnlyError
-from mirage.utils.ranges import slice_window
+from mirage.utils.ranges import slice_window, splice_window
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -1327,3 +1329,74 @@ async def test_the_mark_never_reaches_the_op(monkeypatch):
         assert gate.asked == ["/data/real/secret"]
     finally:
         await ws.close()
+
+
+class _SplicingRAMVFS(RAMVFS):
+    """A RAM mount that answers pwrite the way S3 and redis do: read the
+    file, give the loop a turn, and write the whole file back."""
+
+    def ops(self):
+        found = {ro.name: ro.fn for ro in super().ops()}
+        read, write = found["read"], found["write"]
+
+        async def pwrite(accessor, path, data, offset, **kwargs):
+            whole = await read(accessor, path)
+            await asyncio.sleep(0)
+            await write(accessor, path, splice_window(whole, offset, data))
+
+        return [
+            replace(ro, fn=pwrite) if ro.name == "pwrite" else ro
+            for ro in super().ops()
+        ]
+
+
+@pytest.mark.asyncio
+async def test_offset_writes_to_one_path_all_land_on_a_splicing_store():
+    # Four sessions' edits at once: each pwrite reads the file before any
+    # writes it back, so without one writer at a time per path every
+    # write puts back three bytes the others had just replaced.
+    with Workspace({"/data/": _SplicingRAMVFS()}, mode=MountMode.WRITE) as ws:
+        f = PathSpec.from_str_path("/data/f")
+        await ws.dispatch("write", f, data=b"0123456789")
+        await asyncio.gather(
+            *(
+                ws.dispatch("pwrite", f, data=letter, offset=offset)
+                for letter, offset in (
+                    (b"A", 0),
+                    (b"B", 3),
+                    (b"C", 6),
+                    (b"D", 9),
+                )
+            )
+        )
+        got, _ = await ws.dispatch("read", f)
+        assert bytes(got) == b"A12B45C78D"
+
+
+@pytest.mark.asyncio
+async def test_offset_writes_through_two_mounts_of_one_store_all_land():
+    # One store mounted twice holds one file under two names: the writes
+    # are one writer at a time by the store's own key, not by the name.
+    store = _SplicingRAMVFS()
+    with Workspace({"/a/": store, "/b/": store}, mode=MountMode.WRITE) as ws:
+        await ws.dispatch(
+            "write", PathSpec.from_str_path("/a/f"), data=b"0123456789"
+        )
+        await asyncio.gather(
+            *(
+                ws.dispatch(
+                    "pwrite",
+                    PathSpec.from_str_path(name),
+                    data=letter,
+                    offset=offset,
+                )
+                for name, letter, offset in (
+                    ("/a/f", b"A", 0),
+                    ("/b/f", b"B", 3),
+                    ("/a/f", b"C", 6),
+                    ("/b/f", b"D", 9),
+                )
+            )
+        )
+        got, _ = await ws.dispatch("read", PathSpec.from_str_path("/b/f"))
+        assert bytes(got) == b"A12B45C78D"

@@ -21,11 +21,11 @@ from mirage.runtime.handles.constants import MODE_BASES, MODE_CHARS
 class OpenMode:
     """What an fopen-style mode string says about a handle.
 
-    One vocabulary for every dialect that opens by mode: quickjs's
-    ``std.open`` and monty's ``path_open`` pass these strings verbatim,
-    ``MirageFile`` takes one from embedding code, and preview1's
-    oflags/rights/fdflags translate onto the same facts in
-    ``WasiFs.path_open``.
+    One vocabulary for every dialect that opens by mode: monty's
+    ``path_open`` passes a CPython mode string, ``MirageFile`` takes one
+    from embedding code, and preview1's oflags/rights/fdflags (which a
+    QuickJS guest's ``std.open`` reaches as) translate onto the same
+    facts in ``WasiFs.path_open``.
 
     Args:
         readable (bool): the handle may read (r, +).
@@ -49,18 +49,15 @@ class OpenMode:
 def parse_mode(mode: str) -> OpenMode:
     """Read an fopen-style mode string into its facts, validating it.
 
-    The rule is CPython's, the stricter of the two parsers this
-    replaced — one base, at most one each of ``+``, ``b``, ``t``, and
-    never ``b`` together with ``t`` — widened by one C-dialect
-    spelling: ``wx``, fopen's exclusive create, which CPython spells
-    as a bare ``x``. Both dialects open by mode through this one
-    parser, so it accepts the union. A guest engine that tolerates
-    looser spellings still (C fopen reads ``rr`` as ``r``) renders
-    this refusal in its own dialect at its own boundary.
+    The rule is CPython's: one base, at most one each of ``+``, ``b``,
+    ``t``, and never ``b`` together with ``t``. A guest that opens in
+    C's dialect (fopen reads ``rr`` as ``r`` and spells exclusive
+    creation ``wx``) arrives as open flags and never reaches this
+    parser.
 
     Args:
         mode (str): the mode as the caller spelled it (``r``, ``w+b``,
-            ``a``, ``wx``, ...).
+            ``a``, ``x``, ...).
 
     Raises:
         ValueError: the mode does not parse, in CPython's own wording.

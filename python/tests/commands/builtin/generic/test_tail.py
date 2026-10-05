@@ -376,6 +376,24 @@ async def test_follow_prints_a_repeated_operand_once_per_occurrence():
 
 
 @pytest.mark.asyncio
+async def test_follow_names_a_raw_byte_file_in_its_first_header():
+    # A name byte that is not UTF-8 is written as that byte, as GNU tail
+    # writes the name it was given. Mirrored in tail.test.ts.
+    name = "/d/x" + chr(0xDCFF)
+    fs = _Growing({name: b"l1\n"})
+    stream, _ = await tail_generic(
+        _paths(name),
+        [],
+        _follow_opts(v=True),
+        fs.stat,
+        fs.read,
+        fs.read_range,
+    )
+    chunks = await _drain_for(stream, 0.06)
+    assert b"".join(chunks) == b"==> /d/x\xff <==\nl1\n"
+
+
+@pytest.mark.asyncio
 async def test_follow_reads_past_the_read_through_cache():
     # A warm cache holds the body the last one-shot read saw; a follow
     # polls for exactly what that body does not have yet, so it reads

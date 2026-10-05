@@ -35,6 +35,7 @@ from mirage.commands.cli.builtin.git.errors import (
     InvalidOptionError,
     NoMergeBaseError,
     NoWorkspaceError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.index_file import (
     read_index,
@@ -50,12 +51,13 @@ from mirage.commands.cli.builtin.git.revparse import (
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    STDERR,
     fatal,
     links_of,
+    option_operand,
     split_marked,
     start_point,
+    verb_usage,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -196,7 +198,13 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(texts, InvalidOptionError, escaped(inv.argv))
+        word = option_operand(inv, texts, STDERR)
+        if word is not None and (
+            cached or any(not text.startswith("-") for text in revisions)
+        ):
+            raise UsageError("", verb_usage(inv))
+        if word is not None:
+            raise InvalidOptionError(word, verb_usage(inv))
         repo, location = await opened(fl, doors)
         parsed = parse_diff_flags(
             fl,

@@ -65,11 +65,11 @@ import {
   resolvePathStat,
 } from '../../../mount/namespace/probe.ts'
 import type { Result } from '../types.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 const TARGET_DIR_LONG = '--target-directory'
 const SUFFIX_LONG = '--suffix'
 const VALUED_SHORTS = 'tS'
-const ENC = new TextEncoder()
 
 /** The ln flag bag, parsed once. */
 export interface LnFlags {
@@ -119,11 +119,10 @@ export function parseFlags(fl: FlagView): LnFlags {
 
 /** The GNU option error the parser reported, if any. */
 export function optionRefusal(parsed: ParsedArgs): [string, number] | null {
-  const dec = new TextDecoder()
   const ambiguousFirst = parsed.ambiguousOptions[0]
   if (parsed.optionErrorKinds[0] === 'ambiguous' && ambiguousFirst !== undefined) {
     const [msg, code] = ambiguousOptionError('ln', ...ambiguousFirst)
-    return [dec.decode(msg), code]
+    return [decodeText(msg), code]
   }
   const invalid = parsed.invalidOptions[0]
   if (invalid !== undefined) {
@@ -131,16 +130,16 @@ export function optionRefusal(parsed: ParsedArgs): [string, number] | null {
       parsed.optionErrorKinds[0] === 'unexpected_value'
         ? unexpectedValueError('ln', invalid)
         : unknownOptionError('ln', invalid)
-    return [dec.decode(msg), code]
+    return [decodeText(msg), code]
   }
   if (ambiguousFirst !== undefined) {
     const [msg, code] = ambiguousOptionError('ln', ...ambiguousFirst)
-    return [dec.decode(msg), code]
+    return [decodeText(msg), code]
   }
   const needsValue = parsed.needsValueOptions[0]
   if (needsValue !== undefined) {
     const [msg, code] = missingValueError('ln', needsValue)
-    return [dec.decode(msg), code]
+    return [decodeText(msg), code]
   }
   return null
 }
@@ -808,7 +807,7 @@ export async function handleLn(
     await makeLink(namespace, dispatch, session.cwd, plan, flags, errors, out)
   }
   return result('ln', {
-    out: out.length > 0 ? ENC.encode(out.join('')) : null,
+    out: out.length > 0 ? encodeText(out.join('')) : null,
     exitCode: errors.length > 0 ? 1 : 0,
     ...(errors.length > 0 ? { stderr: errors.join('') } : {}),
   })

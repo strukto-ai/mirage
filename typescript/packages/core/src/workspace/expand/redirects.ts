@@ -26,6 +26,7 @@ import { classifyBarePath } from './classify/index.ts'
 import { expandNode } from './node.ts'
 import type { ExecuteFn } from './node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * Expand redirect targets: heredoc vars, target words, pipelines.
@@ -140,7 +141,7 @@ async function expandRedirect(
     // fail loudly like the argv-position check.
     throw new ExitSignal(
       2,
-      new TextEncoder().encode('mirage: unsupported: process substitution >(...)\n'),
+      encodeText('mirage: unsupported: process substitution >(...)\n'),
       null,
       2,
     )

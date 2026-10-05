@@ -14,6 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import env_snapshot
@@ -36,10 +37,10 @@ async def handle_printenv(
                 IOResult(exit_code=1),
                 ExecutionNode(command="printenv", exit_code=1),
             )
-        out = f"{val}\n".encode()
+        out = encode_text(f"{val}\n")
     else:
         lines = [f"{k}={v}" for k, v in env.items()]
-        out = ("\n".join(sorted(lines)) + "\n").encode()
+        out = encode_text("\n".join(sorted(lines)) + "\n")
     return out, IOResult(), ExecutionNode(command="printenv", exit_code=0)
 
 

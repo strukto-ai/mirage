@@ -785,9 +785,6 @@ importers:
       '@modelcontextprotocol/server':
         specifier: ^2.3.0
         version: 2.3.0
-      '@struktoai/mirage-agents':
-        specifier: workspace:*
-        version: link:../agents
       '@struktoai/mirage-core':
         specifier: workspace:*
         version: link:../core

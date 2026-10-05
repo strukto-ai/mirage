@@ -1,0 +1,97 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import math
+
+import pytest
+
+from mirage.commands.builtin.utils.strtod import (
+    STRTOD,
+    strtod_double,
+    strtod_whole,
+)
+
+
+def _double(text: str) -> float:
+    found = STRTOD.match(text)
+    assert found is not None
+    return strtod_double(found)
+
+
+# What glibc's strtod consumes at the front of a word, C locale. Mirrored
+# in strtod.test.ts.
+@pytest.mark.parametrize(
+    "text,consumed",
+    [
+        ("  -1.5e3x", "  -1.5e3"),
+        ("0x1.8p3 rest", "0x1.8p3"),
+        ("0x", "0"),
+        ("0x.p1", "0"),
+        ("1e", "1"),
+        ("1e+", "1"),
+        (".5", ".5"),
+        ("5.", "5."),
+        ("INFINITY!", "INFINITY"),
+        ("infinit", "inf"),
+        ("nan(x_1)", "nan(x_1)"),
+        ("nan(", "nan"),
+        ("\t\r\v+3", "\t\r\v+3"),
+        ("+.e1", None),
+        ("", None),
+        ("x1", None),
+    ],
+)
+def test_strtod_reads_the_longest_number_at_the_front(text, consumed):
+    found = STRTOD.match(text)
+    assert (None if found is None else found.group(0)) == consumed
+
+
+@pytest.mark.parametrize(
+    "text,whole",
+    [
+        ("3", True),
+        (" 3", True),
+        ("0x10", True),
+        ("3 ", False),
+        ("1\r", False),
+        ("1.5.2", False),
+        ("", False),
+    ],
+)
+def test_strtod_whole_refuses_any_leftover(text, whole):
+    assert (strtod_whole(text) is not None) is whole
+
+
+@pytest.mark.parametrize(
+    "text,value",
+    [
+        ("1.5", 1.5),
+        ("-0x1.8p1", -3.0),
+        ("0x1p-1074", 5e-324),
+        ("0x1p1024", math.inf),
+        ("-0x1p1024", -math.inf),
+        ("1e400", math.inf),
+        ("-inf", -math.inf),
+        ("Infinity", math.inf),
+    ],
+)
+def test_strtod_double_rounds_once_to_the_nearest_double(text, value):
+    assert _double(text) == value
+
+
+@pytest.mark.parametrize("text", ["nan", "-NaN", "nan(0x1)"])
+def test_every_nan_spelling_is_one_quiet_nan(text):
+    value = _double(text)
+    assert math.isnan(value)
+    assert math.copysign(1.0, value) == 1.0

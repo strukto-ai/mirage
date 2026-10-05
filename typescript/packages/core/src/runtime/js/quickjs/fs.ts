@@ -12,15 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { PathSpec } from '../../../types.ts'
 import { WASI, errnoFor } from './errors.ts'
 import { readdir } from './list.ts'
 import { stat } from './stat.ts'
 import { epochToIso } from '../../../utils/dates.ts'
-import { FileHandle, FileTable, parseMode, type OpenMode } from '../../handles/index.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
+import { FileHandle, FileTable, type OpenMode } from '../../handles/index.ts'
 import { applyOpen } from '../../open.ts'
-import type { RuntimeVFS } from '../../vfs.ts'
+import type { RuntimeVFS, VFSStat } from '../../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 
 const ENC = new TextEncoder()
@@ -31,6 +33,37 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 // wasm/errors.py keeps): guests compare against these, so host errno
 // numbering must not leak.
 const ENOENT = WASI.ENOENT
+
+/**
+ * Hand text to the guest. The engine takes a C string, so text holding
+ * a NUL crosses as the pieces between its NULs, which the bootstrap
+ * joins back.
+ *
+ * @param ctx - the quickjs context
+ * @param text - the text the guest reads
+ */
+export function toGuestText(ctx: QuickJSAsyncContext, text: string): QuickJSHandle {
+  if (!text.includes('\0')) return ctx.newString(text)
+  const parts = ctx.newArray()
+  text.split('\0').forEach((part, i) => {
+    const h = ctx.newString(part)
+    ctx.setProp(parts, i, h)
+    h.dispose()
+  })
+  return parts
+}
+
+/**
+ * Read text from the guest, whole or as the pieces between its NULs.
+ *
+ * @param ctx - the quickjs context
+ * @param handle - a string, or the array the bootstrap split one into
+ */
+export function fromGuestText(ctx: QuickJSAsyncContext, handle: QuickJSHandle): string {
+  if (ctx.typeof(handle) === 'string') return ctx.getString(handle)
+  const parts: unknown = ctx.dump(handle)
+  return Array.isArray(parts) ? parts.map(String).join('\0') : String(parts)
+}
 
 /**
  * Install the `std.open`/`os.readdir` host functions on an asyncified
@@ -52,17 +85,37 @@ export function installQuickJsFs(
   vfs: RuntimeVFS | null,
 ): () => Promise<string[]> {
   const table = new FileTable<FileHandle>()
+  // qjs-libc's fopen opens a directory for reading, and every read of it
+  // then fails: it answers nothing and sets the stream's error flag. A
+  // read of zero bytes never reaches the stream, so it leaves the flag.
+  const directories = new Set<number>()
+  const failed = new Set<number>()
+  const readFails = (fd: number, size = -1): boolean => {
+    if (!directories.has(fd)) return false
+    if (size === 0) return true
+    failed.add(fd)
+    return true
+  }
   let cwd = PathSpec.fromStrPath('/')
   const absolute = (handle: QuickJSHandle): string => {
     const path = ctx.getString(handle)
     return path === '' ? '' : resolvePath(path, cwd.virtual)
   }
 
+  // The guest runs on the host's event loop, and a call a RAM mount
+  // answers settles without ever leaving the microtask queue, so a guest
+  // looping over files would hold the loop until it ended: another
+  // session's I/O and timers wait. Every async call gives the loop a turn
+  // once its time slice is spent.
+  const budget = new YieldBudget()
   const defineAsync = (
     name: string,
     fn: (...args: QuickJSHandle[]) => Promise<QuickJSHandle>,
   ): void => {
-    const handle = ctx.newAsyncifiedFunction(name, fn)
+    const handle = ctx.newAsyncifiedFunction(name, async (...args) => {
+      await budget.run()
+      return fn(...args)
+    })
     ctx.setProp(ctx.global, name, handle)
     handle.dispose()
   }
@@ -93,19 +146,29 @@ export function installQuickJsFs(
 
   defineAsync('__mirage_open', async (pathH, modeH) => {
     const path = absolute(pathH)
-    // The engine validates the mode before touching the filesystem
-    // (qjs-libc throws TypeError before any open); -2 tells the
-    // bootstrap to raise that refusal, since a host throw would not
-    // arrive typed. The shared parser is stricter than qjs-libc's
-    // character scan ('rr' passes strspn but not CPython's one-base
-    // rule); the strict answer is the one both guests can agree on.
-    let mode: OpenMode
-    try {
-      mode = parseMode(ctx.getString(modeH))
-    } catch {
-      return ctx.newNumber(-2)
+    // The mode as the real engine reads it: qjs-libc throws TypeError for
+    // a letter outside `rwa+bx` before any open (null tells the bootstrap
+    // to raise it, since a host throw would not arrive typed), and musl's
+    // fopen then reads only the first letter and whether `+` and `x`
+    // appear, so `rr` opens like `r`. Any other refusal answers -errno,
+    // which the bootstrap hands to the guest's errorObj.
+    const spelled = ctx.getString(modeH)
+    if (!/^[rwa+bx]*$/.test(spelled)) return ctx.null
+    // An empty mode passes musl's first-letter check (strchr finds the
+    // string's terminator) and opens for writing, creating the file.
+    const first = spelled.charAt(0)
+    if (first !== '' && !'rwa'.includes(first)) return ctx.newNumber(-WASI.EINVAL)
+    const plus = spelled.includes('+')
+    const mode: OpenMode = {
+      readable: plus || first === 'r',
+      writable: plus || first !== 'r',
+      truncate: first === 'w',
+      append: first === 'a',
+      create: first !== 'r',
+      exclusive: first !== 'r' && spelled.includes('x'),
+      binary: spelled.includes('b'),
     }
-    if (vfs?.serves(path) !== true) return ctx.newNumber(-1)
+    if (vfs?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     // The open's effect lands through the mount at open, by the rule
     // every door shares, so write modes and a read-narrowed session
     // refuse here (the guest gets null), the ledger records the real
@@ -114,8 +177,16 @@ export function installQuickJsFs(
     // denial on an existing file must refuse the open, or a
     // create-capable mode would create over content this open never saw.
     let handle: FileHandle
+    let directory = false
     try {
-      const row = await applyOpen(vfs, path, mode)
+      let row: VFSStat | null
+      try {
+        row = await applyOpen(vfs, path, mode)
+      } catch (err) {
+        if (mode.writable || classify(err) !== 'EISDIR') throw err
+        row = null
+        directory = true
+      }
       // Nothing is read at open: the handle fetches what a read lands in.
       // A handle that writes reads the stored bytes, since its writes land
       // on them; a read-only one sees the rendering.
@@ -131,14 +202,19 @@ export function installQuickJsFs(
               ),
         { size: row?.size ?? 0, writable: mode.writable, append: mode.append },
       )
-    } catch {
-      return ctx.newNumber(-1)
+    } catch (err) {
+      return ctx.newNumber(-errnoFor(err))
     }
-    return ctx.newNumber(table.add(handle))
+    const fd = table.add(handle)
+    if (directory) directories.add(fd)
+    return ctx.newNumber(fd)
   })
 
   defineAsync('__mirage_close', async (fdH) => {
-    const file = table.pop(ctx.getNumber(fdH))
+    const fd = ctx.getNumber(fdH)
+    directories.delete(fd)
+    failed.delete(fd)
+    const file = table.pop(fd)
     if (file === undefined) return ctx.undefined
     if (file.dirty && vfs !== null) await vfs.flush(file.path, file.flushPlan())
     return ctx.undefined
@@ -166,20 +242,46 @@ export function installQuickJsFs(
   })
 
   defineSync('__mirage_read', (fdH, maxH) => {
-    const file = table.get(ctx.getNumber(fdH))
-    if (file === undefined) return ctx.newString('')
-    return ctx.newString(DEC.decode(file.read(ctx.getNumber(maxH))))
+    const fd = ctx.getNumber(fdH)
+    const file = table.get(fd)
+    const size = ctx.getNumber(maxH)
+    if (file === undefined || readFails(fd, size)) return ctx.newString('')
+    return toGuestText(ctx, DEC.decode(file.read(size)))
+  })
+
+  defineSync('__mirage_read_bytes', (fdH, maxH) => {
+    const fd = ctx.getNumber(fdH)
+    const file = table.get(fd)
+    const size = ctx.getNumber(maxH)
+    const bytes = file === undefined || readFails(fd, size) ? new Uint8Array(0) : file.read(size)
+    return ctx.newArrayBuffer(bytes.slice().buffer)
   })
 
   defineSync('__mirage_getline', (fdH) => {
-    const line = table.get(ctx.getNumber(fdH))?.readLine() ?? null
-    return line === null ? ctx.null : ctx.newString(DEC.decode(line))
+    const fd = ctx.getNumber(fdH)
+    const line = readFails(fd) ? null : (table.get(fd)?.readLine() ?? null)
+    return line === null ? ctx.null : toGuestText(ctx, DEC.decode(line))
+  })
+
+  defineSync('__mirage_ferror', (fdH) => (failed.has(ctx.getNumber(fdH)) ? ctx.true : ctx.false))
+
+  defineSync('__mirage_clearerr', (fdH) => {
+    failed.delete(ctx.getNumber(fdH))
+    return ctx.undefined
   })
 
   defineSync('__mirage_write', (fdH, textH) => {
     const file = table.get(ctx.getNumber(fdH))
-    if (file?.writable === true) file.write(ENC.encode(ctx.getString(textH)))
+    if (file?.writable === true) file.write(ENC.encode(fromGuestText(ctx, textH)))
     return ctx.undefined
+  })
+
+  defineSync('__mirage_write_bytes', (fdH, bufferH) => {
+    const file = table.get(ctx.getNumber(fdH))
+    if (file?.writable !== true) return ctx.newNumber(0)
+    const bytes = ctx.getArrayBuffer(bufferH).consume((view) => view.value.slice())
+    file.write(bytes)
+    return ctx.newNumber(bytes.length)
   })
 
   defineSync('__mirage_seek', (fdH, offsetH, whenceH) => {
@@ -253,9 +355,8 @@ export function installQuickJsFs(
     const src = absolute(srcH)
     const dst = absolute(dstH)
     if (vfs?.serves(src) !== true || !vfs.serves(dst)) return ctx.newNumber(-ENOENT)
-    // The door refuses a pair on different mounts (CROSS_MOUNT), which
-    // this engine numbers -44, the real engine's answer (pinned live:
-    // each mount is its own preopen and the destination never resolves).
+    // The door refuses a pair on different mounts with EXDEV, which this
+    // engine numbers -75, as the real engine does.
     try {
       await vfs.rename(src, dst)
       return ctx.newNumber(0)

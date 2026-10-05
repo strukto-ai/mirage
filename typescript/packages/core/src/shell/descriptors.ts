@@ -19,6 +19,7 @@ import { type Channel, JobConsole, type OwnedStream, Terminal } from './console/
 import type { PathSpec } from '../types.ts'
 import { ebadfStdin } from '../utils/errors.ts'
 import { RedirectKind, type Redirect } from './types.ts'
+import { encodeText } from './bytes.ts'
 
 /**
  * The first descriptor outside the signed 32-bit range, or null. Both slots count: the
@@ -46,7 +47,7 @@ export function unsupportedDescriptor(redirects: readonly Redirect[]): number | 
 
 /** Bash's error for a closed descriptor, without the line-number prefix. */
 export function badDescriptorLine(fd: number): Uint8Array {
-  return new TextEncoder().encode(`${String(fd)}: Bad file descriptor\n`)
+  return encodeText(`${String(fd)}: Bad file descriptor\n`)
 }
 
 /**

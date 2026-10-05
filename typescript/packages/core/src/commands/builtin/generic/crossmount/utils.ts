@@ -31,8 +31,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { parseFlags as parseGrepFlags, printsContext as grepPrintsContext } from '../grep.ts'
 import { betweenFiles as rgBetweenFiles, parseFlags as parseRgFlags } from '../rg.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Run one native single-mount command per operand, in operand order. Each
 // operand executes on its owning mount through `runSingle` (which also
@@ -74,7 +73,7 @@ export async function runOperands(
       // remaining operands, GNU-style.
       if (!isFsError(e)) throw e
       const existing = await materialize(io.stderr)
-      const line = ENC.encode(fsErrorLine(cmdName, scope, e))
+      const line = encodeText(fsErrorLine(cmdName, scope, e))
       const merged = new Uint8Array(existing.byteLength + line.byteLength)
       merged.set(existing, 0)
       merged.set(line, existing.byteLength)
@@ -253,7 +252,7 @@ export function streamOperands(
         try {
           for await (const data of chunks(out ?? new Uint8Array(), controller.signal)) {
             if (data.byteLength === 0) continue
-            if (first && printed && separator !== '') yield ENC.encode(separator)
+            if (first && printed && separator !== '') yield encodeText(separator)
             first = false
             printed = true
             yield data
@@ -262,7 +261,7 @@ export function streamOperands(
           if (!isFsError(err)) throw err
           branch.stderr = concatBytes([
             await materialize(branch.stderr),
-            ENC.encode(fsErrorLine(cmdName, scope, err)),
+            encodeText(fsErrorLine(cmdName, scope, err)),
           ])
           branch.exitCode = readFailExitCode(cmdName, err)
         }

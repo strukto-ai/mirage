@@ -46,7 +46,7 @@ export async function stat(
     setNum('dev', 0)
     setNum('ino', 0)
     setNum('mode', st.mode)
-    setNum('nlink', 1)
+    setNum('nlink', st.isDir ? 2 : 1)
     setNum('uid', 0)
     setNum('gid', 0)
     setNum('rdev', st.rdev ?? 0)

@@ -29,12 +29,6 @@
           },
           "expect": {
             "exit": 0
-          },
-          "expect_on": {
-            "pyodide": {
-              "exit": 1,
-              "stderr_contains": "Program terminated with exit(0)"
-            }
           }
         },
         {
@@ -42,6 +36,41 @@
           "expect": {
             "exit": 0,
             "stdout": "kept"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_caught_exit_still_ends_the_program",
+      "runtimes": [
+        "wasi",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\ntry:\n    os._exit(7)\nexcept BaseException:\n    pass\nopen('/data/after.txt', 'w').write('late')\nprint('after')"
+          },
+          "expect": {
+            "exit": 7,
+            "stdout": "",
+            "ops_absent": [
+              "create /data/after.txt"
+            ]
+          }
+        },
+        {
+          "command": "ls /data",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
           }
         }
       ]

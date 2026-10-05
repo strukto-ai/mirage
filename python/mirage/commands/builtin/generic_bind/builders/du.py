@@ -123,8 +123,6 @@ async def _du_walk(
     except Exception as exc:
         _account_for_walk_error(exc, path, budget)
         return 0
-    if info.type == FileType.SYMLINK:
-        return 0
     if info.type != FileType.DIRECTORY:
         size = info.size or 0
         if entries is not None:

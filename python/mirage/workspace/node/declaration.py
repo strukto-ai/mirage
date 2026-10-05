@@ -17,6 +17,7 @@ from typing import Any, Callable
 from mirage.io import IOResult
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
@@ -63,7 +64,7 @@ def _merge_conversion_errors(
     if not errors:
         return result
     stream, io, node = result
-    extra = ("\n".join(errors) + "\n").encode()
+    extra = encode_text("\n".join(errors) + "\n")
     prior = io.stderr if isinstance(io.stderr, bytes) else b""
     merged = prior + extra
     new_io = IOResult(
@@ -129,9 +130,9 @@ def _declare_option_refusal(
     if bad is None:
         return None
     sign = "-" if bad in flag_chars else "+"
-    err = (
+    err = encode_text(
         f"bash: {cmd}: {sign}{bad}: invalid option\n{_DECLARE_USAGE}\n"
-    ).encode()
+    )
     return (
         None,
         IOResult(exit_code=2, stderr=err),
@@ -172,7 +173,7 @@ async def _plus_refusals(
     names += [name for name, _, _ in staged or []]
     for name in names:
         if "r" in plus_chars and view.is_readonly(name):
-            err = f"bash: {cmd}: {name}: readonly variable\n".encode()
+            err = encode_text(f"bash: {cmd}: {name}: readonly variable\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -181,10 +182,10 @@ async def _plus_refusals(
         if ("a" in plus_chars and name in session.arrays) or (
             "A" in plus_chars and name in session.assocs
         ):
-            err = (
+            err = encode_text(
                 f"bash: {cmd}: {name}: cannot destroy array variables "
                 "in this way\n"
-            ).encode()
+            )
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -259,7 +260,7 @@ async def _stamp_attrs(
             for attr in off_attrs:
                 await view.mark(name, attr, False)
     except PolicyDenied as exc:
-        err = f"{exc.strerror}\n".encode()
+        err = encode_text(f"{exc.strerror}\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
@@ -326,7 +327,7 @@ async def _stamp_export(
         try:
             await view.mark(name, VarAttr.EXPORT, True)
         except PolicyDenied as exc:
-            err = f"{exc.strerror}\n".encode()
+            err = encode_text(f"{exc.strerror}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -492,7 +493,7 @@ async def execute_declaration(
             try:
                 ensure_var_visible(session, bare)
             except PolicyDenied as exc:
-                raise DiscardSignal(f"{exc.strerror}\n".encode()) from exc
+                raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
             if want_assoc and bare in session.arrays:
                 conversion_errors.append(
                     f"bash: {cmd_word}: {bare}: cannot convert indexed "

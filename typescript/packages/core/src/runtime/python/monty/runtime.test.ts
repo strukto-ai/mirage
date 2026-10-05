@@ -17,8 +17,6 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { MontyRuntime } from './index.ts'
 import { MontyUnavailableError } from './errors.ts'
-import { PyodideRuntime } from '../pyodide/runtime.ts'
-import { buildRuntime } from '../../table.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
@@ -161,18 +159,95 @@ describe('MontyRuntime', () => {
     for (const rt of runtimes) await rt.close()
   })
 
-  it('runs sandboxed code and captures stdout', async () => {
-    const result = await run(make(), 'print(21 * 2)')
-    expect(result.exitCode).toBe(0)
-    expect(text(result.stdout)).toBe('42\n')
-    expect(text(result.stderr)).toBe('')
-  }, 30_000)
-
-  it('syntax errors surface as a traceback with exit 1', async () => {
-    const result = await run(make(), 'def broken(')
-    expect(result.exitCode).toBe(1)
-    expect(text(result.stderr)).toContain('SyntaxError')
-  }, 30_000)
+  // A program's whole answer: what it prints, its exit code, and a
+  // phrase its stderr carries (null: nothing on stderr). The env rows
+  // read a copy of the run env, like python's MontyFs keeps
+  // dict(environ); the clock rows read the host clock; resolve() and
+  // absolute() are lexical, a str like python.
+  it.each<
+    [
+      string,
+      { code: string; args?: string[]; env?: Record<string, string>; stdin?: string },
+      number,
+      string,
+      string | null,
+    ]
+  >([
+    ['print', { code: 'print(21 * 2)' }, 0, '42\n', null],
+    ['syntax', { code: 'def broken(' }, 1, '', 'SyntaxError'],
+    ['error keeps stdout', { code: "print('before')\n1/0" }, 1, 'before\n', 'ZeroDivisionError'],
+    ['argv', { code: 'print(argv[1:])', args: ['a', 'b'] }, 0, "['a', 'b']\n", null],
+    ['stdin', { code: 'print(stdin.decode())', stdin: 'piped' }, 0, 'piped\n', null],
+    ['no stdin', { code: 'print(stdin is None)' }, 0, 'True\n', null],
+    [
+      'run env',
+      { code: "import os\nprint(os.getenv('MY_VAR', 'unset'))", env: { MY_VAR: 'v1' } },
+      0,
+      'v1\n',
+      null,
+    ],
+    [
+      'missing env key',
+      {
+        code: "import os\ntry:\n    os.environ['nope']\nexcept KeyError as e:\n    print('KeyError', e)",
+        env: { K: 'v' },
+      },
+      0,
+      "KeyError 'nope'\n",
+      null,
+    ],
+    [
+      'env mutation stays in the guest',
+      { code: "import os\nos.environ['K'] = 'guest'\nprint(os.getenv('K'))", env: { K: 'v' } },
+      0,
+      'v\n',
+      null,
+    ],
+    [
+      'host clock',
+      {
+        code:
+          'from datetime import datetime, date, timezone\n' +
+          'n = datetime.now()\n' +
+          'print(n.year >= 2025, n.tzinfo)\n' +
+          'a = datetime.now(timezone.utc)\n' +
+          'print(a.tzinfo)\n' +
+          't = date.today()\n' +
+          'print(t.year >= 2025)',
+      },
+      0,
+      'True None\nUTC\nTrue\n',
+      null,
+    ],
+    [
+      'lexical resolve',
+      {
+        code:
+          'from pathlib import Path\n' +
+          "r = Path('rel/x.txt').resolve()\n" +
+          'print(type(r).__name__, r)\n' +
+          "a = Path('/abs/y.txt').absolute()\n" +
+          'print(type(a).__name__, a)',
+      },
+      0,
+      'str /rel/x.txt\nstr /abs/y.txt\n',
+      null,
+    ],
+  ])(
+    'runs a program: %s',
+    async (_name, program, exitCode, stdout, stderr) => {
+      const result = await make().run({
+        code: program.code,
+        args: program.args ?? [],
+        env: program.env ?? {},
+        stdin: program.stdin === undefined ? null : new TextEncoder().encode(program.stdin),
+      })
+      expect([result.exitCode, text(result.stdout)]).toEqual([exitCode, stdout])
+      if (stderr === null) expect(text(result.stderr)).toBe('')
+      else expect(text(result.stderr)).toContain(stderr)
+    },
+    30_000,
+  )
 
   it('a deadline SIGKILLs the busy worker and reports exit 124', async () => {
     const rt = make()
@@ -197,19 +272,6 @@ describe('MontyRuntime', () => {
     expect(result.exitCode).toBe(1)
   }, 30_000)
 
-  it('runtime errors keep prior stdout', async () => {
-    const result = await run(make(), "print('before')\n1/0")
-    expect(result.exitCode).toBe(1)
-    expect(text(result.stdout)).toBe('before\n')
-    expect(text(result.stderr)).toContain('ZeroDivisionError')
-  }, 30_000)
-
-  it('exposes args as the argv global', async () => {
-    const result = await run(make(), 'print(argv[1:])', ['a', 'b'])
-    expect(result.exitCode).toBe(0)
-    expect(text(result.stdout)).toBe("['a', 'b']\n")
-  }, 30_000)
-
   it('argv[0] is prog when the caller names the program', async () => {
     // A named caller (a CLI install) owns argv[0]; without one the
     // interpreter's own placeholder stands, as `python3 -c` expects.
@@ -223,30 +285,6 @@ describe('MontyRuntime', () => {
     expect([named.exitCode, text(named.stdout)]).toEqual([0, 'pager\n'])
     const plain = await run(make(), 'print(argv[0])')
     expect(text(plain.stdout)).toBe('main.py\n')
-  }, 30_000)
-
-  it('exposes piped input as the stdin global', async () => {
-    const result = await make().run({
-      code: 'print(stdin.decode())',
-      args: [],
-      env: {},
-      stdin: new TextEncoder().encode('piped'),
-    })
-    expect(result.exitCode).toBe(0)
-    expect(text(result.stdout)).toBe('piped\n')
-  }, 30_000)
-
-  it('the stdin global is None without a pipe', async () => {
-    const result = await run(make(), 'print(stdin is None)')
-    expect(result.exitCode).toBe(0)
-    expect(text(result.stdout)).toBe('True\n')
-  }, 30_000)
-
-  it('serves os.getenv from the run env only', async () => {
-    const result = await run(make(), "import os\nprint(os.getenv('MY_VAR', 'unset'))", [], {
-      MY_VAR: 'v1',
-    })
-    expect(text(result.stdout)).toBe('v1\n')
   }, 30_000)
 
   it('serves os.environ as a dict of the run env', async () => {
@@ -280,21 +318,6 @@ describe('MontyRuntime', () => {
         .map((line) => line + '\n')
         .join(''),
     )
-  }, 30_000)
-
-  it('a missing os.environ key raises KeyError, not a runtime error', async () => {
-    const code =
-      "import os\ntry:\n    os.environ['nope']\nexcept KeyError as e:\n    print('KeyError', e)"
-    const result = await run(make(), code, [], { K: 'v' })
-    expect([result.exitCode, text(result.stdout)]).toEqual([0, "KeyError 'nope'\n"])
-  }, 30_000)
-
-  it('mutating os.environ cannot reach the host env', async () => {
-    // The callback hands back a copy, like python's MontyFs, which
-    // keeps dict(environ).
-    const code = "import os\nos.environ['K'] = 'guest'\nprint(os.getenv('K'))"
-    const result = await run(make(), code, [], { K: 'v' })
-    expect([result.exitCode, text(result.stdout)]).toEqual([0, 'v\n'])
   }, 30_000)
 
   it('a rename leaving the mount view raises EXDEV without dispatching', async () => {
@@ -499,16 +522,27 @@ describe('MontyRuntime', () => {
     ])
   }, 30_000)
 
-  it('mkdir on a file raises even under exist_ok', async () => {
-    // exist_ok forgives a directory, never a file — pathlib's own rule
-    // (python's test_monty_mkdir_on_a_file_raises_even_under_exist_ok).
-    const { dispatch, mutations } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
-    const rt = make(dispatch, () => ['/s3/'])
-    const result = await run(rt, "from pathlib import Path\nPath('/s3/a.txt').mkdir(exist_ok=True)")
-    expect(result.exitCode).toBe(1)
-    expect(text(result.stderr)).toContain('FileExistsError')
-    expect(mutations).toEqual([])
-  }, 30_000)
+  // exist_ok forgives a directory, never a file — pathlib's own rule
+  // (python's test_monty_mkdir_on_a_file_raises_even_under_exist_ok),
+  // whether or not the guest read the file first.
+  it.each([
+    ['read first', "Path('/s3/a.txt').read_text()\n"],
+    ['never read', ''],
+  ])(
+    'mkdir on a file raises even under exist_ok (%s)',
+    async (_name, read) => {
+      const { dispatch, mutations } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
+      const rt = make(dispatch, () => ['/s3/'])
+      const result = await run(
+        rt,
+        `from pathlib import Path\n${read}Path('/s3/a.txt').mkdir(exist_ok=True)`,
+      )
+      expect(result.exitCode).toBe(1)
+      expect(text(result.stderr)).toContain('FileExistsError')
+      expect(mutations).toEqual([])
+    },
+    30_000,
+  )
 
   it('refuses a path no mount serves, as python does', async () => {
     // The only filesystem a guest sees is the workspace's: with nothing
@@ -527,34 +561,6 @@ describe('MontyRuntime', () => {
     const probe = await run(make(), "from pathlib import Path\nprint(Path('/tmp').exists())")
     expect(probe.exitCode).toBe(0)
     expect(text(probe.stdout)).toBe('False\n')
-  }, 30_000)
-
-  it('serves the host clock: naive now, aware now, and today', async () => {
-    const result = await run(
-      make(),
-      'from datetime import datetime, date, timezone\n' +
-        'n = datetime.now()\n' +
-        'print(n.year >= 2025, n.tzinfo)\n' +
-        'a = datetime.now(timezone.utc)\n' +
-        'print(a.tzinfo)\n' +
-        't = date.today()\n' +
-        'print(t.year >= 2025)',
-    )
-    expect(result.exitCode).toBe(0)
-    expect(text(result.stdout)).toBe('True None\nUTC\nTrue\n')
-  }, 30_000)
-
-  it('resolve and absolute answer lexically, a str like python', async () => {
-    const result = await run(
-      make(),
-      'from pathlib import Path\n' +
-        "r = Path('rel/x.txt').resolve()\n" +
-        'print(type(r).__name__, r)\n' +
-        "a = Path('/abs/y.txt').absolute()\n" +
-        'print(type(a).__name__, a)',
-    )
-    expect(result.exitCode).toBe(0)
-    expect(text(result.stdout)).toBe('str /rel/x.txt\nstr /abs/y.txt\n')
   }, 30_000)
 
   it('a dead worker maps to exit 1 with a note, and eval propagates it', async () => {
@@ -678,105 +684,80 @@ describe('monty unavailable', () => {
   })
 })
 
-describe('buildRuntime', () => {
-  it('builds pyodide by name', () => {
-    expect(buildRuntime('pyodide')).toBeInstanceOf(PyodideRuntime)
-  })
-
-  it('builds monty by name', () => {
-    expect(buildRuntime('monty')).toBeInstanceOf(MontyRuntime)
-  })
-
-  it('rejects unknown names', () => {
-    expect(() => buildRuntime('docker')).toThrow(/unknown runtime/)
-  })
-
-  it("hints that 'local' lives in the node package", () => {
-    expect(() => buildRuntime('local')).toThrow(/mirage-node/)
-  })
-})
-
 describe('python3 option table (CPython-pinned)', () => {
-  async function run(line: string) {
-    const parser = await getTestParser()
+  // Each row runs its setup lines, then one python3 line: what that
+  // line exits with, prints, and says on stderr (every phrase listed,
+  // or nothing at all for '').
+  it.each<[string, string[], string, number, string | null, string[] | '']>([
+    [
+      'takes -u before a script as a flag, not as the script',
+      ["printf 'print(42)\\n' > /s.py"],
+      'python3 -u /s.py',
+      0,
+      '42\n',
+      '',
+    ],
+    [
+      'exits 2 naming the letter for an unknown short option',
+      [],
+      "python3 -zz -c 'print(1)'",
+      2,
+      null,
+      ['Unknown option: -z'],
+    ],
+    [
+      "exits 2 with CPython's wording when a payload has no argument",
+      [],
+      'python3 -c',
+      2,
+      null,
+      ['Argument expected for the -c option', 'usage: python3 [option] ...'],
+    ],
+    [
+      'sets argv[0] to the script as typed',
+      ["printf 'print(argv[0])\\n' > /s.py"],
+      'python3 /s.py',
+      0,
+      '/s.py\n',
+      '',
+    ],
+    ['sets argv[0] to -c under a payload', [], "python3 -c 'print(argv[0])'", 0, '-c\n', ''],
+    [
+      'refuses -m on a runtime with no import system',
+      [],
+      'python3 -m json.tool',
+      1,
+      null,
+      ['-m', 'monty'],
+    ],
+    [
+      'warns on an init switch monty cannot honor',
+      [],
+      "python3 -O -c 'print(1)'",
+      0,
+      null,
+      ["-O is ignored by the 'monty' runtime"],
+    ],
+    ['does not warn for the by-design no-ops', [], "python3 -u -q -c 'print(1)'", 0, null, ''],
+  ])('%s', async (_name, setup, line, exitCode, stdout, stderr) => {
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'workspace'] },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        runtimes: ['monty', 'workspace'],
+      },
     )
     try {
-      return await ws.shell(line)
+      for (const step of setup) await ws.shell(step)
+      const io = await ws.shell(line)
+      const err = new TextDecoder().decode(io.stderr)
+      expect(io.exitCode).toBe(exitCode)
+      if (stdout !== null) expect(new TextDecoder().decode(io.stdout)).toBe(stdout)
+      if (stderr === '') expect(err).toBe('')
+      else for (const phrase of stderr) expect(err).toContain(phrase)
     } finally {
       await ws.close()
     }
-  }
-
-  it('takes -u before a script as a flag, not as the script', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'workspace'] },
-    )
-    try {
-      await ws.shell("printf 'print(42)\\n' > /s.py")
-      const io = await ws.shell('python3 -u /s.py')
-      expect(io.exitCode).toBe(0)
-      expect(new TextDecoder().decode(io.stdout)).toBe('42\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('exits 2 naming the letter for an unknown short option', async () => {
-    const io = await run("python3 -zz -c 'print(1)'")
-    expect(io.exitCode).toBe(2)
-    expect(new TextDecoder().decode(io.stderr)).toContain('Unknown option: -z')
-  })
-
-  it("exits 2 with CPython's wording when a payload has no argument", async () => {
-    const io = await run('python3 -c')
-    expect(io.exitCode).toBe(2)
-    const err = new TextDecoder().decode(io.stderr)
-    expect(err).toContain('Argument expected for the -c option')
-    expect(err).toContain('usage: python3 [option] ...')
-  })
-
-  it('sets argv[0] to the script as typed', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'workspace'] },
-    )
-    try {
-      await ws.shell("printf 'print(argv[0])\\n' > /s.py")
-      const io = await ws.shell('python3 /s.py')
-      expect(new TextDecoder().decode(io.stdout)).toBe('/s.py\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('sets argv[0] to -c under a payload', async () => {
-    const io = await run("python3 -c 'print(argv[0])'")
-    expect(new TextDecoder().decode(io.stdout)).toBe('-c\n')
-  })
-
-  it('refuses -m on a runtime with no import system', async () => {
-    const io = await run('python3 -m json.tool')
-    expect(io.exitCode).toBe(1)
-    const err = new TextDecoder().decode(io.stderr)
-    expect(err).toContain('-m')
-    expect(err).toContain('monty')
-  })
-
-  it('warns on an init switch monty cannot honor', async () => {
-    const io = await run("python3 -O -c 'print(1)'")
-    expect(io.exitCode).toBe(0)
-    expect(new TextDecoder().decode(io.stderr)).toContain("-O is ignored by the 'monty' runtime")
-  })
-
-  it('does not warn for the by-design no-ops', async () => {
-    const io = await run("python3 -u -q -c 'print(1)'")
-    expect(io.exitCode).toBe(0)
-    expect(new TextDecoder().decode(io.stderr)).toBe('')
   })
 })

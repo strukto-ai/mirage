@@ -76,9 +76,14 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         if (op === 'stat')
           return new FileStat({ name: path, type: FileType.FILE, size: data.length })
         if (op === 'read') return data
-        if (op === 'write') {
+        // A 'w' open empties the file, then its write lands at 0.
+        if (op === 'truncate') {
           writes.push(path)
           if (path === `/data/${rejected}`) throw new Error('denied')
+          files.set(path, new Uint8Array())
+          return
+        }
+        if (op === 'pwrite') {
           files.set(path, bytes ?? new Uint8Array())
           return
         }
@@ -94,9 +99,11 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         )
         const failedAt = names.indexOf(rejected)
         expect(result.exitCode).toBe(1)
+        // Each file is a truncate and a pwrite: the failed truncate's own
+        // pwrite is skipped too.
         expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe(
-          `python3: failed to write /data/${rejected} on mount: denied\n` +
-            `python3: skipped ${String(4 - failedAt)} later mutation(s) after that failure\n`,
+          `python3: failed to truncate /data/${rejected} on mount: denied\n` +
+            `python3: skipped ${String(2 * (4 - failedAt) + 1)} later mutation(s) after that failure\n`,
         )
         expect(writes).toEqual(names.slice(0, failedAt + 1).map((name) => `/data/${name}`))
         for (const name of names.slice(failedAt))
@@ -306,7 +313,11 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
               return new FileStat({ name: path, type: FileType.FILE, size: data.length })
             }
             if (op === 'read') return files.get(path)
-            if (op === 'write') {
+            if (op === 'truncate') {
+              files.set(path, new Uint8Array())
+              return
+            }
+            if (op === 'pwrite') {
               files.set(path, bytes ?? new Uint8Array())
               return
             }
@@ -390,7 +401,11 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
             if (op === 'stat')
               return new FileStat({ name: path, type: FileType.FILE, size: contents.length })
             if (op === 'read') return contents
-            if (op === 'write') {
+            if (op === 'truncate') {
+              contents = new Uint8Array()
+              return
+            }
+            if (op === 'pwrite') {
               const value = DEC.decode(bytes)
               if (value === 'first') {
                 entered.resolve()

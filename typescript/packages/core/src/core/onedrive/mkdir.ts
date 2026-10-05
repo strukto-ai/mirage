@@ -15,7 +15,9 @@
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { GraphError } from '../msgraph/client.ts'
+import { enotdir, isEexist, isEnoent } from '../../utils/errors.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { baseName, createChildFolder, parentPath } from '../msgraph/drive.ts'
 import { fullItemUrl, itemUrl } from './client.ts'
 
@@ -25,37 +27,60 @@ import { fullItemUrl, itemUrl } from './client.ts'
  * The mount root exists from the agent's side because it is mounted, but on
  * the drive it is a folder chain nothing has created until the first write.
  * A file upload creates its parents; a folder create does not, so mkdir has
- * to.
+ * to. The prefix is hidden, so a file in it is named as `root`: the mount
+ * root is then not a directory.
  *
  * Args:
  *   accessor: the mount's accessor.
+ *   root: the path a refusal in the prefix names.
  */
-async function createRoot(accessor: OneDriveAccessor): Promise<void> {
+async function createRoot(accessor: OneDriveAccessor, root: string): Promise<void> {
   let parent = ''
   for (const name of accessor.config.keyPrefix.split('/')) {
-    await createChildFolder(
-      accessor.config,
-      fullItemUrl(accessor.config, parent, '/children'),
-      name,
-    )
-    parent = parent === '' ? name : `${parent}/${name}`
+    const level = parent === '' ? name : `${parent}/${name}`
+    try {
+      await createChildFolder(
+        accessor.config,
+        fullItemUrl(accessor.config, parent, '/children'),
+        name,
+        {
+          item: fullItemUrl(accessor.config, level),
+          parent: fullItemUrl(accessor.config, parent),
+          virtual: root,
+        },
+      )
+    } catch (error) {
+      if (isEexist(error)) throw enotdir(root)
+      throw error
+    }
+    parent = level
   }
 }
 
-async function createDir(accessor: OneDriveAccessor, path: string): Promise<void> {
+async function createDir(
+  accessor: OneDriveAccessor,
+  path: string,
+  virtual: string,
+  root: string,
+  existOk: boolean,
+): Promise<void> {
+  const config = accessor.config
   const parent = parentPath(path)
-  const url = itemUrl(accessor.config, parent, '/children')
+  const create = (): Promise<void> =>
+    createChildFolder(
+      config,
+      itemUrl(config, parent, '/children'),
+      baseName(path),
+      { item: itemUrl(config, path), parent: itemUrl(config, parent), virtual },
+      existOk,
+    )
   try {
-    await createChildFolder(accessor.config, url, baseName(path))
+    await create()
   } catch (error) {
-    const missingRoot =
-      error instanceof GraphError &&
-      error.status === 404 &&
-      parent === '' &&
-      accessor.config.keyPrefix !== ''
+    const missingRoot = isEnoent(error) && parent === '' && config.keyPrefix !== ''
     if (!missingRoot) throw error
-    await createRoot(accessor)
-    await createChildFolder(accessor.config, url, baseName(path))
+    await createRoot(accessor, root)
+    await create()
   }
 }
 
@@ -67,12 +92,22 @@ export async function mkdir(
   const key = path.vfsPath
   if (key === '') return
   if (parents) {
+    const prefix = rstripSlash(mountPrefixOf(path.virtual, path.vfsPath))
     const parts = key.split('/')
     for (let index = 1; index <= parts.length; index++) {
-      await createDir(accessor, parts.slice(0, index).join('/'))
+      const level = parts.slice(0, index).join('/')
+      const virtual = `${prefix}/${level}`
+      try {
+        await createDir(accessor, level, virtual, prefix === '' ? '/' : prefix, true)
+      } catch (error) {
+        // `mkdir -p` passes only a directory at the operand and names the
+        // file it stops at above it, as GNU does.
+        if (!isEexist(error) || index === parts.length) throw error
+        throw enotdir(virtual)
+      }
     }
   } else {
-    await createDir(accessor, key)
+    await createDir(accessor, key, path.virtual, path.virtual, false)
   }
   await invalidateAfterWrite(path)
   if (parents) await invalidateAncestors(path)

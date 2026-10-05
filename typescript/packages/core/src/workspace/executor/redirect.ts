@@ -36,13 +36,13 @@ import {
 } from '../../shell/descriptors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { ExitSignal } from '../../shell/errors.ts'
-import { type Redirect, RedirectKind } from '../../shell/types.ts'
+import { NodeType as NT, type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { writeDescription } from './create.ts'
+import { createFile, writeDescription } from './create.ts'
 import {
   CLOSED as EXEC_CLOSED,
   OPEN_FOR_READ_WRITE,
@@ -165,8 +165,17 @@ export class JobRoute extends JobOutput {
 }
 
 /** Ordered descriptor bindings for one command, restored after execution.
- * Output opens remain deferred until admission completes so a refused command
- * cannot truncate its targets; ordinary opens can still fail after execution. */
+ * A target opened for writing is emptied before the command runs, as bash's
+ * open-before-exec does, so `cat f > f` reads an empty file and `ls > out`
+ * lists `out`; a target that cannot be opened stops the command before it
+ * runs. A `>>` target is opened then too, created when it is missing, so
+ * `ls >> out` lists `out`. A simple command opens its targets only once
+ * dispatch admits it, so a command the gate refuses leaves them as they were.
+ * Two opens stay out of bash's order: an input that cannot be opened stops the
+ * line before any target is opened, where bash has emptied the ones written
+ * before it, because the gate has not judged the line yet; and an input that
+ * reaches a `>` target only through a symlink is read before the target is
+ * emptied, since the paths are compared as typed. */
 const UNREADABLE: unique symbol = Symbol('unreadable')
 type Input = ByteSource | null | typeof UNREADABLE
 
@@ -218,7 +227,20 @@ export async function handleRedirect(
     if (descriptor.identity === EXEC_CLOSED) closed.add(fd)
   }
   const files: FileDescription[] = []
-  for (const r of redirects) {
+  // bash empties a write target as it opens it, so the command finds nothing
+  // to read in the same file through an input redirect.
+  const truncated = new Map<string, number>()
+  for (const [at, r] of redirects.entries()) {
+    if (
+      (r.kind === RedirectKind.STDOUT || r.kind === RedirectKind.STDERR) &&
+      !r.append &&
+      typeof r.target !== 'number'
+    ) {
+      const virtual = ensureScope(r.target).virtual
+      if (!truncated.has(virtual)) truncated.set(virtual, at)
+    }
+  }
+  for (const [at, r] of redirects.entries()) {
     if (r.kind === RedirectKind.AMBIGUOUS) {
       const word = r.target instanceof PathSpec ? r.target.rawPath : String(r.target)
       return shellFailure(encodeText(`${word}: ambiguous redirect\n`))
@@ -266,13 +288,19 @@ export async function handleRedirect(
     }
     const scope = ensureScope(r.target)
     if (r.kind === RedirectKind.STDIN || r.kind === RedirectKind.READWRITE) {
+      // Opened after the target was emptied there is nothing to read; opened
+      // before, the file must still be there.
+      const emptiedAt = r.kind === RedirectKind.STDIN ? truncated.get(scope.virtual) : undefined
       let source: ByteSource | null
       try {
         if (scope.virtual === '/dev/stdin' && r.kind === RedirectKind.STDIN) {
           inputs.set(r.fd, stdin)
           continue
         }
-        source = (await dispatch('read', scope))[0] as ByteSource | null
+        source =
+          emptiedAt !== undefined && emptiedAt < at
+            ? new Uint8Array()
+            : ((await dispatch('read', scope))[0] as ByteSource | null)
       } catch (error) {
         if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
         else {
@@ -280,7 +308,7 @@ export async function handleRedirect(
           return redirectFailure(scope, error)
         }
       }
-      const data = await materialize(source)
+      const data = emptiedAt !== undefined ? new Uint8Array() : await materialize(source)
       if (r.kind === RedirectKind.READWRITE) {
         const file = new FileDescription(scope, true)
         file.source = new FileInput(file, data)
@@ -304,6 +332,29 @@ export async function handleRedirect(
   }
   const refusal = await openRefusal(dispatch, session, redirects)
   if (refusal !== null) return refusal
+  const opening = files.filter((file) => file.source === null)
+  const opened = new Set<FileDescription>()
+  const failure: [PathSpec, unknown][] = []
+  // Open the statement's write targets, as bash's opens do before the command
+  // runs: a `>` one emptied, a `>>` one created when it is missing; false, the
+  // failure kept, when one cannot be opened.
+  const openTargets = async (): Promise<boolean> => {
+    for (let file = opening.shift(); file !== undefined; file = opening.shift()) {
+      try {
+        await createFile(dispatch, session, file.scope, new Uint8Array(), file.append)
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        failure.push([file.scope, error])
+        return false
+      }
+      opened.add(file)
+    }
+    return true
+  }
+  // A simple command opens its targets once dispatch has admitted it (see
+  // runWithRedirectPaths); a compound one has no gate of its own and opens
+  // them here, before its body runs.
+  const simple = command !== null && command.type === NT.COMMAND
   const recorder = new Recorder()
   for (const file of files) {
     if (file.source !== null) continue
@@ -348,18 +399,22 @@ export async function handleRedirect(
     const given = inputs.get(0) ?? null
     if (command === null) {
       if (captureInput && given !== UNREADABLE) await pump(recorder, Channel.STDOUT, given)
-    } else {
+    } else if (simple || (await runWithRedirectPaths(command, targets, openTargets))) {
       const [, execIo, execNode] = await drained(
         recorder,
         ...(await ENCLOSING.run(recorder, () =>
-          runWithRedirectPaths(command, targets, () =>
-            executeNode(
-              command,
-              session,
-              given === UNREADABLE ? unreadableStdin() : given,
-              callStack,
-              { sink: recorder },
-            ),
+          runWithRedirectPaths(
+            command,
+            targets,
+            () =>
+              executeNode(
+                command,
+                session,
+                given === UNREADABLE ? unreadableStdin() : given,
+                callStack,
+                { sink: recorder },
+              ),
+            simple ? openTargets : null,
           ),
         )),
       )
@@ -395,6 +450,8 @@ export async function handleRedirect(
   // written (`route.release()`).
   route.recorder = new Recorder()
   try {
+    const [stopped] = failure
+    if (stopped !== undefined) return redirectFailure(...stopped)
     const chunks = recorder.chunks
     if (refused) {
       outputs.clear()
@@ -430,7 +487,9 @@ export async function handleRedirect(
             const data = unique
               ? concat(chunks.filter(([key]) => dest(key) === file).map(([, data]) => data))
               : new Uint8Array()
-            await writeDescription(dispatch, session, file, data)
+            if (data.byteLength > 0 || !opened.has(file))
+              await writeDescription(dispatch, session, file, data)
+            else file.opened = true
             if (unique) {
               consumed.add(file)
               if (data.byteLength > 0) io.writes[file.scope.virtual] = data
@@ -556,7 +615,7 @@ function describe(output: FdDest, source: Input, owner: Recorder | null): Descri
 function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
   const strerror = fsStrerror(err)
   const label = scope.rawPath
-  return new TextEncoder().encode(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
+  return encodeText(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
 /** GNU's line for a write onto a closed stdout, in the command's name. */
@@ -565,7 +624,7 @@ function closedWriteLine(command: TSNodeLike): Uint8Array {
     .split(/\s+/)
     .filter((w) => w !== '')
   const name = words[0] ?? 'redirect'
-  return new TextEncoder().encode(`${name}: write error: Bad file descriptor\n`)
+  return encodeText(`${name}: write error: Bad file descriptor\n`)
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */
@@ -665,7 +724,7 @@ async function openRefusal(
     if (scope.rawPath.endsWith('/')) {
       const earlier = await applyPendingOpens(dispatch, pending)
       if (earlier !== null) return earlier
-      return shellFailure(new TextEncoder().encode(`${scope.rawPath}: Is a directory\n`))
+      return shellFailure(encodeText(`${scope.rawPath}: Is a directory\n`))
     }
     const path = scope.virtual
     let exists = opened.has(path)
@@ -687,7 +746,7 @@ async function openRefusal(
       const earlier = await applyPendingOpens(dispatch, pending)
       if (earlier !== null) return earlier
       const detail = isDir ? 'Is a directory' : 'cannot overwrite existing file'
-      return shellFailure(new TextEncoder().encode(`${scope.rawPath}: ${detail}\n`))
+      return shellFailure(encodeText(`${scope.rawPath}: ${detail}\n`))
     }
     // This open succeeds, so the target exists for every redirect after
     // it, and a truncating one leaves it empty to be found. Without the

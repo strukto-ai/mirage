@@ -112,7 +112,6 @@ async function duWalk<A extends Accessor>(
     accountForWalkError(err, path, budget)
     return 0
   }
-  if (info.type === FileType.SYMLINK) return 0
   if (info.type !== FileType.DIRECTORY) {
     const size = info.size ?? 0
     if (entries !== null) {

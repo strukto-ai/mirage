@@ -20,6 +20,7 @@ from mirage.commands.errors import (
 from mirage.io import IOResult
 from mirage.policy import Deny, refusal_of, render_deny
 from mirage.runtime.routing import RouteDeny
+from mirage.shell.bytes import encode_text
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.workspace.utils import command_name
 
@@ -38,7 +39,7 @@ def failure_result(exc: BaseException, command: str) -> IOResult:
         command (str): the raw command line, for the diagnostic name.
     """
     if isinstance(exc, CommandTimeoutError):
-        return IOResult(exit_code=124, stderr=(str(exc) + "\n").encode())
+        return IOResult(exit_code=124, stderr=encode_text(str(exc) + "\n"))
     if isinstance(exc, RouteDeny):
         # A deny is a policy outcome, not a mistake: it folds into the
         # line's result the way a timeout does, never a raise. The
@@ -49,10 +50,12 @@ def failure_result(exc: BaseException, command: str) -> IOResult:
         err, code = render_deny(name, deny)
         return IOResult(exit_code=code, stderr=err, refusal=refusal_of(deny))
     if isinstance(exc, FindParseError):
-        return IOResult(exit_code=1, stderr=f"{exc}\n".encode())
+        return IOResult(exit_code=1, stderr=encode_text(f"{exc}\n"))
     if isinstance(exc, UsageError):
-        return IOResult(exit_code=exc.exit_code, stderr=f"{exc}\n".encode())
+        return IOResult(
+            exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
+        )
     if isinstance(exc, OSError):
         name = command_name(command) or command
         return IOResult(exit_code=1, stderr=format_fs_error(name, exc))
-    return IOResult(exit_code=1, stderr=f"{exc}\n".encode())
+    return IOResult(exit_code=1, stderr=encode_text(f"{exc}\n"))

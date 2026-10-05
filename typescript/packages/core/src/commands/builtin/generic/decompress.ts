@@ -25,8 +25,7 @@ import type { StatFn } from './archive/walk.ts'
 import { pathExists } from '../utils/copy.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { stdinStream } from '../utils/stream.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 function asciiLower(text: string): string {
   return text.replace(/[A-Z]/g, (c) => c.toLowerCase())
@@ -57,9 +56,9 @@ export function gzipSuffix(name: string, suffix: string): string | null {
 /** gzip's refusal of a -S suffix it cannot use, before any input. Mirrors
  * Python's suffix_refusal. */
 export function suffixRefusal(suffix: string): IOResult | null {
-  const bytes = ENC.encode(suffix).byteLength
+  const bytes = encodeText(suffix).byteLength
   if (bytes > 0 && bytes <= GZIP_MAX_SUFFIX) return null
-  return new IOResult({ exitCode: 1, stderr: ENC.encode(`gzip: invalid suffix '${suffix}'\n`) })
+  return new IOResult({ exitCode: 1, stderr: encodeText(`gzip: invalid suffix '${suffix}'\n`) })
 }
 
 /**
@@ -285,7 +284,7 @@ export async function decompressInputs(
   function report(line: string, code: number, warning = false): void {
     if (!(warning && quiet)) {
       errors += line
-      io.stderr = ENC.encode(errors)
+      io.stderr = encodeText(errors)
     }
     if (io.exitCode !== 1) io.exitCode = code
   }

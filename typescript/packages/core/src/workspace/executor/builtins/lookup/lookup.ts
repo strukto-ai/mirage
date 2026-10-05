@@ -22,13 +22,14 @@ import { describe, locations, programFile } from './classify.ts'
 import { TYPE_OPTIONS, TYPE_USAGE, WHICH_OPTIONS, WHICH_USAGE } from './constants.ts'
 import { NameKind } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * The refusal shape both builtins use for an unknown option; `voice` is
  * `bash: ` for `type`, a builtin, and empty for `which`, a program.
  */
 function optionError(cmd: string, bad: string, usage: string, voice = ''): Result {
-  const err = new TextEncoder().encode(`${voice}${cmd}: ${bad}: invalid option\n${usage}`)
+  const err = encodeText(`${voice}${cmd}: ${bad}: invalid option\n${usage}`)
   return [
     null,
     new IOResult({ exitCode: 2, stderr: err }),
@@ -57,7 +58,6 @@ export function handleType(
 ): Result {
   const scan = scanOptions(args, TYPE_OPTIONS)
   if (scan.bad !== null) return optionError('type', scan.bad, TYPE_USAGE, 'bash: ')
-  const enc = new TextEncoder()
   const mode = lastOf(scan.letters, 'tpP')
   const allMode = scan.letters.includes('a')
   const hidden = scan.letters.includes('f') ? NameKind.FUNCTION : null
@@ -81,8 +81,8 @@ export function handleType(
       for (const kind of kinds) if (kind === NameKind.FILE) outLines.push(`${programFile(name)}\n`)
     } else outLines.push(...kinds.map((kind) => `${describe(name, kind, session)}\n`))
   }
-  const out = outLines.length > 0 ? enc.encode(outLines.join('')) : null
-  const err = enc.encode(errLines.join(''))
+  const out = outLines.length > 0 ? encodeText(outLines.join('')) : null
+  const err = encodeText(errLines.join(''))
   const code = scan.operands.length === 0 || allFound ? 0 : 1
   return [
     out,
@@ -123,7 +123,7 @@ export function handleWhich(
     }
     if (!silent) outLines.push(`${programFile(name)}\n`)
   }
-  const out = outLines.length > 0 ? new TextEncoder().encode(outLines.join('')) : null
+  const out = outLines.length > 0 ? encodeText(outLines.join('')) : null
   const code = scan.operands.length > 0 && allFound ? 0 : 1
   return [
     out,

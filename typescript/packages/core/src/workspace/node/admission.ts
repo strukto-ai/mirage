@@ -89,6 +89,7 @@ import {
   wholeOccurrence,
 } from './occurrence.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * What the command plane prints when a line does not get to run: 127
@@ -366,7 +367,7 @@ export async function gate(
   const tool = intrinsic || isTool(name, session)
   if (tool && !listed(name, session)) {
     return {
-      stderr: new TextEncoder().encode(`${name}: command not found\n`),
+      stderr: encodeText(`${name}: command not found\n`),
       exitCode: 127,
       refusal: null,
     }

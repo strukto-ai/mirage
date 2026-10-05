@@ -30,7 +30,7 @@ from mirage.observe.context import record, start_op
 from mirage.types import FileStat, PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.errors import eexist, enoent, enotdir, enotsup
-from mirage.utils.path import ancestors, norm
+from mirage.utils.path import ancestors, norm, parent
 from mirage.utils.stat_view import is_dir
 
 
@@ -231,6 +231,18 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
                 raise enotdir(
                     kp.mounted_path(path_spec, above) if parents else path_spec
                 )
+            up = parent(norm(path_spec.mount_path))
+            if not parents and driver.markers_supported and up != "/":
+                # mkdir(2) makes one directory, under one that exists;
+                # only `-p` makes the chain, so a marker under a missing
+                # parent answers ENOENT however the caller reached it. A
+                # store without markers holds no empty directory, so a
+                # parent made a moment ago has no row to find.
+                if (
+                    await _row(stat, accessor, kp.mounted_path(path_spec, up))
+                    is None
+                ):
+                    raise enoent(path_spec)
         if not driver.markers_supported:
             # The store refuses the marker client-side (hf: create_dir is
             # unsupported and a slash-terminated write is IsADirectory),

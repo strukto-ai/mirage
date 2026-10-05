@@ -51,7 +51,6 @@ from mirage.commands.cli.builtin.git.errors import (
     RefLockError,
     RefReadOnlyError,
     UnknownPathspecError,
-    UnknownSwitchError,
     UnresolvableSourceError,
 )
 from mirage.commands.cli.builtin.git.format import short, subject
@@ -109,14 +108,12 @@ from mirage.commands.cli.builtin.git.types import (
     RepoLocation,
 )
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
     links_of,
     mounts_of,
     split_marked,
     start_point,
-    switches,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
@@ -847,9 +844,7 @@ async def checkout(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(
-            texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, texts)
         detach = fl.as_bool("detach")
         if detach and fl.as_bool("b"):
             raise DetachWithCreateError()

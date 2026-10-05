@@ -14,6 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
@@ -33,7 +34,7 @@ async def handle_whoami(
             IOResult(exit_code=1, stderr=err),
             ExecutionNode(command="whoami", exit_code=1, stderr=err),
         )
-    out = f"{namespace.user}\n".encode()
+    out = encode_text(f"{namespace.user}\n")
     return out, IOResult(), ExecutionNode(command="whoami", exit_code=0)
 
 

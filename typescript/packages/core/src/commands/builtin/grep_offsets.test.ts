@@ -13,14 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import {
-  lineOffsets,
-  matchOffset,
-  MatchOffsets,
-  prefixOf,
-  rgPieces,
-  rustMatches,
-} from './grep_offsets.ts'
+import { lineOffsets, MatchOffsets, prefixOf, rgPieces, rustMatches } from './grep_offsets.ts'
 import { decodeText } from '../../shell/bytes.ts'
 
 describe('lineOffsets', () => {
@@ -43,16 +36,6 @@ describe('lineOffsets', () => {
 
   it('is empty for no lines', () => {
     expect(lineOffsets([])).toEqual([])
-  })
-})
-
-describe('matchOffset', () => {
-  it('adds the line start in bytes', () => {
-    expect(matchOffset(10, 'xéy abc', 4)).toBe(15)
-  })
-
-  it('is the line start for a match at the start of a line', () => {
-    expect(matchOffset(11, 'abc abc', 0)).toBe(11)
   })
 })
 
@@ -79,11 +62,6 @@ describe('offsets over a smuggled byte', () => {
     // `\xff` is one byte, so the second line starts at 2 -- GNU's answer for
     // `grep -b a` over `\xff\na\n`, where a replacing decode said 4.
     expect(lineOffsets([decodeText(new Uint8Array([0xff])), 'a'])).toEqual([0, 2])
-  })
-
-  it('counts an invalid byte as one byte inside the line', () => {
-    // `grep -bo a` over `\xffa\n` is `1:a` on GNU grep 3.11.
-    expect(matchOffset(0, decodeText(new Uint8Array([0xff, 0x61])), 1)).toBe(1)
   })
 })
 

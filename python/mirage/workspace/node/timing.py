@@ -1,5 +1,7 @@
 import re
 
+from mirage.shell.bytes import encode_text
+
 DEFAULT_FORMAT = "\nreal\t%3lR\nuser\t%3lU\nsys\t%3lS"
 TOKEN = re.compile(r"%(?:([0-9])?(l)?([RUS])|([%P]))")
 
@@ -18,7 +20,7 @@ def timing_report(
         template (str | None): session TIMEFORMAT, None selects Bash's default.
     """
     if portable:
-        return f"real {elapsed:.2f}\nuser 0.00\nsys 0.00\n".encode()
+        return encode_text(f"real {elapsed:.2f}\nuser 0.00\nsys 0.00\n")
     template = DEFAULT_FORMAT if template is None else template
     if not template:
         return b""
@@ -43,4 +45,4 @@ def timing_report(
     tail = template[cursor:]
     if "%" in tail:
         return b"mirage: TIMEFORMAT: invalid format character\n"
-    return ("".join(pieces) + tail + "\n").encode()
+    return encode_text("".join(pieces) + tail + "\n")

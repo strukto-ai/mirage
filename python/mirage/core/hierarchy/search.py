@@ -12,36 +12,45 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import Awaitable, Callable, Mapping
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.grep_pattern import compile_pattern
 from mirage.commands.builtin.grep_pushdown import grep_search_options
+from mirage.commands.builtin.types import RegexSyntax
 from mirage.core.hierarchy.probe import A
 from mirage.core.hierarchy.scope import ROOT, DetectFn, ScopeMatch
+from mirage.shell.bytes import byte_view
 from mirage.types import PathSpec
 from mirage.vfs.types import SearchOp, SearchQuery, StatOp
 
+LineMatcher = Callable[[str], bool]
 
-def query_matcher(query: SearchQuery) -> re.Pattern[str]:
-    """The matcher the generic scan would compile for this request.
+
+def query_matcher(query: SearchQuery) -> LineMatcher:
+    """Whether the generic scan would select a line, for this request.
 
     A searcher that has to decide a line itself (a candidate the service
     returned, or a line it rendered) decides it with this, so what it
-    prints is what grep over the same file would print.
+    prints is what grep over the same file would print. grep's dialects
+    run in the C locale and match a line's byte view, as its scan does;
+    ripgrep's match the text.
 
     Args:
         query (SearchQuery): the qualified request.
     """
     options = grep_search_options(query)
-    return compile_pattern(
-        query.query,
+    rust = options.syntax is RegexSyntax.RUST
+    pattern = compile_pattern(
+        query.query if rust else byte_view(query.query),
         ignore_case=options.ignore_case,
         fixed_string=options.fixed_string,
         whole_word=options.whole_word,
         syntax=options.syntax,
     )
+    if rust:
+        return lambda line: pattern.search(line) is not None
+    return lambda line: pattern.search(byte_view(line)) is not None
 
 
 Searcher = Callable[[A, ScopeMatch, SearchQuery], Awaitable[list[str]]]

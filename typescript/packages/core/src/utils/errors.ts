@@ -16,6 +16,7 @@ import { gnuPhrase } from '../errors/posix.ts'
 import { dropTrailingSegments, respellOne } from './path.ts'
 import { quotesOperands, shellQuote, shellQuoteAlways } from './quote.ts'
 import { rstripSlash, stripSlash } from './slash.ts'
+import { encodeText } from '../shell/bytes.ts'
 
 export interface FsError extends Error {
   code: string
@@ -656,5 +657,5 @@ export function formatFsError(
     const message = err instanceof Error ? err.message : String(err)
     line = message.startsWith(`${cmdName}: `) ? `${message}\n` : `${cmdName}: ${message}\n`
   }
-  return new TextEncoder().encode(line)
+  return encodeText(line)
 }

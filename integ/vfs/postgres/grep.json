@@ -142,6 +142,19 @@
         "stderr": ""
       },
       "seq": 610060
+    },
+    {
+      "id": "pg_grep_regex_pattern_scans_instead_of_pushing_down",
+      "seq": 610061,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep a.a /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n",
+        "stderr": ""
+      }
     }
   ]
 }

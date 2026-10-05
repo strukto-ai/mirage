@@ -19,6 +19,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io import IOResult
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import ArithError
 from mirage.types import PathSpec, word_text
 from mirage.utils.path import resolve_path
@@ -50,7 +51,7 @@ def result(
         io (IOResult | None): prebuilt IOResult to reuse (e.g. carrying
             writes); its exit_code/stderr are overwritten.
     """
-    err = stderr.encode() if stderr else b""
+    err = encode_text(stderr) if stderr else b""
     io = io if io is not None else IOResult()
     io.exit_code = exit_code
     if err:
@@ -125,7 +126,7 @@ def parse_line(
         return (
             parsed,
             FlagView({}, spec=spec),
-            fail(cmd, message.decode(), code),
+            fail(cmd, decode_text(message), code),
         )
     return parsed, FlagView(parsed.flag_kwargs, spec=spec), None
 
@@ -285,7 +286,7 @@ def refusal(cmd: str, exc: PolicyDenied) -> Result:
         cmd (str): builtin name for the node.
         exc (PolicyDenied): the gate's refusal.
     """
-    err = f"{exc.strerror}\n".encode()
+    err = encode_text(f"{exc.strerror}\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -300,7 +301,7 @@ def readonly_refusal(cmd: str, name: str) -> Result:
         cmd (str): builtin name for the node.
         name (str): the frozen variable.
     """
-    err = f"bash: {name}: readonly variable\n".encode()
+    err = encode_text(f"bash: {name}: readonly variable\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -322,12 +323,27 @@ def arith_refusal(cmd: str, exc: ArithError) -> Result:
         cmd (str): builtin name for the node.
         exc (ArithError): the evaluator's refusal, text already led.
     """
-    err = f"bash: {cmd}: {exc}\n".encode()
+    err = encode_text(f"bash: {cmd}: {exc}\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
         ExecutionNode(command=cmd, exit_code=1, stderr=err),
     )
+
+
+def record_delimiter(text: str | None) -> bytes:
+    """The byte ``read -d`` and ``mapfile -d`` stop at.
+
+    Bash takes the first byte of the argument, not its first character
+    (bash 5.2: ``-d é`` stops at 0xc3, ``-d $'\\xff'`` at the raw byte);
+    an empty argument is NUL and no ``-d`` is a newline.
+
+    Args:
+        text (str | None): the ``-d`` argument, or None when not given.
+    """
+    if text is None:
+        return b"\n"
+    return encode_text(text)[:1] or b"\0"
 
 
 def is_valid_name(name: str) -> bool:
@@ -369,7 +385,7 @@ def builtin_error(name: str, message: str) -> bytes:
         name (str): the builtin.
         message (str): what went wrong, without the newline.
     """
-    return f"bash: {name}: {message}\n".encode()
+    return encode_text(f"bash: {name}: {message}\n")
 
 
 def numeric_operands(args: list[str]) -> list[str]:

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.bytes import encode_text
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.lookup.classify import (
     describe,
@@ -93,7 +94,7 @@ def handle_type(
             out_lines.extend(
                 f"{describe(name, kind, session)}\n" for kind in kinds
             )
-    out = "".join(out_lines).encode() if out_lines else None
+    out = encode_text("".join(out_lines)) if out_lines else None
     # One call, so the diagnostics never ride on the status: a partial
     # miss both warns and reports through the exit code.
     code = 0 if (not scan.operands or all_found) else 1
@@ -140,7 +141,7 @@ def handle_which(
             continue
         if not silent:
             out_lines.append(f"{program_file(name)}\n")
-    out = "".join(out_lines).encode() if out_lines else None
+    out = encode_text("".join(out_lines)) if out_lines else None
     code = 0 if (scan.operands and all_found) else 1
     return result("which", out=out, exit_code=code)
 
