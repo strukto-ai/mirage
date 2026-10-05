@@ -188,3 +188,11 @@ export interface NamespaceView {
   // owner column for an entry whose backend reports no uid.
   user?: string
 }
+
+/**
+ * Run one facade op as a session: `(sessionId, run) => result`, null
+ * naming the workspace's default session as it is when the op runs.
+ * The workspace supplies it, so the facade binds the session the way a
+ * shell line does without holding the session manager itself.
+ */
+export type SessionBind = <T>(sessionId: string | null, run: () => Promise<T>) => Promise<T>

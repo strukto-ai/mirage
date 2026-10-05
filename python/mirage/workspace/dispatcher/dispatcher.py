@@ -34,7 +34,6 @@ from mirage.context import (
     hidden_refusal,
     path_allowed,
 )
-from mirage.errors import POSIX, FsCondition
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
@@ -64,6 +63,7 @@ from mirage.utils.errors import (
     eloop,
     enoent,
     no_mount,
+    no_xattr,
     walk_refusal,
 )
 from mirage.utils.hidden import move_reveals
@@ -127,11 +127,6 @@ def _served(report: OpReport | None, result: Any) -> None:
             None,
             len(result) if isinstance(result, (bytes, bytearray)) else None,
         )
-
-
-def _no_xattr(path: PathSpec) -> OSError:
-    condition = POSIX[FsCondition.NO_XATTR]
-    return OSError(condition.errno, condition.phrase, path.virtual)
 
 
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
@@ -1365,7 +1360,7 @@ class Dispatcher:
         elif op == "getxattr":
             found = stored.get(name)
             if found is None:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             result = found
         elif op == "setxattr":
             if kwargs.get("create") and name in stored:
@@ -1373,13 +1368,13 @@ class Dispatcher:
                     errno.EEXIST, os.strerror(errno.EEXIST), path.virtual
                 )
             if kwargs.get("replace") and name not in stored:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             await self._namespace.set_xattr(
                 path.virtual, name, bytes(kwargs.get("value") or b"")
             )
         else:
             if name not in stored:
-                raise _no_xattr(path)
+                raise no_xattr(path)
             await self._namespace.remove_xattr(path.virtual, name)
         record(
             op,

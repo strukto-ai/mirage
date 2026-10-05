@@ -28,7 +28,7 @@ from mirage.core.email.render import message_json_bytes
 from mirage.core.email.scope import detect_scope
 from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len, sanitize_label
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, sanitize_label
 
 TITLE_MAX = 80
 EPOCH_DATE = "1970-01-01"
@@ -41,7 +41,7 @@ def _msg_filename(subject: str, uid: str) -> str:
     # 80 characters is 240 bytes of CJK, which overflows the 255-byte
     # NAME_MAX once the uid and `.email.json` are added, so the subject
     # takes what they leave rather than a flat character count.
-    fixed = len("__") + byte_len(uid) + len(MSG_SUFFIX)
+    fixed = len("__") + byte_length(uid) + len(MSG_SUFFIX)
     label = _sanitize(subject, max_bytes=NAME_MAX_BYTES - fixed)
     return f"{label}__{uid}{MSG_SUFFIX}"
 

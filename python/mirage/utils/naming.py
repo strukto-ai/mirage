@@ -14,7 +14,7 @@
 
 from mirage.utils.sanitize import (
     NAME_MAX_BYTES,
-    byte_len,
+    byte_length,
     path_safe_name,
     sanitize_name,
     truncate_bytes,
@@ -53,9 +53,9 @@ def fit_id_name(label: str, resource_id: str, suffix: str = "") -> str:
         unless the id alone cannot fit.
     """
     budget = NAME_MAX_BYTES - (
-        len(SEPARATOR) + byte_len(resource_id) + byte_len(suffix)
+        len(SEPARATOR) + byte_length(resource_id) + byte_length(suffix)
     )
-    if byte_len(label) > budget:
+    if byte_length(label) > budget:
         label = truncate_bytes(label, budget).rstrip("_")
     return f"{label}{SEPARATOR}{resource_id}{suffix}"
 

@@ -7,7 +7,9 @@ import { SessionState } from '../../../workspace/session/session.ts'
 import { sessionView } from '../../../workspace/session/state.ts'
 import type { WorkspaceOptions } from '../../../workspace/workspace/types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { NO_IDENTITY, groupName, identityFrom, identityOf, ownerName } from './identity.ts'
+import { groupName, identityFrom, identityOf, ownerName } from './identity.ts'
+
+const NO_IDENTITY = { user: null, profile: null }
 
 describe('identity', () => {
   it('prefers the entry, then the identity, then "-"', () => {

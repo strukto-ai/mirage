@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ScriptSource } from '../../runtime/routing/types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
 import { Option, UsageStyle } from '../spec/types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
 import {

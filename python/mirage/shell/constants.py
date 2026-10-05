@@ -95,7 +95,6 @@ FD_STDOUT = 1
 FD_STDERR = 2
 FD_BOTH = -1
 FD_CLOSE = -1
-SHELL_FDS = frozenset({FD_STDIN, FD_STDOUT, FD_STDERR})
 
 # The dynamic variables the shell answers itself: PIPESTATUS reads the
 # session's record of the last pipeline (`SessionState.pipe_status`),

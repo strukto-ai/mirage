@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic.crossmount.types import RunSingle
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context import path_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -155,7 +155,7 @@ async def _fan_out_traversal(
         stdout, io = (
             None,
             IOResult(
-                exit_code=read_fail_exit(cmd_name, exc),
+                exit_code=read_fail_exit_code(cmd_name, exc),
                 stderr=format_fs_error(cmd_name, exc, paths),
             ),
         )

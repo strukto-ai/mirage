@@ -26,7 +26,7 @@ import {
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { defaultPaths } from '../utils/operands.ts'
+import { defaultPaths } from '../utils/paths.ts'
 
 const ENC = new TextEncoder()
 

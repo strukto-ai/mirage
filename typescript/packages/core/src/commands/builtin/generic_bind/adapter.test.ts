@@ -21,7 +21,6 @@ import { eacces, eisdir, enoent, formatFsError } from '../../../utils/errors.ts'
 import {
   dirAwareStat,
   dirAwareStream,
-  makeResolveGlob,
   resolveGlobOf,
   withDirGuard,
   withHiddenGuard,
@@ -34,6 +33,7 @@ import {
   requireOp,
   type CommandIO,
 } from './adapter.ts'
+import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 import {
   runWithAdmission,
   runWithMountGate,

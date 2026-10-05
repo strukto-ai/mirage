@@ -21,7 +21,7 @@ import type { ExecutionNode } from '../../../workspace/types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { resolveScript } from '../utils/operands.ts'
+import { resolveScript } from '../utils/paths.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { makeInterpreterHandler, runtimeVersion, STDIN_OPERAND } from './interpreter.ts'
 

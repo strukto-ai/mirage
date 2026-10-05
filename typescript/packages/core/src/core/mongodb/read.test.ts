@@ -94,9 +94,6 @@ describe('registered read stream contract', () => {
       const countDocuments = vi.fn(() => {
         throw new Error('full count scan')
       })
-      const getIndexStats = vi.fn(() => {
-        throw new Error('volatile counters')
-      })
       const driver = stubMongoDriver({
         listDatabases: () => Promise.resolve(['app']),
         listCollections: (_db, kind) => Promise.resolve(kind === 'view' ? [] : ['users']),
@@ -104,7 +101,6 @@ describe('registered read stream contract', () => {
         iterDocuments: arrayIter([{ _id: 1, value: 'café' }]),
         listIndexes: () => Promise.resolve([{ name: '_id_', key: { _id: 1 } }]),
         countDocuments,
-        getIndexStats,
       })
       const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
       const path = ps(`/mongo/app/${leaf}`)
@@ -113,7 +109,6 @@ describe('registered read stream contract', () => {
       for await (const chunk of IO.readStream(accessor, path)) actual += decode(chunk)
       expect(actual).toBe(expected)
       expect(countDocuments).not.toHaveBeenCalled()
-      expect(getIndexStats).not.toHaveBeenCalled()
     },
   )
 

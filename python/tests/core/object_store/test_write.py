@@ -118,6 +118,17 @@ def test_mkdir_refuses_a_name_that_exists(accessor):
     assert store.puts == []
 
 
+def test_mkdir_parents_keeps_an_existing_marker(accessor):
+    # A rewrite replaces the marker's metadata and, in a versioned bucket,
+    # adds a version; a directory only a key implies still gets a marker.
+    store = FakeStore({"a/": b"", "imp/x.txt": b"x"})
+    mkdir = make_mkdir(make_driver(store))
+    _managed(mkdir(accessor, spec("/a"), parents=True))
+    assert store.puts == []
+    _managed(mkdir(accessor, spec("/imp"), parents=True))
+    assert store.puts == [("imp/", b"")]
+
+
 def test_mkdir_refuses_a_missing_parent_without_parents(accessor):
     # mkdir(2) makes one directory under one that exists; only `-p`
     # makes the chain, so a guest's os.mkdir under a missing parent is

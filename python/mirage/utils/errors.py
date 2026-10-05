@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import os
 from collections.abc import Awaitable, Callable
 
 from mirage.types import PathSpec
@@ -272,6 +273,11 @@ def no_mount(path: str | PathSpec) -> NoMountError:
 
 def enotempty(path: str | PathSpec) -> OSError:
     return OSError(errno.ENOTEMPTY, "Directory not empty", _virtual_of(path))
+
+
+def no_xattr(path: str | PathSpec) -> OSError:
+    code = getattr(errno, "ENOATTR", errno.ENODATA)
+    return OSError(code, os.strerror(code), _virtual_of(path))
 
 
 def exdev(path: str | PathSpec) -> OSError:

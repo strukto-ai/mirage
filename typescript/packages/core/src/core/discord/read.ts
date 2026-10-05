@@ -12,13 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { guardDay } from '../time_range.ts'
+import { dayChannelId, guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, makeReadRange } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
@@ -28,31 +26,7 @@ import { listMembers } from './members.ts'
 import { readdir } from './readdir.ts'
 import { memberJsonBytes } from './render.ts'
 import { detectScope } from './scope.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
-async function ancestorEntry(
-  accessor: DiscordAccessor,
-  path: PathSpec,
-  index: IndexCacheStore | undefined,
-  up: number,
-): Promise<IndexEntry | null> {
-  let virtual = rstripSlash(path.virtual)
-  for (let i = 0; i < up; i++) virtual = virtual.split('/').slice(0, -1).join('/')
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const spec = new PathSpec({
-    virtual,
-    directory: virtual,
-    vfsPath: mountKey(virtual, prefix),
-  })
-  return resolveEntry(readdir, accessor, spec, index)
-}
-
-/**
- * Render one day's history; the channel id comes from the listing.
- *
- * The typed `name__id` dirname is only trusted once the listing proves it,
- * so a fabricated channel id is ENOENT rather than a raw API error.
- */
 async function readChat(
   accessor: DiscordAccessor,
   match: ScopeMatch,
@@ -60,17 +34,7 @@ async function readChat(
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   await guardDay(accessor, match, path.virtual)
-  const entry = await resolveEntry(readdir, accessor, path, index)
-  let channelId: string
-  if (entry !== null) {
-    channelId = entry.id.split(':', 1)[0] ?? ''
-  } else {
-    // A sealed day lists nothing but the file still reads through the
-    // channel, reproducing the API's own answer for the fetch.
-    const channel = await ancestorEntry(accessor, path, index, 2)
-    if (channel === null) throw enoent(path)
-    channelId = channel.id
-  }
+  const channelId = await dayChannelId(readdir, accessor, path, index)
   return getHistoryJsonl(accessor, channelId, match.slots.day ?? '')
 }
 

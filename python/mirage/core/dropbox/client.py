@@ -51,7 +51,7 @@ def summary_of(text: str) -> str:
     return summary
 
 
-def _token_url(config: DropboxConfig) -> str:
+def _token_url_of(config: DropboxConfig) -> str:
     if not config.endpoint:
         return DROPBOX_TOKEN_URL
     return f"{config.endpoint.rstrip('/')}/oauth2/token"
@@ -73,7 +73,7 @@ async def refresh_access_token(config: DropboxConfig) -> tuple[str, int]:
     if secret:
         body["client_secret"] = secret
     data = await api_request(
-        "POST", _token_url(config), error_of=_flow_error, data=body
+        "POST", _token_url_of(config), error_of=_flow_error, data=body
     )
     return data["access_token"], int(data["expires_in"])
 

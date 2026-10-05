@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.crossmount.constants import (
     STREAM_COMMANDS,
 )
 from mirage.commands.builtin.generic.crossmount.types import Cmd, Strategy
-from mirage.commands.builtin.generic_bind.adapter import AggregateFn
+from mirage.commands.config import AggregateFn
 from mirage.types import PathSpec
 
 

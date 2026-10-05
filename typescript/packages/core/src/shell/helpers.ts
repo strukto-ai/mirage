@@ -761,10 +761,6 @@ export function getCaseItems(node: TSNodeLike): [TSNodeLike[], TSNodeLike[], str
   return items
 }
 
-export function getDeclarationAssignments(node: TSNodeLike): string[] {
-  return node.namedChildren.filter((c) => c.type === NT.VARIABLE_ASSIGNMENT).map((c) => getText(c))
-}
-
 export function getDeclarationKeyword(node: TSNodeLike): string {
   return node.children[0]?.type ?? ''
 }
@@ -834,14 +830,6 @@ export function getUnsetArgs(node: TSNodeLike): string[] {
     if (split !== null) return split
   }
   return node.namedChildren.map((c) => getText(c))
-}
-
-export function getTestArgv(node: TSNodeLike): string[] {
-  return node.namedChildren.map((c) => getText(c))
-}
-
-export function getCommandAssignments(node: TSNodeLike): string[] {
-  return node.namedChildren.filter((c) => c.type === NT.VARIABLE_ASSIGNMENT).map((c) => getText(c))
 }
 
 export function getNegatedCommand(node: TSNodeLike): TSNodeLike {

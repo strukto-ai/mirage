@@ -25,7 +25,7 @@ from mirage.utils.sanitize import (
     ESCAPE_LEAD,
     NAME_MAX_BYTES,
     SAFE_SLASH,
-    byte_len,
+    byte_length,
 )
 
 CJK = "会議の記録" * 40
@@ -56,14 +56,14 @@ def test_a_cjk_label_fits_name_max(path_safe):
     # at all, so this reached 313 and 621 bytes against a 255-byte NAME_MAX
     # and the filesystem refused the name.
     name = make_id_name(CJK, SLACK_ID, path_safe=path_safe)
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     # The cut lands on a character boundary, never mid-sequence.
     assert "\ufffd" not in name
 
 
 def test_a_truncated_label_still_round_trips():
     name = make_id_name(CJK, SLACK_ID, suffix=".json")
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert parse_id_name(name, suffix=".json")[1] == SLACK_ID
 
 
@@ -73,7 +73,7 @@ def test_the_id_is_never_trimmed_to_make_room():
     # silently mangled. Same rule as gcal's event filenames.
     long_id = "v" * (NAME_MAX_BYTES + 10)
     name = make_id_name("Some Name", long_id)
-    assert byte_len(name) > NAME_MAX_BYTES
+    assert byte_length(name) > NAME_MAX_BYTES
     assert name == f"{SEPARATOR}{long_id}"
     assert parse_id_name(name)[1] == long_id
 
@@ -95,7 +95,7 @@ def test_fit_id_name_does_not_re_sanitize_the_label():
 
 def test_fit_id_name_leaves_no_trailing_underscore_from_the_cut():
     name = fit_id_name("a" * 300 + "_" * 5, "id1")
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert "___" not in name
 
 
@@ -127,7 +127,7 @@ def test_a_long_file_name_fits_name_max_and_keeps_id_and_extension(ext):
     """
     name = file_id_name(SLACK_ID, CJK + ext)
 
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert name.endswith(f"{SLACK_ID}{ext}")
     assert "�" not in name
 

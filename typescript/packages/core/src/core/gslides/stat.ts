@@ -12,45 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GSlidesAccessor } from '../../accessor/gslides.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { MIME } from './constants.ts'
-import { resolveAppEntry } from '../google/entry.ts'
+import { makeAppStat } from '../google/stat.ts'
 import { makeFilename } from '../../vfs/gslides/slide_entry.ts'
-import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
-import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { makeStat } from '../hierarchy/stat.ts'
+import { MIME } from './constants.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
-async function fileStat(
-  accessor: GSlidesAccessor,
-  match: ScopeMatch,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  const entry = await resolveAppEntry(
-    accessor.tokenManager,
-    match,
-    path,
-    index,
-    MIME,
-    'gslides/file',
-    makeFilename,
-  )
-  return new FileStat({
-    name: entry.vfsName !== '' ? entry.vfsName : entry.name,
-    type: FileType.FILE,
-    content: ContentType.JSON,
-    modified: entry.remoteTime,
-    size: entry.size,
-    fingerprint: entry.remoteTime !== '' ? entry.remoteTime : null,
-    extra: {
-      doc_id: entry.id,
-      doc_name: entry.name,
-      ...entry.extra,
-    },
-  })
-}
-
-export const stat = makeStat(detectScope, readdir, { overrides: { file: fileStat } })
+export const stat = makeAppStat(MIME, detectScope, readdir, 'gslides/file', makeFilename)

@@ -22,7 +22,7 @@ from mirage.core.notion import readdir as readdir_mod
 from mirage.core.notion.pathing import format_segment
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 
 _ACCESSOR = SimpleNamespace(config=None, pool=None)
 
@@ -116,4 +116,4 @@ async def test_a_long_child_page_title_fits_name_max(monkeypatch):
     names = [p.rsplit("/", 1)[1] for p in out if not p.endswith("page.json")]
 
     assert names == [format_segment(title, child_id)]
-    assert byte_len(names[0]) <= NAME_MAX_BYTES
+    assert byte_length(names[0]) <= NAME_MAX_BYTES

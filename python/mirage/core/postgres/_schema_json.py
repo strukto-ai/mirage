@@ -45,7 +45,9 @@ async def build_database_json(accessor: PostgresAccessor) -> dict[str, Any]:
                 views.append({"schema": s, "name": v, "kind": "materialized"})
         relationships = await client.fetch_all_relationships(conn, schemas)
     return {
-        "database": _db_name_from_dsn(reveal_secret(accessor.config.dsn)),
+        "database": _database_name_from_dsn(
+            reveal_secret(accessor.config.dsn)
+        ),
         "schemas": schemas,
         "tables": tables,
         "views": views,
@@ -92,5 +94,5 @@ async def build_entity_schema_json(
     }
 
 
-def _db_name_from_dsn(dsn: str) -> str:
+def _database_name_from_dsn(dsn: str) -> str:
     return dsn.rstrip("/").rsplit("/", 1)[-1].split("?")[0] or "postgres"

@@ -16,7 +16,6 @@ import type {
   MongoCollectionSpec,
   MongoDriver,
   MongoFindOptions,
-  MongoIndexAccess,
   MongoIterOptions,
 } from '@struktoai/mirage-core/core/mongodb/_driver'
 import { EntityKind } from '@struktoai/mirage-core/core/mongodb/types'
@@ -190,26 +189,6 @@ export class MongoDBStore implements MongoDriver {
   async listIndexes(database: string, collection: string): Promise<Record<string, unknown>[]> {
     const c = await this._client()
     return c.db(database).collection(collection).listIndexes().toArray()
-  }
-
-  async getIndexStats(
-    database: string,
-    collection: string,
-  ): Promise<Record<string, MongoIndexAccess>> {
-    const c = await this._client()
-    const docs = await c
-      .db(database)
-      .collection(collection)
-      .aggregate([{ $indexStats: {} }])
-      .toArray()
-    const out: Record<string, MongoIndexAccess> = {}
-    for (const d of docs) {
-      const name = d.name as string | undefined
-      if (name !== undefined) {
-        out[name] = (d.accesses as MongoIndexAccess | undefined) ?? {}
-      }
-    }
-    return out
   }
 
   async close(): Promise<void> {

@@ -14,7 +14,7 @@
 
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
-import { mountParentReaddir, mountParentStat } from '../utils/operands.ts'
+import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { MountView } from '../../../ops/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'

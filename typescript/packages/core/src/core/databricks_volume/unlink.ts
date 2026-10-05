@@ -19,9 +19,10 @@ import { record, startOp } from '../../observe/context.ts'
 import { FileType, VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
-import { isADirectoryError, isNotFound, notFoundError } from './errors.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { stat } from './stat.ts'
+import { eisdir, enoent } from '../../utils/errors.ts'
 
 export async function unlink(
   accessor: DatabricksVolumeAccessor,
@@ -31,14 +32,14 @@ export async function unlink(
   const p = ensurePathSpec(path)
   const fileStat = await stat(accessor, p, index)
   if (fileStat.type === FileType.DIRECTORY) {
-    throw isADirectoryError(p.virtual)
+    throw eisdir(p.virtual)
   }
   const remotePath = backendPath(accessor.config, p)
   const timer = startOp()
   try {
     await dbxFetch(accessor, 'DELETE', 'files', remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(p.virtual)
+    if (isNotFound(exc)) throw enoent(p.virtual)
     throw exc
   }
   record('unlink', p.virtual, VFSName.DATABRICKS_VOLUME, 0, timer)

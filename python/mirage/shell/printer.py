@@ -50,10 +50,10 @@ def function_text(name: str, body: FunctionBody) -> str:
         name (str): the function's name.
         body (FunctionBody): the body the definition stored.
     """
-    return _Printer(True).definition(name, _definition(body), "")
+    return _Printer(True).definition(name, _definition_of(body), "")
 
 
-def _definition(body: FunctionBody) -> TSNodeLike:
+def _definition_of(body: FunctionBody) -> TSNodeLike:
     node = body[0]
     if node.parent is None and node.type == NT.REDIRECTED_STATEMENT:
         node = node.children[0]

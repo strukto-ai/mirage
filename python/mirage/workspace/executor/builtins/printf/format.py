@@ -108,7 +108,7 @@ def _numeric_value(value: str) -> tuple[int, bool]:
     return _parse_printf_int(value)
 
 
-def _parse_float(value: str) -> tuple[float, bool]:
+def _parse_float_arg(value: str) -> tuple[float, bool]:
     """Resolve a floating-point argument (decimal, hex float, inf/nan, or
     the leading-quote code-point form).
 
@@ -613,7 +613,7 @@ def _convert(
             value, valid = _numeric_value(raw)
             err = None if valid else f"printf: {raw}: invalid number\n"
         return _format_int(value, conv, flags, width, precision), err, False
-    value_f, valid = (0.0, True) if raw is None else _parse_float(raw)
+    value_f, valid = (0.0, True) if raw is None else _parse_float_arg(raw)
     err = None if valid else f"printf: {raw}: invalid number\n"
     if conv in ("a", "A"):
         return (

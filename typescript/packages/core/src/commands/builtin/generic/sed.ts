@@ -367,3 +367,22 @@ async function runInPlace(
     }),
   ]
 }
+
+/**
+ * When the script is supplied via -e/-f, GNU sed treats every bare argument as
+ * a file. The arg parser instead routes the first bare arg into the positional
+ * `text` (script) slot, so recover it as a path operand here.
+ */
+export function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[] {
+  const prefix = opts.mountPrefix !== undefined ? rstripSlash(opts.mountPrefix) : ''
+  return texts.map((t) => {
+    const resolved = resolvePath(t, opts.cwd)
+    const slash = resolved.lastIndexOf('/')
+    return new PathSpec({
+      virtual: resolved,
+      directory: slash >= 0 ? resolved.slice(0, slash + 1) : '/',
+      resolved: true,
+      vfsPath: mountKey(resolved, prefix),
+    })
+  })
+}

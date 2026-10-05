@@ -36,7 +36,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import (
@@ -299,7 +299,7 @@ async def sed(
                 SedInput(
                     p.raw_path,
                     error=fs_error_line("sed", p, exc),
-                    code=read_fail_exit("sed", exc),
+                    code=read_fail_exit_code("sed", exc),
                     fatal=fatal,
                 )
             )
@@ -357,7 +357,7 @@ async def _run_in_place(
             data = await read_bytes(p)
         except FS_ERRORS as exc:
             err += fs_error_line("sed", p, exc)
-            code = max(code, read_fail_exit("sed", exc))
+            code = max(code, read_fail_exit_code("sed", exc))
             if isinstance(exc, IsADirectoryError):
                 break
             continue

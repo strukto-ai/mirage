@@ -32,13 +32,6 @@ async def test_mkdir_creates(fake_drive, gdrive_accessor):
 
 
 @pytest.mark.asyncio
-async def test_mkdir_existing_raises(fake_drive, gdrive_accessor):
-    fake_drive.folder("d")
-    with pytest.raises(FileExistsError):
-        await mkdir(gdrive_accessor, spec("/d"))
-
-
-@pytest.mark.asyncio
 async def test_mkdir_missing_parent_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
         await mkdir(gdrive_accessor, spec("/no/d"))

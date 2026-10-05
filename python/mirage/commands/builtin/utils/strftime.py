@@ -195,7 +195,7 @@ def pad_quarter(quarter: str, flags: str, width: int | None) -> str:
     return quarter.rjust(width, " " if pad == "_" else "0")
 
 
-def pad_composite(
+def padded_composite(
     dt: datetime, directive: str, flags: str, width: int | None
 ) -> str:
     """Pad a composite directive (``%F``, ``%D``, ``%T``, ``%c`` and the
@@ -314,7 +314,7 @@ def gnu_strftime(dt: datetime, fmt: str) -> str:
     is ``0``, so ``%+5d`` reaches strftime as ``%05d``; a ``+`` that a
     later padding flag outranks is dropped. A composite directive
     (``%F``, ``%D``, ``%T``, ``%c`` and friends) that carries any flag
-    or width is padded here as a whole (``pad_composite``), since the C
+    or width is padded here as a whole (``padded_composite``), since the C
     libraries disagree with GNU and with each other about it (``%12F``
     is ``002026-09-03``, which glibc space-pads and macOS mangles).
     ``%z`` and its colon forms ``%:z``,
@@ -385,7 +385,7 @@ def gnu_strftime(dt: datetime, fmt: str) -> str:
         elif pad == "+" and directive in YEARISH_DIGITS:
             out.append(plus_year(dt, directive, width))
         elif directive in COMPOSITES and (flags or width is not None):
-            out.append(pad_composite(dt, directive, flags, width))
+            out.append(padded_composite(dt, directive, flags, width))
         elif directive in NUMERIC_DIGITS and (
             width is not None or pad is not None
         ):

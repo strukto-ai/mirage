@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VFSStat } from '../../vfs.ts'
+import type { VFSStat } from '../../types.ts'
 import type { MontyFsBits } from './loader.ts'
 
 const S_IFREG = 0o100000

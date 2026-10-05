@@ -16,8 +16,9 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 import { recordStream } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
-import { isNotFound, notFoundError } from './errors.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
+import { enoent } from '../../utils/errors.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 
@@ -41,7 +42,7 @@ export async function* readStream(
       headers: { Accept: 'application/octet-stream' },
     })
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(path.virtual)
+    if (isNotFound(exc)) throw enoent(path.virtual)
     throw exc
   }
   const body = r.body

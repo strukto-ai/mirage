@@ -105,7 +105,7 @@ import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core
 import { normalizePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 import { normalizeMongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
 import { normalizeTrelloConfig } from '@struktoai/mirage-core/vfs/trello/config'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/types'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { ChromaClient } from 'chromadb'

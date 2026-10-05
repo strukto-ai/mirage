@@ -15,7 +15,7 @@
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { channelDirname, guildDirname } from './entry.ts'
 import { offsetPages } from './paginate.ts'
-import { snowflakeToIso } from './readdir.ts'
+import { snowflakeToIso } from './entry.ts'
 
 const PAGE_SIZE = 25
 

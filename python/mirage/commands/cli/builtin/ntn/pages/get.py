@@ -20,8 +20,8 @@ from mirage.commands.cli.builtin.ntn.util import (
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.config import NotionConfig
+from mirage.core.notion.normalize import extract_title
 from mirage.core.notion.pages import get_page, get_page_markdown
-from mirage.core.notion.pathing import extract_title
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 
