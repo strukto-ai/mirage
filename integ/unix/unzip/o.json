@@ -97,6 +97,269 @@
         "stdout": "Archive:  r10ub/z.zip\n   creating: r10ub/o/later/\n extracting: r10ub/o/later/z.txt     \nrc=2\nr10ub/o:\nblock\nlater\n\nr10ub/o/later:\nz.txt\nArchive:  r10ub/z2.zip\n extracting: r10ub/o/ok/k.txt        \nrc=2\n",
         "stderr": "checkdir error:  r10ub/o/block exists but is not directory\n                 unable to process block/.\ncheckdir error:  r10ub/o/block exists but is not directory\n                 unable to process block/child/.\ncheckdir error:  r10ub/o/block exists but is not directory\n                 unable to process block/f.txt.\n"
       }
+    },
+    {
+      "id": "unzip_asks_before_it_replaces_and_eof_answers_none",
+      "seq": 16100110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzp_eof/o && printf 'old\\n' > /data/uzp_eof/o/a.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzp_eof/z.zip && cd /data/uzp_eof/o && unzip ../z.zip </dev/null; echo rc=$?; cat a.txt b.txt; cd / && rm -r /data/uzp_eof)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  ../z.zip\n extracting: b.txt                   \nrc=1\nold\nnewb\n",
+        "stderr": "replace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename:  NULL\n(EOF or read error, treating as \"[N]one\" ...)\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "unzip_reads_each_answer_from_its_input",
+      "seq": 16100111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzp_yn/o && printf 'old\\n' > /data/uzp_yn/o/a.txt && printf 'oldb\\n' > /data/uzp_yn/o/b.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzp_yn/z.zip && cd /data/uzp_yn/o && printf 'n\\nyes\\n' | unzip ../z.zip; echo rc=$?; cat a.txt b.txt; cd / && rm -r /data/uzp_yn)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  ../z.zip\n extracting: b.txt                   \nrc=0\nold\nnewb\n",
+        "stderr": "replace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: replace b.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: "
+      },
+      "flags": []
+    },
+    {
+      "id": "unzip_A_replaces_every_file_left",
+      "seq": 16100112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzp_all/o && printf 'old\\n' > /data/uzp_all/o/a.txt && printf 'oldb\\n' > /data/uzp_all/o/b.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzp_all/z.zip && cd /data/uzp_all/o && printf 'A\\n' | unzip -q ../z.zip; echo rc=$?; cat a.txt b.txt; cd / && rm -r /data/uzp_all)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nnew\nnewb\n",
+        "stderr": "replace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: "
+      },
+      "flags": [
+        "q"
+      ]
+    },
+    {
+      "id": "unzip_N_keeps_every_file_left",
+      "seq": 16100113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzp_none/o && printf 'old\\n' > /data/uzp_none/o/a.txt && printf 'oldb\\n' > /data/uzp_none/o/b.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzp_none/z.zip && cd /data/uzp_none/o && printf 'N\\n' | unzip ../z.zip; echo rc=$?; cat a.txt b.txt; cd / && rm -r /data/uzp_none)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  ../z.zip\nrc=0\nold\noldb\n",
+        "stderr": "replace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: "
+      },
+      "flags": []
+    },
+    {
+      "id": "unzip_r_extracts_under_a_new_name",
+      "seq": 16100114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzp_ren/o && printf 'old\\n' > /data/uzp_ren/o/a.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzp_ren/z.zip && cd /data/uzp_ren/o && printf 'r\\n\\nc.txt\\n' | unzip ../z.zip; echo rc=$?; cat a.txt c.txt b.txt; cd / && rm -r /data/uzp_ren)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  ../z.zip\n extracting: c.txt                   \n extracting: b.txt                   \nrc=0\nold\nnew\nnewb\n",
+        "stderr": "replace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: new name: new name: "
+      },
+      "flags": []
+    },
+    {
+      "id": "unzip_repeats_the_question_for_an_answer_it_does_not_know",
+      "seq": 16100115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzp_bad/o && printf 'old\\n' > /data/uzp_bad/o/a.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzp_bad/z.zip && cd /data/uzp_bad/o && printf 'x y\\n\\nn\\n' | unzip ../z.zip; echo rc=$?; cat a.txt; cd / && rm -r /data/uzp_bad)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  ../z.zip\n extracting: b.txt                   \nrc=0\nold\n",
+        "stderr": "replace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: error:  invalid response [x y]\nreplace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: error:  invalid response [{ENTER}]\nreplace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: "
+      },
+      "flags": []
+    },
+    {
+      "id": "unzip_n_never_replaces_and_wins_over_o",
+      "seq": 16100116,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzp_n/o && printf 'old\\n' > /data/uzp_n/o/a.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzp_n/z.zip && cd /data/uzp_n/o && unzip -n ../z.zip; echo rc=$?; cat a.txt; rm b.txt; unzip -o -n ../z.zip; echo rc=$?; cat a.txt b.txt; cd / && rm -r /data/uzp_n)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  ../z.zip\n extracting: b.txt                   \nrc=0\nold\nArchive:  ../z.zip\n extracting: b.txt                   \nrc=0\nold\nnewb\n",
+        "stderr": "caution:  both -n and -o specified; ignoring -o\n"
+      },
+      "flags": [
+        "n",
+        "o"
+      ]
+    },
+    {
+      "id": "unzip_o_replaces_without_asking",
+      "seq": 16100117,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzp_o/o && printf 'old\\n' > /data/uzp_o/o/a.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzp_o/z.zip && cd /data/uzp_o/o && unzip -o ../z.zip </dev/null; echo rc=$?; cat a.txt; cd / && rm -r /data/uzp_o)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  ../z.zip\n extracting: a.txt                   \n extracting: b.txt                   \nrc=0\nnew\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
     }
   ]
 }

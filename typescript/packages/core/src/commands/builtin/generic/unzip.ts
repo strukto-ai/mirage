@@ -25,6 +25,7 @@ import {
   zipinfoLayout,
   type ZipRow,
 } from './archive/zipinfo.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { inflateRaw } from '../../../utils/compress.ts'
@@ -85,6 +86,26 @@ const TESTED_SOME = (archive: string, count: number): string =>
 const TESTING = (name: string): string => `    testing: ${name.padEnd(22)}   OK\n`
 // A -d in a mode that writes nothing (Info-ZIP 6.00).
 const D_IGNORED = 'caution:  not extracting; -d ignored\n'
+const NO_AND_O = 'caution:  both -n and -o specified; ignoring -o\n'
+// Info-ZIP asks before it replaces a file, and reads the answer from its
+// input: the first character decides, and the answer stays on the line.
+const REPLACE_PROMPT = (name: string): string =>
+  `replace ${name}? [y]es, [n]o, [A]ll, [N]one, [r]ename: `
+const REPLACE_EOF = ' NULL\n(EOF or read error, treating as "[N]one" ...)\n'
+const NEW_NAME = 'new name: '
+const INVALID_RESPONSE = (shown: string): string => `error:  invalid response [${shown}]\n`
+
+// An answer as Info-ZIP echoes one it refuses.
+function response(line: Uint8Array): string {
+  if (line.length === 0) return '{ENTER}'
+  const shown: number[] = []
+  for (const byte of line) {
+    if (byte === 0x7f) shown.push(0x5e, 0x3f)
+    else if (byte < 0x20) shown.push(0x5e, byte + 64)
+    else shown.push(byte)
+  }
+  return new TextDecoder().decode(Uint8Array.from(shown))
+}
 
 /**
  * The member patterns and the -x patterns, as Info-ZIP reads them: -x takes
@@ -476,6 +497,8 @@ function checkdirDest(dir: string, strerror: string): string {
 }
 
 interface UnzipFlags {
+  readonly overwrite: boolean
+  readonly neverOverwrite: boolean
   readonly listOnly: boolean
   readonly quiet: boolean
   readonly toStdout: boolean
@@ -494,6 +517,8 @@ interface UnzipFlags {
 // the order typed, and -d as typed, a path and a string.
 function parseFlags(fl: FlagView): UnzipFlags {
   return {
+    overwrite: fl.asBool('o'),
+    neverOverwrite: fl.asBool('n'),
     listOnly: fl.asBool('args_l'),
     quiet: fl.asBool('q'),
     toStdout: fl.asBool('p'),
@@ -664,7 +689,7 @@ export async function unzipGeneric(
       return [out, new IOResult()]
     }
 
-    const exitCode = unmatched.length > 0 || nothingLeft ? 11 : 0
+    let exitCode = unmatched.length > 0 || nothingLeft ? 11 : 0
     const stderr = cautions !== '' ? ENC.encode(cautions) : null
 
     if (pipeMode) {
@@ -719,6 +744,56 @@ export async function unzipGeneric(
     }
     let checkdirFailed = false
     let createFailed = false
+    let answers: AsyncLineIterator | null = null
+    let replaceAll = parsed.overwrite && !parsed.neverOverwrite
+    let skipAll = parsed.neverOverwrite
+    const answer = async (): Promise<Uint8Array | null> => {
+      if (opts.stdin === null) return null
+      answers ??= new AsyncLineIterator(opts.stdin)
+      return answers.readline()
+    }
+    // Where a file entry goes when a file may hold its name. Info-ZIP asks
+    // first, unless -o or an `A` said to replace and -n or an `N` said never
+    // to; end of input answers `N`. `r` names another file under the same
+    // directory, which is asked about in its turn. Mirrors unzip.py.
+    const destination = async (start: string): Promise<string | null> => {
+      let outPath = start
+      for (;;) {
+        if (replaceAll || stat === undefined) return outPath
+        if (!(await pathExists(stat, makePathSpec(outPath)))) return outPath
+        if (skipAll) return null
+        const prompt = REPLACE_PROMPT(shown(outPath))
+        const line = await answer()
+        if (line === null) {
+          errors.push(prompt + REPLACE_EOF)
+          skipAll = true
+          exitCode = Math.max(exitCode, WARN_EXIT)
+          return null
+        }
+        errors.push(prompt)
+        const first = String.fromCharCode(line[0] ?? 0)
+        if (first === 'y' || first === 'Y') return outPath
+        if (first === 'n') return null
+        if (first === 'A') {
+          replaceAll = true
+          return outPath
+        }
+        if (first === 'N') {
+          skipAll = true
+          return null
+        }
+        if (first === 'r' || first === 'R') {
+          let name: Uint8Array | null = new Uint8Array(0)
+          while (name !== null && name.length === 0) {
+            errors.push(NEW_NAME)
+            name = await answer()
+          }
+          if (name !== null) outPath = base + '/' + new TextDecoder().decode(name)
+          continue
+        }
+        errors.push(INVALID_RESPONSE(response(line)))
+      }
+    }
     for (const e of selected) {
       const entryName = lstripSlash(e.name)
       const outPath = base + '/' + rstripSlash(entryName)
@@ -754,25 +829,27 @@ export async function unzipGeneric(
         if (!quiet && !existed) outputLines.push(`   creating: ${shown(outPath)}/`)
         continue
       }
+      const target = await destination(outPath)
+      if (target === null) continue
       const content = await e.content()
       try {
-        await write(makePathSpec(outPath), content)
+        await write(makePathSpec(target), content)
       } catch (err) {
         if (!isFsError(err)) throw err
         // -o unlinks a file already there before it writes, so a refusal of
         // that is its own verb.
         createFailed = true
-        const existed = stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
+        const existed = stat !== undefined && (await pathExists(stat, makePathSpec(target)))
         errors.push(
-          createError(existed ? 'delete old' : 'create', shown(outPath), String(fsStrerror(err))),
+          createError(existed ? 'delete old' : 'create', shown(target), String(fsStrerror(err))),
         )
         continue
       }
       // Relay writes land on whichever mount owns each path and
       // invalidate through the dispatcher; keying them here would have
       // the runner prefix them onto this mount.
-      if (!relay) writes[outPath] = content
-      if (!quiet) outputLines.push(extractedLine(e.method, shown(outPath)))
+      if (!relay) writes[target] = content
+      if (!quiet) outputLines.push(extractedLine(e.method, shown(target)))
     }
     const allStderr = ENC.encode(cautions + errors.join(''))
     return [
@@ -789,7 +866,9 @@ export async function unzipGeneric(
   // A mode that writes nothing says so about -d first; -t prints the
   // offset warning on stdout, every other mode on stderr.
   const writesNothing = zipinfoMode || testMode || pipeMode || listMode || verbose
-  const caution = fl.asStr('d') !== undefined && writesNothing ? D_IGNORED : ''
+  const caution =
+    (parsed.overwrite && parsed.neverOverwrite ? NO_AND_O : '') +
+    (fl.asStr('d') !== undefined && writesNothing ? D_IGNORED : '')
   const onStderr = testMode && !zipinfoMode ? '' : warning
   if ((caution === '' && onStderr === '' && slack === 0) || result === null) return result
   const [out, io] = result
