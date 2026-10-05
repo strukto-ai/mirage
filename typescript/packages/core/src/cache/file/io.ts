@@ -134,14 +134,19 @@ async function setCachedLocked(
   await cache.set(path, data, { fingerprint, ttl })
 }
 
+// The drain each read went to; a nested line hands its outer line them too.
+const draining = new WeakMap<CachableAsyncIterator, Promise<void>>()
+
 export async function applyIo(
   cache: FileCache,
   io: IOResult,
   cacheFacts?: (path: string) => CacheFacts,
   records?: readonly OpRecord[],
 ): Promise<void> {
-  const cacheSet = new Set(io.cache)
-  for (const path of io.cache) {
+  // A path both read and written is dropped: neither side is the file.
+  const kept = io.cache.filter((p) => !(p in io.reads) || !(p in io.writes))
+  const cacheSet = new Set(kept)
+  for (const path of kept) {
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
     // The token has to describe the bytes actually stored, so the lookup
     // asks about the side this branch took. Set in the branch rather
@@ -173,6 +178,7 @@ export async function applyIo(
             records,
           )
           tasks.set(path, task)
+          draining.set(source, task)
           void task.finally(() => {
             if (tasks.get(path) === task) tasks.delete(path)
           })
@@ -187,6 +193,12 @@ export async function applyIo(
     if (cacheSet.has(path)) continue
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
     await cache.remove(path)
+  }
+  // An unfinished read no drain owns is closed; unmount waits on it.
+  for (const [path, source] of Object.entries(io.reads)) {
+    if (!(source instanceof CachableAsyncIterator) || source.exhausted) continue
+    const owner = draining.get(source)
+    if (owner === undefined || cache.drainTasks?.get(path) !== owner) await source.discard()
   }
 }
 

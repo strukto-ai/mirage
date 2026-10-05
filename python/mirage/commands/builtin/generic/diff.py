@@ -453,10 +453,7 @@ async def diff(
             exit_code=2,
             stderr=format_fs_error("diff", exc, [*paths, *flags.exclude_from]),
         )
-    return output, IOResult(
-        exit_code=1 if differ else 0,
-        cache=[p.mount_path for p in paths if not is_stdin(p)],
-    )
+    return output, IOResult(exit_code=1 if differ else 0)
 
 
 __all__ = ["diff"]

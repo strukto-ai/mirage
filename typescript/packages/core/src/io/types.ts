@@ -27,6 +27,13 @@ export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
  */
 export class DeviceInput extends Uint8Array {}
 
+/** Whether a read is over: bytes, or a stream drained to its end. Mirrors
+ * Python's settled. */
+export function settled(source: ByteSource): boolean {
+  if (source instanceof CachableAsyncIterator) return source.exhausted
+  return source instanceof Uint8Array
+}
+
 export async function materialize(source: ByteSource | null | undefined): Promise<Uint8Array> {
   if (source === null || source === undefined) return new Uint8Array()
   if (source instanceof Uint8Array) return source
@@ -217,9 +224,16 @@ export class IOResult {
       sizedRuns: other.sizedRuns,
       countedRuns: other.countedRuns,
       stderr: mergedStderr,
-      reads: { ...this.reads, ...other.reads },
+      // A later write voids earlier claims on its path, and a read that is
+      // over; a running one stays for the drain to close.
+      reads: {
+        ...Object.fromEntries(
+          Object.entries(this.reads).filter(([p, v]) => !(p in other.writes) || !settled(v)),
+        ),
+        ...other.reads,
+      },
       writes: { ...this.writes, ...other.writes },
-      cache: [...this.cache, ...other.cache],
+      cache: [...this.cache.filter((p) => !(p in other.writes)), ...other.cache],
       renames: [...this.renames, ...other.renames],
       producer: other.producer,
       refusal: other.refusal ?? this.refusal,

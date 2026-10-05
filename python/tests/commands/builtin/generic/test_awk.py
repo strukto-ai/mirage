@@ -73,7 +73,7 @@ async def _drain(stdout) -> bytes:
 @pytest.mark.asyncio
 async def test_awk_runs_the_program_files(f, files, data, expected):
     rb, rs = _make_backend(files)
-    output, io = await awk_generic(
+    output, _ = await awk_generic(
         [_spec(path) for path in data],
         (),
         {"f": f},
@@ -81,7 +81,6 @@ async def test_awk_runs_the_program_files(f, files, data, expected):
         read_stream=rs,
     )
     assert (await _drain(output)).decode() == expected
-    assert io.cache == data
 
 
 @pytest.mark.asyncio
@@ -106,7 +105,7 @@ async def test_awk_processes_all_files_with_continuous_nr():
             "/b.txt": b"three\n",
         }
     )
-    output, io = await awk_generic(
+    output, _ = await awk_generic(
         [_spec("/a.txt"), _spec("/b.txt")],
         ("{print NR, $1}",),
         None,
@@ -114,7 +113,6 @@ async def test_awk_processes_all_files_with_continuous_nr():
         read_stream=rs,
     )
     assert (await _drain(output)).decode() == "1 one\n2 two\n3 three\n"
-    assert io.cache == ["/a.txt", "/b.txt"]
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import split_readable
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     resolve_source,
     stdin_stat,
     stdin_stream,
@@ -61,20 +60,16 @@ async def base64_cmd(
         raise extra_operand_error(
             CommandName.BASE64, paths[1].raw_path or paths[1].virtual
         )
-    cache: list[str] = []
     if paths:
         source: AsyncIterator[bytes] = stdin_stream(read_stream, stdin)(
             paths[0]
         )
-        cache = [] if is_stdin(paths[0]) else [paths[0].mount_path]
     else:
         source = resolve_source(stdin)
 
     if decode:
-        return _base64_decode_stream(source, ignore_garbage), IOResult(
-            cache=cache
-        )
-    return _base64_encode_stream(source, wrap=wrap), IOResult(cache=cache)
+        return _base64_decode_stream(source, ignore_garbage), IOResult()
+    return _base64_encode_stream(source, wrap=wrap), IOResult()
 
 
 __all__ = ["base64_cmd"]

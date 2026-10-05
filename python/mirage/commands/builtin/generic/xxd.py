@@ -278,12 +278,10 @@ async def xxd(
         raise extra_operand_error(
             CommandName.XXD, paths[2].raw_path or paths[2].virtual
         )
-    cache: list[str] = []
     if paths:
         source: AsyncIterator[bytes] = stdin_stream(read_stream, stdin)(
             paths[0]
         )
-        cache = [] if is_stdin(paths[0]) else [paths[0].mount_path]
     else:
         source = resolve_source(stdin)
 
@@ -296,7 +294,6 @@ async def xxd(
         return await _write_output(
             paths,
             source,
-            cache,
             read_bytes,
             write_bytes,
             pwrite_bytes,
@@ -306,7 +303,7 @@ async def xxd(
             cols=cols,
             group=group,
         )
-    io = IOResult(cache=cache)
+    io = IOResult()
     if reverse:
         return _xxd_reverse_stream(source, io), io
     if plain:
@@ -319,7 +316,6 @@ async def xxd(
 async def _write_output(
     paths: list[PathSpec],
     source: AsyncIterator[bytes],
-    cache: list[str],
     read_bytes: ReadBytesFn | None,
     write_bytes: Callable[..., Awaitable[None]] | None,
     pwrite_bytes: Callable[..., Awaitable[None]] | None,
@@ -337,7 +333,6 @@ async def _write_output(
     Args:
         paths (list[PathSpec]): INFILE and OUTFILE.
         source (AsyncIterator[bytes]): INFILE's bytes, limits applied.
-        cache (list[str]): Paths worth caching so far.
         read_bytes (ReadBytesFn | None): reads OUTFILE for ``-r``.
         write_bytes (Callable | None): writes OUTFILE.
         pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
@@ -377,10 +372,8 @@ async def _write_output(
                 stderr=fs_error_line("xxd", target, exc).encode(),
                 exit_code=OPEN_OUTPUT_EXIT,
             )
-        # The stretches are not the file, so the cache drops what it holds,
-        # even when OUTFILE is INFILE too.
-        kept = [path for path in cache if path != target.mount_path]
-        return None, IOResult(writes={target.mount_path: b""}, cache=kept)
+        # The stretches are not the file, so the cache drops what it holds.
+        return None, IOResult(writes={target.mount_path: b""})
     if reverse:
         try:
             existing = await read_bytes(target) if read_bytes else b""
@@ -405,8 +398,7 @@ async def _write_output(
             exit_code=OPEN_OUTPUT_EXIT,
         )
     return None, IOResult(
-        writes={target.mount_path: data},
-        cache=[*cache, target.mount_path],
+        writes={target.mount_path: data}, cache=[target.mount_path]
     )
 
 

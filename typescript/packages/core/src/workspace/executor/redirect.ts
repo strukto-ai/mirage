@@ -493,7 +493,10 @@ export async function handleRedirect(
             else file.opened = true
             if (unique) {
               consumed.add(file)
-              if (data.byteLength > 0) io.writes[file.scope.virtual] = data
+              if (data.byteLength > 0) {
+                io.writes[file.scope.virtual] = data
+                io.cache = io.cache.filter((p) => p !== file.scope.virtual)
+              }
             }
           }
         for (const [key, data] of chunks) {
@@ -505,6 +508,7 @@ export async function handleRedirect(
             failedScope = target.scope
             await writeDescription(dispatch, session, target, data)
             io.writes[target.scope.virtual] = data
+            io.cache = io.cache.filter((p) => p !== target.scope.virtual)
           }
         }
       } catch (error) {

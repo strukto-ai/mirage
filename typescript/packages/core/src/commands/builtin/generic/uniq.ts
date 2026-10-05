@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin } from '../utils/stream.ts'
 import { stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
@@ -264,12 +263,10 @@ export async function uniqGeneric(
     if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: encodeText(err) })]
   }
   let source: AsyncIterable<Uint8Array>
-  const cache: string[] = []
   if (paths.length > 0) {
     const input = paths[0]
     if (input === undefined) return [null, new IOResult()]
     source = stream(input)
-    if (!isStdin(input)) cache.push(input.mountPath)
   } else {
     try {
       source = resolveSource(opts.stdin)
@@ -289,8 +286,10 @@ export async function uniqGeneric(
     }
     const data = await materialize(output)
     await write(outputPath, data)
-    cache.push(outputPath.mountPath)
-    return [new Uint8Array(), new IOResult({ writes: { [outputPath.mountPath]: data }, cache })]
+    return [
+      new Uint8Array(),
+      new IOResult({ writes: { [outputPath.mountPath]: data }, cache: [outputPath.mountPath] }),
+    ]
   }
-  return [output, new IOResult({ cache })]
+  return [output, new IOResult()]
 }

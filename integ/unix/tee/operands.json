@@ -179,6 +179,35 @@
         "stdout": "xrc=1\nxx\n",
         "stderr": "tee: /data/a.txt/x: Not a directory\n"
       }
+    },
+    {
+      "id": "tee_then_an_append_to_the_same_file",
+      "seq": 601057,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee8 && printf 'b\\na\\n' > /data/ptee8/t.txt && x=$(printf 'q\\n' | tee /data/ptee8/t.txt; printf 'z\\n' >> /data/ptee8/t.txt) && cat /data/ptee8/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "q\nz\n",
+        "stderr": ""
+      }
     }
   ]
 }

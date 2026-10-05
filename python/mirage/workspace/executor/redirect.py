@@ -633,6 +633,9 @@ async def handle_redirect(
                         consumed.add(id(file))
                         if data:
                             io.writes[file.scope.virtual] = data
+                            io.cache = [
+                                p for p in io.cache if p != file.scope.virtual
+                            ]
             for key, data in chunks:
                 target = dest(key)
                 if target is _TO_STDOUT:
@@ -648,6 +651,9 @@ async def handle_redirect(
                     failed_scope = target.scope
                     await write_description(dispatch, session, target, data)
                     io.writes[target.scope.virtual] = data
+                    io.cache = [
+                        p for p in io.cache if p != target.scope.virtual
+                    ]
         except FS_ERRORS as exc:
             assert failed_scope is not None
             routed.append(

@@ -18,7 +18,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { isStdin, resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
+import { resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
@@ -88,18 +88,16 @@ export async function base64Generic(
     if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: encodeText(err) })]
   }
   const parsed = parseFlags(opts.flags)
-  const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     source = stream(first)
-    if (!isStdin(first)) cache.push(first.virtual)
   } else {
     source = resolveSource(opts.stdin)
   }
   const out = parsed.decode
     ? base64DecodeStream(source, parsed.ignoreGarbage)
     : base64EncodeStream(source, parsed.wrap)
-  return [out, new IOResult({ cache })]
+  return [out, new IOResult()]
 }

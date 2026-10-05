@@ -99,7 +99,7 @@ export async function cutGeneric(
   }
   if (paths.length > 0) {
     const [ok, err] = await readOperands(paths, stream, 'cut')
-    const io = operandsIo(err, { cache: ok.map((operand) => operand.path.virtual) })
+    const io = operandsIo(err)
     if (ok.length === 0 && err !== '') return [null, io]
     const outputs = ok.map((operand) => cutStream(singleChunk(operand.data), parsed))
     const out: ByteSource = asyncChain(outputs)

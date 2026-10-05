@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin, readStdinAsync, stdinStream } from '../utils/stream.ts'
+import { readStdinAsync, stdinStream } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -288,7 +288,6 @@ export async function sedGeneric(
   if (inPlace) return runInPlace(paths, program, machine, doors, stream, write, utf8)
 
   const inputs: SedInput[] = []
-  const readOk: string[] = []
   if (paths.length === 0) {
     const raw = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
     inputs.push({ name: '-', text: byteView(raw, utf8) })
@@ -312,7 +311,6 @@ export async function sedGeneric(
     if (last !== undefined && 'fatal' in last && last.fatal && !lookAhead) break
     try {
       inputs.push({ name: p.rawPath, text: byteView(await materialize(stream(p)), utf8) })
-      if (!isStdin(p)) readOk.push(p.mountPath)
     } catch (e) {
       if (!isFsError(e)) throw e
       const fatal = (e as { code?: string }).code === 'EISDIR'
@@ -330,7 +328,6 @@ export async function sedGeneric(
   return [
     fromByteView(machine.stdout.chunks.join(''), utf8),
     new IOResult({
-      cache: readOk,
       exitCode: writeErr === '' ? machine.exitCode() : 4,
       stderr: stderr === '' ? null : encodeText(stderr),
     }),

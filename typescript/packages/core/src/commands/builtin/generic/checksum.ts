@@ -329,9 +329,7 @@ export async function checksumGeneric(
     // A missing operand is reported and skipped; the good hashes still
     // print (GNU coreutils checksum commands).
     const [ok, err] = await readOperands(paths, stream, name)
-    const io = operandsIo(err, {
-      cache: ok.filter((o) => !isStdin(o.path)).map((o) => o.path.mountPath),
-    })
+    const io = operandsIo(err)
     if (ok.length === 0 && err !== '') return [null, io]
     let body = ''
     for (const o of ok) body += hashLine(await hasher(o.data), o.path.rawPath, name, parsed)
