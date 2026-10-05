@@ -129,6 +129,7 @@
       "seq": 963004,
       "targets": [
         "ram",
+        "opfs",
         "disk"
       ],
       "command": "printf a > /data/xm_gz; printf b > /data2/xm_gz; gzip -c /data/xm_gz /data2/xm_gz | gunzip -c",
@@ -143,6 +144,7 @@
       "seq": 963005,
       "targets": [
         "ram",
+        "opfs",
         "disk"
       ],
       "command": "printf a > /data/xm_gzk; printf b > /data2/xm_gzk; gzip -k /data/xm_gzk /data2/xm_gzk; zcat /data/xm_gzk.gz /data2/xm_gzk.gz",
@@ -157,6 +159,7 @@
       "seq": 963006,
       "targets": [
         "ram",
+        "opfs",
         "disk"
       ],
       "command": "printf abc > /data/xm_trunc; printf def > /data2/xm_trunc; truncate -s 2 /data/xm_trunc /data2/xm_trunc; cat /data/xm_trunc /data2/xm_trunc",
@@ -171,6 +174,7 @@
       "seq": 963007,
       "targets": [
         "ram",
+        "opfs",
         "disk"
       ],
       "command": "printf \"a\\nb\\n\" > /data/xm_split; split -l1 /data/xm_split /data2/xm_part; cat /data2/xm_partaa /data2/xm_partab",

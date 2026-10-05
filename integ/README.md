@@ -190,7 +190,7 @@ with a backend that refuses dispatcher byte reads. Search must reach its
 registered `grep`/`rg` handlers, including filters, depth, sorting and links.
 The target combines nested service mounts, a regular RAM mount, a child that
 serves metadata without search commands, and hidden descendants.
-`crossmount/grep/native.json` also covers repeated operands, quiet stopping,
+`crossmount/service/native.json` also covers repeated operands, quiet stopping,
 errors, an existing custom aggregate registration, and one CLI invocation
 through dispatch doors. A barrier proves native read preparation is bounded to
 four invocations; stream cases check partial failures, timeout cleanup and early
