@@ -17,6 +17,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
+from mirage.utils.errors import eisdir
 from mirage.utils.path import norm
 
 
@@ -46,6 +47,8 @@ async def read(
     else:
         data = await store.get_file(key)
     if data is None:
+        if await store.has_dir(key):
+            raise eisdir(path_spec)
         raise await lookup_error(store, path_spec, key)
     record("read", virtual, "redis", len(data), timer)
     return data

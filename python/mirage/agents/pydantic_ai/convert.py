@@ -12,56 +12,38 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic_ai_backends.types import ExecuteResponse, FileInfo, GrepMatch
+import posixpath
+
+from pydantic_ai.workspaces import CommandResult, FileEntry
 
 from mirage.io.types import IOResult
-from mirage.workspace.tools.io_text import decode, with_refusal
+from mirage.types import FileStat, FileType
+from mirage.workspace.tools.io_text import with_refusal
 
 
-def io_to_execute_response(io: IOResult) -> ExecuteResponse:
-    stdout = decode(io.stdout if isinstance(io.stdout, bytes) else None)
-    stderr = decode(io.stderr if isinstance(io.stderr, bytes) else None)
-    output = stdout
-    if stderr:
-        output = f"{stdout}\n{stderr}" if stdout else stderr
-    return ExecuteResponse(
-        output=with_refusal(output, io.refusal), exit_code=io.exit_code
+async def io_to_command_result(io: IOResult) -> CommandResult:
+    """A finished Mirage line as the result of a workspace command.
+
+    Args:
+        io (IOResult): the line's result; a refusal's reason is appended
+            to stderr.
+    """
+    stdout = await io.stdout_str()
+    stderr = with_refusal(await io.stderr_str(), io.refusal)
+    return CommandResult(exit_code=io.exit_code, stdout=stdout, stderr=stderr)
+
+
+def stat_to_entry(path: str, st: FileStat) -> FileEntry:
+    """One stat row as a workspace entry.
+
+    Args:
+        path (str): the absolute path the row answers for.
+        st (FileStat): the row, its target's when the path is a link.
+    """
+    is_dir = st.type == FileType.DIRECTORY
+    return FileEntry(
+        name=posixpath.basename(path),
+        path=path,
+        is_dir=is_dir,
+        size=None if is_dir else st.size,
     )
-
-
-def io_to_grep_matches(io: IOResult) -> list[GrepMatch]:
-    stdout = decode(
-        io.stdout if isinstance(io.stdout, bytes) else None
-    ).strip()
-    if not stdout:
-        return []
-    matches: list[GrepMatch] = []
-    for line in stdout.split("\n"):
-        parts = line.split(":", 2)
-        if len(parts) >= 3:
-            try:
-                line_num = int(parts[1])
-            except ValueError:
-                continue
-            matches.append(
-                GrepMatch(path=parts[0], line_number=line_num, line=parts[2])
-            )
-    return matches
-
-
-def io_to_file_infos(io: IOResult) -> list[FileInfo]:
-    stdout = decode(
-        io.stdout if isinstance(io.stdout, bytes) else None
-    ).strip()
-    if not stdout:
-        return []
-    infos: list[FileInfo] = []
-    for entry in stdout.split("\n"):
-        entry = entry.strip()
-        if not entry:
-            continue
-        is_dir = entry.endswith("/")
-        clean = entry.rstrip("/")
-        name = clean.rsplit("/", 1)[-1] if "/" in clean else clean
-        infos.append(FileInfo(name=name, path=clean, is_dir=is_dir, size=None))
-    return infos

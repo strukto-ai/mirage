@@ -17,6 +17,7 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
 import { lookupError } from './dest.ts'
+import { eisdir } from '../../utils/errors.ts'
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function* readStream(
@@ -25,7 +26,10 @@ export async function* readStream(
 ): AsyncIterable<Uint8Array> {
   const p = norm(path.mountPath)
   const data = accessor.store.files.get(p)
-  if (data === undefined) throw lookupError(accessor, path, p)
+  if (data === undefined) {
+    if (accessor.store.dirs.has(p)) throw eisdir(path)
+    throw lookupError(accessor, path, p)
+  }
   const rec = recordStream('read', path.virtual, VFSName.RAM)
   if (rec !== null) rec.bytes = data.byteLength
   yield data

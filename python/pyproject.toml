@@ -146,8 +146,9 @@ openai      = ["openai>=2.46.0", "openai-agents>=0.18.3"]
 
 # --- pydantic-ai ---
 pydantic-ai = [
-    "pydantic-ai-slim[anthropic,openai]>=2.13.0",
-    "pydantic-ai-backend>=0.2.16,<0.2.30",
+    "pydantic-ai-slim>=2.52.0",
+    "pydantic-ai-backend[console]>=0.2.30",
+    "chardet>=5.2.0",
 ]
 
 # --- deepagents ---

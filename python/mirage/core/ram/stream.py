@@ -19,6 +19,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ram.dest import lookup_error
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
+from mirage.utils.errors import eisdir
 from mirage.utils.path import norm
 
 
@@ -32,6 +33,8 @@ async def read_stream(
     store = accessor.store
     key = norm(path)
     if key not in store.files:
+        if key in store.dirs:
+            raise eisdir(path_spec)
         raise lookup_error(store, path_spec, key)
     data = store.files[key]
     rec = record_stream("read", virtual, "ram")

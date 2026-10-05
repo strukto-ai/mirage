@@ -17,6 +17,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ram.dest import lookup_error
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
+from mirage.utils.errors import eisdir
 from mirage.utils.path import norm
 from mirage.utils.ranges import slice_window
 
@@ -47,6 +48,8 @@ async def read(
     timer = start_op()
     key = norm(path)
     if key not in store.files:
+        if key in store.dirs:
+            raise eisdir(path_spec)
         raise lookup_error(store, path_spec, key)
     data = store.files[key]
     if offset or size is not None:

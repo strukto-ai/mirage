@@ -64,3 +64,14 @@ async def test_stream_empty_file():
     async for chunk in read_stream(a, PathSpec.from_str_path("/empty")):
         chunks.append(chunk)
     assert b"".join(chunks) == b""
+
+
+@pytest.mark.asyncio
+async def test_stream_directory_is_eisdir():
+    s = RAMStore()
+    s.dirs.add("/sub")
+    with pytest.raises(IsADirectoryError):
+        async for _ in read_stream(
+            RAMAccessor(s), PathSpec.from_str_path("/sub")
+        ):
+            pass
