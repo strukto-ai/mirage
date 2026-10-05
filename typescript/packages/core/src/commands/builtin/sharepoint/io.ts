@@ -26,7 +26,7 @@ import { rename } from '../../../core/sharepoint/rename.ts'
 import { rmR } from '../../../core/sharepoint/rm.ts'
 import { rmdir } from '../../../core/sharepoint/rmdir.ts'
 import { stat } from '../../../core/sharepoint/stat.ts'
-import { stream } from '../../../core/sharepoint/stream.ts'
+import { readStream } from '../../../core/sharepoint/stream.ts'
 import { truncate } from '../../../core/sharepoint/truncate.ts'
 import { unlink } from '../../../core/sharepoint/unlink.ts'
 import { write } from '../../../core/sharepoint/write.ts'
@@ -36,7 +36,7 @@ export const IO: CommandIO<SharePointAccessor> = new VFSAdapter<SharePointAccess
   read: { readdir, readBytes: read, stat },
   native: {
     readRange: rangeOf(read),
-    readStream: stream,
+    readStream,
     exists,
     find,
     du: makeWalkedDu(stat, readdir),

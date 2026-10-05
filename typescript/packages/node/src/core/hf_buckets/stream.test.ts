@@ -19,7 +19,7 @@ import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { HfHubError } from '../hf_hub/client.ts'
 import { type FakeHub, NO_ETAG, xetHash } from '../hf_hub/_test_util.ts'
 import { type FakeHfOperator, fakeHfOperator, installFakeOperator } from './mock.ts'
-import { stream } from './stream.ts'
+import { readStream } from './stream.ts'
 
 const BIG = Buffer.from(`${'x'.repeat(1023)}\n`.repeat(300))
 
@@ -47,7 +47,7 @@ async function accessorWith(files: Record<string, string | Buffer>): Promise<HfB
 
 async function drain(accessor: HfBucketsAccessor, path: string): Promise<Buffer> {
   const chunks: Uint8Array[] = []
-  for await (const chunk of stream(accessor, PathSpec.fromStrPath(path))) chunks.push(chunk)
+  for await (const chunk of readStream(accessor, PathSpec.fromStrPath(path))) chunks.push(chunk)
   return Buffer.concat(chunks)
 }
 
@@ -68,7 +68,7 @@ describe('hf stream', () => {
     const { accessor, fake } = await mounted({ 'big.bin': BIG })
     fake.reach = []
     const [[chunks, first], records] = await runWithRecording(async () => {
-      const iter = stream(accessor, PathSpec.fromStrPath('/big.bin'))[Symbol.asyncIterator]()
+      const iter = readStream(accessor, PathSpec.fromStrPath('/big.bin'))[Symbol.asyncIterator]()
       return [iter, await iter.next()] as const
     })
     // Checked while the generator is suspended at its first yield: a consumer

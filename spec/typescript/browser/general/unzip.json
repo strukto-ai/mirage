@@ -218,6 +218,10 @@
       "type": "bool"
     },
     {
+      "short": "-n",
+      "type": "bool"
+    },
+    {
       "short": "-l",
       "type": "bool"
     },

@@ -305,7 +305,7 @@ async def _awk_stream(
         await interp.close_inputs()
 
 
-async def awk(
+async def awk_generic(
     paths: list[PathSpec],
     texts: Sequence[str] = (),
     flags: Mapping[str, FlagValue] | None = None,
@@ -414,4 +414,4 @@ async def awk(
     return _awk_stream(interp, io), io
 
 
-__all__ = ["awk"]
+__all__ = ["awk_generic"]

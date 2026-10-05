@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.read import read_bytes
+from mirage.core.ram.read import read
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
 
@@ -33,7 +33,7 @@ def store():
 
 @pytest.mark.asyncio
 async def test_read_bytes(store):
-    result = await read_bytes(
+    result = await read(
         store,
         PathSpec(
             vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"
@@ -44,7 +44,7 @@ async def test_read_bytes(store):
 
 @pytest.mark.asyncio
 async def test_read_bytes_nested(store):
-    result = await read_bytes(
+    result = await read(
         store,
         PathSpec(
             vfs_path="sub/nested.txt",
@@ -58,7 +58,7 @@ async def test_read_bytes_nested(store):
 @pytest.mark.asyncio
 async def test_read_bytes_not_found(store):
     with pytest.raises(FileNotFoundError):
-        await read_bytes(
+        await read(
             store,
             PathSpec(
                 vfs_path="nope.txt", virtual="/nope.txt", directory="/nope.txt"
@@ -72,7 +72,7 @@ async def test_read_bytes_empty_file():
 
     a = RAMAccessor(s)
     s.files["/empty"] = b""
-    result = await read_bytes(
+    result = await read(
         a, PathSpec(vfs_path="empty", virtual="/empty", directory="/empty")
     )
     assert result == b""
@@ -85,7 +85,7 @@ async def test_read_bytes_binary_data():
     a = RAMAccessor(s)
     data = bytes(range(256))
     s.files["/bin"] = data
-    result = await read_bytes(
+    result = await read(
         a, PathSpec(vfs_path="bin", virtual="/bin", directory="/bin")
     )
     assert result == data
@@ -97,7 +97,7 @@ async def test_read_bytes_normalizes_path():
 
     a = RAMAccessor(s)
     s.files["/file.txt"] = b"data"
-    result = await read_bytes(
+    result = await read(
         a,
         PathSpec(
             vfs_path="file.txt", virtual="file.txt", directory="file.txt"
@@ -109,4 +109,4 @@ async def test_read_bytes_normalizes_path():
 @pytest.mark.asyncio
 async def test_read_bytes_directory_is_eisdir(store):
     with pytest.raises(IsADirectoryError):
-        await read_bytes(store, PathSpec.from_str_path("/sub"))
+        await read(store, PathSpec.from_str_path("/sub"))

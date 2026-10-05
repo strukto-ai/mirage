@@ -14,7 +14,7 @@
 
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.resolve import path_parts, resolve_item
-from mirage.core.box.write import write_bytes
+from mirage.core.box.write import write
 from mirage.types import PathSpec
 
 
@@ -25,4 +25,4 @@ async def create(accessor: BoxAccessor, path: PathSpec) -> None:
     existing = await resolve_item(accessor, parts)
     if existing is not None:
         return
-    await write_bytes(accessor, path, b"")
+    await write(accessor, path, b"")

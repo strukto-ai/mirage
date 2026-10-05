@@ -21,7 +21,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { lstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { READ_FAILURES, fsStrerror, isEisdir, isEnoent, isFsError } from '../../../utils/errors.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { splitLines } from '../utils/lines.ts'
@@ -561,19 +561,34 @@ async function loadPatchData(
   }
 }
 
+interface PatchFlags {
+  readonly strip: number
+  readonly reverse: boolean
+  // -i as the parser classified it: a path keeps its typed spelling.
+  readonly inputPath: PathSpec | string | null
+  readonly forward: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
+  const fl = new FlagView(bag, specOf('patch'))
+  const input = fl.raw('i')
+  return {
+    strip: fl.asInt('p') ?? 0,
+    reverse: fl.asBool('R'),
+    inputPath: input instanceof PathSpec ? input : (fl.asStr('i') ?? null),
+    forward: fl.asBool('N'),
+  }
+}
+
 export async function patchGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   read: (p: PathSpec) => Promise<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('patch'))
+  const parsed = parseFlags(opts.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
-  const stripCount = fl.asInt('p') ?? 0
-  const reverseMode = fl.asBool('R')
-  const forwardOnly = fl.asBool('N')
-  const iRaw = fl.raw('i')
-  const iFlag = fl.asStr('i') ?? null
+  const { strip: stripCount, reverse: reverseMode, forward: forwardOnly, inputPath } = parsed
   const mountPrefix = opts.mountPrefix ?? ''
   // `patch [ORIGFILE [PATCHFILE]]`: the second operand is the patch file,
   // ahead of -i, and the first is the one file every hunk goes to in place
@@ -582,10 +597,10 @@ export async function patchGeneric(
   // patch.
   const source =
     paths[1] ??
-    (iRaw instanceof PathSpec
-      ? iRaw
-      : iFlag !== null
-        ? PathSpec.fromStrPath(iFlag, mountKey(iFlag, mountPrefix))
+    (inputPath instanceof PathSpec
+      ? inputPath
+      : inputPath !== null
+        ? PathSpec.fromStrPath(inputPath, mountKey(inputPath, mountPrefix))
         : null)
   const loaded = await loadPatchData(source, opts, read)
   if (typeof loaded === 'string') {

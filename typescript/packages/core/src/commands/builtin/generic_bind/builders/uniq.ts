@@ -13,21 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { uniqGeneric } from '../../generic/uniq.ts'
-import { type Builder, dirAwareStat, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStat, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const uniq: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const write = ops.write
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return uniqGeneric(
+    resolved,
+    opts,
+    (p) => ops.readStream(accessor, p, idx),
+    write === undefined ? undefined : (p, data) => write(accessor, p, data),
+    dirAwareStat(ops, accessor, opts),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'uniq',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const write = ops.write
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return uniqGeneric(
-      resolved,
-      opts,
-      (p) => ops.readStream(accessor, p, idx),
-      write === undefined ? undefined : (p, data) => write(accessor, p, data),
-      dirAwareStat(ops, accessor, opts),
-    )
-  },
+  fn: uniq,
 }

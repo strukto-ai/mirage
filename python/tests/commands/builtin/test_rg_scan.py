@@ -38,7 +38,7 @@ from mirage.core.ram.mkdir import mkdir
 from mirage.core.ram.read import read
 from mirage.core.ram.readdir import readdir
 from mirage.core.ram.stat import stat
-from mirage.core.ram.write import write_bytes as _async_write_bytes
+from mirage.core.ram.write import write as _async_write_bytes
 from mirage.io.stream import materialize
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec

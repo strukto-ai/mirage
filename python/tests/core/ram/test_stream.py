@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.stream import stream
+from mirage.core.ram.stream import read_stream
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
 
@@ -27,7 +27,7 @@ async def test_stream_reads_content():
     a = RAMAccessor(s)
     s.files["/file.txt"] = b"hello world"
     chunks = []
-    async for chunk in stream(a, PathSpec.from_str_path("/file.txt")):
+    async for chunk in read_stream(a, PathSpec.from_str_path("/file.txt")):
         chunks.append(chunk)
     assert b"".join(chunks) == b"hello world"
 
@@ -39,7 +39,7 @@ async def test_stream_single_chunk():
     a = RAMAccessor(s)
     s.files["/file.txt"] = b"data"
     chunks = []
-    async for chunk in stream(a, PathSpec.from_str_path("/file.txt")):
+    async for chunk in read_stream(a, PathSpec.from_str_path("/file.txt")):
         chunks.append(chunk)
     assert len(chunks) == 1
 
@@ -50,7 +50,7 @@ async def test_stream_not_found():
 
     a = RAMAccessor(s)
     with pytest.raises(FileNotFoundError):
-        async for _ in stream(a, PathSpec.from_str_path("/nope.txt")):
+        async for _ in read_stream(a, PathSpec.from_str_path("/nope.txt")):
             pass
 
 
@@ -61,7 +61,7 @@ async def test_stream_empty_file():
     a = RAMAccessor(s)
     s.files["/empty"] = b""
     chunks = []
-    async for chunk in stream(a, PathSpec.from_str_path("/empty")):
+    async for chunk in read_stream(a, PathSpec.from_str_path("/empty")):
         chunks.append(chunk)
     assert b"".join(chunks) == b""
 
@@ -71,5 +71,7 @@ async def test_stream_directory_is_eisdir():
     s = RAMStore()
     s.dirs.add("/sub")
     with pytest.raises(IsADirectoryError):
-        async for _ in stream(RAMAccessor(s), PathSpec.from_str_path("/sub")):
+        async for _ in read_stream(
+            RAMAccessor(s), PathSpec.from_str_path("/sub")
+        ):
             pass

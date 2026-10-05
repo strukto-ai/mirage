@@ -233,7 +233,7 @@ def _convert_line(line: str, to_mode: str, from_mode: str, suffix: str) -> str:
     return lead + _convert_field(field, to_mode, from_mode, suffix) + rest
 
 
-async def numfmt(
+async def numfmt_generic(
     *texts: str,
     stdin: ByteSource | None = None,
     to_mode: str = "none",
@@ -269,4 +269,4 @@ async def numfmt(
     return printed.encode(), IOResult()
 
 
-__all__ = ["numfmt"]
+__all__ = ["numfmt_generic"]

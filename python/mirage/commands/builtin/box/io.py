@@ -17,7 +17,7 @@ from mirage.core.box.create import create as _create
 from mirage.core.box.exists import exists as _exists
 from mirage.core.box.mkdir import mkdir as _mkdir
 from mirage.core.box.read import read as _read
-from mirage.core.box.read import stream as _stream
+from mirage.core.box.read import read_stream as _stream
 from mirage.core.box.readdir import readdir as _readdir
 from mirage.core.box.rename import rename as _rename
 from mirage.core.box.rmdir import rm_r as _rm_r
@@ -26,7 +26,7 @@ from mirage.core.box.search import narrow_paths
 from mirage.core.box.stat import stat as _stat
 from mirage.core.box.truncate import truncate as _truncate
 from mirage.core.box.unlink import unlink as _unlink
-from mirage.core.box.write import write_bytes as _write
+from mirage.core.box.write import write as _write
 from mirage.core.generic.du import make_walked_du
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import ContentSearchOps, NativeReadOps, ReadOps, WriteOps

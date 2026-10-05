@@ -33,7 +33,7 @@ async function* discordStream(
   yield await discordRead(accessor, p, index)
 }
 
-async function headCommand(
+async function head(
   accessor: DiscordAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -54,5 +54,5 @@ export const DISCORD_HEAD = command({
   name: 'head',
   vfs: VFSName.DISCORD,
   spec: specOf('head'),
-  fn: headCommand,
+  fn: head,
 })

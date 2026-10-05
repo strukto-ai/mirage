@@ -14,22 +14,22 @@
 
 import { describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
-import { stream } from './stream.ts'
+import { readStream } from './stream.ts'
 import { mkdir } from './mkdir.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/stream', () => {
   it('yields all bytes', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/x'), new TextEncoder().encode('hello stream'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('hello stream'))
     const chunks: Uint8Array[] = []
-    for await (const c of stream(accessor, spec('/x'))) chunks.push(c)
+    for await (const c of readStream(accessor, spec('/x'))) chunks.push(c)
     const decoded = chunks.map((c) => new TextDecoder().decode(c)).join('')
     expect(decoded).toBe('hello stream')
   })
   it('throws "file not found" on missing', async () => {
     const accessor = makeMockAccessor()
-    const it = stream(accessor, spec('/missing'))
+    const it = readStream(accessor, spec('/missing'))
     await expect(it[Symbol.asyncIterator]().next()).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
@@ -39,11 +39,11 @@ describe('opfs/stream', () => {
 describe('opfs/stream tells a file in the chain from a directory leaf', () => {
   it('is ENOTDIR under a plain file and EISDIR for a directory', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/plain'), new TextEncoder().encode('p'))
+    await write(accessor, spec('/plain'), new TextEncoder().encode('p'))
     await mkdir(accessor, spec('/d'))
     const codeOf = async (p: string): Promise<unknown> =>
       (async () => {
-        for await (const chunk of stream(accessor, spec(p))) void chunk
+        for await (const chunk of readStream(accessor, spec(p))) void chunk
       })().then(
         () => null,
         (e: unknown) => (e as { code?: string }).code,

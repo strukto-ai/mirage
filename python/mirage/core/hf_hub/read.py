@@ -91,7 +91,7 @@ def row_token(entry: IndexEntry, etag: str) -> str | None:
     return entry.id or None
 
 
-async def read_bytes(
+async def read(
     accessor: HfHubAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

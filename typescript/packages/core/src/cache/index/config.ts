@@ -14,6 +14,8 @@
 
 import { z } from 'zod'
 
+import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
+
 export const ResourceType = Object.freeze({
   FILE: 'file',
   FOLDER: 'folder',
@@ -187,12 +189,35 @@ export const IndexDirectorySchema = z.object({
 
 export type IndexDirectory = z.output<typeof IndexDirectorySchema>
 
-export interface IndexConfig {
-  type?: IndexType
-  ttl?: number
-}
+const IndexConfigSchema = z.object({
+  type: z.enum(IndexType).optional(),
+  ttl: z.number().optional(),
+})
 
-export interface RedisIndexConfig extends IndexConfig {
-  url?: string
-  keyPrefix?: string
+const RedisIndexConfigSchema = IndexConfigSchema.extend({
+  url: z.string().optional(),
+  keyPrefix: z.string().optional(),
+})
+
+export type IndexConfig = ConfigOf<typeof IndexConfigSchema>
+
+export type RedisIndexConfig = ConfigOf<typeof RedisIndexConfigSchema>
+
+/**
+ * Check an index config the way python's `IndexConfig` checks one on
+ * construction, and camelize its keys.
+ *
+ * The fields are picked by `type`, where python picks them by class, since
+ * a TS config has no class to pick by. One field named in both spellings is
+ * refused, as python refuses the camelCase one.
+ *
+ * @param config the index config as the caller passed it.
+ * @returns the checked config with every key in its camelCase spelling.
+ */
+export function normalizeIndexConfig(config: IndexConfig): IndexConfig {
+  const input = config as Record<string, unknown>
+  refuseRepeatedFields(input)
+  return (input.type ?? IndexType.RAM) === IndexType.RAM
+    ? parseConfigWithSchema(IndexConfigSchema, input)
+    : parseConfigWithSchema(RedisIndexConfigSchema, input)
 }

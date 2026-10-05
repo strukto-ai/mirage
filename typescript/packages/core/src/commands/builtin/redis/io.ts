@@ -31,10 +31,10 @@ import { rmR as redisRmR } from '../../../core/redis/rm.ts'
 import { rmdir as redisRmdir } from '../../../core/redis/rmdir.ts'
 import { setAttrs as redisSetAttrs } from '../../../core/redis/set_attrs.ts'
 import { stat as redisStat } from '../../../core/redis/stat.ts'
-import { stream as redisStream } from '../../../core/redis/stream.ts'
+import { readStream as redisStream } from '../../../core/redis/stream.ts'
 import { truncate as redisTruncate } from '../../../core/redis/truncate.ts'
 import { unlink as redisUnlink } from '../../../core/redis/unlink.ts'
-import { writeBytes as redisWrite } from '../../../core/redis/write.ts'
+import { write as redisWrite } from '../../../core/redis/write.ts'
 
 export const IO: CommandIO<RedisAccessor> = new VFSAdapter<RedisAccessor>({
   read: { readdir: redisReaddir, readBytes: redisRead, stat: redisStat },

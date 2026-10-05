@@ -18,7 +18,10 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { openError, resolveFileHandle } from './utils.ts'
 
-export async function* stream(accessor: OPFSAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
+export async function* readStream(
+  accessor: OPFSAccessor,
+  path: PathSpec,
+): AsyncIterable<Uint8Array> {
   const root = await accessor.root()
   const key = path.mountPath
   let handle: FileSystemFileHandle

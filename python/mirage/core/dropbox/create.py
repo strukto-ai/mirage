@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.write import write_bytes
+from mirage.core.dropbox.write import write
 from mirage.types import PathSpec
 
 
 async def create(accessor: DropboxAccessor, path: PathSpec) -> None:
-    await write_bytes(accessor, path, b"")
+    await write(accessor, path, b"")

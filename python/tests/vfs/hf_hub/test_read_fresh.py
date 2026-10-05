@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.core.hf_hub.read import read_bytes
+from mirage.core.hf_hub.read import read
 from mirage.observe.context import RecordingScope
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
@@ -355,9 +355,7 @@ async def test_a_ranged_read_stamps_the_whole_files_oid(override, expected):
         vfs = _vfs(hub)
         scope = RecordingScope()
         try:
-            data = await read_bytes(
-                vfs.accessor, _spec("a.txt"), offset=2, size=3
-            )
+            data = await read(vfs.accessor, _spec("a.txt"), offset=2, size=3)
         finally:
             scope.close()
             await vfs.accessor.close()

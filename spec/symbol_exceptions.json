@@ -1,5 +1,5 @@
 {
- "baseline": 4487,
+ "baseline": 4082,
  "modules": {
   "ops/registry": {
    "typescript_only": {
@@ -259,6 +259,25 @@
    "typescript_only": {
     "OAuthDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
     "registerOAuthRoutes": "Fastify registers routes through a function; FastAPI's route is the module function protected_resource."
+   }
+  },
+  "cache/file/config": {
+   "typescript_only": {
+    "CacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "RedisCacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "normalizeCacheConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
+   }
+  },
+  "cache/index/config": {
+   "typescript_only": {
+    "IndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "RedisIndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "normalizeIndexConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
+   }
+  },
+  "vfs/secrets": {
+   "typescript_only": {
+    "refuseRepeatedFields": "Python's models take one spelling of a field, so a second spelling is an extra field pydantic refuses; a TypeScript config takes either spelling, so the code door refuses one field named in both."
    }
   }
  }

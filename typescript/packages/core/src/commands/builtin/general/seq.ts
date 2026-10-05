@@ -609,7 +609,7 @@ async function* stream(lines: Iterable<string>, separator: string): AsyncGenerat
   else if (started) yield encodeText('\n')
 }
 
-function seqCommand(
+function seq(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -647,5 +647,5 @@ export const GENERAL_SEQ = command({
   name: 'seq',
   vfs: null,
   spec: specOf('seq'),
-  fn: seqCommand,
+  fn: seq,
 })

@@ -16,19 +16,19 @@ import { describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { readdir } from './readdir.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/readdir', () => {
   it('lists entries with full virtual paths sorted', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/b'), new Uint8Array())
-    await writeBytes(accessor, spec('/a'), new Uint8Array())
+    await write(accessor, spec('/b'), new Uint8Array())
+    await write(accessor, spec('/a'), new Uint8Array())
     expect(await readdir(accessor, spec('/'))).toEqual(['/a', '/b'])
   })
   it('lists nested directory', async () => {
     const accessor = makeMockAccessor()
     await mkdir(accessor, spec('/sub'))
-    await writeBytes(accessor, spec('/sub/x'), new Uint8Array())
+    await write(accessor, spec('/sub/x'), new Uint8Array())
     expect(await readdir(accessor, spec('/sub'))).toEqual(['/sub/x'])
   })
   it('throws ENOENT for a missing path, at any depth', async () => {
@@ -40,7 +40,7 @@ describe('opfs/readdir', () => {
   })
   it('throws ENOTDIR when a path component is a file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/a.txt'), new Uint8Array())
+    await write(accessor, spec('/a.txt'), new Uint8Array())
     for (const p of ['/a.txt', '/a.txt/x', '/a.txt/x/y']) {
       await expect(readdir(accessor, spec(p))).rejects.toMatchObject({ code: 'ENOTDIR' })
     }

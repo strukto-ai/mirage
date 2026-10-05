@@ -24,7 +24,7 @@ import { size as duSize } from '../../core/disk/du/index.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
 import { find as findCore } from '../../core/disk/find.ts'
 import { rmR as rmRCore } from '../../core/disk/rm.ts'
-import { stream as streamCore } from '../../core/disk/stream.ts'
+import { readStream as streamCore } from '../../core/disk/stream.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { DiskVFS } from './disk.ts'
 

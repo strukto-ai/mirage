@@ -3,7 +3,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.truncate import parse_flags
 from mirage.commands.builtin.generic.truncate import (
-    truncate as generic_truncate,
+    truncate_generic as generic_truncate,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,

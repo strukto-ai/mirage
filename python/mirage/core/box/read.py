@@ -77,7 +77,7 @@ async def read(
     )
 
 
-async def stream(
+async def read_stream(
     accessor: BoxAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

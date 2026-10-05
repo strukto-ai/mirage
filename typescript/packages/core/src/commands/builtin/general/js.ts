@@ -76,7 +76,7 @@ export async function handleJs(
   )
 }
 
-async function jsCommand(
+async function js(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -189,12 +189,12 @@ export const GENERAL_JS = command({
   name: 'js',
   vfs: null,
   spec: specOf('js'),
-  fn: jsCommand,
+  fn: js,
 })
 
 export const GENERAL_NODE = command({
   name: 'node',
   vfs: null,
   spec: specOf('node'),
-  fn: jsCommand,
+  fn: js,
 })

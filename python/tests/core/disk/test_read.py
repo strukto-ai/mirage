@@ -16,7 +16,7 @@ import pytest
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.disk.read import read_bytes, read_range
+from mirage.core.disk.read import read, read_range
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -27,7 +27,7 @@ async def test_read_file(tmp_path):
     (tmp_path / "hello.txt").write_bytes(b"hello world")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    result = await read_bytes(
+    result = await read(
         accessor,
         PathSpec(
             vfs_path=mount_key("/hello.txt", "/disk"),
@@ -44,7 +44,7 @@ async def test_read_file_not_found(tmp_path):
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
     with pytest.raises(FileNotFoundError):
-        await read_bytes(
+        await read(
             accessor,
             PathSpec(
                 vfs_path="missing.txt",
@@ -65,7 +65,7 @@ async def test_read_with_glob_scope_and_prefix(tmp_path):
         virtual="/disk/data.bin",
         directory="/disk/",
     )
-    result = await read_bytes(accessor, scope, index)
+    result = await read(accessor, scope, index)
     assert result == b"\x00\x01\x02"
 
 
@@ -165,6 +165,6 @@ async def test_read_bytes_under_a_plain_file_is_not_a_directory(tmp_path):
         vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt/"
     )
     with pytest.raises(NotADirectoryError) as exc:
-        await read_bytes(DiskAccessor(tmp_path), spec)
+        await read(DiskAccessor(tmp_path), spec)
     assert exc.value.filename == "/a.txt/x"
     assert str(tmp_path) not in str(exc.value)

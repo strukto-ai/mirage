@@ -4,7 +4,7 @@ from mirage.commands.builtin.generic.uniq import (
     SKIP_FIELDS,
     _parse_count,
     parse_flags,
-    uniq,
+    uniq_generic,
 )
 from mirage.commands.errors import UsageError
 
@@ -14,7 +14,7 @@ def _unused_read_stream(_accessor, _path):
 
 
 async def _collect(stdin: bytes | None, **kwargs) -> bytes:
-    source, _io = await uniq(
+    source, _io = await uniq_generic(
         [],
         read_stream=_unused_read_stream,
         stdin=stdin,

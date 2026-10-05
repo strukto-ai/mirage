@@ -129,7 +129,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags:
     return TruncateFlags(size=size, no_create=fl.as_bool("no_create"))
 
 
-async def truncate(
+async def truncate_generic(
     paths: list[PathSpec],
     *,
     flags: TruncateFlags,
@@ -210,4 +210,4 @@ async def _truncate_one(
     await truncate_fn(path, parse_size(flags.size, current), flags.no_create)
 
 
-__all__ = ["TruncateFlags", "parse_flags", "parse_size", "truncate"]
+__all__ = ["TruncateFlags", "parse_flags", "parse_size", "truncate_generic"]

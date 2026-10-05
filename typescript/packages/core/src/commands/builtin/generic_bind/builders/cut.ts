@@ -13,14 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { cutGeneric } from '../../generic/cut.ts'
-import { type Builder, dirAwareStream, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStream, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const cut: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return cutGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
+}
 
 export const BUILDER: Builder = {
   name: 'cut',
   read: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return cutGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
-  },
+  fn: cut,
 }

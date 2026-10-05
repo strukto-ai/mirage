@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IndexDirectorySchema, IndexEntry } from './config.ts'
+import { ZodError } from 'zod'
+import { errorSummary } from '../../secrets/summary.ts'
+import {
+  type IndexConfig,
+  IndexDirectorySchema,
+  IndexEntry,
+  IndexType,
+  normalizeIndexConfig,
+} from './config.ts'
 
 // The one wire format: what pydantic writes for the Python IndexEntry,
 // snake_case and every field. `test_config.py` pins the same literal.
@@ -84,3 +92,39 @@ describe('IndexDirectory JSON', () => {
     expect(() => IndexDirectorySchema.parse({ entries: [], expires_at: 1 })).toThrow()
   })
 })
+
+describe('normalizeIndexConfig', () => {
+  it.each([
+    [{ ttl: 5 }, { ttl: 5 }],
+    [
+      { type: IndexType.REDIS, ttl: 5, url: 'redis://localhost:6379/0', key_prefix: 's3:' },
+      { type: IndexType.REDIS, ttl: 5, url: 'redis://localhost:6379/0', keyPrefix: 's3:' },
+    ],
+  ])('takes %j', (config, expected) => {
+    expect(normalizeIndexConfig(config as IndexConfig)).toEqual(expected)
+  })
+
+  it.each([
+    [{ ttll: 5 }, 'ttll: unrecognized_keys'],
+    [{ keyPrefix: 's3:' }, 'keyPrefix: unrecognized_keys'],
+    [{ type: IndexType.RAM, keyPrefix: 's3:' }, 'keyPrefix: unrecognized_keys'],
+    [{ type: IndexType.REDIS, urll: 'redis://x' }, 'urll: unrecognized_keys'],
+    [{ type: IndexType.REDIS, keyPrefix: 'a:', key_prefix: 'b:' }, 'keyPrefix: unrecognized_keys'],
+    [{ type: 'redsi' }, 'type: invalid_value'],
+    [{ type: null }, 'type: invalid_value'],
+    [{ ttl: 'abc' }, 'ttl: invalid_type'],
+    [{ type: IndexType.REDIS, key_prefix: 1 }, 'keyPrefix: invalid_type'],
+  ])('refuses %j', (config, summary) => {
+    expect(refusal(() => normalizeIndexConfig(config as unknown as IndexConfig))).toBe(summary)
+  })
+})
+
+function refusal(run: () => unknown): string {
+  try {
+    run()
+  } catch (err) {
+    if (err instanceof ZodError) return errorSummary(err)
+    throw err
+  }
+  throw new Error('expected a refusal')
+}

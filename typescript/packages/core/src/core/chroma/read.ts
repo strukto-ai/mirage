@@ -32,7 +32,7 @@ async function pageSlug(
   return slug
 }
 
-export async function readBytes(
+export async function read(
   accessor: ChromaAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

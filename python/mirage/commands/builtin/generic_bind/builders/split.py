@@ -26,7 +26,9 @@ from mirage.commands.builtin.generic.split import (
     parse_suffix_length,
     parse_suffix_start,
 )
-from mirage.commands.builtin.generic.split import split as generic_split
+from mirage.commands.builtin.generic.split import (
+    split_generic as generic_split,
+)
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,

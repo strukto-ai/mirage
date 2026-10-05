@@ -3,7 +3,7 @@ from aioresponses import aioresponses
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.onedrive.read import read_bytes
+from mirage.core.onedrive.read import read
 from mirage.core.onedrive.readdir import readdir
 from mirage.core.onedrive.stat import stat
 from mirage.types import FileType, PathSpec
@@ -271,9 +271,7 @@ async def test_stat_size_matches_read_for_every_file():
                 else:
                     assert info.size is not None, child
                     files.append(child)
-                    body = await read_bytes(
-                        accessor, PathSpec.from_str_path(child)
-                    )
+                    body = await read(accessor, PathSpec.from_str_path(child))
                     assert info.size == len(body), child
     assert sorted(files) == sorted(contents)
 

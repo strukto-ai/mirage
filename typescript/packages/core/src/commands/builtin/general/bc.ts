@@ -1620,7 +1620,7 @@ function errorLine(statement: BcStatement, error: BcParseError): number {
   return statement.lines[error.pos] ?? statement.lines[0] ?? statement.incompleteLine
 }
 
-async function bcCommand(
+async function bc(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -1735,5 +1735,5 @@ export const GENERAL_BC = command({
   name: 'bc',
   vfs: null,
   spec: specOf('bc'),
-  fn: bcCommand,
+  fn: bc,
 })

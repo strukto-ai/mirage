@@ -17,12 +17,12 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ram.dest import lookup_error
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent
+from mirage.utils.errors import eisdir
 from mirage.utils.path import norm
 from mirage.utils.ranges import slice_window
 
 
-async def read_bytes(
+async def read(
     accessor: RAMAccessor,
     path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
@@ -56,16 +56,3 @@ async def read_bytes(
         data = slice_window(data, offset, size)
     record("read", virtual, "ram", len(data), timer)
     return data
-
-
-async def read(
-    accessor: RAMAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-    offset: int = 0,
-    size: int | None = None,
-) -> bytes:
-    try:
-        return await read_bytes(accessor, path, index, offset, size)
-    except FileNotFoundError as exc:
-        raise enoent(path.virtual) from exc

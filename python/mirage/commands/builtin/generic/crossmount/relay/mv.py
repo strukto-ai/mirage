@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     transfer_links_of,
     transfer_primitives,
 )
-from mirage.commands.builtin.generic.mv import mv as generic_mv
+from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
 from mirage.commands.builtin.generic_bind.adapter import refuse_reveal
 from mirage.commands.spec import SPECS

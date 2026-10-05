@@ -85,7 +85,7 @@ async function* emailStream(
   yield await emailRead(accessor, p, index)
 }
 
-async function grepCommand(
+async function grep(
   accessor: EmailAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -181,6 +181,6 @@ export const EMAIL_GREP = command({
   name: 'grep',
   vfs: VFSName.EMAIL,
   spec: specOf('grep'),
-  fn: grepCommand,
+  fn: grep,
   aggregate: prefixAggregate,
 })

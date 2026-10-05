@@ -27,6 +27,7 @@ from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import version_line
 from mirage.commands.spec.types import FlagValue
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, error_path, fs_strerror
@@ -87,6 +88,20 @@ TESTED_SOME = "No errors detected in {0} for the {1} file{2} tested.\n"
 TESTING = "    testing: {0:<22}   OK\n"
 # A -d in a mode that writes nothing (Info-ZIP 6.00).
 D_IGNORED = "caution:  not extracting; -d ignored\n"
+NO_AND_O = "caution:  both -n and -o specified; ignoring -o\n"
+# Info-ZIP asks before it replaces a file, and reads the answer from its
+# input: the first character decides, and the answer stays on the line.
+REPLACE_PROMPT = "replace {0}? [y]es, [n]o, [A]ll, [N]one, [r]ename: "
+REPLACE_EOF = ' NULL\n(EOF or read error, treating as "[N]one" ...)\n'
+NEW_NAME = "new name: "
+INVALID_RESPONSE = "error:  invalid response [{0}]\n"
+# Info-ZIP's mapname keeps every extracted path under the root: it drops
+# a leading slash on stderr, a ``..`` component on stdout, and refuses a
+# name that maps to nothing.
+STRIPPED_ABSOLUTE = "warning:  stripped absolute path spec from {0}\n"
+SKIPPED_DOTDOT = 'warning:  skipped "../" path component(s) in {0}'
+MAPNAME_FAILED = "mapname:  conversion of {0} failed\n"
+MAPNAME_EXIT = 2
 WARN_EXIT = 1
 MISSING_EXIT = 2
 # Info-ZIP answers an option it does not know with its usage block and
@@ -435,6 +450,55 @@ async def _make_dirs(
     await ensure_dir(dir_path, mkdir_fn, stat, made)
 
 
+def _map_name(name: str) -> tuple[str, bool]:
+    """A member name as Info-ZIP's mapname turns it into a path.
+
+    Empty, ``.`` and ``..`` directory components are dropped, and a final
+    ``.`` or ``..`` becomes ``_`` or ``__``, so no mapped name climbs out
+    of the extraction root.
+
+    Args:
+        name (str): the name, its leading slashes already stripped.
+
+    Returns:
+        tuple[str, bool]: the path (a directory keeps its trailing slash)
+        and whether a ``..`` component was dropped.
+    """
+    directory = name.endswith("/")
+    parts = name.split("/")[:-1] if directory else name.split("/")
+    kept: list[str] = []
+    skipped = False
+    for index, part in enumerate(parts):
+        last = index == len(parts) - 1 and not directory
+        if part == "" or (not last and part == "."):
+            continue
+        if not last and part == "..":
+            skipped = True
+            continue
+        kept.append("_" if part == "." else "__" if part == ".." else part)
+    mapped = "/".join(kept)
+    return (mapped + "/" if directory and mapped else mapped), skipped
+
+
+def _response(line: bytes) -> str:
+    """An answer as Info-ZIP echoes one it refuses.
+
+    Args:
+        line (bytes): the line read, without its newline.
+    """
+    if not line:
+        return "{ENTER}"
+    shown = bytearray()
+    for byte in line:
+        if byte == 0x7F:
+            shown += b"^?"
+        elif byte < 0x20:
+            shown += b"^" + bytes([byte + 64])
+        else:
+            shown.append(byte)
+    return shown.decode(errors="replace")
+
+
 def _extracted_line(info: zipfile.ZipInfo, shown: str) -> str:
     """Info-ZIP's line for one extracted file, ``%8sing: %-22s  %s``.
 
@@ -474,6 +538,8 @@ async def unzip(
     h: bool = False,
     cwd: PathSpec | str = "/",
     relay: bool = False,
+    n: bool = False,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         # Info-ZIP answers -v without an archive with its version
@@ -533,9 +599,12 @@ async def unzip(
             cwd,
             relay,
             warning if t and not Z else "",
+            overwrite=o and not n,
+            never=n,
+            stdin=stdin,
         )
     # A mode that writes nothing says so about -d first.
-    caution = (
+    caution = (NO_AND_O if o and n else "") + (
         D_IGNORED if d is not None and (Z or t or p or args_l or v) else ""
     )
     on_stderr = "" if t and not Z else warning
@@ -577,6 +646,10 @@ async def _run(
     cwd: PathSpec | str,
     relay: bool,
     warning: str = "",
+    *,
+    overwrite: bool = False,
+    never: bool = False,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """One mode over an opened archive: list, test, pipe, zipinfo, extract.
 
@@ -608,6 +681,10 @@ async def _run(
         relay (bool): dispatch-relayed doors.
         warning (str): the archive's offset warning, which -t prints on
             stdout after the archive line.
+        overwrite (bool): ``-o``, replace a file without asking.
+        never (bool): ``-n``, never replace one.
+        stdin (ByteSource | None): where the answers to the replace
+            prompt are read.
     """
     infos = zf.infolist()
     selected, unmatched, unmatched_excludes = _select(infos, members, excludes)
@@ -734,8 +811,100 @@ async def _run(
             )
     checkdir_failed = False
     create_failed = False
+    answers: AsyncLineIterator | None = None
+    extracted: set[str] = set()
+    replace_all = overwrite
+    skip_all = never
+
+    async def answer() -> bytes | None:
+        nonlocal answers
+        if stdin is None:
+            return None
+        if answers is None:
+            answers = AsyncLineIterator(stdin)
+        return await answers.readline()
+
+    async def destination(out_path: str) -> str | None:
+        """Where a file entry goes when a file may hold its name.
+
+        Info-ZIP asks first, unless ``-o`` or an ``A`` said to replace and
+        ``-n`` or an ``N`` said never to; end of input answers ``N``.
+        ``r`` names another file under the same directory, which is asked
+        about in its turn.
+
+        Args:
+            out_path (str): the entry's path under the extraction root.
+        """
+        nonlocal replace_all, skip_all, exit_code
+        while True:
+            if replace_all:
+                return out_path
+            # Two members can map to one path, so what this run wrote
+            # counts as there even without a stat to ask.
+            exists = out_path in extracted
+            if not exists and stat is not None:
+                exists = await path_exists(
+                    stat, PathSpec.from_str_path(out_path)
+                )
+            if not exists:
+                return out_path
+            if skip_all:
+                return None
+            prompt = REPLACE_PROMPT.format(shown(out_path))
+            line = await answer()
+            if line is None:
+                errors.append(prompt + REPLACE_EOF)
+                skip_all = True
+                exit_code = max(exit_code, WARN_EXIT)
+                return None
+            errors.append(prompt)
+            first = line[:1]
+            if first in (b"y", b"Y"):
+                return out_path
+            if first == b"n":
+                return None
+            if first == b"A":
+                replace_all = True
+                return out_path
+            if first == b"N":
+                skip_all = True
+                return None
+            if first in (b"r", b"R"):
+                name: bytes | None = b""
+                while name == b"":
+                    errors.append(NEW_NAME)
+                    name = await answer()
+                if name is not None:
+                    # Info-ZIP maps the new name as it maps a member's,
+                    # except that it puts an absolute one under the
+                    # working directory instead of -d; here every name
+                    # stays under the extraction root.
+                    typed = name.decode(errors="replace")
+                    renamed, skipped = _map_name(typed.lstrip("/"))
+                    if skipped:
+                        exit_code = max(exit_code, WARN_EXIT)
+                        if not q:
+                            output_lines.append(SKIPPED_DOTDOT.format(typed))
+                    if renamed and not renamed.endswith("/"):
+                        out_path = base + "/" + renamed
+                continue
+            errors.append(INVALID_RESPONSE.format(_response(line)))
+
     for info in selected:
-        entry_name = info.filename.lstrip("/")
+        name = info.filename.lstrip("/")
+        if name != info.filename:
+            errors.append(STRIPPED_ABSOLUTE.format(info.filename))
+            exit_code = max(exit_code, WARN_EXIT)
+        entry_name, skipped = _map_name(name)
+        if skipped:
+            exit_code = max(exit_code, WARN_EXIT)
+            if not q:
+                output_lines.append(SKIPPED_DOTDOT.format(name))
+        if not entry_name:
+            if not name.endswith("/"):
+                errors.append(MAPNAME_FAILED.format(entry_name))
+                exit_code = max(exit_code, MAPNAME_EXIT)
+            continue
         out_path = base + "/" + entry_name.rstrip("/")
         # A directory entry is the only record an empty directory leaves,
         # so it has to be recreated even though nothing is written in it.
@@ -768,6 +937,22 @@ async def _run(
             if not q and not existed:
                 output_lines.append(f"   creating: {shown(out_path)}/")
             continue
+        target = await destination(out_path)
+        if target is None:
+            continue
+        renamed_dir = target.rsplit("/", 1)[0]
+        if target != out_path and renamed_dir != chain:
+            try:
+                await _make_dirs(renamed_dir, mkdir_fn, stat, made)
+            except FS_ERRORS as exc:
+                checkdir_failed = True
+                errors.append(
+                    checkdir_error(
+                        shown(error_path(exc)), fs_strerror(exc), info.filename
+                    )
+                )
+                continue
+        out_path = target
         content = zf.read(info)
         try:
             await write_bytes(PathSpec.from_str_path(out_path), data=content)
@@ -786,6 +971,7 @@ async def _run(
                 )
             )
             continue
+        extracted.add(out_path)
         if not relay:
             # Relay writes land on whichever mount owns each path and
             # invalidate through the dispatcher; keying them here would
@@ -814,6 +1000,7 @@ __all__ = ["unzip"]
 @dataclass(frozen=True, slots=True)
 class UnzipFlags:
     overwrite: bool = False
+    never_overwrite: bool = False
     list_only: bool = False
     dest: "PathSpec | str | None" = None
     quiet: bool = False
@@ -834,6 +1021,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
     dest = fl.raw("d")
     return UnzipFlags(
         overwrite=fl.as_bool("o"),
+        never_overwrite=fl.as_bool("n"),
         list_only=fl.as_bool("args_l"),
         dest=dest if isinstance(dest, (PathSpec, str)) else None,
         quiet=fl.as_bool("q"),
@@ -920,4 +1108,6 @@ async def unzip_generic(
         h=parsed.header,
         cwd=opts.cwd,
         relay=relay,
+        n=parsed.never_overwrite,
+        stdin=opts.stdin,
     )

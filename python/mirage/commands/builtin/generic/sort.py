@@ -347,7 +347,7 @@ async def _read_runs(
     return runs
 
 
-async def sort(
+async def sort_generic(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -460,4 +460,4 @@ async def sort(
     return output, IOResult()
 
 
-__all__ = ["sort"]
+__all__ = ["sort_generic"]

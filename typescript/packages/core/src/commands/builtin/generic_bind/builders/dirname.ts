@@ -13,9 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { dirnameFn } from '../../generic/dirname.ts'
-import type { Builder } from '../adapter.ts'
+import type { Builder, BuilderFn } from '../adapter.ts'
+
+const dirname: BuilderFn = (_ops, accessor, paths, texts, opts) =>
+  dirnameFn(accessor, paths, texts, opts)
 
 export const BUILDER: Builder = {
   name: 'dirname',
-  fn: (_ops, accessor, paths, texts, opts) => dirnameFn(accessor, paths, texts, opts),
+  fn: dirname,
 }

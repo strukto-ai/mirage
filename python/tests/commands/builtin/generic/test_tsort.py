@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.commands.builtin.generic.tsort import tsort
+from mirage.commands.builtin.generic.tsort import tsort_generic
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -27,7 +27,7 @@ def _read_bytes(files: dict[str, bytes]):
 @pytest.mark.asyncio
 async def test_tsort_basic():
     rb = _read_bytes({"deps": b"a b\nb c\n"})
-    out, io = await tsort([_spec("deps")], read_bytes=rb)
+    out, io = await tsort_generic([_spec("deps")], read_bytes=rb)
     assert out == b"a\nb\nc\n"
     assert io.exit_code == 0
 
@@ -35,7 +35,7 @@ async def test_tsort_basic():
 @pytest.mark.asyncio
 async def test_tsort_cycle_detection():
     rb = _read_bytes({"deps": b"a b\nb a\n"})
-    out, io = await tsort([_spec("deps")], read_bytes=rb)
+    out, io = await tsort_generic([_spec("deps")], read_bytes=rb)
     assert (out, io.exit_code) == (b"a\nb\n", 1)
     assert io.stderr == (
         b"tsort: deps: input contains a loop:\ntsort: a\ntsort: b\n"
@@ -44,5 +44,7 @@ async def test_tsort_cycle_detection():
 
 @pytest.mark.asyncio
 async def test_tsort_stdin():
-    out, io = await tsort([], read_bytes=_read_bytes({}), stdin=b"x y\ny z\n")
+    out, io = await tsort_generic(
+        [], read_bytes=_read_bytes({}), stdin=b"x y\ny z\n"
+    )
     assert out == b"x\ny\nz\n"

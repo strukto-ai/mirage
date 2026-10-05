@@ -14,7 +14,7 @@
 
 import asyncio
 
-from mirage.core.ram.read import read_bytes
+from mirage.core.ram.read import read
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.driver_ops import ops
@@ -30,7 +30,7 @@ def _make_backend():
 def test_cat_updates_stats():
     b = _make_backend()
     data = asyncio.run(
-        read_bytes(b.accessor, PathSpec.from_str_path("/data/file.txt"))
+        read(b.accessor, PathSpec.from_str_path("/data/file.txt"))
     )
     assert data == b"hello world"
 
@@ -46,7 +46,7 @@ def test_tee_updates_stats():
 def test_callback_receives_events():
     b = _make_backend()
     data = asyncio.run(
-        read_bytes(b.accessor, PathSpec.from_str_path("/data/file.txt"))
+        read(b.accessor, PathSpec.from_str_path("/data/file.txt"))
     )
     assert data == b"hello world"
 
@@ -61,10 +61,6 @@ def test_write_callback_receives_events():
 
 def test_stats_accumulate():
     b = _make_backend()
-    asyncio.run(
-        read_bytes(b.accessor, PathSpec.from_str_path("/data/file.txt"))
-    )
-    asyncio.run(
-        read_bytes(b.accessor, PathSpec.from_str_path("/data/file.txt"))
-    )
+    asyncio.run(read(b.accessor, PathSpec.from_str_path("/data/file.txt")))
+    asyncio.run(read(b.accessor, PathSpec.from_str_path("/data/file.txt")))
     assert b._store.files["/data/file.txt"] == b"hello world"

@@ -31,10 +31,10 @@ import { rmdir as ramRmdir } from '../../../core/ram/rmdir.ts'
 import { SCOPE_ERROR } from '../../../core/ram/constants.ts'
 import { setAttrs as ramSetAttrs } from '../../../core/ram/set_attrs.ts'
 import { stat as devAwareStat } from '../../../core/dev/stat.ts'
-import { stream as devAwareStream } from '../../../core/dev/stream.ts'
+import { readStream as devAwareStream } from '../../../core/dev/stream.ts'
 import { truncate as ramTruncate } from '../../../core/ram/truncate.ts'
 import { unlink as ramUnlink } from '../../../core/ram/unlink.ts'
-import { writeBytes as ramWrite } from '../../../core/ram/write.ts'
+import { write as ramWrite } from '../../../core/ram/write.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
 export const IO: CommandIO<RAMAccessor> = new VFSAdapter<RAMAccessor>({

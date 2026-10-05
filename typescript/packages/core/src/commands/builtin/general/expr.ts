@@ -472,7 +472,7 @@ export function exprEval(args: string[], utf8 = false): [string, number] {
   return [value, isNull(value) ? 1 : 0]
 }
 
-function exprCommand(
+function expr(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -504,5 +504,5 @@ export const GENERAL_EXPR = command({
   name: 'expr',
   vfs: null,
   spec: specOf('expr'),
-  fn: exprCommand,
+  fn: expr,
 })
