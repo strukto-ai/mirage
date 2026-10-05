@@ -26,7 +26,7 @@ import { edScript, normalDiff, unifiedDiff } from '../diff_format.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
 import { UsageError } from '../../errors.ts'
-import { CommandName, type Option } from '../../spec/types.ts'
+import { CommandName, type FlagValue, type Option } from '../../spec/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { shellQuote } from '../../../utils/quote.ts'
@@ -38,19 +38,58 @@ type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
 
 interface DiffFlags {
-  i: boolean
-  w: boolean
-  b: boolean
-  e: boolean
-  q: boolean
-  u: boolean
-  context: number
+  readonly ignoreCase: boolean
+  readonly ignoreAllSpace: boolean
+  readonly ignoreSpaceChange: boolean
+  readonly ed: boolean
+  readonly unified: boolean
+  readonly context: number
+  readonly brief: boolean
+  readonly recursive: boolean
   /** -N reads a file missing on either side as empty. */
-  newFile: boolean
+  readonly newFile: boolean
   /** --unidirectional-new-file (or -N) reads one missing from the first so. */
-  newFirst: boolean
+  readonly newFirst: boolean
   /** -s reports a pair that does not differ. */
-  identical: boolean
+  readonly identical: boolean
+  readonly exclude: readonly string[]
+  readonly excludeFrom: readonly PathSpec[]
+}
+
+function parseFlags(bag: Record<string, FlagValue>): DiffFlags {
+  const fl = new FlagView(bag, specOf('diff'))
+  let context = -1
+  let unified = fl.asBool('u')
+  for (const [, value] of fl.occurrences('U', 'unified')) {
+    unified = true
+    if (value === true) context = Math.max(context, 3)
+    else if (
+      typeof value === 'string' &&
+      (value === '' || /^[ \t\n\r\v\f]*[+-]?[0-9]+$/.test(value)) &&
+      Number(value) >= 0
+    )
+      context = Math.max(context, Math.min(Number(value), Number.MAX_SAFE_INTEGER))
+    else
+      throw new UsageError(
+        `diff: invalid context length '${String(value)}'\ndiff: Try 'diff --help' for more information.`,
+      )
+  }
+  const newFile = fl.asBool('new_file')
+  return {
+    ignoreCase: fl.asBool('i'),
+    ignoreAllSpace: fl.asBool('w'),
+    ignoreSpaceChange: fl.asBool('b'),
+    ed: fl.asBool('e'),
+    unified,
+    context: context === -1 ? 3 : context,
+    brief: fl.asBool('brief'),
+    recursive: fl.asBool('recursive'),
+    newFile,
+    newFirst: newFile || fl.asBool('unidirectional_new_file'),
+    identical: fl.asBool('report_identical_files'),
+    exclude: fl.asList('exclude'),
+    excludeFrom: fl.asPaths('exclude_from'),
+  }
 }
 
 interface Walk {
@@ -156,15 +195,15 @@ async function diffPair(
   const flags = walk.flags
   let textA = await side(walk, path1, absent[0])
   let textB = await side(walk, path2, absent[1])
-  if (flags.i) {
+  if (flags.ignoreCase) {
     textA = textA.toLowerCase()
     textB = textB.toLowerCase()
   }
-  if (flags.w) {
+  if (flags.ignoreAllSpace) {
     textA = textA.replace(/\s+/g, '')
     textB = textB.replace(/\s+/g, '')
   }
-  if (flags.b) {
+  if (flags.ignoreSpaceChange) {
     textA = textA.replace(/[ \t]+/g, ' ')
     textB = textB.replace(/[ \t]+/g, ' ')
   }
@@ -173,12 +212,12 @@ async function diffPair(
       ? ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} are identical\n`)
       : new Uint8Array(0)
   }
-  if (flags.q) return ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} differ\n`)
+  if (flags.brief) return ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} differ\n`)
   const aLines = splitLinesKeepEnds(textA)
   const bLines = splitLinesKeepEnds(textB)
   let result: string[]
-  if (flags.e) result = edScript(aLines, bLines)
-  else if (flags.u)
+  if (flags.ed) result = edScript(aLines, bLines)
+  else if (flags.unified)
     result = unifiedDiff(aLines, bLines, path1.rawPath, path2.rawPath, flags.context)
   else result = normalDiff(aLines, bLines)
   return ENC.encode(result.join(''))
@@ -241,7 +280,7 @@ async function diffDirs(
         continue
       }
       differ = true
-      if (flags.q) parts.push(body)
+      if (flags.brief) parts.push(body)
       else
         parts.push(
           concat([ENC.encode(`diff${walk.switches} ${childA.rawPath} ${childB.rawPath}\n`), body]),
@@ -277,11 +316,11 @@ async function missing(stat: Stat, path: PathSpec, allowed: boolean): Promise<bo
 }
 
 async function excludedPatterns(
-  fl: FlagView,
+  flags: DiffFlags,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<string[]> {
-  const patterns = [...fl.asList('exclude')]
-  for (const path of fl.asPaths('exclude_from')) {
+  const patterns = [...flags.exclude]
+  for (const path of flags.excludeFrom) {
     const text = DEC.decode(await materialize(stream(path)))
     patterns.push(...text.split('\n').filter((line) => line !== ''))
   }
@@ -295,39 +334,10 @@ export async function diffGeneric(
   readdir: Readdir,
   backendStat: Stat,
 ): Promise<[ByteSource | null, IOResult]> {
-  const fl = new FlagView(opts.flags, specOf('diff'))
-  let context = -1
-  let unified = fl.asBool('u')
-  for (const [, value] of fl.occurrences('U', 'unified')) {
-    unified = true
-    if (value === true) context = Math.max(context, 3)
-    else if (
-      typeof value === 'string' &&
-      (value === '' || /^[ \t\n\r\v\f]*[+-]?[0-9]+$/.test(value)) &&
-      Number(value) >= 0
-    )
-      context = Math.max(context, Math.min(Number(value), Number.MAX_SAFE_INTEGER))
-    else
-      throw new UsageError(
-        `diff: invalid context length '${String(value)}'\ndiff: Try 'diff --help' for more information.`,
-      )
-  }
+  const flags = parseFlags(opts.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.DIFF, paths[2]?.rawPath ?? '')
   if (paths.length < 2)
     throw missingOperandError(CommandName.DIFF, paths[0]?.rawPath ?? null, opts.argv ?? [])
-  const newFile = fl.asBool('new_file')
-  const flags: DiffFlags = {
-    i: fl.asBool('i'),
-    w: fl.asBool('w'),
-    b: fl.asBool('b'),
-    e: fl.asBool('e'),
-    q: fl.asBool('brief'),
-    u: unified,
-    context: context === -1 ? 3 : context,
-    newFile,
-    newFirst: newFile || fl.asBool('unidirectional_new_file'),
-    identical: fl.asBool('report_identical_files'),
-  }
   const p0 = paths[0]
   const p1 = paths[1]
   if (p0 === undefined || p1 === undefined) return [null, new IOResult()]
@@ -337,7 +347,7 @@ export async function diffGeneric(
   const stat = stdinStat(backendStat)
   const dash0 = p0.rawPath === '-'
   const dash1 = p1.rawPath === '-'
-  const errorPaths = [...paths, ...fl.asPaths('exclude_from')]
+  const errorPaths = [...paths, ...flags.excludeFrom]
   let output: Uint8Array | undefined
   let differ = false
   try {
@@ -346,7 +356,7 @@ export async function diffGeneric(
       readdir,
       stat,
       flags,
-      excluded: await excludedPatterns(fl, stream),
+      excluded: await excludedPatterns(flags, stream),
       switches: switchWords(opts.argv ?? [])
         .map((word) => ` ${shellQuote(word)}`)
         .join(''),
@@ -380,7 +390,7 @@ export async function diffGeneric(
       }
       return [null, new IOResult({ exitCode: 2, stderr: concat(lines) })]
     }
-    if (fl.asBool('recursive') && !absent[0] && !absent[1]) {
+    if (flags.recursive && !absent[0] && !absent[1]) {
       const bothDirs =
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
       if (bothDirs) [output, differ] = await diffDirs(walk, p0, p1)

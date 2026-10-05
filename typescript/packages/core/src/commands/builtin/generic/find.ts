@@ -15,6 +15,7 @@
 import { activeCacheManager } from '../../../cache/context.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
 import { fsStrerror, isEnoent, isEnotdir, isMissError, walkRefusal } from '../../../utils/errors.ts'
 import { dotRefusal, linkFollow, statOrEnoent } from '../utils/paths.ts'
@@ -259,6 +260,35 @@ async function missingStartDetail(
   return 'No such file or directory'
 }
 
+interface FindFlags {
+  readonly name: string | null
+  readonly type: string | null
+  readonly size: string | null
+  readonly mtime: string | null
+  readonly maxdepth: string | null
+  readonly iname: string | null
+  readonly path: string | null
+  readonly mindepth: string | null
+  readonly empty: boolean
+  readonly follow: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): FindFlags {
+  const fl = new FlagView(bag, specOf('find'))
+  return {
+    name: fl.asStr('name') ?? null,
+    type: fl.asStr('type') ?? null,
+    size: fl.asStr('size') ?? null,
+    mtime: fl.asStr('mtime') ?? null,
+    maxdepth: fl.asStr('maxdepth') ?? null,
+    iname: fl.asStr('iname') ?? null,
+    path: fl.asStr('path') ?? null,
+    mindepth: fl.asStr('mindepth') ?? null,
+    empty: fl.asBool('empty'),
+    follow: fl.asBool('L'),
+  }
+}
+
 export function findGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -272,15 +302,15 @@ export function findGeneric(
   // needed only to distinguish ENOTDIR from ENOENT at a missing start point.
   missingStat?: (spec: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('find'))
-  const nameFlag = fl.asStr('name') ?? null
-  const inameFlag = fl.asStr('iname') ?? null
-  const typeFlag = fl.asStr('type') ?? null
-  const pathFlag = fl.asStr('path') ?? null
-  const maxDepthFlag = fl.asStr('maxdepth') ?? null
-  const minDepthFlag = fl.asStr('mindepth') ?? null
-  const sizeFlag = fl.asStr('size') ?? null
-  const mtimeFlag = fl.asStr('mtime') ?? null
+  const parsed = parseFlags(opts.flags)
+  const nameFlag = parsed.name
+  const inameFlag = parsed.iname
+  const typeFlag = parsed.type
+  const pathFlag = parsed.path
+  const maxDepthFlag = parsed.maxdepth
+  const minDepthFlag = parsed.mindepth
+  const sizeFlag = parsed.size
+  const mtimeFlag = parsed.mtime
   const targets =
     paths.length > 0
       ? paths
@@ -313,7 +343,7 @@ export function findGeneric(
   }
   const nameExclude = extractNotName(texts)
   const orNames = extractOrNames(nameFlag, texts)
-  const emptyFlag = fl.asBool('empty')
+  const emptyFlag = parsed.empty
   const expr = texts.length > 0 ? parseFindExpression(texts) : null
   // With a stat wired, the mtime window is applied by the overlay-
   // aware post-filter below, not pushed into the core: backend cores
@@ -537,7 +567,7 @@ export function findGeneric(
           expr !== null ? expr.maxSize : maxSize,
           effMtimeMin,
           effMtimeMax,
-          fl.asBool('L'),
+          parsed.follow,
         ),
       )
       withLinks.sort(compareCodePoints)

@@ -475,6 +475,40 @@ function checkdirDest(dir: string, strerror: string): string {
   return `checkdir:  cannot create extraction directory: ${dir}\n           ${strerror}\n`
 }
 
+interface UnzipFlags {
+  readonly listOnly: boolean
+  readonly quiet: boolean
+  readonly toStdout: boolean
+  readonly testOnly: boolean
+  readonly verbose: boolean
+  readonly excludes: readonly string[]
+  readonly zipinfo: boolean
+  readonly namesOnly: boolean
+  readonly namesHeaders: boolean
+  readonly short: boolean
+  readonly medium: boolean
+  readonly header: boolean
+}
+
+// The view stays with the caller: -x, -d and the operands are read back in
+// the order typed, and -d as typed, a path and a string.
+function parseFlags(fl: FlagView): UnzipFlags {
+  return {
+    listOnly: fl.asBool('args_l'),
+    quiet: fl.asBool('q'),
+    toStdout: fl.asBool('p'),
+    testOnly: fl.asBool('t'),
+    verbose: fl.asBool('v'),
+    excludes: fl.asList('x'),
+    zipinfo: fl.asBool('Z'),
+    namesOnly: fl.asBool('args_1'),
+    namesHeaders: fl.asBool('2'),
+    short: fl.asBool('s'),
+    medium: fl.asBool('m'),
+    header: fl.asBool('h'),
+  }
+}
+
 export async function unzipGeneric(
   paths: PathSpec[],
   members: readonly string[],
@@ -486,24 +520,27 @@ export async function unzipGeneric(
   relay = false,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('unzip'))
-  const verbose = fl.asBool('v')
+  const parsed = parseFlags(fl)
+  const verbose = parsed.verbose
   if (paths.length === 0) {
     // Info-ZIP answers -v without an archive with its version banner, and
     // mirage's version line is that banner here.
     if (verbose) return [ENC.encode(versionLine('unzip')), new IOResult()]
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('unzip: missing operand\n') })]
   }
-  const listMode = fl.asBool('args_l')
-  const testMode = fl.asBool('t')
-  const pipeMode = fl.asBool('p')
-  const quiet = fl.asBool('q')
-  const zipinfoMode = fl.asBool('Z')
-  const namesOnly = fl.asBool('args_1')
-  const namesHeaders = fl.asBool('2')
-  const short = fl.asBool('s')
-  const medium = fl.asBool('m')
-  const header = fl.asBool('h')
-  const [chosen, excludes] = patterns(fl, members, fl.asList('x'))
+  const {
+    listOnly: listMode,
+    testOnly: testMode,
+    toStdout: pipeMode,
+    quiet,
+    zipinfo: zipinfoMode,
+    namesOnly,
+    namesHeaders,
+    short,
+    medium,
+    header,
+  } = parsed
+  const [chosen, excludes] = patterns(fl, members, parsed.excludes)
   if (!zipinfoMode) {
     const zipinfoOnly: [string, boolean][] = [
       ['-1', namesOnly],

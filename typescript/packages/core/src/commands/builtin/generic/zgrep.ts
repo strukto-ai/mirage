@@ -49,22 +49,61 @@ function anyLineSelected(data: Uint8Array, pattern: RegExp, invert: boolean): bo
   return false
 }
 
-interface ZgrepOpts {
-  invert: boolean
-  count: boolean
-  lineNumbers: boolean
-  onlyMatching: boolean
-  maxCount: number | null
+// Parsed zgrep flags; the complete set zgrep honors.
+interface ZgrepFlags {
+  readonly ignoreCase: boolean
+  readonly invert: boolean
+  readonly count: boolean
+  readonly filesOnly: boolean
+  readonly filesWithoutMatch: boolean
+  readonly lineNumbers: boolean
   // -b: the byte offset of each line's start or, under -o, of the match
   // itself, in the field order GNU grep prints (name, line, byte). A line
   // is matched as its byte view, so its length is already its byte count.
-  byteOffsets: boolean
+  readonly byteOffsets: boolean
+  readonly fixed: boolean
+  readonly syntax: RegexSyntax
+  readonly forceFilename: boolean
+  readonly suppressFilename: boolean
+  readonly onlyMatching: boolean
+  readonly quiet: boolean
+  readonly wholeWord: boolean
+  readonly maxCount: number | null
+}
+
+// The zero-pattern sentinel is a regex, so it suppresses -F.
+function parseFlags(fl: FlagView, neverMatch: boolean): ZgrepFlags {
+  // -l and -L set one mode in grep, so the later one on the line wins.
+  let listing: string | null = null
+  for (const name of fl.typedOrder('args_l', 'files_without_match')) {
+    if (fl.asBool(name)) listing = name
+  }
+  return {
+    ignoreCase: fl.asBool('i'),
+    invert: fl.asBool('v'),
+    count: fl.asBool('c'),
+    filesOnly: listing === 'args_l',
+    filesWithoutMatch: listing === 'files_without_match',
+    lineNumbers: fl.asBool('n'),
+    byteOffsets: fl.asBool('byte_offset'),
+    fixed: fl.asBool('F') && !neverMatch,
+    // zgrep is grep over decompressed bytes, so it reads a basic expression
+    // unless -E or -P says otherwise, and refuses two matchers as grep does;
+    // -G asks for the default explicitly.
+    syntax: matcherSyntax(fl, 'grep', 'P'),
+    forceFilename: fl.asBool('H'),
+    suppressFilename: fl.asBool('h'),
+    onlyMatching: fl.asBool('o'),
+    quiet: fl.asBool('q'),
+    wholeWord: fl.asBool('w'),
+    maxCount: fl.asInt('m') ?? null,
+  }
 }
 
 function zgrepSearch(
   data: Uint8Array,
   pattern: RegExp,
-  opts: ZgrepOpts,
+  opts: ZgrepFlags,
   filename: string | null,
 ): [string[], boolean] {
   const reGlobal = opts.onlyMatching
@@ -143,45 +182,38 @@ export async function zgrepGeneric(
     ]
   }
   const rawPattern = resolution.pattern
-  // zgrep is grep over decompressed bytes, so it reads a basic expression
-  // unless -E or -P says otherwise, and refuses two matchers as grep does;
-  // -G asks for the default explicitly.
-  let syntax: RegexSyntax
+  let parsed: ZgrepFlags
   try {
-    syntax = matcherSyntax(fl, 'grep', 'P')
+    parsed = parseFlags(fl, neverMatch)
   } catch (err) {
     if (!(err instanceof UsageError)) throw err
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(err.message + '\n') })]
   }
-  const fixedString = fl.asBool('F') && !neverMatch
-  const wholeWord = fl.asBool('w')
-  const ignoreCase = fl.asBool('i')
-  const invert = fl.asBool('v')
-  const countOnly = fl.asBool('c')
-  const lineNumbers = fl.asBool('n')
-  const onlyMatching = fl.asBool('o')
-  const quiet = fl.asBool('q')
-  const byteOffsets = fl.asBool('byte_offset')
-  // -l and -L set one mode in grep, so the later one on the line wins.
-  let listing: string | null = null
-  for (const name of fl.typedOrder('args_l', 'files_without_match')) {
-    if (fl.asBool(name)) listing = name
-  }
-  const filesOnly = listing === 'args_l'
-  const filesWithoutMatch = listing === 'files_without_match'
-  const forceH = fl.asBool('H')
-  const hideH = fl.asBool('h')
-  const maxCount = fl.asInt('m') ?? null
+  const {
+    syntax,
+    fixed: fixedString,
+    invert,
+    filesOnly,
+    filesWithoutMatch,
+    quiet,
+    maxCount,
+  } = parsed
   // GNU grep 3.11 skips regex validation and selection under -m0.
   const pattern =
     maxCount === 0
       ? null
       : neverMatch
         ? new RegExp(NEVER_MATCH)
-        : compilePattern(byteView(rawPattern), ignoreCase, fixedString, wholeWord, syntax)
+        : compilePattern(
+            byteView(rawPattern),
+            parsed.ignoreCase,
+            fixedString,
+            parsed.wholeWord,
+            syntax,
+          )
 
   const multi = paths.length > 1
-  const showFilename = forceH || (multi && !hideH)
+  const showFilename = parsed.forceFilename || (multi && !parsed.suppressFilename)
   let anyMatch = false
   const allResults: string[] = []
 
@@ -219,12 +251,7 @@ export async function zgrepGeneric(
       if (matched === filesOnly) allResults.push(p.rawPath)
       anyMatch ||= matched
     } else {
-      const [result, hadMatch] = zgrepSearch(
-        data,
-        pattern,
-        { invert, count: countOnly, lineNumbers, onlyMatching, maxCount, byteOffsets },
-        fname,
-      )
+      const [result, hadMatch] = zgrepSearch(data, pattern, parsed, fname)
       if (hadMatch) anyMatch = true
       for (const r of result) allResults.push(r)
     }

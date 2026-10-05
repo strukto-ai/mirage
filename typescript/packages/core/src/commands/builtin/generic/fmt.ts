@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -121,22 +122,36 @@ function fmtText(
   return formatted.join('\n\n') + '\n'
 }
 
+interface FmtFlags {
+  readonly width: number
+  readonly goal: number | null
+  readonly prefix: string | null
+  readonly splitOnly: boolean
+  readonly tagged: boolean
+  readonly crown: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): FmtFlags {
+  const fl = new FlagView(bag, specOf('fmt'))
+  const widthValue = fl.asStr('width')
+  const goalValue = fl.asStr('goal')
+  return {
+    width: typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 75,
+    goal: typeof goalValue === 'string' ? Number.parseInt(goalValue, 10) : null,
+    prefix: fl.asStr('prefix') ?? null,
+    splitOnly: fl.asBool('split_only'),
+    tagged: fl.asBool('tagged_paragraph'),
+    crown: fl.asBool('crown_margin'),
+  }
+}
+
 export async function fmtGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
-  const fl = new FlagView(opts.flags, specOf('fmt'))
-  const widthValue = fl.asStr('width')
-  const goalValue = fl.asStr('goal')
-  const prefixValue = fl.asStr('prefix')
-  const width = typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 75
-  const goal = typeof goalValue === 'string' ? Number.parseInt(goalValue, 10) : null
-  const prefix = typeof prefixValue === 'string' ? prefixValue : null
-  const splitOnly = fl.asBool('split_only')
-  const tagged = fl.asBool('tagged_paragraph')
-  const crown = fl.asBool('crown_margin')
+  const { width, goal, prefix, splitOnly, tagged, crown } = parseFlags(opts.flags)
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still format (GNU fmt).

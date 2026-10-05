@@ -15,6 +15,7 @@
 import { isStdin, readStdinAsync, stdinStream } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { eisdir, fsErrorLine, fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { dispatchStat, typedSpec } from '../utils/paths.ts'
@@ -201,6 +202,28 @@ function scriptOrigins(
   return out.length === count ? out : null
 }
 
+interface SedFlags {
+  readonly inPlace: boolean
+  readonly suppress: boolean
+  readonly extended: boolean
+  readonly separate: boolean
+  readonly lineLength: number
+  // -e and -f in the order typed, each with its text.
+  readonly scripts: readonly (readonly [string, string])[]
+}
+
+function parseFlags(bag: Record<string, FlagValue>): SedFlags {
+  const fl = new FlagView(bag, specOf('sed'))
+  return {
+    inPlace: fl.asBool('i'),
+    suppress: fl.asBool('n'),
+    extended: fl.asBool('E') || fl.asBool('r'),
+    separate: fl.asBool('separate'),
+    lineLength: lineLength(fl.asStr('line_length')),
+    scripts: fl.occurrences('e', 'f').map(([name, value]) => [name, String(value)] as const),
+  }
+}
+
 export async function sedGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -208,8 +231,8 @@ export async function sedGeneric(
   stream: Stream,
   write: Write,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('sed'))
-  const inPlace = fl.asBool('i')
+  const parsed = parseFlags(opts.flags)
+  const inPlace = parsed.inPlace
   if (!inPlace) stream = stdinStream(stream, opts.stdin)
   const pieces: SedScriptPiece[] = []
   const firstPath = paths[0]
@@ -217,10 +240,8 @@ export async function sedGeneric(
     (firstPath === undefined ? undefined : mountPrefixOf(firstPath.virtual, firstPath.vfsPath)) ??
     opts.mountPrefix ??
     ''
-  const occurrences = fl.occurrences('e', 'f')
-  const origins = scriptOrigins(opts.argv, occurrences.length)
-  for (const [index, [name, value]] of occurrences.entries()) {
-    const text = String(value)
+  const origins = scriptOrigins(opts.argv, parsed.scripts.length)
+  for (const [index, [name, text]] of parsed.scripts.entries()) {
     const shown = origins?.[index] ?? null
     if (name === 'e') {
       pieces.push(shown === null ? { kind: 'expr', text } : { kind: 'file', text, name: shown })
@@ -243,7 +264,7 @@ export async function sedGeneric(
   let program: SedProgram
   try {
     // -E / -r select Extended Regular Expressions; without them sed is BRE.
-    program = compileScript(pieces, fl.asBool('E') || fl.asBool('r'))
+    program = compileScript(pieces, parsed.extended)
   } catch (err) {
     if (!(err instanceof SedError)) throw err
     const refused = await openWriteFiles(err.wfiles, doors)
@@ -252,9 +273,9 @@ export async function sedGeneric(
   const refused = await openWriteFiles(program.wfiles, doors)
   if (refused !== null) return failed(refused, 4)
   const machine = new SedMachine(program, {
-    suppress: fl.asBool('n'),
-    separate: inPlace || fl.asBool('separate'),
-    lineLength: lineLength(fl.asStr('line_length')),
+    suppress: parsed.suppress,
+    separate: inPlace || parsed.separate,
+    lineLength: parsed.lineLength,
     files: await readScriptFiles(program.rfiles, doors),
     readerFiles: await readScriptFiles(program.readerFiles, doors),
   })
@@ -280,7 +301,7 @@ export async function sedGeneric(
   // (`sed -n '$p' ok.txt dir ok2.txt` prints ok2.txt's last line, exit 0).
   // Only `$`, `n` and `N` look ahead, and under -s never into the next
   // file, so otherwise nothing past the directory is read.
-  const lookAhead = looksAhead(program) && !fl.asBool('separate')
+  const lookAhead = looksAhead(program) && !parsed.separate
   for (const p of paths) {
     const last = inputs.at(-1)
     if (last !== undefined && 'fatal' in last && last.fatal && !lookAhead) break

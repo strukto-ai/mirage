@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -67,17 +68,29 @@ function foldBytes(data: Uint8Array, width: number): Uint8Array {
   return new Uint8Array(output)
 }
 
+interface FoldFlags {
+  readonly width: number
+  readonly breakSpaces: boolean
+  readonly countBytes: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): FoldFlags {
+  const fl = new FlagView(bag, specOf('fold'))
+  const widthValue = fl.asStr('width')
+  return {
+    width: typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 80,
+    breakSpaces: fl.asBool('spaces'),
+    countBytes: fl.asBool('bytes'),
+  }
+}
+
 export async function foldGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
-  const fl = new FlagView(opts.flags, specOf('fold'))
-  const widthValue = fl.asStr('width')
-  const width = typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 80
-  const breakSpaces = fl.asBool('spaces')
-  const countBytes = fl.asBool('bytes')
+  const { width, breakSpaces, countBytes } = parseFlags(opts.flags)
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still fold (GNU fold).

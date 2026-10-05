@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -242,16 +243,33 @@ function repeatedWarning(formed: ReadonlyMap<string, string[]>, junk: boolean): 
  * followed unless `-y` says to store the link. Both are parameters of the
  * shared scan, so the traversal is the same one `tar -c` uses.
  */
+interface ZipFlags {
+  readonly recursive: boolean
+  readonly junkPaths: boolean
+  readonly quiet: boolean
+  readonly storeLinks: boolean
+  readonly exclude: readonly string[]
+}
+
+function parseFlags(bag: Record<string, FlagValue>): ZipFlags {
+  const fl = new FlagView(bag, specOf('zip'))
+  return {
+    recursive: fl.asBool('r'),
+    junkPaths: fl.asBool('j'),
+    quiet: fl.asBool('q'),
+    storeLinks: fl.asBool('y'),
+    exclude: fl.asList('x'),
+  }
+}
+
 async function planZip(
   paths: readonly PathSpec[],
   archive: PathSpec,
   deps: ZipDeps,
   opts: CommandOpts,
+  parsed: ZipFlags,
 ): Promise<ZipPlan> {
-  const fl = new FlagView(opts.flags, specOf('zip'))
-  const recurse = fl.asBool('r')
-  const junk = fl.asBool('j')
-  const exclude = fl.asList('x')
+  const { recursive: recurse, junkPaths: junk, exclude } = parsed
   const members: ZipMember[] = []
   const warnings: string[] = []
   const formed = new Map<string, string[]>()
@@ -273,7 +291,7 @@ async function planZip(
       walk: deps.walk,
       links: opts.ns?.links ?? null,
       mounts: opts.ns?.mounts ?? null,
-      dereference: !fl.asBool('y'),
+      dereference: !parsed.storeLinks,
       recurse,
     })
     for (const problem of scan.problems) {
@@ -325,7 +343,7 @@ export async function zipGeneric(
   opts: CommandOpts,
   deps: ZipDeps,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('zip'))
+  const parsed = parseFlags(opts.flags)
   if (paths.length === 0) {
     return [
       null,
@@ -337,8 +355,8 @@ export async function zipGeneric(
   }
   const archivePath = paths[0]
   if (archivePath === undefined) return [null, new IOResult()]
-  const quiet = fl.asBool('q')
-  const plan = await planZip(paths.slice(1), archivePath, deps, opts)
+  const quiet = parsed.quiet
+  const plan = await planZip(paths.slice(1), archivePath, deps, opts, parsed)
   if (plan.repeated !== '') {
     const message = warningText([...plan.warnings, plan.repeated], quiet) + REPEATED_ERROR
     return [null, new IOResult({ exitCode: REPEATED_EXIT, stderr: ENC.encode(message) })]

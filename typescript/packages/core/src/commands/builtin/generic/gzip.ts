@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import type { StatFn } from './archive/walk.ts'
 import { mountedPath } from '../../../utils/key_prefix.ts'
@@ -36,6 +37,27 @@ import {
 } from './decompress.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 
+interface GzipFlags {
+  readonly decompress: boolean
+  readonly keep: boolean
+  readonly force: boolean
+  readonly toStdout: boolean
+  readonly quiet: boolean
+  readonly suffix: string
+}
+
+function parseFlags(bag: Record<string, FlagValue>): GzipFlags {
+  const fl = new FlagView(bag, specOf('gzip'))
+  return {
+    decompress: fl.asBool('d'),
+    keep: fl.asBool('k'),
+    force: fl.asBool('f'),
+    toStdout: fl.asBool('c'),
+    quiet: fl.asBool('q'),
+    suffix: fl.asStr('S') ?? GZIP_SUFFIX,
+  }
+}
+
 export async function gzipGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -44,13 +66,7 @@ export async function gzipGeneric(
   unlink: (p: PathSpec) => Promise<void>,
   stat?: StatFn,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('gzip'))
-  const decompress = fl.asBool('d')
-  const keep = fl.asBool('k')
-  const force = fl.asBool('f')
-  const stdoutMode = fl.asBool('c')
-  const quiet = fl.asBool('q')
-  const suffix = fl.asStr('S') ?? GZIP_SUFFIX
+  const { decompress, keep, force, toStdout: stdoutMode, quiet, suffix } = parseFlags(opts.flags)
 
   const door = linkDoor(opts)
 

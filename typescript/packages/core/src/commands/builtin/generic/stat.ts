@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { operandStat } from '../utils/operands.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
@@ -493,15 +494,30 @@ async function dispatchedStatfs(
   return result
 }
 
+interface StatFlags {
+  readonly format: string | null
+  readonly fileSystem: boolean
+  readonly deref: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): StatFlags {
+  const fl = new FlagView(bag, specOf('stat'))
+  return {
+    format: fl.asStr('format') ?? null,
+    fileSystem: fl.asBool('file_system'),
+    deref: fl.asBool('dereference'),
+  }
+}
+
 export async function statGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('stat'))
+  const parsed = parseFlags(opts.flags)
   if (paths.length === 0) throw missingOperandError('stat', null)
-  const fmt = fl.asStr('format') ?? null
-  if (fl.asBool('file_system')) {
+  const fmt = parsed.format
+  if (parsed.fileSystem) {
     const dispatch = opts.dispatch
     const probe = (p: PathSpec): Promise<FileStat> =>
       operandStat(p, stat, opts.statPath, opts.ns?.mounts, opts.ns?.links)
@@ -511,7 +527,7 @@ export async function statGeneric(
   }
   const lines: string[] = []
   let err = ''
-  const links = fl.asBool('dereference') ? null : (opts.ns?.links ?? null)
+  const links = parsed.deref ? null : (opts.ns?.links ?? null)
   const identity = identityOf(opts)
   for (const p of paths) {
     // GNU stat lstats: a symlink operand reports the link itself, not
