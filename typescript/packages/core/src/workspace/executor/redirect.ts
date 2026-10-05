@@ -51,7 +51,8 @@ import {
   TO_STDIN as EXEC_TO_STDIN,
   TO_STDOUT as EXEC_TO_STDOUT,
 } from './builtins/exec/constants.ts'
-import { drained, type ExecuteNodeFn, pump } from './jobs.ts'
+import { drained, pump } from './jobs.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'

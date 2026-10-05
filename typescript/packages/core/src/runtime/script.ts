@@ -2,7 +2,7 @@ import { runWithTimeout } from '../commands/builtin/utils/limit.ts'
 import { Runtime } from './base.ts'
 import { LanguageRuntime } from './language.ts'
 import { isEvaluator, type Evaluator } from './mixin.ts'
-import type { ScriptSource } from './routing/types.ts'
+import type { ScriptSource } from './types.ts'
 import { buildRuntime } from './table.ts'
 import type { EvalValue } from './types.ts'
 

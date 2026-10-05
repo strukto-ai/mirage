@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import git from 'isomorphic-git'
 import { headEntries, stagedEntries, workEntries } from './changes.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
-import { treeEntries, type TreeEntry } from './tree.ts'
+import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
 import { compare, limited, renderChanges } from './diff_output.ts'
 import { HEAD } from './constants.ts'
 
@@ -32,7 +31,7 @@ import {
 } from './errors.ts'
 import { parseDiffFlags, renamesEnabled } from './diff_output.ts'
 import { pathspecPatterns } from './pathspec.ts'
-import { configBool, repoArgs, type Repo } from './repo.ts'
+import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { mergeBases, rangeCommits, resolveCommit } from './revparse.ts'
 import { fatal, optionOperand, splitMarked, startPoint, STDERR, verbUsage } from './util.ts'
@@ -41,12 +40,6 @@ import { encodeText } from '../../../../shell/bytes.ts'
 const ENC = new TextEncoder()
 
 type Tree = Map<string, TreeEntry>
-
-/** The entries of the tree one revision names. */
-async function treeOf(repo: Repo, revision: string): Promise<Tree> {
-  const oid = await resolveCommit(repo, revision)
-  return treeEntries(repo, (await git.readCommit({ ...repoArgs(repo), oid })).commit.tree)
-}
 
 /**
  * The two sides a diff compares, and any warning.
@@ -67,7 +60,11 @@ async function sides(
   const ends = texts.length === 1 ? await rangeCommits(repo, first) : null
   if (ends === null) {
     const second = texts[1]
-    return [await treeOf(repo, first), second === undefined ? null : await treeOf(repo, second), '']
+    return [
+      await commitEntries(repo, await resolveCommit(repo, first)),
+      second === undefined ? null : await commitEntries(repo, await resolveCommit(repo, second)),
+      '',
+    ]
   }
   const [left, right, symmetric] = ends
   const after = await treeEntries(repo, right.tree)
@@ -120,7 +117,7 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
       const state = await readIndex(repo, repo.dispatch)
       refuseUnresolved(state)
       before = revisions.length
-        ? await treeOf(repo, revisions[0] ?? HEAD)
+        ? await commitEntries(repo, await resolveCommit(repo, revisions[0] ?? HEAD))
         : ((await headEntries(repo)) ?? new Map<string, TreeEntry>())
       after = stagedEntries(state)
     } else {

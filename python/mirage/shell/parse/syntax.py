@@ -435,7 +435,7 @@ def syntax_error_result(
         )
     snippet = offending.strip()
     err = (
-        f"mirage: syntax error near {snippet!r}\n".encode()
+        f"mirage: syntax error near '{snippet}'\n".encode()
         if snippet
         else b"mirage: syntax error in command\n"
     )

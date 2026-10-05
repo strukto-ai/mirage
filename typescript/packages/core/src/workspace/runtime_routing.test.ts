@@ -28,13 +28,8 @@ import { POLICY_EVAL_TIMEOUT, evaluatorOf, runtimeForLanguage } from '../runtime
 import type { RunArgs, RunResult } from '../runtime/types.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { QuickJsRuntime } from '../runtime/js/quickjs/runtime.ts'
-import {
-  DenyResult,
-  parseVerdict,
-  RouteDeny,
-  RouteResult,
-  ScriptSource,
-} from '../runtime/routing/index.ts'
+import { DenyResult, parseVerdict, RouteDeny, RouteResult } from '../runtime/routing/index.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Channel, JobConsole } from '../shell/console/index.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'

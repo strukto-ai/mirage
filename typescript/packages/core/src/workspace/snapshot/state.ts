@@ -28,7 +28,7 @@ import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { CLISpec } from '../../commands/cli/types.ts'
-import { ScriptSource } from '../../runtime/routing/types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
 
 /**
  * Per-name overrides for restoring installed CLIs: a plain mapping is a

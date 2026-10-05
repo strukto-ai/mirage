@@ -3,8 +3,8 @@ from typing import Any
 from mirage.accessor.notion import NotionAccessor
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.notion.client import NotionAPIError
+from mirage.core.notion.normalize import page_segment_name
 from mirage.core.notion.pages import get_page
-from mirage.core.notion.pathing import page_dirname
 from mirage.utils.errors import enoent
 
 
@@ -32,7 +32,7 @@ async def resolve_row(
         parent.get("data_source_id") != match.slots["data_source_id"]
         or page.get("in_trash")
         or page.get("archived")
-        or page_dirname(page) != name
+        or page_segment_name(page) != name
     ):
         raise enoent(virtual)
     return page

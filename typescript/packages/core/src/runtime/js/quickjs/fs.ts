@@ -22,7 +22,8 @@ import { epochToIso } from '../../../utils/dates.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { FileHandle, FileTable, type OpenMode } from '../../handles/index.ts'
 import { applyOpen } from '../../open.ts'
-import type { RuntimeVFS, VFSStat } from '../../vfs.ts'
+import type { RuntimeVFS } from '../../vfs.ts'
+import type { VFSStat } from '../../types.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 
 const ENC = new TextEncoder()

@@ -15,7 +15,7 @@
 import { classify } from '../errors/index.ts'
 import { eexist, eisdir, enoent } from '../utils/errors.ts'
 import type { OpenMode } from './handles/mode.ts'
-import type { VFSEntry, VFSStat } from './vfs.ts'
+import type { VFSEntry, VFSStat } from './types.ts'
 
 /**
  * What an open asks of the filesystem it lands on. The file door

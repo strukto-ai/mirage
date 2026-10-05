@@ -20,7 +20,8 @@ import type { FindOptions } from '../../../vfs/base.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { LinkView } from '../../../ops/types.ts'
-import { findGeneric as streamFind, linkResults } from './find.ts'
+import { findGeneric as streamFind } from './find.ts'
+import { linkResults } from '../../../core/generic/find.ts'
 
 async function findGeneric(...args: Parameters<typeof streamFind>) {
   const result = await streamFind(...args)

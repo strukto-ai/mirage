@@ -17,6 +17,12 @@ import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { ExecutionNode } from '../../types.ts'
 import type { FlagValue } from '../../../commands/spec/types.ts'
 import type { PathSpec } from '../../../types.ts'
+import type { ExecutionScope } from '../../execution.ts'
+import type { CallStack } from '../../../shell/call_stack.ts'
+import type { JobConsole } from '../../../shell/console/index.ts'
+import type { HandOff } from '../../../policy/types.ts'
+import type { SessionState } from '../../session/session.ts'
+import type { TSNodeLike } from '../../../shell/types.ts'
 
 export type Result = [ByteSource | null, IOResult, ExecutionNode]
 export type Flags = Record<string, FlagValue>
@@ -55,3 +61,31 @@ export interface ParsedCommand {
   missingRequiredOperands: readonly string[]
   typedDests: readonly string[]
 }
+
+/** Per-call overrides a caller can layer onto the walker's deps. */
+export interface ExecuteNodeOpts {
+  /** @internal Scheduling scope; background jobs create their own. */
+  executionScope?: ExecutionScope
+  sink?: JobConsole
+  signal?: AbortSignal
+  /** The hand-off the subtree runs on: a background job's own. */
+  handed?: HandOff
+  /**
+   * The node is the whole of a child shell (a background job), which runs
+   * its EXIT action when the node ends.
+   */
+  endsShell?: boolean
+  /**
+   * False leaves what expanding the node printed to the caller, which
+   * routes it around the node's redirects.
+   */
+  ownDiagnostics?: boolean
+}
+
+export type ExecuteNodeFn = (
+  node: TSNodeLike,
+  session: SessionState,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+  opts?: ExecuteNodeOpts,
+) => Promise<[ByteSource | null, IOResult, ExecutionNode]>

@@ -107,7 +107,8 @@ import {
   visibleEnv,
 } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
-import { drained, type ExecuteNodeOpts, runStatement } from '../executor/jobs.ts'
+import { drained, runStatement } from '../executor/jobs.ts'
+import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { endShell } from '../executor/traps.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { encodeText } from '../../shell/bytes.ts'

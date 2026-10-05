@@ -20,7 +20,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.cp import parse_flags
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links
-from mirage.commands.builtin.generic.find import parse_find_args, walk_find
+from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,
@@ -33,6 +33,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.context import hidden_paths_intersect, path_rules_active
+from mirage.core.generic.find import walk_find
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import StatOverlay
 from mirage.types import NativeCopy, PathSpec, PrimitiveCopy

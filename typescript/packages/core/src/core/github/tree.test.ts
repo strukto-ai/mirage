@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchDirTree, fetchTree, GitHubApiError, type GitHubTransport } from './client.ts'
+import { GitHubApiError, type GitHubTransport } from './client.ts'
+import { fetchDirTree, fetchTree } from './tree.ts'
 import { GitHubAccessor } from '../../accessor/github.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { IndexEntry, type Evicted } from '../../cache/index/config.ts'

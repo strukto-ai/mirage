@@ -14,16 +14,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  fetchDirTree,
-  fetchDirTreePage,
-  fetchTree,
   GitHubApiError,
   GitHubConnectionError,
   type GitHubTransport,
   graphqlUrl,
   HttpGitHubTransport,
-  searchCode,
 } from './client.ts'
+import { searchCode } from './client.ts'
+import { fetchDirTree, fetchDirPage, fetchTree } from './tree.ts'
 
 interface Seen {
   url: string
@@ -427,7 +425,7 @@ describe('tree reference encoding', () => {
       REPLY = { status: 200, body: '{"tree":[],"truncated":false}' }
       const client = transport()
       await fetchTree(client, 'o', 'r', ref)
-      await fetchDirTreePage(client, 'o', 'r', ref)
+      await fetchDirPage(client, 'o', 'r', ref)
       await fetchDirTree(client, 'o', 'r', ref)
       expect(SEEN.map(({ url }) => url)).toEqual([
         `https://api.example.test/repos/o/r/git/trees/${encodeURIComponent(ref)}?recursive=1`,
@@ -438,7 +436,7 @@ describe('tree reference encoding', () => {
   )
 })
 
-describe('fetchDirTreePage', () => {
+describe('fetchDirPage', () => {
   it('carries truncation and drops gitlinks', async () => {
     const transport = {
       get: () =>
@@ -450,7 +448,7 @@ describe('fetchDirTreePage', () => {
           ],
         }),
     } as unknown as GitHubTransport
-    const page = await fetchDirTreePage(transport, 'o', 'r', 'sha')
+    const page = await fetchDirPage(transport, 'o', 'r', 'sha')
     expect(page.truncated).toBe(true)
     // A gitlink has no blob and no size; the page drops it like the tree.
     expect(page.tree.map((item) => item.path)).toEqual(['a.py'])

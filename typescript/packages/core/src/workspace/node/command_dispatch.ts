@@ -48,13 +48,13 @@ import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
 import { handleCommand } from '../executor/command/command.ts'
-import type { ExecuteNodeOpts } from '../executor/jobs.ts'
+import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import {
   type AliasMark,
   aliasCommandText,
   expandingAliases,
 } from '../executor/builtins/alias/index.ts'
-import { findSyntaxError, syntaxErrorMessage, type ShellParser } from '../../shell/parse/index.ts'
+import { findSyntaxError, syntaxErrorResult, type ShellParser } from '../../shell/parse/index.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import { guardIO, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import {
@@ -195,12 +195,9 @@ export async function executeCommand(
         parser.sourceOffsets(line, ast),
       )
       if (offending !== null) {
-        const errBytes = encodeText(syntaxErrorMessage(offending, ast))
-        return [
-          null,
-          new IOResult({ exitCode: 2, stderr: errBytes }),
-          new ExecutionNode({ command: head, exitCode: 2, stderr: errBytes }),
-        ]
+        const io = syntaxErrorResult(offending, ast)
+        const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+        return [null, io, new ExecutionNode({ command: head, exitCode: io.exitCode, stderr: bad })]
       }
       session.aliasStack.push(head)
       // The rewritten line is read from this node, so it runs as a line

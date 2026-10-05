@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../base.ts'
-import type { EvalValue, RuntimeLanguage } from '../types.ts'
+import type { EvalValue, ScriptSource } from '../types.ts'
 
 /** One command of the line being routed, distilled from the parse. */
 export interface ParsedCommand {
@@ -136,35 +136,6 @@ export function routeContextFromPayload(payload: Record<string, unknown>): Route
     agentId: String(payload.agent_id),
     mounts: (payload.mounts as string[]).slice(),
   }
-}
-
-/**
- * Script source arriving from a workspace config, not from code.
- *
- * The programmatic API takes functions; a yaml `script:`/`policy:`
- * value references a `.py` file whose content is embedded here at
- * load. The source sees ctx as a dict and its LAST EXPRESSION is the
- * verdict. It runs on the policy engine (monty today; a sandbox
- * runtime is a candidate door later).
- */
-export class ScriptSource {
-  /**
-   * `language` names the script's language ("python" or "js"), stamped
-   * from the file extension at config load; the programmatic default
-   * is "python". The policy engine prefers a matching evaluator.
-   *
-   * `module` says the source is an ES module (a `.mjs` file), so a js
-   * engine must run it in module mode or `import` and top-level
-   * `await` fail. It is stamped from the extension at load beside
-   * `language`, since the path is gone once the source is embedded.
-   * Inert for policy scripts: a module has no completion value, and
-   * their contract is the last expression.
-   */
-  constructor(
-    readonly source: string,
-    readonly language: RuntimeLanguage = 'python',
-    readonly module = false,
-  ) {}
 }
 
 /**

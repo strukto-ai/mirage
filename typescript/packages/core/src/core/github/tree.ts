@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import { fetchDirTreePage, fetchTree, GitHubApiError } from './client.ts'
+import { GitHubApiError, type GitHubTransport } from './client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { LookupStatus } from '../../cache/index/config.ts'
 import type { IndexEntry, IndexSnapshot, ListResult } from '../../cache/index/config.ts'
@@ -317,11 +317,132 @@ export async function pointRow(
   const expression = parent === '' ? accessor.ref : `${accessor.ref}:${parent}`
   let page: { tree: GitHubTreeItem[]; truncated: boolean }
   try {
-    page = await fetchDirTreePage(accessor.transport, accessor.owner, accessor.repo, expression)
+    page = await fetchDirPage(accessor.transport, accessor.owner, accessor.repo, expression)
   } catch (err) {
     if (err instanceof GitHubApiError && DEFER_STATUSES.has(err.status)) return null
     throw err
   }
   const row = page.tree.find((item) => item.path === name)
   return { entry: row === undefined ? null : makeTreeEntry(row), truncated: page.truncated }
+}
+
+/**
+ * Fetch the recursive tree of `ref`, and the head it answered at.
+ *
+ * A tree asked by a branch, a tag or a commit sha names the commit it
+ * resolved to as its top-level `sha` (measured against GitHub, 2026-09-30),
+ * so the rows and the version come from one response.
+ *
+ * Returns:
+ *   { tree, truncated, sha }: the rows, GitHub's `truncated` flag, and the
+ *   head commit sha, or null when the response names none.
+ */
+export async function fetchTree(
+  transport: GitHubTransport,
+  owner: string,
+  repo: string,
+  ref: string,
+): Promise<{ tree: GitHubTreeItem[]; truncated: boolean; sha: string | null }> {
+  const data = (await transport.get(
+    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}`,
+    {
+      recursive: '1',
+    },
+  )) as { tree?: GitHubTreeItem[]; truncated?: boolean; sha?: unknown }
+  return {
+    tree: dropSubmodules(data.tree ?? []),
+    truncated: data.truncated === true,
+    sha: headOf(data),
+  }
+}
+
+/**
+ * Ask which commit `ref` resolves to, with one shallow request: the shallow
+ * tree of the root answers the same top-level `sha` as the recursive one, at
+ * a fraction of the size.
+ *
+ * Returns:
+ *   string | null: the head commit sha, or null when the response names none.
+ */
+export async function fetchHead(
+  transport: GitHubTransport,
+  owner: string,
+  repo: string,
+  ref: string,
+): Promise<string | null> {
+  const data = (await transport.get(
+    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}`,
+  )) as { sha?: unknown }
+  return headOf(data)
+}
+
+export function headOf(data: { sha?: unknown }): string | null {
+  return typeof data.sha === 'string' && data.sha !== '' ? data.sha : null
+}
+
+// Submodule gitlinks (type "commit") have no size and no blob to read;
+// exclude them from the tree entirely.
+export function dropSubmodules(tree: GitHubTreeItem[]): GitHubTreeItem[] {
+  return tree.filter((item) => item.type !== 'commit')
+}
+
+/**
+ * Fetch one directory's tree (non-recursive), and whether GitHub cut it.
+ *
+ * Args:
+ *   treeSha (string): a raw tree sha, ref, or `{ref}:{dir}` expression.
+ *
+ * Returns:
+ *   { tree, truncated }: the rows, submodule gitlinks excluded, and
+ *   GitHub's `truncated` flag.
+ *
+ * Throws:
+ *   GitHubApiError: the response carries no tree, which must not read as
+ *   an empty directory.
+ */
+export async function fetchDirPage(
+  transport: GitHubTransport,
+  owner: string,
+  repo: string,
+  treeSha: string,
+): Promise<{ tree: GitHubTreeItem[]; truncated: boolean }> {
+  const data = (await transport.get(
+    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(treeSha)}`,
+  )) as {
+    tree?: GitHubTreeItem[]
+    truncated?: boolean
+  }
+  if (data.tree === undefined) {
+    throw new GitHubApiError(
+      `GitHub tree response for ${owner}/${repo} ${treeSha} carries no tree`,
+      0,
+    )
+  }
+  return { tree: dropSubmodules(data.tree), truncated: data.truncated === true }
+}
+
+/**
+ * Fetch a single directory's whole tree (non-recursive).
+ *
+ * Used as fallback when the recursive tree was truncated, where the listing
+ * is cached as complete, so a directory GitHub cut short is refused rather
+ * than returned: a name past the cut would otherwise read as absent, which a
+ * `read: fresh` probe or a drift check takes as gone.
+ *
+ * Mirrors Python's `fetch_dir_tree`.
+ *
+ * Throws:
+ *   GitHubApiError: GitHub truncated the listing, or sent no tree.
+ */
+export async function fetchDirTree(
+  transport: GitHubTransport,
+  owner: string,
+  repo: string,
+  treeSha: string,
+): Promise<GitHubTreeItem[]> {
+  const page = await fetchDirPage(transport, owner, repo, treeSha)
+  if (page.truncated) {
+    throw new GitHubApiError(`GitHub truncated the tree listing of ${owner}/${repo} ${treeSha}`, 0)
+  }
+  return page.tree
 }

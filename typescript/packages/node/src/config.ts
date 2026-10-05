@@ -21,7 +21,7 @@ import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/index'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
 import {

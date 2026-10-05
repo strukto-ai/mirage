@@ -15,6 +15,8 @@
 import errno
 from collections.abc import Awaitable, Callable
 
+from mirage.errors.posix import POSIX
+from mirage.errors.types import FsCondition
 from mirage.types import PathSpec
 from mirage.utils.path import drop_trailing_segments, respell_one
 from mirage.utils.quote import quotes_operands, shell_quote, shell_quote_always
@@ -272,6 +274,11 @@ def no_mount(path: str | PathSpec) -> NoMountError:
 
 def enotempty(path: str | PathSpec) -> OSError:
     return OSError(errno.ENOTEMPTY, "Directory not empty", _virtual_of(path))
+
+
+def no_xattr(path: str | PathSpec) -> OSError:
+    condition = POSIX[FsCondition.NO_XATTR]
+    return OSError(condition.errno, condition.phrase, _virtual_of(path))
 
 
 def exdev(path: str | PathSpec) -> OSError:

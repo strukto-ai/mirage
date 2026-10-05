@@ -20,10 +20,12 @@ import type { RegisteredCommand } from '../../commands/config.ts'
 import {
   HttpGitHubTransport,
   fetchRepoInfo as fetchGitHubRepoInfo,
-  fetchTree as fetchGitHubTree,
 } from '../../core/github/client.ts'
 
-import { buildTreeMap as githubBuildTreeMap } from '../../core/github/tree.ts'
+import {
+  buildTreeMap as githubBuildTreeMap,
+  fetchTree as fetchGitHubTree,
+} from '../../core/github/tree.ts'
 import { buildDeltaHook } from '../../core/github/watch.ts'
 import { GITHUB_OPS } from '../../ops/github/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'

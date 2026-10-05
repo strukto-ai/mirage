@@ -15,7 +15,6 @@
 import { guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
-import { epochToIso } from '../../utils/dates.ts'
 import { makeReaddir, type DirListing, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listChannels } from './channels.ts'
@@ -23,36 +22,16 @@ import { DiscordApiError } from './client.ts'
 import { DiscordIndexEntry, DiscordResourceType } from './entry.ts'
 import { fileBlobName } from './files.ts'
 import { listGuilds } from './guilds.ts'
-import { DISCORD_EPOCH, listMessagesForDay } from './history.ts'
+import { listMessagesForDay } from './history.ts'
 import { listMembers } from './members.ts'
 import { historyJsonlBytes, memberJsonBytes } from './render.ts'
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
+import { snowflakeToDate } from './entry.ts'
 
 const SOFT_STATUSES = new Set([403, 404, 429])
 
 const CONTAINER_TYPE = 'discord/container'
-
-export function snowflakeToDate(snowflake: string): string {
-  if (snowflake === '') return ''
-  const ms = (BigInt(snowflake) >> 22n) + DISCORD_EPOCH
-  const d = new Date(Number(ms))
-  const yyyy = d.getUTCFullYear().toString().padStart(4, '0')
-  const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
-  const dd = d.getUTCDate().toString().padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-export function snowflakeToIso(snowflake: string): string | null {
-  if (snowflake === '') return null
-  let ms: bigint
-  try {
-    ms = (BigInt(snowflake) >> 22n) + DISCORD_EPOCH
-  } catch {
-    return null
-  }
-  return epochToIso(Number(ms / 1000n))
-}
 
 /**
  * The channel's day directories, newest first.

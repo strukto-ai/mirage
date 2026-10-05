@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BridgeOpAttrs } from '../../../types.ts'
-import type { VFSEntry, VFSStat } from '../../../vfs.ts'
+import type { VFSEntry, VFSStat } from '../../../types.ts'
 import type { MirageMutation } from './journal.ts'
 
 /** An inline flush stops at its first failure; skipped excludes that entry. */

@@ -58,7 +58,7 @@ import * as searchModule from '../../../core/postgres/search.ts'
 import * as statModule from '../../../core/postgres/stat.ts'
 import { resolvePostgresConfig } from '../../../vfs/postgres/config.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
-import { hasUnresolvedGlob } from '../utils/operands.ts'
+import { hasUnresolvedGlob } from '../utils/paths.ts'
 import { POSTGRES_COMMANDS } from './index.ts'
 
 const POSTGRES_GREP = POSTGRES_COMMANDS.filter((c) => c.name === 'grep' && c.filetype == null)
