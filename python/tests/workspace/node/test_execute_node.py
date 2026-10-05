@@ -1291,11 +1291,12 @@ def test_redirect_concat_target():
 
 
 def test_redirect_append():
-    """Append opens the target before echo runs, then appends, both
-    through the op door without a content pre-read."""
+    """echo touches no file of its own, so its ``>>`` target is opened by
+    the one append of its output, through the op door without a content
+    pre-read."""
     _, _, _, _, _, dispatch = _exec("echo hello >> /data/out.txt")
     ops = [c[0][0] for c in dispatch.call_args_list]
-    assert ops == ["append", "append"]
+    assert ops == ["append"]
 
 
 def test_redirect_stdin():
@@ -1718,7 +1719,7 @@ def test_redirect_append_var():
         "echo x >> $LOG", env={"LOG": "/data/app.log"}
     )
     ops = [c[0][0] for c in dispatch.call_args_list]
-    assert ops == ["append", "append"]
+    assert ops == ["append"]
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "append"]
     assert write_calls[0][0][1].virtual == "/data/app.log"
 

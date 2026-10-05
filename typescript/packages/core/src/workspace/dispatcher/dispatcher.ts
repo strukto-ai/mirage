@@ -99,6 +99,16 @@ import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/r
 import { encodeText } from '../../shell/bytes.ts'
 
 /**
+ * Whether a completed write op was an append of no bytes. That is an open for
+ * appending (`true >> f`): it may create the file, but it leaves an existing
+ * one's times as they were. Mirrors Python's `_appends_nothing`.
+ */
+function appendsNothing(opName: string, args: readonly unknown[]): boolean {
+  const data = args[0]
+  return opName === 'append' && data instanceof Uint8Array && data.byteLength === 0
+}
+
+/**
  * Drop listing entries the bound session hides.
  *
  * Entry shapes vary by backend (bare names, trailing-slash names, full
@@ -666,7 +676,7 @@ export class Dispatcher {
           (onCall) => run(fullKwargs, onCall),
           async (value) => {
             served(report, value)
-            await this.settleWrite(opName, p, renameDst)
+            await this.settleWrite(opName, p, renameDst, fullArgs)
           },
         )
       } else {
@@ -699,7 +709,7 @@ export class Dispatcher {
       )
     }
     if (DISPATCH_WRITE_OPS.has(opName) && !SERIAL_WRITE_OPS.has(opName)) {
-      await this.settleWrite(opName, p, renameDst)
+      await this.settleWrite(opName, p, renameDst, fullArgs)
     }
     if (opName === 'stat' && result instanceof FileStat) {
       result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
@@ -813,9 +823,11 @@ export class Dispatcher {
     opName: string,
     p: PathSpec,
     renameDst: PathSpec | null,
+    args: readonly unknown[],
   ): Promise<void> {
-    const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
-    await this.invalidateAfterWriteByPath(p.virtual, observed)
+    const opened = appendsNothing(opName, args)
+    const observed = STAMP_WRITE_OPS.has(opName) && !opened ? Date.now() / 1000 : null
+    await this.invalidateAfterWriteByPath(p.virtual, observed, !opened)
     if (opName === 'unlink' || opName === 'rmdir') {
       // The name no longer holds that file, so what was set on it
       // (overlay mode and owner, extended attributes) goes with it, as
@@ -1659,7 +1671,17 @@ export class Dispatcher {
     )
   }
 
-  async invalidateAfterWriteByPath(rawPath: string, observed: number | null = null): Promise<void> {
+  /**
+   * Drop what a write to `rawPath` made stale above the store. `observed` is
+   * the epoch seconds of a content write to record, null for a removal;
+   * `times` false keeps the overlay times, for an open that wrote nothing.
+   * Mirrors Python's Dispatcher.invalidate_after_write.
+   */
+  async invalidateAfterWriteByPath(
+    rawPath: string,
+    observed: number | null = null,
+    times = true,
+  ): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
     // invalidate the written directory itself instead of its parent
@@ -1667,7 +1689,7 @@ export class Dispatcher {
     const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return
-    await this.namespace.clearTimes(path, observed)
+    if (times) await this.namespace.clearTimes(path, observed)
     const manager = this.managerFor(mount)
     await manager.invalidateAfterWrite(path)
     await manager.invalidateAncestors(path)

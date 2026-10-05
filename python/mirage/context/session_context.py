@@ -417,8 +417,9 @@ def get_walk_probe() -> WalkProbe | None:
 
 
 # Opens a statement's write targets as bash does before the command
-# runs; False when one cannot be opened.
-RedirectOpener = Callable[[], Awaitable[bool]]
+# runs, given the admitted command's name and arguments; False when one
+# cannot be opened.
+RedirectOpener = Callable[[str, tuple[str, ...]], Awaitable[bool]]
 
 _redirect_paths: ContextVar[
     tuple[int, tuple[PathSpec, ...], RedirectOpener | None] | None
@@ -441,8 +442,9 @@ def set_redirect_paths(
     inherits the outer statement's targets.
 
     The opener empties the targets bash opens for writing before the
-    command runs; dispatch calls it once the line is admitted, so a
-    command the gate refuses leaves its targets as they were.
+    command runs; dispatch calls it with the command's name and arguments
+    once the line is admitted, so a command the gate refuses leaves its
+    targets as they were.
 
     Args:
         node_id (int): the command node the targets belong to.

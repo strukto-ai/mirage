@@ -32,6 +32,10 @@ export async function appendBytes(
   } catch (err) {
     throw await openError(root, key, err, p)
   }
+  // Appending nothing opens the file (`true >> f`): the lookup above created
+  // a missing one, and an existing one stays as it was, modification time
+  // included.
+  if (data.byteLength === 0) return
   const existing = await handle.getFile()
   const existingBytes = new Uint8Array(await existing.arrayBuffer())
   const merged = new Uint8Array(existingBytes.byteLength + data.byteLength)

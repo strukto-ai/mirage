@@ -472,6 +472,24 @@ async def test_listing_error_falls_back_to_the_walk():
 
 
 @pytest.mark.asyncio
+async def test_listing_error_asks_the_listed_path_about_a_file_once():
+    """The walk ends at the listed path, which the first probe already
+    found is not a file; on an API-backed mount a second ask is a
+    second request."""
+    asked: list[str] = []
+
+    async def counting_is_file(key: str) -> bool:
+        asked.append(key)
+        return await _is_file(key)
+
+    exc = await listing_error(
+        "/data/sub/never", "/data/sub/never", counting_is_file, _is_dir
+    )
+    assert isinstance(exc, FileNotFoundError)
+    assert asked == ["/data/sub/never"]
+
+
+@pytest.mark.asyncio
 async def test_listing_error_asks_the_mount_root_nothing():
     async def unreachable(key: str) -> bool:
         raise AssertionError(f"the root needs no probe: {key}")

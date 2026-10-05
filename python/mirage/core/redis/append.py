@@ -32,6 +32,10 @@ async def append_bytes(
     p = norm(path)
     await check_dest_parents(store, path_spec, p)
     await check_write_target(store, path_spec, p)
+    # Appending nothing opens the file (`true >> f`): it creates a missing
+    # one and leaves an existing one as it was, modification time included.
+    if not data and await store.has_file(p):
+        return
     existing = await store.get_file(p)
     if existing is not None:
         await store.set_file(p, existing + data)

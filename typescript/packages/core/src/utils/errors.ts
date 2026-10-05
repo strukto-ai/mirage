@@ -215,7 +215,8 @@ export async function readdirError(
 // That premise is exactly what a flat store breaks: ram and redis rename without
 // creating the destination's ancestors, so they can hold `/missing/a.txt` with
 // `/missing` absent, where resolution stops and the answer is ENOENT. Those call
-// readdirError directly.
+// readdirError directly. The walk ends at the listed path itself, which the
+// first probe has already found is not a file, so it is not asked again.
 // Mirrors Python's listing_error.
 export async function listingError(
   path: string | { virtual: string; rawPath?: string },
@@ -223,8 +224,10 @@ export async function listingError(
   isFile: (p: string) => boolean | Promise<boolean>,
   isDir: (p: string) => boolean | Promise<boolean>,
 ): Promise<FsError> {
-  if (stripSlash(key) !== '' && (await isFile(key))) return enotdir(path)
-  return readdirError(path, key, isFile, isDir)
+  const leaf = stripSlash(key)
+  if (leaf === '') return readdirError(path, key, isFile, isDir)
+  if (await isFile(key)) return enotdir(path)
+  return readdirError(path, key, (p) => stripSlash(p) !== leaf && isFile(p), isDir)
 }
 
 /**

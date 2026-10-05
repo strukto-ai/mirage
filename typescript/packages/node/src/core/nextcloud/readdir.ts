@@ -9,24 +9,29 @@ import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { SCOPE_ERROR } from './constants.ts'
 import { isNotFound } from './util.ts'
 
-async function isFile(accessor: NextcloudAccessor, key: string): Promise<boolean> {
-  const op = await accessor.operator()
-  try {
-    return !(await op.stat(stripSlash(key))).isDirectory()
-  } catch (error) {
-    if (isNotFound(error)) return false
-    throw error
+// isFile and isDir probes that share one PROPFIND per key: one stat answers
+// both, a collection included, so a walk asking each of a component in turn
+// sends one request for it rather than two. Mirrors Python's _kind_probes.
+function kindProbes(
+  accessor: NextcloudAccessor,
+): [(key: string) => Promise<boolean>, (key: string) => Promise<boolean>] {
+  const kinds = new Map<string, 'file' | 'dir' | null>()
+  const kind = async (key: string): Promise<'file' | 'dir' | null> => {
+    const stripped = stripSlash(key)
+    const known = kinds.get(stripped)
+    if (known !== undefined) return known
+    const op = await accessor.operator()
+    let found: 'file' | 'dir' | null
+    try {
+      found = (await op.stat(stripped)).isDirectory() ? 'dir' : 'file'
+    } catch (error) {
+      if (!isNotFound(error)) throw error
+      found = null
+    }
+    kinds.set(stripped, found)
+    return found
   }
-}
-
-async function isDir(accessor: NextcloudAccessor, key: string): Promise<boolean> {
-  const op = await accessor.operator()
-  try {
-    return (await op.stat(`${stripSlash(key)}/`)).isDirectory()
-  } catch (error) {
-    if (isNotFound(error)) return false
-    throw error
-  }
+  return [async (key) => (await kind(key)) === 'file', async (key) => (await kind(key)) === 'dir']
 }
 
 export async function readdir(
@@ -62,12 +67,7 @@ export async function readdir(
     // than raising, so without this `ls /nextcloud/never` rendered an empty
     // directory and exited 0. The mount root is exempt: it exists because
     // it is mounted.
-    throw await listingError(
-      path,
-      target,
-      (p) => isFile(accessor, p),
-      (p) => isDir(accessor, p),
-    )
+    throw await listingError(path, target, ...kindProbes(accessor))
   }
   const names: string[] = []
   const directories = new Set<string>()

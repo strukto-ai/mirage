@@ -412,6 +412,19 @@ describe('listingError', () => {
     )
   })
 
+  it('asks the listed path whether it is a file once', async () => {
+    // The walk ends at the listed path, which the first probe already found
+    // is not a file; on an API-backed mount a second ask is a second request.
+    const asked: string[] = []
+    const countingIsFile = (key: string): boolean => {
+      asked.push(key)
+      return isFile(key)
+    }
+    const err = await listingError('/data/sub/never', '/data/sub/never', countingIsFile, isDir)
+    expect(err.code).toBe('ENOENT')
+    expect(asked).toEqual(['/data/sub/never'])
+  })
+
   it('asks the mount root nothing', async () => {
     const unreachable = (key: string): boolean => {
       throw new Error(`the root needs no probe: ${key}`)

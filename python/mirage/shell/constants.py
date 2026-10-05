@@ -96,6 +96,12 @@ FD_STDERR = 2
 FD_BOTH = -1
 FD_CLOSE = -1
 
+# Builtins that read and write no file of their own, so a write
+# redirect on one can wait for their output: nothing they do can see a
+# target emptied early. `printf -v` assigns a variable instead, and is
+# opened first like any other command (`redirect.py`).
+OUTPUT_ONLY_BUILTINS = frozenset({"echo", "printf", "true", "false", ":"})
+
 # The dynamic variables the shell answers itself: PIPESTATUS reads the
 # session's record of the last pipeline (`SessionState.pipe_status`),
 # FUNCNAME the frames on the call stack (`SessionState.function_names`)

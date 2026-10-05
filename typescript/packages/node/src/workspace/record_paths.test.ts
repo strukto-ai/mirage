@@ -111,12 +111,11 @@ async function ledger(vfs: BaseVFS, setup: string | null): Promise<[string, stri
   }
 }
 
-// A redirect opens k.txt before echo runs and writes it after: `>` is two
-// writes, and `>>` on a backend with a native append is two appends.
+// echo touches no file of its own, so its redirect target is opened by the
+// one write of its output: `>` is one write, and `>>` on a backend with a
+// native append one append.
 const NATIVE_APPEND: [string, string][] = [
   ['write', K],
-  ['write', K],
-  ['append', K],
   ['append', K],
   ['append', K],
   ['write', NEW],
@@ -164,7 +163,6 @@ describe('record paths name the virtual path (node backends)', () => {
       // append are a read plus a write, since s3 has no native append.
       expect(await ledger(vfs, null)).toEqual([
         ['write', K],
-        ['write', K],
         ['read', K],
         ['write', K],
         ['read', K],
@@ -202,8 +200,6 @@ describe('record paths name the virtual path (node backends)', () => {
     // later reads, the in-mount cp's included, are served from the cache.
     expect(await ledger(vfs, null)).toEqual([
       ['write', K],
-      ['write', K],
-      ['append', K],
       ['append', K],
       ['append', K],
       ['write', NEW],

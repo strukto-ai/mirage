@@ -164,14 +164,10 @@ async def _stat_candidate(
                 modified=None,
             )
         return _candidate_from_metadata("/", name, metadata)
-    relative = key.strip("/")
     try:
-        metadata = await operator.stat(relative)
+        metadata = await operator.stat(key.strip("/"))
     except NotFound:
-        try:
-            metadata = await operator.stat(relative + "/")
-        except NotFound:
-            return None
+        return None
     return _candidate_from_metadata(key, name, metadata)
 
 

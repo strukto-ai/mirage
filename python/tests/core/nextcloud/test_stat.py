@@ -26,6 +26,25 @@ async def test_stat_directory_via_dir_probe(make_acc):
 
 
 @pytest.mark.asyncio
+async def test_stat_asks_the_server_once(make_acc):
+    acc = make_acc({"data/file.txt": b"x"})
+    fake = acc._fake
+    asked: list[str] = []
+    real_stat = fake.stat
+
+    async def _counted(key):
+        asked.append(key)
+        return await real_stat(key)
+
+    fake.stat = _counted
+    s = await stat(acc, PathSpec.from_str_path("/data"))
+    assert s.type == FileType.DIRECTORY
+    with pytest.raises(FileNotFoundError):
+        await stat(acc, PathSpec.from_str_path("/missing.txt"))
+    assert asked == ["data", "missing.txt"]
+
+
+@pytest.mark.asyncio
 async def test_stat_missing_raises_filenotfound(make_acc):
     acc = make_acc({})
     with pytest.raises(FileNotFoundError):

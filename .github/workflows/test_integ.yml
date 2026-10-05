@@ -545,7 +545,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2]
     services:
       redis:
         image: redis:7
@@ -602,12 +602,13 @@ jobs:
       # One runner process per target, four at a time: a runner's
       # --target-jobs lanes share one core, and the battery is CPU-bound
       # there. shard.py splits the targets this host runs across the shard
-      # jobs by case count, leaving out the services --allow-skip names
-      # (other jobs provision and run those), and prints each target's time
-      # at the end, which is what to read before changing --procs or the
-      # shard count. The http facet rides the same split: its fixture server
-      # is a TypeScript kit fake the adapter starts, and this python-host job
-      # already has node for it.
+      # jobs by measured seconds (integ/ci/shard_seconds.json), leaving out
+      # the services --allow-skip names (other jobs provision and run
+      # those), and prints each target's time at the end, which is what to
+      # read before changing --procs, the shard count or that table. The
+      # http facet rides the same split: its fixture server is a TypeScript
+      # kit fake the adapter starts, and this python-host job already has
+      # node for it.
       - name: Run declarative battery (python hosts)
         env:
           SHARD_INDEX: ${{ matrix.shard }}
@@ -779,7 +780,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2]
     services:
       redis:
         image: redis:7

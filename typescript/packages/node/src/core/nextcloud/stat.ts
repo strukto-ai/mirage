@@ -44,26 +44,19 @@ export async function stat(
     if (listing.entries !== undefined && listing.entries !== null) throw enoent(path)
   }
   const op = await accessor.operator()
-  let metadata: Metadata | null = null
+  let metadata: Metadata
   try {
     metadata = await op.stat(key)
   } catch (error) {
-    if (!isNotFound(error)) throw error
+    if (isNotFound(error)) throw enoent(path)
+    throw error
   }
-  if (metadata !== null && !metadata.isDirectory()) return fileStat(key, raw, metadata)
-  try {
-    const directory = await op.stat(`${key}/`)
-    if (directory.isDirectory()) {
-      return new FileStat({
-        name: key.split('/').pop() ?? '/',
-        type: FileType.DIRECTORY,
-        modified: directory.lastModified,
-      })
-    }
-  } catch (error) {
-    if (!isNotFound(error)) throw error
-  }
-  throw enoent(path)
+  if (!metadata.isDirectory()) return fileStat(key, raw, metadata)
+  return new FileStat({
+    name: key.split('/').pop() ?? '/',
+    type: FileType.DIRECTORY,
+    modified: metadata.lastModified,
+  })
 }
 
 function fileStat(key: string, raw: string, metadata: Metadata): FileStat {

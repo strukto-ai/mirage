@@ -19,6 +19,26 @@
         "stdout": "rc=1\nrc=1\nrc=1\nkeep\n",
         "stderr": "nodir/f: No such file or directory\nnodir/g: No such file or directory\nnodir/h: No such file or directory\n"
       }
+    },
+    {
+      "id": "redirect_unopenable_target_of_an_output_only_builtin",
+      "seq": 501164,
+      "targets": [
+        "ram",
+        "redis",
+        "opfs",
+        "disk",
+        "databricks",
+        "databricks-prefix",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/r10 && cd /data/r10 && echo x > nodir/f; echo rc=$? && printf y >> nodir/g; echo rc=$? && : > nodir/h; echo rc=$? && printf -v v %s z > nodir/i; echo \"rc=$? v=$v\" && ls; cd / && rm -r /data/r10",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1 v=\n",
+        "stderr": "nodir/f: No such file or directory\nnodir/g: No such file or directory\nnodir/h: No such file or directory\nnodir/i: No such file or directory\n"
+      }
     }
   ]
 }

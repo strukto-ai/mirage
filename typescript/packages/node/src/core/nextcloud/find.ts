@@ -120,18 +120,12 @@ async function statCandidate(
     return { key, name, kind: 'd', size: 0, modified: null, isEmpty: null }
   }
   const op = await accessor.operator()
-  const relative = stripSlash(key)
   let metadata: Metadata
   try {
-    metadata = await op.stat(relative)
+    metadata = await op.stat(stripSlash(key))
   } catch (error) {
-    if (!isNotFound(error)) throw error
-    try {
-      metadata = await op.stat(`${relative}/`)
-    } catch (directoryError) {
-      if (isNotFound(directoryError)) return null
-      throw directoryError
-    }
+    if (isNotFound(error)) return null
+    throw error
   }
   return candidateFromMetadata(key, name, metadata)
 }

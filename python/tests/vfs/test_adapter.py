@@ -135,7 +135,7 @@ async def test_write_capability_obeys_mount_mode(accessor, mode):
     try:
         result = await ws.shell("echo changed > /nested/data/a.txt")
         assert (result.exit_code == 0) == (mode == MountMode.WRITE)
-        assert write.await_count == (2 if mode == MountMode.WRITE else 0)
+        assert write.await_count == (1 if mode == MountMode.WRITE else 0)
         refused = await ws.shell("rm /nested/data/a.txt")
         reason = (
             "Read-only file system"

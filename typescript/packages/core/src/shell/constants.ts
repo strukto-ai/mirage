@@ -69,6 +69,18 @@ export const FD_STDERR = 2
 export const FD_BOTH = -1
 export const FD_CLOSE = -1
 
+// Builtins that read and write no file of their own, so a write redirect on
+// one can wait for their output: nothing they do can see a target emptied
+// early. `printf -v` assigns a variable instead, and is opened first like any
+// other command (`redirect.ts`).
+export const OUTPUT_ONLY_BUILTINS: ReadonlySet<string> = new Set([
+  'echo',
+  'printf',
+  'true',
+  'false',
+  ':',
+])
+
 // The dynamic variables the shell answers itself: PIPESTATUS reads the
 // session's record of the last pipeline (`SessionState.pipeStatus`), FUNCNAME
 // the frames on the call stack (`SessionState.functionNames`) and RANDOM
