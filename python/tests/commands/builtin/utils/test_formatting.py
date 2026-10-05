@@ -153,3 +153,15 @@ def test_full_iso_time_keeps_the_stamp_digits_in_the_zone():
     assert formatting.full_iso_time(None, resolve_tz("UTC-8")) == (
         "1970-01-01 08:00:00.000000000 +0800"
     )
+
+
+@pytest.mark.parametrize(
+    "stamp,shown",
+    [
+        ("9999-12-31T23:59:59.999999", "9999-12-31 23:59:59.999999000 +0000"),
+        ("2026-03-04T05:06:07.999999", "2026-03-04 05:06:07.999999000 +0000"),
+    ],
+)
+def test_full_iso_time_never_rounds_into_the_next_second(stamp, shown):
+    assert formatting.full_iso_time(stamp) == shown
+    assert formatting.styled_time(stamp, "full-iso") == shown

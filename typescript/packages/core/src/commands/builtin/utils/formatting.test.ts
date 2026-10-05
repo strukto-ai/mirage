@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType } from '../../../types.ts'
-import { fullIsoTime, parseBlockSize, formatLsLong } from './formatting.ts'
+import { fullIsoTime, parseBlockSize, formatLsLong, styledTime } from './formatting.ts'
 import { resolveTz } from '../../../utils/timezone.ts'
 
 describe('parseBlockSize', () => {
@@ -49,4 +49,12 @@ it('renders full-iso with the stamp digits in the zone', () => {
     '2026-03-04 13:06:07.123456789 +0800',
   )
   expect(fullIsoTime(null, resolveTz('UTC-8'))).toBe('1970-01-01 08:00:00.000000000 +0800')
+})
+
+it.each([
+  ['9999-12-31T23:59:59.999999', '9999-12-31 23:59:59.999999000 +0000'],
+  ['2026-03-04T05:06:07.999999', '2026-03-04 05:06:07.999999000 +0000'],
+])('never rounds %s into the next second', (stamp, shown) => {
+  expect(fullIsoTime(stamp)).toBe(shown)
+  expect(styledTime(stamp, 'full-iso')).toBe(shown)
 })

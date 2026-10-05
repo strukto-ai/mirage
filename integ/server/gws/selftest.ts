@@ -772,6 +772,17 @@ async function gridRangesHttp(at: string): Promise<void> {
     JSON.stringify(sheetsOf(masked.body)[0]?.properties),
     '{"title":"Sheet1"}',
   )
+  for (const whole of ['sheets/*', 'sheets(*)', 'sheets/data/rowData/*'])
+    eq(
+      `fields: ${whole} keeps the message whole`,
+      (await get(`includeGridData=true&fields=${encodeURIComponent(whole)}`)).status,
+      200,
+    )
+  eq(
+    'fields: sheets/* keeps every sheet field',
+    Object.keys(obj((await get(`fields=${encodeURIComponent('sheets/*')}`)).body)).join(','),
+    'sheets',
+  )
   for (const wrong of [
     'notAField',
     'sheets(propertis)',

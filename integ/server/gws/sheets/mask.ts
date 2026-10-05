@@ -23,7 +23,8 @@ import type { Field, Fields } from './fields.ts'
 export type MaskPath = readonly string[]
 
 // `a.b(c,d.e),f` read the way the live API reads it: a parenthesized list
-// distributes over the path before it, so this is a.b.c, a.b.d.e and f.
+// distributes over the path before it, so this is a.b.c, a.b.d.e and f. A
+// partial-response `/` separates segments as `.` does (`sheets/properties`).
 export function parseMask(text: string): MaskPath[] {
   let at = 0
   const items = (prefix: readonly string[]): MaskPath[] => {
@@ -34,7 +35,7 @@ export function parseMask(text: string): MaskPath[] {
       while (at < text.length && !',()'.includes(text.charAt(at))) {
         const ch = text.charAt(at)
         at += 1
-        if (ch !== '.') name += ch
+        if (ch !== '.' && ch !== '/') name += ch
         else {
           path.push(name.trim())
           name = ''
@@ -80,15 +81,15 @@ export function pickMask(value: JsonValue, paths: readonly MaskPath[]): JsonValu
 // not have: the valid part as typed, then the first bad segment in
 // snake_case, and nothing after it (`textFormatX.bold` is `text_format_x`).
 // A `read` mask (the `fields` of a GET) reaches through a repeated field to
-// its elements, and takes any path below a scalar or a message the tree
-// leaves out.
+// its elements, keeps a whole message at a `*`, and takes any path below a
+// scalar or a message the tree leaves out.
 export function badField(paths: readonly MaskPath[], fields: Fields, read = false): string | null {
   for (const path of paths) {
     if (path.length === 1 && path[0] === '*') continue
     let node: Field = fields
     for (let i = 0; i < path.length; i += 1) {
-      if (read && node === null) break
       const seg = path[i] ?? ''
+      if (read && (node === null || seg === '*')) break
       const found: Field | undefined = isMessage(node) ? fieldOf(node, seg) : undefined
       const child: Field | undefined =
         read && found != null && !isMessage(found)

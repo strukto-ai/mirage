@@ -1,8 +1,3 @@
-// What each `.` and negated bracket checks first under a UTF-8 locale: a byte
-// that is no part of a character rides the text as its surrogate escape, and
-// glibc matches it with neither.
-const RAW_BYTE_GUARD = '(?![\\udc80-\\udcff])'
-
 export const POSIX_CLASSES: Readonly<Record<string, string>> = {
   alpha: 'A-Za-z',
   digit: '0-9',
@@ -77,6 +72,11 @@ export function classCharacters(name: string): string | null {
     .filter((ch) => pattern.test(ch))
     .join('')
 }
+
+// What each `.` and negated bracket checks first under a UTF-8 locale: a byte
+// that is no part of a character rides the text as its surrogate escape, and
+// glibc matches it with neither.
+const RAW_BYTE_GUARD = '(?![\\udc80-\\udcff])'
 
 /** The index past the `]` closing the bracket opened at `start`. */
 function bracketEnd(source: string, start: number): number {
