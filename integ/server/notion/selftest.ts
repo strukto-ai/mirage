@@ -689,6 +689,33 @@ async function pagePropertyWrites(at: string): Promise<void> {
     (byId.properties as Record<string, Record<string, JsonValue>>).Priority!.number,
     5,
   )
+  const twice = await request(
+    at,
+    'PATCH',
+    `/v1/pages/${ROW}`,
+    { properties: { Stage: { select: { name: 'One' } }, st: { select: { name: 'Two' } } } },
+    400,
+  )
+  eq('a column named twice is refused', twice.message, 'Stage and st both name the property Stage.')
+  eq('a column named twice mints no option', await options(), stage)
+  const added = await request(at, 'PATCH', `/v1/data_sources/${DS}`, {
+    properties: { Score: { number: {} } },
+  })
+  const score = String((added.properties as Record<string, Record<string, JsonValue>>).Score!.id)
+  check('an added column has a percent-encoded id', score.startsWith('%3A'), score)
+  for (const [ref, number] of [
+    [score, 1],
+    [decodeURIComponent(score), 2],
+  ] as const) {
+    const written = await request(at, 'PATCH', `/v1/pages/${ROW}`, {
+      properties: { [ref]: { number } },
+    })
+    eq(
+      `a column written by its id ${ref} reads back by name`,
+      (written.properties as Record<string, Record<string, JsonValue>>).Score!.number,
+      number,
+    )
+  }
 
   const listed = await children()
   for (const parent of [{ page_id: PAGE }, { workspace: true }]) {

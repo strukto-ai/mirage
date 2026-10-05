@@ -141,12 +141,18 @@ function normalizeValue(column: Json, kind: string, value: JsonValue): JsonValue
 // its id, either spelling of the id as `propByRef` takes it, and the value
 // lands under the column's name. A key that names no column is refused with
 // live's words, and the caller writes nothing: "property names or IDs must
-// match the parent data source's schema" (API reference, create a page).
+// match the parent data source's schema" (API reference, create a page). Two
+// keys naming one column (its name and its id) are refused in the fake's
+// words, rather than one value silently winning.
 export function normalizeProperties(properties: Json, schema: Json): Array<[string, Json]> | Reply {
   const out: Array<[string, Json]> = []
+  const named = new Map<string, string>()
   for (const [ref, value] of Object.entries(properties)) {
     const key = columnNameOf(schema, ref)
     if (key === undefined) return validation(`${ref} is not a property that exists.`)
+    const first = named.get(key)
+    if (first !== undefined) return validation(`${first} and ${ref} both name the property ${key}.`)
+    named.set(key, ref)
     const column = asObject(schema[key])
     const columnType = typeof column.type === 'string' ? column.type : undefined
     // A bare array under the column name is a shorthand the fake accepts; it
