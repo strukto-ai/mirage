@@ -17,16 +17,7 @@ import logging
 
 import pytest
 
-from mirage.core.dropbox.fingerprint import result_token, token_of
-
-
-@pytest.mark.parametrize(
-    "value, token",
-    [("abc", "abc"), ("", None), (None, None), (7, None)],
-    ids=["hash", "empty", "absent", "number"],
-)
-def test_only_a_non_empty_string_is_a_token(value, token):
-    assert token_of(value) == token
+from mirage.core.dropbox.fingerprint import result_token
 
 
 @pytest.mark.parametrize(
@@ -39,10 +30,20 @@ def test_only_a_non_empty_string_is_a_token(value, token):
         ),
         (None, None, False),
         (json.dumps({"server_modified": "t"}), None, False),
+        (json.dumps({"content_hash": ""}), None, False),
+        (json.dumps({"content_hash": 7}), None, False),
         ("not json", None, True),
         (json.dumps(["a"]), None, True),
     ],
-    ids=["hash", "absent", "no-hash", "not-json", "not-object"],
+    ids=[
+        "hash",
+        "absent",
+        "no-hash",
+        "empty-hash",
+        "number-hash",
+        "not-json",
+        "not-object",
+    ],
 )
 def test_a_result_header_names_its_content_hash(raw, token, warns, caplog):
     # Never the modified stamp: stat stamps content_hash. Dropbox always

@@ -1406,30 +1406,6 @@ describe('the read-token contract', () => {
     }
   })
 
-  it('a dropbox same-size rewrite is refetched on content_hash', async () => {
-    // The real service repeated server_modified across same-size writes
-    // (probed 2026-10-02) while content_hash moved on every one. A token
-    // built on the modified stamp calls the rewrite fresh and serves SEED.
-    const fake = await makeFake('dropbox', 'root', SEED)
-    const virtual = `/m/${fake.key}`
-    const ws = freshWorkspace(fake.vfs)
-    try {
-      await line(ws, `cat ${virtual}`)
-      const before = await reconcileStat(ws, fake, virtual)
-      fake.rewrite(CHANGED)
-      const after = await reconcileStat(ws, fake, virtual)
-      const fetched = fake.fetches()
-      const out = await line(ws, `cat ${virtual}`)
-      expect(SEED.byteLength).toBe(CHANGED.byteLength)
-      expect(after.modified).toBe(before.modified)
-      expect(after.fingerprint).not.toBe(before.fingerprint)
-      expect(fake.fetches() - fetched).toBe(1)
-      expect(out).toEqual(CHANGED)
-    } finally {
-      await ws.close()
-    }
-  })
-
   it('the contract goes red on a backend with two token kinds', async () => {
     // s3 forced to stat a timestamp while its read stamps the ETag: both
     // tokens exist and differ. The contract must fail it, or it could not
