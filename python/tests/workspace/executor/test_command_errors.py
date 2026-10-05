@@ -72,11 +72,17 @@ async def test_nested_mount_failure_keeps_the_line(name, caplog):
         raise error
 
     ws = Workspace({"/bad": RAMVFS(), "/good": RAMVFS()}, mode="exec")
-    ws.mount("/bad").register_fns([failing_readdir])
+    # find and du hand each mount's part to that mount's own command;
+    # ls -R lists the nested mount through the dispatcher.
+    ws.mount("/bad").register_fns(
+        [failing_readdir]
+        if name == "ls -R"
+        else [failing_command(name, error, lazy=False)]
+    )
     try:
         await ws.shell("echo data >/good/file")
         result = await ws.shell(
-            f"echo before; {name} / 2>/dev/null; echo after=$?"
+            f"echo before; {name} / >/dev/null 2>&1; echo after=$?"
         )
         assert result.stdout == b"before\nafter=1\n"
         assert not result.stderr
@@ -87,6 +93,8 @@ async def test_nested_mount_failure_keeps_the_line(name, caplog):
         result = await ws.shell(f"{name} /")
         assert result.stderr == f"{name.split()[0]}: remote failure\n".encode()
         assert result.exit_code == 1
+        # A mount's own find or du fails alone; the other mounts answer.
+        assert (b"/good" in result.stdout) == (name != "ls -R")
     finally:
         await ws.close()
 

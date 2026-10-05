@@ -216,8 +216,7 @@ export class FlagView {
     return []
   }
 
-  // Mirrors Python's `as_paths`: a line parsed for a cross-mount strategy
-  // keeps its resolved strings, so it answers empty there.
+  // PATH-typed flag values arrive as PathSpec. Mirrors Python's `as_paths`.
   asPaths(name: string): PathSpec[] {
     const value = this.flags[this.key(name)]
     if (Array.isArray(value)) {

@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_chmod_both_mounts",
+      "seq": 9900009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf a > /data/xm_chmod && printf b > /data2/xm_chmod && chmod 640 /data/xm_chmod /data2/xm_chmod && stat -c \"%a\" /data/xm_chmod /data2/xm_chmod",
+      "expect": {
+        "exit": 0,
+        "stdout": "640\n640\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_chmod_continues_after_missing",
+      "seq": 9900010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chmod 640 /data/xm_chmod_missing /data2/xm_chmod; echo status:$?; stat -c \"%a\" /data2/xm_chmod",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:1\n640\n",
+        "stderr": "chmod: cannot access '/data/xm_chmod_missing': No such file or directory\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "xm_auto_column_global_width",
+      "seq": 963000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a 1\\n' > /data/xm_col; printf 'long 2\\n' > /data2/xm_col; column -t /data/xm_col /data2/xm_col",
+      "expect": {
+        "exit": 0,
+        "stdout": "a     1\nlong  2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

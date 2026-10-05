@@ -30,6 +30,37 @@
         "stdout": "00000000: 6162 6364                                abcd\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_xxd_across_mounts",
+      "seq": 963218,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab' > /data/xm_rt_xx; xxd /data/xm_rt_xx > /data2/xm_rt_xx.hex; cat /data2/xm_rt_xx.hex; xxd -r /data2/xm_rt_xx.hex; rm /data/xm_rt_xx /data2/xm_rt_xx.hex",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 6162                                     ab\nab",
+        "stderr": ""
+      }
     }
   ]
 }

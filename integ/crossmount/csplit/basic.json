@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_csplit_across_mounts",
+      "seq": 963202,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf '1\\n2\\n3\\n' > /data/xm_rt_cs; csplit -f /data2/xm_rt_cs /data/xm_rt_cs 2; cat /data2/xm_rt_cs00; cat /data2/xm_rt_cs01; rm /data/xm_rt_cs /data2/xm_rt_cs00 /data2/xm_rt_cs01",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n4\n1\n2\n3\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

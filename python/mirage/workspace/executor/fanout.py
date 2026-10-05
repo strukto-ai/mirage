@@ -12,14 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
 import logging
+from typing import Any
 
 from mirage.commands.builtin.generic.crossmount.constants import (
     DISPATCH_BUILDERS,
 )
+from mirage.commands.builtin.generic.crossmount.du import run_du
+from mirage.commands.builtin.generic.crossmount.find import run_find
 from mirage.commands.builtin.generic.crossmount.route import handle_cross_mount
 from mirage.commands.builtin.generic.crossmount.search import walks_mounts
-from mirage.commands.builtin.generic.crossmount.types import RunSingle
+from mirage.commands.builtin.generic.crossmount.types import (
+    CrossResult,
+    RunSingle,
+)
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import FlagValue
@@ -43,6 +50,52 @@ from mirage.workspace.types import ExecutionNode
 logger = logging.getLogger(__name__)
 
 _TRAVERSAL_CMDS = frozenset({"find", "du"})
+
+
+async def _own_part(
+    run_single: RunSingle,
+    registry: MountRegistry,
+    dispatch: DispatchFn,
+    cwd: str,
+    ns: NamespaceView | None,
+    cmd_name: str,
+    paths: list[PathSpec],
+    texts: list[str],
+    flag_kwargs: dict[str, FlagValue],
+    **options: Any,
+) -> CrossResult:
+    """One mount's part of a find or du, on the command that mount serves.
+
+    A mount that registers no find or du of its own still answers its
+    part through the generic walk over the dispatcher, since both read
+    only the metadata every mount serves.
+
+    Args:
+        run_single (RunSingle): The executor's single-mount runner.
+        registry (MountRegistry): Registry holding the mount table.
+        dispatch (DispatchFn): Workspace operation dispatcher.
+        cwd (str): Session working directory.
+        ns (NamespaceView | None): Name-plane facts.
+        cmd_name (str): find or du.
+        paths (list[PathSpec]): The part's start point.
+        texts (list[str]): Positional text operands.
+        flag_kwargs (dict[str, FlagValue]): Parsed flags.
+        **options (Any): Forwarded to ``run_single``.
+    """
+    try:
+        await registry.resolve_mount(cmd_name, paths, cwd)
+    except MountCommandUnsupported:
+        return await run_dispatch(
+            DISPATCH_BUILDERS[cmd_name],
+            paths,
+            texts,
+            flag_kwargs,
+            dispatch,
+            cwd,
+            ns,
+            options.get("stdin"),
+        )
+    return await run_single(cmd_name, paths, texts, flag_kwargs, **options)
 
 
 def _should_fan_out(
@@ -92,10 +145,12 @@ async def _fan_out_traversal(
     dispatch: DispatchFn | None = None,
     native: RunSingle | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Compose a traversal using native search or one metadata walk.
+    """Compose a traversal over the mounts inside its operands.
 
-    No output is inspected to recover paths or repair depth and totals.
-    Each generic sees the mounted tree through the same dispatcher.
+    Each mount's own command answers for its part: find and du from
+    every mount's structured rows and measurements, a search from its
+    owned scopes. No output is inspected to recover paths or repair
+    depth and totals.
 
     Args:
         cmd_name (str): find, du, ls or a recursive grep/rg.
@@ -110,22 +165,28 @@ async def _fan_out_traversal(
         ns (NamespaceView | None): Name-plane facts.
         session_view (SessionView | None): The session plane's door.
         dispatch (DispatchFn | None): Workspace operation dispatcher.
-        native (RunSingle | None): Single-mount runner for the native
-            search a scope delegates to.
+        native (RunSingle | None): Single-mount runner each mount's part
+            of the walk runs on.
     """
     if dispatch is None or native is None:
         raise ValueError("traversal requires dispatcher and native execution")
+    part = functools.partial(_own_part, native, registry, dispatch, cwd, ns)
     try:
-        if cmd_name in ("find", "du"):
-            stdout, io = await run_dispatch(
-                DISPATCH_BUILDERS[cmd_name],
+        if cmd_name == "find":
+            stdout, io = await run_find(
+                paths, texts, flag_kwargs, dispatch, part, cwd, ns, stdin
+            )
+        elif cmd_name == "du":
+            stdout, io = await run_du(
                 paths,
                 texts,
                 flag_kwargs,
                 dispatch,
+                part,
                 cwd,
                 ns,
                 stdin,
+                nested=True,
             )
         else:
             stdout, io = await handle_cross_mount(
@@ -225,6 +286,20 @@ async def run_with_fanout(
             native run over the merged bytes).
     """
     if not _should_fan_out(cmd_name, paths, flag_kwargs, registry):
+        if cmd_name in _TRAVERSAL_CMDS and dispatch is not None:
+            return await _own_part(
+                run_single,
+                registry,
+                dispatch,
+                cwd,
+                ns,
+                cmd_name,
+                paths,
+                texts,
+                flag_kwargs,
+                stdin=stdin,
+                resolve_hint=resolve_hint,
+            )
         return await run_single(
             cmd_name,
             paths,

@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_unlink_intermediate_symlink",
+      "seq": 9900018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data2/xm_unlink_dir && printf keep > /data2/xm_unlink_dir/f && ln -s /data2/xm_unlink_dir /data/xm_unlink_link && unlink /data/xm_unlink_link/f && test ! -e /data2/xm_unlink_dir/f && test -L /data/xm_unlink_link && echo removed",
+      "expect": {
+        "exit": 0,
+        "stdout": "removed\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_unlink_final_symlink",
+      "seq": 9900019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf keep > /data2/xm_unlink_keep && ln -s /data2/xm_unlink_keep /data/xm_unlink_final && unlink /data/xm_unlink_final && cat /data2/xm_unlink_keep && test ! -L /data/xm_unlink_final",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep",
+        "stderr": ""
+      }
+    }
+  ]
+}

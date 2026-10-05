@@ -24,7 +24,7 @@ import { runTee } from './tee.ts'
 import { runUnzip } from './unzip.ts'
 import { runWc } from './wc.ts'
 import { runZip } from './zip_cmd.ts'
-import { DISPATCH_BUILDERS } from '../constants.ts'
+import { DISPATCH_BUILDERS, RELAY_COMMANDS } from '../constants.ts'
 import { runDispatch } from '../../../generic_bind/dispatch.ts'
 import type { CrossResult, DispatchFn, RunSingle } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
@@ -62,6 +62,8 @@ export async function runRelay(
   cwd = '/',
   argv: readonly string[] = [],
 ): Promise<CrossResult> {
+  if (!RELAY_COMMANDS.has(cmdName))
+    throw new Error(`Unsupported cross-mount relay command: ${cmdName}`)
   if (cmdName === 'awk') return runAwk(scopes, textArgs, flagKwargs, runSingle, stdin)
   if (cmdName === 'sed') return runSed(scopes, textArgs, flagKwargs, dispatch, stdin, cwd, argv)
   if (cmdName === 'wc') return runWc(scopes, flagKwargs, dispatch, runSingle)

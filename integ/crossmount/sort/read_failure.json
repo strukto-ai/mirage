@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xrf_sort",
+      "seq": 963101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort /data/xrf.txt /data2/xrf_nope.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "sort: cannot read: /data2/xrf_nope.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "xrf_sort_dir",
+      "seq": 963107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort /data/xrf.txt /data2/xrf_dir",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "sort: read failed: /data2/xrf_dir: Is a directory\n"
+      }
+    }
+  ]
+}

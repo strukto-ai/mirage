@@ -50,7 +50,13 @@ export async function mkdir(
     await invalidateAncestors(p)
     return
   }
-  const parentStat = await stat(accessor, parentPath(p), index)
+  let parentStat
+  try {
+    parentStat = await stat(accessor, parentPath(p), index)
+  } catch (exc) {
+    if ((exc as { code?: string }).code === 'ENOENT') throw enoent(p.virtual)
+    throw exc
+  }
   if (parentStat.type !== FileType.DIRECTORY) {
     throw enotdir(p.virtual)
   }

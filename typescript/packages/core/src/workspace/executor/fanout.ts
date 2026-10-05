@@ -14,6 +14,8 @@
 
 import { pathAllowed } from '../../context/session_context.ts'
 import { DISPATCH_BUILDERS } from '../../commands/builtin/generic/crossmount/constants.ts'
+import { runDu } from '../../commands/builtin/generic/crossmount/du.ts'
+import { runFind } from '../../commands/builtin/generic/crossmount/find.ts'
 import { handleCrossMount } from '../../commands/builtin/generic/crossmount/route.ts'
 import { walksMounts } from '../../commands/builtin/generic/crossmount/search.ts'
 import type { RunSingle, DispatchFn } from '../../commands/builtin/generic/crossmount/types.ts'
@@ -34,6 +36,42 @@ import { ExecutionNode } from '../types.ts'
 
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 
+/**
+ * One mount's part of a find or du, on the command that mount serves. A mount
+ * that registers no find or du of its own still answers its part through the
+ * generic walk over the dispatcher, since both read only the metadata every
+ * mount serves.
+ */
+function ownPart(
+  runSingle: RunSingle,
+  registry: MountRegistry,
+  dispatch: DispatchFn,
+  cwd: string,
+  ns: NamespaceView | undefined,
+): RunSingle {
+  return async (cmdName, paths, texts, bag, opts) => {
+    try {
+      await registry.resolveMount(cmdName, paths, cwd)
+    } catch (err) {
+      if (!(err instanceof MountCommandUnsupported)) throw err
+      const builder = DISPATCH_BUILDERS.get(cmdName)
+      if (builder === undefined) throw new Error(`No dispatch builder for ${cmdName}`)
+      return runDispatch(
+        builder,
+        paths,
+        texts,
+        bag,
+        dispatch,
+        cwd,
+        ns,
+        opts?.stdin ?? null,
+        opts?.signal,
+      )
+    }
+    return runSingle(cmdName, paths, texts, bag, opts ?? {})
+  }
+}
+
 export function shouldFanOut(
   cmdName: string,
   paths: readonly PathSpec[],
@@ -52,7 +90,12 @@ export function shouldFanOut(
   return walksMounts(cmdName, flagKwargs)
 }
 
-/** Native content search or one metadata traversal over the mounted tree. */
+/**
+ * Compose a traversal over the mounts inside its operands. Each mount's own
+ * command answers for its part: find and du from every mount's structured
+ * rows and measurements, a search from its owned scopes. No output is
+ * inspected to recover paths or repair depth and totals.
+ */
 export async function fanOutTraversal(
   cmdName: string,
   paths: readonly PathSpec[],
@@ -74,20 +117,32 @@ export async function fanOutTraversal(
     throw new Error('traversal requires dispatcher and native execution')
   let stdout: ByteSource | null
   let io: IOResult
+  const part = ownPart(native, registry, dispatch, cwd, ns)
   try {
-    if (cmdName === 'find' || cmdName === 'du') {
-      const builder = DISPATCH_BUILDERS.get(cmdName)
-      if (builder === undefined) throw new Error(`No traversal builder for ${cmdName}`)
-      ;[stdout, io] = await runDispatch(
-        builder,
+    if (cmdName === 'find') {
+      ;[stdout, io] = await runFind(
         paths,
         texts,
         flagKwargs,
         dispatch,
+        part,
         cwd,
         ns,
         stdin,
         signal,
+      )
+    } else if (cmdName === 'du') {
+      ;[stdout, io] = await runDu(
+        paths,
+        texts,
+        flagKwargs,
+        dispatch,
+        part,
+        cwd,
+        ns,
+        stdin,
+        signal,
+        true,
       )
     } else {
       ;[stdout, io] = await handleCrossMount(
@@ -159,7 +214,11 @@ export function runWithFanout(
   return async (cmdName, paths, texts, flagKwargs, opts) => {
     const stdin = opts?.stdin ?? null
     if (!shouldFanOut(cmdName, paths, flagKwargs, registry)) {
-      return runSingle(cmdName, paths, texts, flagKwargs, opts ?? {})
+      const run =
+        TRAVERSAL_CMDS.has(cmdName) && dispatch !== undefined
+          ? ownPart(runSingle, registry, dispatch, cwd, ns)
+          : runSingle
+      return run(cmdName, paths, texts, flagKwargs, opts ?? {})
     }
     let mount: MountEntry | null = null
     try {

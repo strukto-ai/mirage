@@ -16,26 +16,10 @@ import { type ByteSource, IOResult } from '../../../../../io/types.ts'
 import type { NamespaceView } from '../../../../../ops/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import { rstripSlash } from '../../../../../utils/slash.ts'
 import { relayIsDirOf, relayWalkOf } from '../../../generic_bind/archive_io.ts'
 import { parseFlags, tarGeneric } from '../../tar/tar.ts'
 import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-
-// The positional operands among a line's path words. The scopes are every
-// path word in line order, an option's value among them. The parser gives
-// each option its word first (POSIX order, and the order -C needs), so the
-// same words go here and what is left are the operands, each with its own
-// spelling.
-function operands(scopes: readonly PathSpec[], taken: readonly string[]): PathSpec[] {
-  const rest = [...scopes]
-  for (const value of taken) {
-    const key = rstripSlash(value) || '/'
-    const index = rest.findIndex((scope) => (rstripSlash(scope.virtual) || '/') === key)
-    if (index >= 0) rest.splice(index, 1)
-  }
-  return rest
-}
 
 /**
  * Run a tar whose archive, operands and -C destination span mounts.
@@ -57,8 +41,7 @@ export async function runTar(
 ): Promise<CrossResult> {
   const parsed = parseFlags(flagKwargs)
   const archive = parsed.archive
-  const created =
-    archive !== null && parsed.create ? operands(scopes, [archive, ...parsed.directories]) : []
+  const created = archive !== null && parsed.create ? scopes : []
   const result = await tarGeneric(
     flatten(created),
     textArgs,

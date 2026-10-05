@@ -14,6 +14,8 @@
 
 import { expect, it } from 'vitest'
 import { commandStarted, runInCommandScope } from '../../../cache/index/scope.ts'
+import { command } from '../../config.ts'
+import { SPECS } from '../../spec/index.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
@@ -91,6 +93,7 @@ class Capped extends RAMVFS {
 }
 
 it('charges each mount its own cap in a du walk', async () => {
+  // A du that reports no measurement leaves the line to this walk.
   const enc = new TextEncoder()
   const outer = new Uncapped()
   const inner = new Capped()
@@ -100,6 +103,15 @@ it('charges each mount its own cap in a du walk', async () => {
     { '/a': outer, '/a/b': inner },
     { mode: MountMode.WRITE, shellParser: await getTestParser() },
   )
+  const spec = SPECS.du
+  if (spec === undefined) throw new Error('Missing spec: du')
+  for (const cmd of command({
+    name: 'du',
+    vfs: 'ram',
+    spec,
+    fn: (_accessor, paths) => [enc.encode(`0\t${paths[0]?.rawPath ?? ''}\n`), new IOResult()],
+  }))
+    ws.registry.mountFor('/a/b/x').register(cmd)
   try {
     const result = await ws.shell('du -a /a')
     const rows = new TextDecoder().decode(result.stdout).split('\n')
