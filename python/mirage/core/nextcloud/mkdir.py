@@ -50,9 +50,9 @@ async def mkdir(
     """
     key = nextcloud_key(path).rstrip("/")
     op = accessor.operator()
-    # MKCOL under a file is a 409 opendal leaves unnamed: look the levels
-    # up to tell ENOTDIR from EEXIST. Its 405 on a taken name reads as
-    # done, so a taken name is the doors' to refuse (refuse_taken).
+    # MKCOL under a file is a 409 opendal leaves unnamed, and opendal reads
+    # MKCOL's 405 on a taken name as done, a file holding the name
+    # included: look the levels up to tell ENOTDIR from EEXIST.
     try:
         await op.create_dir(key + "/")
     except Unexpected as exc:
@@ -68,3 +68,9 @@ async def mkdir(
         ) from exc
     await invalidate_after_write(path)
     await invalidate_ancestors(path)
+    try:
+        md = await op.stat(key)
+    except NotFound:
+        md = None
+    if md is not None and md.mode != EntryMode.Dir:
+        raise eexist(path)
