@@ -18,7 +18,7 @@ import type { MountView, NamespaceView } from '../../../../ops/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../utils/errors.ts'
-import { ownedScopes } from './scopes.ts'
+import { mountStarts, ownedScopes } from './scopes.ts'
 import type { OwnedScope } from './types.ts'
 
 const DIRS: Record<string, string[]> = {
@@ -91,4 +91,19 @@ it('drops walked entries admit refuses and keeps a refusal as its own scope', as
     ['/a/f', 'EACCES'],
     ['/a/m', null],
   ])
+})
+
+it('starts at the operand, then at each mount below it', () => {
+  const operand = new PathSpec({ virtual: '/a', directory: '/a', vfsPath: 'a', rawPath: './a' })
+  const starts = mountStarts(operand, ns())
+  expect(starts[0]).toBe(operand)
+  expect(starts.slice(1).map((s) => [s.virtual, s.rawPath])).toEqual([['/a/m', './a/m']])
+  const refused = new PathSpec({
+    virtual: '/a',
+    directory: '/a',
+    vfsPath: 'a',
+    walkError: 'ENOENT',
+  })
+  expect(mountStarts(refused, ns())).toEqual([refused])
+  expect(mountStarts(operand, undefined)).toEqual([operand])
 })

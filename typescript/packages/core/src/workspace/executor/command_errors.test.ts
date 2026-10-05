@@ -73,18 +73,27 @@ class FailingListing extends RAMVFS {
 }
 
 it.each(['find', 'du', 'ls -R'])('keeps nested %s failure inside the line', async (name) => {
+  // find and du hand each mount's part to that mount's own command; ls -R
+  // lists the nested mount through the dispatcher.
+  const listing = name === 'ls -R'
   const ws = new Workspace(
-    { '/bad': new FailingListing(), '/good': new RAMVFS() },
+    { '/bad': listing ? new FailingListing() : new RAMVFS(), '/good': new RAMVFS() },
     { mode: 'exec', shellParser: await getTestParser() },
   )
+  if (!listing) {
+    for (const cmd of failingCommand(name, new Error('remote failure'), false))
+      ws.registry.mountFor('/bad/f').register(cmd)
+  }
   try {
     await ws.shell('echo data >/good/file')
-    const result = await ws.shell(`echo before; ${name} / 2>/dev/null; echo after=$?`)
+    const result = await ws.shell(`echo before; ${name} / >/dev/null 2>&1; echo after=$?`)
     expect(DEC.decode(result.stdout)).toBe('before\nafter=1\n')
     expect(DEC.decode(result.stderr)).toBe('')
     const failed = await ws.shell(`${name} /`)
     expect(DEC.decode(failed.stderr)).toBe(`${name.split(' ')[0] ?? ''}: remote failure\n`)
     expect(failed.exitCode).toBe(1)
+    // A mount's own find or du fails alone; the other mounts answer.
+    expect(DEC.decode(failed.stdout).includes('/good')).toBe(!listing)
   } finally {
     await ws.close()
   }

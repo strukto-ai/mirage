@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import logging
 
 from mirage.commands.config import ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
@@ -39,6 +40,8 @@ from mirage.workspace.mount.namespace.probe import path_readdir, path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.session import SessionState, env_snapshot, session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 
 async def exec_node(
@@ -345,6 +348,7 @@ async def run_on_mount(
         # ValueError, or a filesystem OSError) becomes this command's
         # IOResult, prefixed with the command name like GNU (prog: message)
         # and the TypeScript executor.
+        logger.debug("%s failed", cmd_name, exc_info=True)
         return None, IOResult(
             exit_code=read_fail_exit(cmd_name, exc),
             stderr=format_fs_error(cmd_name, exc, paths),

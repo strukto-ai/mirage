@@ -1140,6 +1140,19 @@
         "stdout": "/data/xm_lnk\n/data/xm_loop\nrc=0\nxm_lnk@\nxm_loop@\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nest_depth_limits_count_across_the_mount",
+      "seq": 950090,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "mkdir -p /data/xm_depth/a /data/inner/xm_depth/b/c; printf 1 > /data/xm_depth/a/f; printf 22 > /data/inner/xm_depth/b/c/g; find /data -mindepth 3 -maxdepth 4 -path '*xm_depth*' | sort; du -d 2 /data | grep xm_depth; du -c -s /data/inner/xm_depth /data/xm_depth; rm -r /data/xm_depth /data/inner/xm_depth",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner/xm_depth/b\n/data/inner/xm_depth/b/c\n/data/xm_depth/a/f\n2\t/data/inner/xm_depth\n1\t/data/xm_depth/a\n1\t/data/xm_depth\n2\t/data/inner/xm_depth\n1\t/data/xm_depth\n3\ttotal\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -10,6 +10,7 @@ from mirage.commands.builtin.generic.du import (
 )
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.config import CommandOpts
+from mirage.io.types import SizedRun
 from mirage.ops.types import LinkView, MountView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -125,6 +126,31 @@ async def test_a_truncated_walk_warns_and_exits_one(cut, code):
     assert out.stdout == b"2\t/dir\n"
     assert out.exit_code == code
     assert (b"incomplete" in out.stderr) is cut
+
+
+@pytest.mark.asyncio
+async def test_du_reports_what_it_measured_unless_it_only_summed():
+    compute_size, compute_entries = _make_backend(
+        {"/dir/a.txt": 2, "/dir/s/b": 3}
+    )
+    paths = [_spec("/m/dir", "dir")]
+    out = await du(
+        paths,
+        compute_size=compute_size,
+        compute_entries=compute_entries,
+        flags=DuFlags(),
+        directories=lambda: ["/m/dir/e"],
+    )
+    assert out.runs == [
+        SizedRun((("/m/dir/a.txt", 2), ("/m/dir/s/b", 3)), ("/m/dir/e",))
+    ]
+    out = await du(
+        paths,
+        compute_size=compute_size,
+        compute_entries=compute_entries,
+        flags=DuFlags(s=True),
+    )
+    assert out.runs is None
 
 
 def test_rollup_handles_a_root_mount():

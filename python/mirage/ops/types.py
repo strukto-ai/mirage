@@ -147,13 +147,14 @@ class MountView:
     walker that must account for the whole subtree therefore has to be
     told, the same way ``LinkView`` tells it about symlinks.
 
-    A walk that spans mounts (find, du, ls -R over a nested mount) runs
-    once over the dispatcher, whose listings already name the mounts
-    below, so it is handed no descendant to avoid. A command bound to
-    one backend (tar, zip, du -x) reads the boundaries here and says
-    what it did with them: du excludes a descendant's subtree while
-    accounting, since its totals would otherwise count the parent
-    backend's shadowed keys.
+    A walk that spans mounts (find, du over a nested mount) lets each
+    mount's own command answer for its part and composes the parts
+    (find's rows, du's measurement); ls -R runs once over the
+    dispatcher, whose listings already name the mounts below. Each
+    part, like any command bound to one backend (tar, zip, du -x),
+    reads the boundaries here and says what it did with them: du
+    excludes a descendant's subtree while accounting, since its totals
+    would otherwise count the parent backend's shadowed keys.
 
     Two questions, two methods, because one name for both is what let a
     hidden mount reach a user. **Avoiding** a boundary needs every mount

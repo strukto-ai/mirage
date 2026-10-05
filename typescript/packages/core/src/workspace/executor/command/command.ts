@@ -38,9 +38,8 @@ import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
 import { abortable, mergeSignals } from '../../abort.ts'
 import { ExecutionNode } from '../../types.ts'
-import { aggregateFor, strategyFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
-import type { Cmd } from '../../../commands/builtin/generic/crossmount/types.ts'
-import { Strategy } from '../../../commands/builtin/generic/crossmount/types.ts'
+import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
+import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import {
@@ -473,9 +472,9 @@ export async function handleCommand(
     // but are not inputs. Parsed operands preserve aliases, order, and repeated path
     // values.
     let csScopes = ['sort', 'cp', 'mv', 'diff'].includes(cmdName) ? csParsed.paths : pathScopes
-    if (strategyFor(cmdName as Cmd) === Strategy.RELAY) {
-      // STREAM and FANOUT run each operand natively on its mount, which
-      // expands the operand's glob. RELAY sees every operand at once (wc's
+    if (RELAY_COMMANDS.has(cmdName)) {
+      // STREAM and FANOUT (and a custom command's reducer) run each operand
+      // natively on its mount, which expands the operand's glob. RELAY sees every operand at once (wc's
       // layout, cp's sources), so its glob operands must expand here; an
       // unmatched glob stays the literal word, like bash. One operand at a
       // time, so join's option loop sees each match where its glob was typed.

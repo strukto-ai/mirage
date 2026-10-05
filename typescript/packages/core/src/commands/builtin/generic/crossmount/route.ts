@@ -25,6 +25,7 @@ import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle }
 import { runRelay } from './relay/index.ts'
 import { runStream } from './stream/index.ts'
 import { runSearch } from './search.ts'
+import { runDu } from './du.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { readFailExitCode } from '../../../spec/usage.ts'
 import { UsageError } from '../../../errors.ts'
@@ -37,7 +38,9 @@ import { encodeText } from '../../../../shell/bytes.ts'
 // outputs, RELAY moves per-file data through the dispatcher into one shared
 // generic. STREAM and FANOUT execute through `runSingle`, so each mount
 // expands its own glob operands and uses its own native command
-// implementation.
+// implementation. grep, rg and du compose each mount's own command instead: a
+// search from its owned scopes (`runSearch`), du from its measurement
+// (`runDu`).
 export async function handleCrossMount(
   cmdName: string,
   scopes: PathSpec[],
@@ -87,6 +90,9 @@ export async function handleCrossMount(
         ns,
         input,
       )
+    }
+    if (cmdName === 'du') {
+      return await runDu(scopes, textArgs, flagKwargs, dispatch, runSingle, cwd, ns, input)
     }
     const cmd = cmdName as Cmd
     const strategy = strategyFor(cmd)

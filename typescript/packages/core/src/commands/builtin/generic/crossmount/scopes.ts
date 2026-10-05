@@ -62,3 +62,27 @@ export async function* ownedScopes(
     yield* ownedScopes(child, dispatch, ns, admit, true)
   }
 }
+
+/**
+ * The operand, then each visible mount root below it, as start points.
+ *
+ * Each start is one mount's own part of the operand's tree: the operand's
+ * mount answers for everything but the mounts inside it, and every mount
+ * below answers from its root, spelled as the operand was typed. A hidden
+ * mount is never a start, though it still shadows the parent backend's keys.
+ */
+export function mountStarts(path: PathSpec, ns: NamespaceView | undefined): PathSpec[] {
+  if (path.walkError !== null || ns?.mounts === undefined) return [path]
+  return [
+    path,
+    ...ns.mounts.visibleDescendants(path.virtual).map(
+      (root) =>
+        new PathSpec({
+          virtual: root,
+          directory: root,
+          vfsPath: root.replace(/^\/+|\/+$/g, ''),
+          rawPath: respellOne(root, path.virtual, path.rawPath),
+        }),
+    ),
+  ]
+}

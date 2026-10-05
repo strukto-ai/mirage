@@ -71,6 +71,20 @@ export class OpReport {
   }
 }
 
+/**
+ * One `du` operand as measured, before its rows are rendered.
+ *
+ * du derives every row from the files it counted, so a line spanning mounts
+ * renders each mount's own measurement as one tree, the way find's actions
+ * run over every mount's `matchedRuns`. `leaves` are every file counted, as
+ * (virtual path, bytes); `directories` the directories the walk met, which
+ * keep a row though no counted file lies under them.
+ */
+export interface SizedRun {
+  readonly leaves: readonly (readonly [string, number])[]
+  readonly directories: readonly string[]
+}
+
 export interface IOResultInit {
   stdout?: ByteSource | null
   stderr?: ByteSource | null
@@ -82,6 +96,7 @@ export interface IOResultInit {
   cache?: string[]
   producer?: Producer | null
   matchedRuns?: PathSpec[][] | null
+  sizedRuns?: SizedRun[] | null
   refusal?: Refusal | null
 }
 
@@ -91,6 +106,9 @@ export class IOResult {
   // repeated start point stays its own traversal (GNU walks each to
   // completion before the next).
   matchedRuns: PathSpec[][] | null
+  // du's measurement before rendering, one run per operand it could read, in
+  // operand order; null when the command supplied none.
+  sizedRuns: SizedRun[] | null
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
@@ -115,6 +133,7 @@ export class IOResult {
 
   constructor(init: IOResultInit = {}) {
     this.matchedRuns = init.matchedRuns ?? null
+    this.sizedRuns = init.sizedRuns ?? null
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
@@ -177,6 +196,7 @@ export class IOResult {
     const result = new IOResult({
       stdout: other.stdout,
       matchedRuns: other.matchedRuns,
+      sizedRuns: other.sizedRuns,
       stderr: mergedStderr,
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },

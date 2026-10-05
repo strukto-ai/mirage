@@ -22,11 +22,10 @@ from mirage.commands.builtin.generic.crossmount import (
     handle_cross_mount,
     is_cross_mount,
 )
-from mirage.commands.builtin.generic.crossmount.detect import (
-    aggregate_for,
-    strategy_for,
+from mirage.commands.builtin.generic.crossmount.constants import (
+    RELAY_COMMANDS,
 )
-from mirage.commands.builtin.generic.crossmount.types import Strategy
+from mirage.commands.builtin.generic.crossmount.detect import aggregate_for
 from mirage.commands.builtin.generic.program import (
     PROGRAM_FILE_COMMANDS,
     prepare_program,
@@ -506,9 +505,10 @@ async def handle_command(
             else path_scopes
         )
         cross_flags = cross_parsed.flag_kwargs
-        if strategy_for(cmd_name) is Strategy.RELAY:
-            # STREAM and FANOUT run each operand natively on its mount, which
-            # expands the operand's glob. RELAY sees every operand at once
+        if cmd_name in RELAY_COMMANDS:
+            # STREAM and FANOUT (and a custom command's reducer) run each
+            # operand natively on its mount, which expands the operand's
+            # glob. RELAY sees every operand at once
             # (wc's layout, cp's sources), so its glob operands must expand
             # here; an unmatched glob stays the literal word, like bash.
             # One operand at a time, so join's option loop sees each match

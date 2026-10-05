@@ -77,3 +77,29 @@ async def owned_scopes(
         )
         async for scope in owned_scopes(child, dispatch, ns, admit, True):
             yield scope
+
+
+def mount_starts(path: PathSpec, ns: NamespaceView | None) -> list[PathSpec]:
+    """The operand, then each visible mount root below it, as start points.
+
+    Each start is one mount's own part of the operand's tree: the
+    operand's mount answers for everything but the mounts inside it, and
+    every mount below answers from its root, spelled as the operand was
+    typed. A hidden mount is never a start, though it still shadows the
+    parent backend's keys.
+
+    Args:
+        path (PathSpec): One operand.
+        ns (NamespaceView | None): Mount ownership facts.
+    """
+    if path.walk_error is not None or ns is None or ns.mounts is None:
+        return [path]
+    return [path] + [
+        PathSpec(
+            virtual=root,
+            directory=root,
+            vfs_path=root.strip("/"),
+            raw_path=respell_one(root, path.virtual, path.raw_path),
+        )
+        for root in ns.mounts.visible_descendants(path.virtual)
+    ]

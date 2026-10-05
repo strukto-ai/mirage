@@ -12,9 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 import pytest
 
-from mirage.commands.builtin.generic.crossmount.scopes import owned_scopes
+from mirage.commands.builtin.generic.crossmount.scopes import (
+    mount_starts,
+    owned_scopes,
+)
 from mirage.ops.types import MountView, NamespaceView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import eacces
@@ -88,3 +93,13 @@ async def test_admit_drops_walked_entries_and_a_refusal_is_its_own_scope():
         (s.path.virtual, type(s.error).__name__ if s.error else None)
         for s in scopes
     ] == [("/a/d", None), ("/a/f", "PermissionError"), ("/a/m", None)]
+
+
+def test_mount_starts_are_the_operand_then_each_mount_below_it():
+    operand = replace(PathSpec.from_str_path("/a"), raw_path="./a")
+    starts = mount_starts(operand, _ns())
+    assert starts[0] is operand
+    assert [(s.virtual, s.raw_path) for s in starts[1:]] == [("/a/m", "./a/m")]
+    refused = replace(operand, walk_error="ENOENT")
+    assert mount_starts(refused, _ns()) == [refused]
+    assert mount_starts(operand, None) == [operand]
