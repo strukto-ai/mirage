@@ -18,7 +18,7 @@ import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import type { MakeGenericOpsOptions, OpsTable } from './types.ts'
 import { isUnsatisfiableRange, sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../utils/glob_walk.ts'
-import { einval, eisdir, isMissingPath } from '../../utils/errors.ts'
+import { eexist, einval, eisdir, isEnotdir, isMissingPath } from '../../utils/errors.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 
 const expectPathSpec = (value: unknown, op: string): PathSpec => {
@@ -47,6 +47,33 @@ const expectOffset = (value: unknown, path: PathSpec): number => {
   }
   if (!Number.isInteger(value) || value < 0) throw einval(path)
   return value
+}
+
+/**
+ * Whether a mkdir finds its directory already made.
+ *
+ * mkdir(2) refuses a name that exists, file or directory, and `mkdir -p`
+ * passes only a directory. Not every backend's create says so (a Graph 409
+ * on a folder, Nextcloud's MKCOL 405, SFTP under `-p`), so both doors look
+ * the name up before the create. A name that cannot be looked up is left to
+ * the create, which answers ENOENT or ENOTDIR. Mirrors Python's
+ * `mkdir_exists`.
+ */
+export async function mkdirExists<A>(
+  stat: (accessor: A, path: PathSpec) => unknown,
+  accessor: A,
+  path: PathSpec,
+  parents: boolean,
+): Promise<boolean> {
+  let row: unknown
+  try {
+    row = await stat(accessor, path)
+  } catch (error) {
+    if (isMissingPath(error) || isEnotdir(error)) return false
+    throw error
+  }
+  if (parents && (row as { type?: unknown } | null)?.type === FileType.DIRECTORY) return true
+  throw eexist(path)
 }
 
 /**
@@ -279,10 +306,13 @@ export function makeGenericOps<A extends Accessor>(
     // for backends whose core requires the flag (databricks_volume).
     emit(
       'mkdir',
-      (accessor, path, _args, kwargs) =>
-        options.mkdirParents || kwargs.parents === true
+      async (accessor, path, _args, kwargs) => {
+        const parents = kwargs.parents === true
+        if (await mkdirExists(table.stat, asA(accessor), path, parents)) return
+        await (options.mkdirParents || parents
           ? mkdir(asA(accessor), path, true)
-          : mkdir(asA(accessor), path),
+          : mkdir(asA(accessor), path))
+      },
       true,
     )
   }

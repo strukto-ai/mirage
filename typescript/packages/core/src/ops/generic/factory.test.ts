@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { Accessor } from '../../accessor/base.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { enoent } from '../../utils/errors.ts'
 import { makeGenericOps } from './factory.ts'
 import type { OpsTable } from './types.ts'
 
@@ -27,6 +28,8 @@ function appendOp(table: OpsTable): ReturnType<typeof makeGenericOps>[number] {
   if (op === undefined) throw new Error('no append op emitted')
   return op
 }
+
+const missing = vi.fn(() => Promise.reject(enoent(PATH)))
 
 const makeTable = (extra: Partial<OpsTable> = {}): OpsTable => ({
   readdir: vi.fn(() => Promise.resolve(['/x/a.txt'])),
@@ -141,7 +144,7 @@ describe('makeGenericOps', () => {
 
   it('mkdirParents forwards the parents flag', async () => {
     const mkdir = vi.fn()
-    const ops = makeGenericOps('x', makeTable({ mkdir }), {
+    const ops = makeGenericOps('x', makeTable({ mkdir, stat: missing }), {
       mkdirParents: true,
     })
     await ops.find((o) => o.name === 'mkdir')?.fn(ACCESSOR, PATH, [], {})
@@ -153,12 +156,28 @@ describe('makeGenericOps', () => {
     // dispatch kwarg; python's registry hands kwargs to the op, so the
     // adapter must read it rather than drop it.
     const mkdir = vi.fn()
-    const ops = makeGenericOps('x', makeTable({ mkdir }))
+    const ops = makeGenericOps('x', makeTable({ mkdir, stat: missing }))
     const fn = ops.find((o) => o.name === 'mkdir')?.fn
     await fn?.(ACCESSOR, PATH, [], { parents: true })
     expect(mkdir).toHaveBeenCalledWith(ACCESSOR, PATH, true)
     await fn?.(ACCESSOR, PATH, [], {})
     expect(mkdir).toHaveBeenLastCalledWith(ACCESSOR, PATH)
+  })
+
+  // A backend whose create passes a taken name still answers EEXIST.
+  it.each([
+    [FileType.DIRECTORY, false, true],
+    [FileType.FILE, false, true],
+    [FileType.FILE, true, true],
+    [FileType.DIRECTORY, true, false],
+  ])('mkdir of a %s with parents=%s is refused: %s', async (kind, parents, refused) => {
+    const mkdir = vi.fn()
+    const stat = vi.fn(() => Promise.resolve(new FileStat({ name: 'a.txt', type: kind })))
+    const fn = makeGenericOps('x', makeTable({ mkdir, stat })).find((o) => o.name === 'mkdir')?.fn
+    const made = fn?.(ACCESSOR, PATH, [], { parents })
+    if (refused) await expect(made).rejects.toMatchObject({ code: 'EEXIST' })
+    else await made
+    expect(mkdir).not.toHaveBeenCalled()
   })
 
   it('emulated truncate pads and cuts through readBytes + write', async () => {
