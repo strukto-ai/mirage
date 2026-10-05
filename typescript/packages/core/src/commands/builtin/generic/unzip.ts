@@ -94,6 +94,40 @@ const REPLACE_PROMPT = (name: string): string =>
 const REPLACE_EOF = ' NULL\n(EOF or read error, treating as "[N]one" ...)\n'
 const NEW_NAME = 'new name: '
 const INVALID_RESPONSE = (shown: string): string => `error:  invalid response [${shown}]\n`
+// Info-ZIP's mapname keeps every extracted path under the root: it drops a
+// leading slash on stderr, a `..` component on stdout, and refuses a name
+// that maps to nothing.
+const STRIPPED_ABSOLUTE = (name: string): string =>
+  `warning:  stripped absolute path spec from ${name}\n`
+const SKIPPED_DOTDOT = (name: string): string =>
+  `warning:  skipped "../" path component(s) in ${name}`
+const MAPNAME_FAILED = (name: string): string => `mapname:  conversion of ${name} failed\n`
+const MAPNAME_EXIT = 2
+
+/**
+ * A member name as Info-ZIP's mapname turns it into a path: empty, `.` and
+ * `..` directory components are dropped, and a final `.` or `..` becomes `_`
+ * or `__`, so no mapped name climbs out of the extraction root. Returns the
+ * path (a directory keeps its trailing slash) and whether a `..` was
+ * dropped. Mirrors unzip.py.
+ */
+function mapName(name: string): [string, boolean] {
+  const directory = name.endsWith('/')
+  const parts = directory ? name.split('/').slice(0, -1) : name.split('/')
+  const kept: string[] = []
+  let skipped = false
+  parts.forEach((part, index) => {
+    const last = index === parts.length - 1 && !directory
+    if (part === '' || (!last && part === '.')) return
+    if (!last && part === '..') {
+      skipped = true
+      return
+    }
+    kept.push(part === '.' ? '_' : part === '..' ? '__' : part)
+  })
+  const mapped = kept.join('/')
+  return [directory && mapped !== '' ? mapped + '/' : mapped, skipped]
+}
 
 // An answer as Info-ZIP echoes one it refuses.
 function response(line: Uint8Array): string {
@@ -788,14 +822,41 @@ export async function unzipGeneric(
             errors.push(NEW_NAME)
             name = await answer()
           }
-          if (name !== null) outPath = base + '/' + new TextDecoder().decode(name)
+          if (name !== null) {
+            // Info-ZIP maps the new name as it maps a member's, except that it
+            // puts an absolute one under the working directory instead of -d;
+            // here every name stays under the extraction root.
+            const typed = new TextDecoder().decode(name)
+            const [renamed, skipped] = mapName(typed.replace(/^\/+/, ''))
+            if (skipped) {
+              exitCode = Math.max(exitCode, WARN_EXIT)
+              if (!quiet) outputLines.push(SKIPPED_DOTDOT(typed))
+            }
+            if (renamed !== '' && !renamed.endsWith('/')) outPath = base + '/' + renamed
+          }
           continue
         }
         errors.push(INVALID_RESPONSE(response(line)))
       }
     }
     for (const e of selected) {
-      const entryName = lstripSlash(e.name)
+      const name = lstripSlash(e.name)
+      if (name !== e.name) {
+        errors.push(STRIPPED_ABSOLUTE(e.name))
+        exitCode = Math.max(exitCode, WARN_EXIT)
+      }
+      const [entryName, skipped] = mapName(name)
+      if (skipped) {
+        exitCode = Math.max(exitCode, WARN_EXIT)
+        if (!quiet) outputLines.push(SKIPPED_DOTDOT(name))
+      }
+      if (entryName === '') {
+        if (!name.endsWith('/')) {
+          errors.push(MAPNAME_FAILED(entryName))
+          exitCode = Math.max(exitCode, MAPNAME_EXIT)
+        }
+        continue
+      }
       const outPath = base + '/' + rstripSlash(entryName)
       const isDir = e.name.endsWith('/')
       // A directory entry is the only record an empty directory leaves, so
@@ -831,6 +892,17 @@ export async function unzipGeneric(
       }
       const target = await destination(outPath)
       if (target === null) continue
+      const renamedDir = target.slice(0, target.lastIndexOf('/'))
+      if (target !== outPath && renamedDir !== chain) {
+        try {
+          await makeDirs(renamedDir)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          checkdirFailed = true
+          errors.push(checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name))
+          continue
+        }
+      }
       const content = await e.content()
       try {
         await write(makePathSpec(target), content)

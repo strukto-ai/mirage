@@ -95,6 +95,13 @@ REPLACE_PROMPT = "replace {0}? [y]es, [n]o, [A]ll, [N]one, [r]ename: "
 REPLACE_EOF = ' NULL\n(EOF or read error, treating as "[N]one" ...)\n'
 NEW_NAME = "new name: "
 INVALID_RESPONSE = "error:  invalid response [{0}]\n"
+# Info-ZIP's mapname keeps every extracted path under the root: it drops
+# a leading slash on stderr, a ``..`` component on stdout, and refuses a
+# name that maps to nothing.
+STRIPPED_ABSOLUTE = "warning:  stripped absolute path spec from {0}\n"
+SKIPPED_DOTDOT = 'warning:  skipped "../" path component(s) in {0}'
+MAPNAME_FAILED = "mapname:  conversion of {0} failed\n"
+MAPNAME_EXIT = 2
 WARN_EXIT = 1
 MISSING_EXIT = 2
 # Info-ZIP answers an option it does not know with its usage block and
@@ -441,6 +448,36 @@ async def _make_dirs(
         await mkdir_fn(PathSpec.from_str_path(dir_path), parents=True)
         return
     await ensure_dir(dir_path, mkdir_fn, stat, made)
+
+
+def _map_name(name: str) -> tuple[str, bool]:
+    """A member name as Info-ZIP's mapname turns it into a path.
+
+    Empty, ``.`` and ``..`` directory components are dropped, and a final
+    ``.`` or ``..`` becomes ``_`` or ``__``, so no mapped name climbs out
+    of the extraction root.
+
+    Args:
+        name (str): the name, its leading slashes already stripped.
+
+    Returns:
+        tuple[str, bool]: the path (a directory keeps its trailing slash)
+        and whether a ``..`` component was dropped.
+    """
+    directory = name.endswith("/")
+    parts = name.split("/")[:-1] if directory else name.split("/")
+    kept: list[str] = []
+    skipped = False
+    for index, part in enumerate(parts):
+        last = index == len(parts) - 1 and not directory
+        if part == "" or (not last and part == "."):
+            continue
+        if not last and part == "..":
+            skipped = True
+            continue
+        kept.append("_" if part == "." else "__" if part == ".." else part)
+    mapped = "/".join(kept)
+    return (mapped + "/" if directory and mapped else mapped), skipped
 
 
 def _response(line: bytes) -> str:
@@ -830,12 +867,36 @@ async def _run(
                     errors.append(NEW_NAME)
                     name = await answer()
                 if name is not None:
-                    out_path = base + "/" + name.decode(errors="replace")
+                    # Info-ZIP maps the new name as it maps a member's,
+                    # except that it puts an absolute one under the
+                    # working directory instead of -d; here every name
+                    # stays under the extraction root.
+                    typed = name.decode(errors="replace")
+                    renamed, skipped = _map_name(typed.lstrip("/"))
+                    if skipped:
+                        exit_code = max(exit_code, WARN_EXIT)
+                        if not q:
+                            output_lines.append(SKIPPED_DOTDOT.format(typed))
+                    if renamed and not renamed.endswith("/"):
+                        out_path = base + "/" + renamed
                 continue
             errors.append(INVALID_RESPONSE.format(_response(line)))
 
     for info in selected:
-        entry_name = info.filename.lstrip("/")
+        name = info.filename.lstrip("/")
+        if name != info.filename:
+            errors.append(STRIPPED_ABSOLUTE.format(info.filename))
+            exit_code = max(exit_code, WARN_EXIT)
+        entry_name, skipped = _map_name(name)
+        if skipped:
+            exit_code = max(exit_code, WARN_EXIT)
+            if not q:
+                output_lines.append(SKIPPED_DOTDOT.format(name))
+        if not entry_name:
+            if not name.endswith("/"):
+                errors.append(MAPNAME_FAILED.format(entry_name))
+                exit_code = max(exit_code, MAPNAME_EXIT)
+            continue
         out_path = base + "/" + entry_name.rstrip("/")
         # A directory entry is the only record an empty directory leaves,
         # so it has to be recreated even though nothing is written in it.
@@ -871,6 +932,18 @@ async def _run(
         target = await destination(out_path)
         if target is None:
             continue
+        renamed_dir = target.rsplit("/", 1)[0]
+        if target != out_path and renamed_dir != chain:
+            try:
+                await _make_dirs(renamed_dir, mkdir_fn, stat, made)
+            except FS_ERRORS as exc:
+                checkdir_failed = True
+                errors.append(
+                    checkdir_error(
+                        shown(error_path(exc)), fs_strerror(exc), info.filename
+                    )
+                )
+                continue
         out_path = target
         content = zf.read(info)
         try:

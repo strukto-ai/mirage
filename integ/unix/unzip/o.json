@@ -360,6 +360,72 @@
       "flags": [
         "o"
       ]
+    },
+    {
+      "id": "unzip_maps_member_names_under_the_root",
+      "seq": 16100125,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzdd/d && printf k > /data/uzdd/d/.keep && printf %s 'UEsDBBQAAAAAAAAAIVxEYnKWDAAAAAwAAAALAAAALi4vZXZpbC50eHQuLi9ldmlsLnR4dApQSwMEFAAAAAAAAAAhXOl5FX4OAAAADgAAAA0AAABhLy4uLy4uL2IudHh0YS8uLi8uLi9iLnR4dApQSwMEFAAAAAAAAAAhXPARV10JAAAACQAAAAgAAAAvYWJzLnR4dC9hYnMudHh0ClBLAwQUAAAAAAAAACFcVwFyPQoAAAAKAAAACQAAAC4vZG90LnR4dC4vZG90LnR4dApQSwMEFAAAAAAAAAAhXISs70kLAAAACwAAAAoAAAB4Ly4uL3kudHh0eC8uLi95LnR4dApQSwMEFAAAAAAAAAAhXFCdIEMFAAAABQAAAAQAAABhLy4uYS8uLgpQSwMEFAAAAAAAAAAhXMpSQCYDAAAAAwAAAAIAAAAuLi4uClBLAwQUAAAAAAAAACFcQdZp6QcAAAAHAAAABgAAAG9rLnR4dG9rLnR4dApQSwECFAMUAAAAAAAAACFcRGJylgwAAAAMAAAACwAAAAAAAAAAAAAAgAEAAAAALi4vZXZpbC50eHRQSwECFAMUAAAAAAAAACFc6XkVfg4AAAAOAAAADQAAAAAAAAAAAAAAgAE1AAAAYS8uLi8uLi9iLnR4dFBLAQIUAxQAAAAAAAAAIVzwEVddCQAAAAkAAAAIAAAAAAAAAAAAAACAAW4AAAAvYWJzLnR4dFBLAQIUAxQAAAAAAAAAIVxXAXI9CgAAAAoAAAAJAAAAAAAAAAAAAACAAZ0AAAAuL2RvdC50eHRQSwECFAMUAAAAAAAAACFchKzvSQsAAAALAAAACgAAAAAAAAAAAAAAgAHOAAAAeC8uLi95LnR4dFBLAQIUAxQAAAAAAAAAIVxQnSBDBQAAAAUAAAAEAAAAAAAAAAAAAACAAQEBAABhLy4uUEsBAhQDFAAAAAAAAAAhXMpSQCYDAAAAAwAAAAIAAAAAAAAAAAAAAIABKAEAAC4uUEsBAhQDFAAAAAAAAAAhXEHWaekHAAAABwAAAAYAAAAAAAAAAAAAAIABSwEAAG9rLnR4dFBLBQYAAAAACAAIAK8BAAB2AQAAAAA=' | base64 -d > /data/uzdd/m.zip && cd /data/uzdd && unzip -d d m.zip; echo rc=$?; cd d && find . -type f | sort; cd / && rm -r /data/uzdd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  m.zip\nwarning:  skipped \"../\" path component(s) in ../evil.txt\n extracting: d/evil.txt              \nwarning:  skipped \"../\" path component(s) in a/../../b.txt\n extracting: d/a/b.txt               \n extracting: d/abs.txt               \n extracting: d/dot.txt               \nwarning:  skipped \"../\" path component(s) in x/../y.txt\n extracting: d/x/y.txt               \n extracting: d/a/__                  \n extracting: d/__                    \n extracting: d/ok.txt                \nrc=1\n./.keep\n./__\n./a/__\n./a/b.txt\n./abs.txt\n./dot.txt\n./evil.txt\n./ok.txt\n./x/y.txt\n",
+        "stderr": "warning:  stripped absolute path spec from /abs.txt\n"
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "unzip_maps_a_renamed_file_under_the_root",
+      "seq": 16100126,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/uzrn/o && printf 'old\\n' > /data/uzrn/o/a.txt && printf %s 'UEsDBAoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAYS50eHRuZXcKUEsDBAoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAYi50eHRuZXdiClBLAQIeAwoAAAAAAAAAIVzIUAo0BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAAAAIVzup3gKBQAAAAUAAAAFAAAAAAAAAAEAAACkgScAAABiLnR4dFBLBQYAAAAAAgACAGYAAABPAAAAAAA=' | base64 -d > /data/uzrn/z.zip && cd /data/uzrn/o && printf 'r\\n../up.txt\\n' | unzip ../z.zip; echo rc=$?; ls; ls ..; cd / && rm -r /data/uzrn)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  ../z.zip\nwarning:  skipped \"../\" path component(s) in ../up.txt\n extracting: up.txt                  \n extracting: b.txt                   \nrc=1\na.txt\nb.txt\nup.txt\no\nz.zip\n",
+        "stderr": "replace a.txt? [y]es, [n]o, [A]ll, [N]one, [r]ename: new name: "
+      },
+      "flags": []
     }
   ]
 }
