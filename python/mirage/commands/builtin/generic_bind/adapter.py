@@ -38,7 +38,7 @@ from mirage.context import (
 )
 from mirage.context.session_context import require_paths_writable
 from mirage.io import IOResult
-from mirage.ops.generic.factory import mkdir_exists
+from mirage.ops.generic.factory import refuse_taken
 from mirage.ops.types import ChildMounts, LinkTargetStat, StatOverlay
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, pre_ops_gate
@@ -952,8 +952,7 @@ async def _mkdir_on_writable(
     **options: Any,
 ) -> Any:
     """mkdir on a writable region: a taken name is refused before the
-    create, as mkdir(2) does (``mkdir_exists``), and the create runs
-    only for a name that is not there.
+    create, as mkdir(2) does (``refuse_taken``).
 
     Args:
         fn (OperationFn): the raw backend mkdir.
@@ -963,10 +962,8 @@ async def _mkdir_on_writable(
         parents (bool): ``-p``.
         **options: forwarded untouched.
     """
-    if isinstance(path, PathSpec) and await mkdir_exists(
-        stat, accessor, path, parents
-    ):
-        return None
+    if isinstance(path, PathSpec):
+        await refuse_taken(stat, accessor, path, parents)
     return await fn(accessor, path, parents=parents, **options)
 
 

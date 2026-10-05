@@ -319,16 +319,22 @@ async def test_mkdir_parents_knob():
 async def test_mkdir_refuses_a_taken_name_before_the_create(
     kind, parents, refused
 ):
-    """A backend whose create passes a taken name still answers EEXIST."""
+    """A backend whose create passes a taken name still answers EEXIST.
+
+    A directory under ``-p`` still reaches the create, which writes the
+    marker an implied object-store directory lacks.
+    """
     row = FileStat(name="a.txt", type=kind)
     table = make_table(mkdir=AsyncMock(), stat=AsyncMock(return_value=row))
     mkdir = next(o for o in make_generic_ops("x", table) if o.name == "mkdir")
+    acc = NOOPAccessor()
     if refused:
         with pytest.raises(FileExistsError):
-            await mkdir.fn(NOOPAccessor(), PATH, parents=parents)
+            await mkdir.fn(acc, PATH, parents=parents)
+        table.mkdir.assert_not_awaited()
     else:
-        await mkdir.fn(NOOPAccessor(), PATH, parents=parents)
-    table.mkdir.assert_not_awaited()
+        await mkdir.fn(acc, PATH, parents=parents)
+        table.mkdir.assert_awaited_once_with(acc, PATH, parents=True)
 
 
 def test_native_truncate_wins_over_emulation():

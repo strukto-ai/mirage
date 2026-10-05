@@ -1323,4 +1323,4 @@ async def test_mode_guard_refuses_a_taken_name_on_a_writable_mount(
             await call
     finally:
         reset_mount_gate(gtoken)
-    assert made == (["/data/d"] if kind is None else [])
+    assert made == ([] if refused else ["/data/d"])

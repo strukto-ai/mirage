@@ -249,17 +249,19 @@ def _make_path_write(fn: OpFn) -> OpFn:
     return mutate
 
 
-async def mkdir_exists(
+async def refuse_taken(
     stat: OpFn, accessor: Accessor, path: PathSpec, parents: bool
-) -> bool:
-    """Whether a mkdir finds its directory already made.
+) -> None:
+    """Refuse a mkdir of a name that is taken, as mkdir(2) does.
 
     mkdir(2) refuses a name that exists, file or directory, and ``mkdir
     -p`` passes only a directory. Not every backend's create says so (a
     Graph 409 on a folder, Nextcloud's MKCOL 405, SFTP under ``-p``), so
-    both doors look the name up before the create. A name that cannot
-    be looked up is left to the create, which answers ENOENT or ENOTDIR.
-    Mirrors TS ``mkdirExists``.
+    both doors look the name up before the create. A directory under
+    ``-p`` still reaches the create, which keeps it durable (an object
+    store writes the marker of a directory only a key implied), and a
+    name that cannot be looked up is left to it too, to answer ENOENT or
+    ENOTDIR. Mirrors TS ``refuseTaken``.
 
     Args:
         stat (OpFn): the backend's stat.
@@ -273,9 +275,9 @@ async def mkdir_exists(
     try:
         row = await stat(accessor, path)
     except (FileNotFoundError, NotADirectoryError):
-        return False
+        return
     if parents and row.type == FileType.DIRECTORY:
-        return True
+        return
     raise eexist(path)
 
 
@@ -285,8 +287,7 @@ def _make_mkdir_parents(
 
     async def mkdir(accessor: Accessor, path: PathSpec, **kwargs) -> None:
         parents = kwargs.get("parents") is True
-        if await mkdir_exists(stat, accessor, path, parents):
-            return
+        await refuse_taken(stat, accessor, path, parents)
         await fn(accessor, path, parents=force_parents or parents)
 
     return mkdir

@@ -46,7 +46,7 @@ import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
 import { moveReveals } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { mkdirExists } from '../../../ops/generic/factory.ts'
+import { refuseTaken } from '../../../ops/generic/factory.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 
 import { FileType, MountMode, PathSpec, type FileStat, type WalkProbe } from '../../../types.ts'
@@ -475,8 +475,7 @@ async function mkdirOnReadOnly<A extends Accessor>(
 
 /**
  * mkdir on a writable region: a taken name is refused before the create, as
- * mkdir(2) does (`mkdirExists`), and the create runs only for a name that is
- * not there. Mirrors Python's `_mkdir_on_writable`.
+ * mkdir(2) does (`refuseTaken`). Mirrors Python's `_mkdir_on_writable`.
  */
 async function mkdirOnWritable<A extends Accessor>(
   mkdir: MkdirOp<A>,
@@ -485,7 +484,7 @@ async function mkdirOnWritable<A extends Accessor>(
   path: PathSpec,
   parents: boolean,
 ): Promise<void> {
-  if (await mkdirExists(stat, accessor, path, parents)) return
+  await refuseTaken(stat, accessor, path, parents)
   await mkdir(accessor, path, parents)
 }
 

@@ -1117,6 +1117,6 @@ it.each([
       if (refused) await expect(call).rejects.toMatchObject({ code: 'EEXIST' })
       else await call
     })
-    expect(made).toEqual(kind === null ? ['/data/d'] : [])
+    expect(made).toEqual(refused ? [] : ['/data/d'])
   },
 )

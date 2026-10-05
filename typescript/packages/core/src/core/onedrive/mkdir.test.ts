@@ -100,15 +100,18 @@ describe('OneDrive mkdir under a mount root the drive does not have yet', () => 
 describe('OneDrive mkdir names a refusal', () => {
   const plain = (): OneDriveAccessor => new OneDriveAccessor({ accessToken: 'token' })
 
+  // A folder another client made after the doors looked still 409s, and
+  // only -p passes it.
   it.each([
-    [{ folder: {} }, null],
-    [{ file: {} }, 'EEXIST'],
-  ])('a 409 on %j is %s', async (taken, code) => {
+    [{ folder: {} }, false, 'EEXIST'],
+    [{ folder: {} }, true, null],
+    [{ file: {} }, false, 'EEXIST'],
+  ])('a 409 on %j with parents=%s is %s', async (taken, parents, code) => {
     folderFetch(
       { [`${BASE}/root:/parent:/children`]: [409] },
       { [`${BASE}/root:/parent/new`]: taken },
     )
-    const made = mkdir(plain(), PathSpec.fromStrPath('/od/parent/new', 'parent/new'))
+    const made = mkdir(plain(), PathSpec.fromStrPath('/od/parent/new', 'parent/new'), parents)
     if (code === null) await expect(made).resolves.toBeUndefined()
     else await expect(made).rejects.toMatchObject({ code })
   })

@@ -177,7 +177,9 @@ describe('makeGenericOps', () => {
     const made = fn?.(ACCESSOR, PATH, [], { parents })
     if (refused) await expect(made).rejects.toMatchObject({ code: 'EEXIST' })
     else await made
-    expect(mkdir).not.toHaveBeenCalled()
+    // A directory under -p still reaches the create, which writes the marker
+    // an implied object-store directory lacks.
+    expect(mkdir).toHaveBeenCalledTimes(refused ? 0 : 1)
   })
 
   it('emulated truncate pads and cuts through readBytes + write', async () => {
