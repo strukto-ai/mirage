@@ -38,7 +38,11 @@ const FLOAT_CONVERSIONS = 'efgaEFGA'
 
 // GNU's long double, as the pins here measure it: IEEE binary128, arm64
 // Linux's, with 112 fraction bits under the lead bit and a least normal
-// exponent of -16382. x86-64's 80-bit one has the same exponent range.
+// exponent of -16382. GNU's own output depends on it: x86-64's 80-bit long
+// double keeps 64 bits with an explicit lead bit, so its %a prints 1 as
+// 0x8p-3 where arm64 prints 0x1p+0, and its overflow edge sits lower. No one
+// output matches both; mirage follows binary128 throughout, the form seq's %a
+// goldens were pinned in.
 const QUAD_FRACTION_BITS = 112
 const QUAD_MIN_EXPONENT = -16382
 
