@@ -208,7 +208,6 @@ async def test_readdir_channels_stores_created(accessor, index):
 
 @pytest.mark.asyncio
 async def test_readdir_channel_dates_with_created(accessor, index):
-
     await index.set_dir(
         "/channels",
         [
@@ -246,7 +245,6 @@ async def test_readdir_channel_dates_with_created(accessor, index):
 
 @pytest.mark.asyncio
 async def test_readdir_channel_dates_cached_in_entries(accessor, index):
-
     await index.set_dir(
         "/channels",
         [

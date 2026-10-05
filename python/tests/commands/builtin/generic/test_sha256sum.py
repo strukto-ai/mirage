@@ -12,7 +12,6 @@ def _spec(path: str) -> PathSpec:
 
 
 def _backend(files: dict[str, bytes]):
-
     async def stat(path: PathSpec) -> FileStat:
         if path.virtual not in files:
             raise FileNotFoundError(path.virtual)

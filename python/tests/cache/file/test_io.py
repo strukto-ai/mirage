@@ -313,7 +313,6 @@ async def test_apply_io_empty_io(cache):
 
 
 def _make_stream(data: bytes) -> CachableAsyncIterator:
-
     async def _gen():
         yield data
 
@@ -408,7 +407,6 @@ async def test_prefix_eviction_retires_a_fill_before_a_replacement_starts():
 
 
 def _make_chunked_stream(chunks: list[bytes]) -> CachableAsyncIterator:
-
     async def _gen():
         for c in chunks:
             yield c

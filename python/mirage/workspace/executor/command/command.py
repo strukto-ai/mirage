@@ -284,7 +284,7 @@ async def handle_command(
                     if dispatch is not None
                     else None
                 ),
-                ns=namespace_view_of(registry, namespace, dispatch),
+                ns=namespace_view_of(registry, namespace, dispatch, session),
                 session_view=session_view(session, registry.policies),
                 processes=registry.process_view(session)
                 if registry.process_view is not None
@@ -535,7 +535,7 @@ async def handle_command(
             routing_decision=routing_decision,
             execute_fn=execute_fn,
         )
-        cross_ns = namespace_view_of(registry, namespace, dispatch)
+        cross_ns = namespace_view_of(registry, namespace, dispatch, session)
         # A per-operand native run is single-mount by construction, so a
         # traversal operand holding nested mounts has to fan out inside
         # it, exactly as the same operand would on a line of its own.
@@ -692,7 +692,7 @@ async def handle_command(
         else b""
     )
 
-    single_ns = namespace_view_of(registry, namespace, dispatch)
+    single_ns = namespace_view_of(registry, namespace, dispatch, session)
     single_stat = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None

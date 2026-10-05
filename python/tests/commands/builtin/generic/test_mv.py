@@ -44,7 +44,6 @@ def _slashed(path: str) -> PathSpec:
 
 
 def _make_backend(files: dict[str, bytes], dirs: set[str]):
-
     async def stat(p) -> FileStat:
         k = _key(p)
         if k in dirs:
@@ -410,7 +409,6 @@ async def test_primitive_faults(
 
 
 def _dir_readdir(files, dirs):
-
     async def readdir(p) -> list[str]:
         base = _key(p) + "/" if _key(p) != "/" else "/"
         children = {

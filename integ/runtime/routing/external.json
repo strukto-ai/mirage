@@ -118,7 +118,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "cat: secret.txt: protected\n"
+            "stderr": "cat: secret.txt: Permission denied\n"
           }
         },
         {
@@ -126,7 +126,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "cat: secret.txt: protected\n"
+            "stderr": "cat: secret.txt: Permission denied\n"
           }
         },
         {
@@ -222,7 +222,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "grep: secret.txt: protected\n"
+            "stderr": "grep: secret.txt: Permission denied\n"
           }
         },
         {
@@ -278,7 +278,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: /vault/steal.py: credentials are never read by hand\n"
+            "stderr": "python3: /vault/steal.py: Permission denied\n"
           }
         },
         {
@@ -286,7 +286,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "node: /vault/steal.js: credentials are never read by hand\n"
+            "stderr": "node: /vault/steal.js: Permission denied\n"
           }
         },
         {
@@ -294,7 +294,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: /vault/steal.py: credentials are never read by hand\n"
+            "stderr": "python3: /vault/steal.py: Permission denied\n"
           }
         },
         {
@@ -302,7 +302,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: /vault/steal.py: credentials are never read by hand\n"
+            "stderr": "python3: /vault/steal.py: Permission denied\n"
           }
         },
         {
@@ -316,7 +316,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: steal.py: credentials are never read by hand\n"
+            "stderr": "python3: steal.py: Permission denied\n"
           }
         },
         {
@@ -324,7 +324,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "node: steal.js: credentials are never read by hand\n"
+            "stderr": "node: steal.js: Permission denied\n"
           }
         },
         {
@@ -389,7 +389,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python: ./-: credentials are never read by hand\n"
+            "stderr": "python: ./-: Permission denied\n"
           }
         },
         {
@@ -397,7 +397,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: /vault/-: credentials are never read by hand\n"
+            "stderr": "python3: /vault/-: Permission denied\n"
           }
         },
         {
@@ -405,7 +405,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "js: ./-: credentials are never read by hand\n"
+            "stderr": "js: ./-: Permission denied\n"
           }
         },
         {
@@ -413,7 +413,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "node: /vault/-: credentials are never read by hand\n"
+            "stderr": "node: /vault/-: Permission denied\n"
           }
         },
         {

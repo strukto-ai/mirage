@@ -47,7 +47,6 @@ def _doc(filename: str, length: int = 0) -> dict:
 
 
 def _fake_iter(docs):
-
     async def iter_latest(accessor, query):
         for doc in docs:
             yield doc
@@ -114,7 +113,6 @@ class _FakeColl:
 
 
 def _fake_prefix_iter(names: list[str]):
-
     async def iter_latest(accessor, query):
         pattern = re.compile(query["filename"]["$regex"]) if query else None
         for name in names:
@@ -125,7 +123,6 @@ def _fake_prefix_iter(names: list[str]):
 
 
 def _latest_of(names: list[str]):
-
     async def latest_file(accessor, key):
         return {"_id": ObjectId(), "length": 0} if key in names else None
 

@@ -35,7 +35,6 @@ async def _make_stream(*items):
 
 
 def test_exit_on_empty_with_items():
-
     async def _run():
         io = IOResult()
         stream = exit_on_empty(_make_stream(b"a", b"b"), io)
@@ -47,7 +46,6 @@ def test_exit_on_empty_with_items():
 
 
 def test_exit_on_empty_no_items():
-
     async def _run():
         io = IOResult()
         stream = exit_on_empty(_make_stream(), io)
@@ -59,7 +57,6 @@ def test_exit_on_empty_no_items():
 
 
 def test_exit_on_empty_single_item():
-
     async def _run():
         io = IOResult()
         stream = exit_on_empty(_make_stream(b"only"), io)
@@ -71,7 +68,6 @@ def test_exit_on_empty_single_item():
 
 
 def test_drain_consumes_without_accumulating():
-
     async def run():
         stream = _make_stream(b"hello", b"world")
         await drain(stream)
@@ -80,7 +76,6 @@ def test_drain_consumes_without_accumulating():
 
 
 def test_drain_none():
-
     async def run():
         await drain(None)
 
@@ -88,7 +83,6 @@ def test_drain_none():
 
 
 def test_drain_bytes():
-
     async def run():
         await drain(b"hello")
 
@@ -96,7 +90,6 @@ def test_drain_bytes():
 
 
 def test_async_chain_two_streams():
-
     async def run():
         a = _make_stream(b"hello ")
         b = _make_stream(b"world")
@@ -109,7 +102,6 @@ def test_async_chain_two_streams():
 
 
 def test_async_chain_with_none():
-
     async def run():
         a = None
         b = _make_stream(b"world")
@@ -122,7 +114,6 @@ def test_async_chain_with_none():
 
 
 def test_async_chain_with_bytes():
-
     async def run():
         a = b"hello "
         b = b"world"
@@ -135,7 +126,6 @@ def test_async_chain_with_bytes():
 
 
 def test_async_chain_empty():
-
     async def run():
         chunks = []
         async for chunk in async_chain([None, None]):

@@ -654,9 +654,9 @@ async def test_a_session_the_restore_creates_runs_under_the_default_profile():
         assert compiled is not None
         restored = target.get_session("s2")
         assert restored.profile == "default"
-        assert restored.commands is compiled.commands
-        assert restored.script is compiled.script
-        assert target._session_mgr.script_of("s2") is compiled.script
+        assert restored.commands is compiled.policies.commands
+        assert restored.script is compiled.policies.script
+        assert target._session_mgr.script_of("s2") is compiled.policies.script
         assert restored.env.get("PUBLIC_A") == "1"
         refused = await target.shell("rm /f.txt", session_id="s2")
         assert refused.exit_code == 126

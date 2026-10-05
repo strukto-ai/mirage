@@ -29,12 +29,15 @@ interface MountRootQuery {
  * What a command-plane refusal is about, which picks its voice. `command`
  * refuses the whole line in bash's own words, `<cmd>: Permission denied`,
  * exit 126, and the reason rides the result's `refusal` record instead.
- * `operand` refuses one operand and keeps the GNU voice `<cmd>: <reason>`
- * (the reason names the operand, as `rm: cannot remove 'x': ...` does),
- * exit 1, or the command's own fatal code where GNU differs (tar exits
- * 2). The exit code and errno derive from the plane and this scope,
- * never from a number a policy picks, so a document deny and a coded
- * one are indistinguishable. Mirrors the Python DenyScope.
+ * `operand` refuses one operand, exit 1, or the command's own fatal code
+ * where GNU differs (tar exits 2): with `Deny.path` set it prints the
+ * command's own GNU line for that operand and `Permission denied`, the
+ * reason riding the record; without it the reason is the diagnostic,
+ * `<cmd>: <reason>` (a built-in that words a POSIX error, as
+ * `rm: cannot remove 'x': ...` does). The exit code and errno derive
+ * from the plane and this scope, never from a number a policy picks, so
+ * a document deny and a coded one are indistinguishable. Mirrors the
+ * Python DenyScope.
  */
 export type DenyScope = 'command' | 'operand'
 
@@ -70,9 +73,29 @@ export interface Deny {
   policy?: string
   /** True when the chain refused on a policy's behalf because it raised. */
   failed?: boolean
-  /** The error a built-in refusal raises in place of EACCES (ENOENT for a
-   * hidden path, EROFS for a read-only one). */
+  /** The error a built-in refusal raises in place of EACCES (EROFS for a
+   * read-only path). */
   error?: Error
+  /** The operand an `operand` refusal is about, as typed: the door prints
+   * the command's own line for it and `Permission denied`, the reason
+   * riding the record. Absent leaves the reason as the diagnostic. */
+  path?: string
+}
+
+/**
+ * Answer as though the path did not exist.
+ *
+ * Outranks every other answer: a hidden path is absent, so there is
+ * nothing left to allow, refuse or ask about. Never rendered as a
+ * refusal: no reason, no `refusal` record, no explain line. The door
+ * throws `error` as the terminal would for a missing name (ENOENT, or
+ * EACCES for a create landing in a visible directory). The built-in hide
+ * answers it; no coded hook returns one. `kind` is the wire
+ * discriminant shared with Python.
+ */
+export interface Hide {
+  kind: 'hide'
+  error: Error
 }
 
 /**
@@ -136,8 +159,8 @@ export interface Ruling {
   readonly rule: CommandRule | null
   /**
    * The operand a path-scoped rule matched, as typed, which the GNU
-   * voice prints (`rm: letters.txt: <reason>`); null when the rule
-   * reaches the whole line.
+   * line names (`rm: cannot remove 'letters.txt': Permission denied`);
+   * null when the rule reaches the whole line.
    */
   readonly matchedPath: string | null
   /**
@@ -186,14 +209,14 @@ export interface Ask {
 }
 
 /**
- * The closed vocabulary of policy answers: a hook returns an Action to
- * state an opinion or null to stay silent. Deny refuses (first opinion
- * wins); Ask defers to the host (a Deny anywhere in the chain still
- * wins); Limit bounds (every opinion merges to the tightest,
- * Limit.aggr). Each hook accepts a fixed set of kinds (VALIDITY),
- * enforced at the seam.
+ * The closed vocabulary of policy answers, ranked by kind: Hide (the
+ * built-in's, the path is absent), then Deny (first opinion wins), then
+ * Ask (defers to the host; a Deny anywhere in the chain still wins),
+ * then Limit (every opinion merges to the tightest, Limit.aggr). A hook
+ * returns an Action to state an opinion or null to stay silent; each
+ * hook accepts a fixed set of kinds (VALIDITY), enforced at the seam.
  */
-export type Action = Deny | Limit | Ask
+export type Action = Hide | Deny | Limit | Ask
 
 /**
  * How far an answer reaches.

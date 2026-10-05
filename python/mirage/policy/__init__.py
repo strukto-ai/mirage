@@ -38,6 +38,7 @@ from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.policies import (
     Policies,
     describe_refusal,
+    policy_denied,
     post_execute_gate,
     post_ops_gate,
     pre_ops_gate,
@@ -138,6 +139,7 @@ __all__ = [
     "ProfileMount",
     "ProfileScript",
     "describe_refusal",
+    "policy_denied",
     "refusal_of",
     "render_deny",
     "render_pending",

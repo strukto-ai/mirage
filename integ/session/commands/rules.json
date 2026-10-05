@@ -10,7 +10,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: letters.txt: no deletes in the repo\n"
+        "stderr": "rm: cannot remove 'letters.txt': Permission denied\n"
       }
     },
     {
@@ -36,7 +36,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mkdir: /repo/sealed/deep: sealed until review\n"
+        "stderr": "mkdir: cannot create directory '/repo/sealed/deep': Permission denied\n"
       }
     },
     {
@@ -62,7 +62,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "echo: /repo/sealed/x: sealed until review\n"
+        "stderr": "echo: /repo/sealed/x: Permission denied\n"
       }
     },
     {
@@ -75,7 +75,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: private\n"
+        "stderr": "cat: /scratch/private/k: Permission denied\n"
       }
     },
     {
@@ -141,7 +141,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/locked/y: frozen\n"
+        "stderr": "cat: /scratch/locked/y: Permission denied\n"
       }
     },
     {
@@ -156,7 +156,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: cannot delete '/scratch/locked/y': frozen\n"
+        "stderr": "find: cannot delete '/scratch/locked/y': Permission denied\n"
       }
     },
     {
@@ -196,7 +196,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/k: private\n"
+        "stderr": "cat: /scratch/k: Permission denied\n"
       }
     },
     {
@@ -222,7 +222,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ls: .: private\n"
+        "stderr": "ls: cannot access '.': Permission denied\n"
       }
     },
     {
@@ -235,7 +235,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "grep: /scratch/private: private\n"
+        "stderr": "grep: /scratch/private: Permission denied\n"
       }
     },
     {
@@ -262,7 +262,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/anch.pem: anchored pem\n"
+        "stderr": "cat: /scratch/anch.pem: Permission denied\n"
       }
     },
     {
@@ -289,7 +289,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: private\n",
+        "stderr": "cat: /scratch/private/k: Permission denied\n",
         "check": "[]\n"
       },
       "check": {
@@ -306,7 +306,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: private/k: private\n"
+        "stderr": "cat: private/k: Permission denied\n"
       }
     },
     {
@@ -319,7 +319,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/k: private\n"
+        "stderr": "cat: /scratch/k: Permission denied\n"
       }
     },
     {
@@ -332,7 +332,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/private/k: private\n"
+        "stderr": "cat: /scratch/private/k: Permission denied\n"
       }
     },
     {
@@ -345,7 +345,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\n",
-        "stderr": "cat: /scratch/private/k: private\n"
+        "stderr": "cat: /scratch/private/k: Permission denied\n"
       },
       "explain_blind": true
     },
@@ -402,6 +402,48 @@
         "exit": 2,
         "stdout": "",
         "stderr": "awk: cannot open \"/scratch/lw/alias\" for output (Permission denied)\n"
+      }
+    },
+    {
+      "id": "cmd_find_names_a_refused_start_point_as_gnu",
+      "seq": 13740105,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "frozen",
+      "command": "find /scratch/locked/y",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: '/scratch/locked/y': Permission denied\n"
+      }
+    },
+    {
+      "id": "cmd_du_names_a_refused_start_point_as_gnu",
+      "seq": 13740106,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "frozen",
+      "command": "du /scratch/locked/y",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: cannot access '/scratch/locked/y': Permission denied\n"
+      }
+    },
+    {
+      "id": "cmd_touch_names_a_refused_target_as_gnu",
+      "seq": 13740107,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "frozen",
+      "command": "touch /scratch/locked/new",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "touch: cannot touch '/scratch/locked/new': Permission denied\n"
       }
     }
   ]

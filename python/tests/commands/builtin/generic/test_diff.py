@@ -48,7 +48,6 @@ async def _stat(path: PathSpec) -> FileStat:
 
 @pytest.mark.asyncio
 async def test_two_stdin_operands_are_one_file():
-
     async def unread(path: PathSpec) -> bytes:
         raise AssertionError(f"read {path.virtual}")
 

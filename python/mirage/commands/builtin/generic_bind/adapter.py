@@ -33,15 +33,19 @@ from mirage.context import (
     get_mount_gate,
     get_op_policies,
     get_walk_probe,
-    hidden_paths_intersect,
     hidden_refusal,
-    path_allowed,
-    path_rules_active,
+    session_visibility,
 )
 from mirage.context.session_context import require_paths_writable
 from mirage.io import IOResult
 from mirage.ops.generic.factory import refuse_taken
-from mirage.ops.types import ChildMounts, LinkTargetStat, StatOverlay
+from mirage.ops.namespace_view import paths_scoped
+from mirage.ops.types import (
+    ChildMounts,
+    LinkTargetStat,
+    NamespaceView,
+    StatOverlay,
+)
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, pre_ops_gate
 from mirage.runtime.types import DispatchFn
@@ -58,7 +62,7 @@ from mirage.utils.errors import (
     walk_refusal,
 )
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
-from mirage.utils.hidden import move_reveals
+from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.path import norm, parent
 from mirage.utils.remnants import remove_remnants, visible_below
 from mirage.vfs.types import (
@@ -625,9 +629,10 @@ def _refuse_hidden(path: PathSpec, create: bool) -> None:
         path (PathSpec): the operand being guarded.
         create (bool): whether the op creates the path it names.
     """
-    if path_allowed(path.virtual):
+    vis = session_visibility()
+    if path_visible(vis, path.virtual):
         return
-    raise hidden_refusal(path.virtual, create)
+    raise hidden_refusal(vis, path.virtual, create)
 
 
 async def _guarded_readdir(
@@ -645,10 +650,11 @@ async def _guarded_readdir(
     _refuse_hidden(parent, create=False)
     entries = await fn(*args, **kwargs)
     base = parent.virtual.rstrip("/")
+    vis = session_visibility()
     return [
         e
         for e in entries
-        if path_allowed(f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
+        if path_visible(vis, f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
     ]
 
 
@@ -659,12 +665,7 @@ def _move_would_reveal(src: PathSpec, dst: PathSpec) -> bool:
         src (PathSpec): the subtree being moved or copied.
         dst (PathSpec): where it would land.
     """
-    sess = get_current_session()
-    if sess is None:
-        return False
-    return move_reveals(
-        sess.hidden_paths, sess.shown_paths, src.virtual, dst.virtual
-    )
+    return move_reveals(session_visibility(), src.virtual, dst.virtual)
 
 
 def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
@@ -836,11 +837,12 @@ async def _guarded_rmdir(
     try:
         return await fn(*args, index=index, **kwargs)
     except OSError as exc:
+        vis = session_visibility()
         if (
             target is None
             or unlink is None
             or exc.errno not in (errno.ENOTEMPTY, errno.EEXIST)
-            or not hidden_paths_intersect(target.virtual)
+            or not hidden_under(vis, target.virtual)
         ):
             raise
         lead: list[Any] = []
@@ -860,11 +862,12 @@ async def _guarded_rmdir(
         merged = list(entries)
         if children is not None:
             merged.extend(children(target.virtual))
-        if not entries or visible_below(target.virtual, merged, path_allowed):
+        visible = functools.partial(path_visible, vis)
+        if not entries or visible_below(target.virtual, merged, visible):
             raise
         channel = _SlotChannel(tuple(lead), index, readdir, stat, unlink, fn)
         try:
-            await remove_remnants(channel, path_allowed, target)
+            await remove_remnants(channel, visible, target)
         except Exception as cascade:
             raise exc from cascade
         return None
@@ -879,7 +882,7 @@ async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
         **kwargs: forwarded untouched.
     """
     probed = next(a for a in args if isinstance(a, PathSpec))
-    if not path_allowed(probed.virtual):
+    if not path_visible(session_visibility(), probed.virtual):
         return False
     return bool(await fn(*args, **kwargs))
 
@@ -1592,31 +1595,22 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
     return replace(ops, **changes)
 
 
-def command_paths_scoped(paths: list[PathSpec], prefix: str) -> bool:
-    """Whether command path restrictions require a checked traversal.
-
-    Args:
-        paths (list[PathSpec]): invocation roots, including a default cwd.
-        prefix (str): mount root, used conservatively for globs.
-    """
-    return path_rules_active() or any(
-        hidden_paths_intersect(
-            prefix or "/" if path.pattern is not None else path.virtual
-        )
-        for path in paths
-    )
-
-
-def scoped_io(ops: CommandIO, paths: list[PathSpec], prefix: str) -> CommandIO:
+def scoped_io(
+    ops: CommandIO,
+    ns: NamespaceView | None,
+    paths: list[PathSpec],
+    prefix: str,
+) -> CommandIO:
     """Drop the native walks when a hide, a path rule or a coded
     pre_ops policy judges the command's paths.
 
     Args:
         ops (CommandIO): command-guarded backend capabilities.
+        ns (NamespaceView | None): the command's namespace view.
         paths (list[PathSpec]): invocation roots, including a default cwd.
         prefix (str): owning mount prefix.
     """
-    if not command_paths_scoped(paths, prefix):
+    if not paths_scoped(ns, paths, prefix):
         return ops
     return replace(
         ops,

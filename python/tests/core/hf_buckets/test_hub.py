@@ -74,7 +74,6 @@ def test_a_trailing_slash_endpoint_is_not_doubled():
 
 
 def _rows(answer):
-
     async def post(*_args, **kwargs):
         post.bodies.append(_args[2] if len(_args) > 2 else kwargs)
         return answer

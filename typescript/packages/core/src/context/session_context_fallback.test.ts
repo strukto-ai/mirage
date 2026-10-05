@@ -19,7 +19,7 @@ import {
   getCurrentSession,
   getOpPolicies,
   mountGateFor,
-  pathAllowed,
+  sessionVisibility,
   redirectPathsFor,
   redirectTargetJudged,
   requireMountWritable,
@@ -46,6 +46,10 @@ import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
 import { Session } from '../workspace/workspace/handle.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
+import { pathVisible } from '../utils/hidden.ts'
+import { MountRegistry } from '../workspace/mount/registry.ts'
+import { namespaceViewOf } from '../workspace/mount/namespace/view.ts'
+import type { DispatchFn } from '../runtime/types.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per
@@ -153,7 +157,7 @@ describe('session predicates on the fallback storage', () => {
   it('a hide holds while a concurrent session shadows the newest frame', async () => {
     const hider = new SessionState({
       sessionId: 'hider',
-      hiddenPaths: { paths: ['/repo/.env'] },
+      visibility: { paths: { paths: ['/repo/.env'] } },
     })
     const other = new SessionState({ sessionId: 'other' })
     const [hold, release] = gate()
@@ -164,13 +168,89 @@ describe('session predicates on the fallback storage', () => {
     const short = runWithSession(other, () => {
       // The hider's frame is not the newest, but its hide must still
       // count: every live session is folded, most restrictive first.
-      allowedBesideHider = pathAllowed('/repo/.env')
+      allowedBesideHider = pathVisible(sessionVisibility(), '/repo/.env')
       release()
       return Promise.resolve()
     })
     await Promise.all([long, short])
     expect(allowedBesideHider).toBe(false)
-    expect(pathAllowed('/repo/.env')).toBe(true)
+    expect(pathVisible(sessionVisibility(), '/repo/.env')).toBe(true)
+  })
+
+  it('folds every live visibility toward the narrower view', async () => {
+    // Two sessions live on the one slot: a hide or a hidden var of
+    // either holds, a show holds only where every hider shows it (at any
+    // mode: the mode gates read each session's own), and the wider
+    // process scope and command list need both to agree.
+    const wide = new SessionState({
+      sessionId: 'wide',
+      visibility: {
+        paths: { paths: ['/a'] },
+        shown: {
+          entries: [
+            { path: '/a/ok', mode: null },
+            { path: '/b/ok', mode: MountMode.READ },
+          ],
+        },
+        vars: { names: ['A'] },
+        processes: 'workspace',
+        commands: ['ls', 'cat'],
+      },
+    })
+    const narrow = new SessionState({
+      sessionId: 'narrow',
+      visibility: {
+        paths: { paths: ['/b'] },
+        shown: { entries: [{ path: '/b/ok', mode: MountMode.WRITE }] },
+        vars: { patterns: ['X_*'] },
+        processes: 'session',
+        commands: ['cat', 'rm'],
+      },
+    })
+    const [hold, release] = gate()
+    let seen: ReturnType<typeof sessionVisibility> = null
+    const long = runWithSession(wide, async () => {
+      await hold
+    })
+    const short = runWithSession(narrow, () => {
+      seen = sessionVisibility()
+      release()
+      return Promise.resolve()
+    })
+    await Promise.all([long, short])
+    expect(seen).toEqual({
+      paths: { paths: ['/a', '/b'], patterns: [] },
+      shown: { entries: [{ path: '/b/ok', mode: MountMode.READ }] },
+      vars: { names: ['A'], patterns: ['X_*'] },
+      processes: 'session',
+      commands: ['cat'],
+    })
+  })
+
+  it('a command view folds the live sessions as the op door does', async () => {
+    const hider = new SessionState({
+      sessionId: 'hider',
+      visibility: { paths: { paths: ['/data/x'] } },
+    })
+    const other = new SessionState({ sessionId: 'other' })
+    const registry = new MountRegistry({ '/data': new RAMVFS() }, MountMode.WRITE)
+    const dispatch = (() => Promise.reject(new Error('unused'))) as unknown as DispatchFn
+    const [hold, release] = gate()
+    let folded: boolean | undefined
+    const long = runWithSession(hider, async () => {
+      await hold
+    })
+    const short = runWithSession(other, () => {
+      const vis = namespaceViewOf(registry, null, dispatch, other).visibility ?? null
+      folded = pathVisible(vis, '/data/x')
+      release()
+      return Promise.resolve()
+    })
+    await Promise.all([long, short])
+    expect(folded).toBe(false)
+    // A session named outside any line keeps its own view.
+    const own = namespaceViewOf(registry, null, dispatch, other).visibility ?? null
+    expect(pathVisible(own, '/data/x')).toBe(true)
   })
 
   it('a settle out of order cannot wipe a live hide into visibility', async () => {
@@ -180,7 +260,7 @@ describe('session predicates on the fallback storage', () => {
     // visible mid-command.
     const hider = new SessionState({
       sessionId: 'hider',
-      hiddenPaths: { paths: ['/repo/.env'] },
+      visibility: { paths: { paths: ['/repo/.env'] } },
     })
     const other = new SessionState({ sessionId: 'other' })
     const [hold, release] = gate()
@@ -191,7 +271,7 @@ describe('session predicates on the fallback storage', () => {
     const second = runWithSession(hider, async () => {
       release()
       await first
-      seen = pathAllowed('/repo/.env')
+      seen = pathVisible(sessionVisibility(), '/repo/.env')
     })
     await second
     expect(seen).toBe(false)
@@ -257,6 +337,7 @@ describe('the admission gate on the fallback storage', () => {
   function entryGate(scoped: boolean, granted: readonly CommandRule[], refuse: string): EntryGate {
     return {
       scoped,
+      scopes: () => scoped,
       granted,
       check(virtual: string): void {
         if (virtual === refuse) throw new Error(`refused: ${virtual}`)

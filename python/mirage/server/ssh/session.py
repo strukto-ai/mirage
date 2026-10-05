@@ -266,7 +266,7 @@ async def run_line(
         )
     except MirageAbortError:
         return INTERRUPTED
-    await deliver(io.stdout, io.stderr, send)
+    await deliver(io, send)
     return io.exit_code
 
 

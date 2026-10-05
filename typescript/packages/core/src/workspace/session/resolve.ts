@@ -23,7 +23,7 @@ import { checkRules } from './validate.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import type { CommandRule, AdmissionRules, HideReason, ProfileScript } from '../../policy/types.ts'
 import type { HiddenPaths, MountMode, ShowEntry, ShownPaths } from '../../types.ts'
-import { weakerMode } from '../../types.ts'
+import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
 import { classifyPaths, classifyShows, classifyVars } from '../../utils/hidden.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import {
@@ -392,38 +392,46 @@ export function compileScript(effective: SessionProfile, name: string): ProfileS
 
 /** The session fields a profile compiles to. */
 export function compileProfile(effective: SessionProfile | null, name = ''): CompiledProfile {
+  const profile = name === '' ? null : name
   if (effective === null) {
     return {
-      mountModes: null,
-      hiddenPaths: null,
-      hiddenVars: null,
-      env: null,
-      cwd: null,
-      commands: null,
-      commandLimits: null,
-      script: null,
-      shownPaths: null,
+      setup: { env: null, cwd: null },
+      visibility: DEFAULT_VISIBILITY,
+      policies: {
+        mountModes: null,
+        commands: null,
+        script: null,
+        commandLimits: null,
+        processes: DEFAULT_PROCESS_PERMISSIONS,
+      },
       hideReasons: [],
-      profile: name === '' ? null : name,
+      profile,
     }
   }
   const commands = compileCommands(effective)
   checkRules(commands)
+  const processes =
+    effective.processes == null
+      ? DEFAULT_PROCESS_PERMISSIONS
+      : parseProcessPermissions(effective.processes)
   return {
-    ...(effective.processes == null
-      ? {}
-      : { processes: parseProcessPermissions(effective.processes) }),
-    mountModes: modesOf(effective),
-    hiddenPaths: hiddenOf(effective),
-    hiddenVars: classifyVars(effective.vars?.hide ?? []),
-    env: effective.env ?? null,
-    cwd: effective.cwd ?? null,
-    commands,
-    script: compileScript(effective, name),
-    commandLimits: effective.commandLimits ?? null,
-    shownPaths: shownOf(effective),
+    setup: { env: effective.env ?? null, cwd: effective.cwd ?? null },
+    visibility: {
+      paths: hiddenOf(effective),
+      shown: shownOf(effective),
+      vars: classifyVars(effective.vars?.hide ?? []),
+      processes: processes.list,
+      commands: commands?.allow ?? null,
+    },
+    policies: {
+      mountModes: modesOf(effective),
+      commands,
+      script: compileScript(effective, name),
+      commandLimits: effective.commandLimits ?? null,
+      processes,
+    },
     hideReasons: hideReasonsOf(effective),
-    profile: name === '' ? null : name,
+    profile,
   }
 }
 
@@ -437,16 +445,15 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
  * agent runs under.
  */
 export function narrow(session: SessionState, compiled: CompiledProfile): void {
-  session.mountModes = compiled.mountModes === null ? null : new Map(compiled.mountModes)
-  session.hiddenPaths = compiled.hiddenPaths
-  session.shownPaths = compiled.shownPaths ?? null
-  session.hiddenVars = compiled.hiddenVars
-  session.hideReasons = compiled.hideReasons ?? []
-  session.commands = compiled.commands
-  session.script = compiled.script ?? null
-  session.profile = compiled.profile ?? null
-  session.commandLimits = { ...compiled.commandLimits }
-  session.processes = compiled.processes ?? DEFAULT_PROCESS_PERMISSIONS
+  const policies = compiled.policies
+  session.mountModes = policies.mountModes === null ? null : new Map(policies.mountModes)
+  session.visibility = compiled.visibility
+  session.hideReasons = compiled.hideReasons
+  session.commands = policies.commands
+  session.script = policies.script
+  session.profile = compiled.profile
+  session.commandLimits = { ...policies.commandLimits }
+  session.processes = policies.processes
 }
 
 /**
@@ -461,6 +468,6 @@ export function narrow(session: SessionState, compiled: CompiledProfile): void {
  */
 export function applyProfile(session: SessionState, compiled: CompiledProfile): void {
   narrow(session, compiled)
-  if (compiled.env != null) Object.assign(session.vars, varsFromEnv(compiled.env))
-  if (compiled.cwd !== null) setCwd(session, compiled.cwd)
+  if (compiled.setup.env != null) Object.assign(session.vars, varsFromEnv(compiled.setup.env))
+  if (compiled.setup.cwd !== null) setCwd(session, compiled.setup.cwd)
 }

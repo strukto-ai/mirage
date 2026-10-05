@@ -14,7 +14,8 @@
 
 import { constants as osConstants } from 'node:os'
 
-import { describe, expect, it } from 'vitest'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
+import { describe, expect, it, vi } from 'vitest'
 import {
   classifyErrno,
   classifyError,
@@ -114,5 +115,22 @@ describe('the shared vocabulary', () => {
     // adapter reads the host's own numbering for the same passthrough.
     const err = Object.assign(new Error('x'), { code: 'ENAMETOOLONG' })
     expect(classifyErrno(err)).toBe(osConstants.errno.ENAMETOOLONG)
+  })
+
+  it('logs a policy reason the kernel cannot carry', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    try {
+      const refused = new PolicyDenied('Permission denied', '/data/x', {
+        kind: 'deny',
+        reason: 'sealed',
+        policy: 'RulePolicy',
+        scope: 'command',
+        askId: null,
+      })
+      expect(classifyErrno(refused)).toBe(EACCES)
+      expect(info).toHaveBeenCalledWith('policy RulePolicy refused /data/x: sealed')
+    } finally {
+      info.mockRestore()
+    }
   })
 })

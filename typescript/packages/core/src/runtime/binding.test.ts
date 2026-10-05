@@ -176,7 +176,9 @@ describe('execution bindings', () => {
       expect(required(context.sessionView).get('PUBLIC')).toBe('agent')
       expect(required(other.sessionView).get('PUBLIC')).toBeNull()
       expect(context.env.PUBLIC).toBeUndefined()
-      await expect(required(context.sessionView).set('SECRET', 'no')).rejects.toThrow('protected')
+      await expect(required(context.sessionView).set('SECRET', 'no')).rejects.toMatchObject({
+        refusal: { reason: 'protected' },
+      })
       const reads = await Promise.all([
         context.scope.run(async () => {
           await Promise.resolve()

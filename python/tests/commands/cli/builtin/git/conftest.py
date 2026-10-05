@@ -328,7 +328,7 @@ def repo_doors(ws) -> CLIDoors:
     return CLIDoors(
         dispatch=ws.dispatch,
         stat_path=functools.partial(path_stat, ws.dispatch),
-        ns=namespace_view_of(ws._registry, ws._namespace, ws.dispatch),
+        ns=namespace_view_of(ws._registry, ws._namespace, ws.dispatch, None),
         session_view=session_view(SessionState(session_id="test")),
     )
 

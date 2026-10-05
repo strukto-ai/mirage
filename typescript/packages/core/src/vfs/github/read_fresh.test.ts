@@ -88,7 +88,7 @@ describe('github under read: fresh', () => {
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       const session = w.createSession('hidden')
-      session.hiddenPaths = { paths: [PATH] }
+      session.visibility = { ...session.visibility, paths: { paths: [PATH] } }
       const result = await w.shell(`cat ${PATH}`, { sessionId: 'hidden' })
       expect(DEC.decode(result.stdout)).toBe('')
       expect(result.exitCode).toBe(1)

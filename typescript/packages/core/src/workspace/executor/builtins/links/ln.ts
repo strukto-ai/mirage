@@ -52,7 +52,8 @@ import {
 } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
-import { pathAllowed } from '../../../../context/session_context.ts'
+import { sessionVisibility } from '../../../../context/session_context.ts'
+import { pathVisible } from '../../../../utils/hidden.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -229,13 +230,13 @@ async function listedByParent(dispatch: DispatchFn, virtual: string): Promise<bo
 // way, or a link inside hidden space leads ln out of it: into the
 // directory it points at, or to the target string a hard link would copy.
 function visibleLink(namespace: Namespace, virtual: string): boolean {
-  return pathAllowed(virtual) && namespace.isLink(virtual)
+  return pathVisible(sessionVisibility(), virtual) && namespace.isLink(virtual)
 }
 
 // Resolve the links along a path the session may see; a hidden path
 // stays as typed. Throws CycleError as `follow` does.
 function followVisible(namespace: Namespace, virtual: string): string {
-  return pathAllowed(virtual) ? namespace.follow(virtual) : virtual
+  return pathVisible(sessionVisibility(), virtual) ? namespace.follow(virtual) : virtual
 }
 
 // An operand as the path the kernel reaches, its final name kept. Command
@@ -246,7 +247,7 @@ function followVisible(namespace: Namespace, virtual: string): string {
 // link is made. Mirrors Python's operand_abs.
 export function operandAbs(namespace: Namespace, arg: string | PathSpec, cwd: string): string {
   const virtual = absPath(arg, cwd)
-  if (arg instanceof PathSpec || !pathAllowed(virtual)) return virtual
+  if (arg instanceof PathSpec || !pathVisible(sessionVisibility(), virtual)) return virtual
   try {
     return posixNormpath(namespace.followParent(dottedSpelling(arg, cwd) ?? virtual))
   } catch (err) {
@@ -273,7 +274,7 @@ function walkVerdict(
 ): string | null {
   if (wordText(word) === '') return ENOENT_TEXT
   const virtual = absPath(word, cwd)
-  if (!pathAllowed(virtual)) return null
+  if (!pathVisible(sessionVisibility(), virtual)) return null
   const trimmed = rstripSlash(virtual) || '/'
   try {
     if (followLast) namespace.follow(trimmed)
@@ -569,7 +570,7 @@ export async function makeLink(
       data = bytes
     }
   }
-  if (pathAllowed(plan.linkAbs) && namespace.isMountRoot(plan.linkAbs)) {
+  if (pathVisible(sessionVisibility(), plan.linkAbs) && namespace.isMountRoot(plan.linkAbs)) {
     errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
     return
   }

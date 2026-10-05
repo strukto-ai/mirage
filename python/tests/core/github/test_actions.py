@@ -58,7 +58,6 @@ async def test_list_runs_can_scope_to_a_workflow(monkeypatch):
 async def test_resolve_workflow_passes_ids_and_filenames_through(
     monkeypatch, selector
 ):
-
     async def workflows(config, ref, limit):
         raise AssertionError("an id or filename needs no lookup")
 
@@ -97,7 +96,6 @@ async def test_resolve_workflow_matches_a_display_name_case_insensitively(
 
 @pytest.mark.asyncio
 async def test_resolve_workflow_rejects_an_unknown_display_name(monkeypatch):
-
     async def workflows(config, ref, limit):
         return [{"id": 101, "name": "CI"}]
 

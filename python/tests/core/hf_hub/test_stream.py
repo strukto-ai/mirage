@@ -124,7 +124,6 @@ async def test_stream_with_no_recorder_still_reads(accessor, monkeypatch):
 
 
 def _refusing(status: int):
-
     async def fake(
         _token, _url, _chunk_size, *, session=None, on_response=None
     ):

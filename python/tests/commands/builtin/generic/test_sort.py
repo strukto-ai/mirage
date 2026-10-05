@@ -56,7 +56,6 @@ def _spec(virtual: str, raw: str | None = None) -> PathSpec:
 def _reader(
     files: dict[str, bytes | OSError],
 ) -> Callable[[PathSpec], Awaitable[bytes]]:
-
     async def read_bytes(path: PathSpec) -> bytes:
         value = files[path.virtual]
         if isinstance(value, OSError):

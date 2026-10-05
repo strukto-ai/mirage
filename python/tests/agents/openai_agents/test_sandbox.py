@@ -56,7 +56,6 @@ def _make_client() -> MirageSandboxClient:
 
 
 def test_create_session_with_default_mounts():
-
     async def _run():
         client = _make_client()
         session = await client.create()
@@ -68,7 +67,6 @@ def test_create_session_with_default_mounts():
 
 
 def test_session_file_read_write():
-
     async def _run():
         client = _make_client()
         session = await client.create()
@@ -83,7 +81,6 @@ def test_session_file_read_write():
 
 
 def test_persist_and_hydrate_workspace():
-
     async def _run():
         client = _make_client()
         session = await client.create()
@@ -102,7 +99,6 @@ def test_persist_and_hydrate_workspace():
 
 
 def test_session_running_state():
-
     async def _run():
         client = _make_client()
         session = await client.create()
@@ -144,7 +140,6 @@ def _workspace() -> Workspace:
 
 
 def test_argv_keeps_its_word_boundaries():
-
     async def _run():
         session = await _make_client().create()
         result = await session.exec("printf", "%s|", "a b", "c", shell=False)
@@ -154,7 +149,6 @@ def test_argv_keeps_its_word_boundaries():
 
 
 def test_a_single_string_without_a_shell_is_one_program_name():
-
     async def _run():
         session = await _make_client().create()
         result = await session.exec("echo hello", shell=False)
@@ -164,7 +158,6 @@ def test_a_single_string_without_a_shell_is_one_program_name():
 
 
 def test_a_shell_prefix_runs_the_line_itself():
-
     async def _run():
         session = await _make_client().create()
         result = await session.exec("echo $((1 + 2))", shell=["sh", "-c"])
@@ -174,7 +167,6 @@ def test_a_shell_prefix_runs_the_line_itself():
 
 
 def test_exec_raises_on_its_timeout():
-
     async def _run():
         session = await _make_client().create()
         start = time.perf_counter()
@@ -186,7 +178,6 @@ def test_exec_raises_on_its_timeout():
 
 
 def test_commands_start_at_the_manifest_root():
-
     async def _run():
         client = MirageSandboxClient(_workspace())
         session = await client.create(
@@ -202,7 +193,6 @@ def test_commands_start_at_the_manifest_root():
 
 
 def test_an_unconfigured_session_runs_at_the_mirage_root():
-
     async def _run():
         session = await _make_client().create()
         assert session.state.manifest.root == "/"
@@ -212,7 +202,6 @@ def test_an_unconfigured_session_runs_at_the_mirage_root():
 
 
 def test_cd_and_export_do_not_outlive_their_command():
-
     async def _run():
         session = await _make_client().create()
         await session.exec("cd /tmp; export X=1")
@@ -222,7 +211,6 @@ def test_cd_and_export_do_not_outlive_their_command():
 
 
 def test_each_sandbox_session_owns_a_mirage_session_until_deleted():
-
     async def _run():
         ws = _workspace()
         client = MirageSandboxClient(ws)
@@ -239,7 +227,6 @@ def test_each_sandbox_session_owns_a_mirage_session_until_deleted():
 
 
 def test_relative_paths_resolve_against_the_manifest_root():
-
     async def _run():
         ws = _workspace()
         session = await MirageSandboxClient(ws).create(
@@ -254,7 +241,6 @@ def test_relative_paths_resolve_against_the_manifest_root():
 
 
 def test_write_creates_every_missing_parent():
-
     async def _run():
         ws = _workspace()
         session = await MirageSandboxClient(ws).create()
@@ -265,7 +251,6 @@ def test_write_creates_every_missing_parent():
 
 
 def test_resume_after_delete_keeps_the_agents_edits():
-
     async def _run():
         ws = _workspace()
         client = MirageSandboxClient(ws)
@@ -286,7 +271,6 @@ def test_resume_after_delete_keeps_the_agents_edits():
 
 
 def test_resume_refuses_another_backends_state():
-
     class OtherState(SandboxSessionState):
         type: Literal["other"] = "other"
 
@@ -305,7 +289,6 @@ def test_resume_refuses_another_backends_state():
 
 
 def test_a_long_command_keeps_running_in_the_background():
-
     async def _run():
         session = await _make_client().create()
         started = await session.pty_exec_start(
@@ -324,7 +307,6 @@ def test_a_long_command_keeps_running_in_the_background():
 
 
 def test_a_quick_background_command_answers_at_once():
-
     async def _run():
         session = await _make_client().create()
         update = await session.pty_exec_start("echo out; echo err >&2")
@@ -336,7 +318,6 @@ def test_a_quick_background_command_answers_at_once():
 
 
 def test_interrupt_cancels_a_background_command():
-
     async def _run():
         session = await _make_client().create()
         started = await session.pty_exec_start("sleep 30", yield_time_s=0.25)
@@ -351,7 +332,6 @@ def test_interrupt_cancels_a_background_command():
 
 
 def test_a_background_command_refuses_stdin():
-
     async def _run():
         session = await _make_client().create()
         started = await session.pty_exec_start("sleep 30", yield_time_s=0.25)
@@ -384,7 +364,6 @@ def test_combined_output_puts_stderr_on_its_own_line():
 
 
 def test_an_approved_command_resumes_through_the_runner(scripted_model):
-
     def gate(tools: ShellToolSet) -> None:
         tools.exec_command.needs_approval = True
 
@@ -410,7 +389,6 @@ def test_an_approved_command_resumes_through_the_runner(scripted_model):
 
 
 def test_commands_see_the_manifest_environment():
-
     async def _run():
         session = await _make_client().create(
             manifest=Manifest(
@@ -427,7 +405,6 @@ def test_commands_see_the_manifest_environment():
 
 
 def test_a_background_command_raises_on_its_timeout():
-
     async def _run():
         session = await _make_client().create()
         started = await session.pty_exec_start(
@@ -443,7 +420,6 @@ def test_a_background_command_raises_on_its_timeout():
 
 
 def test_apply_patch_writes_inside_the_sandbox_session():
-
     async def _run():
         ws = _workspace()
         session = await MirageSandboxClient(ws).create()

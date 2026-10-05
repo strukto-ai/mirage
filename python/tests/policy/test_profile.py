@@ -573,8 +573,8 @@ def test_profile_applies_every_narrowing_field():
     # A mount the profile never names is absent from the map and keeps the
     # mode the workspace gave it; naming one mount is not an allowlist.
     assert "/b" not in sess.mount_modes
-    assert sess.hidden_paths == HiddenPaths(paths=("/a/secrets",))
-    assert sess.hidden_vars == HiddenVars(names=("SLACK_TOKEN",))
+    assert sess.visibility.paths == HiddenPaths(paths=("/a/secrets",))
+    assert sess.visibility.vars == HiddenVars(names=("SLACK_TOKEN",))
     assert sess.env["ROLE"] == "analyst"
 
 
@@ -584,7 +584,7 @@ def test_one_profile_serves_many_sessions():
     ws = _ws()
     s1 = ws.create_session("agent1", profile=ANALYST)
     s2 = ws.create_session("agent2", profile=ANALYST)
-    assert s1.hidden_paths == s2.hidden_paths
+    assert s1.visibility.paths == s2.visibility.paths
     seed_var(s1, "ROLE", "changed")
     assert s2.env["ROLE"] == "analyst"
 
@@ -598,7 +598,7 @@ def test_explicit_mounts_can_only_weaken_a_mode_never_raise_it():
         "agent", mounts={"/a": "read", "/b": "read"}, profile=ANALYST
     )
     assert sess.mount_modes == {"/a": MountMode.READ, "/b": MountMode.READ}
-    assert sess.hidden_paths == HiddenPaths(paths=("/a/secrets",))
+    assert sess.visibility.paths == HiddenPaths(paths=("/a/secrets",))
     raised = ws.create_session("wider", mounts={"/a": "rwx"}, profile=ANALYST)
     assert raised.mount_modes["/a"] == MountMode.WRITE
 
@@ -667,7 +667,7 @@ def test_create_session_by_profile_name_reads_that_whole_document():
     sess = ws.create_session("agent", profile="reviewer")
     assert sess.mount_modes is not None
     assert sess.mount_modes["/a"] == MountMode.READ
-    assert sess.hidden_paths == HiddenPaths(paths=("/a/secrets",))
+    assert sess.visibility.paths == HiddenPaths(paths=("/a/secrets",))
     assert sess.cwd == "/b"
     assert sess.env["PAGER"] == "cat"
 
@@ -677,7 +677,7 @@ def test_create_session_without_a_profile_takes_the_default_one():
     sess = ws.create_session("agent")
     assert sess.mount_modes is not None
     assert sess.mount_modes["/a"] == MountMode.WRITE
-    assert sess.hidden_paths is None
+    assert sess.visibility.paths is None
     assert sess.cwd == "/b"
     # A workspace with no default profile leaves the session unrestricted.
     plain = _ws().create_session("free")
@@ -706,7 +706,7 @@ def test_default_profile_shapes_the_workspace_session_too():
     assert default.mount_modes is not None
     assert default.mount_modes["/b"] == MountMode.EXEC
     assert "/a" not in default.mount_modes
-    assert default.hidden_paths == HiddenPaths(paths=("/b/vault",))
+    assert default.visibility.paths == HiddenPaths(paths=("/b/vault",))
     assert default.cwd == "/b"
 
     async def run():
@@ -730,7 +730,7 @@ def test_default_profile_shapes_the_workspace_session_too():
     assert vault_exit != 0
     plain_ws = _ws()
     plain = plain_ws.get_session(plain_ws.default_session_id)
-    assert plain.mount_modes is None and plain.hidden_paths is None
+    assert plain.mount_modes is None and plain.visibility.paths is None
 
 
 def test_a_role_keeps_a_mount_away_by_hiding_it_not_by_omitting_it():
@@ -804,10 +804,10 @@ def test_inline_permissions_add_to_the_named_profile():
     # The profile says read and the inline document says write: the weaker
     # one wins, which is the profile's.
     assert sess.mount_modes["/a"] == MountMode.READ
-    assert sess.hidden_paths == HiddenPaths(
+    assert sess.visibility.paths == HiddenPaths(
         paths=("/a/secrets",), patterns=("*.key",)
     )
-    assert sess.hidden_vars == HiddenVars(patterns=("AWS_*",))
+    assert sess.visibility.vars == HiddenVars(patterns=("AWS_*",))
     assert sess.cwd == "/a"
 
 
@@ -1056,7 +1056,8 @@ async def test_deny_rules_by_source_scope_and_voice():
         assert await _line(ws, "cd /repo/d && rm x") == (
             1,
             "",
-            "rm: x: no deletes in the repo\n",
+            "rm: cannot remove 'x': Permission denied\n"
+            "policy denied: no deletes in the repo\n",
         )
         assert (await _line(ws, "rm /scratch/z"))[0] == 0
         # A pure path rule holds at the command plane for any command
@@ -1064,7 +1065,7 @@ async def test_deny_rules_by_source_scope_and_voice():
         assert await _line(ws, "cat /repo/locked/y") == (
             1,
             "",
-            "cat: /repo/locked/y: frozen\n",
+            "cat: /repo/locked/y: Permission denied\npolicy denied: frozen\n",
         )
         with pytest.raises(PermissionError):
             await ws.vfs.write("/repo/locked/y", b"changed")
@@ -1106,7 +1107,8 @@ async def test_find_delete_is_gated_at_the_op_door_not_by_a_named_rule():
         assert await _line(ws, "find /repo/locked -name y -delete") == (
             1,
             "",
-            "find: cannot delete '/repo/locked/y': frozen\n",
+            "find: cannot delete '/repo/locked/y': Permission denied\n"
+            "policy denied: frozen\n",
         )
         assert (await _line(ws, "cat /repo/locked/y"))[0] == 1
         # The same rule holds for the host's own door, read or write.
@@ -1152,18 +1154,19 @@ async def test_a_command_scoped_path_rule_reads_the_path_the_command_touches():
         assert await _line(ws, "cat /data/secret") == (
             1,
             "",
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
         # Through the link: refused, the operand named as typed.
         assert await _line(ws, "cat /data/link") == (
             1,
             "",
-            "cat: /data/link: sealed\n",
+            "cat: /data/link: Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "head -n 1 /data/other") == (
             1,
             "",
-            "head: /data/other: sealed\n",
+            "head: cannot open '/data/other' for reading: Permission denied\n"
+            "policy denied: sealed\n",
         )
         # rm removes the link, not the target: the target's rule does
         # not apply, the link's own does.
@@ -1171,7 +1174,8 @@ async def test_a_command_scoped_path_rule_reads_the_path_the_command_touches():
         assert await _line(ws, "rm /data/link") == (
             1,
             "",
-            "rm: /data/link: keep the link\n",
+            "rm: cannot remove '/data/link': Permission denied\n"
+            "policy denied: keep the link\n",
         )
         assert (await _line(ws, "cat /data/link"))[0] == 1
     finally:
@@ -1209,12 +1213,13 @@ async def test_redirect_targets_are_judged_with_the_line():
         assert await _line(ws, "cat < /data/secret") == (
             1,
             "",
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "echo two > /data/audit.log") == (
             1,
             "",
-            "echo: /data/audit.log: audit is append-only\n",
+            "echo: /data/audit.log: Permission denied\n"
+            "policy denied: audit is append-only\n",
         )
         # The refused write did not truncate, and clean redirects run.
         assert await _line(ws, "cat /data/audit.log") == (0, "one\n", "")
@@ -1325,12 +1330,14 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
         assert await _line(ws, "rm /repo/x") == (
             1,
             "",
-            "rm: /repo/x: no deletes in the repo\n",
+            "rm: cannot remove '/repo/x': Permission denied\n"
+            "policy denied: no deletes in the repo\n",
         )
         assert await _line(ws, "cat /repo/a; rm -f /repo/x") == (
             1,
             "",
-            "rm: /repo/x: no deletes in the repo\n",
+            "rm: cannot remove '/repo/x': Permission denied\n"
+            "policy denied: no deletes in the repo\n",
         )
         assert box.lines == []
         assert await _line(ws, "cat /repo/a | wc -l") == (
@@ -1490,22 +1497,23 @@ async def test_a_bare_listing_in_a_ruled_directory_is_refused():
         assert await _line(ws, "ls /repo/sealed") == (
             1,
             "",
-            "ls: /repo/sealed: sealed\n",
+            "ls: cannot access '/repo/sealed': Permission denied\n"
+            "policy denied: sealed\n",
         )
         assert await _line(ws, "cd /repo/sealed && ls") == (
             1,
             "",
-            "ls: .: sealed\n",
+            "ls: cannot access '.': Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "cd /repo/sealed && find -name f") == (
             1,
             "",
-            "find: .: sealed\n",
+            "find: '.': Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "cd /repo/sealed && grep -r x") == (
             1,
             "",
-            "grep: /repo/sealed: sealed\n",
+            "grep: /repo/sealed: Permission denied\npolicy denied: sealed\n",
         )
         # With an operand, or without the recursion that reads the
         # directory, nothing is implied.
@@ -1575,7 +1583,7 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
         assert await _line(ws, "cat /repo/private/k") == (
             1,
             "",
-            "cat: /repo/private/k: private\n",
+            "cat: /repo/private/k: Permission denied\npolicy denied: private\n",
         )
         assert await _line(ws, "cat /repo/private/k", "veiled") == (
             1,
@@ -1585,7 +1593,7 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
         assert await _line(ws, "cat /repo/sealed/x") == (
             1,
             "",
-            "cat: /repo/sealed/x: sealed\n",
+            "cat: /repo/sealed/x: Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "cat /repo/sealed/x", "veiled") == (
             1,
@@ -1761,7 +1769,8 @@ async def test_a_session_grant_covers_the_rule_and_a_deny_is_never_reopened():
         assert await _line(ws, "cd /repo/d && rm x") == (
             1,
             "",
-            "rm: x: no deletes in the repo\n",
+            "rm: cannot remove 'x': Permission denied\n"
+            "policy denied: no deletes in the repo\n",
         )
         assert ws.decisions.pending() == ()
         # The answer is session state: on the record, and not another
@@ -1991,6 +2000,7 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
             "grep: /data/t/locked/y: Permission denied\n"
             "grep: /data/t/private: Permission denied\n"
             "grep: /data/t/sealed: Permission denied\n"
+            "policy denied: sealed\n"
         )
         code, out, err = await _line(ws, "ls -R /data/t", "g")
         assert code == 1
@@ -1999,12 +2009,15 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
         assert err == (
             "ls: cannot open directory '/data/t/private': Permission denied\n"
             "ls: cannot open directory '/data/t/sealed': Permission denied\n"
+            "policy denied: sealed\n"
         )
         code, out, err = await _line(ws, "find /data/t -name '*'", "g")
         assert code == 1
         assert "/data/t/sealed\n" in out and "/data/t/sealed/s" not in out
         assert "/data/t/locked/y\n" in out and "/data/t/private/k\n" in out
-        assert err == "find: '/data/t/sealed': Permission denied\n"
+        assert err == (
+            "find: '/data/t/sealed': Permission denied\npolicy denied: sealed\n"
+        )
         code, out, err = await _line(ws, "du -a /data/t", "g")
         assert code == 1
         assert "2\t/data/t/locked/y\n" in out
@@ -2012,6 +2025,7 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
         assert "0\t/data/t/sealed\n" in out and "/data/t/sealed/" not in out
         assert err == (
             "du: cannot read directory '/data/t/sealed': Permission denied\n"
+            "policy denied: sealed\n"
         )
         code, out, err = await _line(ws, "cp -r /data/t /data/copy", "g")
         assert code == 1
@@ -2019,6 +2033,7 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
             "cp: cannot access '/data/t/sealed': Permission denied\n"
             "cp: cannot open '/data/t/locked/y' for reading: "
             "Permission denied\n"
+            "policy denied: frozen\n"
         )
         assert (await _line(ws, "cat /data/copy/private/k", "g"))[1] == "k\n"
         assert (await _line(ws, "test -d /data/copy/sealed", "g"))[0] == 0
@@ -2032,12 +2047,13 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
             "denied\n"
             "tar: Exiting with failure status due to previous "
             "errors\n"
+            "policy denied: frozen\n"
         )
         code, out, err = await _line(ws, "tar -tf /data/a.tar", "g")
         assert "data/t/sealed/\n" in out and "locked/y" not in out
         assert "data/t/private/k\n" in out and "ghost" not in out
         code, out, err = await _line(ws, "tree /data/t", "g")
-        assert code == 2 and err == ""
+        assert code == 2 and err == "policy denied: sealed\n"
         assert "`-- sealed  [error opening dir]\n" in out
         assert "|   `-- y\n" in out
     finally:
@@ -2077,6 +2093,7 @@ TAR_SEC_REFUSED = (
     "tar: /data/r/sec: Cannot open: Permission denied\n"
     "tar: Exiting with failure status due to previous "
     "errors\n"
+    "policy denied: tarred\n"
 )
 
 
@@ -2126,7 +2143,8 @@ async def test_a_relayed_walk_meets_the_command_rules():
         assert await _line(ws, "cp -r /data/r /other/r", "g") == (
             1,
             "",
-            "cp: cannot open '/data/r/sec' for reading: Permission denied\n",
+            "cp: cannot open '/data/r/sec' for reading: Permission denied\n"
+            "policy denied: copied\n",
         )
         assert (await _line(ws, "find /other/r", "g"))[
             1
@@ -2134,8 +2152,8 @@ async def test_a_relayed_walk_meets_the_command_rules():
         assert await _line(ws, "cp -r /other/src /data/dst", "g") == (
             1,
             "",
-            "cp: cannot create regular file '/data/dst/sec': "
-            "Permission denied\n",
+            "cp: cannot create regular file '/data/dst/sec': Permission denied\n"
+            "policy denied: copied\n",
         )
         assert (await _line(ws, "find /data/dst", "g"))[
             1
@@ -2158,20 +2176,20 @@ async def test_a_write_through_the_command_dispatcher_meets_the_rules():
         assert await _line(ws, "split -l 1 /data/f /data/out/x", "g") == (
             1,
             "",
-            "split: /data/out/xab: Permission denied\n",
+            "split: /data/out/xab: Permission denied\npolicy denied: cut\n",
         )
         assert await _line(ws, "csplit -f /data/out/xx /data/f 2", "g") == (
             1,
             "2\n",
-            "csplit: /data/out/xx01: Permission denied\n",
+            "csplit: /data/out/xx01: Permission denied\npolicy denied: cut\n",
         )
         assert await _line(
             ws, "awk '{print > \"/data/out/locked\"}' /data/f", "g"
         ) == (
             2,
             "",
-            'awk: cannot open "/data/out/locked" for '
-            "output (Permission denied)\n",
+            'awk: cannot open "/data/out/locked" for output (Permission denied)\n'
+            "policy denied: cut\n",
         )
         listed = (await _line(ws, "ls /data/out", "g"))[1].split()
         assert "xaa" in listed
@@ -2254,7 +2272,8 @@ async def test_a_warm_walk_is_refused_as_the_cold_walk_is():
             2,
             "/data/w/b.txt:secret open\n",
             "grep: /data/w/a.txt: Permission denied\n"
-            "grep: /data/w/p.txt: Permission denied\n",
+            "grep: /data/w/p.txt: Permission denied\n"
+            "policy denied: walled\n",
         )
     finally:
         await ws.close()
@@ -2318,7 +2337,8 @@ async def test_an_ordered_rg_across_mounts_meets_the_command_rules():
         expected = (
             2,
             "/data/w/b.txt:secret b\n",
-            "rg: /data/w/a.txt: Permission denied (os error 13)\n",
+            "rg: /data/w/a.txt: Permission denied (os error 13)\n"
+            "policy denied: sealed\n",
         )
         assert await _line(ws, "rg secret /data", "g") == expected
         assert await _line(ws, "rg --sort path secret /data", "g") == expected
@@ -2337,7 +2357,7 @@ async def test_tree_across_mounts_marks_the_directory_it_may_not_open():
             2,
             "/data\n|-- sub\n|   `-- x  [error opening dir]\n`-- w\n"
             "    |-- a.txt\n    `-- b.txt\n\n4 directories, 2 files\n",
-            "",
+            "policy denied: sealed\n",
         )
     finally:
         await ws.close()
@@ -2353,7 +2373,8 @@ async def test_find_delete_meets_the_command_rules():
         assert await _line(ws, "find /data/w -name a.txt -delete", "g") == (
             1,
             "",
-            "find: cannot delete '/data/w/a.txt': sealed\n",
+            "find: cannot delete '/data/w/a.txt': Permission denied\n"
+            "policy denied: sealed\n",
         )
         assert (await _line(ws, "ls /data/w", "g"))[1] == "a.txt\nb.txt\n"
     finally:
@@ -2376,19 +2397,24 @@ async def test_a_create_through_the_command_dispatcher_meets_the_rules():
             1,
             "",
             "mktemp: failed to create directory via template "
-            "'/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n",
+            "'/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n"
+            "policy denied: cut\n",
         )
         assert await _line(ws, "mktemp -p /data/tmpd", "g") == (
             1,
             "",
             "mktemp: failed to create file via template "
-            "'/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n",
+            "'/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n"
+            "policy denied: cut\n",
         )
-        refused = "".join(
-            "checkdir error:  cannot create /data/uz/src\n"
-            "                 Permission denied\n"
-            f"                 unable to process src/{name}.\n"
-            for name in ("", "open", "sec")
+        refused = (
+            "".join(
+                "checkdir error:  cannot create /data/uz/src\n"
+                "                 Permission denied\n"
+                f"                 unable to process src/{name}.\n"
+                for name in ("", "open", "sec")
+            )
+            + "policy denied: cut\n"
         )
         assert await _line(ws, "unzip -q -d /data/uz /other/z.zip", "g") == (
             2,
@@ -2439,13 +2465,13 @@ async def test_a_dispatched_read_through_a_link_meets_the_target_rule():
                 ws,
                 f"awk 'BEGIN {{ getline x < \"/data/{name}\"; print x }}'",
                 "g",
-            ) == (0, "\n", "")
+            ) == (0, "\n", "policy denied: sealed\n")
             assert await _line(
                 ws, f"sed -n 'r /data/{name}' /data/f", "g"
             ) == (
                 0,
                 "",
-                "",
+                "policy denied: sealed\n",
             )
         assert await _line(
             ws, "awk 'BEGIN { getline x < \"/data/okalias\"; print x }'", "g"
@@ -2513,7 +2539,7 @@ async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
             assert await _line(ws, f"zap {op}", "g") == (
                 1,
                 "",
-                "zap: sealed\n",
+                "zap: Permission denied\npolicy denied: sealed\n",
             )
             assert (await _line(ws, "ls /data/real", "g"))[1] == "secret\n"
         finally:
@@ -2554,12 +2580,13 @@ async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
         ) == (
             4,
             "",
-            "sed: couldn't open file /data/dalias/secret: Permission denied\n",
+            "sed: couldn't open file /data/dalias/secret: Permission denied\n"
+            "policy denied: sealed\n",
         )
         assert await _line(ws, "cat /data/dalias/secret", "g") == (
             1,
             "",
-            "cat: /data/dalias/secret: sealed\n",
+            "cat: /data/dalias/secret: Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "cat /data/real/secret") == (0, "s\n", "")
     finally:
@@ -2628,7 +2655,8 @@ async def test_concurrent_sessions_judge_dispatched_ops_by_their_own_gate():
         assert sealed == (
             4,
             "",
-            "sed: couldn't open file /data/real/secret: Permission denied\n",
+            "sed: couldn't open file /data/real/secret: Permission denied\n"
+            "policy denied: sealed\n",
         )
         assert opened == (0, "", "")
         assert (
@@ -2684,7 +2712,7 @@ async def test_an_asked_scope_reached_by_a_walk_is_refused_until_named():
         assert await _line(ws, "grep -r a /data/t/asked", "g") == (
             2,
             "",
-            "grep: /data/t/asked/a: Permission denied\n",
+            "grep: /data/t/asked/a: Permission denied\npolicy denied: nod\n",
         )
         assert ws.decisions.pending() == ()
         code, _, err = await _line(ws, "grep a /data/t/asked/a", "g")
@@ -2759,12 +2787,12 @@ async def test_every_permissions_door_accepts_the_plain_document():
         assert await _line(ws, "cat /data/w") == (
             1,
             "",
-            "cat: /data/w: walled\n",
+            "cat: /data/w: Permission denied\npolicy denied: walled\n",
         )
         assert await _line(ws, "cat /box/top") == (
             1,
             "",
-            "cat: /box/top: boxed\n",
+            "cat: /box/top: Permission denied\npolicy denied: boxed\n",
         )
         ws.create_session("i", profile={"commands": {"allow": ["echo"]}})
         assert (await _line(ws, "ls /data", "i"))[0] == 127
@@ -2781,7 +2809,7 @@ async def test_every_permissions_door_accepts_the_plain_document():
         assert await _line(ws, "cat /data/x", "d") == (
             1,
             "",
-            "cat: /data/x: no\n",
+            "cat: /data/x: Permission denied\npolicy denied: no\n",
         )
     finally:
         await ws.close()

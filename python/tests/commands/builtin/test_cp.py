@@ -25,7 +25,6 @@ cp_cmd = _CMDS.require("cp").fn
 
 
 def _cat_sync(backend, path):
-
     async def _collect():
         return b"".join([c async for c in read_stream(backend.accessor, path)])
 

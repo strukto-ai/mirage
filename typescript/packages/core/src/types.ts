@@ -144,6 +144,37 @@ export interface HiddenVars {
   readonly patterns?: readonly string[]
 }
 
+export type ProcessScope = 'session' | 'workspace'
+
+/**
+ * What exists for one session, compiled once from its profile.
+ *
+ * The one answer to "is this here?" for everything a session touches:
+ * paths (hides, re-opened by deeper shows), variables, processes and
+ * commands. The views filter what they list through it and the op
+ * boundary answers a hidden path as absent from it; nothing else asks
+ * the profile what exists. `DEFAULT_VISIBILITY` hides nothing.
+ *
+ * `shown` re-opens a hidden subtree and states a subtree's mode;
+ * `processes` is whose processes the session sees; `commands` is the
+ * allow patterns that install commands, null installing every one.
+ */
+export interface Visibility {
+  readonly paths: HiddenPaths | null
+  readonly shown: ShownPaths | null
+  readonly vars: HiddenVars | null
+  readonly processes: ProcessScope
+  readonly commands: readonly string[] | null
+}
+
+export const DEFAULT_VISIBILITY: Visibility = Object.freeze({
+  paths: null,
+  shown: null,
+  vars: null,
+  processes: 'session',
+  commands: null,
+})
+
 /**
  * What a command's own I/O asks before touching an entry it reached
  * below its operands.
@@ -172,6 +203,10 @@ export interface EntryGate {
   check(virtual: string): void
   /** True exactly where `check` would throw, for a door that declines instead (the read cache). */
   refuses(virtual: string): boolean
+  /** Whether anything at or under this path could be refused for the
+   * running command, so a native walk there gives way to the guarded one;
+   * per operand, unlike `scoped`. */
+  scopes(virtual: string): boolean
 }
 
 const MOUNT_MODE_ALIASES: Readonly<Record<string, MountMode>> = Object.freeze({

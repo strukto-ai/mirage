@@ -75,7 +75,6 @@ def test_ioresult_cache_set():
 
 
 def test_ioresult_merge_combines_cache():
-
     async def _run():
         left = IOResult(cache=["/a"])
         right = IOResult(cache=["/b"])
@@ -86,7 +85,6 @@ def test_ioresult_merge_combines_cache():
 
 
 def test_ioresult_merge_mixed_reads():
-
     async def _run():
         left = IOResult(reads={"/a": b"hello"})
         ait = _async_source(b"x")
@@ -106,7 +104,6 @@ def test_ioresult_stdout_defaults_none():
 
 
 def test_ioresult_materialize_stdout_bytes():
-
     async def _run():
         io = IOResult(stdout=b"hello")
         assert await io.materialize_stdout() == b"hello"
@@ -115,7 +112,6 @@ def test_ioresult_materialize_stdout_bytes():
 
 
 def test_ioresult_materialize_stdout_exhausted_async():
-
     async def _run():
         ci = CachableAsyncIterator(_async_source(b"he", b"llo"))
         await ci.drain()
@@ -127,7 +123,6 @@ def test_ioresult_materialize_stdout_exhausted_async():
 
 
 def test_ioresult_materialize_stdout_none():
-
     async def _run():
         io = IOResult(stdout=None)
         assert await io.materialize_stdout() == b""
@@ -136,7 +131,6 @@ def test_ioresult_materialize_stdout_none():
 
 
 def test_ioresult_stdout_str():
-
     async def _run():
         io = IOResult(stdout=b"hello world")
         assert await io.stdout_str() == "hello world"
@@ -145,7 +139,6 @@ def test_ioresult_stdout_str():
 
 
 def test_ioresult_materialize_stderr():
-
     async def _run():
         io = IOResult(stderr=b"error msg")
         assert await io.materialize_stderr() == b"error msg"
@@ -154,7 +147,6 @@ def test_ioresult_materialize_stderr():
 
 
 def test_ioresult_stderr_str():
-
     async def _run():
         io = IOResult(stderr=b"error")
         assert await io.stderr_str() == "error"
@@ -163,7 +155,6 @@ def test_ioresult_stderr_str():
 
 
 def test_ioresult_merge_stdout_takes_right():
-
     async def _run():
         left = IOResult(stdout=b"left")
         right = IOResult(stdout=b"right")
@@ -174,7 +165,6 @@ def test_ioresult_merge_stdout_takes_right():
 
 
 def test_ioresult_merge_exit_code_takes_right():
-
     async def _run():
         left = IOResult(exit_code=0)
         right = IOResult(exit_code=1)
@@ -185,7 +175,6 @@ def test_ioresult_merge_exit_code_takes_right():
 
 
 def test_ioresult_merge_stderr_concatenates():
-
     async def _run():
         left = IOResult(stderr=b"err1 ")
         right = IOResult(stderr=b"err2")
@@ -196,7 +185,6 @@ def test_ioresult_merge_stderr_concatenates():
 
 
 def test_ioresult_merge_stderr_none_both():
-
     async def _run():
         left = IOResult(stderr=None)
         right = IOResult(stderr=None)
@@ -207,7 +195,6 @@ def test_ioresult_merge_stderr_none_both():
 
 
 def test_stdout_str_materializes_async_iterator():
-
     async def _run():
         io = IOResult(stdout=_async_source(b"hel", b"lo"))
         assert await io.stdout_str() == "hello"
@@ -216,7 +203,6 @@ def test_stdout_str_materializes_async_iterator():
 
 
 def test_stderr_str_materializes_async_iterator():
-
     async def _run():
         io = IOResult(stderr=_async_source(b"err", b"or"))
         assert await io.stderr_str() == "error"
@@ -225,7 +211,6 @@ def test_stderr_str_materializes_async_iterator():
 
 
 def test_merge_materializes_async_stderr():
-
     async def _run():
         left = IOResult(stderr=_async_source(b"warn"))
         right = IOResult(stdout=b"out")

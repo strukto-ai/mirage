@@ -67,7 +67,6 @@ def test_entry_of_composites_without_a_backend_fingerprint():
 
 
 def _backend(tree: dict[str, dict]) -> ReaddirWalk:
-
     async def readdir(spec: PathSpec, index: IndexCacheStore) -> list[str]:
         node = tree.get(spec.virtual)
         if node is None or "children" not in node:
@@ -174,7 +173,6 @@ def test_readdir_walk_treats_a_missing_root_as_empty():
 
 
 def test_readdir_walk_propagates_a_non_absence_error():
-
     async def readdir(spec: PathSpec, index: IndexCacheStore) -> list[str]:
         raise PermissionError("rate limited")
 

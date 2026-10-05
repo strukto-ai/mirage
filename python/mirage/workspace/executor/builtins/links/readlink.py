@@ -126,6 +126,7 @@ async def handle_readlink(
                         False,
                         namespace.readlink,
                         partial(dispatch_stat, dispatch),
+                        session.visibility,
                     )
                 )
                 continue

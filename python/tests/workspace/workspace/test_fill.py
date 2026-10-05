@@ -36,7 +36,7 @@ from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.shell.parse import parse
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
-from mirage.types import HiddenVars
+from mirage.types import HiddenVars, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.snapshot.state import to_state_dict
 
@@ -63,7 +63,6 @@ def counting_source(fields: dict[str, str]) -> tuple[list[str], FetchFn]:
 
 
 def dead_source() -> FetchFn:
-
     async def fetch(config: FakeConfig, ref: str) -> ResolvedSecret:
         raise RuntimeError("connection refused")
 
@@ -377,7 +376,7 @@ async def test_hidden_managed_name_never_fetches():
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r", "fetch": "eager"}})
     try:
         session = ws.get_session(ws.default_session_id)
-        session.hidden_vars = HiddenVars(names=("TOKEN",))
+        session.visibility = Visibility(vars=HiddenVars(names=("TOKEN",)))
         io = await ws.shell("env")
         assert io.exit_code == 0
         assert "TOKEN" not in (await io.stdout_str())
@@ -1624,7 +1623,6 @@ class AccountConfig(BaseModel):
 
 
 def account_source() -> FetchFn:
-
     async def fetch(config: AccountConfig, ref: str) -> ResolvedSecret:
         seen = config.token.get_secret_value() if config.token else "none"
         return ResolvedSecret(
@@ -1705,7 +1703,6 @@ async def test_a_bare_source_name_still_uses_ambient_defaults():
 
 
 async def slow_bootstrap(calls: list[str]) -> FetchFn:
-
     async def fetch(config: FakeConfig, ref: str) -> ResolvedSecret:
         calls.append(ref)
         await asyncio.sleep(0.01)
@@ -1746,7 +1743,7 @@ async def test_a_whole_line_with_nothing_pending_resolves_nothing():
     )
     try:
         session = ws.get_session(ws.default_session_id)
-        session.hidden_vars = HiddenVars(names=("TOKEN",))
+        session.visibility = Visibility(vars=HiddenVars(names=("TOKEN",)))
         io = await ws.shell("nvidia-smi -L")
         assert io.exit_code == 0
         assert calls == []
@@ -1840,7 +1837,6 @@ async def test_an_instance_aliasing_env_redacts_like_env():
 
 
 def small_env(fields: dict[str, str]) -> FetchFn:
-
     async def fetch(config: FakeConfig, ref: str) -> ResolvedSecret:
         return ResolvedSecret(fields=dict(fields))
 

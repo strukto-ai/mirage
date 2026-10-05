@@ -35,6 +35,7 @@ from mirage.types import HiddenPaths, PathSpec
 from mirage.utils.hidden import (
     anchor_depth,
     classify_paths,
+    hides_intersect,
     path_covers,
     path_hidden,
 )
@@ -71,7 +72,8 @@ class RuleMatch:
     RuleMatch with ``operand`` None when the rule refuses (or asks
     about) the whole line, and a RuleMatch naming the operand when the
     rule is path-scoped and one operand fell under its paths, so the
-    refusal is scoped to that operand (``rm: x: <reason>``, exit 1)
+    refusal is scoped to that operand (``rm: cannot remove 'x':
+    Permission denied``, exit 1)
     rather than to the command (``rm: Permission denied``, 126).
 
     Args:
@@ -358,6 +360,38 @@ def match_io(
     return path_hidden(scope, virtual)
 
 
+def io_reach(
+    rules: AdmissionRules | None, tokens: Sequence[str], virtual: str
+) -> bool:
+    """Whether a rule in force could reach an entry at or under this
+    path for the running line: the rule names the line and its paths
+    could cover something in the subtree.
+
+    What a native walk asks before it trusts the raw tree, per operand
+    the way a hide is: a rule on ``/repo/.env`` leaves ``find /s3`` its
+    native op.
+
+    Args:
+        rules (AdmissionRules | None): the session's admission rules.
+        tokens (Sequence[str]): the line as an admission pattern reads
+            it, command name first.
+        virtual (str): absolute virtual path of the walk's start point.
+    """
+    if rules is None:
+        return False
+    for rule in (*rules.deny, *rules.ask):
+        scope = rule_scope(rule)
+        if scope is None:
+            continue
+        if rule.commands and not any(
+            pattern_matches(p, tokens) for p in rule.commands
+        ):
+            continue
+        if hides_intersect(scope, virtual):
+            return True
+    return False
+
+
 def io_refusal(
     rules: AdmissionRules | None,
     tokens: Sequence[str],
@@ -407,6 +441,41 @@ def io_refusal(
     if verb == ASK_SECOND and rule in granted:
         return None
     return rule.reason
+
+
+def posix_level(rule: CommandRule) -> bool:
+    """Whether a rule holds at an op door too: a pure path rule, which
+    names no command and has paths to match, the one kind an op can meet.
+
+    The sort of a profile's rules: a POSIX-level rule holds at every
+    door, a command-level one (it names a command, or no path) only where
+    a line is judged.
+
+    Args:
+        rule (CommandRule): the rule.
+    """
+    return not rule.commands and rule_scope(rule) is not None
+
+
+def skipped_at_op_doors(rules: AdmissionRules | None) -> tuple[str, ...]:
+    """The command-level parts of a profile's rules, which a door that
+    sees only ops (a kernel mount, SFTP, codex-exec's file calls) cannot
+    apply, each described for the operator's warning: the allow list and
+    every rule that is not POSIX level.
+
+    Args:
+        rules (AdmissionRules | None): the session's admission rules.
+    """
+    if rules is None:
+        return ()
+    skipped = ["commands.allow"] if rules.allow is not None else []
+    for verb, listed in (("deny", rules.deny), ("ask", rules.ask)):
+        skipped.extend(
+            f"commands.{verb}: {rule.reason}"
+            for rule in listed
+            if not posix_level(rule)
+        )
+    return tuple(skipped)
 
 
 def op_reach(

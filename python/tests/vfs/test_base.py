@@ -255,7 +255,6 @@ def test_a_table_built_driver_needs_a_name():
 
 
 def test_a_subclass_name_names_a_table_built_driver():
-
     class Wiki(BaseVFS):
         name = "wiki"
 

@@ -869,7 +869,7 @@ async def test_a_leafs_session_write_clears_the_same_gate_the_shell_does():
         ws.register_cli("stash", STASH)
         denied = await ws.shell("stash AWS_PROFILE prod")
         assert denied.exit_code != 0
-        assert b"not yours to set" in (denied.stderr or b"")
+        assert denied.refusal and "not yours to set" in denied.refusal.reason
         assert (await ws.shell("echo $AWS_PROFILE")).stdout == b"\n"
         allowed = await ws.shell("stash OTHER fine")
         assert allowed.exit_code == 0

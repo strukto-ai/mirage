@@ -526,6 +526,7 @@ def explain_notes(
     out: str,
     err: str,
     reasons: tuple[str, ...],
+    refused: str,
 ) -> list[str]:
     """Where the dry run and the run disagreed, empty when they agree.
 
@@ -537,14 +538,17 @@ def explain_notes(
     lines nobody typed. A refusal it predicts must be the refusal that
     arrives. And the harder direction: a refusal that arrives must have
     been predicted, which is checked by looking for one of the
-    document's own rule reasons in what the run printed. That last one
-    is the direction a prediction cannot check on its own, and it is
-    where the bugs were: reading a line without its redirect target
-    answered ALLOW for a line the run refused.
+    document's own rule reasons on an operand refusal's record, the one
+    a rule naming the line's operand writes (the streams keep bash's
+    words, and a walk's refusal below the operand is the command's).
+    That last one is the direction a
+    prediction cannot check on its own, and it is where the bugs were:
+    reading a line without its redirect target answered ALLOW for a
+    line the run refused.
 
-    The message is looked for on either stream because the line's own
-    redirections still apply to the run and not to the prediction:
-    ``rm /denied 2>&1`` is refused on stdout.
+    The predicted message is looked for on either stream because the
+    line's own redirections still apply to the run and not to the
+    prediction: ``rm /denied 2>&1`` is refused on stdout.
 
     Args:
         predicted (tuple[int, str] | None): what explain foresaw.
@@ -554,13 +558,15 @@ def explain_notes(
         err (str): the run's stderr.
         reasons (tuple[str, ...]): every reason the document can speak
             with.
+        refused (str): the reason on the run's operand refusal record,
+            empty when it has none.
     """
     notes: list[str] = []
     if recorded:
         notes.append(
             f"explain: recorded {recorded} question(s), must record none"
         )
-    spoke = next((r for r in reasons if r and (r in err or r in out)), None)
+    spoke = next((r for r in reasons if r and r in refused), None)
     if predicted is None:
         if spoke is not None:
             notes.append(
@@ -652,8 +658,14 @@ async def run_case(
     err = raw_err.decode(errors="replace")
     notes = undecodable({"stdout": raw_out, "stderr": raw_err})
     if reasons and not case.get("explain_blind"):
+        refusal = result.refusal
+        refused = (
+            refusal.reason
+            if refusal is not None and refusal.scope == "operand"
+            else ""
+        )
         notes += explain_notes(
-            predicted, recorded, result.exit_code, out, err, reasons
+            predicted, recorded, result.exit_code, out, err, reasons, refused
         )
     check_out = None
     if read_paths:

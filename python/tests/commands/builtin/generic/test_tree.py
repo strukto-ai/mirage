@@ -21,7 +21,6 @@ def _dir(name: str) -> FileStat:
 
 
 def _make_backend(tree_map: dict[str, FileStat]):
-
     async def stat(p: PathSpec, index=None) -> FileStat:
         if p.virtual not in tree_map:
             raise FileNotFoundError(p.virtual)

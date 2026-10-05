@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.io.types import IOResult
-from mirage.policy import describe_refusal, says_why
+from mirage.policy import PolicyDenied, describe_refusal, says_why
 from mirage.types import Refusal
 
 
@@ -68,6 +68,18 @@ def with_refusal_bytes(data: bytes, refusal: Refusal | None) -> bytes:
     if not line or not data:
         return data or line
     return data + line if data.endswith(b"\n") else data + b"\n" + line
+
+
+def error_text(exc: Exception) -> str:
+    """A tool's failure as the agent reads it: the error in Python's own
+    words (a policy's refusal reads as a plain ``Permission denied``),
+    then the refusal's line when a policy refused the op.
+
+    Args:
+        exc (Exception): the failure.
+    """
+    refusal = exc.refusal if isinstance(exc, PolicyDenied) else None
+    return with_refusal(f"Error: {exc}", refusal)
 
 
 def io_to_str(io: IOResult) -> str:

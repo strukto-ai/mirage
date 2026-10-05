@@ -25,7 +25,6 @@ from mirage.types import ContentType, FileStat, FileType
 def _mounts(
     descendants: tuple[str, ...] = (), hidden: tuple[str, ...] = ()
 ) -> MountView:
-
     def under(path: str) -> list[str]:
         return [d for d in descendants if d.startswith(path.rstrip("/") + "/")]
 

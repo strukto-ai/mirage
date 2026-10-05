@@ -69,7 +69,6 @@ async def test_a_paged_connection_is_read_to_its_end():
 
 @pytest.mark.asyncio
 async def test_a_cursor_that_does_not_advance_is_refused():
-
     async def fetch(select, cursor):
         return _comments(["b"], "c1")
 
@@ -79,7 +78,6 @@ async def test_a_cursor_that_does_not_advance_is_refused():
 
 @pytest.mark.asyncio
 async def test_project_items_are_read_apart_and_none_without_the_scope():
-
     async def items(select, cursor):
         assert select.startswith("projectItems(first: 100)")
         return {

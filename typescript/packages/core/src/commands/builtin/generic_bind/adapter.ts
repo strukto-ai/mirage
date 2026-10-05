@@ -31,23 +31,21 @@ import {
   getAdmission,
   getCurrentSession,
   getOpPolicies,
-  hiddenPathsIntersect,
   hiddenRefusal,
-  liveSessions,
   mountGateFor,
-  pathAllowed,
-  pathRulesActive,
+  sessionVisibility,
   walkProbeFor,
 } from '../../../context/session_context.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
 import { preOpsGate, type Policies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
-import { moveReveals } from '../../../utils/hidden.ts'
+import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { refuseTaken } from '../../../ops/generic/factory.ts'
-import type { StatOverlay } from '../../../ops/types.ts'
+import type { NamespaceView, StatOverlay } from '../../../ops/types.ts'
 
 import { FileType, MountMode, PathSpec, type FileStat, type WalkProbe } from '../../../types.ts'
 import {
@@ -437,23 +435,23 @@ export interface Builder<A extends Accessor = Accessor> {
  * boundary so each command renders the refusal through its own
  * missing-file wording, indistinguishable from a real miss. */
 export function refuseHidden(path: PathSpec, create: boolean): void {
-  if (pathAllowed(path.virtual)) return
-  throw hiddenRefusal(path.virtual, create)
+  const vis = sessionVisibility()
+  if (pathVisible(vis, path.virtual)) return
+  throw hiddenRefusal(vis, path.virtual, create)
 }
 
 function visibleChildren(entries: string[], parent: PathSpec): string[] {
   const base = rstripSlash(parent.virtual)
+  const vis = sessionVisibility()
   return entries.filter((e) => {
     const trimmed = rstripSlash(e)
-    return pathAllowed(`${base}/${trimmed.slice(trimmed.lastIndexOf('/') + 1)}`)
+    return pathVisible(vis, `${base}/${trimmed.slice(trimmed.lastIndexOf('/') + 1)}`)
   })
 }
 
-/** Whether any live session's hides make this relocation a reveal. */
+/** Whether the bound session's hides make this relocation a reveal. */
 function moveWouldReveal(src: PathSpec, dst: PathSpec): boolean {
-  return liveSessions().some((sess) =>
-    moveReveals(sess.hiddenPaths, sess.shownPaths, src.virtual, dst.virtual),
-  )
+  return moveReveals(sessionVisibility(), src.virtual, dst.virtual)
 }
 
 /** Refuse a relocation that would surface a hidden path.
@@ -509,7 +507,7 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
   const ex = ops.exists
   if (ex !== undefined) {
     guarded.exists = async (accessor, path) => {
-      if (!pathAllowed(path.virtual)) return false
+      if (!pathVisible(sessionVisibility(), path.virtual)) return false
       return ex(accessor, path)
     }
   }
@@ -539,10 +537,11 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
         return
       } catch (exc) {
         const code = (exc as { code?: string }).code
+        const vis = sessionVisibility()
         if (
           rawUnlink === undefined ||
           (code !== 'ENOTEMPTY' && code !== 'EEXIST') ||
-          !hiddenPathsIntersect(path.virtual)
+          !hiddenUnder(vis, path.virtual)
         ) {
           throw exc
         }
@@ -562,7 +561,8 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
         // as the ops plane's merged listing does, while the cascade
         // itself only ever removes what the backend holds.
         const merged = children === undefined ? entries : [...entries, ...children(path.virtual)]
-        if (entries.length === 0 || visibleBelow(path.virtual, merged, pathAllowed)) {
+        const visible = (virtual: string): boolean => pathVisible(vis, virtual)
+        if (entries.length === 0 || visibleBelow(path.virtual, merged, visible)) {
           throw exc
         }
         const channel: RemnantChannel = {
@@ -578,7 +578,7 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
           },
         }
         try {
-          await removeRemnants(channel, pathAllowed, path)
+          await removeRemnants(channel, visible, path)
         } catch {
           throw exc
         }
@@ -971,7 +971,9 @@ export function withCommandGuards<A extends Accessor>(
   if (guarded.exists !== undefined) {
     const exists = guarded.exists
     guarded.exists = (accessor, path) =>
-      pathAllowed(path.virtual) ? exists(accessor, path) : Promise.resolve(false)
+      pathVisible(sessionVisibility(), path.virtual)
+        ? exists(accessor, path)
+        : Promise.resolve(false)
   }
   if (ops.du !== undefined) {
     guarded.du = {
@@ -1134,24 +1136,18 @@ function guardOperation<Args extends unknown[], R>(
   return walkedCall(null, commandCall(fn, name) as (...args: Args) => Promise<R>)
 }
 
-/** Whether the admitted command, a coded preOps policy or the namespace requires a checked traversal. */
-export function commandPathsScoped(paths: readonly PathSpec[], prefix: string): boolean {
-  return (
-    pathRulesActive() ||
-    paths.some((path) => hiddenPathsIntersect(path.pattern === null ? path.virtual : prefix || '/'))
-  )
-}
-
 /**
  * Drop the native walks when a hide, a path rule or a coded preOps
- * policy judges the command's paths.
+ * policy judges the command's paths, as the command's namespace view
+ * (`ns`) answers.
  */
 export function scopedIo<A extends Accessor>(
   ops: CommandIO<A>,
+  ns: NamespaceView | undefined,
   paths: readonly PathSpec[],
   prefix: string,
 ): CommandIO<A> {
-  if (!commandPathsScoped(paths, prefix)) return ops
+  if (!pathsScoped(ns, paths, prefix)) return ops
   const result = { ...ops }
   delete result.find
   delete result.du

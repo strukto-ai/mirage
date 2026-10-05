@@ -30,9 +30,10 @@ from mirage.commands.builtin.generic_bind.builders.du import (
 from mirage.commands.builtin.github.io import IO, resolve_glob
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
-from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.core.github.tree import ensure_tree
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
+from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -88,19 +89,18 @@ async def _stat(
     return await IO.stat(accessor, path, index)
 
 
-def _walked(accessor: GitHubAccessor, path: PathSpec) -> bool:
+def _walked(
+    accessor: GitHubAccessor, ns: NamespaceView | None, path: PathSpec
+) -> bool:
     """Whether du walks the subtree through the command guards rather
     than summing the tree it already holds.
 
     Args:
         accessor (GitHubAccessor): backend handle.
+        ns (NamespaceView | None): the command's namespace view.
         path (PathSpec): the operand being sized.
     """
-    return (
-        accessor.truncated
-        or path_rules_active()
-        or hidden_paths_intersect(path.virtual)
-    )
+    return accessor.truncated or paths_scoped(ns, [path])
 
 
 async def _live_size(
@@ -108,6 +108,7 @@ async def _live_size(
     accessor: GitHubAccessor,
     index: IndexCacheStore,
     budget: WalkBudget,
+    ns: NamespaceView | None,
     path: PathSpec,
 ) -> int:
     await live()
@@ -115,7 +116,7 @@ async def _live_size(
     # is walked folder by folder, as a backend with no tree would be; so
     # is a subtree under a hide or a path rule, whose raw sum would count
     # what the session cannot see and never report a refused directory.
-    if _walked(accessor, path):
+    if _walked(accessor, ns, path):
         return await walk_size(
             with_command_guards(with_policy_guard(IO)),
             accessor,
@@ -132,10 +133,11 @@ async def _live_entries(
     accessor: GitHubAccessor,
     index: IndexCacheStore,
     budget: WalkBudget,
+    ns: NamespaceView | None,
     path: PathSpec,
 ) -> tuple[list[tuple[str, int]], int]:
     await live()
-    if _walked(accessor, path):
+    if _walked(accessor, ns, path):
         return await walk_entries(
             with_command_guards(with_policy_guard(IO)),
             accessor,
@@ -175,8 +177,8 @@ async def du(
         opts,
         partial(_resolve, live, accessor, opts.index),
         partial(_stat, live, accessor, opts.index),
-        partial(_live_size, live, accessor, opts.index, budget),
-        partial(_live_entries, live, accessor, opts.index, budget),
+        partial(_live_size, live, accessor, opts.index, budget, opts.ns),
+        partial(_live_entries, live, accessor, opts.index, budget, opts.ns),
         truncated=lambda: budget.hit,
         unreadable=lambda: budget.unreadable,
         directories=lambda: budget.directories,

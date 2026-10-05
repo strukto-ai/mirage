@@ -26,7 +26,7 @@ from mirage.context import (
     set_current_session,
     set_mount_gate,
 )
-from mirage.types import MountMode, PathSpec, ShowEntry, ShownPaths
+from mirage.types import MountMode, PathSpec, ShowEntry, ShownPaths, Visibility
 from mirage.workspace.session import SessionState
 
 
@@ -35,7 +35,6 @@ class FakeAccessor:
 
 
 def _make_rm(files: set[str], calls: list[tuple]):
-
     async def resolve_glob(accessor, paths, index):
         return paths
 
@@ -109,8 +108,10 @@ async def test_rm_holds_each_path_to_its_regions_mode():
     sess = SessionState(
         session_id="agent",
         mount_modes={"/gdocs": MountMode.READ},
-        shown_paths=ShownPaths(
-            entries=(ShowEntry("/gdocs/build", MountMode.WRITE),)
+        visibility=Visibility(
+            shown=ShownPaths(
+                entries=(ShowEntry("/gdocs/build", MountMode.WRITE),)
+            )
         ),
     )
     session_token = set_current_session(sess)

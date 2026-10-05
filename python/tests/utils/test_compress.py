@@ -181,7 +181,6 @@ async def test_expansion_yields_bounded_chunks_before_reading_more_input():
 
 @pytest.mark.asyncio
 async def test_trailing_warning_follows_valid_output():
-
     async def source():
         yield HELLO + b"junk"
 

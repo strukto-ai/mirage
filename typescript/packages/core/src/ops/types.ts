@@ -14,7 +14,7 @@
 
 import type { ShellValue } from '../shell/variable.ts'
 import type { VarAttr } from '../shell/variable.ts'
-import type { FileStat } from '../types.ts'
+import type { FileStat, Visibility } from '../types.ts'
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
 
@@ -185,6 +185,10 @@ export interface NamespaceView {
   // claimed the workspace. What an owner-rendering command prints in the
   // owner column for an entry whose backend reports no uid.
   user?: string
+  // The running session's hides and shows; absent when unrestricted.
+  visibility?: Visibility
+  // Whether anything at or under a path is judged; a native walk yields.
+  scoped?: (virtual: string) => boolean
 }
 
 /**

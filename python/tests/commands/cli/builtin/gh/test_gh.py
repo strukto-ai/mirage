@@ -227,7 +227,6 @@ def _path(value: str) -> PathSpec:
 
 
 def _doors(files: dict[str, bytes]) -> CLIDoors:
-
     async def dispatch(op, path, *args, **kwargs):
         assert op == "read"
         return files[path.virtual], None
@@ -291,7 +290,6 @@ def _graphql(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_json_repo_view_asks_graphql_for_the_fields_named(monkeypatch):
-
     async def unexpected_readme(config, ref):
         raise AssertionError("JSON output must not fetch README content")
 

@@ -37,7 +37,6 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
-from mirage.context import path_allowed
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
@@ -55,6 +54,7 @@ from mirage.types import (
     PrimitiveMove,
     ReaddirFn,
     StatFn,
+    Visibility,
 )
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.errors import (
@@ -64,6 +64,7 @@ from mirage.utils.errors import (
     DotWalkMissing,
     fs_strerror,
 )
+from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import CycleError, resolve_path
 from mirage.utils.quote import shell_quote_always
@@ -98,6 +99,8 @@ class TransferLinks:
         relay (PrimitiveCopy): the door's own transfer primitives, which
             copy what a followed link leads to on whatever mount it lives.
         relay_stat (StatFn): the door's stat, for the same walk.
+        visibility (Visibility | None): the session's visibility; a link
+            it hides is not copied.
     """
 
     links: LinkView
@@ -105,6 +108,7 @@ class TransferLinks:
     cwd: str
     relay: PrimitiveCopy
     relay_stat: StatFn
+    visibility: Visibility | None = None
 
 
 # Each option of cp's link policy, and what it asks for; the last typed
@@ -480,7 +484,7 @@ async def copy_tree_links(
     shown_dst = target.raw_path.rstrip("/") or target.raw_path
     below = sorted(copies.links.subtree(base), key=lambda row: row[0])
     for virtual, row in below:
-        if not path_allowed(virtual):
+        if not path_visible(copies.visibility, virtual):
             continue
         rel = virtual[len(base.rstrip("/")) + 1 :]
         landing = f"{dst_base}/{rel}"

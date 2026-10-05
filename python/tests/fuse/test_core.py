@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import logging
 import os
 import stat
 import threading
@@ -657,3 +658,30 @@ async def test_removing_a_link_leaves_its_targets_handles_alone():
     core.unlink("/alias")
     assert "read" not in [r.op for r in ws.vfs.records[before:]]
     core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_session_is_told_the_command_rules_a_door_of_ops_skips(
+    caplog,
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    keys = {"reason": "keys", "paths": ["/data/*.key"]}
+    ruled = ws.create_session(
+        "agent",
+        profile={
+            "commands": {
+                "deny": [{"reason": "no rm", "commands": ["rm"]}, keys]
+            }
+        },
+    )
+    with caplog.at_level(logging.WARNING, logger="mirage.fuse.core"):
+        MountCore(ws.vfs, session=ruled)
+    assert "commands.deny: no rm" in caplog.text
+    assert "keys" not in caplog.text
+    caplog.clear()
+    pathed = ws.create_session(
+        "pathed", profile={"commands": {"deny": [keys]}}
+    )
+    with caplog.at_level(logging.WARNING, logger="mirage.fuse.core"):
+        MountCore(ws.vfs, session=pathed)
+    assert caplog.text == ""

@@ -30,9 +30,8 @@ from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
 from mirage.commands.resolve import get_extension
 from mirage.context import (
     get_current_session,
-    hidden_paths_intersect,
     hidden_refusal,
-    path_allowed,
+    session_visibility,
 )
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
@@ -68,7 +67,7 @@ from mirage.utils.errors import (
     no_xattr,
     walk_refusal,
 )
-from mirage.utils.hidden import move_reveals
+from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent
 from mirage.utils.ranges import slice_window
@@ -131,7 +130,7 @@ def _served(report: OpReport | None, result: Any) -> None:
 
 
 def _visible_entries(entries: list[str], parent: str) -> list[str]:
-    """Drop listing entries the current session's spec hides.
+    """Drop listing entries the bound session hides.
 
     Entry shapes vary by backend (bare names, trailing-slash names,
     full paths), so each is keyed by its final segment against the
@@ -143,10 +142,11 @@ def _visible_entries(entries: list[str], parent: str) -> list[str]:
         parent (str): the directory that was listed, as a virtual path.
     """
     base = parent.rstrip("/")
+    vis = session_visibility()
     return [
         e
         for e in entries
-        if path_allowed(f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
+        if path_visible(vis, f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
     ]
 
 
@@ -338,10 +338,11 @@ class Dispatcher:
             virtual (str): the virtual path being answered.
         """
         prefixes = [m.prefix for m in self._namespace.registry.mounts()]
+        vis = session_visibility()
         if op == "readdir":
-            return namespace_listing(prefixes, self._namespace, virtual)
+            return namespace_listing(vis, prefixes, self._namespace, virtual)
         if op == "stat":
-            return namespace_stat(prefixes, self._namespace, virtual)
+            return namespace_stat(vis, prefixes, self._namespace, virtual)
         return None
 
     async def _gated_namespace(
@@ -410,15 +411,16 @@ class Dispatcher:
         # is checked so a link inside hidden space cannot be followed
         # out of it, the followed path is re-checked so a visible link
         # cannot lead in, and a rename destination is a create.
-        if not path_allowed(path.virtual):
-            raise hidden_refusal(path.virtual, op in HIDDEN_CREATE_OPS)
+        vis = session_visibility()
+        if not path_visible(vis, path.virtual):
+            raise hidden_refusal(vis, path.virtual, op in HIDDEN_CREATE_OPS)
         dst = kwargs.get("dst")
         if (
             op == "rename"
             and isinstance(dst, PathSpec)
-            and not path_allowed(dst.virtual)
+            and not path_visible(vis, dst.virtual)
         ):
-            raise hidden_refusal(dst.virtual, True)
+            raise hidden_refusal(vis, dst.virtual, True)
         # An operand the walk already refused (the empty name, a link
         # loop) names nothing an op can reach, whatever `virtual` says.
         for walked in (path, dst):
@@ -465,17 +467,9 @@ class Dispatcher:
             # content is silent (rm_r, the remnant rmdir below);
             # relocating it into view is refused. Only a directory has
             # anything below it to re-anchor, so a file source passes.
-            sess = get_current_session()
-            if (
-                sess is not None
-                and move_reveals(
-                    sess.hidden_paths,
-                    sess.shown_paths,
-                    path.virtual,
-                    dst.virtual,
-                )
-                and await self._moved_source_is_dir(path)
-            ):
+            if move_reveals(
+                vis, path.virtual, dst.virtual
+            ) and await self._moved_source_is_dir(path):
                 raise PermissionError(
                     errno.EACCES, os.strerror(errno.EACCES), path.virtual
                 )
@@ -510,8 +504,10 @@ class Dispatcher:
                 raise eloop(path) from None
             if followed != path.virtual:
                 path = PathSpec.from_str_path(followed)
-                if not path_allowed(path.virtual):
-                    raise hidden_refusal(path.virtual, op in HIDDEN_CREATE_OPS)
+                if not path_visible(vis, path.virtual):
+                    raise hidden_refusal(
+                        vis, path.virtual, op in HIDDEN_CREATE_OPS
+                    )
         if rule_gate is not None and not no_follow:
             _judge(rule_gate, typed, walked, path)
         if op in XATTR_OPS:
@@ -576,7 +572,7 @@ class Dispatcher:
                 self._namespace.try_mount_for(dst.virtual)
             ).admit(op, dst, True, create=True, subtree=True)
         if op == "rmdir" and any(
-            path_allowed(link)
+            path_visible(vis, link)
             for link, _ in self._namespace.link_stats_below(path.virtual)
         ):
             raise OSError(
@@ -731,6 +727,7 @@ class Dispatcher:
         if op == "readdir":
             result = _visible_entries(
                 merge_readdir(
+                    vis,
                     result,
                     [m.prefix for m in self._namespace.registry.mounts()],
                     self._namespace,
@@ -779,12 +776,13 @@ class Dispatcher:
                 # serial order (a link synthesizes its parents), and
                 # the purge taking the directory's hidden nodes must
                 # not take it too.
+                vis = session_visibility()
                 arrived = frozenset(
                     link
                     for link, _ in self._namespace.link_stats_below(
                         path.virtual
                     )
-                    if path_allowed(link)
+                    if path_visible(vis, link)
                 )
                 await self._namespace.purge_under(path.virtual, keep=arrived)
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
@@ -863,7 +861,8 @@ class Dispatcher:
             path (PathSpec): the directory being removed.
             refusal (OSError): the backend's not-empty error.
         """
-        if not hidden_paths_intersect(path.virtual):
+        vis = session_visibility()
+        if not hidden_under(vis, path.virtual):
             raise refusal
         try:
             entries = await mount.execute_op("readdir", path.virtual)
@@ -878,12 +877,14 @@ class Dispatcher:
         # see keeps the refusal instead of reporting a successful rmdir
         # while the mounted child remains.
         merged = merge_readdir(
+            vis,
             entries,
             [m.prefix for m in self._namespace.registry.mounts()],
             self._namespace,
             path.virtual,
         )
-        if not entries or visible_below(path.virtual, merged, path_allowed):
+        visible = functools.partial(path_visible, vis)
+        if not entries or visible_below(path.virtual, merged, visible):
             raise refusal
         channel = _MountChannel(
             mount,
@@ -891,7 +892,7 @@ class Dispatcher:
             functools.partial(self.invalidate_after_write, mount),
         )
         try:
-            await remove_remnants(channel, path_allowed, path)
+            await remove_remnants(channel, visible, path)
         except Exception as exc:
             raise refusal from exc
         # The namespace's own nodes under the subtree go with it: a
@@ -909,7 +910,7 @@ class Dispatcher:
         links_below = [
             p for p in self._namespace.symlink_targets() if p.startswith(base)
         ]
-        if any(path_allowed(p) for p in links_below):
+        if any(path_visible(vis, p) for p in links_below):
             raise refusal
         await self._namespace.purge_under(path.virtual)
 
@@ -953,8 +954,9 @@ class Dispatcher:
             walked = posixpath.normpath(walked)
         if walked == path.virtual:
             return path
-        if not path_allowed(walked):
-            raise hidden_refusal(walked, create)
+        vis = session_visibility()
+        if not path_visible(vis, walked):
+            raise hidden_refusal(vis, walked, create)
         return PathSpec.from_str_path(walked)
 
     def _table_answers(
@@ -1146,7 +1148,12 @@ class Dispatcher:
         if self._namespace.is_link(path.virtual):
             return True, None
         prefixes = [m.prefix for m in self._namespace.registry.mounts()]
-        if namespace_stat(prefixes, self._namespace, path.virtual) is not None:
+        if (
+            namespace_stat(
+                session_visibility(), prefixes, self._namespace, path.virtual
+            )
+            is not None
+        ):
             return True, None
         mount = self._namespace.try_mount_for(path.virtual)
         if mount is None:
@@ -1245,7 +1252,12 @@ class Dispatcher:
         if virtual == "/":
             return FileType.DIRECTORY
         prefixes = [m.prefix for m in self._namespace.registry.mounts()]
-        if namespace_stat(prefixes, self._namespace, virtual) is not None:
+        if (
+            namespace_stat(
+                session_visibility(), prefixes, self._namespace, virtual
+            )
+            is not None
+        ):
             return FileType.DIRECTORY
         mount = self._namespace.try_mount_for(virtual)
         if mount is None:

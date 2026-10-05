@@ -115,6 +115,7 @@ export async function handleReadlink(
             false,
             readlink,
             dispatchStat(dispatch),
+            session.visibility,
           ),
         )
         continue

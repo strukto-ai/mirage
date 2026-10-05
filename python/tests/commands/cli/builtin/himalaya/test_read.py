@@ -85,7 +85,6 @@ async def test_read_without_an_id_is_a_usage_error():
 
 @pytest.mark.asyncio
 async def test_raw_writes_the_rfc5322_bytes_verbatim(monkeypatch):
-
     async def fake_raw(accessor, folder, uid):
         return b"From: a@x\r\n\r\nbody"
 

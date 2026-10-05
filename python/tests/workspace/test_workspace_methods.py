@@ -42,7 +42,6 @@ def _load(*args, **kwargs):
 
 
 def _read(ws, path):
-
     async def _do():
         r = await ws.shell(f"cat {path}")
         return await r.stdout_str()

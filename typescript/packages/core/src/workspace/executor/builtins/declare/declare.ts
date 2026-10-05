@@ -296,7 +296,7 @@ export function identifierFailure(cmd: string, errors: string[]): Result {
  * one: reporting it as declared would leak it.
  */
 export function declareLine(session: SessionState, name: string): string | null {
-  if (varHidden(session.hiddenVars, name)) return null
+  if (varHidden(session.visibility, name)) return null
   const v = sessionEntry(session.vars, name)
   if (v === undefined) return null
   const letters = attrLetters(v)

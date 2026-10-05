@@ -16,12 +16,12 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
-import { FileType, PathSpec, type StatFn } from '../../../types.ts'
+import { FileType, PathSpec, type StatFn, type Visibility } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { eloop, enoent, enotdir, fsErrorLine, isMissingPath } from '../../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { parent } from '../../../utils/path.ts'
-import { pathAllowed } from '../../../context/session_context.ts'
+import { pathVisible } from '../../../utils/hidden.ts'
 import { dispatchStat, linkTarget } from '../utils/paths.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
@@ -88,6 +88,7 @@ export async function canonicalize(
   nolinks: boolean,
   readlink: ((path: string) => string | null) | null,
   stat: StatFn,
+  visibility: Visibility | null = null,
 ): Promise<string> {
   if (word === '') throw enoent(word)
   const names = (word.startsWith('/') ? word : `${cwd}/${word}`).split('/').filter((n) => n !== '')
@@ -103,7 +104,8 @@ export async function canonicalize(
       continue
     }
     path = path === '/' ? `/${name}` : `${path}/${name}`
-    const target = nolinks || readlink === null || !pathAllowed(path) ? null : readlink(path)
+    const target =
+      nolinks || readlink === null || !pathVisible(visibility, path) ? null : readlink(path)
     if (target !== null) {
       links++
       const key = JSON.stringify([path, names])
@@ -154,12 +156,21 @@ export async function realpath(
   cwd = '/',
   readlink: ((path: string) => string | null) | null = null,
   flags: RealpathFlags = parseFlags({}),
+  visibility: Visibility | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
   if (paths.length === 0) throw missingOperandError('realpath', null)
   const canon = async (word: string): Promise<string> => {
-    const path = await canonicalize(word, cwd, flags.mode, flags.links !== 'P', readlink, stat)
+    const path = await canonicalize(
+      word,
+      cwd,
+      flags.mode,
+      flags.links !== 'P',
+      readlink,
+      stat,
+      visibility,
+    )
     if (flags.links !== 'L') return path
-    return canonicalize(path, cwd, flags.mode, false, readlink, stat)
+    return canonicalize(path, cwd, flags.mode, false, readlink, stat, visibility)
   }
   const relativeTo = flags.relativeTo ?? flags.relativeBase
   let to: string | null = null
@@ -219,5 +230,12 @@ export async function realpathGeneric(
           (await stat(
             PathSpec.fromStrPath(path.virtual, mountKey(path.virtual, prefix)),
           )) as FileStat
-  return realpath(paths, pathStat, opts.cwd, linkTarget(opts.ns?.links), parseFlags(opts.flags))
+  return realpath(
+    paths,
+    pathStat,
+    opts.cwd,
+    linkTarget(opts.ns?.links),
+    parseFlags(opts.flags),
+    opts.ns?.visibility ?? null,
+  )
 }

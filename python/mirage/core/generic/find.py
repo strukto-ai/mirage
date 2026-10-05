@@ -15,10 +15,11 @@ from mirage.commands.builtin.find_eval import (
 )
 from mirage.commands.builtin.find_printf import printf_kind
 from mirage.commands.errors import is_entry_error
-from mirage.context import path_allowed
+from mirage.context import session_visibility
 from mirage.ops.types import LinkView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp, matches_mtime
+from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.stat_view import DIR_SIZE, content_size
 
@@ -618,8 +619,9 @@ async def walk_find(
     need_mtime = args.mtime_min is not None or args.mtime_max is not None
     learned: dict[str, float | None] = {}
     results: list[str] = []
+    vis = session_visibility()
     for p, kind in sorted(collected):
-        if not path_allowed(p):
+        if not path_visible(vis, p):
             continue
         is_dir = kind == "d"
         entry_name = p.rsplit("/", 1)[-1]
@@ -692,7 +694,7 @@ async def walk_find(
         for r in await link_results(
             links, root_path, prefix, search_key, args, tree, follow=follow
         )
-        if path_allowed(r)
+        if path_visible(vis, r)
     )
     find_eval.settle_prunes(tree, learned)
     return sorted(find_eval.drop_pruned(results, tree, prefix))

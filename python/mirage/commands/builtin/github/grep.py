@@ -27,12 +27,12 @@ from mirage.commands.builtin.grep_pushdown import grep_needs_every_file
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.core.github.constants import SCOPE_ERROR
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as github_readdir
 from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 
 
@@ -50,9 +50,7 @@ async def grep(
     # under a hide or a path rule the scan sets search aside and reads
     # through the command guards, which report a refused directory where
     # GNU does and never open a sealed file.
-    scoped = path_rules_active() or any(
-        hidden_paths_intersect(p.virtual) for p in paths
-    )
+    scoped = paths_scoped(opts.ns, paths)
 
     resolved: list[PathSpec] = []
     used_search = False

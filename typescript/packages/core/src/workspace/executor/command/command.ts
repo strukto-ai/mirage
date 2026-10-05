@@ -261,7 +261,7 @@ export async function handleCommand(
           entries: registry.runtimeEntries,
           dispatch,
           statPath: (path: string) => pathStat(dispatch, path, null),
-          ns: namespaceViewOf(registry, namespace ?? null, dispatch),
+          ns: namespaceViewOf(registry, namespace ?? null, dispatch, session),
           sessionView: sessionView(session, registry.policies),
           ...(registry.processView === undefined
             ? {}
@@ -505,7 +505,7 @@ export async function handleCommand(
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
-    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch)
+    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session)
     // A per-operand native run is single-mount by construction, so a
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
@@ -670,7 +670,7 @@ export async function handleCommand(
       ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       : null
 
-  const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch)
+  const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch, session)
   const singleStat: StatPath = (path: string) => pathStat(dispatch, path, null)
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(

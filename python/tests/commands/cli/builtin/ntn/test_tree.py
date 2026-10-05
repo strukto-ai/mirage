@@ -144,7 +144,6 @@ def test_write_classification():
 
 @pytest.mark.asyncio
 async def test_installed_tree_dispatches_pages_create(monkeypatch):
-
     async def fake_create(config, body):
         return {"id": "P1", "object": "page", "parent": body["parent"]}
 

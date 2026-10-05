@@ -584,7 +584,7 @@ export class Workspace {
     return captureBinding(
       this.runtimeBinding,
       {
-        ns: namespaceViewOf(this.registry, this.namespace, this.dispatcher.dispatch),
+        ns: namespaceViewOf(this.registry, this.namespace, this.dispatcher.dispatch, session),
         sessionView: sessionView(session, this.policies),
         processes: this.processView(session),
         cwd: PathSpec.fromStrPath(session.cwd),
@@ -996,7 +996,7 @@ export class Workspace {
       withInline(base, inline),
       this.profileName(options.profile ?? null),
     )
-    checkCliVerbs(compiled.commands, this.cliVerbs())
+    checkCliVerbs(compiled.policies.commands, this.cliVerbs())
     const session = this.sessionManager.create(sessionId)
     applyProfile(session, compiled)
     return session
@@ -1060,7 +1060,7 @@ export class Workspace {
   ): Promise<SessionState> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const compiled = compileProfile(this.baseProfile(profile), this.profileName(profile))
-    checkCliVerbs(compiled.commands, this.cliVerbs())
+    checkCliVerbs(compiled.policies.commands, this.cliVerbs())
     const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
     if (this.isShuttingDown()) throw new Error('Workspace is closed')

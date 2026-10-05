@@ -436,7 +436,7 @@ describe('the fenced remnant cascade rides the mount revisions', () => {
       internals.registry.mountFor('/ram/d').revisions.set('/ram/d/h.txt', 'r1')
       const sess = new SessionState({
         sessionId: 'agent',
-        hiddenPaths: { paths: ['/ram/d/h.txt'] },
+        visibility: { paths: { paths: ['/ram/d/h.txt'] } },
       })
       await runWithSession(sess, () => ws.dispatch('rmdir', '/ram/d'))
       expect(seen).toBe('r1')
@@ -1143,7 +1143,7 @@ describe('a marked op is judged on the paths the door reaches', () => {
       )
       const session = new SessionState({
         sessionId: 'hider',
-        hiddenPaths: { paths: ['/data/hid'] },
+        visibility: { paths: { paths: ['/data/hid'] } },
       })
       const { gate, asked } = refusing('/data/real/secret')
       await runWithSession(session, async () => {

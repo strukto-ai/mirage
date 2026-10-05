@@ -23,7 +23,13 @@ from mirage.io.types import IOResult
 from mirage.policy import Action, Deny, OpsContext, Policy
 from mirage.policy.types import SessionContext
 from mirage.shell.variable import VarAttr
-from mirage.types import HiddenPaths, HiddenVars, MountMode, PathSpec
+from mirage.types import (
+    HiddenPaths,
+    HiddenVars,
+    MountMode,
+    PathSpec,
+    Visibility,
+)
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import (
@@ -321,7 +327,7 @@ def test_export_fires_the_state_gate():
 
     denied, allowed = asyncio.run(run())
     assert denied.exit_code != 0
-    assert b"refused by policy" in (denied.stderr or b"")
+    assert denied.refusal and "refused by policy" in denied.refusal.reason
     assert "SECRET_X" not in ws.env
     assert allowed.exit_code == 0
     assert ws.env.get("PUBLIC_X") == "1"
@@ -349,7 +355,7 @@ def test_every_declaring_spelling_fires_the_state_gate():
 
     for io in asyncio.run(run()):
         assert io.exit_code != 0, f"unexpected success: {io}"
-        assert b"refused by policy" in (io.stderr or b"")
+        assert io.refusal and "refused by policy" in io.refusal.reason
     session = ws.get_session(ws.default_session_id)
     for name in ("SECRET_A", "SECRET_B", "SECRET_C", "SECRET_D", "SECRET_E"):
         assert name not in session.vars
@@ -362,7 +368,7 @@ def test_a_hidden_name_cannot_be_marked_readonly():
     ws = _two_mounts()
     session = ws.get_session(ws.default_session_id)
     seed_var(session, "SECRET", "topsecret")
-    session.hidden_vars = HiddenVars(names=("SECRET",), patterns=())
+    session.visibility = Visibility(vars=HiddenVars(names=("SECRET",)))
 
     async def run():
         return await ws.shell("readonly SECRET")
@@ -458,7 +464,7 @@ def test_bare_export_of_a_new_name_fires_the_gate():
 
     denied, allowed, listed = asyncio.run(run())
     assert denied.exit_code != 0
-    assert b"refused by policy" in (denied.stderr or b"")
+    assert denied.refusal and "refused by policy" in denied.refusal.reason
     assert "SECRET_BARE" not in ws.env
     assert allowed.exit_code == 0
     # Marked but unset, which is bash's third state: `export -p` lists
@@ -476,7 +482,7 @@ def test_local_fires_the_gate():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"refused by policy" in (io.stderr or b"")
+    assert io.refusal and "refused by policy" in io.refusal.reason
     assert "SECRET_L" not in ws.env
 
 
@@ -494,7 +500,7 @@ def test_plain_assignment_fires_the_gate():
 
     denied, allowed = asyncio.run(run())
     assert denied.exit_code != 0
-    assert b"refused by policy" in (denied.stderr or b"")
+    assert denied.refusal and "refused by policy" in denied.refusal.reason
     assert "SECRET_P" not in ws.env
     assert allowed.exit_code == 0
     assert ws.env.get("PUBLIC_P") == "1"
@@ -521,7 +527,7 @@ def test_array_assignment_fires_the_gate():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"refused by policy" in (io.stderr or b"")
+    assert io.refusal and "refused by policy" in io.refusal.reason
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     assert "SECRET_V" not in sess.arrays
 
@@ -577,7 +583,7 @@ def test_declaration_array_assignment_fires_the_gate():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"refused by policy" in (io.stderr or b"")
+    assert io.refusal and "refused by policy" in io.refusal.reason
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     assert "SECRET_D" not in sess.arrays
 
@@ -598,7 +604,7 @@ def test_a_prefix_assignment_clears_the_gate():
 
     denied, out, allowed_out = asyncio.run(run())
     assert denied.exit_code != 0
-    assert b"refused by policy" in (denied.stderr or b"")
+    assert denied.refusal and "refused by policy" in denied.refusal.reason
     assert out == ""
     # A name no rule covers still reaches the command.
     assert allowed_out == "fine\n"
@@ -615,7 +621,7 @@ def test_declare_x_on_an_existing_name_clears_the_gate():
 
     io = asyncio.run(ws.shell("declare -x SECRET_TOKEN"))
     assert io.exit_code != 0
-    assert b"refused by policy" in (io.stderr or b"")
+    assert io.refusal and "refused by policy" in io.refusal.reason
     assert VarAttr.EXPORT not in sess.vars["SECRET_TOKEN"].attrs
     # The value is untouched and still readable as a shell variable.
     assert sess.vars["SECRET_TOKEN"].value == "hunter2"
@@ -786,7 +792,7 @@ def test_subscripted_unset_of_a_scalar_fires_the_gate():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"refused by policy" in (io.stderr or b"")
+    assert io.refusal and "refused by policy" in io.refusal.reason
     assert ws.env.get("SECRET_U") == "v"
 
 
@@ -835,7 +841,7 @@ def _hidden_vars_ws() -> Workspace:
     # would make the hidden-vars assertions below vacuous.
     set_attr(sess, "SLACK_TOKEN", VarAttr.EXPORT)
     set_attr(sess, "PUBLIC", VarAttr.EXPORT)
-    sess.hidden_vars = HiddenVars(names=("SLACK_TOKEN",))
+    sess.visibility = Visibility(vars=HiddenVars(names=("SLACK_TOKEN",)))
     return ws
 
 
@@ -990,7 +996,7 @@ def _hidden_array_ws() -> Workspace:
     sess = ws.create_session("agent", mounts={"/a": "write"})
     seed_var(sess, "SLACK_TOKEN", ["xoxb-real", "xoxb-two"])
     seed_var(sess, "PUBLIC", "ok")
-    sess.hidden_vars = HiddenVars(names=("SLACK_TOKEN",))
+    sess.visibility = Visibility(vars=HiddenVars(names=("SLACK_TOKEN",)))
     return ws
 
 
@@ -1097,7 +1103,7 @@ def test_subscript_arithmetic_resolves_against_the_visible_env():
     ws = _two_mounts()
     sess = ws.create_session("agent", mounts={"/a": "write"})
     seed_var(sess, "SECRET_IDX", "1")
-    sess.hidden_vars = HiddenVars(names=("SECRET_IDX",))
+    sess.visibility = Visibility(vars=HiddenVars(names=("SECRET_IDX",)))
 
     async def run():
         await ws.shell("b=(x y)", session_id="agent")
@@ -1115,7 +1121,7 @@ def test_hidden_home_reads_as_unset_everywhere():
     ws = _two_mounts()
     sess = ws.create_session("agent", mounts={"/a": "write"})
     seed_var(sess, "HOME", "/a/homedir")
-    sess.hidden_vars = HiddenVars(names=("HOME",))
+    sess.visibility = Visibility(vars=HiddenVars(names=("HOME",)))
 
     async def run():
         home = await ws.shell('echo "[$HOME]"', session_id="agent")
@@ -1147,7 +1153,9 @@ def _hidden_paths_ws() -> Workspace:
     a._store.dirs.add("/secrets")
     ws = Workspace({"/a": (a, MountMode.WRITE)}, mode=MountMode.WRITE)
     sess = ws.create_session("agent")
-    sess.hidden_paths = HiddenPaths(paths=("/a/secrets",), patterns=("*.key",))
+    sess.visibility = Visibility(
+        paths=HiddenPaths(paths=("/a/secrets",), patterns=("*.key",))
+    )
     return ws
 
 
@@ -1412,7 +1420,7 @@ def test_a_whole_mount_hidden_by_prefix_disappears():
     # while mount_modes still lists the grant.
     ws = _two_mounts()
     sess = ws.create_session("agent", mounts={"/a": "write", "/b": "write"})
-    sess.hidden_paths = HiddenPaths(paths=("/b",))
+    sess.visibility = Visibility(paths=HiddenPaths(paths=("/b",)))
 
     async def run():
         root = await ws.shell("ls /", session_id="agent")

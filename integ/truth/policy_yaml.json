@@ -25,7 +25,7 @@
     "                                         and refuses one that holds it",
     "reviewer  echo x > /scratch/cold/f       [1] /scratch/cold/f: Permission denied",
     "                                         pre_ops refuses a write at the op door",
-    "reviewer  export AWS_SECRET=x            [1] credentials are set by the operator",
+    "reviewer  export AWS_SECRET=x            [1] AWS_SECRET: permission denied",
     "                                         pre_session refuses a credential",
     "reviewer  export SAFE=1 && echo $SAFE    [0] 1",
     "                                         silence where no hook objects",

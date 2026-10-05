@@ -396,6 +396,8 @@ describe('sandbox policy', () => {
       shell.resolve({ command: 'sort /data/notes/a.txt', sandboxPolicy: READ_ONLY }),
     )
     expect(missing.stderr.text).toContain('command not found')
+    // The twin's view of what is installed is the source's allow list.
+    expect(ws.getSession('agent::read-only').visibility.commands).toEqual(['cat', 'ls', 'echo'])
   })
 
   it('keeps a bound session out of the read-only twin it narrowed into', async () => {

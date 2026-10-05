@@ -13,8 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import logging
 
 from mirage.errors import FsCondition, classify, posix_errno
+from mirage.policy.errors import PolicyDenied
+
+logger = logging.getLogger(__name__)
 
 # "attribute not found" errno: ENOATTR on macOS, ENODATA on Linux.
 NO_XATTR = posix_errno(FsCondition.NO_XATTR)
@@ -50,7 +54,9 @@ def classify_error(err: BaseException) -> int:
     numbers. An OSError whose errno the vocabulary does not name is
     passed through untouched (ENAMETOOLONG reaches the kernel as
     itself), and the message needles are a last resort for bare
-    OSErrors, not a classification channel.
+    OSErrors, not a classification channel. A kernel mount and SFTP can
+    hand back only the number, so a policy's reason for a refusal goes
+    to the operator log here.
 
     Args:
         err (BaseException): the exception raised by the mount core.
@@ -58,6 +64,13 @@ def classify_error(err: BaseException) -> int:
     Returns:
         int: positive POSIX errno; ``errno.EIO`` when nothing matches.
     """
+    if isinstance(err, PolicyDenied) and err.refusal is not None:
+        logger.info(
+            "policy %s refused %s: %s",
+            err.refusal.policy,
+            err.filename,
+            err.refusal.reason,
+        )
     condition = classify(err)
     if condition is not None:
         return posix_errno(condition)

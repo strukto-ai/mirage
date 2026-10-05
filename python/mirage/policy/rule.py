@@ -50,7 +50,7 @@ class RulePolicy(Policy):
             return None
         if hit.operand is None:
             return Deny(self.rule.reason)
-        return Deny(f"{hit.operand}: {self.rule.reason}", DenyScope.OPERAND)
+        return Deny(self.rule.reason, DenyScope.OPERAND, path=hit.operand)
 
     async def pre_ops(self, ctx: OpsContext) -> Action | None:
         # The op-layer twin: pure path protection (no command scope)

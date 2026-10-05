@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
-import { hiddenPathsIntersect, pathRulesActive } from '../../../../context/session_context.ts'
+import { pathsScoped } from '../../../../ops/namespace_view.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -44,12 +44,7 @@ export const BUILDER: Builder = {
     // off its native op. -empty takes the walk too: a native op judges a
     // directory from its own listing, and the object stores, ssh and gdrive
     // call every directory non-empty.
-    if (
-      find !== undefined &&
-      !texts.includes('-empty') &&
-      !pathRulesActive() &&
-      !resolved.some((p) => hiddenPathsIntersect(p.virtual))
-    ) {
+    if (find !== undefined && !texts.includes('-empty') && !pathsScoped(opts.ns, resolved)) {
       // -mtime must see namespace times (touch results, observed
       // writes), so local backends post-filter through the overlay-
       // aware stat instead of pushing the window into the core.

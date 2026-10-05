@@ -22,7 +22,8 @@ import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../utils/errors.ts'
 import { dottedSpelling } from '../utils/path.ts'
 import type { DispatchFn } from '../runtime/types.ts'
-import { getCurrentSession, pathAllowed } from '../context/session_context.ts'
+import { getCurrentSession, sessionVisibility } from '../context/session_context.ts'
+import { pathVisible } from '../utils/hidden.ts'
 import type { SessionBind } from './types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
@@ -204,7 +205,7 @@ export class Ops {
     let seen: string | null = null
     const run = (): Promise<[unknown, IOResult]> => {
       seen = getCurrentSession()?.sessionId ?? null
-      if (links !== null && pathAllowed(path)) followed = links.follow(path)
+      if (links !== null && pathVisible(sessionVisibility(), path)) followed = links.follow(path)
       const spec = PathSpec.fromStrPath(followed)
       const typed = new PathSpec({
         virtual: spec.virtual,

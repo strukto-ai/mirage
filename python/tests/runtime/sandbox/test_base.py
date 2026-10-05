@@ -91,7 +91,6 @@ async def test_first_line_connects_once():
 
 @pytest.mark.asyncio
 async def test_failed_connect_retries_on_the_next_line():
-
     class FlakyBox(RecordingSandbox):
         async def connect(self) -> None:
             await super().connect()
@@ -155,7 +154,6 @@ def test_config_dict_form_coerces():
 
 @pytest.mark.asyncio
 async def test_line_timeout_answers_124():
-
     class SlowBox(RecordingSandbox):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
@@ -182,7 +180,6 @@ async def test_line_timeout_answers_124():
 
 @pytest.mark.asyncio
 async def test_line_output_caps_truncate_with_notice():
-
     class ChattyBox(RecordingSandbox):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str

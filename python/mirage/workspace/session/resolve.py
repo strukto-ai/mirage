@@ -21,6 +21,8 @@ from mirage.policy.profile import (
     MountCommandsBlock,
     PathsBlock,
     ProfileMount,
+    ProfilePolicies,
+    ProfileSetup,
     SessionProfile,
     VarsBlock,
 )
@@ -36,6 +38,7 @@ from mirage.types import (
     MountMode,
     ShowEntry,
     ShownPaths,
+    Visibility,
     weaker_mode,
 )
 from mirage.utils.hidden import classify_paths, classify_shows, classify_vars
@@ -528,30 +531,31 @@ def compile_profile(
             owner-rendering command shows.
     """
     if effective is None:
-        return CompiledProfile(
-            mount_modes=None,
-            hidden_paths=None,
-            hidden_vars=None,
-            env=None,
-            cwd=None,
-            commands=None,
-            profile=name or None,
-        )
+        return CompiledProfile(profile=name or None)
     commands = compile_commands(effective)
     check_rules(commands)
+    processes = effective.processes or ProcessPermissions()
     return CompiledProfile(
-        processes=effective.processes or ProcessPermissions(),
-        mount_modes=_modes(effective),
-        hidden_paths=_hidden(effective),
-        hidden_vars=classify_vars(
-            effective.vars.hide if effective.vars is not None else ()
+        setup=ProfileSetup(
+            env=dict(effective.env) if effective.env is not None else None,
+            cwd=effective.cwd,
         ),
-        env=dict(effective.env) if effective.env is not None else None,
-        cwd=effective.cwd,
-        commands=commands,
-        script=compile_script(effective, name),
-        command_limits=effective.command_limits,
-        shown_paths=_shown(effective),
+        visibility=Visibility(
+            paths=_hidden(effective),
+            shown=_shown(effective),
+            vars=classify_vars(
+                effective.vars.hide if effective.vars is not None else ()
+            ),
+            processes=processes.list,
+            commands=commands.allow if commands is not None else None,
+        ),
+        policies=ProfilePolicies(
+            mount_modes=_modes(effective),
+            commands=commands,
+            script=compile_script(effective, name),
+            command_limits=effective.command_limits,
+            processes=processes,
+        ),
         hide_reasons=_hide_reasons_of(effective),
         profile=name or None,
     )
@@ -571,20 +575,19 @@ def narrow(session: SessionState, compiled: CompiledProfile) -> None:
         session (SessionState): the session to narrow.
         compiled (CompiledProfile): the effective profile.
     """
+    policies = compiled.policies
     session.mount_modes = (
-        dict(compiled.mount_modes)
-        if compiled.mount_modes is not None
+        dict(policies.mount_modes)
+        if policies.mount_modes is not None
         else None
     )
-    session.hidden_paths = compiled.hidden_paths
-    session.shown_paths = compiled.shown_paths
-    session.hidden_vars = compiled.hidden_vars
+    session.visibility = compiled.visibility
     session.hide_reasons = compiled.hide_reasons
-    session.commands = compiled.commands
-    session.script = compiled.script
+    session.commands = policies.commands
+    session.script = policies.script
     session.profile = compiled.profile
-    session.command_limits = dict(compiled.command_limits or {})
-    session.processes = compiled.processes
+    session.command_limits = dict(policies.command_limits or {})
+    session.processes = policies.processes
 
 
 def apply_profile(session: SessionState, compiled: CompiledProfile) -> None:
@@ -604,7 +607,7 @@ def apply_profile(session: SessionState, compiled: CompiledProfile) -> None:
         compiled (CompiledProfile): the effective profile.
     """
     narrow(session, compiled)
-    if compiled.env:
-        session.vars.update(vars_from_env(compiled.env))
-    if compiled.cwd is not None:
-        set_cwd(session, compiled.cwd)
+    if compiled.setup.env:
+        session.vars.update(vars_from_env(compiled.setup.env))
+    if compiled.setup.cwd is not None:
+        set_cwd(session, compiled.setup.cwd)

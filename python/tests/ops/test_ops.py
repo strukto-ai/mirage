@@ -28,7 +28,7 @@ from mirage.policy import (
     Policy,
     PolicyDenied,
 )
-from mirage.types import FileType, HiddenPaths, MountMode
+from mirage.types import FileType, HiddenPaths, MountMode, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session
 from mirage.workspace.session import SessionState
@@ -211,7 +211,8 @@ class UngrantedRemote(RAMVFS):
 def deep_only_session():
     """Bind a session whose role hides the parent mount's own content."""
     session = SessionState(
-        session_id="agent", hidden_paths=HiddenPaths(patterns=("/m/*.txt",))
+        session_id="agent",
+        visibility=Visibility(paths=HiddenPaths(patterns=("/m/*.txt",))),
     )
     token = set_current_session(session)
     yield session
@@ -434,7 +435,9 @@ def deep_scoped_session():
     leaving the nested mount below it reachable."""
     session = SessionState(
         session_id="agent",
-        hidden_paths=HiddenPaths(paths=("/data/other", "/data/f.txt")),
+        visibility=Visibility(
+            paths=HiddenPaths(paths=("/data/other", "/data/f.txt"))
+        ),
     )
     token = set_current_session(session)
     yield session
@@ -679,7 +682,9 @@ class TestPerCallSession:
         ws = self._split_ws()
         session = SessionState(
             session_id="blind",
-            hidden_paths=HiddenPaths(paths=("/data/secret.txt",)),
+            visibility=Visibility(
+                paths=HiddenPaths(paths=("/data/secret.txt",))
+            ),
         )
         token = set_current_session(session)
         try:

@@ -536,14 +536,27 @@ const CANNOT_OPEN = 'cannot open {quoted} for reading: {strerror}'
 export const FAILURE_WORDING: ReadonlyMap<string, readonly [string | null, string | null]> =
   new Map([
     ['csplit', [CANNOT_OPEN, null]],
+    ['du', ['cannot access {quoted}: {strerror}', null]],
+    ['find', ['{quoted}: {strerror}', '{quoted}: {strerror}']],
     ['fmt', [CANNOT_OPEN, null]],
     ['head', [CANNOT_OPEN, 'error reading {quoted}: {strerror}']],
+    ['ls', ['cannot access {quoted}: {strerror}', null]],
+    [
+      'mkdir',
+      [
+        'cannot create directory {quoted}: {strerror}',
+        'cannot create directory {quoted}: {strerror}',
+      ],
+    ],
     ['rev', ['cannot open {bare}: {strerror}', null]],
+    ['rm', ['cannot remove {quoted}: {strerror}', 'cannot remove {quoted}: {strerror}']],
+    ['rmdir', ['failed to remove {quoted}: {strerror}', 'failed to remove {quoted}: {strerror}']],
     ['sed', ["can't read {bare}: {strerror}", 'read error on {bare}: {strerror}']],
     ['split', [CANNOT_OPEN, null]],
     ['stat', ['cannot statx {quoted}: {strerror}', 'cannot statx {quoted}: {strerror}']],
     ['tac', ['failed to open {quoted} for reading: {strerror}', '{shown}: read error: {strerror}']],
     ['tail', [CANNOT_OPEN, 'error reading {quoted}: {strerror}']],
+    ['touch', ['cannot touch {quoted}: {strerror}', 'cannot touch {quoted}: {strerror}']],
     [
       'truncate',
       [

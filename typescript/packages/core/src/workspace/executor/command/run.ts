@@ -234,7 +234,7 @@ export async function runOnMount(
   // namespace owes a directory. A command that does not read `ns` off
   // its context ignores it, so there is no list of aware commands to
   // keep in step.
-  const ns = namespaceViewOf(registry, namespace ?? null, dispatch)
+  const ns = namespaceViewOf(registry, namespace ?? null, dispatch, session)
   const statOverlay = ns.statOverlay ?? null
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link

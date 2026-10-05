@@ -61,7 +61,6 @@ async def test_send_message_threads_when_thread_ts_given(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_read_messages_defaults_limit(monkeypatch):
-
     async def fake_fetch(config, channel, limit):
         return [{"ts": "1.0", "text": f"{channel}:{limit}"}]
 
@@ -76,7 +75,6 @@ async def test_read_messages_defaults_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_react_and_reactions(monkeypatch):
-
     async def fake_add(config, channel, ts, emoji):
         return {"ok": True, "emoji": emoji}
 
@@ -99,7 +97,6 @@ async def test_react_and_reactions(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pin_unpin_list(monkeypatch):
-
     async def fake_pin(config, channel, ts):
         return {"ok": True}
 
@@ -128,7 +125,6 @@ async def test_pin_unpin_list(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_member_info_and_list_members(monkeypatch):
-
     async def fake_profile(config, user):
         return {"id": user}
 
@@ -155,7 +151,6 @@ async def test_member_info_and_list_members(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_emoji_list(monkeypatch):
-
     async def fake_emoji(config):
         return {"shipit": "url"}
 

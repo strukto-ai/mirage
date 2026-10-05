@@ -123,7 +123,6 @@ def test_pipe_stages_do_not_leak_into_the_console():
 
 
 def test_redirected_output_goes_to_the_file_not_the_console():
-
     async def _do():
         ws = _workspace()
         await ws.shell("echo hi > /m/f.txt &")
@@ -380,7 +379,6 @@ async def test_a_job_writes_the_file_after_its_redirect_is_canceled():
 
 
 def test_bare_wait_with_no_jobs_returns_nothing():
-
     async def _do():
         ws = _workspace()
         result = await ws.shell("wait")

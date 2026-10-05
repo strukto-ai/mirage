@@ -1068,7 +1068,6 @@ ALL_CASES = CASES + ATTR_CASES + FUNC_JOB_CASES + REVIEW_CASES
     "case_id,cmd,out,err,code", ALL_CASES, ids=[c[0] for c in ALL_CASES]
 )
 def test_assoc_case(case_id, cmd, out, err, code):
-
     async def run():
         ws = Workspace({"data": RAMVFS()})
         try:

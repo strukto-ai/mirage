@@ -24,7 +24,10 @@ from mirage.commands.builtin.generic.rg import (
     rg_syntax,
 )
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
-from mirage.commands.builtin.generic_bind.adapter import CommandIO, bound_op
+from mirage.commands.builtin.generic_bind.adapter import (
+    CommandIO,
+    bound_op,
+)
 from mirage.commands.builtin.grep_pattern import (
     PATTERN_KEYS,
     matcher_syntax,
@@ -42,8 +45,8 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.shell.bytes import utf8_locale
 from mirage.types import FileType, JsonValue, PathSpec
 from mirage.utils.errors import FileTooLargeError
@@ -152,8 +155,7 @@ async def run_search(
         and meta is not None
         and pattern is not None
         and operand is not None
-        and not hidden_paths_intersect(operand.virtual)
-        and not path_rules_active()
+        and not paths_scoped(opts.ns, [operand])
     ):
         query = SearchQuery(
             query=pattern,

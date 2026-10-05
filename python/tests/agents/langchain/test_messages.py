@@ -16,7 +16,6 @@ from mirage.agents.langchain.messages import extract_text
 
 
 def test_extract_text_from_string():
-
     class Msg:
         content = "hello world"
 
@@ -24,7 +23,6 @@ def test_extract_text_from_string():
 
 
 def test_extract_text_from_blocks():
-
     class Msg:
         content = [
             {"type": "text", "text": "hello"},
@@ -36,7 +34,6 @@ def test_extract_text_from_blocks():
 
 
 def test_extract_text_skips_empty():
-
     class Msg:
         content = [
             {"type": "text", "text": "  "},
@@ -47,7 +44,6 @@ def test_extract_text_skips_empty():
 
 
 def test_extract_text_no_content():
-
     class Msg:
         pass
 

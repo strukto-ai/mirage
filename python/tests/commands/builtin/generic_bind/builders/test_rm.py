@@ -31,7 +31,6 @@ FILES = {"/m/a.txt", "/m/d/x.txt", "/m/locked/f.txt"}
 
 
 def _ops(removed: list[str] | None = None) -> CommandIO:
-
     async def readdir(_accessor, path, index=None):
         return TREE.get(path.virtual, [])
 

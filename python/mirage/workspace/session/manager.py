@@ -186,7 +186,7 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session is None:
             return (
-                self._default_profile.commands
+                self._default_profile.policies.commands
                 if self._default_profile is not None
                 else None
             )
@@ -207,7 +207,7 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session is None:
             return (
-                self._default_profile.script
+                self._default_profile.policies.script
                 if self._default_profile is not None
                 else None
             )
@@ -344,9 +344,7 @@ class SessionManager:
                     # scratch state: dropping them here would wake a
                     # restarted daemon unrestricted and let the next
                     # flush erase them from the store.
-                    default.hidden_paths = stored.hidden_paths
-                    default.shown_paths = stored.shown_paths
-                    default.hidden_vars = stored.hidden_vars
+                    default.visibility = stored.visibility
                     default.hide_reasons = stored.hide_reasons
                     default.commands = stored.commands
                     default.script = stored.script

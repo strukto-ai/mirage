@@ -25,7 +25,6 @@ TREE = {"/m": ["/m/empty", "/m/locked"], "/m/empty": [], "/m/locked": []}
 
 
 def _ops(removed: list[str] | None = None) -> CommandIO:
-
     async def readdir(_accessor, path, index=None):
         return TREE.get(path.virtual, [])
 

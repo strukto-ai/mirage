@@ -63,7 +63,6 @@ class _Tree:
 
 
 def _links(entries: dict[str, str]) -> LinkView:
-
     def stat_of(path):
         target = entries[path]
         return FileStat(
@@ -108,7 +107,6 @@ def _mounts(
     roots: tuple[str, ...] = (),
     hidden: tuple[str, ...] = (),
 ) -> MountView:
-
     def root_of(path):
         for root in sorted(roots, key=len, reverse=True):
             if path == root or path.startswith(root.rstrip("/") + "/"):

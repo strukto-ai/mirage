@@ -118,7 +118,6 @@ async def test_a_tree_passed_to_the_constructor_counts_as_hydrated(tree_calls):
 
 @pytest.fixture
 def default_branch(monkeypatch):
-
     async def _fetch(config, owner, repo, session=None):
         return "master"
 

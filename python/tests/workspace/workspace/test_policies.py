@@ -79,8 +79,10 @@ async def test_workspace_guards_refuse_before_backend_io():
         result = await ws.shell("rm /data/prod/x.txt")
         assert result.exit_code == 1
         assert result.stderr == (
-            b"rm: /data/prod/x.txt: production data is protected\n"
+            b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
         )
+        assert result.refusal is not None
+        assert result.refusal.reason == "production data is protected"
         out = await ws.shell("cat /data/prod/x.txt")
         assert out.stdout == b"keep\n"
         ok = await ws.shell(
@@ -153,7 +155,7 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
         )
         result = await ws.shell("touch /data/prod/x")
         assert result.exit_code == 1
-        assert b"frozen" in result.stderr
+        assert result.refusal and "frozen" in result.refusal.reason
         ok = await ws.shell("touch /data/dev-x && echo done")
         assert b"done" in ok.stdout
     finally:
@@ -183,7 +185,7 @@ async def test_guards_cover_path_valued_flags():
         await ws.shell("mkdir -p /data/prod")
         result = await ws.shell("shuf -e a -o /data/prod/out")
         assert result.exit_code == 1
-        assert b"prod is protected" in result.stderr
+        assert result.refusal and "prod is protected" in result.refusal.reason
         listing = await ws.shell("ls /data/prod")
         assert b"out" not in listing.stdout
     finally:
@@ -220,7 +222,8 @@ async def test_path_guards_hold_at_the_programmatic_door():
         with pytest.raises(PermissionError) as excinfo:
             await ws.vfs.write("/data/prod/x.txt", b"nope\n")
         assert excinfo.value.errno == errno.EACCES
-        assert "prod is protected" in str(excinfo.value)
+        assert excinfo.value.refusal is not None
+        assert "prod is protected" in excinfo.value.refusal.reason
         with pytest.raises(PermissionError):
             await ws.vfs.read("/data/prod/x.txt")
     finally:
@@ -801,7 +804,8 @@ async def test_a_post_ops_deny_beats_a_limit():
         await ws.vfs.write("/data/f.txt", b"hello world")
         with pytest.raises(PermissionError) as excinfo:
             await ws.vfs.read("/data/f.txt")
-        assert "reads are suppressed" in str(excinfo.value)
+        assert excinfo.value.refusal is not None
+        assert "reads are suppressed" in excinfo.value.refusal.reason
     finally:
         await ws.close()
 
@@ -1332,7 +1336,9 @@ async def test_a_profile_policy_judges_the_session_door():
         ws.create_session("s", profile="release")
         refused = await ws.shell("export AWS_SECRET=x", session_id="s")
         assert refused.exit_code == 1
-        assert refused.stderr == b"credentials are set by the operator\n"
+        assert refused.stderr == b"AWS_SECRET: permission denied\n"
+        assert refused.refusal is not None
+        assert refused.refusal.reason == "credentials are set by the operator"
         landed = await ws.shell("export SAFE=1 && echo $SAFE", session_id="s")
         assert landed.exit_code == 0
         assert landed.stdout == b"1\n"

@@ -45,7 +45,6 @@ def op(
     filetype: str | None = None,
     write: bool = False,
 ) -> Callable[..., Any]:
-
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         vfs_names = vfs if isinstance(vfs, list) else [vfs]
         ops = getattr(fn, "_registered_ops", [])

@@ -34,6 +34,7 @@ from mirage.types import (
     PathSpec,
     ShowEntry,
     ShownPaths,
+    Visibility,
 )
 from mirage.workspace.session import SessionState
 
@@ -71,7 +72,6 @@ async def _unused_dir_op(_accessor: Accessor, _path: PathSpec) -> None:
 
 
 def _io(writes: list[str]) -> CommandIO:
-
     async def write(_accessor: Accessor, path: PathSpec, _data: bytes) -> None:
         writes.append(path.virtual)
 
@@ -106,8 +106,10 @@ async def test_tee_holds_each_path_to_its_regions_mode():
     sess = SessionState(
         session_id="agent",
         mount_modes={"/s3": MountMode.READ},
-        shown_paths=ShownPaths(
-            entries=(ShowEntry("/s3/build", MountMode.WRITE),)
+        visibility=Visibility(
+            shown=ShownPaths(
+                entries=(ShowEntry("/s3/build", MountMode.WRITE),)
+            )
         ),
     )
     session_token = set_current_session(sess)
@@ -134,8 +136,10 @@ async def test_tee_writes_inside_the_granted_region():
     sess = SessionState(
         session_id="agent",
         mount_modes={"/s3": MountMode.READ},
-        shown_paths=ShownPaths(
-            entries=(ShowEntry("/s3/build", MountMode.WRITE),)
+        visibility=Visibility(
+            shown=ShownPaths(
+                entries=(ShowEntry("/s3/build", MountMode.WRITE),)
+            )
         ),
     )
     session_token = set_current_session(sess)

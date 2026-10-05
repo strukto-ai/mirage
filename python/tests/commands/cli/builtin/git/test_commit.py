@@ -21,7 +21,7 @@ from dulwich.repo import Repo
 from mirage.commands.cli.builtin.git.commit import DEFAULT_EMAIL, identity
 from mirage.commands.spec.flag_view import FlagView
 from mirage.ops.types import SessionView
-from mirage.types import HiddenVars
+from mirage.types import HiddenVars, Visibility
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var, session_view
 
@@ -193,7 +193,8 @@ def test_a_hidden_variable_is_not_read_as_an_identity():
     # The door filters hidden names, so a hidden GIT_AUTHOR_NAME reads
     # as unset rather than leaking into a commit the session can see.
     session = SessionState(
-        session_id="s", hidden_vars=HiddenVars(patterns=("GIT_AUTHOR_*",))
+        session_id="s",
+        visibility=Visibility(vars=HiddenVars(patterns=("GIT_AUTHOR_*",))),
     )
     seed_var(session, "GIT_AUTHOR_NAME", "Secret")
     seed_var(session, "GIT_AUTHOR_EMAIL", "s@x")

@@ -18,11 +18,8 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { IOResult, type SizedRun } from '../../../io/types.ts'
-import {
-  hiddenPathsIntersect,
-  pathAllowed,
-  pathRulesActive,
-} from '../../../context/session_context.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
+import { pathVisible } from '../../../utils/hidden.ts'
 import {
   ZERO_LENGTH_NAME,
   fsStrerror,
@@ -36,7 +33,8 @@ import { formatRecords } from '../utils/output.ts'
 import { scaledSize } from '../utils/formatting.ts'
 import { quoteText } from '../../quote.ts'
 import { INTMAX } from '../constants.ts'
-import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
+import type { LinkView, MountView, NamespaceView, StatPath } from '../../../ops/types.ts'
+import type { Visibility } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import type { DuEntries } from '../../../vfs/types.ts'
@@ -171,7 +169,11 @@ function cwdSpec(cwd: string, mountPrefix?: string): PathSpec {
 /**
  * Whether an operand holds anything, for the unstattable case.
  */
-async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Promise<boolean> {
+async function duHasContent(
+  vis: Visibility | undefined,
+  computeEntries: ComputeEntries,
+  path: PathSpec,
+): Promise<boolean> {
   try {
     const [entries] = await computeEntries(path)
     // The visibility filter is what makes this safe to ask after the
@@ -179,7 +181,7 @@ async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Pro
     // accessor, which knows nothing of hides, so counting its raw answer
     // would confirm a walled-off subtree's parent. Entries are lifted onto
     // virtual paths first, since that is the space a hide is written in.
-    return toVirtual(entries, path).some(([leaf]) => pathAllowed(leaf))
+    return toVirtual(entries, path).some(([leaf]) => pathVisible(vis, leaf))
   } catch {
     // This runs only after stat already failed, to tell an implicit
     // directory from an absent path. Backends raise their own error types
@@ -289,7 +291,17 @@ async function duOperands(
       if (!isMissingPath(err)) throw err
       stattable = false
     }
-    if (!(await duOperandExists(path, stattable, hasContent, statPath))) {
+    let exists: boolean
+    try {
+      exists = await duOperandExists(path, stattable, hasContent, statPath)
+    } catch (err) {
+      // The door refuses to stat it: GNU names the errno it got
+      // (`du: cannot access 'P': Permission denied`).
+      if ((err as { code?: string }).code !== 'EACCES') throw err
+      missing.push([path.rawPath, fsStrerror(err) ?? 'Permission denied'])
+      continue
+    }
+    if (!exists) {
       missing.push([path.rawPath, ENOENT_TEXT])
       continue
     }
@@ -478,8 +490,10 @@ async function duOne(
   links: LinkView | null,
   mounts: MountView | null,
   directories?: () => readonly string[],
+  ns?: NamespaceView,
 ): Promise<[string[], number, SizedRun | null]> {
   const label = path.rawPath
+  const vis = ns?.visibility
 
   const linkRow = links?.statAt(path.virtual) ?? null
   if (linkRow !== null) {
@@ -494,13 +508,7 @@ async function duOne(
   if (roots.length > 0) leaves = dropShadowed(leaves, roots)
   const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
 
-  if (
-    flags.s &&
-    !flags.S &&
-    roots.length === 0 &&
-    !hiddenPathsIntersect(path.virtual) &&
-    !pathRulesActive()
-  ) {
+  if (flags.s && !flags.S && roots.length === 0 && !pathsScoped(ns, [path])) {
     // The one-total fast path trusts the backend's own sum, which a
     // session hiding paths cannot: hidden leaves would be counted into
     // a total their names never justify, so that session takes the
@@ -516,7 +524,7 @@ async function duOne(
   const dirs = (directories?.() ?? []).filter(
     (d) =>
       norm(d).startsWith(under) &&
-      pathAllowed(d) &&
+      pathVisible(vis, d) &&
       !roots.some((r) => norm(d) === r || norm(d).startsWith(r + '/')),
   )
   const walked = (directories?.() ?? []).some((d) => norm(d) === rootKey)
@@ -535,7 +543,7 @@ async function duOne(
   }
 
   let entries = toVirtual(raw, path).concat(leaves)
-  const visible = entries.filter(([leaf]) => pathAllowed(leaf))
+  const visible = entries.filter(([leaf]) => pathVisible(vis, leaf))
   if (visible.length !== entries.length) {
     // Same honesty rule as shadowed leaves: the total is the sum of
     // what the session may see, never the backend's own number.
@@ -607,6 +615,7 @@ export async function du(
   mounts: MountView | null = null,
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
+  ns?: NamespaceView,
 ): Promise<DuOutput> {
   const lines: string[] = []
   let grand = 0
@@ -620,6 +629,7 @@ export async function du(
       links,
       mounts,
       directories,
+      ns,
     )
     lines.push(...block)
     grand += total
@@ -686,7 +696,7 @@ export async function duGeneric(
     opts.cwd,
     resolveGlob,
     stat,
-    (p) => duHasContent(computeEntries, p),
+    (p) => duHasContent(opts.ns?.visibility, computeEntries, p),
     opts.mountPrefix,
     links,
     opts.statPath ?? null,
@@ -702,6 +712,7 @@ export async function duGeneric(
     opts.ns?.mounts ?? null,
     unreadable,
     directories,
+    opts.ns,
   )
   return [
     out.stdout,

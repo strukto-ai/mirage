@@ -473,7 +473,6 @@ async def test_listing_error_falls_back_to_the_walk():
 
 @pytest.mark.asyncio
 async def test_listing_error_asks_the_mount_root_nothing():
-
     async def unreachable(key: str) -> bool:
         raise AssertionError(f"the root needs no probe: {key}")
 
@@ -486,7 +485,7 @@ async def test_readdir_error_reports_the_virtual_path():
     spec = PathSpec.from_str_path("/data/nope")
     exc = await readdir_error(spec, "/data/nope", _is_file, _is_dir)
     assert format_fs_error("ls", exc) == (
-        b"ls: /data/nope: No such file or directory\n"
+        b"ls: cannot access '/data/nope': No such file or directory\n"
     )
 
 

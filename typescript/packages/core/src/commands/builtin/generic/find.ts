@@ -42,7 +42,7 @@ import {
   type PredNode,
 } from '../find_eval.ts'
 import { printfKind } from '../find_printf.ts'
-import { pathAllowed } from '../../../context/session_context.ts'
+import { pathVisible } from '../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linkResults } from '../../../core/generic/find.ts'
 
@@ -431,7 +431,18 @@ export function findGeneric(
       }
       let startIsDir = false
       if (startStat !== undefined && !rootIsLink) {
-        let start = await startStat(root.virtual)
+        let start: FileStat | null
+        try {
+          start = await startStat(root.virtual)
+        } catch (err) {
+          // A start point the door refuses to stat is GNU's own
+          // diagnostic for it, quoted like a missing one
+          // (`find: 'P': Permission denied`), not an escaped error.
+          const detail = fsStrerror(err)
+          if (detail === null) throw err
+          missing.push(`find: '${root.rawPath !== '' ? root.rawPath : root.virtual}': ${detail}`)
+          continue
+        }
         if (start === null) {
           // GNU names each start point it cannot stat, keeps going with the
           // rest, and exits 1. Reported as the operand was typed, falling
@@ -488,7 +499,11 @@ export function findGeneric(
           stat !== undefined
             ? await applyMtimeFilter(rootRows, effMtimeMin, effMtimeMax, stat, prefix)
             : rootRows
-        first = respellRaw(checked.filter(pathAllowed), root.virtual, root.rawPath)
+        first = respellRaw(
+          checked.filter((row) => pathVisible(opts.ns?.visibility, row)),
+          root.virtual,
+          root.rawPath,
+        )
         for (const row of first) yield ENC.encode(row + '\n')
       }
       let keys: string[]
@@ -581,7 +596,7 @@ export function findGeneric(
       // Hidden rows drop here, above the native-op/walk fork and after
       // the link merge, so a mount's visibility behavior cannot depend
       // on whether its backend ships a native find op.
-      const visibleRows = unpruned.filter((row) => pathAllowed(row))
+      const visibleRows = unpruned.filter((row) => pathVisible(opts.ns?.visibility, row))
       const added = respellRaw(visibleRows, root.virtual, root.rawPath)
       for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')
       for (const r of added) run.push(matchedPath(r, root))

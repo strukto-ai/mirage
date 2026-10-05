@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
-import { hiddenPathsIntersect, pathRulesActive } from '../../../context/session_context.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { makeSearchBackedFind } from '../../../core/generic/find.ts'
 import type { SlugTree } from '../../../core/slug_tree/tree.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
@@ -142,19 +142,18 @@ export function makeFind<A extends Accessor>(
       // paths or a path rule it would answer for entries the session cannot
       // see; the walk classifies through the guarded readdir/stat, the fork
       // the factory builder takes.
-      const result =
-        pathRulesActive() || resolved.some((p) => hiddenPathsIntersect(p.virtual))
-          ? await findWalk(full ? walkFull : walkLight, accessor, resolved, words, {
-              ...opts,
-              flags: bag,
-            })
-          : await findGeneric(
-              resolved,
-              words,
-              { ...opts, flags: bag },
-              (root, options) => findCore(accessor, root, options, index),
-              (spec: PathSpec) => statFn(accessor, spec, index),
-            )
+      const result = pathsScoped(opts.ns, resolved)
+        ? await findWalk(full ? walkFull : walkLight, accessor, resolved, words, {
+            ...opts,
+            flags: bag,
+          })
+        : await findGeneric(
+            resolved,
+            words,
+            { ...opts, flags: bag },
+            (root, options) => findCore(accessor, root, options, index),
+            (spec: PathSpec) => statFn(accessor, spec, index),
+          )
       if (result === null || searchPath === undefined) return result
       const [stdout, ioResult] = result
       return [await normalizeFindOutput(stdout, searchPath), ioResult]

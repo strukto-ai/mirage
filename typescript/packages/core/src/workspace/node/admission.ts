@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sessionPathAllowed } from '../../context/session_context.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
   Outcome,
-  PolicyDenied,
+  PermissionsPolicy,
   Scope,
   askRule,
+  policyDenied,
   refusalOf,
   renderDeny,
   renderPending,
@@ -32,7 +33,7 @@ import type {
   Deny,
   HandOff,
 } from '../../policy/index.ts'
-import { ioRefusal } from '../../policy/match/rule.ts'
+import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { commandNodes } from '../../runtime/routing/index.ts'
@@ -145,8 +146,10 @@ const REDIRECT_CHAIN: ReadonlySet<string> = new Set([
  * read, write or listing (`EntryGate`). The paths the gate already judged
  * pass, since the line was admitted on them; every other entry is judged
  * by `ioRefusal` under the same precedence the gate applied to the line,
- * and a refusal is the op door's `PolicyDenied` (EACCES, the reason, the
- * path), which every command renders as GNU's `Permission denied`.
+ * and a refusal is the op door's `PolicyDenied` (EACCES, the path, the
+ * reason on its record), which every command renders as GNU's
+ * `Permission denied`. `opsJudged` is whether a coded or scripted preOps
+ * policy speaks for the session, which judges every path.
  * `granted` holds the ask rules the line runs under a grant for: the one
  * the door answered for this line, and the session's standing ones.
  */
@@ -156,6 +159,7 @@ export class Admitted implements EntryGate {
   readonly judged: ReadonlySet<string>
   readonly granted: readonly CommandRule[]
   readonly scoped: boolean
+  readonly opsJudged: boolean
 
   constructor(init: {
     rules: AdmissionRules | null
@@ -163,19 +167,30 @@ export class Admitted implements EntryGate {
     judged: ReadonlySet<string>
     granted: readonly CommandRule[]
     scoped: boolean
+    opsJudged?: boolean
   }) {
     this.rules = init.rules
     this.tokens = init.tokens
     this.judged = init.judged
     this.granted = init.granted
     this.scoped = init.scoped
+    this.opsJudged = init.opsJudged ?? false
   }
 
   // Throw `PolicyDenied` when a rule in force refuses this entry for the
   // running command.
   check(virtual: string): void {
     const reason = this.refusal(virtual)
-    if (reason !== null) throw new PolicyDenied(reason, virtual)
+    if (reason !== null) {
+      throw policyDenied({ kind: 'deny', reason, policy: PermissionsPolicy.name }, virtual)
+    }
+  }
+
+  // Whether anything at or under this path could be refused for the
+  // running command: a coded or scripted preOps policy judges every path,
+  // and a rule in force any path its scope could cover.
+  scopes(virtual: string): boolean {
+    return this.opsJudged || ioReach(this.rules, this.tokens, virtual)
   }
 
   // Whether a rule in force refuses this entry for the running command,
@@ -283,7 +298,7 @@ function seen(
   specs: readonly PathSpec[],
   unread: ReadonlySet<string> = new Set(),
 ): PathSpec[] {
-  return specs.filter((p) => !unread.has(p.virtual) && sessionPathAllowed(session, p.virtual))
+  return specs.filter((p) => !unread.has(p.virtual) && pathVisible(session.visibility, p.virtual))
 }
 
 /**
@@ -467,12 +482,14 @@ export async function admit(
       .map((r) => r.rule)
     if (asked !== null && asked.kind === 'ask') granted.unshift(askRule(ctx, asked))
     const rules = session.commands
+    const judged = await opsJudged
     return new Admitted({
       rules,
       tokens: ctx.tokens ?? [],
       judged: new Set(ctx.paths.map((p) => norm(p.virtual))),
       granted,
-      scoped: scopesPaths(rules, name) || (await opsJudged),
+      scoped: scopesPaths(rules, name) || judged,
+      opsJudged: judged,
     })
   }
   const [stderr, exitCode] =

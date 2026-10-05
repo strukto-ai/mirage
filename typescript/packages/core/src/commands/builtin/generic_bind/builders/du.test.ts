@@ -21,7 +21,7 @@ import { runWithAdmission } from '../../../../context/session_context.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { EntryGate } from '../../../../types.ts'
 import { scopedIo, type CommandIO } from '../adapter.ts'
-import type { MountView } from '../../../../ops/types.ts'
+import type { MountView, NamespaceView } from '../../../../ops/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -97,10 +97,14 @@ describe('du walk fallback (no native du op)', () => {
 // readdir instead.
 const SCOPED_GATE: EntryGate = {
   scoped: true,
+  scopes: () => true,
   granted: [],
   check: () => undefined,
   refuses: () => false,
 }
+
+// The command's view as admission builds it for a scoped gate.
+const SCOPED_VIEW: NamespaceView = { scoped: () => true }
 
 const THROTTLED = Object.assign(new Error('Box GET /folders/9/items -> 429'), {
   status: 429,
@@ -121,11 +125,12 @@ async function runScoped(
   paths: PathSpec[],
 ): Promise<[Uint8Array, { exitCode: number; stderr: Uint8Array | null }]> {
   const result = await runWithAdmission(SCOPED_GATE, async () =>
-    BUILDER.fn(scopedIo(ops, paths, ''), ACCESSOR, paths, [], {
+    BUILDER.fn(scopedIo(ops, SCOPED_VIEW, paths, ''), ACCESSOR, paths, [], {
       stdin: null,
       flags: {},
       filetypeFns: null,
       cwd: '/',
+      ns: SCOPED_VIEW,
     }),
   )
   return result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]

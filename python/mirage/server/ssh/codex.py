@@ -524,7 +524,7 @@ async def run_process(
         cwd=cwd,
         env=env or None,
     )
-    await deliver(io.stdout, io.stderr, send)
+    await deliver(io, send)
     return io.exit_code
 
 

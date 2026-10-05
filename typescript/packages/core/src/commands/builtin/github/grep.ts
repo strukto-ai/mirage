@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { hiddenPathsIntersect, pathRulesActive } from '../../../context/session_context.ts'
+import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { IO } from './io.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
@@ -44,7 +44,7 @@ async function grep(
   // hide or a path rule the scan sets search aside and reads through the
   // command guards, which report a refused directory where GNU does and
   // never open a sealed file.
-  const scoped = pathRulesActive() || paths.some((p) => hiddenPathsIntersect(p.virtual))
+  const scoped = pathsScoped(opts.ns, paths)
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]

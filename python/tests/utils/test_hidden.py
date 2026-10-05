@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.types import HiddenPaths, HiddenVars, MountMode, ShowEntry
+from mirage.types import (
+    HiddenPaths,
+    HiddenVars,
+    MountMode,
+    ShowEntry,
+    Visibility,
+)
 from mirage.utils.hidden import (
     classify_paths,
     classify_shows,
+    hidden_under,
     hide_depth,
-    hides_intersect,
     move_reveals,
     path_covers,
     path_hidden,
@@ -29,6 +35,10 @@ from mirage.utils.hidden import (
 )
 
 
+def _vis(hide: list[str], show: tuple[ShowEntry, ...] = ()) -> Visibility:
+    return Visibility(paths=classify_paths(hide), shown=classify_shows(show))
+
+
 def test_none_hides_nothing():
     assert path_hidden(None, "/a/b") is False
     assert var_hidden(None, "SECRET") is False
@@ -36,7 +46,7 @@ def test_none_hides_nothing():
 
 def test_empty_spec_hides_nothing():
     assert path_hidden(HiddenPaths(), "/a/b") is False
-    assert var_hidden(HiddenVars(), "SECRET") is False
+    assert var_hidden(Visibility(vars=HiddenVars()), "SECRET") is False
 
 
 def test_exact_path_hides_itself_and_its_subtree():
@@ -99,17 +109,17 @@ def test_patterns_share_the_repo_fnmatch_dialect():
 
 
 def test_var_names_are_exact():
-    h = HiddenVars(names=("SLACK_TOKEN",))
-    assert var_hidden(h, "SLACK_TOKEN")
-    assert not var_hidden(h, "SLACK_TOKEN2")
-    assert not var_hidden(h, "PATH")
+    vis = Visibility(vars=HiddenVars(names=("SLACK_TOKEN",)))
+    assert var_hidden(vis, "SLACK_TOKEN")
+    assert not var_hidden(vis, "SLACK_TOKEN2")
+    assert not var_hidden(vis, "PATH")
 
 
 def test_var_patterns_are_globs_over_names():
-    h = HiddenVars(patterns=("AWS_*", "*_SECRET"))
-    assert var_hidden(h, "AWS_ACCESS_KEY_ID")
-    assert var_hidden(h, "DB_SECRET")
-    assert not var_hidden(h, "HOME")
+    vis = Visibility(vars=HiddenVars(patterns=("AWS_*", "*_SECRET")))
+    assert var_hidden(vis, "AWS_ACCESS_KEY_ID")
+    assert var_hidden(vis, "DB_SECRET")
+    assert not var_hidden(vis, "HOME")
 
 
 def test_classify_paths_splits_globs_from_exact_subtrees():
@@ -207,56 +217,50 @@ def test_show_head_is_the_anchor():
 
 
 def test_path_visible_is_the_anchor_depth_rule():
-    hidden = classify_paths(["/repo"])
-    shown = classify_shows([ShowEntry("/repo/public", MountMode.READ)])
+    vis = _vis(["/repo"], (ShowEntry("/repo/public", MountMode.READ),))
     # The deeper show re-opens its subtree.
-    assert path_visible(hidden, shown, "/repo/public/index.html")
-    assert path_visible(hidden, shown, "/repo/public")
+    assert path_visible(vis, "/repo/public/index.html")
+    assert path_visible(vis, "/repo/public")
     # Everything else under the hide stays nonexistent.
-    assert not path_visible(hidden, shown, "/repo/secrets/key.pem")
-    assert not path_visible(hidden, shown, "/repo/README.md")
+    assert not path_visible(vis, "/repo/secrets/key.pem")
+    assert not path_visible(vis, "/repo/README.md")
     # No hide, always visible; no show, plain hiding.
-    assert path_visible(None, shown, "/anywhere")
-    assert not path_visible(hidden, None, "/repo/x")
+    assert path_visible(Visibility(shown=vis.shown), "/anywhere")
+    assert not path_visible(Visibility(paths=vis.paths), "/repo/x")
 
 
 def test_hide_wins_the_equal_depth_tie():
-    hidden = classify_paths(["/repo/public"])
-    shown = classify_shows([ShowEntry("/repo/public", MountMode.READ)])
-    assert not path_visible(hidden, shown, "/repo/public/x")
+    vis = _vis(["/repo/public"], (ShowEntry("/repo/public", MountMode.READ),))
+    assert not path_visible(vis, "/repo/public/x")
 
 
 def test_deeper_hide_re_closes_inside_a_show():
-    hidden = classify_paths(["/repo", "/repo/public/sealed"])
-    shown = classify_shows([ShowEntry("/repo/public")])
-    assert path_visible(hidden, shown, "/repo/public/a.txt")
-    assert not path_visible(hidden, shown, "/repo/public/sealed/k")
+    vis = _vis(["/repo", "/repo/public/sealed"], (ShowEntry("/repo/public"),))
+    assert path_visible(vis, "/repo/public/a.txt")
+    assert not path_visible(vis, "/repo/public/sealed/k")
 
 
 def test_show_outranks_a_name_pattern_only_inside_its_anchor():
-    hidden = classify_paths(["*.pem"])
-    shown = classify_shows([ShowEntry("/repo/public")])
-    assert path_visible(hidden, shown, "/repo/public/tls.pem")
-    assert not path_visible(hidden, shown, "/other/tls.pem")
+    vis = _vis(["*.pem"], (ShowEntry("/repo/public"),))
+    assert path_visible(vis, "/repo/public/tls.pem")
+    assert not path_visible(vis, "/other/tls.pem")
 
 
 def test_ancestors_of_a_show_anchor_stay_visible():
     # The road to the carve-out exists: `ls /repo` lists `public` even
     # though `/repo` itself lies under the hide.
-    hidden = classify_paths(["/repo"])
-    shown = classify_shows([ShowEntry("/repo/public/docs")])
+    vis = _vis(["/repo"], (ShowEntry("/repo/public/docs"),))
     for virtual in ("/", "/repo", "/repo/public"):
-        assert path_visible(hidden, shown, virtual)
-    assert not path_visible(hidden, shown, "/repo/other")
+        assert path_visible(vis, virtual)
+    assert not path_visible(vis, "/repo/other")
 
 
 def test_a_hidden_show_anchor_opens_no_road():
     # The show anchor is itself re-hidden at equal depth, so nothing
     # above it gains visibility from it.
-    hidden = classify_paths(["/repo", "/repo/public"])
-    shown = classify_shows([ShowEntry("/repo/public")])
-    assert not path_visible(hidden, shown, "/repo")
-    assert not path_visible(hidden, shown, "/repo/public/x")
+    vis = _vis(["/repo", "/repo/public"], (ShowEntry("/repo/public"),))
+    assert not path_visible(vis, "/repo")
+    assert not path_visible(vis, "/repo/public/x")
 
 
 def test_shown_mode_is_the_deepest_mode_entry():
@@ -299,36 +303,36 @@ def test_classify_shows_empty_is_none():
     assert classify_shows([ShowEntry("/a")]) is not None
 
 
-def test_hides_intersect_is_the_per_operand_gate():
-    spec = classify_paths(["/repo/.env"])
+def test_hidden_under_is_the_per_operand_gate():
+    spec = _vis(["/repo/.env"])
     # The walk that could reach the entry loses its fast path...
-    assert hides_intersect(spec, "/repo")
-    assert hides_intersect(spec, "/")
-    assert hides_intersect(spec, "/repo/.env")
+    assert hidden_under(spec, "/repo")
+    assert hidden_under(spec, "/")
+    assert hidden_under(spec, "/repo/.env")
     # ...and a sibling mount keeps its native op.
-    assert not hides_intersect(spec, "/s3")
-    assert not hides_intersect(spec, "/repo/open")
+    assert not hidden_under(spec, "/s3")
+    assert not hidden_under(spec, "/repo/open")
     # A component pattern names no place, so it intersects everything.
-    assert hides_intersect(classify_paths(["*.pem"]), "/s3")
+    assert hidden_under(_vis(["*.pem"]), "/s3")
     # An anchored pattern intersects through its fixed head, and inside
     # its own subtree.
-    sealed = classify_paths(["/repo/sealed/*"])
-    assert hides_intersect(sealed, "/repo")
-    assert hides_intersect(sealed, "/repo/sealed/x")
-    assert not hides_intersect(sealed, "/repo/open")
-    assert not hides_intersect(None, "/")
+    sealed = _vis(["/repo/sealed/*"])
+    assert hidden_under(sealed, "/repo")
+    assert hidden_under(sealed, "/repo/sealed/x")
+    assert not hidden_under(sealed, "/repo/open")
+    assert not hidden_under(None, "/")
 
 
-def test_hides_intersect_counts_an_operand_below_a_patterns_head():
+def test_hidden_under_counts_an_operand_below_a_patterns_head():
     # The wildcard tail can match anywhere under the fixed head, so a
     # walk of any subtree below it may hold matches (`/repo/*/secret`
     # covers `/repo/public/secret`), even though the operand itself is
     # neither hidden nor an ancestor of the head.
-    spec = classify_paths(["/repo/*/secret"])
-    assert hides_intersect(spec, "/repo/public")
-    assert hides_intersect(spec, "/repo/public/deep")
-    assert hides_intersect(spec, "/repo")
-    assert not hides_intersect(spec, "/other")
+    spec = _vis(["/repo/*/secret"])
+    assert hidden_under(spec, "/repo/public")
+    assert hidden_under(spec, "/repo/public/deep")
+    assert hidden_under(spec, "/repo")
+    assert not hidden_under(spec, "/other")
 
 
 def test_a_globbed_show_keeps_its_anchor_traversable():
@@ -336,39 +340,38 @@ def test_a_globbed_show_keeps_its_anchor_traversable():
     # anchor's depth, so the anchor directory and the road above it
     # answer by the same compare instead of staying hidden around
     # visible children.
-    hidden = classify_paths(["/repo"])
-    shown = classify_shows([ShowEntry("/repo/public/*")])
-    assert path_visible(hidden, shown, "/repo/public/index.html")
-    assert path_visible(hidden, shown, "/repo/public")
-    assert path_visible(hidden, shown, "/repo")
-    assert not path_visible(hidden, shown, "/repo/secrets")
+    vis = _vis(["/repo"], (ShowEntry("/repo/public/*"),))
+    assert path_visible(vis, "/repo/public/index.html")
+    assert path_visible(vis, "/repo/public")
+    assert path_visible(vis, "/repo")
+    assert not path_visible(vis, "/repo/secrets")
     # A hide at the anchor's own depth still wins the tie.
-    rehidden = classify_paths(["/repo", "/repo/public"])
-    assert not path_visible(rehidden, shown, "/repo/public")
-    assert not path_visible(rehidden, shown, "/repo/public/index.html")
+    rehidden = _vis(["/repo", "/repo/public"], (ShowEntry("/repo/public/*"),))
+    assert not path_visible(rehidden, "/repo/public")
+    assert not path_visible(rehidden, "/repo/public/index.html")
 
 
 def test_move_reveals_an_exact_entry_below_the_source():
     # /m/data/secret re-anchors to /m/moved/secret, which nothing hides.
-    spec = classify_paths(["/m/data/secret"])
-    assert move_reveals(spec, None, "/m/data", "/m/moved")
+    spec = _vis(["/m/data/secret"])
+    assert move_reveals(spec, "/m/data", "/m/moved")
     # An entry not below the source moves nothing.
-    assert not move_reveals(spec, None, "/m/other", "/m/moved")
+    assert not move_reveals(spec, "/m/other", "/m/moved")
     # The entry itself is the source: the operand is hidden and the
     # per-path guard answered before this predicate is asked.
-    assert not move_reveals(spec, None, "/m/data/secret/deep", "/m/x")
-    assert not move_reveals(None, None, "/m/data", "/m/moved")
+    assert not move_reveals(spec, "/m/data/secret/deep", "/m/x")
+    assert not move_reveals(None, "/m/data", "/m/moved")
 
 
 def test_move_does_not_reveal_when_the_mapped_path_stays_hidden():
-    spec = classify_paths(["/m/d/sec", "/m/moved/sec"])
-    assert not move_reveals(spec, None, "/m/d", "/m/moved")
-    assert move_reveals(spec, None, "/m/d", "/m/elsewhere")
+    spec = _vis(["/m/d/sec", "/m/moved/sec"])
+    assert not move_reveals(spec, "/m/d", "/m/moved")
+    assert move_reveals(spec, "/m/d", "/m/elsewhere")
 
 
 def test_component_patterns_follow_the_name_and_never_reveal():
-    spec = classify_paths(["*.env"])
-    assert not move_reveals(spec, None, "/m/d", "/m/moved")
+    spec = _vis(["*.env"])
+    assert not move_reveals(spec, "/m/d", "/m/moved")
 
 
 def test_anchored_patterns_refuse_toward_refusal():
@@ -376,21 +379,15 @@ def test_anchored_patterns_refuse_toward_refusal():
     # match space cannot be enumerated, so any pattern that could reach
     # below the source refuses: head at the source, below it, or above
     # it with the wildcard region spanning the source.
-    below = classify_paths(["/m/d/sec/*"])
-    assert move_reveals(below, None, "/m/d", "/m/moved")
-    at = classify_paths(["/m/d/*"])
-    assert move_reveals(at, None, "/m/d", "/m/moved")
-    above = classify_paths(["/m/*/secret"])
-    assert move_reveals(above, None, "/m/d", "/m/moved")
-    unrelated = classify_paths(["/other/*/secret"])
-    assert not move_reveals(unrelated, None, "/m/d", "/m/moved")
+    for hide in ("/m/d/sec/*", "/m/d/*", "/m/*/secret"):
+        assert move_reveals(_vis([hide]), "/m/d", "/m/moved")
+    assert not move_reveals(_vis(["/other/*/secret"]), "/m/d", "/m/moved")
 
 
 def test_a_show_below_the_mapped_path_counts_as_a_reveal():
     # The mapped anchor lands hidden under /m/moved, but a visible show
     # anchored strictly below it re-opens a road in, which pathVisible's
     # carve-out rule reports as visibility.
-    hidden = classify_paths(["/m/d/sec", "/m/moved"])
-    shown = classify_shows([ShowEntry("/m/moved/sec/open")])
-    assert move_reveals(hidden, shown, "/m/d", "/m/moved")
-    assert not move_reveals(hidden, None, "/m/d", "/m/moved")
+    vis = _vis(["/m/d/sec", "/m/moved"], (ShowEntry("/m/moved/sec/open"),))
+    assert move_reveals(vis, "/m/d", "/m/moved")
+    assert not move_reveals(Visibility(paths=vis.paths), "/m/d", "/m/moved")

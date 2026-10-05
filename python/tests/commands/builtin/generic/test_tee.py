@@ -61,7 +61,6 @@ def test_parse_flags_reads_the_exit_warn_axis(mode, stop):
     [OSError("disk full"), _SdkError("An error occurred (AccessDenied)")],
 )
 async def test_a_write_error_is_diagnosed_and_stdout_still_copied(error):
-
     async def _write(_p, _d):
         raise error
 

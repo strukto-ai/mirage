@@ -303,7 +303,6 @@ class StreamingShell:
     async def __call__(
         self, line: str, session_id: str, stdin: bytes | None = None
     ) -> IOResult:
-
         async def forever():
             yield b"first\n"
             await asyncio.sleep(10)
@@ -319,7 +318,6 @@ class ComplainingShell:
     async def __call__(
         self, line: str, session_id: str, stdin: bytes | None = None
     ) -> IOResult:
-
         async def forever():
             await asyncio.sleep(10)
             yield b"never\n"

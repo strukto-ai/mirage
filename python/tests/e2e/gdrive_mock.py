@@ -303,7 +303,6 @@ def _resolve_fake(token_manager, registry):
 
 
 def _build_fakes(registry):
-
     async def fake_refresh(_config):
         return _FAKE_TOKEN, _FAKE_EXPIRES_IN
 

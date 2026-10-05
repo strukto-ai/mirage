@@ -23,7 +23,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: /repo/letters.txt: no deletes in the repo\n"
+        "stderr": "rm: cannot remove '/repo/letters.txt': Permission denied\n"
       }
     },
     {
@@ -50,7 +50,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: /scratch/both/locked/y: both: locked\n"
+        "stderr": "rm: cannot remove '/scratch/both/locked/y': Permission denied\n"
       }
     },
     {
@@ -93,7 +93,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: /scratch/both/locked/y: both: locked\n"
+        "stderr": "rm: cannot remove '/scratch/both/locked/y': Permission denied\n"
       }
     },
     {
@@ -148,7 +148,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: /repo/sealed/x: owner: sealed\n"
+        "stderr": "rm: cannot remove '/repo/sealed/x': Permission denied\n"
       }
     },
     {
@@ -189,7 +189,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /scratch/span/sealed/s: span sealed\n"
+        "stderr": "cat: /scratch/span/sealed/s: Permission denied\n"
       }
     },
     {
@@ -244,7 +244,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cp: /scratch/vaultc/secret: courier sealed\n"
+        "stderr": "cp: /scratch/vaultc/secret: Permission denied\n"
       }
     },
     {
@@ -258,7 +258,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mv: /scratch/vaultc/secret: courier sealed\n"
+        "stderr": "mv: /scratch/vaultc/secret: Permission denied\n"
       }
     },
     {

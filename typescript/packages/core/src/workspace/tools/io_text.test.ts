@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Refusal } from '../../types.ts'
 import { ExecuteResult } from '../workspace/workspace.ts'
-import { decode, ioToStr, replaceText, withRefusal } from './io_text.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import { decode, errorText, ioToStr, replaceText, withRefusal } from './io_text.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
 
@@ -170,5 +171,23 @@ describe('replaceText', () => {
 
   it('reports a miss as a zero count', () => {
     expect(replaceText('abc', 'z', 'y', false)).toEqual(['abc', 0])
+  })
+})
+
+describe('errorText', () => {
+  it('adds the policy line to a plain EACCES', () => {
+    const refusal: Refusal = {
+      kind: 'deny',
+      reason: 'sealed',
+      policy: '',
+      scope: 'command',
+      askId: null,
+    }
+    expect(errorText(new PolicyDenied('Permission denied', '/data/x', refusal))).toBe(
+      'Error: Permission denied\npolicy denied: sealed\n',
+    )
+    expect(errorText(new Error('No such file or directory'))).toBe(
+      'Error: No such file or directory',
+    )
   })
 })

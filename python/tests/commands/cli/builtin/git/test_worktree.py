@@ -46,7 +46,7 @@ async def walk(ws, tracked: set[str], mode: str = UNTRACKED_NORMAL):
         tracked (set[str]): paths to treat as held by the index.
         mode (str): which untracked files to report.
     """
-    ns = namespace_view_of(ws._registry, ws._namespace, ws.dispatch)
+    ns = namespace_view_of(ws._registry, ws._namespace, ws.dispatch, None)
     return await scan(
         ws.dispatch,
         functools.partial(path_stat, ws.dispatch),

@@ -109,7 +109,6 @@ async def test_pack_checksum_uses_bounded_ranges(length, known_size):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed_op", ["stat", "read"])
 async def test_pack_permission_failure_keeps_path_and_git_error(failed_op):
-
     async def dispatch(op, path, **kwargs):
         if op == failed_op:
             raise PermissionError(path.virtual)
