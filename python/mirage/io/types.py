@@ -48,6 +48,17 @@ async def materialize(stream: ByteSource | None) -> bytes:
     return b"".join([chunk async for chunk in chunks(stream)])
 
 
+def settled(source: ByteSource) -> bool:
+    """Whether a read is over: bytes, or a stream drained to its end.
+
+    Args:
+        source (ByteSource): what a command recorded as a read.
+    """
+    if isinstance(source, CachableAsyncIterator):
+        return source.exhausted
+    return isinstance(source, bytes)
+
+
 @dataclass(frozen=True, slots=True)
 class SizedRun:
     """One ``du`` operand as measured, before its rows are rendered.
@@ -261,9 +272,21 @@ class IOResult:
             sized_runs=other.sized_runs,
             counted_runs=other.counted_runs,
             stderr=merged_stderr,
-            reads={**self.reads, **other.reads},
+            # A later write of a path voids what the earlier side claimed
+            # of it, and the read, once it is over; a stream still
+            # running stays for the cache's drain to finish and close.
+            # The writer's own claim, if any, follows.
+            reads={
+                **{
+                    p: v
+                    for p, v in self.reads.items()
+                    if p not in other.writes or not settled(v)
+                },
+                **other.reads,
+            },
             writes={**self.writes, **other.writes},
-            cache=self.cache + other.cache,
+            cache=[p for p in self.cache if p not in other.writes]
+            + other.cache,
             renames=self.renames + other.renames,
             producer=other.producer,
             refusal=(

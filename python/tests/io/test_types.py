@@ -85,6 +85,32 @@ def test_ioresult_merge_combines_cache():
     asyncio.run(_run())
 
 
+def test_ioresult_merge_a_later_write_voids_an_earlier_claim():
+
+    async def _run():
+        left = IOResult(writes={"/f": b"whole"}, cache=["/f", "/g"])
+        right = IOResult(writes={"/f": b"z"})
+        merged = await left.merge(right)
+        assert merged.cache == ["/g"]
+        claimed = await left.merge(IOResult(writes={"/f": b"q"}, cache=["/f"]))
+        assert claimed.cache == ["/g", "/f"]
+
+    asyncio.run(_run())
+
+
+def test_ioresult_merge_a_later_write_voids_a_finished_read():
+
+    async def _run():
+        running = CachableAsyncIterator(_async_source(b"x"))
+        left = IOResult(reads={"/f": b"old", "/s": running}, cache=["/f"])
+        right = IOResult(writes={"/f": b"new", "/s": b"new"}, cache=["/f"])
+        merged = await left.merge(right)
+        assert merged.reads == {"/s": running}
+        assert merged.cache == ["/f"]
+
+    asyncio.run(_run())
+
+
 def test_ioresult_merge_mixed_reads():
 
     async def _run():

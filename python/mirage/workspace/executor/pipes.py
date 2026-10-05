@@ -25,7 +25,7 @@ from mirage.io.stream import (
     discard_io,
     discard_streams,
 )
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource, materialize, settled
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.supervisor import ProcessSupervisor
@@ -232,8 +232,14 @@ async def handle_pipe(
         stderr_bytes = await materialize(io.stderr)
         if stderr_bytes:
             merged_stderr_parts.append(stderr_bytes)
+        merged_reads = {
+            p: v
+            for p, v in merged_reads.items()
+            if p not in io.writes or not settled(v)
+        }
         merged_reads.update(io.reads)
         merged_writes.update(io.writes)
+        merged_cache = [p for p in merged_cache if p not in io.writes]
         merged_cache.extend(io.cache)
 
     if merged_stderr_parts:

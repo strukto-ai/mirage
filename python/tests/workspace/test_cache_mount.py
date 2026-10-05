@@ -224,13 +224,17 @@ async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
         ("cat /data/f; printf 'z\\n' >> /data/f", b"a\nb\nz\n"),
         ("awk 1 /data/f | tee -a /data/f > /dev/null", b"a\nb\na\nb\n"),
         ("tac /data/f >> /data/f", b"a\nb\nb\na\n"),
+        ("sort -o /data/f /data/f; printf 'z\\n' >> /data/f", b"a\nb\nz\n"),
+        ("printf 'q\\n' | tee /data/f >> /data/f", b"q\nq\n"),
+        ("printf 'q\\n' | tee /data/f >> /data/f 2>> /data/f", b"q\nq\n"),
     ],
 )
 async def test_a_line_that_reads_and_appends_leaves_no_stale_entry(
     line, stored
 ):
-    """A line that reads a file and appends to it holds neither the file
-    nor its append whole, so the next read reaches the store."""
+    """A line that reads or writes a file and then appends to it holds
+    neither the file nor its append whole, so the next read reaches the
+    store."""
     ram = RAMVFS()
     ram.caches_reads = True
     ws = Workspace({"/data": ram}, mode=MountMode.WRITE)
@@ -240,3 +244,21 @@ async def test_a_line_that_reads_and_appends_leaves_no_stale_entry(
     out = await (await ws.shell("cat /data/f")).materialize_stdout()
     await ws.close()
     assert out == stored
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    ["cat /data/f; sort -o /data/f /data/f", "cat /data/f | sort -o /data/f"],
+)
+async def test_a_whole_write_after_a_read_stays_cached(line):
+    """sort rewrites the file it was handed whole, so the cache keeps
+    sort's bytes and not the read that came before them."""
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ws = Workspace({"/data": ram}, mode=MountMode.WRITE)
+    await ws.shell("printf 'b\\na\\n' > /data/f")
+    await (await ws.shell(line)).materialize_stdout()
+    cached = await ws.cache.get("/data/f")
+    await ws.close()
+    assert cached == b"a\nb\n"
