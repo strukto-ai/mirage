@@ -162,5 +162,11 @@ export async function runDispatch(
   )
   if (result === null) return [null, new IOResult()]
   const body = await materialize(result[0])
-  return [body, await reads.merge(result[1])]
+  const merged = await reads.merge(result[1])
+  // Every read went through the dispatcher, whose cold read keeps what the
+  // file cache may hold; listing a read path again would keep a filetype
+  // renderer's output there, which cat would then print. A written path
+  // stays listed. Mirrors Python's run_dispatch.
+  merged.cache = merged.cache.filter((p) => !(p in merged.reads))
+  return [body, merged]
 }

@@ -855,20 +855,27 @@ describe('rmdir namespace entries', () => {
 })
 
 describe('a cold read keeps its bytes for the next reader', () => {
-  // A caching mount whose `.count` reads render BODY, one tally per fetch;
-  // with `race` the first fetch is overtaken by a write. Mirrors Python's
-  // tests/workspace/dispatcher/test_dispatcher.py.
-  function counted(race = false): { ws: Workspace; fetched: string[] } {
+  // A caching mount whose reads answer BODY, one tally per fetch. The
+  // counted read replaces the mount's plain read, or with `filetype`
+  // renders only that extension; with `race` the first fetch is overtaken
+  // by a write. Mirrors Python's tests/workspace/dispatcher/test_dispatcher.py.
+  function counted(
+    race = false,
+    filetype: string | null = null,
+  ): { ws: Workspace; fetched: string[]; ops: OpsRegistry } {
     const fetched: string[] = []
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
     const ops = new OpsRegistry()
     ops.registerVfs(vfs)
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, ops })
+    const ws = new Workspace(
+      { '/data': vfs },
+      { mode: MountMode.WRITE, ops, shellParserFactory: getTestParser },
+    )
     ops.register({
       name: 'read',
       vfs: vfs.name,
-      filetype: '.count',
+      filetype,
       write: false,
       fn: async (_accessor, path, _args, kwargs) => {
         fetched.push(path.virtual)
@@ -878,13 +885,13 @@ describe('a cold read keeps its bytes for the next reader', () => {
         return sliceWindow(ENC.encode('BODY'), offset, size)
       },
     })
-    return { ws, fetched }
+    return { ws, fetched, ops }
   }
 
-  it('serves the ranges of a render from one kept read', async () => {
-    // A render has no remote range: the read op would fetch the whole file
-    // and slice it for every range, so the first range keeps the file and
-    // the rest, and the whole read, are served from it.
+  it('serves the ranges of an unranged read from one kept read', async () => {
+    // A read op with no remote range would fetch the whole file and slice
+    // it for every range, so the first range keeps the file and the rest,
+    // and the whole read, are served from it.
     const { ws, fetched } = counted()
     await ws.vfs.write('/data/f.count', 'STORED')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('BO')
@@ -897,7 +904,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
   it('keeps nothing from a raw or a natively ranged read', async () => {
     // A raw read is not the rendering the cache holds under the same key,
     // and a store that serves a range itself moved only that range.
-    const { ws, fetched } = counted()
+    const { ws, fetched } = counted(false, '.count')
     await ws.vfs.write('/data/f.count', 'STORED')
     await ws.vfs.write('/data/f.txt', '0123456789')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { raw: true }))).toBe('STORED')
@@ -915,6 +922,83 @@ describe('a cold read keeps its bytes for the next reader', () => {
     await ws.vfs.read('/data/f.count')
     await ws.vfs.read('/data/f.count')
     expect(fetched).toHaveLength(2)
+  })
+
+  it.each([
+    ['whole', {}, 'RENDER'],
+    ['ranged', { offset: 0, size: 2 }, 'RE'],
+  ])(
+    'keeps nothing from a renderer registered after the probe (%s)',
+    async (_name, window, rendered) => {
+      // The fill is chosen after the probe, but the op is resolved only once
+      // the mount is ready; a renderer landing in between runs, and its
+      // rendering must not become what cat reads. A ranged read on a store
+      // with no native range fills the whole file too.
+      const { ws, ops } = counted()
+      await ws.vfs.write('/data/f.count', 'STORED')
+      const mount = ws.mount('/data')
+      const probe = ws.cache.get.bind(ws.cache)
+      const ready = mount.ensureReady.bind(mount)
+      let probed = false
+      Object.assign(ws.cache, {
+        get: async (path: string) => {
+          probed = true
+          return probe(path)
+        },
+      })
+      Object.assign(mount, {
+        ensureReady: async () => {
+          if (probed && ops.find('read', mount.vfs, '.count') === null) {
+            ops.register({
+              name: 'read',
+              vfs: mount.vfs.name,
+              filetype: '.count',
+              write: false,
+              fn: () => Promise.resolve(ENC.encode('RENDER')),
+            })
+          }
+          await ready()
+        },
+      })
+      expect(DEC.decode(await ws.vfs.read('/data/f.count', window))).toBe(rendered)
+      expect(await ws.cache.exists('/data/f.count')).toBe(false)
+      expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('STORED')
+    },
+  )
+
+  it('hands a ranged render to the renderer as its range', async () => {
+    // A render is never kept, so filling the whole file for a range would
+    // only render more than the read asked for.
+    const { ws, ops } = counted()
+    const mount = ws.mount('/data')
+    const windows: [unknown, unknown][] = []
+    ops.register({
+      name: 'read',
+      vfs: mount.vfs.name,
+      filetype: '.count',
+      write: false,
+      fn: (_accessor, _path, _args, kwargs) => {
+        windows.push([kwargs.offset, kwargs.size])
+        return Promise.resolve(ENC.encode('RE'))
+      },
+    })
+    await ws.vfs.write('/data/f.count', 'STORED')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('RE')
+    expect(windows).toEqual([[0, 2]])
+  })
+
+  it('neither keeps a render nor serves one to a command', async () => {
+    // The file cache holds what commands read under the path alone, so a
+    // kept render would be what cat prints, and a kept cat what the
+    // renderer read returns.
+    const { ws, fetched } = counted(false, '.count')
+    await ws.vfs.write('/data/f.count', 'STORED')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count'))).toBe('BODY')
+    expect(await ws.cache.exists('/data/f.count')).toBe(false)
+    expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('STORED')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('BO')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count'))).toBe('BODY')
+    expect(fetched).toEqual(['/data/f.count', '/data/f.count', '/data/f.count'])
   })
 })
 

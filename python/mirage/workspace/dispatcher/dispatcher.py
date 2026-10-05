@@ -28,6 +28,7 @@ from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
+from mirage.commands.resolve import get_extension
 from mirage.context import (
     get_current_session,
     hidden_paths_intersect,
@@ -565,29 +566,26 @@ class Dispatcher:
             )
         await mount.ensure_ready()
         caches_reads = mount.vfs.caches_reads
-        # The file cache is keyed on the path alone, and what it holds is
-        # the rendered read. A raw read asks for a different value under
-        # the same key, so it is neither served from that cache nor kept
-        # in it.
+        # The file cache holds what commands read, keyed on the path
+        # alone. A raw read, or a read through a filetype renderer
+        # (whoever registered it), asks for a different value under the
+        # same key, so it is neither served from that cache nor kept in
+        # it. The renderer read still gets the freshness check, so a path
+        # the backend reports gone fails.
         raw = "filetype" in kwargs and kwargs["filetype"] is None
-        # A cold read keeps the whole file it fetched for the next reader,
-        # through the mount's own manager, the one a command's read
-        # fills: a write racing the fetch retires its generation, so the
-        # bytes it read are not kept. A ranged read comes from the store
-        # only where the store can serve one; elsewhere the read op would
-        # fetch the whole file and slice it for every range, so the whole
-        # file is read once, kept, and each range sliced from it.
+        filetype = (
+            kwargs["filetype"]
+            if "filetype" in kwargs
+            else get_extension(path.virtual)
+        )
+
+        def renders_read() -> bool:
+            return filetype is not None and mount.has_filetype_op(
+                "read", filetype
+            )
+
         offset, size = _window(kwargs)
         whole = (offset, size) == (0, None)
-        filler = (
-            mount.cache_manager
-            if caches_reads
-            and not raw
-            and op in DISPATCH_READ_OPS
-            and size != 0
-            and (whole or not mount.reads_ranges(path.virtual))
-            else None
-        )
 
         if caches_reads and not raw and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
@@ -596,6 +594,7 @@ class Dispatcher:
                 and await self._reconciler.may_serve_cached(
                     mount, path.virtual
                 )
+                and not renders_read()
                 and not mount.retiring
                 and self._namespace.try_mount_for(path.virtual) is mount
             ):
@@ -617,6 +616,26 @@ class Dispatcher:
                 if bound is not None:
                     served = await apply_op_limit(served, bound)
                 return served, IOResult(reads={path.virtual: served})
+
+        # A cold read keeps the whole file it fetched for the next reader,
+        # through the mount's own manager, the one a command's read
+        # fills: a write racing the fetch retires its generation, so the
+        # bytes it read are not kept. A ranged read comes from the store
+        # only where the store can serve one; elsewhere the read op would
+        # fetch the whole file and slice it for every range, so the whole
+        # file is read once, kept, and each range sliced from it. The op
+        # is resolved only once the mount is ready, so a renderer can land
+        # after this check; the fill asks again before it keeps anything.
+        filler = (
+            mount.cache_manager
+            if caches_reads
+            and not raw
+            and op in DISPATCH_READ_OPS
+            and size != 0
+            and (whole or not mount.reads_ranges(path.virtual))
+            and not renders_read()
+            else None
+        )
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             # Ops.rename addresses both endpoints against the source's
@@ -644,6 +663,7 @@ class Dispatcher:
                         path.virtual,
                         **_whole_read(kwargs),
                     ),
+                    keep=lambda: not renders_read(),
                 )
                 result = kept if whole else slice_window(kept, offset, size)
             elif op in SERIAL_WRITE_OPS:

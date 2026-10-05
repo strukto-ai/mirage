@@ -513,34 +513,28 @@ export class Dispatcher {
       throw enotempty(p.virtual)
     }
     const caches = vfs.cachesReads
-    // The file cache is keyed on the path alone, and what it holds is the
-    // rendered read. A raw read asks for a different value under the same
-    // key, so it is neither served from that cache nor kept in it.
+    // The file cache holds what commands read, keyed on the path alone. A
+    // raw read, or a read through a filetype renderer (whoever registered
+    // it), asks for a different value under the same key, so it is neither
+    // served from that cache nor kept in it. The renderer read still gets
+    // the freshness check, so a path the backend reports gone fails.
     // Mirrors Python's Dispatcher.dispatch.
     await mount.ensureReady()
     const raw = kwargs?.filetype === null
-    // A cold read keeps the whole file it fetched for the next reader,
-    // through the mount's own manager, the one a command's read fills: a
-    // write racing the fetch retires its generation, so the bytes it read
-    // are not kept. A ranged read comes from the store only where the store
-    // can serve one; elsewhere the read op would fetch the whole file and
-    // slice it for every range, so the whole file is read once, kept, and
-    // each range sliced from it. Mirrors Python's Dispatcher.dispatch.
+    const filetype = getExtension(p.virtual)
+    const requested = kwargs?.filetype
+    const readType =
+      requested === undefined ? filetype : typeof requested === 'string' ? requested : null
+    const rendersRead = (): boolean =>
+      readType !== null && this.opsRegistry.find('read', vfs, readType) !== null
     const [readOffset, readSize] = readWindow(kwargs)
     const whole = readOffset === 0 && readSize === null
-    const filler =
-      caches &&
-      !raw &&
-      DISPATCH_READ_OPS.has(opName) &&
-      readSize !== 0 &&
-      (whole || !this.opsRegistry.readsRanges(vfs, getExtension(p.virtual)))
-        ? mount.cacheManager
-        : null
     if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (
         cached !== null &&
         (await this.reconciler.mayServeCached(mount, p.virtual)) &&
+        !rendersRead() &&
         !mount.retiring &&
         this.namespace.tryMountFor(p.virtual) === mount
       ) {
@@ -563,6 +557,24 @@ export class Dispatcher {
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
+    // A cold read keeps the whole file it fetched for the next reader,
+    // through the mount's own manager, the one a command's read fills: a
+    // write racing the fetch retires its generation, so the bytes it read
+    // are not kept. A ranged read comes from the store only where the store
+    // can serve one; elsewhere the read op would fetch the whole file and
+    // slice it for every range, so the whole file is read once, kept, and
+    // each range sliced from it. The op is resolved only once the mount is
+    // ready, so a renderer can land after this check; the fill asks again
+    // before it keeps anything. Mirrors Python's Dispatcher.dispatch.
+    const filler =
+      caches &&
+      !raw &&
+      DISPATCH_READ_OPS.has(opName) &&
+      readSize !== 0 &&
+      (whole || !this.opsRegistry.readsRanges(vfs, filetype)) &&
+      !rendersRead()
+        ? mount.cacheManager
+        : null
     if (this.opsRegistry.find(opName, vfs)?.write === true) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofsReadOnly(`mount at '${p.virtual}' is read-only`, p)
@@ -577,7 +589,6 @@ export class Dispatcher {
     // gmail reads) resolve by the path's extension; Python reaches them
     // because its dispatcher routes through Mount.execute_op, which
     // stamps the filetype. Stamp it here the same way.
-    const filetype = getExtension(p.virtual)
     const fullKwargs: OpKwargs = {
       ...(kwargs ?? {}),
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
@@ -625,7 +636,11 @@ export class Dispatcher {
           return wrapOpStream(answer, mount.mountId, mount.activity)
         })
       if (filler !== null) {
-        const kept = await filler.fill(p, () => run(wholeRead(fullKwargs)))
+        const kept = await filler.fill(
+          p,
+          () => run(wholeRead(fullKwargs)),
+          () => !rendersRead(),
+        )
         result =
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)
       } else if (SERIAL_WRITE_OPS.has(opName)) {
