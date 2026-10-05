@@ -331,6 +331,21 @@ def arith_refusal(cmd: str, exc: ArithError) -> Result:
     )
 
 
+def record_delimiter(text: str | None) -> bytes:
+    """The byte ``read -d`` and ``mapfile -d`` stop at.
+
+    Bash takes the first byte of the argument, not its first character
+    (bash 5.2: ``-d é`` stops at 0xc3, ``-d $'\\xff'`` at the raw byte);
+    an empty argument is NUL and no ``-d`` is a newline.
+
+    Args:
+        text (str | None): the ``-d`` argument, or None when not given.
+    """
+    if text is None:
+        return b"\n"
+    return encode_text(text)[:1] or b"\0"
+
+
 def is_valid_name(name: str) -> bool:
     """Whether the word is a shell identifier.
 

@@ -360,3 +360,14 @@ export function numericOperands(args: readonly string[]): readonly string[] {
 export function statusOf(word: string): number {
   return Number(((BigInt(word.trim()) % 256n) + 256n) % 256n)
 }
+
+/**
+ * The byte `read -d` and `mapfile -d` stop at. Bash takes the first byte of
+ * the argument, not its first character (bash 5.2: `-d é` stops at 0xc3,
+ * `-d $'\xff'` at the raw byte); an empty argument is NUL and no `-d` is a
+ * newline. Mirrors Python's record_delimiter.
+ */
+export function recordDelimiter(text: string | null): number {
+  if (text === null) return 10
+  return encodeText(text)[0] ?? 0
+}

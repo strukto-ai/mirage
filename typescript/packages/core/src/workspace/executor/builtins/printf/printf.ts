@@ -183,9 +183,7 @@ export async function handlePrintf(
       // ships printf as a builtin, so the builtin governs. A bare `-v` short
       // of its NAME is left to the format path, where bash's own `option
       // requires an argument` is a separate change.
-      const err = new TextEncoder().encode(
-        `bash: printf: -${first[1] ?? ''}: invalid option\n${USAGE}`,
-      )
+      const err = encodeText(`bash: printf: -${first[1] ?? ''}: invalid option\n${USAGE}`)
       return [
         null,
         new IOResult({ exitCode: 2, stderr: err }),

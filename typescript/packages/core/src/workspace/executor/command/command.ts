@@ -561,9 +561,7 @@ export async function handleCommand(
       csExec.stderr = await materialize(csIo.stderr)
     }
     if (csParsed.warnings.length > 0) {
-      const csWarn = new TextEncoder().encode(
-        csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''),
-      )
+      const csWarn = encodeText(csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       const csExisting = await materialize(csIo.stderr)
       csIo.stderr = concat([csWarn, csExisting])
       csExec.stderr = concat([csWarn, csExec.stderr])
@@ -605,7 +603,7 @@ export async function handleCommand(
     }
     if (mountPrefixes.size > 1) {
       const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
-      const err = new TextEncoder().encode(
+      const err = encodeText(
         `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
       )
       return [

@@ -182,9 +182,7 @@ export async function handleUnset(
     // base, not the element, in the error).
     const base = match?.[1] ?? name
     if (session.readonlyVars.has(base)) {
-      const err = new TextEncoder().encode(
-        `bash: unset: ${base}: cannot unset: readonly variable\n`,
-      )
+      const err = encodeText(`bash: unset: ${base}: cannot unset: readonly variable\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),

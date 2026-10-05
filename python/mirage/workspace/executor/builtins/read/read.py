@@ -30,6 +30,7 @@ from mirage.workspace.executor.builtins.shared import (
     arith_refusal,
     is_valid_name,
     readonly_refusal,
+    record_delimiter,
     refusal,
     require_view,
 )
@@ -335,10 +336,7 @@ async def handle_read(
         )
     flags = parse.flags
     raw = bool(flags.get("r"))
-    delim = b"\n"
-    if "d" in flags:
-        text = str(flags["d"])
-        delim = encode_text(text[:1]) if text else b"\0"
+    delim = record_delimiter(str(flags["d"]) if "d" in flags else None)
     nchars: int | None = None
     exact: int | None = None
     # `-n` and `-N` are one setting in bash: the last one written wins.

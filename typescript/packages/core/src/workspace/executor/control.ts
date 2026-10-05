@@ -436,7 +436,7 @@ async function conditionLoop(
   }
 
   if (hitLimit) {
-    const warn = new TextEncoder().encode(
+    const warn = encodeText(
       `warning: ${label} loop terminated after ${MAX_WHILE.toString()} iterations\n`,
     )
     const existing = mergedIo.stderr
@@ -534,7 +534,7 @@ export async function handleCfor(
     return collectLoopResult(allStdout, mergedIo, 'for')
   }
   if (hitLimit) {
-    const warn = new TextEncoder().encode(
+    const warn = encodeText(
       `warning: for loop terminated after ${MAX_WHILE.toString()} iterations\n`,
     )
     const existing = mergedIo.stderr

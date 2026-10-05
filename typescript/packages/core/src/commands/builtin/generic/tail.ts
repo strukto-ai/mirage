@@ -46,8 +46,6 @@ import { quoteText } from '../../quote.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
-const ENC = new TextEncoder()
-
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Stat = (p: PathSpec) => Promise<FileStat>
 type ReadRange = (p: PathSpec, offset: number, size: number) => Promise<Uint8Array>
@@ -242,7 +240,7 @@ async function* follow(
     const [slot, p] = entry
     if (unread.has(p.virtual)) {
       if (showHeaders) {
-        yield ENC.encode(
+        yield encodeText(
           `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
         )
       }
@@ -267,7 +265,7 @@ async function* follow(
       continue
     }
     if (showHeaders) {
-      yield ENC.encode(
+      yield encodeText(
         `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
       )
     }

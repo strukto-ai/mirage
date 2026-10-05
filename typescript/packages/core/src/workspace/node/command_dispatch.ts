@@ -27,7 +27,7 @@ import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch, mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
-import { encodeText } from '../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import {
   getCommandName,
@@ -695,8 +695,7 @@ async function runArgv(
 export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
   if (said.byteLength === 0) return [...lines]
   const spoken = new Set(
-    new TextDecoder()
-      .decode(said)
+    decodeText(said)
       .split('\n')
       .map((t) => t.trim()),
   )
@@ -904,9 +903,7 @@ async function routeArgv(
       }
     } catch (err) {
       if (err instanceof CycleError) {
-        const errBytes = new TextEncoder().encode(
-          `${name}: ${err.path}: Too many levels of symbolic links\n`,
-        )
+        const errBytes = encodeText(`${name}: ${err.path}: Too many levels of symbolic links\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: errBytes }),

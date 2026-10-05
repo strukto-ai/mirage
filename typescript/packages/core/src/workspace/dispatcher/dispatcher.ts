@@ -97,6 +97,7 @@ import {
 } from '../../context/session_context.ts'
 import { moveReveals } from '../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * Drop listing entries the current session's spec hides.
@@ -1170,7 +1171,7 @@ export class Dispatcher {
       target = found
       result = found
     }
-    record(opName, path.virtual, VFSName.RAM, new TextEncoder().encode(target).byteLength, timer)
+    record(opName, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
     memoryAnswered(report)
     const bound = await postOpsGate(this.policies, opName, path, write, owner ?? '', result)
     if (bound !== null) return (await applyOpLimit(result, bound)) as string | null

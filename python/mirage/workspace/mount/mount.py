@@ -62,6 +62,7 @@ from mirage.observe.context import (
 from mirage.ops.registry import RegisteredOp
 from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileType,
     Limit,
@@ -737,7 +738,7 @@ class MountEntry:
             if not handlers:
                 return None, IOResult(
                     exit_code=127,
-                    stderr=(f"{cmd_name}: command not found".encode()),
+                    stderr=encode_text(f"{cmd_name}: command not found"),
                 )
 
             mount_prefix = self.prefix.rstrip("/")
@@ -877,9 +878,9 @@ class MountEntry:
                     ):
                         return None, IOResult(
                             exit_code=1,
-                            stderr=(
+                            stderr=encode_text(
                                 f"{cmd_name}: read-only mount "
-                                f"at {self.prefix}\n".encode()
+                                f"at {self.prefix}\n"
                             ),
                         )
                     # The dispatch-level guard only sees default limits

@@ -898,9 +898,7 @@ async function unsetError(
 /** The refusal of a `:=` that names no single element. */
 function badSubscript(p: BraceParse): DiscardSignal {
   return new DiscardSignal(
-    new TextEncoder().encode(
-      `bash: ${p.varName ?? ''}[${p.subscript ?? ''}]: bad array subscript\n`,
-    ),
+    encodeText(`bash: ${p.varName ?? ''}[${p.subscript ?? ''}]: bad array subscript\n`),
   )
 }
 

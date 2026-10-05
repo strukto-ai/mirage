@@ -1623,9 +1623,7 @@ async function executeNodeBody(
   // Constructs the parser accepts but the executor cannot honor (e.g.
   // C-style `for ((;;))`). Mirrors the unsupported-builtin diagnostic
   // so agents see a capability gap, not a crash.
-  const unsupportedErr = new TextEncoder().encode(
-    `mirage: unsupported shell construct: ${node.type}\n`,
-  )
+  const unsupportedErr = encodeText(`mirage: unsupported shell construct: ${node.type}\n`)
   return [
     null,
     new IOResult({ exitCode: 2, stderr: unsupportedErr }),

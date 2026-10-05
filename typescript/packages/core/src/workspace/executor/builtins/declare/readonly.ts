@@ -95,9 +95,7 @@ export async function handleReadonly(
 ): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, READONLY_FLAGS)
   if (bad !== null) {
-    const err = new TextEncoder().encode(
-      `bash: readonly: -${bad}: invalid option\n${READONLY_USAGE}`,
-    )
+    const err = encodeText(`bash: readonly: -${bad}: invalid option\n${READONLY_USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

@@ -135,7 +135,7 @@ export async function handleEnv(
   }
   if (command.length === 0) {
     const sep = nullSep ? '\0' : '\n'
-    const out = new TextEncoder().encode(
+    const out = encodeText(
       Object.entries(base)
         .map(([k, v]) => `${k}=${v}${sep}`)
         .join(''),

@@ -505,6 +505,44 @@
       ]
     },
     {
+      "id": "stat_c_counts_a_link_target_in_bytes",
+      "seq": 15400208,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "statvfs"
+      ],
+      "command": "for t in $'\\377' 'é'; do ln -s \"$t\" {mount}/fcD_m; stat -c %s {mount}/fcD_m; rm {mount}/fcD_m; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
       "id": "stat_y_and_x_render_gnu_timestamps",
       "seq": 15400207,
       "targets": [

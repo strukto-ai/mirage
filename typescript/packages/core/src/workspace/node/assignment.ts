@@ -233,7 +233,7 @@ export async function executeAssignment(
       const { map, badWords } = buildAssocLiteral(heldMap, items, append)
       await assignVar(view, key, map)
       if (badWords.length > 0) {
-        const errBytes = new TextEncoder().encode(
+        const errBytes = encodeText(
           badWords
             .map(
               (word) =>

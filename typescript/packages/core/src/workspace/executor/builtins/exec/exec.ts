@@ -53,7 +53,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 export function handleExecCommand(args: string[], _session: SessionState): Result {
   if (args.length === 0)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
-  const err = new TextEncoder().encode(
+  const err = encodeText(
     `mirage: exec: ${args[0] ?? ''}: process replacement is not supported ` +
       '(no OS process to replace)\n',
   )

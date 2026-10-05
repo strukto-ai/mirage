@@ -111,10 +111,8 @@ async function emptyDirs(
   statPath: StatPath | null,
 ): Promise<[string[], [string, unknown][]]> {
   if (statPath === null) return [[], []]
-  const dec = new TextDecoder()
   const rows = blocks.flatMap((data) =>
-    dec
-      .decode(data)
+    decodeText(data)
       .split('\n')
       .filter((line) => line.startsWith('0\t') && line.length > 2)
       .map((line) => line.slice(2)),

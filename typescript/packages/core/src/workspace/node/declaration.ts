@@ -124,9 +124,7 @@ function declareOptionRefusal(
     .find((c) => !DECLARE_LETTERS.has(c))
   if (bad === undefined) return null
   const sign = flagChars.has(bad) ? '-' : '+'
-  const err = new TextEncoder().encode(
-    `bash: ${cmd}: ${sign}${bad}: invalid option\n${DECLARE_USAGE}\n`,
-  )
+  const err = encodeText(`bash: ${cmd}: ${sign}${bad}: invalid option\n${DECLARE_USAGE}\n`)
   return [
     null,
     new IOResult({ exitCode: 2, stderr: err }),
@@ -168,9 +166,7 @@ function plusRefusals(
       (plusChars.has('a') && Object.hasOwn(session.arrays, name)) ||
       (plusChars.has('A') && Object.hasOwn(session.assocs, name))
     ) {
-      const err = new TextEncoder().encode(
-        `bash: ${cmd}: ${name}: cannot destroy array variables in this way\n`,
-      )
+      const err = encodeText(`bash: ${cmd}: ${name}: cannot destroy array variables in this way\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
