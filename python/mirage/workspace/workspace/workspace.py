@@ -285,19 +285,10 @@ class Workspace:
         self._drift = DriftQueue()
         self.processes = ProcessSupervisor()
         self.job_table = JobTable(console_factory, self.processes)
-        # Every top-level line in flight or queued: its stop event, the
-        # session it named (None for the default) and the event it sets
-        # once it has ended. ``cancel`` reaches lines of every door this
-        # way, whoever holds them.
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
-        # Open unless a capture holds it: a new top-level line waits
-        # here, so what a snapshot or copy reads is what the lines left.
         self._admitting = asyncio.Event()
         self._admitting.set()
         self._capture_lock = asyncio.Lock()
-        # The lines the admission has let in, which a capture waits for;
-        # and the writes under way from outside every running line (a
-        # door's file op, a background job), which it waits out too.
         self._admitted: set[asyncio.Event] = set()
         self._writes = 0
         self._writes_idle = asyncio.Event()

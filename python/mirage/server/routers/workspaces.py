@@ -118,6 +118,32 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
         raise
 
 
+@asynccontextmanager
+async def _building(
+    request: Request, workspace_id: str
+) -> AsyncIterator[None]:
+    """Hold ``workspace_id`` for a clone or load while it is built.
+
+    No create of the id runs alongside, so none can take over a claim
+    this build made and then lose it when the build fails and releases
+    it; the caller's claim covers the build.
+
+    Args:
+        request (Request): the cloning or loading request.
+        workspace_id (str): the id being built.
+    """
+    registry = request.app.state.registry
+    build = f"build:{new_workspace_id()}"
+    async with registry.creating(workspace_id, build) as admitted:
+        if not admitted:
+            raise HTTPException(
+                status_code=409,
+                detail=f"workspace id already exists: {workspace_id!r}",
+            )
+        async with _claimed(request, workspace_id):
+            yield
+
+
 def store_key(request: Request, key: str) -> str:
     """The key the caller's snapshot ``key`` has in the store.
 
@@ -378,7 +404,7 @@ async def clone_workspace(
             status_code=409, detail=f"workspace id already exists: {req.id!r}"
         )
     wid = req.id or new_workspace_id()
-    async with _claimed(request, wid):
+    async with _building(request, wid):
         try:
             new_ws = await run_capture(
                 src_entry,
@@ -448,7 +474,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         store = _snapshot_store(request)
         source = store_key(request, req.key)
     wid = req.id or new_workspace_id()
-    async with _claimed(request, wid):
+    async with _building(request, wid):
         secrets = _build_load_secrets(req.override)
         try:
             # An override mount's credential may be a pointer at one of

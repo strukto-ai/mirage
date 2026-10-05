@@ -443,6 +443,54 @@ describe('AuthMiddleware integration', () => {
       }
     })
 
+    it('refuses a create of an id a load is building', async () => {
+      // A create that took over a load's claim could register first, and the
+      // load's failure would then drop the owner record of a live workspace.
+      const app = jwtApp()
+      const alice = await bearer({ sub: 'alice' })
+      let loading = (): void => undefined
+      const started = new Promise<void>((resolve) => {
+        loading = resolve
+      })
+      let finish = (): void => undefined
+      const held = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      vi.spyOn(Workspace, 'load').mockImplementation(async () => {
+        loading()
+        await held
+        throw new Error('not a snapshot')
+      })
+      try {
+        const load = app.inject({
+          method: 'POST',
+          url: '/v1/workspaces/load',
+          headers: alice,
+          payload: { key: 's.tar', id: 'w' },
+        })
+        await started
+        let r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: alice,
+          payload: { ...RAM, id: 'w' },
+        })
+        expect(r.statusCode).toBe(409)
+        finish()
+        expect((await load).statusCode).toBe(400)
+        r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: alice,
+          payload: { ...RAM, id: 'w' },
+        })
+        expect(r.statusCode, r.body).toBe(201)
+      } finally {
+        vi.restoreAllMocks()
+        await app.close()
+      }
+    })
+
     it('leaves the id free after a failed create', async () => {
       const app = jwtApp()
       try {

@@ -180,31 +180,14 @@ export class Workspace {
   private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
   private readonly lineLock = new KeyLock()
-  /**
-   * Every top-level line in flight or queued, by its stop: the session it
-   * named (undefined for the default) and a promise settled once it has
-   * ended. `cancel` reaches lines of every door this way, whoever holds
-   * them.
-   */
   private readonly lines = new Map<
     AbortController,
     { sessionId: string | undefined; ended: Promise<void> }
   >()
-  /**
-   * Open unless a capture holds it: a new top-level line waits here, so
-   * what a snapshot or copy reads is what the lines left.
-   */
   private admitting: Promise<void> = Promise.resolve()
-  /** Captures take turns; each waits for the one before it. */
   private captures: Promise<void> = Promise.resolve()
-  /** Whether a capture holds the admission. */
   private capturing = false
-  /** The lines the admission has let in, which a capture waits for. */
   private readonly admitted = new Set<AbortController>()
-  /**
-   * Writes under way from outside every running line (a door's file op, a
-   * background job), which a capture waits out too.
-   */
   private writes = 0
   private writesIdle: Promise<void> = Promise.resolve()
   private settleWrites: () => void = () => undefined
@@ -1693,6 +1676,10 @@ export class Workspace {
    * capture that starts waits it out.
    */
   private async admitWrite<T>(write: () => Promise<T>): Promise<T> {
+    // Without task-isolated context a running line's write looks like
+    // anyone's, and holding it would stall the capture waiting on that
+    // line; such hosts have no SFTP or FUSE door to hold, so writes pass.
+    if (!asyncContextIsolatesTasks) return write()
     const line = LINE_STOP.getStore()
     if (WRITE_HELD.getStore() === true || (line !== undefined && this.admitted.has(line))) {
       return write()

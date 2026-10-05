@@ -202,6 +202,25 @@ async function claimed(
   }
 }
 
+/**
+ * Hold `id` for a clone or load while it is built: no create of the id runs
+ * alongside, so none can take over a claim this build made and then lose
+ * it when the build fails and releases it. The caller's claim covers the
+ * build.
+ */
+function building(
+  deps: WorkspaceRoutesDeps,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  id: string,
+  build: () => Promise<FastifyReply>,
+): Promise<FastifyReply> {
+  return deps.registry.creating(id, `build:${newWorkspaceId()}`, async (admitted) => {
+    if (!admitted) return reply.status(409).send({ detail: `workspace id already exists: ${id}` })
+    return claimed(deps, req, reply, id, build)
+  })
+}
+
 /** Refuse an id that would name the state root, not a workspace. */
 function refuseId(reply: FastifyReply, id: string): FastifyReply {
   return reply.status(400).send({ detail: `invalid workspace id: ${id}` })
@@ -368,7 +387,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     const store = typeof source === 'string' ? deps.snapshotStore : undefined
     if (typeof source === 'string' && store === undefined) return noStore(reply)
     const wid = workspaceId ?? newWorkspaceId()
-    return claimed(deps, req, reply, wid, async () => {
+    return building(deps, req, reply, wid, async () => {
       let overrides: Record<string, BaseVFS | Mount>
       try {
         // An override mount's credential may be a pointer at one of
@@ -468,7 +487,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         return reply.status(409).send({ detail: `workspace id already exists: ${body.id}` })
       }
       const wid = body.id ?? newWorkspaceId()
-      return claimed(deps, req, reply, wid, async () => {
+      return building(deps, req, reply, wid, async () => {
         const src = source.runner.ws
         let newWs
         try {

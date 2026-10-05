@@ -19,7 +19,12 @@ interface FileHandle {
     length: number,
     position: number | null,
   ): Promise<{ bytesRead: number }>
-  write(data: Uint8Array): Promise<unknown>
+  write(
+    data: Uint8Array,
+    offset: number,
+    length: number,
+    position: number | null,
+  ): Promise<{ bytesWritten: number }>
   stat(): Promise<{ isFile(): boolean }>
   close(): Promise<void>
 }
@@ -125,7 +130,12 @@ export async function writeStreamToFile(
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
-      await handle.write(value)
+      let offset = 0
+      while (offset < value.byteLength) {
+        const { bytesWritten } = await handle.write(value, offset, value.byteLength - offset, null)
+        if (bytesWritten === 0) throw new Error(`${path}: write made no progress`)
+        offset += bytesWritten
+      }
       written += value.byteLength
     }
   } finally {

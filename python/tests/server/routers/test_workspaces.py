@@ -745,6 +745,41 @@ async def test_state_from_before_accounts_is_no_accounts_to_take(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_create_waits_out_a_load_of_the_same_id(
+    snapshot_store, tmp_path, monkeypatch
+):
+    # A create that took over a load's claim could register first, and the
+    # load's failure would then drop the owner record of a live workspace.
+    secret = "s" * 32
+    app = _jwt_app(secret, tmp_path / "state", snapshot_store=snapshot_store)
+    loading = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def held_load(*args, **kwargs):
+        loading.set()
+        await finish.wait()
+        raise ValueError("not a snapshot")
+
+    monkeypatch.setattr(Workspace, "load", held_load)
+    async with _account(app, secret, "alice") as alice:
+        load = asyncio.create_task(
+            alice.post("/v1/workspaces/load", json={"key": "s.tar", "id": "w"})
+        )
+        await loading.wait()
+        r = await alice.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 409, r.text
+        finish.set()
+        assert (await load).status_code == 400
+        r = await alice.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
 async def test_a_key_needs_a_snapshot_store():
     app, _ = _make_app_with_short_grace(grace=10.0)
     async with AsyncClient(
