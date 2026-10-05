@@ -12,12 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { publishRead } from '../../cache/context.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
+import { record, recordStream, startOp } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
+import { Sha1, sha1Hex } from '../../utils/hash.ts'
 import { downloadFile, downloadFileStream } from './api.ts'
+import { entryToken, readToken } from './fingerprint.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
@@ -57,9 +61,33 @@ export async function read(
   )
   if (entry === null) throw enoent(path.virtual)
   if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
-  return downloadFile(accessor.tokenManager, entry.id, window)
+  const timer = startOp()
+  const data = await downloadFile(accessor.tokenManager, entry.id, window)
+  // Only a whole read through a row with a sha1 can yield a token, so nothing
+  // else is hashed. The token never depends on a recorder being bound
+  // (read_revalidatable.test.ts holds each declarer to it). A whole buffer
+  // prefers WebCrypto's native SHA-1, falling back to incremental Sha1
+  // when unavailable. Streams use incremental Sha1 without buffering.
+  const hashable = window === undefined && entryToken(entry) !== null
+  const fingerprint = hashable ? readToken(entry, await sha1Hex(data)) : null
+  publishRead(path.virtual, data, fingerprint)
+  record('read', path.virtual, 'box', data.byteLength, timer, {
+    fingerprint,
+  })
+  return data
 }
 
+/**
+ * Stream a file, stamped with its sha1 once it has been read whole. When a
+ * token can result (a recorder is bound and the row has a sha1), each chunk
+ * feeds a running SHA-1; the token lands only after the last chunk, so a
+ * stream abandoned part-way stamps nothing.
+ *
+ * Args:
+ *   accessor: Box accessor.
+ *   path: the path to read.
+ *   index: listing cache, consulted for the file id.
+ */
 export async function* readStream(
   accessor: BoxAccessor,
   path: PathSpec,
@@ -83,7 +111,12 @@ export async function* readStream(
   )
   if (entry === null) throw enoent(path.virtual)
   if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
+  const rec = recordStream('read', path.virtual, 'box')
+  const digest = rec !== null && entryToken(entry) !== null ? new Sha1() : null
   for await (const chunk of downloadFileStream(accessor.tokenManager, entry.id)) {
+    digest?.update(chunk)
+    if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }
+  if (rec !== null && digest !== null) rec.fingerprint = readToken(entry, digest.digest())
 }

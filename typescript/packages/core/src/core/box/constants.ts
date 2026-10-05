@@ -36,3 +36,8 @@ export const PLACE_EVENTS: ReadonlySet<string> = new Set([
   'ITEM_MAKE_CURRENT_VERSION',
 ])
 export const TRASH_EVENTS: ReadonlySet<string> = new Set(['ITEM_TRASH'])
+
+export const SHA1 = 'sha1'
+export const ACTIVE = 'active'
+export const ALL_FILES_FOLDER_ID = '0'
+export const TRASH_FOLDER_ID = '1'

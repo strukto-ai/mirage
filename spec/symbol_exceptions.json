@@ -1,5 +1,5 @@
 {
- "baseline": 4073,
+ "baseline": 4072,
  "modules": {
   "ops/registry": {
    "typescript_only": {
@@ -283,6 +283,11 @@
   "config": {
    "typescript_only": {
     "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same door."
+   }
+  },
+  "core/box/api": {
+   "typescript_only": {
+    "BoxFileInfo": "The shape of GET /files/{id} with the fields the fresh check asks for (path_collection, item_status) beside BoxItem's; Python reads the same answer as a plain dict, as it does every Box item."
    }
   }
  }

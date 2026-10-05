@@ -161,4 +161,21 @@ describe('box readdir', () => {
       ),
     ).rejects.toMatchObject({ status: 429 })
   })
+
+  it.each([
+    [5, undefined],
+    ['', undefined],
+    ['abc', 'abc'],
+  ] as const)('keeps only a string sha1 (%s)', async (sha1, kept) => {
+    vi.mocked(api.listFolderItems).mockResolvedValue([
+      { type: 'file', id: '200', name: 'a.txt', size: 1, sha1 } as unknown as api.BoxItem,
+    ])
+    const index = new RAMIndexCacheStore()
+    await readdir(
+      makeAccessor(),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
+      index,
+    )
+    expect((await index.get('/a.txt')).entry?.extra.sha1).toBe(kept)
+  })
 })

@@ -43,6 +43,7 @@
     "runtime": "tsx runtime/run.ts",
     "selftest": "tsx server/kit/selftest/run.ts",
     "hf:selftest": "tsx server/hf/selftest.ts",
+    "box:selftest": "tsx server/box/selftest.ts",
     "hf-hub:selftest": "tsx server/hf_hub/selftest.ts",
     "hf-mcp:capture": "tsx server/hf_hub/capture.ts",
     "slack:atlas": "tsx slack_atlas.ts",

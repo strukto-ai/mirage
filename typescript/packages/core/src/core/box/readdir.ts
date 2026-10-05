@@ -12,13 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { activeCacheManager } from '../../cache/context.ts'
+import { entryOrWarm } from '../../cache/index/warm.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { PathSpec } from '../../types.ts'
+import { FileType, PathSpec } from '../../types.ts'
 import { absentOn404, listFolderItems, type BoxItem } from './api.ts'
-import { enotdir } from '../../utils/errors.ts'
+import { SHA1 } from './constants.ts'
+import { tokenOf } from './fingerprint.ts'
+import { enotdir, enoent } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export function resourceTypeFor(item: BoxItem): string {
@@ -50,26 +54,14 @@ export async function readdir(
       e.code = 'ENOENT'
       throw e
     }
-    let result = await index.get(virtualKey)
-    if (result.entry === undefined || result.entry === null) {
-      const parentOriginal = rstripSlash(path.virtual).replace(/\/[^/]+$/, '') || '/'
-      if (parentOriginal !== path.virtual) {
-        const parentPath = PathSpec.fromStrPath(parentOriginal, mountKey(parentOriginal, prefix))
-        await readdir(accessor, parentPath, index)
-        result = await index.get(virtualKey)
-      }
-      if (result.entry === undefined || result.entry === null) {
-        const e = new Error(`ENOENT: ${path.virtual}`) as Error & { code: string }
-        e.code = 'ENOENT'
-        throw e
-      }
-    }
-    if (result.entry.resourceType !== 'box/folder') {
-      // Listing a file id would 404 on /folders/{id}/items; surface the
-      // POSIX error so generic ls falls back to the file entry.
-      throw enotdir(path.virtual)
-    }
-    folderId = result.entry.id
+    const probed = activeCacheManager()?.probedStat(path)
+    if (probed != null && probed.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
+    const parentVirtual = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
+    const parentPath = PathSpec.fromStrPath(parentVirtual, mountKey(parentVirtual, prefix))
+    const entry = await entryOrWarm(index, virtualKey, () => readdir(accessor, parentPath, index))
+    if (entry === null) throw enoent(path.virtual)
+    if (entry.resourceType !== 'box/folder') throw enotdir(path.virtual)
+    folderId = entry.id
   }
 
   const items = await absentOn404(path.virtual, () =>
@@ -84,7 +76,7 @@ export async function readdir(
     }
     const isDir = it.type === 'folder'
     const filename = it.name
-    const sha1 = typeof it.sha1 === 'string' && it.sha1 !== '' ? it.sha1 : null
+    const sha1 = tokenOf(it[SHA1])
     const entry = new IndexEntry({
       id: it.id,
       name: filename,
@@ -92,7 +84,7 @@ export async function readdir(
       remoteTime: it.modified_at ?? '',
       vfsName: filename,
       size: isDir ? null : typeof it.size === 'number' ? it.size : null,
-      extra: sha1 === null ? {} : { sha1 },
+      extra: sha1 === null ? {} : { [SHA1]: sha1 },
     })
     entries.push({ name: filename, entry, isDir })
   }
