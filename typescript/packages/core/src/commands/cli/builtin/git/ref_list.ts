@@ -461,7 +461,7 @@ export function uniqueWidth(oid: string, width: number, ids: readonly string[]):
  * the ids fall in is read once, so a listing of many branches costs one pass
  * over the ids those buckets hold rather than one per branch.
  */
-async function uniqueAbbreviations(
+export async function uniqueAbbreviations(
   repo: Repo,
   widths: ReadonlyMap<string, number>,
 ): Promise<Map<string, number>> {

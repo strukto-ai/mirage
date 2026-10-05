@@ -14,6 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import SET_OPTION_DEFAULTS, SET_OPTION_NAMES
 from mirage.shell.options import parse_option_word
@@ -39,7 +40,7 @@ async def handle_set(
             f"{k}={_listed_value(v)}"
             for k, v in sorted(visible_env(session).items())
         ]
-        out = ("\n".join(lines) + "\n").encode()
+        out = encode_text("\n".join(lines) + "\n")
         return out, IOResult(), ExecutionNode(command="set", exit_code=0)
     i = 0
     while i < len(args):
@@ -68,7 +69,9 @@ async def handle_set(
             # line is dropped. Without this a typo -- or an option mirage
             # has yet to wire, as `physical` once was -- reads as success.
             if option not in SET_OPTION_NAMES:
-                err = f"bash: set: {option}: invalid option name\n".encode()
+                err = encode_text(
+                    f"bash: set: {option}: invalid option name\n"
+                )
                 return (
                     None,
                     IOResult(exit_code=2, stderr=err),
@@ -131,7 +134,7 @@ def _option_listing(session: SessionState, plus: bool) -> bytes:
             lines.append(f"set {'-' if on else '+'}o {name}")
         else:
             lines.append(f"{name:<15}\t{'on' if on else 'off'}")
-    return ("\n".join(lines) + "\n").encode()
+    return encode_text("\n".join(lines) + "\n")
 
 
 async def set_builtin(call: BuiltinCall) -> Result:

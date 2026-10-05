@@ -18,6 +18,7 @@ import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 export function handlePrintenv(name: string | null, session: SessionState): Result {
   // The process view, not the shell view: GNU printenv is a separate
@@ -33,12 +34,12 @@ export function handlePrintenv(name: string | null, session: SessionState): Resu
         new ExecutionNode({ command: 'printenv', exitCode: 1 }),
       ]
     }
-    const out = new TextEncoder().encode(`${val}\n`)
+    const out = encodeText(`${val}\n`)
     return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
   }
   const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`)
   lines.sort(compareCodePoints)
-  const out = new TextEncoder().encode(`${lines.join('\n')}\n`)
+  const out = encodeText(`${lines.join('\n')}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
 }
 

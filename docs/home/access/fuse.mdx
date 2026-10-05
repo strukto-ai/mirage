@@ -1,0 +1,80 @@
+---
+title: FUSE
+description: Open a workspace as a folder that any program can use.
+icon: folder-open
+---
+
+FUSE shows a workspace as a real folder. Editors, `grep`, `git` and any other program read and write its files like local ones, and every file operation still goes through the workspace's mounts. The folder can be on the server's machine, or on your own machine when the server runs somewhere else.
+
+| The folder is on | How | Needs |
+| --- | --- | --- |
+| the server's machine | `backend: fuse` on a mount in the workspace config | FUSE on the server's machine |
+| your machine | `sshfs` through the server's [SSH](/home/access/ssh) | `sshfs` on your machine, SSH on the server |
+
+With the `mirage` CLI the server runs on your machine, so the first way puts the folder there too. In your own app, set `backend` on the `Mount` instead, in [Python](/python/setup/fuse) or [TypeScript](/typescript/setup/fuse).
+
+## On the server's machine
+
+<Steps>
+  <Step title="Install FUSE">
+    Install the system FUSE first, see the [support matrix](/home/setup/fuse). Then the binding:
+    <CodeGroup>
+    ```bash Python
+    pip install 'mirage-ai[fuse]'
+    ```
+
+    ```bash TypeScript
+    npm install -g @zkochan/fuse-native
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Mark the mounts">
+    ```yaml workspace.yaml
+    mounts:
+      /data:
+        vfs: ram
+        mode: WRITE
+        backend: fuse
+        mountpoint: /tmp/demo-data
+      /docs:
+        vfs: s3
+        config: {bucket: docs}
+        backend: fuse
+    ```
+    A `mountpoint` must be a folder that exists. Without one, the server makes a new temporary folder.
+  </Step>
+  <Step title="Create the workspace">
+    ```bash
+    mirage workspace create workspace.yaml --id demo
+    ls /tmp/demo-data
+    ```
+    The answer, like `GET /v1/workspaces/{id}`, lists where each mount landed:
+    ```json
+    "fuse_mountpoints": {"/data": "/tmp/demo-data", "/docs": "/tmp/mirage-s2eei0jw"}
+    ```
+  </Step>
+</Steps>
+
+The server mounts the folders when it creates the workspace and unmounts them when the workspace is closed or deleted. A folder belongs to no session, so no [profile](/home/permissions) applies: it sees each mount as the mount's mode allows, and a write to a `READ` mount fails with "Read-only file system". On macOS a process holds one FUSE mount at a time, so the server can serve one folder there.
+
+## On your machine
+
+```bash
+mkdir -p ~/mnt/demo
+sshfs -p 2222 -o direct_io demo@127.0.0.1:/ ~/mnt/demo
+ls ~/mnt/demo/data
+fusermount3 -u ~/mnt/demo        # on macOS: umount ~/mnt/demo
+```
+
+[sshfs](https://github.com/libfuse/sshfs) mounts the workspace over SFTP, so the server needs nothing more than [SSH turned on](/home/access/ssh#turn-it-on) and your key authorized. On Linux install it with `apt install sshfs`; on macOS install macFUSE and SSHFS from [macfuse.github.io](https://macfuse.github.io).
+
+A hosted server can be reached through its HTTPS port instead, logged in by the CLI's token rather than a key ([Over HTTPS](/home/access/ssh#over-https)):
+
+```bash
+sshfs -o ProxyCommand="mirage ssh-proxy %r" -o direct_io demo@mirage:/ ~/mnt/demo
+```
+
+- **Keep `-o direct_io`.** Files from API-backed mounts, such as Linear, Slack or Trello, have no size until they are read, so they list as 0 bytes. Without `direct_io` the kernel trusts that size and they read as empty; with it they read in full.
+- **One session for the whole mount.** The mount is one SFTP channel, so it runs as one fresh session under the key's [profile](/home/access/ssh#bind-a-key-to-a-profile), closed when you unmount. In `jwt` mode the key needs [`mirage-account`](/home/access/ssh#bind-a-key-to-an-account) and opens only that account's workspaces; through `mirage ssh-proxy` the token's account does.
+- A write to a `READ` mount fails with "Permission denied", since SFTP has no read-only error.
+- Every file operation is a round trip to the server.

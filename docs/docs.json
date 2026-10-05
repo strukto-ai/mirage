@@ -69,11 +69,18 @@
             "group": "Access",
             "pages": [
               "home/access/overview",
-              "home/access/http",
-              "home/access/mcp",
-              "home/access/rpc",
-              "home/access/ssh",
-              "home/access/cli"
+              {
+                "group": "Server",
+                "icon": "server",
+                "pages": [
+                  "home/access/http",
+                  "home/access/mcp",
+                  "home/access/rpc",
+                  "home/access/ssh",
+                  "home/access/fuse",
+                  "home/access/cli"
+                ]
+              }
             ]
           },
           {
@@ -259,23 +266,28 @@
           },
           {
             "group": "AI Agents",
-            "icon": "robot",
             "pages": [
+              "python/agents/index",
               {
-                "group": "Integrations",
-                "icon": "robot",
+                "group": "Coding Agents",
+                "icon": "laptop-code",
                 "pages": [
-                  "python/agents/index",
+                  "python/agents/claude-code",
+                  "python/agents/codex",
+                  "python/agents/grok-build"
+                ]
+              },
+              {
+                "group": "Agent SDKs",
+                "icon": "cubes",
+                "pages": [
+                  "python/agents/claude-agent-sdk",
+                  "python/agents/agno",
                   "python/agents/openai-agents",
                   "python/agents/langchain",
                   "python/agents/openhands",
                   "python/agents/pydantic-ai",
-                  "python/agents/agno",
-                  "python/agents/haystack",
-                  "python/agents/claude-code",
-                  "python/agents/claude-agent-sdk",
-                  "python/agents/codex",
-                  "python/agents/grok-build"
+                  "python/agents/haystack"
                 ]
               }
             ]
@@ -463,24 +475,29 @@
           },
           {
             "group": "AI Agents",
-            "icon": "robot",
             "pages": [
+              "typescript/agents/index",
               {
-                "group": "Integrations",
-                "icon": "robot",
+                "group": "Coding Agents",
+                "icon": "laptop-code",
                 "pages": [
-                  "typescript/agents/index",
-                  "typescript/agents/openai",
-                  "typescript/agents/langchain",
-                  "typescript/agents/pi",
-                  "typescript/agents/vercel",
-                  "typescript/agents/mastra",
-                  "typescript/agents/opencode",
                   "typescript/agents/claude-code",
-                  "typescript/agents/claude-agent-sdk",
                   "typescript/agents/codex",
                   "typescript/agents/grok-build",
+                  "typescript/agents/pi",
+                  "typescript/agents/opencode",
                   "typescript/agents/dsh"
+                ]
+              },
+              {
+                "group": "Agent SDKs",
+                "icon": "cubes",
+                "pages": [
+                  "typescript/agents/vercel",
+                  "typescript/agents/mastra",
+                  "typescript/agents/claude-agent-sdk",
+                  "typescript/agents/openai",
+                  "typescript/agents/langchain"
                 ]
               }
             ]
@@ -676,7 +693,7 @@
         "href": "https://www.strukto.ai/mirage"
       },
       {
-        "label": "Discord",
+        "label": "",
         "icon": "discord",
         "href": "https://discord.gg/u8BPQ65KsS"
       },

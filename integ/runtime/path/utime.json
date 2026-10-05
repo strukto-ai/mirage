@@ -32,11 +32,12 @@
             "js": "console.log(os.utimes('/data/t.txt', 100000, 200000), os.utimes('/data/nope.txt', 1, 2))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "0 -44\n"
             }
           }

@@ -30,6 +30,7 @@ import { gnuStrerror, isFsError, isWalkError, enotsup } from '../../../utils/err
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { encodeBase64 } from '../../../utils/base64.ts'
 
 import { renderWriteOut } from './curl_write_out.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
@@ -61,6 +62,19 @@ const HEAD_FORM_WARNING =
 // curl's own Content-Type for a -d body, sent unless the line names one:
 // httpx's `content=` and fetch's body carry no type of their own.
 const BODY_CONTENT_TYPE = 'application/x-www-form-urlencoded'
+const JSON_TYPE = 'application/json'
+// Every option that adds a piece to the body, in the order curl joins them,
+// and the spelling curl names in a read failure.
+const DATA_OPTIONS = ['data', 'data_binary', 'data_raw', 'data_urlencode', 'json']
+const DATA_SPELLING: Record<string, string> = {
+  data: '-d',
+  data_binary: '--data-binary',
+  data_urlencode: '--data-urlencode',
+  json: '--json',
+}
+// -d @FILE drops these bytes from what it reads; --data-binary keeps them.
+const DATA_STRIPPED = new Set([0x0d, 0x0a, 0x00])
+const UNRESERVED = /^[A-Za-z0-9\-._~]$/
 
 export function resolveTarget(o: string, cwd: string): PathSpec {
   let path = o
@@ -73,26 +87,56 @@ export function resolveTarget(o: string, cwd: string): PathSpec {
   return new PathSpec({ vfsPath: stripSlash(path), virtual: path, directory, resolved: true })
 }
 
-/** Whether the line's headers already carry a Content-Type. */
-function namesContentType(headers: Record<string, string>): boolean {
-  return Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
+/**
+ * The headers -H sends, and every name it mentions.
+ *
+ * curl's reading of each line: `Name: value` sends the header, `Name:` with
+ * nothing after it sends nothing and still stops curl adding its own of that
+ * name, `Name;` sends it empty, and a line with neither separator is
+ * dropped. The value loses its leading blanks only. A name given twice in any
+ * case is one header whose values are joined with `, `, a deliberate
+ * divergence from curl, which sends two lines: fetch merges them so, and RFC
+ * 9110 reads the two forms alike.
+ */
+export function headerLines(values: readonly string[]): [[string, string][], Set<string>] {
+  const sent = new Map<string, [string, string]>()
+  const named = new Set<string>()
+  for (const line of values) {
+    const colon = line.indexOf(':')
+    let name: string
+    let value: string
+    if (colon > 0) {
+      name = line.slice(0, colon)
+      value = line.slice(colon + 1).replace(/^\s+/, '')
+    } else if (colon < 0 && line.endsWith(';') && line.length > 1) {
+      name = line.slice(0, -1)
+      value = ''
+    } else continue
+    const key = name.toLowerCase()
+    named.add(key)
+    if (colon > 0 && value === '') continue
+    const prior = sent.get(key)
+    sent.set(key, prior === undefined ? [name, value] : [prior[0], `${prior[1]}, ${value}`])
+  }
+  return [[...sent.values()], named]
 }
 
 /**
  * The request curl -v shows, as far as mirage can see it.
  *
- * Only what leaves mirage is dumped: the request line, Host, the
- * User-Agent, curl's own Accept, the headers the line added, and the two a
- * -d body adds. curl's `*` transport lines (resolving, connecting, TLS)
- * have no source here and are omitted, as are the headers the HTTP stack
- * appends on its own and a -F body's encoding, which the client builds.
- * `bodyType` is the Content-Type curl added for the body itself, null when
- * the line named one or there is no body.
+ * Only what leaves mirage is dumped: the request line, Host, the headers in
+ * curl's order, and the two a -d body adds. curl's `*` transport lines
+ * (resolving, connecting, TLS) have no source here and are omitted, as are
+ * the headers the HTTP stack appends on its own and a -F body's encoding,
+ * which the client builds. `headers` is every header between Host and the
+ * body's own, in the order curl sends them; `bodyType` is the Content-Type
+ * curl added for the body itself, null when the line named one or there is
+ * no body.
  */
 export function requestLines(
   url: string,
   method: string,
-  headers: Record<string, string>,
+  headers: readonly [string, string][],
   bodyLen: number | null,
   bodyType: string | null,
 ): string[] {
@@ -105,18 +149,121 @@ export function requestLines(
   } catch {
     // Not a URL fetch could parse either; the request line shows the word.
   }
-  const lines = [
-    `${method} ${target} HTTP/1.1`,
-    `Host: ${host}`,
-    `User-Agent: ${headers['User-Agent'] ?? DEFAULT_USER_AGENT}`,
-    'Accept: */*',
-  ]
-  for (const [k, v] of Object.entries(headers)) {
-    if (k !== 'User-Agent') lines.push(`${k}: ${v}`)
-  }
+  const lines = [`${method} ${target} HTTP/1.1`, `Host: ${host}`]
+  for (const [k, v] of headers) lines.push(`${k}: ${v}`)
   if (bodyLen !== null) lines.push(`Content-Length: ${String(bodyLen)}`)
   if (bodyType !== null) lines.push(`Content-Type: ${bodyType}`)
   return lines
+}
+
+/**
+ * curl's escaping for --data-urlencode: everything but letters, digits and
+ * `-._~` becomes `%XX`, and a space then becomes `+` (curl 8.14.1).
+ */
+export function urlEncoded(data: Uint8Array): string {
+  let out = ''
+  for (const byte of data) {
+    const char = String.fromCharCode(byte)
+    out += UNRESERVED.test(char)
+      ? char
+      : byte === 0x20
+        ? '+'
+        : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`
+  }
+  return out
+}
+
+/**
+ * Read the file an `@NAME` value names, `-` being stdin. curl gives up on
+ * the whole line when it cannot (exit 26), naming the file unless -s, and
+ * the option either way.
+ */
+async function readAt(
+  option: string,
+  name: string,
+  opts: CommandOpts,
+  silent: boolean,
+): Promise<Uint8Array> {
+  try {
+    if (name === '-') return await materialize(opts.stdin ?? null)
+    if (opts.dispatch === undefined) throw enotsup('unavailable', 'read', name)
+    const [content] = await opts.dispatch('read', resolveTarget(name, opts.cwd), [])
+    return await materialize(content as ByteSource)
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    const detail = silent ? '' : `curl: Failed to open ${name}\n`
+    const failure = new UsageError(
+      `${detail}curl: option ${option}: error encountered when reading a file\n${HELP_HINT}`,
+      EXIT_READ,
+    )
+    failure.cause = err
+    throw failure
+  }
+}
+
+/** One data option's contribution to the body. */
+async function dataPiece(
+  kind: string,
+  value: string,
+  opts: CommandOpts,
+  silent: boolean,
+): Promise<Uint8Array> {
+  if (kind === 'data_raw') return ENC.encode(value)
+  const option = DATA_SPELLING[kind] ?? kind
+  if (kind === 'data_urlencode') {
+    // `=` is looked for before `@`: `name=content` encodes the content,
+    // `name@file` a file's, and a bare value all of it.
+    let sep = value.indexOf('=')
+    if (sep < 0) sep = value.indexOf('@')
+    const name = sep > 0 ? value.slice(0, sep) : ''
+    const content = sep >= 0 ? value.slice(sep + 1) : value
+    const raw =
+      sep >= 0 && value[sep] === '@'
+        ? await readAt(option, content, opts, silent)
+        : ENC.encode(content)
+    const encoded = urlEncoded(raw)
+    return ENC.encode(name !== '' ? `${name}=${encoded}` : encoded)
+  }
+  if (!value.startsWith('@')) return ENC.encode(value)
+  const raw = await readAt(option, value.slice(1), opts, silent)
+  return kind === 'data' ? raw.filter((byte) => !DATA_STRIPPED.has(byte)) : raw
+}
+
+/**
+ * The body the data options build, and whether --json was among them. The
+ * pieces are joined in line order with `&` between them, except before a
+ * --json piece, and only once the body so far is not empty (curl 8.14.1:
+ * `-d '' -d b` sends `b`).
+ */
+async function requestBody(fl: FlagView, opts: CommandOpts): Promise<[Uint8Array | null, boolean]> {
+  const silent = fl.asBool('silent')
+  const occurrences = fl.occurrences(...DATA_OPTIONS)
+  if (occurrences.length === 0) return [null, false]
+  let body: Uint8Array = new Uint8Array()
+  let json = false
+  for (const [kind, value] of occurrences) {
+    const piece = await dataPiece(kind, String(value), opts, silent)
+    if (body.length > 0 && kind !== 'json') body = concat([body, ENC.encode('&')])
+    body = concat([body, piece])
+    json ||= kind === 'json'
+  }
+  return [body, json]
+}
+
+/**
+ * The Authorization value -u sends, and the prompt it costs. A user without
+ * a `:` has curl ask for the password on stderr and read it from stdin,
+ * which is all a workspace has: the bytes it read minus the last one, which
+ * curl takes to be the newline.
+ */
+export function basicAuth(user: string, stdin: Uint8Array): [string, Uint8Array] {
+  let prompt: Uint8Array = new Uint8Array()
+  let pair = user
+  if (!user.includes(':')) {
+    prompt = ENC.encode(`Enter host password for user '${user}':\n`)
+    pair = `${user}:${new TextDecoder().decode(stdin.slice(0, -1))}`
+  }
+  return [`Basic ${encodeBase64(ENC.encode(pair))}`, prompt]
 }
 
 /**
@@ -181,10 +328,9 @@ async function curlCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('curl'))
-  const header = fl.asStr('header') ?? null
   const userAgent = fl.asStr('user_agent') ?? null
   const request = fl.asStr('request') ?? null
-  const data = fl.asStr('data') ?? null
+  const hasData = fl.occurrences(...DATA_OPTIONS).length > 0
   const form = fl.asStr('form') ?? null
   const outputValue = fl.raw('output')
   const output =
@@ -209,16 +355,7 @@ async function curlCommand(
   // -s silences the message, -S puts it back. Neither changes the exit code.
   const quiet = fl.asBool('silent') && !fl.asBool('show_error')
 
-  const headers: Record<string, string> = {}
-  if (header !== null) {
-    const idx = header.indexOf(':')
-    if (idx > 0) {
-      headers[header.slice(0, idx).trim()] = header.slice(idx + 1).trim()
-    }
-  }
-  if (userAgent !== null) {
-    headers['User-Agent'] = userAgent
-  }
+  const [sent, named] = headerLines(fl.asList('header'))
   // curl refuses these lines before any transfer (curl 8.7.1, exit 2). A
   // negative --max-time is not a number curl takes; curl names the spelling
   // typed, which the handler cannot see, so the long one.
@@ -231,9 +368,9 @@ async function curlCommand(
   // -I beside a body option asks two methods of one request: curl warns and
   // refuses. -s mutes the warning and -S does not bring it back; the option
   // error -F adds is never muted.
-  if (head && (data !== null || form !== null)) {
-    let err = fl.asBool('silent') ? '' : data !== null ? HEAD_DATA_WARNING : HEAD_FORM_WARNING
-    if (data === null) err += `curl: option -F: is badly used here\n${HELP_HINT}\n`
+  if (head && (hasData || form !== null)) {
+    let err = fl.asBool('silent') ? '' : hasData ? HEAD_DATA_WARNING : HEAD_FORM_WARNING
+    if (!hasData) err += `curl: option -F: is badly used here\n${HELP_HINT}\n`
     return [null, new IOResult({ exitCode: EXIT_USAGE, stderr: ENC.encode(err) })]
   }
   const url = texts[0]
@@ -244,28 +381,44 @@ async function curlCommand(
   const timeoutMs =
     maxTime === undefined ? DEFAULT_TIMEOUT_MS : maxTime === 0 ? null : maxTime * 1000
   let template = fl.asStr('write_out') ?? ''
+  // curl 8.14.1: -s suppresses only the opening diagnostic; -S does not
+  // restore it. The option error is always printed. Parsed flags lose their
+  // spelling, so each option names its usual one.
   if (template.startsWith('@')) {
-    try {
-      let content: ByteSource | null = opts.stdin ?? null
-      if (template !== '@-') {
-        if (opts.dispatch === undefined) throw enotsup('unavailable', 'read', template.slice(1))
-        const [format] = await opts.dispatch('read', resolveTarget(template.slice(1), opts.cwd), [])
-        content = format as ByteSource
-      }
-      template = new TextDecoder().decode(await materialize(content))
-    } catch (err) {
-      if (!isWalkError(err)) throw err
-      // curl 8.14.1: -s suppresses only the opening diagnostic; -S does
-      // not restore it. Parsed flags lose their spelling, so use -w.
-      const detail = fl.asBool('silent') ? '' : `curl: Failed to open ${template.slice(1)}\n`
-      const failure = new UsageError(
-        `${detail}curl: option -w: error encountered when reading a file\n${HELP_HINT}`,
-        EXIT_READ,
-      )
-      failure.cause = err
-      throw failure
-    }
+    const raw = await readAt('-w', template.slice(1), opts, fl.asBool('silent'))
+    template = new TextDecoder().decode(raw)
   }
+  const [body, json] = await requestBody(fl, opts)
+  // A custom header of a name curl would add itself takes its place, so
+  // curl's own goes only where the line names none. The trace lists them in
+  // curl's order; the wire leaves User-Agent and Accept to the client's
+  // defaults unless the line set them.
+  const auth: [string, string][] = []
+  let prompt: Uint8Array = new Uint8Array()
+  const user = fl.asStr('user') ?? null
+  if (user !== null && !named.has('authorization')) {
+    const stdin = user.includes(':') ? new Uint8Array() : await materialize(opts.stdin ?? null)
+    const [token, asked] = basicAuth(user, stdin)
+    prompt = asked
+    auth.push(['Authorization', token])
+  }
+  const agent: [string, string][] =
+    userAgent !== null && !named.has('user-agent') ? [['User-Agent', userAgent]] : []
+  const typed: [string, string][] = json
+    ? ['Content-Type', 'Accept']
+        .filter((name) => !named.has(name.toLowerCase()))
+        .map((name): [string, string] => [name, JSON_TYPE])
+    : []
+  const headers: Record<string, string> = Object.fromEntries([...auth, ...agent, ...sent, ...typed])
+  const traceHeaders: [string, string][] = [
+    ...auth,
+    ...(named.has('user-agent')
+      ? []
+      : [['User-Agent', userAgent ?? DEFAULT_USER_AGENT] as [string, string]]),
+    ...(named.has('accept') || json ? [] : [['Accept', '*/*'] as [string, string]]),
+    ...sent,
+    ...typed,
+  ]
   const started = performance.now()
   const finish = async (
     stdout: ByteSource | null,
@@ -281,13 +434,11 @@ async function curlCommand(
       size_download: String(response?.body.length ?? 0),
       content_type: response?.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '',
       method:
-        response?.method ??
-        request ??
-        (head ? 'HEAD' : data !== null || form !== null ? 'POST' : 'GET'),
+        response?.method ?? request ?? (head ? 'HEAD' : hasData || form !== null ? 'POST' : 'GET'),
       exitcode: String(io.exitCode),
       time_total: ((performance.now() - started) / 1000).toFixed(6),
     })
-    io.stderr = concat([await materialize(io.stderr), err])
+    io.stderr = concat([prompt, await materialize(io.stderr), err])
     return [concat([await materialize(stdout), out]), io]
   }
   let method: string
@@ -309,17 +460,16 @@ async function curlCommand(
         verify,
       })
     } else {
-      method = request ?? (head ? 'HEAD' : data !== null ? 'POST' : 'GET')
-      const body = data !== null ? ENC.encode(data) : undefined
-      bodyLen = body !== undefined ? body.length : null
+      method = request ?? (head ? 'HEAD' : body !== null ? 'POST' : 'GET')
+      bodyLen = body !== null ? body.length : null
       // -v shows what is sent, so curl's default for the body goes on the
       // request, not on the trace alone.
-      if (body !== undefined && !namesContentType(headers)) bodyType = BODY_CONTENT_TYPE
-      const sent = bodyType !== null ? { ...headers, 'Content-Type': bodyType } : headers
+      if (body !== null && !json && !named.has('content-type')) bodyType = BODY_CONTENT_TYPE
+      const wire = bodyType !== null ? { ...headers, 'Content-Type': bodyType } : headers
       resp = await httpRequest(url, {
         method,
-        headers: sent,
-        ...(body !== undefined ? { body } : {}),
+        headers: wire,
+        ...(body !== null ? { body } : {}),
         timeoutMs,
         followRedirects: location,
         verify,
@@ -369,7 +519,7 @@ async function curlCommand(
                 requestLines(
                   target,
                   sentAs,
-                  headers,
+                  traceHeaders,
                   carries ? bodyLen : null,
                   carries ? bodyType : null,
                 ),

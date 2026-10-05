@@ -56,7 +56,7 @@ async def test_rg_chat_jsonl_scans_the_named_day(accessor, index):
             return_value=[],
         ),
         patch(
-            "mirage.commands.builtin.slack.rg.generic_rg",
+            "mirage.commands.builtin.slack.rg.rg_generic",
             new_callable=AsyncMock,
             return_value=(b"", None),
         ) as mock_generic,
@@ -92,7 +92,7 @@ async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
             new_callable=AsyncMock,
         ) as mock_files,
         patch(
-            "mirage.commands.builtin.slack.rg.generic_rg",
+            "mirage.commands.builtin.slack.rg.rg_generic",
             new_callable=AsyncMock,
             return_value=(b"", None),
         ) as mock_generic,
@@ -133,7 +133,7 @@ async def test_grep_chat_jsonl_scans_the_named_day(accessor, index):
             return_value=[],
         ),
         patch(
-            "mirage.commands.builtin.slack.grep.generic_grep",
+            "mirage.commands.builtin.slack.grep.grep_generic",
             new_callable=AsyncMock,
             return_value=(b"", None),
         ) as mock_generic,

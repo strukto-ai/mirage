@@ -13,6 +13,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
 from mirage.utils.errors import fs_error_line, fs_strerror
 
@@ -52,8 +53,8 @@ def error_line(path: PathSpec, exc: Exception) -> bytes:
         exc (Exception): the refusal.
     """
     if fs_strerror(exc) is not None:
-        return fs_error_line("tee", path, exc).encode()
-    return f"tee: {path.mount_path}: {exc}\n".encode()
+        return encode_text(fs_error_line("tee", path, exc))
+    return encode_text(f"tee: {path.mount_path}: {exc}\n")
 
 
 async def write_one(
@@ -277,7 +278,7 @@ async def tee(
     parsed = parse_flags(flags or {})
     raw = await read_stdin_async(stdin)
     if raw is None:
-        raw = (" ".join(texts)).encode() if texts else b""
+        raw = encode_text(" ".join(texts)) if texts else b""
     if not paths:
         return raw, IOResult()
     return await write_output(

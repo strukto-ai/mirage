@@ -33,6 +33,40 @@
         "stdout": "h\nw\nf\nb\nb\nc\nn\nc\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_cut_reports_a_missing_operand_and_goes_on",
+      "seq": 15800035,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cut -c1 /data2/xpr_nope.txt /data/a.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "h\nw\nf\nb\nb\nrc=1\n",
+        "stderr": "cut: /data2/xpr_nope.txt: No such file or directory\n"
+      }
     }
   ]
 }

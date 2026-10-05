@@ -56,6 +56,30 @@ TS_DESTRUCTURE = re.compile(
 )
 
 
+ALL_CAPS = re.compile(r"[A-Z0-9_]+")
+
+
+def fold(name: str) -> str:
+    """Fold a top-level name so a spelling convention is not a divergence.
+
+    camelCase and snake_case fold together, and so do the two spellings
+    of an acronym (``dispatchIO`` and ``dispatch_io``, ``WCFlags`` and
+    ``WcFlags``) and of a digit run (``absentOn404`` and
+    ``absent_on_404``). An ALL_CAPS constant stays as typed, so one side
+    spelling a module constant as a camelCase value still counts.
+
+    Args:
+        name (str): the name as declared, a leading underscore included.
+    """
+    bare = name.lstrip("_")
+    if ALL_CAPS.fullmatch(bare):
+        return bare
+    spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", bare)
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", spaced)
+    spaced = re.sub(r"([A-Za-z])(\d)", r"\1_\2", spaced)
+    return spaced.lower()
+
+
 def python_names(path: Path) -> dict[str, str]:
     """Top-level names a python module defines, keyed by folded name.
 
@@ -71,7 +95,7 @@ def python_names(path: Path) -> dict[str, str]:
         if isinstance(
             node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
         ):
-            names[canonical(node.name)] = node.name
+            names[fold(node.name)] = node.name
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             if (
@@ -93,7 +117,7 @@ def python_names(path: Path) -> dict[str, str]:
                         isinstance(leaf, ast.Name)
                         and leaf.id.lstrip("_")[:1].isupper()
                     ):
-                        names[canonical(leaf.id)] = leaf.id
+                        names[fold(leaf.id)] = leaf.id
     return names
 
 
@@ -121,7 +145,7 @@ def typescript_names(paths: list[Path]) -> dict[str, str]:
                 if name:
                     found.add(name)
         for name in sorted(found - TS_CODECS):
-            names[canonical(name)] = name
+            names[fold(name)] = name
     return names
 
 

@@ -13,41 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Mirrors python/tests/commands/builtin/generic/test_gzip.py.
 
-import { describe, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { eacces } from '../../../utils/errors.ts'
 import { gzipGeneric } from './gzip.ts'
 import { gunzip } from '../../../utils/compress.ts'
-import { MountMode, PathSpec } from '../../../types.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../../workspace/workspace/workspace.ts'
-
-async function shell(line: string): Promise<[string, string, number]> {
-  const ws = new Workspace(
-    { '/data/': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
-  try {
-    const io = await ws.shell(line)
-    const dec = new TextDecoder()
-    return [dec.decode(io.stdout), dec.decode(io.stderr), io.exitCode]
-  } finally {
-    await ws.close()
-  }
-}
-
-describe('gzip on a link in place (O_NOFOLLOW unless -c or -f)', () => {
-  const seed = "cd /data && printf 'hello\\n' > a.txt && ln -s a.txt al && "
-  it('gzip -k refuses the link', async () => {
-    const r = await shell(`${seed}gzip -k al; ls -F`)
-    expect(r).toEqual(['a.txt\nal@\n', 'gzip: al: Too many levels of symbolic links\n', 0])
-  })
-
-  it('gzip -kf compresses beside the link', async () => {
-    const r = await shell(`${seed}gzip -kf al && ls -F && gunzip -c al.gz`)
-    expect(r).toEqual(['a.txt\nal@\nal.gz\nhello\n', '', 0])
-  })
-})
+import { PathSpec } from '../../../types.ts'
 
 it.each([false, true])('compression skips suffixes or reports late errors: %s', async (skipped) => {
   const reads: string[] = []

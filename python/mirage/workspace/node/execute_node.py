@@ -35,6 +35,7 @@ from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
@@ -976,7 +977,7 @@ def _diagnostic_stderr(node: Any, session: SessionState) -> bytes:
     return b"".join(
         message
         if isinstance(message, bytes)
-        else (prefix + message + "\n").encode()
+        else encode_text(prefix + message + "\n")
         for message in session._diagnostics
     )
 
@@ -1309,14 +1310,14 @@ async def _execute_node(
             try:
                 ensure_var_visible(session, name)
             except PolicyDenied as exc:
-                err = f"bash: {exc.strerror}\n".encode()
+                err = encode_text(f"bash: {exc.strerror}\n")
                 return (
                     None,
                     IOResult(exit_code=1, stderr=err),
                     ExecutionNode(command=text, exit_code=1, stderr=err),
                 )
             if name in session.readonly_vars:
-                err = f"bash: {name}: readonly variable\n".encode()
+                err = encode_text(f"bash: {name}: readonly variable\n")
                 return (
                     None,
                     IOResult(exit_code=1, stderr=err),
@@ -1329,14 +1330,14 @@ async def _execute_node(
                 )
             reader.settle()
         except PolicyDenied as exc:
-            err = f"bash: {exc.strerror}\n".encode()
+            err = encode_text(f"bash: {exc.strerror}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
                 ExecutionNode(command=text, exit_code=1, stderr=err),
             )
         if error is not None:
-            err = f"bash: ((: {expr}: {error}\n".encode()
+            err = encode_text(f"bash: ((: {expr}: {error}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -1435,7 +1436,7 @@ async def _execute_node(
     if kind in (NodeKind.FOR, NodeKind.SELECT):
         var, values, body = get_for_parts(node)
         if not is_valid_name(var):
-            err = f"bash: `{var}': not a valid identifier\n".encode()
+            err = encode_text(f"bash: `{var}': not a valid identifier\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -1555,7 +1556,7 @@ async def _execute_node(
             # `readonly -f f` froze the body: either definition syntax
             # refuses with `f: readonly function`, exit 1, and the old
             # body stays, pinned on 5.2.37.
-            err = f"bash: {name}: readonly function\n".encode()
+            err = encode_text(f"bash: {name}: readonly function\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -1637,7 +1638,7 @@ async def _execute_node(
     # (tree-sitter ERROR nodes, future grammar additions). Mirrors the
     # unsupported-builtin diagnostic so agents see a capability gap,
     # not a crash.
-    err = f"mirage: unsupported shell construct: {node.type}\n".encode()
+    err = encode_text(f"mirage: unsupported shell construct: {node.type}\n")
     return (
         None,
         IOResult(exit_code=2, stderr=err),

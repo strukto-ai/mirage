@@ -201,6 +201,7 @@ export function commitPeople(row: {
 export interface CommitRow {
   sha: string
   parentSha: string
+  otherParentsJson: string
   message: string
   authorLogin: string
   date: string
@@ -241,18 +242,23 @@ export function commitIdentity(row: CommitRow): CommitIdentity {
   }
 }
 
-// A commit's parents as each rendering lists them, linked at `kind`
-// (`commits` for the REST shape, `git/commits` for git's): its first parent,
-// or none for a root, since the fake keeps first parents only.
-function parentsJson(repo: string, row: CommitRow, kind: string): JsonValue[] {
+// Every parent a commit names, in order: the first, then the ones a merge
+// adds. None for a root.
+export function parentsOf(row: CommitRow): string[] {
   if (row.parentSha === '') return []
-  return [
-    {
-      sha: row.parentSha,
-      url: `https://api.github.com/repos/${repo}/${kind}/${row.parentSha}`,
-      html_url: `https://github.com/${repo}/commit/${row.parentSha}`,
-    },
-  ]
+  const others = JSON.parse(row.otherParentsJson) as string[]
+  return [row.parentSha, ...others]
+}
+
+// A commit's parents as each rendering lists them, linked at `kind`
+// (`commits` for the REST shape, `git/commits` for git's), in order, or none
+// for a root.
+function parentsJson(repo: string, row: CommitRow, kind: string): JsonValue[] {
+  return parentsOf(row).map((sha) => ({
+    sha,
+    url: `https://api.github.com/repos/${repo}/${kind}/${sha}`,
+    html_url: `https://github.com/${repo}/commit/${sha}`,
+  }))
 }
 
 // A commit's git author and committer: a seeded commit's login at its date,
@@ -306,6 +312,7 @@ export function rootCommit(sha: string): CommitRow {
   return {
     sha,
     parentSha: '',
+    otherParentsJson: '[]',
     message: 'Initial commit',
     authorLogin: 'mirage',
     date: ROOT_COMMIT_DATE,

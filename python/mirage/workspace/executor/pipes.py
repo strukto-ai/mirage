@@ -30,6 +30,7 @@ from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.console.pipe import PipeConsole
@@ -175,7 +176,7 @@ async def handle_pipe(
             try:
                 process = processes.start(
                     session_id=session.session_id,
-                    command=(cmd.text or b"").decode(),
+                    command=decode_text(cmd.text or b""),
                     cwd=PathSpec.from_str_path(session.cwd),
                     parent_pid=session.process_id,
                     run=partial(run_segment, i, cmd),

@@ -26,9 +26,10 @@ from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.config import CommandOpts
 from mirage.context import path_rules_active
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import MountView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
-from mirage.vfs.types import DuEntries, OperationFn
+from mirage.vfs.types import DuEntries
 
 
 @dataclass(slots=True)
@@ -47,6 +48,12 @@ class WalkBudget:
     directory it met, which is how one no file points at (an empty one,
     or a refused one) still gets GNU's row.
 
+    A walk with no cap of its own (the dispatcher's, which spans mounts)
+    defers to the mounts it crosses: each entry is charged to the mount
+    serving it, at that mount's own cap, so a disk tree below a capped
+    root is not cut short and a service below an uncapped one is not
+    walked without its bound.
+
     Args:
         remaining (int | None): entries still allowed, or None for no cap.
         hit (bool): whether the cap was reached.
@@ -54,29 +61,84 @@ class WalkBudget:
             walk could not open, in the order it met them.
         directories (list[str]): virtual paths of every directory the
             walk met, the operand's own included.
+        mounts (MountView | None): the mount table, for a walk with no
+            cap of its own.
+        spent (dict[str, int]): entries charged so far per mount root.
     """
 
     remaining: int | None
     hit: bool = False
     unreadable: list[str] = field(default_factory=list)
     directories: list[str] = field(default_factory=list)
+    mounts: MountView | None = None
+    spent: dict[str, int] = field(default_factory=dict)
 
-    def spend(self) -> bool:
+    def spend(self, path: str) -> bool:
         """Charge one entry to the budget.
+
+        Args:
+            path (str): virtual path of the directory whose listing names
+                the entry, so a mount root is charged to its parent, as
+                the parent's own walk would count it.
 
         Returns:
             bool: True if the walk may continue, False once exhausted.
         """
-        if self.remaining is None:
+        if self.remaining is not None:
+            if self.remaining <= 0:
+                self.hit = True
+                return False
+            self.remaining -= 1
             return True
-        if self.remaining <= 0:
+        if self.mounts is None or self.mounts.max_du_entries is None:
+            return True
+        cap = self.mounts.max_du_entries(path)
+        if cap is None:
+            return True
+        owner = self.mounts.root_of(path)
+        used = self.spent.get(owner, 0)
+        if used >= cap:
             self.hit = True
             return False
-        self.remaining -= 1
+        self.spent[owner] = used + 1
         return True
 
 
-async def _walk(
+def _account_for_walk_error(
+    exc: Exception, path: PathSpec, budget: WalkBudget
+) -> None:
+    """Account for an error the walk met at ``path``, or re-raise it.
+
+    Absence counts as zero, because an entry listed a moment ago can be
+    gone by the time the walk reaches it, with ENOTDIR for one whose
+    directory became a plain file meanwhile. A refusal counts as zero
+    too, but never silently: GNU ``du`` skips what it cannot read, names
+    it on stderr and exits 1, so the path is recorded here for the
+    generic to report. Everything else (a 429, a 5xx, an aborted line)
+    says the walk never saw that subtree, and a confidently wrong size is
+    worse than an unknown one, so it surfaces instead of being summed as
+    nothing.
+
+    Both of the walk's doors come through here, because a refused
+    ``stat`` is the same fact as a refused ``readdir``: a rule denying a
+    path outright refuses before the walk ever learns the entry is a
+    directory.
+
+    Args:
+        exc (Exception): what the stat or readdir raised.
+        path (PathSpec): where the walk met it.
+        budget (WalkBudget): records the refused directories.
+    """
+    if isinstance(exc, PermissionError):
+        budget.unreadable.append(path.virtual)
+        return
+    if not isinstance(
+        exc, (FileNotFoundError, NotADirectoryError, ValueError)
+    ):
+        raise exc
+
+
+async def _du_walk(
     ops: CommandIO,
     accessor: Accessor,
     index: IndexCacheStore,
@@ -86,13 +148,8 @@ async def _walk(
 ) -> int:
     try:
         info = await ops.stat(accessor, path, index)
-    except (FileNotFoundError, NotADirectoryError, ValueError):
-        return 0
-    except PermissionError:
-        # A refused stat is the same fact as a refused listing: a rule
-        # denying the path outright refuses before the walk learns it is
-        # a directory, and GNU still names it and exits 1.
-        budget.unreadable.append(path.virtual)
+    except Exception as exc:
+        _account_for_walk_error(exc, path, budget)
         return 0
     if info.type != FileType.DIRECTORY:
         size = info.size or 0
@@ -103,14 +160,12 @@ async def _walk(
     budget.directories.append(path.virtual)
     try:
         children = await ops.readdir(accessor, path, index)
-    except (FileNotFoundError, NotADirectoryError, ValueError):
-        return 0
-    except PermissionError:
-        budget.unreadable.append(path.virtual)
+    except Exception as exc:
+        _account_for_walk_error(exc, path, budget)
         return 0
     total = 0
     for child in children:
-        if not budget.spend():
+        if not budget.spend(path.virtual):
             break
         child_spec = PathSpec(
             virtual=child,
@@ -118,7 +173,9 @@ async def _walk(
             resolved=False,
             vfs_path=rekey(path.virtual, path.vfs_path, child),
         )
-        total += await _walk(ops, accessor, index, child_spec, budget, entries)
+        total += await _du_walk(
+            ops, accessor, index, child_spec, budget, entries
+        )
     return total
 
 
@@ -129,7 +186,7 @@ async def walk_size(
     budget: WalkBudget,
     path: PathSpec,
 ) -> int:
-    return await _walk(ops, accessor, index, path, budget, None)
+    return await _du_walk(ops, accessor, index, path, budget, None)
 
 
 async def walk_entries(
@@ -140,54 +197,9 @@ async def walk_entries(
     path: PathSpec,
 ) -> DuEntries:
     entries: list[tuple[str, int]] = []
-    total = await _walk(ops, accessor, index, path, budget, entries)
+    total = await _du_walk(ops, accessor, index, path, budget, entries)
     entries.sort()
     return entries, total
-
-
-async def _op_size(
-    op: OperationFn,
-    accessor: Accessor,
-    index: IndexCacheStore,
-    path: PathSpec,
-) -> int:
-    return await op(accessor, path, index)
-
-
-async def _op_entries(
-    op: OperationFn,
-    accessor: Accessor,
-    index: IndexCacheStore,
-    path: PathSpec,
-) -> DuEntries:
-    return await op(accessor, path, index)
-
-
-async def _resolve(
-    ops: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
-    targets: list[PathSpec],
-) -> list[PathSpec]:
-    return await ops.resolve_glob(accessor, targets, index)
-
-
-async def _stat(
-    ops: CommandIO, accessor: Accessor, index: IndexCacheStore, path: PathSpec
-):
-    return await ops.stat(accessor, path, index)
-
-
-def _budget_hit(budget: WalkBudget) -> bool:
-    return budget.hit
-
-
-def _budget_unreadable(budget: WalkBudget) -> list[str]:
-    return budget.unreadable
-
-
-def _budget_directories(budget: WalkBudget) -> list[str]:
-    return budget.directories
 
 
 async def du(
@@ -199,7 +211,9 @@ async def du(
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("du: no VFS")
-    budget = WalkBudget(ops.max_du_entries)
+    budget = WalkBudget(
+        ops.max_du_entries, mounts=opts.ns.mounts if opts.ns else None
+    )
     native = ops.du
     compute_size: ComputeSize
     compute_entries: ComputeEntries
@@ -211,21 +225,19 @@ async def du(
             walk_entries, ops, accessor, opts.index, budget
         )
     else:
-        compute_size = partial(_op_size, native.size, accessor, opts.index)
-        compute_entries = partial(
-            _op_entries, native.entries, accessor, opts.index
-        )
+        compute_size = partial(native.size, accessor, index=opts.index)
+        compute_entries = partial(native.entries, accessor, index=opts.index)
     return await du_generic(
         paths,
         list(texts),
         opts,
-        partial(_resolve, ops, accessor, opts.index),
-        partial(_stat, ops, accessor, opts.index),
+        lambda targets: ops.resolve_glob(accessor, targets, opts.index),
+        lambda p: ops.stat(accessor, p, opts.index),
         compute_size,
         compute_entries,
-        truncated=partial(_budget_hit, budget),
-        unreadable=partial(_budget_unreadable, budget),
-        directories=partial(_budget_directories, budget),
+        truncated=lambda: budget.hit,
+        unreadable=lambda: budget.unreadable,
+        directories=lambda: budget.directories,
     )
 
 

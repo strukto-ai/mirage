@@ -65,9 +65,11 @@ export class PyodideExecution {
     subprocess: (payload: string) => string = () => {
       throw new Error('subprocess requires a Pyodide worker with shared memory')
     },
+    seal: () => void = () => undefined,
   ) {
     pyodide.registerJsModule('_mirage_xattr', { call: xattr })
     pyodide.registerJsModule('_mirage_process', { run: subprocess })
+    pyodide.registerJsModule('_mirage_exit', { seal })
     this.namespace = pyodide.toPy({ __name__: '_mirage_pyodide' }) as PyNamespace
     try {
       pyodide.runPython(source, { globals: this.namespace, filename: 'mirage/execution.py' })

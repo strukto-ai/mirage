@@ -221,7 +221,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ls: ambiguous argument '' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'time'\n  - 'size'\n  - 'extension'\n  - 'version'\n  - 'width'\nTry 'ls --help' for more information.\n"
+        "stderr": "ls: ambiguous argument '' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
       },
       "flags": [
         "sort"
@@ -258,7 +258,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ls: invalid argument 'NON' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'time'\n  - 'size'\n  - 'extension'\n  - 'version'\n  - 'width'\nTry 'ls --help' for more information.\n"
+        "stderr": "ls: invalid argument 'NON' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
       },
       "flags": [
         "sort"
@@ -295,11 +295,121 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ls: invalid argument '\\303\\251' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'time'\n  - 'size'\n  - 'extension'\n  - 'version'\n  - 'width'\nTry 'ls --help' for more information.\n"
+        "stderr": "ls: invalid argument '\\303\\251' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
       },
       "flags": [
         "sort"
       ]
+    },
+    {
+      "id": "ls_size_and_time_ties_break_on_the_name",
+      "seq": 15800013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/crls && printf xx > /data/crls/c && cd /data/crls && printf xx > a && printf xx > b && touch -t 202401010000 a b c && ls -S c a b; ls -rS c a b; ls -S; ls -rS; ls -t c a b; ls -rt c a b; ls -t; ls -rt; cd / && rm -r /data/crls",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\nc\nb\na\na\nb\nc\nc\nb\na\na\nb\nc\nc\nb\na\na\nb\nc\nc\nb\na\n",
+        "stderr": ""
+      },
+      "flags": [
+        "S",
+        "t",
+        "r"
+      ]
+    },
+    {
+      "id": "ls_sort_name_is_the_default_order",
+      "seq": 15800014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lssn/sub/deep && printf 'deep\\n' > /data/lssn/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/lssn/sub/nested.txt && (cd /data/lssn/sub && ls --sort=name; ls --sort=nam -r; ls -t --sort=name; ls --sort=n; echo rc=$?); rm -r /data/lssn",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\nnested.txt\nnested.txt\ndeep\ndeep\nnested.txt\nrc=1\n",
+        "stderr": "ls: ambiguous argument 'n' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "sort"
+      ]
+    },
+    {
+      "id": "ls_sort_word_is_case_sensitive",
+      "seq": 16100004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --sort=NONE /data",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ls: invalid argument 'NONE' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
+      }
     }
   ]
 }

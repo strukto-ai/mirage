@@ -54,7 +54,7 @@ async def test_tree_hides_dotfiles_by_default():
         "/r/visible.txt": _file("visible.txt"),
     }
     readdir, stat = _make_backend(tree_map)
-    output, _ = await tree(_spec("/r"), readdir=readdir, stat=stat)
+    output, _ = await tree([_spec("/r")], readdir=readdir, stat=stat)
     decoded = output.decode()
     assert ".hidden" not in decoded
     assert "visible.txt" in decoded
@@ -64,7 +64,7 @@ async def test_tree_hides_dotfiles_by_default():
 async def test_tree_empty_dir_reports_zero_counts():
     tree_map = {"/r": _dir("r")}
     readdir, stat = _make_backend(tree_map)
-    output, io = await tree(_spec("/r"), readdir=readdir, stat=stat)
+    output, io = await tree([_spec("/r")], readdir=readdir, stat=stat)
     assert output.decode().splitlines() == ["/r", "", "0 directories, 0 files"]
     assert io.exit_code == 0
 
@@ -81,7 +81,7 @@ async def test_tree_not_a_directory_matches_the_missing_path_shape():
     async def stat(p: PathSpec, index=None) -> FileStat:
         raise NotADirectoryError(p.virtual)
 
-    output, io = await tree(_spec("/a.txt/x"), readdir=readdir, stat=stat)
+    output, io = await tree([_spec("/a.txt/x")], readdir=readdir, stat=stat)
     lines = output.decode().splitlines()
     assert lines == [
         "/a.txt/x  [error opening dir]",
@@ -155,7 +155,7 @@ async def test_tree_crosses_into_a_nested_mount():
     readdir, stat = _make_backend(parent)
     readdir_path, stat_path = _dispatch_pair(parent, child, "/base/inner")
     output, io = await tree(
-        _spec("/base"),
+        [_spec("/base")],
         readdir=readdir,
         stat=stat,
         mounts=_mounts_view(["/base/inner"]),

@@ -25,6 +25,7 @@ from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
 from mirage.policy import HandOff
 from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
+from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
@@ -568,7 +569,9 @@ async def run_prepared_line(
         if offending is None and argv is None:
             # tree-sitter accepts an unclosed backtick as a complete
             # command, so the region is scanned separately.
-            offending = find_unterminated_backtick((ast.text or b"").decode())
+            offending = find_unterminated_backtick(
+                decode_text(ast.text or b"")
+            )
         if offending is not None:
             io = syntax_error_result(offending, ast)
             record_status(session, io.exit_code)

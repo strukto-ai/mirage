@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { decodeText } from '../../shell/bytes.ts'
 import { compilePosixRegex } from '../../utils/posix.ts'
 import { RegexSyntax } from './types.ts'
 import { BreError, translateBre, translateEre } from './utils/bre.ts'
@@ -45,8 +46,6 @@ export const PATTERN_KEYS: Readonly<Record<string, string>> = {
 }
 // The dest -f fills: grep's and rg's name the long spelling, zgrep has none.
 const FILE_KEYS: Readonly<Record<string, string>> = { grep: 'file', zgrep: 'f', rg: 'file' }
-
-const DEC = new TextDecoder()
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -127,7 +126,7 @@ export function mergePatternList(
 ): string | null {
   const parts: string[] = pattern === null ? [] : pattern.split('\n')
   if (fileData !== null && fileData.length > 0) {
-    let text = DEC.decode(fileData)
+    let text = decodeText(fileData)
     if (text.endsWith('\n')) text = text.slice(0, -1)
     parts.push(...text.split('\n'))
   }

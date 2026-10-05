@@ -14,6 +14,8 @@
 from collections.abc import Awaitable
 from typing import TYPE_CHECKING, TypeVar
 
+from mirage.shell.bytes import encode_text
+
 if TYPE_CHECKING:
     from mirage.io.types import ByteSource
     from mirage.shell.types import ArithWrite
@@ -121,7 +123,7 @@ class UnboundVariable(ExitSignal):
     def __init__(self, name: str) -> None:
         super().__init__(
             127,
-            stderr=f"bash: {name}: unbound variable\n".encode(),
+            stderr=encode_text(f"bash: {name}: unbound variable\n"),
             contained_code=1,
         )
 
@@ -151,7 +153,7 @@ class BadSubstitution(DiscardSignal):
             fixed (bool): whether this level's name is final.
         """
         if not self.fixed:
-            self.stderr = f"bash: {word}: bad substitution\n".encode()
+            self.stderr = encode_text(f"bash: {word}: bad substitution\n")
             self.fixed = fixed
         return self
 

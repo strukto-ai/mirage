@@ -2406,7 +2406,7 @@ describe('a relayed walk meets the command rules', () => {
           `                 unable to process src/${name}.\n`,
       )
       .join('')
-    expect(await line(ws, 'unzip -q -d /data/uz /other/z.zip')).toEqual([50, '', refused])
+    expect(await line(ws, 'unzip -q -d /data/uz /other/z.zip')).toEqual([2, '', refused])
     expect((await line(ws, 'find /data/tmpd /data/uz'))[1]).toBe('/data/tmpd\n/data/uz\n')
   })
 })

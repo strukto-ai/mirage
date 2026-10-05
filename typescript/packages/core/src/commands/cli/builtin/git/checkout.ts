@@ -17,21 +17,33 @@ import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
-import { branchUpstream, headCommit, remoteBranch, setUpTracking, trackMode } from './branch.ts'
+import type { CLIDoors, CLIInvocation } from '../../types.ts'
+import {
+  branchUpstream,
+  headCommit,
+  refuseAmbiguous,
+  remoteBranch,
+  setUpTracking,
+  trackMode,
+} from './branch.ts'
 import { trackingLines } from './render.ts'
 import { ADDED, DELETED, headEntries, MODIFIED, workChanges } from './changes.ts'
 import {
   BadStartPointError,
   BranchExistsError,
   CheckoutConflictError,
+  DetachPathError,
+  DetachWithCreateError,
   GitError,
+  InvalidReferenceError,
   NoWorkspaceError,
+  PathsWithBranchError,
   RefLockError,
+  RefReadOnlyError,
   UnknownPathspecError,
-  UnknownSwitchError,
+  UnresolvableSourceError,
 } from './errors.ts'
-import { GITLINK_MODE } from './constants.ts'
+import { GITLINK_MODE, HEAD } from './constants.ts'
 import { short } from './format.ts'
 import { readIndex, refuseUnresolved, updateIndex, type StagedEntry } from './index_file.ts'
 import {
@@ -45,7 +57,7 @@ import {
   restoreEntry,
   under,
 } from './io.ts'
-import { record } from './reflog.ts'
+import { append, entry, IDENTITY, logged, record, ZERO } from './reflog.ts'
 import {
   BRANCH_PREFIX,
   blockingRef,
@@ -55,24 +67,21 @@ import {
   setHead,
   writeRef,
 } from './refs.ts'
-import { under as inside } from './pathspec.ts'
+import { matched, repoRelative, under as inside } from './pathspec.ts'
 import { repoArgs, type Repo } from './repo.ts'
-import { opened } from './session.ts'
-import { resolveCommit } from './revparse.ts'
+import { indexLocked, opened } from './session.ts'
+import { noteAmbiguity, refsNamed, resolveCommit } from './revparse.ts'
+import { restorePaths, sourceTree } from './restore.ts'
 import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType } from '../../../../types.ts'
-import type { Dispatch, HeadMove, HeadRef, IndexEntry } from './types.ts'
-import { checkOperands, escaped, fatal, switches } from './util.ts'
+import type { Dispatch, HeadMove, HeadRef, IndexEntry, ReadOnlyRefusal } from './types.ts'
+import { checkSwitches, fatal, splitMarked, startPoint as lineStart } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
-
-// What checkout records in the reflog. There is no committer here, only a move
-// of HEAD, so the same stated identity commit uses is reused.
-export const IDENTITY = 'mirage <mirage@localhost>'
 
 // git's word-for-word warning when HEAD leaves a branch, kept verbatim. It is
 // the only thing telling a caller that commits made from here become unreachable
@@ -362,10 +371,13 @@ export async function previousPosition(repo: Repo, head: HeadRef): Promise<strin
 }
 
 /**
- * Point HEAD at a commit and write the reflog line for the move.
+ * Point HEAD at a commit and write the reflog lines for the move.
  *
  * The half of a checkout that happens whatever the working tree holds: a branch
- * created where HEAD already is does only this.
+ * created where HEAD already is does only this. The move is HEAD's alone to
+ * log, from the branch it left or the whole id it was detached at; a branch the
+ * line creates gets a log of its own saying where it came from. Pinned against
+ * git 2.50.1.
  */
 async function attach(
   dispatch: Dispatch,
@@ -376,20 +388,29 @@ async function attach(
   target: string,
   ref: string | null,
   creating: boolean,
+  from: string,
 ): Promise<void> {
-  if (creating && ref !== null) await writeRef(dispatch, repo.location.commondir, ref, oid)
+  const when = Math.floor(Date.now() / 1000)
+  if (creating && ref !== null) {
+    await writeRef(dispatch, repo.location.commondir, ref, oid)
+    const log = under(repo.location.commondir, 'logs', ref)
+    if (await logged(dispatch, repo.location, ref, log)) {
+      const line = entry(ZERO, oid, IDENTITY, when, `branch: Created from ${from}`)
+      await append(dispatch, repo.location.commondir, `logs/${ref}`, line)
+    }
+  }
   if (ref !== null) await setHead(dispatch, repo.location.gitdir, ref)
   else await detachHead(dispatch, repo.location.gitdir, oid)
-  const where = head.branch ?? short(head.commit ?? '', repo.abbrev)
+  const where = head.branch ?? head.commit ?? ''
   await record(
     dispatch,
     repo.location.gitdir,
     repo.location.commondir,
-    ref,
+    null,
     headCommit(known, head),
     oid,
     IDENTITY,
-    Math.floor(Date.now() / 1000),
+    when,
     `checkout: moving from ${where} to ${target}`,
   )
 }
@@ -446,6 +467,7 @@ function stageLetters(
  * @param target the operand as the user spelled it, for the reflog
  * @param ref the branch to attach HEAD to, null to detach it at the commit
  * @param creating whether `ref` is a new branch to write first
+ * @param from the start point a new branch was created from, as typed
  * @param inPlace whether the line named no start point, so the new branch is
  *   being created where HEAD already is
  * @returns each path whose uncommitted change was carried across, against the
@@ -463,6 +485,7 @@ export async function moveHead(
   target: string,
   ref: string | null,
   creating: boolean,
+  from: string,
   inPlace: boolean,
 ): Promise<HeadMove> {
   // A branch created where HEAD already is moves nothing: git writes the ref,
@@ -472,7 +495,7 @@ export async function moveHead(
   // decides it, which is git's own reading rather than a comparison of the two
   // trees. Pinned against git 2.50.1.
   if (inPlace) {
-    await attach(dispatch, repo, known, head, oid, target, ref, creating)
+    await attach(dispatch, repo, known, head, oid, target, ref, creating, from)
     return { carried: new Map(), warnings: '' }
   }
   const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
@@ -511,16 +534,10 @@ export async function moveHead(
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
   const notes = await switchTo(repo, dispatch, statPath, before, after, links, mounts)
-  await attach(dispatch, repo, known, head, oid, target, ref, creating)
+  await attach(dispatch, repo, known, head, oid, target, ref, creating, from)
   return { carried, warnings: notes.join('') }
 }
 
-/**
- * Switch the working tree to another branch or commit.
- *
- * Refuses rather than overwriting when the switch would destroy work that is not
- * committed; see `moveHead`, which does the moving for `switch` as well.
- */
 /**
  * What a switch onto a branch prints about its upstream, on stdout. Read after
  * the move, so a branch created by the switch has its ref to count from.
@@ -538,6 +555,97 @@ export async function trackingReport(repo: Repo, branch: string): Promise<string
         .join('')
 }
 
+/**
+ * Whether an operand reads as a commit, for checkout's choice between a
+ * tree-ish and a path: a name a ref answers to does, and so does an id or an
+ * expression that resolves to one.
+ */
+async function readsAsCommit(
+  repo: Repo,
+  known: ReadonlyMap<string, string>,
+  operand: string,
+): Promise<boolean> {
+  if (refsNamed(known, operand).length > 0) return true
+  try {
+    await resolveCommit(repo, operand)
+    return true
+  } catch (err) {
+    if (err instanceof GitError) return false
+    throw err
+  }
+}
+
+/** Whether an operand names a path the index holds, which makes it a pathspec. */
+async function namesPath(
+  repo: Repo,
+  dispatch: Dispatch,
+  start: string,
+  operand: string,
+): Promise<boolean> {
+  const state = await readIndex(repo, dispatch)
+  const names = new Set([...state.entries.keys(), ...state.conflicts.keys()])
+  return matched(names, repoRelative(repo.location, start, operand)).size > 0
+}
+
+/**
+ * `git checkout [<tree-ish>] [--] <pathspec>...`: put paths back from the
+ * index into the working tree, or from a tree-ish into both; a path only the
+ * index holds is left as it is. Without `--` git reports how many files it
+ * rewrote, from the index or from the tree's abbreviated id. Pinned against
+ * git 2.50.1.
+ *
+ * @param repo the opened repository
+ * @param doors the invocation's doors
+ * @param fl the line's flags
+ * @param treeish the tree-ish named ahead of the paths, null for the index
+ * @param paths the pathspecs as typed
+ * @param counted whether the line named its paths without `--`
+ */
+async function checkoutPaths(
+  repo: Repo,
+  doors: CLIDoors,
+  fl: FlagView,
+  treeish: string | null,
+  paths: readonly string[],
+  counted: boolean,
+): Promise<CommandFnResult> {
+  let tree = ''
+  let source: Map<string, TreeEntry> | null = null
+  if (treeish !== null) {
+    try {
+      ;[tree, source] = await sourceTree(repo, treeish)
+    } catch (err) {
+      if (err instanceof UnresolvableSourceError) throw new InvalidReferenceError(treeish)
+      throw err
+    }
+  }
+  const [notes, updated] = await restorePaths(
+    repo,
+    doors,
+    paths,
+    lineStart(fl),
+    source,
+    treeish !== null,
+    true,
+    true,
+  )
+  let told = notes.join('')
+  if (counted && !fl.asBool('quiet')) {
+    const from = treeish === null ? 'the index' : short(tree, repo.abbrev)
+    told += `Updated ${String(updated)} path${updated === 1 ? '' : 's'} from ${from}\n`
+  }
+  return [null, told === '' ? new IOResult() : new IOResult({ stderr: ENC.encode(told) })]
+}
+
+/**
+ * Switch the working tree to another branch or commit, or put paths back.
+ *
+ * Refuses rather than overwriting when the switch would destroy work that is not
+ * committed; see `moveHead`, which does the moving for `switch` as well. Paths
+ * after `--`, or operands past a first one that reads as a commit, or a lone
+ * operand the index holds and no ref names, are put back instead; see
+ * `checkoutPaths`.
+ */
 export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
   const doors = inv.doors ?? {}
   const texts = [...inv.texts]
@@ -551,27 +659,52 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
-    const target = texts[0]
+    checkSwitches(inv, texts)
+    const detach = fl.asBool('detach')
+    if (detach && fl.asBool('b')) throw new DetachWithCreateError()
+    const target = texts[0] ?? (detach ? HEAD : undefined)
     if (target === undefined) throw new UnknownPathspecError('')
+    const extra = texts[1]
+    if (detach && extra !== undefined) throw new DetachPathError(extra)
     const repo = await opened(fl, doors, true)
     const mode = await trackMode(repo)
     const head = await readHead(dispatch, repo.location.gitdir)
     let creating = fl.asBool('b')
     const ref = `${BRANCH_PREFIX}${target}`
     const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
+    if (creating && texts.length > 2) throw new PathsWithBranchError(target)
+    if (!creating && !detach) {
+      const [leading, marked] = splitMarked(texts, inv.argv)
+      if (marked.length > 0) {
+        const paths = [...leading.slice(1), ...marked]
+        return await checkoutPaths(repo, doors, fl, leading[0] ?? null, paths, false)
+      }
+      if (texts.length > 1) {
+        const treeish = (await readsAsCommit(repo, known, target)) ? target : null
+        const paths = treeish === null ? texts : texts.slice(1)
+        return await checkoutPaths(repo, doors, fl, treeish, paths, true)
+      }
+    }
     if (creating && known.has(ref)) throw new BranchExistsError(target)
     let guessed: string | null = null
-    if (!creating && !known.has(ref) && target !== head.branch) {
+    // The commit a target names when it is no local branch: a branch of that
+    // name wins over every other reading, as git's checkout reads it.
+    let named: string | null = null
+    if (!creating && (detach || (!known.has(ref) && target !== head.branch))) {
       try {
-        await resolveCommit(repo, target)
+        named = await resolveCommit(repo, target)
       } catch {
+        if (detach) throw new DetachPathError(target)
+        if (await namesPath(repo, dispatch, lineStart(fl), target)) {
+          return await checkoutPaths(repo, doors, fl, null, texts, true)
+        }
         guessed = await remoteBranch(repo, target)
         if (guessed === null) throw new UnknownPathspecError(target)
         creating = true
       }
     }
-    if (!creating && target === head.branch) {
+    if (!creating && !detach && target === head.branch) {
+      await noteAmbiguity(repo, target)
       // The shortcut moves nothing, and that is exactly why it has to read the
       // index: git refuses the line over an unresolved index rather than
       // answering that there is nothing to do, so a caller cannot read
@@ -596,6 +729,12 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       } catch {
         throw new BadStartPointError(startPoint, target)
       }
+      if (guessed === null) await refuseAmbiguous(repo, startPoint, false)
+    } else if (named !== null) {
+      oid = named
+    } else if (!creating && known.has(ref)) {
+      await noteAmbiguity(repo, target)
+      oid = await resolveCommit(repo, ref)
     } else {
       oid = await resolveCommit(repo, creating ? 'HEAD' : target)
     }
@@ -604,7 +743,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     // taken.
     const held = creating ? blockingRef(new Set(known.keys()), ref) : null
     if (held !== null) throw new RefLockError(ref, held)
-    const attached = creating || known.has(ref)
+    const attached = !detach && (creating || known.has(ref))
     const moved = await moveHead(
       dispatch,
       statPath,
@@ -617,6 +756,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       target,
       attached ? ref : null,
       creating,
+      startPoint ?? HEAD,
       creating && startPoint === undefined,
     )
     carried = [...moved.carried]
@@ -641,9 +781,9 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     } else {
       const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
       const subject = commit.message.split('\n')[0] ?? ''
-      note +=
-        `Note: switching to '${target}'.\n\n${DETACHED_ADVICE}\n` +
-        `HEAD is now at ${short(oid, repo.abbrev)} ${subject}\n`
+      // Asked for by name, a detached HEAD needs no advice on how it happened.
+      if (!detach) note += `Note: switching to '${target}'.\n\n${DETACHED_ADVICE}\n`
+      note += `HEAD is now at ${short(oid, repo.abbrev)} ${subject}\n`
     }
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
@@ -651,4 +791,15 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   if (fl.asBool('quiet')) return [null, new IOResult({ stderr: ENC.encode(warnings) })]
   return [ENC.encode(carried), new IOResult({ stderr: ENC.encode(note) })]
+}
+
+/**
+ * checkout's refusal by a read-only mount: the new branch's ref under `-b`,
+ * whose lock git takes first, and the index's otherwise.
+ */
+export const checkoutReadOnly: ReadOnlyRefusal = (inv, location) => {
+  const name = inv.texts[0]
+  if (!new FlagView(inv.flags).asBool('b') || name === undefined) return indexLocked(inv, location)
+  const ref = `${BRANCH_PREFIX}${name}`
+  return new RefReadOnlyError(ref, under(location?.commondir ?? '.git', ref))
 }

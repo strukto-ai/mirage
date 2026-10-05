@@ -14,7 +14,7 @@
 
 import { HttpGitHubTransport, type GitHubTransport } from '../../../../core/github/client.ts'
 import type { GhConfig } from '../../../../core/github/config.ts'
-import { parseRepo, type RepoRef } from '../../../../core/github/repo.ts'
+import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'
 import { jqRaised, jqRun, type JqRun } from '../../../../core/jq/index.ts'
 import { PartialOutputError, UsageError } from '../../../errors.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
@@ -26,7 +26,7 @@ import { resolvePath } from '../../../../utils/path.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { GOJQ_RAISED } from './constants.ts'
+import { CONNECT_HINT, GITHUB_HOST, GOJQ_RAISED } from './constants.ts'
 
 const ENC = new TextEncoder()
 
@@ -35,6 +35,23 @@ export function ghTransport(config: unknown): GitHubTransport {
   const opts: { token: string; baseUrl?: string } = { token: cfg.token }
   if (cfg.baseUrl !== undefined) opts.baseUrl = cfg.baseUrl
   return new HttpGitHubTransport(opts)
+}
+
+/**
+ * Refuse a repository on a host this install cannot reach. Real gh sends the
+ * request to whatever host a repository argument names; this one answers
+ * github.com, whose subdomains go-gh reads as github.com, and the host its
+ * `baseUrl` names. Any other host is one it cannot connect to, and it says so
+ * in gh's words (pinned against gh 2.85.0) rather than asking its own host for
+ * a repository of the same name.
+ */
+function checkHost(config: unknown, host: string | null): void {
+  if (host === null) return
+  const name = host.toLowerCase()
+  if (name === GITHUB_HOST || name.endsWith(`.${GITHUB_HOST}`)) return
+  const base = (config as GhConfig).baseUrl
+  if (base !== undefined && URL.canParse(base) && new URL(base).hostname === name) return
+  throw new Error(`error connecting to ${name}\n${CONNECT_HINT}`)
 }
 
 /**
@@ -47,7 +64,9 @@ export function ghRepo(config: unknown, spec: string | undefined): RepoRef {
   if (named === undefined || named === '') {
     throw new Error('no repository given; pass one or set `repo` on the install')
   }
-  return parseRepo(named)
+  const ref = parseRepo(named)
+  checkHost(config, repoHost(named))
+  return ref
 }
 
 // gh's exporter writes with Go's encoding/json, which escapes U+2028 and
@@ -79,6 +98,11 @@ export function textOut(text: string): CommandFnResult {
   return [out, new IOResult()]
 }
 
+/** Whether a gh boolean flag is on: given bare, or as `=true`. */
+export function ghBool(fl: FlagView, name: string): boolean {
+  return fl.asBool(name) || fl.asStr(name) === 'true'
+}
+
 export function repoFor(inv: CLIInvocation, fl: FlagView): RepoRef {
   return ghRepo(inv.config, fl.asStr('repo') ?? undefined)
 }
@@ -94,6 +118,7 @@ export function repoNumber(
   if (/^\d+$/.test(raw)) return [repoFor(inv, fl), Number(raw)]
   const match = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)\/?$/.exec(raw)
   if (match?.[3] !== urlKind) throw new Error(`a ${label} number is required`)
+  checkHost(inv.config, new URL(raw).hostname)
   return [parseRepo(`${match[1] ?? ''}/${match[2] ?? ''}`), Number(match[4])]
 }
 

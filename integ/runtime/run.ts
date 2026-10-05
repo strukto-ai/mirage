@@ -85,7 +85,12 @@ interface Expect {
   content?: string
   ops_contain?: string[]
   ops_absent?: string[]
+  ops_count?: Record<string, number>
   value?: unknown
+  // An expect keyed by language, as `program` is: each language's own
+  // answer for the step.
+  python?: Expect
+  js?: Expect
 }
 
 interface FacadeSpec {
@@ -111,6 +116,8 @@ interface Step {
   expect_on?: Record<string, Expect>
   facade?: FacadeSpec
   expect?: Expect
+  // Steps run at once, each on a session of its own.
+  parallel?: Step[]
 }
 
 interface MountSpecJson {
@@ -696,6 +703,14 @@ function checkOps(expect: Expect, seen: string[]): string[] {
       problems.push(`ledger must not hold ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`)
     }
   }
+  for (const [entry, want] of Object.entries(expect.ops_count ?? {})) {
+    const got = seen.filter((s) => s === entry || s.split(' ', 1)[0] === entry).length
+    if (got !== want) {
+      problems.push(
+        `ledger holds ${JSON.stringify(entry)} ${String(got)} times, not ${String(want)}: got ${JSON.stringify(seen)}`,
+      )
+    }
+  }
   return problems
 }
 
@@ -750,14 +765,44 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
   return []
 }
 
-async function runStep(
+/**
+ * Run each branch on a session of its own, all at once. The branches
+ * start together, so their ops reach the mounts interleaved as two
+ * agents' would, and each is checked against its own `expect`. A branch
+ * cannot check the ledger: the workspace keeps one, and every branch's
+ * ops land in it. Mirrors run.py `_run_parallel`.
+ */
+async function runParallel(
   ws: Workspace,
   caseId: string,
   index: number,
+  branches: Step[],
+): Promise<string[]> {
+  const ledger = branches.flatMap((branch, k) =>
+    Object.keys(branch.expect ?? {}).some((key) => LEDGER_CHECKS.has(key))
+      ? [
+          `${caseId} step[${index}].parallel[${k}]: a branch cannot check ` +
+            "the ledger, which holds every branch's ops",
+        ]
+      : [],
+  )
+  if (ledger.length > 0) return ledger
+  const runs = branches.map((branch, k) => {
+    const sessionId = `parallel-${index}-${k}`
+    ws.createSession(sessionId)
+    return runStep(ws, caseId, `step[${index}].parallel[${k}]`, branch, sessionId)
+  })
+  return (await Promise.all(runs)).flat()
+}
+
+async function runStep(
+  ws: Workspace,
+  caseId: string,
+  label: string,
   step: Step,
+  sessionId?: string,
 ): Promise<string[]> {
   const expect = step.expect ?? {}
-  const label = `step[${index}]`
   // The ledger slice this step adds: ws.records delegates to the Ops
   // facade's account, so the step's own ops are the tail.
   const ledgerBefore = ws.records.length
@@ -815,6 +860,7 @@ async function runStep(
     command += ' ' + singleQuote(source)
   }
   const options: Record<string, unknown> = {}
+  if (sessionId !== undefined) options.sessionId = sessionId
   if (step.runtime !== undefined) options.runtime = step.runtime
   if (step.stdin !== undefined) options.stdin = ENC.encode(step.stdin)
   if (expect.throws_contains !== undefined) {
@@ -864,6 +910,8 @@ const RUNTIME_LANGUAGE: Record<string, string | null> = {
   apple_container: null,
 }
 const PROGRAM_HEAD: Record<string, string> = { python: 'python3 -c', js: 'node -e' }
+// The expect keys that read the workspace's op ledger.
+const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 // What a `runtimes` entry needs on this host before it can run. A runtime
 // missing here does not exist on this host (wasi is python's), so its
 // variant is not listed at all. e2b is left out: E2B's sandbox proxy drops
@@ -919,42 +967,73 @@ function runtimeEntry(
 }
 
 /**
- * The case as one runtime runs it, or null when nothing runs there. A
- * step's `program` (inline source) or `script` (a fixture path) maps a
- * guest language to what that language runs, under `python3 -c` or
- * `node -e`, and a `command` map gives the whole line per language; a
- * step with nothing in the runtime's language is left out, and a case
- * left with no program is not the runtime's. A step's `expect_on` keyed
- * by the runtime, then by `runtime@host`, is what it answers
- * differently, and the case's `filesystem` entry for it is the
- * capabilities it declares. Mirrors run.py `_for_runtime`.
+ * The step with its `expect_on` entries for `keys` laid over `expect` in
+ * order, a parallel step's branches each the same way. Mirrors run.py
+ * `_overlay`.
+ */
+function overlay(step: Step, keys: string[]): Step {
+  const on = step.expect_on ?? {}
+  let expect: Expect = { ...(step.expect ?? {}) }
+  for (const key of keys) expect = { ...expect, ...on[key] }
+  const overlaid: Step = { ...step, expect }
+  if (step.parallel !== undefined) overlaid.parallel = step.parallel.map((b) => overlay(b, keys))
+  return overlaid
+}
+
+/**
+ * One step as a runtime of `language` runs it, and whether it holds a
+ * guest program; null when nothing in it runs there. A `program` (inline
+ * source) or `script` (a fixture path) maps a guest language to what that
+ * language runs, under `python3 -c` or `node -e`, and a `command` map
+ * gives the whole line per language. An `expect` keyed by language, as
+ * `program` is, gives each language its own answer. A parallel step keeps
+ * the branches that run there. Mirrors run.py `_step_for`.
+ */
+function stepFor(step: Step, language: string | null): [Step | null, boolean] {
+  if (step.parallel !== undefined) {
+    const mapped = step.parallel.map((branch) => stepFor(branch, language))
+    const branches = mapped.flatMap(([branch]) => (branch === null ? [] : [branch]))
+    if (branches.length === 0) return [null, false]
+    return [{ ...step, parallel: branches }, mapped.some(([, guest]) => guest)]
+  }
+  const key = (['program', 'script', 'command'] as const).find((k) => typeof step[k] === 'object')
+  if (key === undefined) return [step, false]
+  const source = language === null ? undefined : (step[key] as Record<string, string>)[language]
+  if (language === null || source === undefined) return [null, false]
+  const head = PROGRAM_HEAD[language] ?? ''
+  const rest = { ...step }
+  delete rest.program
+  const mapped: Step =
+    key === 'program'
+      ? { ...rest, command: `${head} ${singleQuote(source)}` }
+      : key === 'script'
+        ? { ...rest, command: head, script: source }
+        : { ...rest, command: source }
+  const expect = step.expect ?? {}
+  if (Object.keys(expect).some((k) => k in PROGRAM_HEAD)) {
+    mapped.expect = (expect as Record<string, Expect | undefined>)[language] ?? {}
+  }
+  return [mapped, true]
+}
+
+/**
+ * The case as one runtime runs it, or null when nothing runs there. Each
+ * step runs as `stepFor` maps it to the runtime's language; a step with
+ * nothing in that language is left out, and a case left with no program
+ * is not the runtime's. A step's `expect_on` keyed by the runtime, then
+ * by `runtime@host`, is what it answers differently, and the case's
+ * `filesystem` entry for it is the capabilities it declares. Mirrors
+ * run.py `_for_runtime`.
  */
 function forRuntime(testCase: Case, runtime: string): Case | null {
   const language = RUNTIME_LANGUAGE[runtime] ?? null
-  const head = PROGRAM_HEAD[language ?? ''] ?? ''
   const steps: Step[] = []
   let programs = 0
   for (const listed of testCase.steps ?? []) {
-    let step = listed
-    const key = (['program', 'script', 'command'] as const).find(
-      (k) => typeof listed[k] === 'object',
-    )
-    if (key !== undefined) {
-      const source = (listed[key] as Record<string, string>)[language ?? '']
-      if (source === undefined) continue
-      programs += 1
-      const rest = { ...listed }
-      delete rest.program
-      step =
-        key === 'program'
-          ? { ...rest, command: `${head} ${singleQuote(source)}` }
-          : key === 'script'
-            ? { ...rest, command: head, script: source }
-            : { ...rest, command: source }
-    }
-    const on = step.expect_on ?? {}
-    const expect = { ...(step.expect ?? {}), ...on[runtime], ...on[`${runtime}@${HOST}`] }
-    steps.push({ ...step, expect })
+    const [step, guest] = stepFor(listed, language)
+    if (step === null) continue
+    if (guest) programs += 1
+    steps.push(overlay(step, [runtime, `${runtime}@${HOST}`]))
   }
   if (programs === 0 && language !== null) return null
   const world = structuredClone(testCase.world ?? {})
@@ -1091,16 +1170,18 @@ async function runCase(suite: string, testCase: Case): Promise<string[]> {
           )
       }
     }
+    const backend = testCase.backend
+    const keys = backend === undefined ? [] : [backend]
+    if (backend !== undefined && testCase.runtime !== undefined) {
+      keys.push(`${testCase.runtime}@${backend}`)
+    }
     for (const [index, listed] of (testCase.steps ?? []).entries()) {
-      const on = listed.expect_on ?? {}
-      const backend = testCase.backend ?? ''
-      const expect = {
-        ...(listed.expect ?? {}),
-        ...on[backend],
-        ...on[`${testCase.runtime ?? ''}@${backend}`],
-      }
-      const step = { ...listed, expect }
-      problems.push(...(await runStep(ws, caseId, index, step)))
+      const step = overlay(listed, keys)
+      problems.push(
+        ...(step.parallel !== undefined
+          ? await runParallel(ws, caseId, index, step.parallel)
+          : await runStep(ws, caseId, `step[${index}]`, step)),
+      )
     }
   } finally {
     try {

@@ -15,6 +15,7 @@
 import re
 from collections.abc import Sequence
 
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import (
     REDIRECT_NODE_TYPES,
@@ -49,10 +50,10 @@ def function_text(name: str, body: FunctionBody) -> str:
         name (str): the function's name.
         body (FunctionBody): the body the definition stored.
     """
-    return _Printer(True).definition(name, _definition(body), "")
+    return _Printer(True).definition(name, _definition_of(body), "")
 
 
-def _definition(body: FunctionBody) -> TSNodeLike:
+def _definition_of(body: FunctionBody) -> TSNodeLike:
     node = body[0]
     if node.parent is None and node.type == NT.REDIRECTED_STATEMENT:
         node = node.children[0]
@@ -417,11 +418,9 @@ class _Printer:
                 begin is not None or child.type == "(("
             ):
                 if begin is not None:
-                    text = (
+                    text = decode_text(
                         source[begin - start : child.start_byte - start]
-                        .decode()
-                        .lstrip()
-                    )
+                    ).lstrip()
                     slots.append(text or "1")
                 begin = child.end_byte if child.type != "))" else None
                 if child.type == "))":
@@ -517,15 +516,15 @@ class _Printer:
         self, node: TSNodeLike, fd: str | None, document: Heredoc | None
     ) -> str:
         source = getattr(node, "source_text", node.text) or b""
-        text = source.decode(errors="replace")
+        text = decode_text(source)
         operator = "<<-" if text.startswith("<<-") else "<<"
         start = len(operator)
         while start < len(text) and text[start] in " \t":
             start += 1
-        end = delimiter_end(text.encode(), start) or start
+        end = delimiter_end(encode_text(text), start) or start
         word = text[start:end]
         if document is not None:
-            body = document.body.decode(errors="replace")
+            body = decode_text(document.body)
             delimiter, quoted = document.delimiter, document.quoted
         else:
             body = get_text(
@@ -589,12 +588,15 @@ def _parts(node: TSNodeLike) -> list[str | TSNodeLike]:
     for child in node.children:
         if child.start_byte > end:
             parts.append(
-                source[
-                    end - node.start_byte : child.start_byte - node.start_byte
-                ].decode()
+                decode_text(
+                    source[
+                        end - node.start_byte : child.start_byte
+                        - node.start_byte
+                    ]
+                )
             )
         end = child.end_byte
         parts.append(child)
     if end < node.end_byte:
-        parts.append(source[end - node.start_byte :].decode())
+        parts.append(decode_text(source[end - node.start_byte :]))
     return parts

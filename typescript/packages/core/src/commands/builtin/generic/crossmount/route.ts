@@ -19,12 +19,17 @@ import type { NamespaceView, SessionView } from '../../../../ops/types.ts'
 import { formatFsError, isFsError } from '../../../../utils/errors.ts'
 import { strategyFor } from './detect.ts'
 import { runFanout } from './fanout/index.ts'
+import type { AggregateFn } from '../../../config.ts'
+import { runOperands, mergeOperandIos } from './utils.ts'
 import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
 import { runRelay } from './relay/index.ts'
 import { runStream } from './stream/index.ts'
+import { runSearch } from './search.ts'
+import { runDu } from './du.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { readFailExitCode } from '../../../spec/usage.ts'
 import { UsageError } from '../../../errors.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Run a command whose path operands span mounts. Every command combines
 // per-mount work under one of three strategies (see Strategy): STREAM merges
@@ -33,7 +38,9 @@ import { UsageError } from '../../../errors.ts'
 // outputs, RELAY moves per-file data through the dispatcher into one shared
 // generic. STREAM and FANOUT execute through `runSingle`, so each mount
 // expands its own glob operands and uses its own native command
-// implementation.
+// implementation. grep, rg and du compose each mount's own command instead: a
+// search from its owned scopes (`runSearch`), du from its measurement
+// (`runDu`).
 export async function handleCrossMount(
   cmdName: string,
   scopes: PathSpec[],
@@ -53,6 +60,7 @@ export async function handleCrossMount(
   // (cp's link sources).
   cwd = '/',
   argv: readonly string[] = [],
+  aggregate: AggregateFn | null = null,
 ): Promise<CrossResult> {
   const native = runSingle
   const input = resolveSource(stdin)
@@ -62,8 +70,30 @@ export async function handleCrossMount(
       stdin: paths.some((p) => isStdin(p)) ? input : (options?.stdin ?? null),
     })
   try {
-    // isCrossMount gated on CROSS_MOUNT_COMMANDS membership, so the name is
-    // one of the Cmd values by the time it reaches the strategy layer.
+    if (aggregate !== null) {
+      const results = await runOperands(runSingle, cmdName, scopes, textArgs, flagKwargs)
+      const body = aggregate(results.map((r) => [r.scope.virtual, r.data]))
+      return [
+        body,
+        await mergeOperandIos(results, Math.max(0, ...results.map((r) => r.io.exitCode))),
+      ]
+    }
+    if (cmdName === 'grep' || cmdName === 'rg') {
+      return await runSearch(
+        cmdName,
+        scopes,
+        textArgs,
+        flagKwargs,
+        dispatch,
+        runSingle,
+        cwd,
+        ns,
+        input,
+      )
+    }
+    if (cmdName === 'du') {
+      return await runDu(scopes, textArgs, flagKwargs, dispatch, runSingle, cwd, ns, input)
+    }
     const cmd = cmdName as Cmd
     const strategy = strategyFor(cmd)
     if (strategy === Strategy.RELAY) {
@@ -95,7 +125,7 @@ export async function handleCrossMount(
         null,
         new IOResult({
           exitCode: err.exitCode,
-          stderr: new TextEncoder().encode(`${err.message}\n`),
+          stderr: encodeText(`${err.message}\n`),
         }),
       ]
     }

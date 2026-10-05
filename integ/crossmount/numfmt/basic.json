@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_numfmt_across_mounts",
+      "seq": 963210,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf '1024\\n2048\\n' > /data/xm_rt_nf; numfmt --to=iec < /data/xm_rt_nf > /data2/xm_rt_nf; cat /data2/xm_rt_nf; rm /data/xm_rt_nf /data2/xm_rt_nf",
+      "expect": {
+        "exit": 0,
+        "stdout": "1.0K\n2.0K\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

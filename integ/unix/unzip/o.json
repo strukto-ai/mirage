@@ -35,6 +35,68 @@
         "q",
         "d"
       ]
+    },
+    {
+      "id": "unzip_lists_each_extracted_entry",
+      "seq": 16100015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r10uz && printf '%s' 'UEsDBAoAAAAAAIAYIlzeMVo+BwAAAAcAAAAFAAAAZS50eHRleHRyYWN0UEsDBAoAAAAAAIAYIlwAAAAAAAAAAAAAAAACAAAAZC9QSwMEFAAAAAgAgBgiXHnKf7AHAAAAMQAAAAcAAABkL2YudHh0S0wkDXABAFBLAQIeAwoAAAAAAIAYIlzeMVo+BwAAAAcAAAAFAAAAAAAAAAEAAACkgQAAAABlLnR4dFBLAQIeAwoAAAAAAIAYIlwAAAAAAAAAAAAAAAACAAAAAAAAAAAAEADtQSoAAABkL1BLAQIeAxQAAAAIAIAYIlx5yn+wBwAAADEAAAAHAAAAAAAAAAEAAACkgUoAAABkL2YudHh0UEsFBgAAAAADAAMAmAAAAHYAAAAAAA==' | base64 -d > /data/r10uz/z.zip && unzip /data/r10uz/z.zip -d /data/r10uz/out; echo rc=$?; unzip -o /data/r10uz/z.zip -d /data/r10uz/out; echo rc=$?; (cd /data/r10uz && unzip -o z.zip d/f.txt -d o2; echo rc=$?); rm -r /data/r10uz",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/r10uz/z.zip\n extracting: /data/r10uz/out/e.txt   \n   creating: /data/r10uz/out/d/\n  inflating: /data/r10uz/out/d/f.txt  \nrc=0\nArchive:  /data/r10uz/z.zip\n extracting: /data/r10uz/out/e.txt   \n  inflating: /data/r10uz/out/d/f.txt  \nrc=0\nArchive:  z.zip\n  inflating: o2/d/f.txt              \nrc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_a_file_in_the_way_skips_its_entries",
+      "seq": 16100019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && mkdir -p r10ub/o && printf '%s' 'UEsDBAoAAAAAAIAYIlwAAAAAAAAAAAAAAAAGAAAAYmxvY2svUEsDBAoAAAAAAIAYIlwAAAAAAAAAAAAAAAAMAAAAYmxvY2svY2hpbGQvUEsDBAoAAAAAAIAYIlwAAAAAAAAAAAAAAAAGAAAAbGF0ZXIvUEsDBAoAAAAAAIAYIlydatx0AgAAAAIAAAALAAAAbGF0ZXIvei50eHR6ClBLAQIeAwoAAAAAAIAYIlwAAAAAAAAAAAAAAAAGAAAAAAAAAAAAEADtQQAAAABibG9jay9QSwECHgMKAAAAAACAGCJcAAAAAAAAAAAAAAAADAAAAAAAAAAAABAA7UEkAAAAYmxvY2svY2hpbGQvUEsBAh4DCgAAAAAAgBgiXAAAAAAAAAAAAAAAAAYAAAAAAAAAAAAQAO1BTgAAAGxhdGVyL1BLAQIeAwoAAAAAAIAYIlydatx0AgAAAAIAAAALAAAAAAAAAAEAAACkgXIAAABsYXRlci96LnR4dFBLBQYAAAAABAAEANsAAACdAAAAAAA=' | base64 -d > r10ub/z.zip && printf x > r10ub/o/block && unzip -o r10ub/z.zip -d r10ub/o; echo rc=$?; ls -R r10ub/o; printf '%s' 'UEsDBAoAAAAAAIAYIlzAN6uSAgAAAAIAAAALAAAAYmxvY2svZi50eHRmClBLAwQKAAAAAACAGCJcjUkFJwIAAAACAAAACAAAAG9rL2sudHh0awpQSwECHgMKAAAAAACAGCJcwDerkgIAAAACAAAACwAAAAAAAAABAAAApIEAAAAAYmxvY2svZi50eHRQSwECHgMKAAAAAACAGCJcjUkFJwIAAAACAAAACAAAAAAAAAABAAAApIErAAAAb2svay50eHRQSwUGAAAAAAIAAgBvAAAAUwAAAAAA' | base64 -d > r10ub/z2.zip && unzip -o r10ub/z2.zip -d r10ub/o; echo rc=$?; rm -r r10ub)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  r10ub/z.zip\n   creating: r10ub/o/later/\n extracting: r10ub/o/later/z.txt     \nrc=2\nr10ub/o:\nblock\nlater\n\nr10ub/o/later:\nz.txt\nArchive:  r10ub/z2.zip\n extracting: r10ub/o/ok/k.txt        \nrc=2\n",
+        "stderr": "checkdir error:  r10ub/o/block exists but is not directory\n                 unable to process block/.\ncheckdir error:  r10ub/o/block exists but is not directory\n                 unable to process block/child/.\ncheckdir error:  r10ub/o/block exists but is not directory\n                 unable to process block/f.txt.\n"
+      }
     }
   ]
 }

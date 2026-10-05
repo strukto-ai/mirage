@@ -16,6 +16,7 @@ import asyncio
 import logging
 
 from mirage.process.supervisor import ProcessSupervisor
+from mirage.shell.bytes import encode_text
 from mirage.shell.console import (
     KILLED_OUTCOME,
     Channel,
@@ -113,7 +114,7 @@ async def _settle(run: JobRunner, job: Job) -> int:
             return 1
         job.status = JobStatus.COMPLETED
         job.exit_code = 1
-        await job.console.emit(Channel.STDERR, str(exc).encode())
+        await job.console.emit(Channel.STDERR, encode_text(str(exc)))
         await job.console.finish(exit_outcome(1))
         return 1
     if job.status != JobStatus.RUNNING:

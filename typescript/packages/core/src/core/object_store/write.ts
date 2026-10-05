@@ -18,7 +18,7 @@ import { record, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, enotsup, isMissingPath } from '../../utils/errors.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import { ancestors, norm } from '../../utils/path.ts'
+import { ancestors, norm, parent } from '../../utils/path.ts'
 import { isDir } from '../../utils/stat_view.ts'
 import type {
   MkdirFn,
@@ -179,6 +179,20 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
       // both unreadable. mkdir(2) blames the operand; the walk `-p` makes
       // stops at the file and names it.
       if (above !== null) throw enotdir(parents ? kp.mountedPath(path, above) : path)
+      const up = parent(norm(path.mountPath))
+      // mkdir(2) makes one directory, under one that exists; only `-p`
+      // makes the chain, so a marker under a missing parent answers
+      // ENOENT however the caller reached it. A store without markers
+      // holds no empty directory, so a parent made a moment ago has no
+      // row to find.
+      if (
+        !parents &&
+        driver.markersSupported !== false &&
+        up !== '/' &&
+        (await rowAt(stat, accessor, kp.mountedPath(path, up))) === null
+      ) {
+        throw enoent(path)
+      }
     }
     if (driver.markersSupported === false) {
       // The store refuses the marker client-side (hf: create_dir is
@@ -195,6 +209,10 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
     if (pfx === '') return
     const { conn, close } = await driver.connect(accessor)
     try {
+      // `-p` on a directory that holds its marker leaves the marker as it
+      // is: a rewrite replaces its metadata and, in a versioned bucket, adds
+      // a version. A directory only a key below implies still gets one.
+      if (row !== null && (await driver.head(conn, pfx)) !== null) return
       await driver.put(conn, pfx, new Uint8Array(0))
     } finally {
       await close()

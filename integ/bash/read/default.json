@@ -33,6 +33,74 @@
         "stdout": "[a][b]\n[  a b  ]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "read_keeps_raw_bytes",
+      "seq": 502506,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\377b\\n' | { read -r y; printf '%s\\n' \"$y\"; } | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 ff 62 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "read_stops_at_the_first_byte_of_its_delimiter",
+      "seq": 502507,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\377b' | { read -r -d $'\\377' x; echo \"rc=$? <$x>\"; }; printf 'a\\303\\251b' | { read -r -d é x; echo \"rc=$? <$x>\"; }; printf 'abc' | { read -r -d $'\\377' x; echo \"rc=$? <$x>\"; }",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0 <a>\nrc=0 <a>\nrc=1 <abc>\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xrf_seed",
+      "seq": 963100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'b\\na\\n' > /data/xrf.txt && mkdir -p /data2/xrf_dir && echo inner > /data2/xrf_dir/inner.txt && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xrf_seed_named_dir",
+      "seq": 963109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p '/data2/No such file or directory' && printf inner > '/data2/No such file or directory/inner.txt' && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -20,12 +20,11 @@ import { bindCommands, catchAll, runtimeBindingsFor } from '../table.ts'
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import { EvalError } from '../errors.ts'
 import { isEvaluator, type Evaluator } from '../mixin.ts'
-import type { EvalValue } from '../types.ts'
+import { ScriptSource, type EvalValue } from '../types.ts'
 import { RouteDeny, RouteError } from './errors.ts'
 import {
   DenyResult,
   RouteResult,
-  ScriptSource,
   routeContextPayload,
   type RouteDecision,
   type RouteContext,

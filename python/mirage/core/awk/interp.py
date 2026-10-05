@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 
@@ -95,6 +95,7 @@ from mirage.core.awk.value import (
     to_num,
     to_str,
 )
+from mirage.shell.bytes import byte_view, from_byte_view
 
 SCALAR_DEFAULTS = {
     "FS": " ",
@@ -203,6 +204,8 @@ class Interpreter:
         host (AwkHost): the doors to files and commands.
         argv (Sequence[str]): the operands as typed, ARGV[1] onward.
         assignments (dict[str, str] | None): the ``-v`` assignments.
+        environ (Mapping[str, str] | None): the exported environment,
+            which ENVIRON holds; writing ENVIRON reaches no command.
     """
 
     def __init__(
@@ -211,6 +214,7 @@ class Interpreter:
         host: AwkHost,
         argv: Sequence[str] = (),
         assignments: dict[str, str] | None = None,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         self.program = program
         self.host = host
@@ -247,6 +251,9 @@ class Interpreter:
         for position, operand in enumerate(argv, 1):
             self.tables["ARGV"][str(position)] = strnum(operand)
         self.globals["ARGC"] = num(len(argv) + 1)
+        self.tables["ENVIRON"] = {
+            name: strnum(value) for name, value in (environ or {}).items()
+        }
 
     def special(self, name: str) -> str:
         return to_str(self.globals.get(name, UNINIT), "%.6g")
@@ -791,9 +798,11 @@ class Interpreter:
             span = to_num(await self.eval(args[2])) if len(args) > 2 else None
             return text(substr(subject, start, span))
         if name == "toupper":
-            return text((await self.str_arg(args[0])).upper())
+            raw = from_byte_view(await self.str_arg(args[0]))
+            return text(byte_view(raw.upper()))
         if name == "tolower":
-            return text((await self.str_arg(args[0])).lower())
+            raw = from_byte_view(await self.str_arg(args[0]))
+            return text(byte_view(raw.lower()))
         if name == "sprintf":
             fmt = await self.str_arg(args[0])
             rest = [await self.eval(a) for a in args[1:]]
@@ -918,9 +927,9 @@ class Interpreter:
             body (str): the text.
         """
         if self.out_pipes or self.held:
-            self.held.append(body.encode())
+            self.held.append(from_byte_view(body))
         else:
-            self.out.append(body.encode())
+            self.out.append(from_byte_view(body))
 
     def release(self) -> None:
         """Let held standard output go, as a flush of stdout does."""
@@ -996,7 +1005,7 @@ class Interpreter:
             self.stdout(body)
             return
         if name == STDERR_NAME:
-            self.err.append(body.encode())
+            self.err.append(from_byte_view(body))
             return
         pending = self.out_files.get(name)
         if pending is None:
@@ -1013,7 +1022,7 @@ class Interpreter:
         """
         body = "".join(self.out_pipes.pop(command))
         await self.flush_files()
-        run = await self.host.run(command, body.encode())
+        run = await self.host.run(command, from_byte_view(body))
         self.out.append(run.stdout)
         self.err.append(run.stderr)
         return run.status
@@ -1329,11 +1338,11 @@ class Interpreter:
         Args:
             failure (AwkRuntimeError | AwkSyntaxError): the fatal error.
         """
-        self.err.append(f"{failure}\n".encode())
+        self.err.append(from_byte_view(f"{failure}\n"))
         try:
             await self.flush_files()
         except AwkRuntimeError as exc:
-            self.err.append(f"{exc}\n".encode())
+            self.err.append(from_byte_view(f"{exc}\n"))
         self.release()
         return self.take()
 

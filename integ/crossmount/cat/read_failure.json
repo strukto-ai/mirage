@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xrf_cat",
+      "seq": 963104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/xrf.txt /data2/xrf_nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "b\na\n",
+        "stderr": "cat: /data2/xrf_nope.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "xrf_cat_dir",
+      "seq": 963108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/xrf.txt /data2/xrf_dir",
+      "expect": {
+        "exit": 1,
+        "stdout": "b\na\n",
+        "stderr": "cat: /data2/xrf_dir: Is a directory\n"
+      }
+    }
+  ]
+}

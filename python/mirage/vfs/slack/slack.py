@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.builtin.slack import COMMANDS
+from mirage.commands.builtin.slack.io import IO
 from mirage.commands.config import RegisteredCommand, registered_commands
 from mirage.core.time_range import TimeRange
 from mirage.ops.registry import RegisteredOp
@@ -35,6 +36,7 @@ class SlackVFS(BaseVFS):
     # (users.list is payload-identical to users.info, verified live), and
     # file blobs carry Slack's upload byte count.
     sizes_always_known: bool = True
+    max_du_entries: int | None = IO.max_du_entries
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
 

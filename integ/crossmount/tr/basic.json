@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_tr_across_mounts",
+      "seq": 963214,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf 'abc\\n' > /data/xm_rt_tr; tr a-z A-Z < /data/xm_rt_tr > /data2/xm_rt_tr; cat /data2/xm_rt_tr; rm /data/xm_rt_tr /data2/xm_rt_tr",
+      "expect": {
+        "exit": 0,
+        "stdout": "ABC\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

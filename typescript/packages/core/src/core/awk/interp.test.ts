@@ -191,7 +191,7 @@ describe('awk interpreter', () => {
     ],
     ['function f(x){x=5} BEGIN{y=1; f(y); print y}', '1\n'],
     ['BEGIN{OFMT="%.2f"; x=3.14159; print x, x""}', '3.14 3.14159\n'],
-    ['BEGIN{print length("héllo"), toupper("abc"), index("hello","ll")}', '5 ABC 3\n'],
+    ['BEGIN{print length("héllo"), toupper("abc"), index("hello","ll")}', '6 ABC 3\n'],
     ['BEGIN{print match("foobar",/o+/), RSTART, RLENGTH}', '2 2 2\n'],
     ['BEGIN{srand(1); a=rand(); srand(1); print (a==rand()), (a<1)}', '1 1\n'],
     ['BEGIN{a[10]; a[9]; a["x"]; for(k in a)printf "%s ", k}', '10 9 x '],
@@ -218,6 +218,18 @@ describe('awk interpreter', () => {
 
   it('reads a command-line assignment as a strnum', async () => {
     expect(await run('BEGIN{print n+1, (n==5)}', { assignments: { n: '5' } })).toBe('6 1\n')
+  })
+
+  it('holds the environment in ENVIRON as strnums', async () => {
+    const interp = new Interpreter(
+      parse('BEGIN{print ENVIRON["n"]+1, (ENVIRON["n"]==5), ("m" in ENVIRON)}'),
+      new FakeHost(),
+      [],
+      {},
+      { n: '05' },
+    )
+    await interp.runBegin()
+    expect(DEC.decode((await interp.drain())[0])).toBe('6 1 0\n')
   })
 
   it('carries the exit code and still runs END', async () => {

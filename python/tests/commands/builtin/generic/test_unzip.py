@@ -12,20 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import io
 import zipfile
 
 import pytest
 
 from mirage.commands.builtin.generic.unzip import (
-    CORRUPT_CDIR,
     EXTRA_BYTES,
     MISSING_BYTES,
     ZERO_TESTED,
+    corrupt_cdir,
     unzip,
 )
 from mirage.commands.errors import UsageError
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -180,7 +181,7 @@ async def test_extract_writes_only_the_selected_members(
     out, res, got = await _run(members)
     assert got == written
     assert out.decode() == "Archive:  /a.zip\n" + "".join(
-        f"  inflating: {path[1:]}\n" for path in written
+        f"  inflating: {path[1:]:<22}  \n" for path in written
     )
     assert (res.exit_code, _stderr_text(res)) == (code, stderr)
 
@@ -231,7 +232,7 @@ _CDIR_AT = int.from_bytes(_MULTI_ZIP[_END + 16 : _END + 20], "little")
             {"args_l": True},
             None,
             3,
-            CORRUPT_CDIR.format("/a.zip"),
+            corrupt_cdir("/a.zip"),
         ),
         (
             _patch(_MULTI_ZIP, b"PK\x05\x06", 10, 2, 2),
@@ -239,7 +240,7 @@ _CDIR_AT = int.from_bytes(_MULTI_ZIP[_END + 16 : _END + 20], "little")
             {"Z": True},
             None,
             3,
-            CORRUPT_CDIR.format("/a.zip"),
+            corrupt_cdir("/a.zip"),
         ),
         (
             b"X" + _MULTI_ZIP,
@@ -419,3 +420,38 @@ async def test_a_read_only_mount_refuses_unzip_at_the_write(
         result.stderr,
     ) == (code, stdout, stderr)
     assert vfs._store.files == before
+
+
+@pytest.mark.asyncio
+async def test_a_refused_probe_still_reports_the_entry_and_goes_on():
+    """A stat refused while naming the level in the way ends no run.
+
+    The level a member needs cannot be searched, so its mkdir fails and
+    so does the stat that looks for a file in the way; Info-ZIP reports
+    the member with a checkdir error, extracts the next one and exits 2.
+    """
+    data = _zip_entries((("sec/a.txt", b"A"), ("ok.txt", b"OK")))
+    recorder = _Recorder()
+
+    async def stat(path: PathSpec) -> FileStat:
+        if path.virtual.startswith("/out/sec"):
+            raise PermissionError(errno.EACCES, "Permission denied")
+        if path.virtual == "/out":
+            return FileStat(name="out", type=FileType.DIRECTORY)
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+    async def mkdir(_p: PathSpec, parents: bool = False) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    _, res = await unzip(
+        _archive(),
+        read_bytes=_Reader(data),
+        write_bytes=recorder,
+        mkdir_fn=mkdir,
+        stat=stat,
+        d="/out",
+        q=True,
+    )
+    assert recorder.written == {"/out/ok.txt": b"OK"}
+    assert res.exit_code == 2
+    assert _stderr_text(res).endswith("unable to process sec/a.txt.\n")

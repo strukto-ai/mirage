@@ -35,9 +35,11 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { sessionView, visibleEnv } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
-import { type ExecuteNodeFn, runStatement } from './jobs.ts'
+import { runStatement } from './jobs.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -318,7 +320,7 @@ export async function handleFor(
   // rule, checked up front so the loop never starts, exactly as bash
   // refuses `for x` on a readonly x before the first iteration.
   if (view.isReadonly(variable)) {
-    const err = new TextEncoder().encode(`bash: ${variable}: readonly variable\n`)
+    const err = encodeText(`bash: ${variable}: readonly variable\n`)
     return collectLoopResult([], new IOResult({ exitCode: 1, stderr: err }), 'for')
   }
   for (const val of values) {
@@ -333,7 +335,7 @@ export async function handleFor(
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       mergedIo = await mergedIo.merge(
-        new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${err.message}\n`) }),
+        new IOResult({ exitCode: 1, stderr: encodeText(`${err.message}\n`) }),
       )
       break
     }
@@ -435,7 +437,7 @@ async function conditionLoop(
   }
 
   if (hitLimit) {
-    const warn = new TextEncoder().encode(
+    const warn = encodeText(
       `warning: ${label} loop terminated after ${MAX_WHILE.toString()} iterations\n`,
     )
     const existing = mergedIo.stderr
@@ -527,13 +529,13 @@ export async function handleCfor(
       throw err
     }
     const prefix = err instanceof ArithError ? 'bash: ((: ' : 'bash: '
-    const errBytes = new TextEncoder().encode(`${prefix}${err.message}\n`)
+    const errBytes = encodeText(`${prefix}${err.message}\n`)
     mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))
     mergedIo.exitCode = 1
     return collectLoopResult(allStdout, mergedIo, 'for')
   }
   if (hitLimit) {
-    const warn = new TextEncoder().encode(
+    const warn = encodeText(
       `warning: for loop terminated after ${MAX_WHILE.toString()} iterations\n`,
     )
     const existing = mergedIo.stderr
@@ -725,7 +727,6 @@ export async function handleSelect(
   signal?: AbortSignal,
   sink?: JobConsole,
 ): Promise<Result> {
-  const enc = new TextEncoder()
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   const view = sessionView(session, policies)
@@ -738,7 +739,7 @@ export async function handleSelect(
     const menu = showMenu ? selectMenu(words, env.COLUMNS ?? '') : ''
     const prompt = menu + (env.PS3 ?? '#? ')
     mergedIo = await mergedIo.merge(
-      new IOResult({ stderr: prompt !== '' ? enc.encode(prompt) : null }),
+      new IOResult({ stderr: prompt !== '' ? encodeText(prompt) : null }),
     )
     const reply = lines !== null ? await readReply(lines, signal) : null
     // A failed choice read (end of input, a readonly REPLY) ends the prompt
@@ -747,11 +748,11 @@ export async function handleSelect(
     if (reply !== null && view.isReadonly('REPLY')) frozen = 'REPLY'
     else if (reply !== null && reply !== '' && view.isReadonly(variable)) frozen = variable
     if (reply === null || frozen === 'REPLY') {
-      if (sink !== undefined) await sink.emit(Channel.STDOUT, enc.encode('\n'))
-      else allStdout.push(enc.encode('\n'))
+      if (sink !== undefined) await sink.emit(Channel.STDOUT, encodeText('\n'))
+      else allStdout.push(encodeText('\n'))
     }
     if (reply === null || frozen !== null) {
-      const err = frozen !== null ? enc.encode(`bash: ${frozen}: readonly variable\n`) : null
+      const err = frozen !== null ? encodeText(`bash: ${frozen}: readonly variable\n`) : null
       mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: err }))
       break
     }
@@ -765,7 +766,7 @@ export async function handleSelect(
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       mergedIo = await mergedIo.merge(
-        new IOResult({ exitCode: 1, stderr: enc.encode(`${err.message}\n`) }),
+        new IOResult({ exitCode: 1, stderr: encodeText(`${err.message}\n`) }),
       )
       break
     }

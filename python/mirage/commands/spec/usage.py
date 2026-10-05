@@ -30,6 +30,7 @@ from mirage.commands.spec.constants import (
     USAGE_HINT_PREFIX,
 )
 from mirage.commands.spec.types import CommandName
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.utils.errors import DotWalkLoop, FileTooLargeError, fs_strerror
 
 
@@ -79,7 +80,7 @@ def _read_fail_code(cmd_name: str, is_dir: bool) -> int:
     return READ_FAIL_EXIT.get(cmd_name, 1)
 
 
-def read_fail_exit(cmd_name: str, exc: BaseException) -> int:
+def read_fail_exit_code(cmd_name: str, exc: BaseException) -> int:
     """The exit code for a command that could not read an operand.
 
     Read off the command, not off the errno, because that is how GNU's
@@ -122,7 +123,7 @@ def _line_read_fail_code(cmd_name: str, line: str) -> int | None:
     return None
 
 
-def read_fail_exit_line(cmd_name: str, rendered: bytes) -> int:
+def read_fail_exit_code_from_line(cmd_name: str, rendered: bytes) -> int:
     """The same code, for a read failure known only as a rendered line.
 
     The cross-mount stream path fetches each operand with a native ``cat``
@@ -160,9 +161,9 @@ def python_option_error(cmd_name: str, line: str) -> tuple[bytes, int]:
             usage line ('python' or 'python3').
         line (str): the message line, newline included.
     """
-    return (
+    return encode_text(
         line + PYTHON_USAGE.format(name=cmd_name)
-    ).encode(), usage_exit_code(cmd_name)
+    ), usage_exit_code(cmd_name)
 
 
 def curl_option_error(line: str) -> tuple[bytes, int]:
@@ -176,7 +177,7 @@ def curl_option_error(line: str) -> tuple[bytes, int]:
         line (str): the message line, newline included.
     """
     hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
-    return (line + hint).encode(), usage_exit_code("curl")
+    return encode_text(line + hint), usage_exit_code("curl")
 
 
 def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
@@ -199,7 +200,7 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     if cmd_name == CommandName.FIND:
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"find: unknown predicate `{dashed}'\n"
-        return line.encode(), usage_exit_code(cmd_name)
+        return encode_text(line), usage_exit_code(cmd_name)
     if cmd_name == "rg":
         return rg_unknown_flag(token)
     if cmd_name in PYTHON_NAMES:
@@ -212,7 +213,7 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     else:
         line = f"{cmd_name}: invalid option -- '{token}'\n"
     hint = usage_hint(cmd_name) + "\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    return encode_text(line + hint), usage_exit_code(cmd_name)
 
 
 # ripgrep's `find_similar_names` threshold: the share of 3-grams a flag
@@ -238,7 +239,7 @@ def rg_unknown_flag(token: str) -> tuple[bytes, int]:
         if similar:
             listed = ", ".join(f"--{n}" for n in similar)
             line += f"\nsimilar flags that are available: {listed}\n"
-    return line.encode(), usage_exit_code("rg")
+    return encode_text(line), usage_exit_code("rg")
 
 
 def similar_rg_flags(unrecognized: str) -> list[str]:
@@ -307,7 +308,7 @@ def unexpected_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     option = token.split("=", 1)[0]
     line = f"{cmd_name}: option '{option}' doesn't allow an argument\n"
     hint = usage_hint(cmd_name) + "\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    return encode_text(line + hint), usage_exit_code(cmd_name)
 
 
 def ambiguous_option_error(
@@ -331,7 +332,7 @@ def ambiguous_option_error(
         f"{cmd_name}: option '{token}' is ambiguous; possibilities: {listed}\n"
     )
     hint = usage_hint(cmd_name) + "\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    return encode_text(line + hint), usage_exit_code(cmd_name)
 
 
 def invalid_int_error(
@@ -351,7 +352,7 @@ def invalid_int_error(
     """
     line = f"{cmd_name}: invalid int value: '{value}' for '{option}'\n"
     hint = usage_hint(cmd_name) + "\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    return encode_text(line + hint), usage_exit_code(cmd_name)
 
 
 def invalid_float_error(
@@ -373,7 +374,7 @@ def invalid_float_error(
         )
     line = f"{cmd_name}: invalid float value: '{value}' for '{option}'\n"
     hint = usage_hint(cmd_name) + "\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    return encode_text(line + hint), usage_exit_code(cmd_name)
 
 
 def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
@@ -398,7 +399,7 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     else:
         line = f"{cmd_name}: option requires an argument -- '{token}'\n"
     hint = usage_hint(cmd_name) + "\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    return encode_text(line + hint), usage_exit_code(cmd_name)
 
 
 def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
@@ -422,7 +423,7 @@ def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
     """
     line = f"{cmd_name}: Old option '{letter}' requires an argument.\n"
     hint = usage_hint(cmd_name) + "\n"
-    return (line + hint).encode(), OLD_OPTION_EXIT
+    return encode_text(line + hint), OLD_OPTION_EXIT
 
 
 def argmatch_line(
@@ -518,7 +519,7 @@ def invalid_argument_error(
     )
     hint = usage_hint(cmd_name) + "\n"
     code = usage_exit_code(cmd_name) if exit_code is None else exit_code
-    return (line + hint).encode(), code
+    return encode_text(line + hint), code
 
 
 def argmatch_error(
@@ -547,7 +548,7 @@ def argmatch_error(
     message, code = invalid_argument_error(
         cmd_name, option, value, choices, exit_code, kind
     )
-    return UsageError(message.decode().rstrip("\n"), code)
+    return UsageError(decode_text(message).rstrip("\n"), code)
 
 
 def missing_required_error(cmd_name: str, option: str) -> tuple[bytes, int]:
@@ -563,7 +564,7 @@ def missing_required_error(cmd_name: str, option: str) -> tuple[bytes, int]:
     """
     line = f"{cmd_name}: option '{option}' is required\n"
     hint = usage_hint(cmd_name) + "\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    return encode_text(line + hint), usage_exit_code(cmd_name)
 
 
 def usage_hint(cmd_name: str) -> str:

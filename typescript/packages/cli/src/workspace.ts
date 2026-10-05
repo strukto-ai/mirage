@@ -237,6 +237,48 @@ export function registerWorkspaceCommands(program: Command): void {
       )
     })
 
+  ws.command('close')
+    .description('Stop a workspace and keep its state for the same id.')
+    .argument('<id>')
+    .action(async (id: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        (await handleResponse(
+          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/close`),
+        )) as {
+          id: string
+        },
+        (d) => `Closed workspace ${d.id}.`,
+      )
+    })
+
+  ws.command('cancel')
+    .description('Cancel the running and queued commands of every session.')
+    .argument('<id>')
+    .action(async (id: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/cancel`),
+        ),
+      )
+    })
+
+  ws.command('kill')
+    .description('Kill the background jobs of every session.')
+    .argument('<id>')
+    .action(async (id: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/kill`),
+        ),
+      )
+    })
+
   ws.command('clone')
     .description("Clone a workspace's live state.")
     .argument('<srcId>')

@@ -14,13 +14,25 @@
 
 import { timingSafeEqual } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { createRemoteJWKSet } from 'jose'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 
-import { AuthMode, type AuthConfig } from './config.ts'
+import { AuthMode, PROTECTED_RESOURCE_PATH, type AuthConfig } from './config.ts'
 import { JWTVerificationError, verifyJwt } from './jwt.ts'
 
+declare module 'fastify' {
+  interface FastifyRequest {
+    /**
+     * Who the request runs as: the JWT's `sub` in jwt mode, null when
+     * the mode names no account (local or shared token), which may use
+     * every workspace.
+     */
+    account: string | null
+  }
+}
+
 const BEARER_PREFIX = 'Bearer '
-const HEALTH_PATHS = new Set(['/v1/health'])
+const PUBLIC_PATHS = new Set(['/v1/health', PROTECTED_RESOURCE_PATH])
 const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 const AUTH_RATE_LIMIT_POINTS = 2000
 const AUTH_RATE_LIMIT_WINDOW_SECONDS = 60
@@ -46,6 +58,7 @@ async function unauthorized(reply: FastifyReply, reason: string): Promise<void> 
 }
 
 export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
+  app.decorateRequest('account', null)
   if (config.mode === AuthMode.Local && config.localToken === undefined) {
     console.warn(
       'daemon starting without bearer auth; anyone who can reach it can drive it. ' +
@@ -53,12 +66,16 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
     )
     return
   }
+  // The issuer's published keys, cached and fetched again for a key id
+  // they do not hold, so a key rotation needs no restart.
+  const keySet =
+    config.jwt?.jwksUrl !== undefined ? createRemoteJWKSet(new URL(config.jwt.jwksUrl)) : undefined
   const limiter = new RateLimiterMemory({
     points: AUTH_RATE_LIMIT_POINTS,
     duration: AUTH_RATE_LIMIT_WINDOW_SECONDS,
   })
   app.addHook('onRequest', async (req, reply) => {
-    if (HEALTH_PATHS.has(req.url)) return
+    if (PUBLIC_PATHS.has(req.url)) return
     try {
       await limiter.consume(req.ip)
     } catch (e) {
@@ -72,7 +89,7 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
     }
   })
   app.addHook('onRequest', async (req, reply) => {
-    if (HEALTH_PATHS.has(req.url)) return
+    if (PUBLIC_PATHS.has(req.url)) return
     const token = extractBearer(req)
     if (token === undefined) {
       await unauthorized(reply, 'missing bearer token')
@@ -84,7 +101,10 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
         return
       }
       try {
-        await verifyJwt(token, config.jwt)
+        const claims = await verifyJwt(token, config.jwt, keySet)
+        // verifyJwt refuses a token without one; null would be refused
+        // too, since jwt mode requires an account.
+        req.account = claims.sub ?? null
       } catch (e) {
         const reason = e instanceof JWTVerificationError ? e.message : String(e)
         await unauthorized(reply, reason)

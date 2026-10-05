@@ -88,6 +88,10 @@ export async function cloneWorkspaceWithOverride(
   src: CoreWorkspace,
   override: OverrideShape | null,
 ): Promise<Workspace> {
+  return src.quiesced(() => clone(src, override))
+}
+
+async function clone(src: CoreWorkspace, override: OverrideShape | null): Promise<Workspace> {
   const state = await toStateDict(src)
   // Same-process, so the declarations travel with the clone the way a
   // reused remote VFS does: the state carries the env pointers

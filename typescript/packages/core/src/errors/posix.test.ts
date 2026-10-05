@@ -27,7 +27,6 @@ describe('the posix table', () => {
     ['EPERM', 'Operation not permitted'],
     ['ENOTEMPTY', 'Directory not empty'],
     ['EXDEV', 'Invalid cross-device link'],
-    ['CROSS_MOUNT', 'Invalid cross-device link'],
     ['ENOTSUP', 'Operation not supported'],
     ['ELOOP', 'Too many levels of symbolic links'],
     ['EINVAL', 'Invalid argument'],
@@ -38,13 +37,9 @@ describe('the posix table', () => {
     expect(gnuPhrase(cond)).toBe(phrase)
   })
 
-  it('numbers the cross-mount rename as EXDEV', () => {
-    expect(posixErrno('CROSS_MOUNT')).toBe(posixErrno('EXDEV'))
-  })
-
   it('gives every row a positive number and a phrase', () => {
     for (const cond of FS_CONDITIONS) {
-      expect(POSIX[cond].errno).toBeGreaterThan(0)
+      expect(posixErrno(cond)).toBeGreaterThan(0)
       expect(POSIX[cond].phrase).not.toBe('')
     }
   })

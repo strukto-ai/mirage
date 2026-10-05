@@ -18,8 +18,8 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.commands.builtin.generic.rg import (
     parse_flags,
     refuse_missing_pattern,
+    rg_generic,
 )
-from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import pushdown_operand
@@ -122,7 +122,7 @@ async def rg(
             )
 
     resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
-    return await generic_rg(
+    return await rg_generic(
         resolved,
         texts,
         opts,

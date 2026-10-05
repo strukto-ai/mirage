@@ -25,13 +25,10 @@ from mirage.commands.builtin.sed_script import (
     SedRegex,
     sed_regex_flags,
 )
+from mirage.shell.bytes import byte_view, from_byte_view, text_view
 from mirage.utils.posix import compile_posix_regex
 
 SED_LINE_LENGTH = 70
-
-_SURROGATE_BASE = 0xDC00
-_SURROGATE_LOW = 0xDC80
-_SURROGATE_HIGH = 0xDCFF
 
 _LIST_ESCAPES = {
     0x07: "\\a",
@@ -46,21 +43,6 @@ _LIST_ESCAPES = {
 _RANGE_INACTIVE = 0
 _RANGE_ACTIVE = 1
 _RANGE_CLOSED = 2
-
-
-def _char_bytes(ch: str) -> bytes:
-    """The bytes one pattern-space character stands for.
-
-    A raw byte carried as its surrogate escape is that byte, anything
-    else its UTF-8 form.
-
-    Args:
-        ch (str): one character.
-    """
-    code = ord(ch)
-    if _SURROGATE_LOW <= code <= _SURROGATE_HIGH:
-        return bytes([code - _SURROGATE_BASE])
-    return ch.encode("utf-8", "surrogatepass")
 
 
 def list_line(text: str, width: int) -> str:
@@ -81,7 +63,7 @@ def list_line(text: str, width: int) -> str:
     out: list[str] = []
     col = 0
     for ch in text:
-        for byte in _char_bytes(ch):
+        for byte in from_byte_view(ch):
             if 0x20 <= byte < 0x7F:
                 piece = "\\\\" if byte == 0x5C else chr(byte)
             else:
@@ -224,6 +206,17 @@ def _reader_lines(text: str) -> list[str]:
     return out
 
 
+def _case_mapped(text: str, upper: bool) -> str:
+    """``text`` with its ASCII letters mapped, as the C locale maps them.
+
+    Args:
+        text (str): a byte view.
+        upper (bool): map to upper case rather than lower.
+    """
+    raw = from_byte_view(text)
+    return byte_view(raw.upper() if upper else raw.lower())
+
+
 def _apply_repl(m: "re.Match[str]", repl: str) -> str:
     """Expand a GNU sed replacement against a match.
 
@@ -231,31 +224,65 @@ def _apply_repl(m: "re.Match[str]", repl: str) -> str:
     literal ``&``, ``\\n``/``\\t`` are newline/tab, and ``\\X`` is a
     literal X.
 
+    ``\\U`` and ``\\L`` map everything after them to upper or lower case
+    until ``\\E`` or the other one; ``\\u`` and ``\\l`` map only the next
+    character, and one that lands on an empty group passes to what
+    directly follows the group. Every case escape drops a one-shot still
+    waiting, written before it or carried to it, so the later of two
+    one-shots wins: GNU sed 4.9's ``setup_replacement`` cuts the
+    replacement at each escape and ``append_replacement`` hands a carried
+    one-shot to the next piece only. The C locale maps ASCII letters only,
+    so a byte above 0x7f is written as it is; GNU 4.9 writes 0xff for it,
+    which is not copied.
+
     Args:
         m (re.Match): The regex match for the current substitution.
         repl (str): The sed replacement template.
     """
     out: list[str] = []
+    sticky: bool | None = None
+    pending: bool | None = None
+    carried: bool | None = None
+
+    def emit(piece: str, group: bool = False) -> None:
+        nonlocal pending, carried
+        first = pending if pending is not None else carried
+        own = pending is not None
+        pending = carried = None
+        if not piece:
+            if group and own:
+                carried = first
+            return
+        if first is not None:
+            out.append(_case_mapped(piece[0], first))
+            piece = piece[1:]
+        out.append(piece if sticky is None else _case_mapped(piece, sticky))
+
     i = 0
     while i < len(repl):
         ch = repl[i]
         if ch == "\\" and i + 1 < len(repl):
             nxt = repl[i + 1]
             if nxt in "0123456789":
-                grp = m.group(int(nxt))
-                out.append(grp if grp is not None else "")
+                emit(m.group(int(nxt)) or "", group=True)
+            elif nxt in "ULE":
+                sticky = None if nxt == "E" else nxt == "U"
+                pending = carried = None
+            elif nxt in "ul":
+                pending = nxt == "u"
+                carried = None
             elif nxt == "n":
-                out.append("\n")
+                emit("\n")
             elif nxt == "t":
-                out.append("\t")
+                emit("\t")
             else:
-                out.append(nxt)
+                emit(nxt)
             i += 2
         elif ch == "&":
-            out.append(m.group(0))
+            emit(m.group(0), group=True)
             i += 1
         else:
-            out.append(ch)
+            emit(ch)
             i += 1
     return "".join(out)
 
@@ -308,7 +335,9 @@ class SedMachine:
 
     def stderr(self) -> str:
         """What the program wrote to /dev/stderr, then the error lines."""
-        return "".join(self._special_err.chunks) + "".join(self.stderr_lines)
+        return text_view("".join(self._special_err.chunks)) + "".join(
+            self.stderr_lines
+        )
 
     def exit_code(self) -> int:
         """The exit status GNU would end with after the runs so far."""
@@ -722,7 +751,7 @@ class SedMachine:
                 self._main.raw(f"{self._line_number}\n")
             elif c == "F":
                 self._main.flush_newline()
-                self._main.raw(f"{self._file_name}\n")
+                self._main.raw(byte_view(f"{self._file_name}\n"))
             pc += 1
         if not self.no_default_output:
             self._main.line(self._pattern, self._chomped)

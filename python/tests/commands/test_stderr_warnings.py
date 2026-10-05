@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.rg import rg_generic
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
@@ -79,7 +79,7 @@ async def test_rg_scan_collects_warnings_on_unreadable_file():
         return stat_fn(path.virtual)
 
     # The scan reports the file it could not read and keeps searching.
-    out, io = await generic_rg(
+    out, io = await rg_generic(
         [PathSpec.from_str_path("/")],
         ["hello"],
         CommandOpts(),

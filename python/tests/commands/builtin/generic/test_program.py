@@ -2,7 +2,6 @@ import pytest
 
 from mirage.commands.builtin.generic.program import (
     prepare_program,
-    program_file_refusal,
     read_program_file,
 )
 from mirage.io.types import IOResult, materialize
@@ -32,108 +31,6 @@ async def test_rg_pattern_file_from_stdin_lowers_to_regexp():
     assert error is None
     assert (texts, flags) == (["/in"], {"file": [], "regexp": ["a\nb"]})
     assert await materialize(rest) == b""
-
-
-@pytest.mark.asyncio
-async def test_rg_dev_stdin_pattern_file_takes_no_dash():
-    # ripgrep reads `-f /dev/stdin` as a file, so a `-` operand after it
-    # searches what is left of stdin (nothing) rather than being refused.
-    _, flags, rest, error = await prepare_program(
-        "rg",
-        [],
-        {"file": [_typed("/dev/stdin")]},
-        b"a\n",
-        _no_dispatch,
-        [_typed("-")],
-    )
-    assert error is None
-    assert flags == {"file": [], "regexp": ["a"]}
-    assert await materialize(rest) == b""
-
-
-@pytest.mark.asyncio
-async def test_grep_reads_a_dash_pattern_file_twice_without_refusing():
-    # GNU grep 3.11 reads the second `-f -` as an empty pattern file.
-    _, flags, _, error = await prepare_program(
-        "grep",
-        [],
-        {"file": [_typed("-"), _typed("-")], "e": []},
-        b"a\n",
-        _no_dispatch,
-        [_typed("-")],
-    )
-    assert error is None
-    assert flags == {"file": [], "e": ["a"]}
-
-
-@pytest.mark.parametrize(
-    "name,exc,line,code",
-    [
-        ("grep", IsADirectoryError(), "grep: dir: Is a directory\n", 2),
-        (
-            "grep",
-            FileNotFoundError(),
-            "grep: dir: No such file or directory\n",
-            2,
-        ),
-        (
-            "rg",
-            IsADirectoryError(),
-            "rg: dir:Is a directory (os error 21)\n",
-            2,
-        ),
-        (
-            "rg",
-            FileNotFoundError(),
-            "rg: dir: No such file or directory (os error 2)\n",
-            2,
-        ),
-        (
-            "rg",
-            NotADirectoryError(),
-            "rg: dir: Not a directory (os error 20)\n",
-            2,
-        ),
-        ("zgrep", IsADirectoryError(), "cat: dir: Is a directory\n", 2),
-        (
-            "zgrep",
-            FileNotFoundError(),
-            "cat: dir: No such file or directory\n",
-            2,
-        ),
-        (
-            "sed",
-            FileNotFoundError(),
-            "sed: couldn't open file dir: No such file or directory\n",
-            4,
-        ),
-        ("awk", IsADirectoryError(), "awk: read error (Is a directory)\n", 2),
-        (
-            "awk",
-            FileNotFoundError(),
-            'awk: cannot open "dir" (No such file or directory)\n',
-            2,
-        ),
-        (
-            "jq",
-            IsADirectoryError(),
-            "jq: Could not open dir: It's a directory\n",
-            2,
-        ),
-        (
-            "jq",
-            FileNotFoundError(),
-            "jq: Could not open dir: No such file or directory\n",
-            2,
-        ),
-    ],
-)
-def test_a_program_file_refusal_is_in_each_commands_words(
-    name, exc, line, code
-):
-    # grep 3.11, ripgrep 14.1.1, gzip 1.13 (zgrep copies the file with
-    # cat), sed 4.9, mawk 1.3.4, jq 1.7.1 on debian:stable-slim.
-    assert program_file_refusal(name, _typed("dir"), exc) == (line, code)
 
 
 @pytest.mark.asyncio

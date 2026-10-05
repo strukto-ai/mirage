@@ -139,9 +139,9 @@ through the workspace dispatch, so `open('/data/f.txt')` inside the
 code reads and writes the mount live — RAM, Redis, S3, or a virtual
 backend — with the same cache, write modes, and per-session mount
 narrowing as `cat`. Guest writes are immediately visible to every
-command, a read-only mount (or a session narrowed to read) answers
-`PermissionError` at `open()`, and none of this needs FUSE, a config
-key, or any setup. The interpreter's own build directory is served
+command, a read-only mount (or a session narrowed to read) refuses a
+write at `open()` with `OSError` errno 30 ("Read-only file system"), as
+Linux does, and none of this needs FUSE, a config key, or any setup. The interpreter's own build directory is served
 read-only from the host; a mount at `/` coexists with it (mount
 prefixes win for their subtrees, the build serves the rest).
 

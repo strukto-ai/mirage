@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { mapped, parseRefspec } from './refs.ts'
+import { mapped, parseRefspec, safeRefName, wholeRefName } from './refs.ts'
 
 it.each([
   ['main', { src: 'main', dst: null, force: false }],
@@ -34,4 +34,24 @@ it.each([
   ['refs/heads/main', 'refs/heads/main', ''],
 ])('maps %s over %s', (spec, name, expected) => {
   expect(mapped(parseRefspec(spec), name)).toBe(expected)
+})
+
+it.each([
+  ['HEAD', true],
+  ['ORIG_HEAD', true],
+  ['refs/heads/main', true],
+  ['refs/heads/a..b', true],
+  ['lower', false],
+  ['A1', false],
+  ['refs/', false],
+  ['refs/heads//x', false],
+  ['refs/heads/./x', false],
+  ['refs/heads/../x', false],
+])('safeRefName follows refname_is_safe: %s', (name, safe) => {
+  expect(safeRefName(name)).toBe(safe)
+})
+
+it('takes no bare @ as a whole ref name', () => {
+  expect(wholeRefName('@')).toBe(false)
+  expect(wholeRefName('HEAD')).toBe(true)
 })

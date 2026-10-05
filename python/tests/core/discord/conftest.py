@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from datetime import datetime, timezone
+
 import aiohttp
 import pytest
 
@@ -20,7 +22,7 @@ import mirage.core.discord.readdir as readdir_mod
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.discord.config import DiscordConfig
-from mirage.core.discord.history import date_to_snowflake
+from mirage.core.discord.history import snowflake_at
 from mirage.core.discord.render import history_jsonl_bytes
 
 GUILD = {"id": "G001", "name": "My Server"}
@@ -29,7 +31,11 @@ CHANNELS = [
         "id": "C001",
         "name": "general",
         "type": 0,
-        "last_message_id": date_to_snowflake("2024-01-15"),
+        "last_message_id": str(
+            snowflake_at(
+                datetime(2024, 1, 15, tzinfo=timezone.utc).timestamp()
+            )
+        ),
     },
     {"id": "C002", "name": "random", "type": 0},
 ]

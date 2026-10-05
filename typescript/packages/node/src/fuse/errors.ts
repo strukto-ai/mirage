@@ -47,7 +47,6 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
   EPERM: osConstants.errno.EPERM,
   ENOTEMPTY,
   EXDEV,
-  CROSS_MOUNT: EXDEV,
   ENOTSUP: osConstants.errno.ENOTSUP,
   ELOOP: osConstants.errno.ELOOP,
   EINVAL,

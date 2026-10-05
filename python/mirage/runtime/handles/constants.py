@@ -17,14 +17,12 @@
 # it reads.
 MODE_CHARS = frozenset("rwaxbt+")
 
-# The legal base-letter sets: CPython's four plus C fopen's wx
-# (exclusive create), which CPython spells as a bare x.
+# The legal base-letter sets: CPython's four.
 MODE_BASES = (
     frozenset("r"),
     frozenset("w"),
     frozenset("a"),
     frozenset("x"),
-    frozenset("wx"),
 )
 
 # The least a read-only handle fetches per trip to the mount. A guest

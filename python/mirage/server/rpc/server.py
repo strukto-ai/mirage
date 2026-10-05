@@ -22,7 +22,6 @@ from typing import Any, TypeGuard, TypeVar
 import jsonschema
 
 from mirage import __version__
-from mirage.agents.tool_operations import MirageToolOperations
 from mirage.errors.classify import classify, failure_text
 from mirage.errors.types import FsCondition
 from mirage.server.io_serde import io_result_to_dict
@@ -36,6 +35,7 @@ from mirage.server.rpc.constants import (
     RPC_PARSE_ERROR,
 )
 from mirage.types import JsonValue
+from mirage.workspace.tools.tool_operations import MirageToolOperations
 from mirage.workspace.workspace import Workspace
 from mirage.workspace.workspace.handle import Session
 
@@ -123,8 +123,8 @@ class MirageRpcServer:
         workspace (Workspace): the workspace to serve.
         session_id (str | None): the session the methods act as; None is
             the workspace's default session.
-        operations (MirageToolOperations | None): the tool table to serve,
-            built for the session when None.
+        operations (MirageToolOperations | None): the tool table to serve;
+            the session's own (``session.tools``) when None.
         name (str): the server name ``initialize`` reports.
         version (str): the server version ``initialize`` reports.
     """
@@ -141,9 +141,7 @@ class MirageRpcServer:
         self._session_id = session_id or workspace.default_session_id
         self._session = Session(workspace, self._session_id)
         self._ops = (
-            operations
-            if operations is not None
-            else MirageToolOperations(workspace, True, self._session_id)
+            operations if operations is not None else self._session.tools
         )
         self._name = name
         self._version = version

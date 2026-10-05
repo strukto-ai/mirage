@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLISpec
+from mirage.concurrency.limiter import run_blocking
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
@@ -205,7 +206,13 @@ async def to_state_dict(ws) -> dict[str, Any]:
         mt for mt in mounted if mt.prefix not in auto_prefixes
     ):
         async with m.use():
-            vfs_state = m.vfs.get_state()
+            # Disk walks the host tree and redis answers over a
+            # blocking client, so neither runs on the loop.
+            vfs_state = (
+                await run_blocking(m.vfs.get_state)
+                if m.vfs.name in (VFSName.DISK, VFSName.REDIS)
+                else m.vfs.get_state()
+            )
         mounts_state.append(
             {
                 MountKey.INDEX: idx,
@@ -501,7 +508,10 @@ async def apply_state_dict(
                 m[MountKey.PREFIX],
             )
             continue
-        mount.vfs.load_state(m[MountKey.VFS_STATE])
+        if mount.vfs.name in (VFSName.DISK, VFSName.REDIS):
+            await run_blocking(mount.vfs.load_state, m[MountKey.VFS_STATE])
+        else:
+            mount.vfs.load_state(m[MountKey.VFS_STATE])
 
     await _restore_sessions(ws, state, sessions)
     # The env template is constructor state the rebuilt workspace was
@@ -576,6 +586,9 @@ async def _restore_sessions(
     ws, state: dict[str, Any], tables: list[SessionState]
 ) -> None:
     default_sid = state.get(StateKey.DEFAULT_SESSION_ID)
+    # Every session the snapshot restores is a new one to the agent
+    # tools, so none keeps what was read before.
+    ws._reads.clear()
     if default_sid is not None:
         # The snapshot's default session identity wins over the live
         # one, and the discovery record's pointer follows it.

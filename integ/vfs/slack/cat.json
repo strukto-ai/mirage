@@ -77,6 +77,32 @@
         "stdout": "{\"id\":\"U7\",\"name\":\"priya\",\"real_name\":\"Priya Nair\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Priya Nair\",\"display_name\":\"priya\",\"email\":\"priya@kestrel.example.com\"}}",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_cat_concatenates_day_files_in_order",
+      "seq": 520019,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/engineering__C3/2026-01-19/chat.jsonl /slack/channels/general__C1/2025-12-19/chat.jsonl | jq -r .text",
+      "expect": {
+        "exit": 0,
+        "stdout": "PR #326 is up for the cache refactor, can someone review\napproved, ship it\ndeploy #2064 succeeded on preview\nkudos to Frank for the customer save\ntoday we made the hard decision to reduce our team, thank you erin and frank for everything\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_tail_and_jq_read_a_day_file",
+      "seq": 520021,
+      "targets": [
+        "slack"
+      ],
+      "command": "tail -n 1 /slack/channels/engineering__C3/2026-01-19/chat.jsonl; jq -r .text /slack/channels/general__C1/2025-12-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"type\":\"message\",\"user\":\"U5\",\"text\":\"deploy #2064 succeeded on preview\",\"ts\":\"1768827382.000652\"}\nkudos to Frank for the customer save\ntoday we made the hard decision to reduce our team, thank you erin and frank for everything\n",
+        "stderr": ""
+      }
     }
   ]
 }

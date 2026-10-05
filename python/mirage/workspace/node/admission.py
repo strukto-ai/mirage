@@ -47,6 +47,7 @@ from mirage.policy.match import (
 )
 from mirage.runtime.routing import command_nodes
 from mirage.shell import parse
+from mirage.shell.bytes import encode_text
 from mirage.shell.helpers import (
     get_parts,
     get_redirects,
@@ -352,7 +353,7 @@ async def gate(
     """
     tool = intrinsic or is_tool(name, session)
     if tool and not listed(name, session):
-        return Refused(f"{name}: command not found\n".encode(), 127)
+        return Refused(encode_text(f"{name}: command not found\n"), 127)
     tokens, program = program_tokens(registry, name, args, session.cwd)
     implied = (
         default_cwd_operand(

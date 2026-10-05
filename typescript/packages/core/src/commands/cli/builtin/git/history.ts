@@ -19,8 +19,19 @@ import { HEAD } from './constants.ts'
 
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
-import { BadDateError, IncompatibleLogOptionsError, UnrecognizedArgumentError } from './errors.ts'
-import { MEDIUM, parsePretty, type CommitFacts, type LogFormat } from './format.ts'
+import {
+  BadDateError,
+  IncompatibleLogOptionsError,
+  InvalidDecorateError,
+  UnrecognizedArgumentError,
+} from './errors.ts'
+import {
+  MEDIUM,
+  needsDecorations,
+  parsePretty,
+  type CommitFacts,
+  type LogFormat,
+} from './format.ts'
 import { touches } from './pickaxe.ts'
 import { loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
@@ -28,7 +39,9 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 import { compilePosixRegex, POSIX_CLASSES } from '../../../../utils/posix.ts'
 import { mappedIdentity } from './mailmap.ts'
 import { dateClock, parseDateMode } from './dates.ts'
-import type { DateMode, MailmapEntry } from './types.ts'
+import { configValues } from './fs.ts'
+import { maybeBool } from './util.ts'
+import { Decoration, type DateMode, type MailmapEntry } from './types.ts'
 
 const BRANCH_PREFIX = 'refs/heads/'
 // How many hidden commits a limited walk takes past the point where only
@@ -70,7 +83,11 @@ export interface LogFlags {
   readonly maxParents: number | null
   readonly firstParent: boolean
   readonly date: DateMode
-  readonly decorate: boolean
+  /**
+   * How commits are labelled with their refs; parseFlags leaves it off, and
+   * `decorationFor` settles it once the repository's config can be read.
+   */
+  readonly decorate: Decoration
   /** `-n`/`--max-count`, how many commits to print; null when unlimited. */
   readonly maxCount: number | null
   /** `--oneline`, one abbreviated row per commit. */
@@ -285,7 +302,7 @@ export function parseFlags(
     greps,
     ignoreCase,
     date: parseDateMode(fl.asStr('date') ?? 'default', dateClock(env)),
-    decorate: fl.asBool('decorate'),
+    decorate: Decoration.NONE,
     // git reads a negative count as no limit at all.
     maxCount: maxCount !== null && maxCount < 0 ? null : maxCount,
     minParents: fl.asBool('merges') ? 2 : (fl.asInt('min_parents') ?? null),
@@ -361,16 +378,78 @@ export async function refCommits(repo: Repo): Promise<CommitFacts[]> {
 }
 
 /**
+ * `parse_decoration_style`: a boolean word or number, `short`, `full` or
+ * `auto`, which decorates only a terminal and so never here; null for anything
+ * else.
+ *
+ * @param value the `--decorate=` or `log.decorate` value
+ */
+export function decorationStyle(value: string): Decoration | null {
+  const flag = maybeBool(value)
+  if (flag !== null) return flag ? Decoration.SHORT : Decoration.NONE
+  if (value === 'short') return Decoration.SHORT
+  if (value === 'full') return Decoration.FULL
+  if (value === 'auto') return Decoration.NONE
+  return null
+}
+
+/**
+ * How a `log` or `show` line labels its commits, as git's `cmd_log_init_finish`
+ * settles it (pinned against git 2.47.3).
+ *
+ * `log.decorate` sets the style, a value it cannot read meaning none, and the
+ * line's `--decorate[=<style>]` and `--no-decorate` override it, the last one
+ * typed winning; `--pretty=raw` ignores the config. A template that prints
+ * `%d` or `%D` is decorated even when nothing asked, by short names unless a
+ * style says full, and one that prints neither loads no labels at all.
+ *
+ * @param repo the opened repository
+ * @param fl the line's flags
+ * @param pretty the line's format
+ * @throws InvalidDecorateError a `--decorate` value that names no style
+ */
+export async function decorationFor(
+  repo: Repo,
+  fl: FlagView,
+  pretty: LogFormat,
+): Promise<Decoration> {
+  let style: Decoration | null = null
+  for (const [key, value] of fl.occurrences('decorate', 'no_decorate')) {
+    if (key === 'no_decorate') style = Decoration.NONE
+    else if (typeof value !== 'string') style = Decoration.SHORT
+    else {
+      style = decorationStyle(value)
+      if (style === null) throw new InvalidDecorateError(value)
+    }
+  }
+  if (style === null && pretty.kind !== 'raw') {
+    const configured = (await configValues(repo.dispatch, repo.location, 'log.decorate')).at(-1)
+    if (configured !== undefined) style = decorationStyle(configured)
+  }
+  style ??= Decoration.NONE
+  if (pretty.kind !== 'format' && pretty.kind !== 'tformat') return style
+  if (!needsDecorations(pretty)) return Decoration.NONE
+  return style === Decoration.NONE ? Decoration.SHORT : style
+}
+
+/**
  * Ref labels per commit, in the order git prints them.
  *
  * git walks refs alphabetically and prepends each label, so a commit's labels
  * read in reverse ref order; HEAD is pulled to the front, spelled
  * `HEAD -> branch` when attached (the branch's own label is absorbed) and
  * `HEAD` alone when detached. Pinned against git 2.50.
+ *
+ * @param repo the opened repository
+ * @param style `FULL` keeps each ref's whole name; anything else shortens it
  */
-export async function decorations(repo: Repo): Promise<Map<string, string[]>> {
+export async function decorations(
+  repo: Repo,
+  style: Decoration = Decoration.SHORT,
+): Promise<Map<string, string[]>> {
   const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
   const resolved = await resolvedRefs(repo)
+  const full = style === Decoration.FULL
   const labels = new Map<string, string[]>()
   for (const name of [...resolved.keys()].sort(compareCodePoints)) {
     if (name === HEAD) continue
@@ -379,16 +458,17 @@ export async function decorations(repo: Repo): Promise<Map<string, string[]>> {
     const commit = await peelToCommit(repo, oid)
     if (commit === null) continue
     const list = labels.get(commit.oid) ?? []
-    list.unshift(refLabel(name))
+    list.unshift(refLabel(name, full))
     labels.set(commit.oid, list)
   }
-  await decorateHead(repo, refs, resolved, labels)
+  await decorateHead(repo, refs, resolved, labels, full)
   return labels
 }
 
-/** One ref's decoration label, in git's spelling. */
-function refLabel(name: string): string {
-  if (name.startsWith(TAG_PREFIX)) return `tag: ${name.slice(TAG_PREFIX.length)}`
+/** One ref's decoration label, in git's spelling, by its short or its full name. */
+function refLabel(name: string, full: boolean): string {
+  if (name.startsWith(TAG_PREFIX)) return `tag: ${full ? name : name.slice(TAG_PREFIX.length)}`
+  if (full) return name
   if (name.startsWith(BRANCH_PREFIX)) return name.slice(BRANCH_PREFIX.length)
   if (name.startsWith(REMOTE_PREFIX)) return name.slice(REMOTE_PREFIX.length)
   return name
@@ -400,6 +480,7 @@ async function decorateHead(
   refs: ReadonlyMap<string, string>,
   resolved: ReadonlyMap<string, string>,
   labels: Map<string, string[]>,
+  full: boolean,
 ): Promise<void> {
   const oid = resolved.get(HEAD)
   if (oid === undefined) return
@@ -408,7 +489,7 @@ async function decorateHead(
   const list = labels.get(commit.oid) ?? []
   const raw = refs.get(HEAD) ?? ''
   if (raw.startsWith(SYMREF_PREFIX)) {
-    const branch = refLabel(raw.slice(SYMREF_PREFIX.length).trim())
+    const branch = refLabel(raw.slice(SYMREF_PREFIX.length).trim(), full)
     const at = list.indexOf(branch)
     if (at !== -1) list.splice(at, 1)
     list.unshift(`HEAD -> ${branch}`)

@@ -18,6 +18,7 @@ from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
     camel,
     csv_values,
+    gh_bool,
     list_limit,
     repo_for,
     text_out,
@@ -138,9 +139,9 @@ async def create_cmd(
         "tag_name": tag,
         "name": fl.as_str("title") or tag,
         "body": notes or "",
-        "draft": fl.as_bool("draft"),
-        "prerelease": fl.as_bool("prerelease"),
-        "generate_release_notes": fl.as_bool("generate_notes"),
+        "draft": gh_bool(fl, "draft"),
+        "prerelease": gh_bool(fl, "prerelease"),
+        "generate_release_notes": gh_bool(fl, "generate_notes"),
     }
     if fl.as_str("target") is not None:
         body["target_commitish"] = fl.as_str("target") or ""

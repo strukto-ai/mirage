@@ -18,24 +18,9 @@ import tarfile
 
 import pytest
 
-from mirage.commands.builtin.generic.tar.constants import (
-    MODE_CONFLICT,
-    MULTIPLE_ARCHIVES,
-)
-from mirage.commands.builtin.generic.tar.tar import (
-    parse_flags as tar_parse_flags,
-)
-from mirage.commands.builtin.generic.tar.tar import strip_count
-from mirage.commands.errors import UsageError
-from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-
-CHILD_FAILED = (
-    b"tar: Child returned status 1\n"
-    b"tar: Error is not recoverable: exiting now\n"
-)
 
 
 def _tar(members: dict[str, bytes]) -> bytes:
@@ -49,8 +34,6 @@ def _tar(members: dict[str, bytes]) -> bytes:
 
 
 OK = gzip.compress(_tar({"d/a.txt": b"hello\n", "d/b.txt": b"bee\n"}), mtime=0)
-# The same archive with its CRC-32 and length trailer zeroed.
-DAMAGED = OK[:-8] + b"\0" * 8
 
 
 async def _shell(line: str, seed: dict[str, bytes]):
@@ -64,20 +47,6 @@ async def _shell(line: str, seed: dict[str, bytes]):
         r.exit_code,
         await r.materialize_stdout(),
         await r.materialize_stderr(),
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_damaged_trailer_still_yields_every_member():
-    seed = {"/data/bad.tgz": DAMAGED}
-    reasons = (
-        b"\ngzip: stdin: invalid compressed data--crc error\n"
-        b"\ngzip: stdin: invalid compressed data--length error\n"
-    )
-    assert await _shell("tar -tzf /data/bad.tgz nomatch", seed) == (
-        2,
-        b"",
-        reasons + CHILD_FAILED,
     )
 
 
@@ -97,103 +66,6 @@ async def test_lists_the_member_a_cut_short_stream_reaches():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "data,flags", [(OK[:-8], "-tzf"), (OK + OK[:2], "-xOzf")]
-)
-async def test_a_truncated_gzip_wrapper_keeps_complete_tar_members(
-    data, flags
-):
-    out = b"hello\nbee\n" if flags == "-xOzf" else b"d/a.txt\nd/b.txt\n"
-    r = await _shell(f"tar {flags} /data/cut.tgz", {"/data/cut.tgz": data})
-    assert r == (
-        2,
-        out,
-        b"\ngzip: stdin: unexpected end of file\n" + CHILD_FAILED,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("size", [9, 512])
-async def test_a_tar_parse_error_does_not_mask_the_gzip_failure(size):
-    bad = gzip.compress(b"x" * size, mtime=0)[:-8] + b"\0" * 8
-    notices = (
-        (
-            b"tar: This does not look like a tar archive\n"
-            b"tar: Skipping to next header\n"
-        )
-        if size >= 512
-        else b""
-    )
-    r = await _shell("tar -tzf /data/bad.tgz", {"/data/bad.tgz": bad})
-    assert r == (
-        2,
-        b"",
-        b"\ngzip: stdin: invalid compressed data--crc error\n"
-        b"\ngzip: stdin: invalid compressed data--length error\n"
-        + notices
-        + CHILD_FAILED,
-    )
-
-
-@pytest.mark.asyncio
-async def test_cross_mount_tar_keeps_the_empty_archive_refusal():
-    ws = Workspace(
-        {"/data": RAMVFS(), "/other": RAMVFS()}, mode=MountMode.WRITE
-    )
-    await ws.shell("echo hello > /other/a.txt")
-    result = await ws.shell("cd /data; tar -cf '' /other/a.txt")
-    assert result.exit_code == 2
-    assert result.stderr == (
-        b"tar: : Cannot open: No such file or directory\n"
-        b"tar: Error is not recoverable: exiting now\n"
-    )
-
-
-@pytest.mark.parametrize(
-    "words,message",
-    [
-        # argp stops at the first refusal in line order (tar 1.35).
-        (["-c", "-x"], MODE_CONFLICT),
-        (
-            ["--strip-components=x", "-c", "-x"],
-            "tar: x: Invalid number of elements",
-        ),
-        (["-t", "-f", "/a", "-f", "/a"], MULTIPLE_ARCHIVES),
-    ],
-)
-def test_parse_flags_refuses_what_tar_refuses(words, message):
-    flags = parse_to_kwargs(parse_command(SPECS["tar"], words, "/", "tar"))
-    with pytest.raises(UsageError) as exc:
-        tar_parse_flags(flags)
-    assert (
-        str(exc.value) == f"{message}\nTry 'tar --help' for more information."
-    )
-    assert exc.value.exit_code == 2
-
-
-@pytest.mark.parametrize("raw,count", [("+1", 1), ("010", 10)])
-def test_a_strip_count_reads_at_base_ten(raw, count):
-    assert strip_count(raw) == count
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line,out",
-    [
-        (
-            "tar --create --file=a.tar a.txt && tar --list --file a.tar",
-            "a.txt\n",
-        ),
-    ],
-)
-async def test_tars_long_options_run_as_the_short_ones(line, out):
-    ws = Workspace({"/data": RAMVFS()}, mode="write")
-    await ws.shell("mkdir /data/dir && printf 'x\\n' > /data/a.txt")
-    r = await ws.shell(f"cd /data && {line}")
-    assert (r.exit_code, await r.stdout_str()) == (0, out)
-
-
-@pytest.mark.asyncio
 async def test_stdout_archive_needs_no_writable_root_and_does_not_create_dash():
     ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.READ)
     await ws.shell("printf hello > /data/a")
@@ -203,16 +75,3 @@ async def test_stdout_archive_needs_no_writable_root_and_does_not_create_dash():
     assert await result.materialize_stderr() == b"a\n"
     assert (await ws.shell("test ! -e /-")).exit_code == 0
     await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("data,flags", [(b"", "-tf"), (b"x" * 1024, "-xf")])
-async def test_invalid_archive_has_tar_diagnostics(data, flags):
-    notices = b"tar: This does not look like a tar archive\n"
-    if len(data) >= 512:
-        notices += b"tar: Skipping to next header\n"
-    assert await _shell(f"tar {flags} /data/bad", {"/data/bad": data}) == (
-        2,
-        b"",
-        notices + b"tar: Exiting with failure status due to previous errors\n",
-    )

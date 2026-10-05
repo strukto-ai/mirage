@@ -35,11 +35,12 @@
             "js": "const f = std.open('/data/digits.txt', 'r')\nf.seek(2, std.SEEK_SET)\nconst at = f.tell()\nconst a = f.readAsString(4)\nconsole.log(at, JSON.stringify(a), f.tell(), JSON.stringify(f.readAsString()))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "2 '2345' 6 '6789'\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "2 '2345' 6 '6789'\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "2 \"2345\" 6 \"6789\"\n"
             }
           }
@@ -50,15 +51,13 @@
             "js": "const f = std.open('/data/digits.txt', 'r')\nf.seek(-3, std.SEEK_END)\nconsole.log(f.readAsString(), f.tell())"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "b'789' 10\n"
-          },
-          "expect_on": {
-            "quickjs": {
-              "stdout": "789 10\n"
+            "python": {
+              "exit": 0,
+              "stdout": "b'789' 10\n"
             },
-            "quickjs@typescript": {
-              "stdout": "0123456789 10\n"
+            "js": {
+              "exit": 0,
+              "stdout": "789 10\n"
             }
           }
         },
@@ -68,11 +67,12 @@
             "js": "const f = std.open('/data/digits.txt', 'r')\nf.seek(20, std.SEEK_SET)\nconsole.log(JSON.stringify(f.readAsString(4)), f.tell(), f.eof())"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "b'' 20\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "b'' 20\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "\"\" 20 true\n"
             }
           }
@@ -159,11 +159,12 @@
             "js": "const f = std.open('/data/big.txt', 'r')\nf.seek(1048570, std.SEEK_SET)\nconst a = f.readAsString(12)\nf.seek(1500000, std.SEEK_SET)\nconst b = f.readAsString(10)\nconsole.log(JSON.stringify(a), JSON.stringify(b), f.tell())"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "b'6334\\nline 96' b'ne 134259\\n' 1500010\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "b'6334\\nline 96' b'ne 134259\\n' 1500010\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "\"6334\\nline 96\" \"ne 134259\\n\" 1500010\n"
             }
           }

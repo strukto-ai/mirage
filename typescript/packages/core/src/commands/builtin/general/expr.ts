@@ -17,7 +17,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { byteView, fromByteView } from '../../../shell/bytes.ts'
 import { BreError, compileBre } from '../utils/bre.ts'
 import { quoteWord } from '../../quote.ts'
 
@@ -116,40 +116,6 @@ function parseIntOperand(s: string): bigint {
   const n = intOperandOrNone(s)
   if (n === null) throw new ExprError(NON_INTEGER)
   return n
-}
-
-// One argv word as GNU sees it: one character per byte.
-//
-// Every expr string operator counts bytes, not characters, because GNU
-// runs in the C locale: `expr length ee` with two two-byte `e` acutes is
-// 4, `substr` will split one character in half and print the half
-// (`expr substr <e-acute><e-acute> 2 2` is the bytes `a9 c3`), `index`
-// searches a set of bytes so a byte shared with another character
-// matches, and the BRE's `.` matches one byte. All of that follows from
-// one representation change rather than four special cases, so the whole
-// parser runs on a string whose every character is one byte and the
-// conversion happens only at the command boundary. `to_byte_view` in
-// expr.py is the twin.
-//
-// `encodeText` rather than `TextEncoder`, because a raw byte reaches a
-// command as its U+DCxx sentinel and `TextEncoder` would write that as
-// U+FFFD.
-function toByteView(text: string): string {
-  const raw = encodeText(text)
-  let view = ''
-  for (const byte of raw) view += String.fromCharCode(byte)
-  return view
-}
-
-// The bytes a byte-view string stands for -- a value, or a diagnostic
-// built from byte-view words and this module's ASCII wording, so every
-// code point is below 256. GNU writes the raw bytes of the operand it was
-// handed, so a `substr` that split a character prints the invalid half
-// rather than a replacement character.
-function fromByteView(view: string): Uint8Array {
-  const raw = new Uint8Array(view.length)
-  for (let i = 0; i < view.length; i += 1) raw[i] = view.charCodeAt(i) & 0xff
-  return raw
 }
 
 // Whether GNU expr counts a value as false. GNU's `null()` is not "empty
@@ -293,7 +259,7 @@ function doSubstr(text: string, posArg: string, lenArg: string): string {
 // `expr 1 '|' 1 '/' 0` is 1 rather than a division by zero.
 //
 // Every word in `args`, every value it produces and every word it quotes
-// in a diagnostic is a byte view (`toByteView`), which is what makes
+// in a diagnostic is a byte view (`byteView`), which is what makes
 // `length`, `index`, `substr` and `:` count bytes as GNU does and makes a
 // string comparison the `strcmp` byte order GNU uses. The conversion is
 // the command's, not the parser's.
@@ -505,7 +471,7 @@ function exprCommand(
     return [null, new IOResult({ exitCode: 2, stderr: fromByteView(MISSING_OPERAND) })]
   }
   try {
-    const [result, exitCode] = exprEval(texts.map(toByteView))
+    const [result, exitCode] = exprEval(texts.map((text) => byteView(text)))
     return [fromByteView(result + '\n'), new IOResult({ exitCode })]
   } catch (err) {
     if (err instanceof ExprError) {

@@ -45,7 +45,14 @@ import {
   CODEX_TERMINATED,
 } from './constants.ts'
 import { CodexRPCError } from './errors.ts'
-import { keyProfile, loginEnv, newSessionId, openSession, type ChannelRequest } from './session.ts'
+import {
+  keyProfile,
+  loginEntry,
+  loginEnv,
+  newSessionId,
+  openSession,
+  type ChannelRequest,
+} from './session.ts'
 import { ChannelInput, ChannelOutput, Mark } from './stream.ts'
 
 type Message = Record<string, JsonValue>
@@ -891,11 +898,11 @@ export async function serveCodex(
   channel: ServerChannel,
   request: ChannelRequest,
 ): Promise<void> {
-  if (!registry.has(request.username)) {
+  const entry = loginEntry(registry, request.username, request.account)
+  if (entry === null) {
     refuse(channel, `no such workspace: ${request.username}`)
     return
   }
-  const entry = registry.get(request.username)
   const sessionId = newSessionId()
   try {
     await openSession(entry.runner.ws, sessionId, loginEnv(request), keyProfile(request.profile))

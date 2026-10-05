@@ -16,8 +16,11 @@ from functools import partial
 
 import pytest
 
-from mirage.commands.builtin.generic.rg import parse_flags, walk_filter
-from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.rg import (
+    parse_flags,
+    rg_generic,
+    walk_filter,
+)
 from mirage.commands.builtin.rg_scan import (
     WalkFilter,
     loop_error_line,
@@ -96,7 +99,7 @@ async def rg(backend, path, pattern, **kwargs):
     if kwargs.get("glob_pattern") is not None:
         flags["glob"] = [kwargs["glob_pattern"]]
     accessor = backend.accessor
-    out, io = await generic_rg(
+    out, io = await rg_generic(
         [to_pathspec(path)],
         [pattern],
         CommandOpts(flags=flags),

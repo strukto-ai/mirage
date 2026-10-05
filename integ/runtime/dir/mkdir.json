@@ -32,11 +32,12 @@
             "js": "console.log(os.mkdir('/data/d'), (os.stat('/data/d')[0].mode & os.S_IFMT) === os.S_IFDIR)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "True\n"
-          },
-          "expect_on": {
-            "quickjs": {
+            "python": {
+              "exit": 0,
+              "stdout": "True\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "0 true\n"
             }
           }
@@ -47,11 +48,28 @@
             "js": "console.log(os.mkdir('/data/d'))"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileExistsError\n"
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-20\n"
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nfor parents in (False, True):\n    try:\n        Path('/data/seed.txt').mkdir(parents=parents)\n        print('created')\n    except OSError as e:\n        print(type(e).__name__)",
+            "js": "console.log(os.mkdir('/data/seed.txt'))"
           },
-          "expect_on": {
-            "quickjs": {
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "FileExistsError\nFileExistsError\n"
+            },
+            "js": {
+              "exit": 0,
               "stdout": "-20\n"
             }
           }
@@ -62,18 +80,13 @@
             "js": "const r = os.mkdir('/data/x/y')\nconsole.log(r === 0 ? 'created' : r)"
           },
           "expect": {
-            "exit": 0,
-            "stdout": "FileNotFoundError\n"
-          },
-          "expect_on": {
-            "quickjs": {
-              "stdout": "-44\n"
-            },
-            "s3": {
-              "stdout": "created\n"
-            },
-            "pyodide@s3": {
+            "python": {
+              "exit": 0,
               "stdout": "FileNotFoundError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-44\n"
             }
           }
         },

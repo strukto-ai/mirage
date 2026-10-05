@@ -21,7 +21,7 @@ import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
 import { parseFlags, rgGeneric, walkFilter } from './generic/rg.ts'
 import { eacces, enoent } from '../../utils/errors.ts'
-import { decodeLine } from './grep_offsets.ts'
+import { decodeText } from '../../shell/bytes.ts'
 import {
   type WalkFilter,
   loopErrorLine,
@@ -114,10 +114,10 @@ async function rgFull(
       yield await readBytesFn(p.virtual)
     },
   )) as [Uint8Array | AsyncIterable<Uint8Array> | null, IOResult]
-  const text = out === null ? '' : decodeLine(await materialize(out))
+  const text = out === null ? '' : decodeText(await materialize(out))
   if (io !== null) io.exitCode = result.exitCode
   if (warnings !== null) {
-    const stderr = decodeLine(await materialize(result.stderr))
+    const stderr = decodeText(await materialize(result.stderr))
     if (stderr !== '') warnings.push(...stderr.split('\n').slice(0, -1))
   }
   return text === '' ? [] : text.split('\n').slice(0, -1)
@@ -786,7 +786,7 @@ describe('rgFull offsets over a smuggled byte', () => {
 
   it('keeps a smuggled byte in the printed line', async () => {
     // The scan answers in `string[]`, and the byte rides through as the
-    // sentinel `decodeLine` gave it: `formatRecords` puts it back as itself,
+    // sentinel `decodeText` gave it: `formatRecords` puts it back as itself,
     // which is what ripgrep prints (measured 14.1.1: `\377` reaches the
     // terminal raw, never as U+FFFD).
     expect(await raw('/raw/inv2.bin', 'a', { byteOffsets: true })).toEqual(['0:\udcffa'])

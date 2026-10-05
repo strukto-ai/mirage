@@ -101,6 +101,40 @@
         "stdout": "a1=./sub/x.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "source_and_bash_scripts_keep_raw_bytes",
+      "seq": 609224,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'echo \\377\\n' > /data/raw.sh; source /data/raw.sh | od -An -tx1; bash /data/raw.sh | od -An -tx1; printf 'echo \\376\\n' | bash | od -An -tx1; rm /data/raw.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": " ff 0a\n ff 0a\n fe 0a\n",
+        "stderr": ""
+      }
     }
   ]
 }

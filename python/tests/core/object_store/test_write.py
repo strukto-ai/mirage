@@ -90,9 +90,9 @@ def test_truncate_extends_a_missing_key(accessor):
 
 
 def test_mkdir_writes_a_marker_and_parents_gate_ancestors(accessor):
-    store = FakeStore()
+    store = FakeStore({"a/": b""})
     manager = _managed(make_mkdir(make_driver(store))(accessor, spec("/a/b")))
-    assert store.objects == {"a/b/": b""}
+    assert store.objects == {"a/": b"", "a/b/": b""}
     assert manager.writes == ["/a/b"]
     deep = _managed(
         make_mkdir(make_driver(store))(accessor, spec("/x/y"), parents=True)
@@ -118,6 +118,27 @@ def test_mkdir_refuses_a_name_that_exists(accessor):
     assert store.puts == []
 
 
+def test_mkdir_parents_keeps_an_existing_marker(accessor):
+    # A rewrite replaces the marker's metadata and, in a versioned bucket,
+    # adds a version; a directory only a key implies still gets a marker.
+    store = FakeStore({"a/": b"", "imp/x.txt": b"x"})
+    mkdir = make_mkdir(make_driver(store))
+    _managed(mkdir(accessor, spec("/a"), parents=True))
+    assert store.puts == []
+    _managed(mkdir(accessor, spec("/imp"), parents=True))
+    assert store.puts == [("imp/", b"")]
+
+
+def test_mkdir_refuses_a_missing_parent_without_parents(accessor):
+    # mkdir(2) makes one directory under one that exists; only `-p`
+    # makes the chain, so a guest's os.mkdir under a missing parent is
+    # ENOENT and puts nothing.
+    store = FakeStore()
+    with pytest.raises(FileNotFoundError):
+        _managed(make_mkdir(make_driver(store))(accessor, spec("/a/b")))
+    assert store.puts == []
+
+
 def test_mkdir_refuses_a_directory_under_a_file(accessor):
     # A marker below a file put a directory under it. mkdir(2) blames
     # the operand; the walk `mkdir -p` makes names the file it stops at.
@@ -133,11 +154,14 @@ def test_mkdir_refuses_a_directory_under_a_file(accessor):
     assert store.puts == []
 
 
-def test_mkdir_without_marker_support_is_a_no_op(accessor):
+@pytest.mark.parametrize("parents", [True, False])
+def test_mkdir_without_marker_support_is_a_no_op(accessor, parents):
+    # Without markers a parent made a moment ago has no row, so even a
+    # plain mkdir under it cannot be checked and stays a no-op.
     store = FakeStore()
     driver = replace(make_driver(store), markers_supported=False)
     manager = _managed(
-        make_mkdir(driver)(accessor, spec("/a/b"), parents=True)
+        make_mkdir(driver)(accessor, spec("/a/b"), parents=parents)
     )
     assert store.objects == {}
     assert manager.writes == []

@@ -127,19 +127,19 @@ export class HfHubAccessor extends Accessor {
   }
 }
 
-export class HfModelsHubAccessor extends HfHubAccessor {
+export class HfModelsAccessor extends HfHubAccessor {
   constructor(config: HfRepoConfig) {
     super(config, 'model', VFSName.HF_MODELS)
   }
 }
 
-export class HfDatasetsHubAccessor extends HfHubAccessor {
+export class HfDatasetsAccessor extends HfHubAccessor {
   constructor(config: HfRepoConfig) {
     super(config, 'dataset', VFSName.HF_DATASETS)
   }
 }
 
-export class HfSpacesHubAccessor extends HfHubAccessor {
+export class HfSpacesAccessor extends HfHubAccessor {
   constructor(config: HfRepoConfig) {
     super(config, 'space', VFSName.HF_SPACES)
   }

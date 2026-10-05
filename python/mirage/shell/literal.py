@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from shlex import join
 
+from mirage.shell.bytes import encode_text
 from mirage.shell.types import TSNodeLike
 
 
@@ -57,16 +58,16 @@ def literal_tree(argv: tuple[str, ...]) -> TSNodeLike:
     offset = 0
     for i, arg in enumerate(argv):
         word = LiteralNode(
-            "raw_string", ("'" + arg + "'").encode(), start_byte=offset
+            "raw_string", encode_text("'" + arg + "'"), start_byte=offset
         )
         if i == 0:
-            name = LiteralNode("command_name", arg.encode(), [word])
+            name = LiteralNode("command_name", encode_text(arg), [word])
             word.parent = name
             words.append(name)
         else:
             words.append(word)
         offset += len(word.text) + 1
-    text = join(argv).encode()
+    text = encode_text(join(argv))
     command = LiteralNode("command", text, list(words))
     for part in words:
         part.parent = command

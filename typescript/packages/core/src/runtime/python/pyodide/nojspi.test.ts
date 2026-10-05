@@ -53,12 +53,14 @@ describe('PyodideRuntime without JSPI', () => {
     })
     expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(result.exitCode).toBe(0)
-    const writes = calls.filter((c) => c.op === 'write')
-    expect(writes).toHaveLength(1)
-    const w0 = writes[0]
-    if (w0?.bytes === undefined) throw new Error('unreachable')
-    expect(w0.path).toBe('/ram/out.txt')
-    expect(new TextDecoder().decode(w0.bytes)).toBe('landed')
+    const mutations = calls.filter((c) => c.op === 'create' || c.op === 'pwrite')
+    expect(mutations.map((c) => `${c.op} ${c.path}`)).toEqual([
+      'create /ram/out.txt',
+      'pwrite /ram/out.txt',
+    ])
+    const written = mutations[1]?.bytes
+    if (written === undefined) throw new Error('unreachable')
+    expect(new TextDecoder().decode(written)).toBe('landed')
     await rt.close()
   }, 60_000)
 
@@ -135,7 +137,8 @@ describe('PyodideRuntime without JSPI', () => {
     const mutations = calls.filter((c) => c.op !== 'read' && c.op !== 'readdir' && c.op !== 'stat')
     expect(mutations).toEqual([
       { op: 'mkdir', path: '/ram/box' },
-      { op: 'write', path: '/ram/box/f.txt' },
+      { op: 'create', path: '/ram/box/f.txt' },
+      { op: 'pwrite', path: '/ram/box/f.txt' },
       { op: 'rename', path: '/ram/box/f.txt', dst: '/ram/box/g.txt' },
       { op: 'unlink', path: '/ram/box/g.txt' },
       { op: 'rmdir', path: '/ram/box' },

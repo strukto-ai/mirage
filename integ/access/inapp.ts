@@ -20,7 +20,6 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buffer } from 'node:stream/consumers'
-import { MirageToolOperations } from '@struktoai/mirage-agents/tool_operations'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import {
   Outcome,
@@ -124,7 +123,7 @@ async function bytes(vfs: Vfs, step: Json): Promise<Answer> {
 async function caseAnswer(
   op: string,
   session: Session,
-  tools: MirageToolOperations,
+  tools: Session['tools'],
   step: Json,
 ): Promise<Answer> {
   if (op === 'shell' || op === 'session') {
@@ -224,6 +223,16 @@ async function steps(
       } else if (kind === 'session_delete') {
         await get(wid).closeSession(step.session as string)
         answers.push({ text: 'deleted' })
+      } else if (kind === 'cancel_lines') {
+        const session = typeof step.session === 'string' ? step.session : undefined
+        answers.push({ text: String(await get(wid).cancel(session)) })
+      } else if (kind === 'kill_jobs') {
+        const session = typeof step.session === 'string' ? step.session : undefined
+        answers.push({ text: String(await get(wid).kill(session)) })
+      } else if (kind === 'close_workspace') {
+        await get(wid).close()
+        workspaces.delete(wid)
+        answers.push({ text: 'closed' })
       } else if (kind === 'snapshot') {
         await get(wid).snapshot(join(scratch, prefix + (step.name as string)))
         answers.push({ text: 'saved' })
@@ -287,7 +296,7 @@ async function main(): Promise<void> {
       suite.session !== undefined
         ? await ws.session(suite.session.id, { profile: suite.session.profile })
         : await ws.session(ws.defaultSessionId)
-    const tools = new MirageToolOperations(ws, { sessionId: session.sessionId })
+    const tools = session.tools
     const answers: Answer[] = []
     for (const c of suite.cases) answers.push(await caseAnswer(suite.op, session, tools, c.input))
     console.log(JSON.stringify(answers))

@@ -19,7 +19,7 @@ import type {
   WriteOps,
   SearchOps,
   ReadStreamOp,
-  ReaddirOp,
+  MkdirOp,
   ResolveGlobOp,
   StatOp,
 } from '../../../vfs/types.ts'
@@ -45,6 +45,7 @@ import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
 import { moveReveals } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { refuseTaken } from '../../../ops/generic/factory.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 
 import { FileType, MountMode, PathSpec, type FileStat, type WalkProbe } from '../../../types.ts'
@@ -63,26 +64,11 @@ import {
 } from '../../../utils/errors.ts'
 import { dotRefusal } from '../utils/paths.ts'
 import type { ChildMounts } from '../../../ops/types.ts'
-import {
-  DEFAULT_MAX_GLOB_MATCHES,
-  resolveGlobWith,
-  type TargetStat,
-} from '../../../utils/glob_walk.ts'
+import { makeResolveGlob, type TargetStat } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 import type { AggregateFn, CommandFnResult, CommandOpts } from '../../config.ts'
-
-export function makeResolveGlob<A extends Accessor = Accessor>(
-  readdir: ReaddirOp<A>,
-  maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
-  children?: ChildMounts,
-  stat?: StatOp<A>,
-  targetStat?: TargetStat,
-): ResolveGlobOp<A> {
-  return async (accessor, paths, index) =>
-    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches, children, stat, targetStat)
-}
 
 export interface CommandIO<A extends Accessor = Accessor>
   extends ReadOps<A>, NativeReadOps<A>, WriteOps<A> {
@@ -471,6 +457,21 @@ async function mkdirOnReadOnly<A extends Accessor>(
   if (!parents) throw eexist(path.virtual)
 }
 
+/**
+ * mkdir on a writable region: a taken name is refused before the create, as
+ * mkdir(2) does (`refuseTaken`). Mirrors Python's `_mkdir_on_writable`.
+ */
+async function mkdirOnWritable<A extends Accessor>(
+  mkdir: MkdirOp<A>,
+  stat: StatOp<A>,
+  accessor: A,
+  path: PathSpec,
+  parents: boolean,
+): Promise<void> {
+  await refuseTaken(stat, accessor, path, parents)
+  await mkdir(accessor, path, parents)
+}
+
 /** Guard only written endpoints; native subtree mutations also check descendants. */
 export function withModeGuard<A extends Accessor = Accessor>(ops: CommandIO<A>): CommandIO<A> {
   const guarded = { ...ops }
@@ -481,7 +482,8 @@ export function withModeGuard<A extends Accessor = Accessor>(ops: CommandIO<A>):
     })
   }
   // A directory on a read-only region answers what the create would run into
-  // instead of refusing the operand outright (mkdirOnReadOnly).
+  // instead of refusing the operand outright (mkdirOnReadOnly), and one on a
+  // writable region refuses a taken name (mkdirOnWritable).
   const mk = ops.mkdir
   if (mk !== undefined) {
     guarded.mkdir = (accessor, path, parents) => {
@@ -489,7 +491,7 @@ export function withModeGuard<A extends Accessor = Accessor>(ops: CommandIO<A>):
       if (gate !== null && effectivePathMode(path.virtual, gate[0], gate[1]) === MountMode.READ) {
         return mkdirOnReadOnly(ops.stat, gate, accessor, path, parents ?? false)
       }
-      return mk(accessor, path, parents)
+      return mkdirOnWritable(mk, ops.stat, accessor, path, parents ?? false)
     }
   }
   return guarded

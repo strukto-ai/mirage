@@ -14,6 +14,7 @@
 
 from dataclasses import replace
 
+from mirage.shell.bytes import decode_text
 from mirage.shell.parse.heredoc.body import heredoc_bodies
 from mirage.shell.parse.heredoc.constants import (
     HEREDOC_BODY,
@@ -93,4 +94,4 @@ def body_prefix(redirect_node: TSNodeLike) -> str:
     gap = data[span[0] : body.start_byte - origin]
     if not gap or any(byte not in SKIPPED_BLANKS for byte in gap):
         return ""
-    return gap.decode()
+    return decode_text(gap)

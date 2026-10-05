@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
-import { dateToSnowflake, DISCORD_EPOCH, fetchRecentMessages, getHistoryJsonl } from './history.ts'
+import { DISCORD_EPOCH, fetchRecentMessages, getHistoryJsonl, snowflakeAt } from './history.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -48,23 +48,10 @@ class FakeDiscordTransport implements DiscordTransport {
   }
 }
 
-describe('dateToSnowflake', () => {
-  it('produces a larger snowflake at end-of-day than at start', () => {
-    const start = BigInt(dateToSnowflake('2026-04-25'))
-    const end = BigInt(dateToSnowflake('2026-04-26'))
-    expect(end > start).toBe(true)
-  })
-
+describe('snowflakeAt', () => {
   it('matches the (ms - epoch) << 22 formula', () => {
-    const startMs = BigInt(Date.UTC(2026, 3, 25, 0, 0, 0))
-    const expected = ((startMs - DISCORD_EPOCH) << 22n).toString()
-    expect(dateToSnowflake('2026-04-25')).toBe(expected)
-  })
-
-  it('throws on malformed dates', () => {
-    expect(() => dateToSnowflake('invalid')).toThrow()
-    expect(() => dateToSnowflake('2026-04')).toThrow()
-    expect(() => dateToSnowflake('abcd-ef-gh')).toThrow()
+    const ms = Date.UTC(2026, 3, 25)
+    expect(snowflakeAt(ms / 1000)).toBe((BigInt(ms) - DISCORD_EPOCH) << 22n)
   })
 })
 
@@ -73,12 +60,12 @@ describe('getHistoryJsonl', () => {
     // Discord answers newest-first, so a full page is descending and the
     // cursor for the next one is its first (newest) id.
     const firstPage = Array.from({ length: 100 }, (_, i) => ({
-      id: String(BigInt(dateToSnowflake('2026-04-25')) + BigInt(100 - i)),
+      id: String(snowflakeAt(Date.UTC(2026, 3, 25) / 1000) + BigInt(100 - i)),
       content: `msg${String(100 - i)}`,
     }))
     const secondPage = [
       {
-        id: String(BigInt(dateToSnowflake('2026-04-25')) + 200n),
+        id: String(snowflakeAt(Date.UTC(2026, 3, 25) / 1000) + 200n),
         content: 'tail',
       },
     ]
@@ -99,7 +86,7 @@ describe('getHistoryJsonl', () => {
   })
 
   it('filters out messages whose id is past the end-of-day snowflake', async () => {
-    const beforeBig = BigInt(dateToSnowflake('2026-04-26'))
+    const beforeBig = snowflakeAt(Date.UTC(2026, 3, 26) / 1000)
     const inside = { id: String(beforeBig - 10n), content: 'in' }
     const outside = { id: String(beforeBig + 10n), content: 'out' }
     const t = new FakeDiscordTransport((n) => {
@@ -120,7 +107,7 @@ describe('getHistoryJsonl', () => {
   })
 
   it('sorts messages ascending by snowflake id across pages', async () => {
-    const after = BigInt(dateToSnowflake('2026-04-25'))
+    const after = snowflakeAt(Date.UTC(2026, 3, 25) / 1000)
     const m1 = { id: String(after + 5n), content: 'a' }
     const m2 = { id: String(after + 3n), content: 'b' }
     const t = new FakeDiscordTransport((n) => {

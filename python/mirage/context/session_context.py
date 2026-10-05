@@ -14,6 +14,7 @@
 
 import errno
 import os
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -434,13 +435,19 @@ def path_rules_active() -> bool:
     return gate is not None and gate.scoped
 
 
-_redirect_paths: ContextVar[tuple[int, tuple[PathSpec, ...]] | None] = (
-    ContextVar("mirage_redirect_paths", default=None)
-)
+# Opens a statement's write targets as bash does before the command
+# runs; False when one cannot be opened.
+RedirectOpener = Callable[[], Awaitable[bool]]
+
+_redirect_paths: ContextVar[
+    tuple[int, tuple[PathSpec, ...], RedirectOpener | None] | None
+] = ContextVar("mirage_redirect_paths", default=None)
 
 
 def set_redirect_paths(
-    node_id: int, paths: tuple[PathSpec, ...]
+    node_id: int,
+    paths: tuple[PathSpec, ...],
+    opener: RedirectOpener | None = None,
 ) -> Token[Any]:
     """Bind a statement's expanded redirect targets to the command node
     they belong to, for that node's run.
@@ -452,11 +459,17 @@ def set_redirect_paths(
     on the way to the command (a ``$()`` operand, an ``eval``) never
     inherits the outer statement's targets.
 
+    The opener empties the targets bash opens for writing before the
+    command runs; dispatch calls it once the line is admitted, so a
+    command the gate refuses leaves its targets as they were.
+
     Args:
         node_id (int): the command node the targets belong to.
         paths (tuple[PathSpec, ...]): the expanded targets.
+        opener (RedirectOpener | None): opens the targets, False when
+            one of them cannot be opened.
     """
-    return _redirect_paths.set((node_id, paths))
+    return _redirect_paths.set((node_id, paths, opener))
 
 
 def reset_redirect_paths(token: Token[Any]) -> None:
@@ -475,6 +488,19 @@ def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
     if bound is None or bound[0] != node_id:
         return ()
     return bound[1]
+
+
+def redirect_opener_for(node_id: int) -> RedirectOpener | None:
+    """The opener bound with this command node's redirect targets, None
+    for any other node or when none is bound.
+
+    Args:
+        node_id (int): the command node just admitted.
+    """
+    bound = _redirect_paths.get()
+    if bound is None or bound[0] != node_id:
+        return None
+    return bound[2]
 
 
 _program_invocation: ContextVar[int | None] = ContextVar(

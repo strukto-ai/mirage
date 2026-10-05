@@ -2,7 +2,10 @@ import asyncio
 
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.errors import GitError
+from mirage.commands.cli.builtin.git.errors import (
+    GitError,
+    ShortlogOptionError,
+)
 from mirage.commands.cli.builtin.git.format import subject
 from mirage.commands.cli.builtin.git.history import (
     LogFlags,
@@ -17,7 +20,11 @@ from mirage.commands.cli.builtin.git.mailmap import (
 from mirage.commands.cli.builtin.git.revparse import split_revisions
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import MailmapEntry
-from mirage.commands.cli.builtin.git.util import check_operands, escaped, fatal
+from mirage.commands.cli.builtin.git.util import (
+    fatal,
+    option_operand,
+    verb_usage,
+)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -78,7 +85,9 @@ async def shortlog(
     """
     fl = FlagView(inv.flags)
     try:
-        check_operands(inv.texts, marked=escaped(inv.argv))
+        word = option_operand(inv, inv.texts)
+        if word is not None:
+            raise ShortlogOptionError(word, verb_usage(inv))
         doors = inv.doors or CLIDoors()
         repo, location = await opened(fl, doors)
         assert doors.dispatch is not None

@@ -22,17 +22,22 @@ import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import {
+  AmbiguousArgumentError,
+  AmbiguousObjectNameError,
   BranchExistsError,
   BranchNameRequiredError,
-  BranchUsageError,
+  BranchPointError,
   CheckedOutBranchError,
   GitError,
   InvalidBranchNameError,
+  InvalidObjectNameError,
   NoBranchError,
   NoWorkspaceError,
+  RefDeleteReadOnlyError,
   RefLockError,
-  UnknownSwitchError,
+  RefReadOnlyError,
   UnmergedBranchError,
+  UsageError,
 } from './errors.ts'
 import { parseFlags, select } from './history.ts'
 import { short } from './format.ts'
@@ -48,26 +53,28 @@ import {
   refListing,
   sortKeys,
 } from './ref_list.ts'
-import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import { resolveCommit } from './revparse.ts'
+import {
+  COMMIT,
+  noteAmbiguity,
+  refsNamed,
+  resolveCommit,
+  resolveObject,
+  unwrapped,
+} from './revparse.ts'
+import { append, entry, IDENTITY, logged, ZERO } from './reflog.ts'
 import {
   RefKind,
   Track,
   type Dispatch,
+  type GitObject,
   type HeadRef,
+  type ReadOnlyRefusal,
   type RefItem,
   type Upstream,
 } from './types.ts'
-import {
-  checkOperands,
-  configSection,
-  escaped,
-  fatal,
-  gitBool,
-  switches,
-  withoutSection,
-} from './util.ts'
+import { checkSwitches, configSection, fatal, gitBool, verbUsage, withoutSection } from './util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -81,6 +88,24 @@ const TRACK_WORDS: ReadonlyMap<string, Track> = new Map([
   ['simple', Track.SIMPLE],
   ['inherit', Track.INHERIT],
 ])
+
+/**
+ * Refuse a start point two refs answer to, as git's branch creation does while
+ * `core.warnAmbiguousRefs` is on, after warning that it is ambiguous. With no
+ * start point git starts from the current branch by its short name, so that
+ * name is the one checked.
+ *
+ * @param repo the opened repository
+ * @param name the start point as typed, or the current branch's short name
+ * @param warned whether reading it already put the warning on the list
+ */
+export async function refuseAmbiguous(repo: Repo, name: string, warned: boolean): Promise<void> {
+  if (!(await configBool(repo, 'core.warnAmbiguousRefs', true))) return
+  const table = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  if (refsNamed(table, name).length <= 1) return
+  if (!warned) await noteAmbiguity(repo, name)
+  throw new AmbiguousObjectNameError(name)
+}
 
 /** Point a new branch at a commit, refusing to move an existing one. */
 async function create(
@@ -98,12 +123,32 @@ async function create(
   if (!validRefName(name)) throw new InvalidBranchNameError(name)
   const ref = `${HEADS_PREFIX}${name}`
   if (refs.has(ref)) throw new BranchExistsError(name)
-  const oid = await resolveCommit(repo, start ?? HEAD)
+  // With no start point git starts from the current branch by its short name,
+  // or from HEAD when it is detached, and it is that name the refusals and the
+  // new branch's log speak of.
+  const from = start ?? head.branch ?? HEAD
+  let found: GitObject
+  try {
+    found = await resolveObject(repo, from)
+  } catch (err) {
+    if (err instanceof AmbiguousArgumentError) throw new InvalidObjectNameError(from)
+    throw err
+  }
+  await refuseAmbiguous(repo, from, true)
+  const commit = await unwrapped(repo, found, from)
+  if (commit.type !== COMMIT) throw new BranchPointError(commit.oid, commit.type, from)
+  const oid = commit.oid
   // Last, as it is for git: a ref whose path another ref already holds fails
   // when the lock is taken, so a bad start point is reported first.
   const held = blockingRef(new Set(refs.keys()), ref)
   if (held !== null) throw new RefLockError(ref, held)
   await writeRef(dispatch, repo.location.commondir, ref, oid)
+  const log = under(repo.location.commondir, 'logs', ref)
+  if (await logged(dispatch, repo.location, ref, log)) {
+    const when = Math.floor(Date.now() / 1000)
+    const line = entry(ZERO, oid, IDENTITY, when, `branch: Created from ${from}`)
+    await append(dispatch, repo.location.commondir, `logs/${ref}`, line)
+  }
   return setUpTracking(repo, name, start ?? null, mode, head)
 }
 
@@ -433,7 +478,7 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const dispatch = doors.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
-    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
+    checkSwitches(inv, texts)
     const repo = await opened(fl, doors)
     const mode = await trackMode(repo)
     const filter = await refFilter(repo, words)
@@ -443,16 +488,20 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
       return [ENC.encode(head.branch ? head.branch + '\n' : ''), new IOResult()]
     const force = fl.asBool('D')
     if (fl.asBool('delete') || force) {
-      if (listing) throw new BranchUsageError()
+      if (listing) throw new UsageError('', verbUsage(inv))
       if (texts.length === 0) throw new BranchNameRequiredError()
       const parts: string[] = []
       for (const name of texts) parts.push(await remove(dispatch, repo, refs, head, name, force))
+      if (fl.asBool('quiet')) return [null, new IOResult()]
       return [ENC.encode(parts.join('')), new IOResult()]
     }
     const first = texts[0]
     if (first !== undefined && !listing) {
       const [tracking, warning] = await create(dispatch, repo, refs, first, texts[1], mode, head)
-      return [tracking ? ENC.encode(tracking) : null, new IOResult({ stderr: ENC.encode(warning) })]
+      return [
+        tracking && !fl.asBool('quiet') ? ENC.encode(tracking) : null,
+        new IOResult({ stderr: ENC.encode(warning) }),
+      ]
     }
     return await listBranches(
       inv,
@@ -514,4 +563,13 @@ export async function branchUpstream(
   if (!refs.has(`${HEADS_PREFIX}${head.branch}`)) return null
   const tip = await resolveCommit(repo, `${HEADS_PREFIX}${head.branch}`)
   return upstreamOf(repo, head.branch, tip)
+}
+
+/** branch's refusal by a read-only mount: the lock on the ref it creates or deletes. */
+export const branchReadOnly: ReadOnlyRefusal = (inv, location) => {
+  const fl = new FlagView(inv.flags)
+  const ref = `${HEADS_PREFIX}${inv.texts[0] ?? ''}`
+  const path = under(location?.commondir ?? '.git', ref)
+  if (fl.asBool('delete') || fl.asBool('D')) return new RefDeleteReadOnlyError(ref, path)
+  return new RefReadOnlyError(ref, path)
 }

@@ -36,6 +36,7 @@ import { IOResult, materialize } from '../../../../io/types.ts'
 import { readZipEntries, ZipFormatError, type ZipEntry } from '../../../builtin/generic/unzip.ts'
 import {
   camel,
+  ghBool,
   ghTransport,
   readCliFile,
   repoFor,
@@ -144,8 +145,8 @@ export async function runViewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const raw = inv.texts[0] ?? ''
   if (!/^\d+$/.test(raw)) throw new Error('a run ID is required in noninteractive mode')
-  const logs = fl.asBool('log')
-  const failedOnly = fl.asBool('log_failed')
+  const logs = ghBool(fl, 'log')
+  const failedOnly = ghBool(fl, 'log_failed')
   if (logs && failedOnly) throw new UsageError('specify only one of --log or --log-failed', 1)
   const transport = ghTransport(inv.config)
   const ref = repoFor(inv, fl)
@@ -158,7 +159,7 @@ export async function runViewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const out = await typedOut(row, fl, human, RUN_FIELDS)
   if (
     out !== null &&
-    fl.asBool('exit_status') &&
+    ghBool(fl, 'exit_status') &&
     row.conclusion !== null &&
     row.conclusion !== undefined &&
     row.conclusion !== '' &&
@@ -346,14 +347,14 @@ export async function runRerunCmd(inv: CLIInvocation): Promise<CommandFnResult> 
   const job = fl.asStr('job')
   if (job !== undefined && job !== '') {
     if (!/^\d+$/.test(job)) throw new Error('--job expects a numeric job ID')
-    await rerunJob(transport, ref, Number(job), fl.asBool('debug'))
+    await rerunJob(transport, ref, Number(job), ghBool(fl, 'debug'))
   } else {
     await rerun(
       transport,
       ref,
       Number(raw),
-      fl.asBool('failed') ? 'rerun-failed-jobs' : 'rerun',
-      fl.asBool('debug') ? { enable_debug_logging: true } : undefined,
+      ghBool(fl, 'failed') ? 'rerun-failed-jobs' : 'rerun',
+      ghBool(fl, 'debug') ? { enable_debug_logging: true } : undefined,
     )
   }
   return textOut('')
@@ -366,7 +367,7 @@ export async function workflowListCmd(inv: CLIInvocation): Promise<CommandFnResu
       ghTransport(inv.config),
       repoFor(inv, fl),
       fl.asInt('limit') ?? 50,
-      fl.asBool('all') ? undefined : (row) => row.state === 'active',
+      ghBool(fl, 'all') ? undefined : (row) => row.state === 'active',
     )
   ).map(workflow)
   const human = rows
@@ -379,7 +380,7 @@ export async function workflowViewCmd(inv: CLIInvocation): Promise<CommandFnResu
   const fl = new FlagView(inv.flags)
   const id = inv.texts[0] ?? ''
   if (id === '') throw new Error('a workflow ID, name, or filename is required')
-  const yaml = fl.asBool('yaml')
+  const yaml = ghBool(fl, 'yaml')
   const gitRef = fl.asStr('ref') ?? ''
   if (!yaml && gitRef !== '') throw new UsageError('`--yaml` required when specifying `--ref`', 1)
   const transport = ghTransport(inv.config)
@@ -421,7 +422,7 @@ async function workflowYaml(
 }
 
 async function workflowInputs(inv: CLIInvocation, fl: FlagView): Promise<Record<string, unknown>> {
-  if (fl.asBool('json')) {
+  if (ghBool(fl, 'json')) {
     if (inv.stdin === null) throw new Error('--json needs standard input')
     let value: unknown
     try {

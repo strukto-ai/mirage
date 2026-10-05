@@ -30,8 +30,12 @@ import {
   SHELL_INPUT,
   WRITE_DESCRIPTION,
   WRITE_INPUT,
-} from '../tool_descriptions.ts'
-import { MirageToolOperations, type MirageToolOperationsOptions } from '../tool_operations.ts'
+} from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
+import {
+  MirageToolOperations,
+  type MirageToolOperationsOptions,
+} from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 
 /**
  * Mirage's tool table as Mastra tools: shell, read, write, edit, ls, grep
@@ -39,7 +43,11 @@ import { MirageToolOperations, type MirageToolOperationsOptions } from '../tool_
  * `{ text, isError }` as the MCP tool of the same name does.
  */
 export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions = {}) {
-  const operations = new MirageToolOperations(ws, options)
+  const session = new Session(ws, options.sessionId ?? null)
+  const operations =
+    options.staleWriteProtection === false
+      ? new MirageToolOperations(session, false)
+      : session.tools
   const mirageTool = (name: string, description: string, input: object) =>
     createTool({
       id: `mirage-${name}`,

@@ -29,7 +29,8 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { isFsError } from '../../utils/errors.ts'
 import { BreakSignal, ContinueSignal, carried, isUnwinding } from '../executor/control.ts'
 import { divertStatement } from '../executor/builtins/exec/index.ts'
-import { type ExecuteNodeFn, handleBackground } from '../executor/jobs.ts'
+import { handleBackground } from '../executor/jobs.ts'
+import type { ExecuteNodeFn } from '../executor/command/types.ts'
 import { failedRead, land, statementOutput, type Written } from '../executor/statement.ts'
 import { runExitTrap } from '../executor/traps.ts'
 import type { ExecuteFn } from '../expand/node.ts'
@@ -40,6 +41,7 @@ import type { HandOff } from '../../policy/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -175,7 +177,7 @@ async function runProgram(
       if (session.shellOptions.verbose === true && last >= first) {
         const text = sourceLines.slice(first, last + 1).join('\n')
         mergedIo = await land(
-          [[Channel.STDERR, new TextEncoder().encode(`${text}\n`), false]],
+          [[Channel.STDERR, encodeText(`${text}\n`), false]],
           sink,
           allStdout,
           mergedIo,
@@ -319,7 +321,7 @@ async function runProgram(
         else {
           ioResult.stderr = concat([
             await materialize(ioResult.stderr),
-            new TextEncoder().encode(`${err instanceof Error ? err.message : String(err)}\n`),
+            encodeText(`${err instanceof Error ? err.message : String(err)}\n`),
           ])
           ioResult.exitCode = 1
         }

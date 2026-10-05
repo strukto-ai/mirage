@@ -175,6 +175,7 @@ gh repo create tools-next --private --description 'Next generation'
 
 gh repo fork acme/tools
 gh repo fork acme/tools --fork-name tools-patched
+gh repo fork https://github.com/acme/tools --org acme-labs --default-branch-only
 
 gh repo rename tools-v2 -R acme/tools
 
@@ -205,10 +206,12 @@ current one; a name with no owner is the viewer's. Both print nothing on
 success, as gh does when it is not writing to a terminal.
 
 `[HOST/]OWNER/REPO` is parsed from the right, so the owner and the
-repository are the last two segments and a leading host is dropped. The
-host is accepted for compatibility with lines copied from real gh but
-does **not** route: every call goes to the install's `base_url`. A second
-host means a second install.
+repository are the last two segments. A repository URL (`https://HOST/OWNER/REPO`,
+`git@HOST:OWNER/REPO.git`) reads the same way. Every call goes to the
+install's `base_url`, so the host must be github.com or the host `base_url`
+names; any other is refused the way gh refuses a host it cannot reach,
+`error connecting to HOST`, rather than asked of the install's own host. A
+second host means a second install.
 
 ### api
 
@@ -306,7 +309,8 @@ prints `error: boom` alone.
 | Only the command groups listed above are installed | `auth`, `browse`, `codespace`, `extension`, `gist`, and host checkout operations do not act on virtual workspace state |
 | Commands never prompt, open an editor, or launch a browser | agents need deterministic, noninteractive execution |
 | `pr create` requires explicit title, head, base, and body/body-file | there is no host checkout from which to infer or fill them |
-| `repo fork` omits clone/remote flags; release asset upload and `run watch` are absent | those require host files, checkout state, or a streaming surface not modeled here |
+| `repo fork` refuses `--clone`, and `--remote` without a repository; release asset upload and `run watch` are absent | those require host files, checkout state, or a streaming surface not modeled here |
+| `gh help` answers the `environment` and `exit-codes` topics only; `formatting`, `mintty`, `reference` and `telemetry` are unknown topics | those describe a terminal, a config directory or a manual a workspace does not have |
 | `repo` has no `archive`, `unarchive`, `sync`, `deploy-key`, `autolink`, `gitignore`, `license`, `clone` or `set-default` | `clone` and `set-default` act on a host checkout; the others are not implemented |
 | Outside `issue`, `pr` and `repo`, typed `--json` exposes a REST-backed field subset | upstream's full field sets include GraphQL-only data; use `gh api` for arbitrary REST fields |
 | `gh api --input` accepts JSON, and pagination follows REST `Link` headers only | arbitrary byte bodies and GraphQL cursor pagination are not implemented |
@@ -315,4 +319,4 @@ prints `error: boom` alone.
 | `gh api --slurp` also takes `--jq`, running it once on the array of pages | gh refuses the pair; the combination is the one-call way to filter every page together |
 | A builtin's `--jq` error keeps jq 1.8.2's wording: `Cannot index number with string ("a")` where gh says `expected an object but got: number (5000)` | mirage evaluates `--jq` with jq, and gojq's messages carry values jq's leave out. The negative-count errors of `limit`, `skip` and `nth`, which gojq raises with `error`, still read `error: ...` as in gh. An `error(v)` built outside a `catch` from a value that `catch` took from another `error` also reads as a builtin's, because the reruns that tell the two apart cannot follow it |
 | `--jq` numbers are jq's doubles: `nan` prints as an empty line, an infinity as the largest finite number, a negative zero as `0`, and an integer literal past 2^53 as its nearest double | jq has made `nan`, an infinity and a big literal that before mirage sees them, and jq.py hands a negative zero to Python as `0`, which TypeScript matches; gh prints `NaN`, `+Inf` and `-0` (refusing the first two inside an array or object) and keeps a big literal's digits |
-| A `HOST/` repository prefix is accepted but never routes | one install is one account on one host; use another install for another host |
+| A repository on another host is refused rather than routed there | one install is one account on one host; use another install for another host |

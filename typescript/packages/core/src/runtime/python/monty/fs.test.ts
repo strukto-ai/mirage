@@ -499,39 +499,26 @@ describe('MontyFs mounted open and append', () => {
   })
 
   // The follow-stat of a dangling link misses, but the listed name is
-  // still there: O_EXCL refuses it rather than creating through it.
-  it('refuses an exclusive open of a dangling link it listed', async () => {
+  // still there: O_EXCL refuses it rather than creating through it, and a
+  // read follows the link, so it fails at open, as POSIX and python's
+  // monty answer, rather than handing back a handle whose first read
+  // fails.
+  it.each([
+    ['an exclusive', 'x', '[Errno 17] File exists'],
+    ['a read', 'r', '[Errno 2] No such file or directory'],
+  ])('refuses %s open of a dangling link it listed', async (_name, mode, refusal) => {
     const dispatch = vi.fn<BridgeDispatchFn>((op, path, _bytes, _dst, attrs) => {
       if (op === 'readdir' && path === '/ram/') return Promise.resolve(['/ram/lnk'])
-      // The link's own row, which only a no-follow stat reaches.
       if (op === 'stat' && path === '/ram/lnk' && attrs?.nofollow === true) {
         return Promise.resolve(new FileStat({ name: path, size: 8, type: FileType.SYMLINK }))
       }
       return Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' }))
     })
     const access = accessOn(dispatch, {}, ['/ram'], ['lnk'])
-    await expect(Promise.resolve(access.handle('open', ['/ram/lnk', 'x']))).rejects.toThrow(
-      '[Errno 17] File exists',
+    await expect(Promise.resolve(access.handle('open', ['/ram/lnk', mode]))).rejects.toThrow(
+      refusal,
     )
     expect(dispatch.mock.calls.some(([op]) => op === 'create')).toBe(false)
-  })
-
-  // A read follows the link, so a dangling one fails at open, as POSIX
-  // and python's monty answer, rather than handing back a handle whose
-  // first read fails.
-  it('refuses a read open of a dangling link it listed', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>((op, path, _bytes, _dst, attrs) => {
-      if (op === 'readdir' && path === '/ram/') return Promise.resolve(['/ram/lnk'])
-      // The link's own row, which only a no-follow stat reaches.
-      if (op === 'stat' && path === '/ram/lnk' && attrs?.nofollow === true) {
-        return Promise.resolve(new FileStat({ name: path, size: 8, type: FileType.SYMLINK }))
-      }
-      return Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' }))
-    })
-    const access = accessOn(dispatch, {}, ['/ram'], ['lnk'])
-    await expect(Promise.resolve(access.handle('open', ['/ram/lnk', 'r']))).rejects.toThrow(
-      '[Errno 2] No such file or directory',
-    )
   })
 
   it('mkdir on an existing file raises FileExistsError even under exist_ok', async () => {

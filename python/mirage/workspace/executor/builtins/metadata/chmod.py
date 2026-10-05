@@ -15,6 +15,7 @@
 from mirage.commands.builtin.utils.formatting import ls_mode_string
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_chmod
 from mirage.utils.quote import shell_quote_always
@@ -139,7 +140,7 @@ async def handle_chmod(
     quiet = fl.as_bool("silent") or fl.as_bool("quiet")
     return result(
         "chmod",
-        out="".join(out).encode() or None,
+        out=encode_text("".join(out)) or None,
         exit_code=1 if errors else 0,
         stderr=None if quiet else "".join(errors),
     )

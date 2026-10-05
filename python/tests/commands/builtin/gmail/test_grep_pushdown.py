@@ -112,7 +112,7 @@ async def test_binary_search_snippet_uses_rendered_file_scan():
             new=AsyncMock(return_value=[_label_scope()]),
         ),
         patch(
-            "mirage.commands.builtin.gmail.grep.generic_grep",
+            "mirage.commands.builtin.gmail.grep.grep_generic",
             new=AsyncMock(return_value=(b"", IOResult())),
         ) as generic,
     ):

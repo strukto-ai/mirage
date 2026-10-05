@@ -21,6 +21,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text
 from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import IFS_DEFAULT
 from mirage.shell.job_table import JobTable
@@ -157,7 +158,7 @@ async def handle_bash(
     if script is None and stdin is not None:
         stdin_data = await materialize(stdin)
         if stdin_data:
-            script = stdin_data.decode(errors="replace")
+            script = decode_text(stdin_data)
             stdin = None
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)

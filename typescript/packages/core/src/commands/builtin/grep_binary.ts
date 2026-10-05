@@ -15,7 +15,8 @@
 import { compilePosixRegex } from '../../utils/posix.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { closeQuietly } from '../../io/stream.ts'
-import { decodeLine, encodeLine, MatchOffsets, prefixOf } from './grep_offsets.ts'
+import { prefixOf } from './grep_offsets.ts'
+import { byteView, fromByteView } from '../../shell/bytes.ts'
 import { requiredNeedles } from './grep_prefilter.ts'
 import type { RegexSyntax } from './types.ts'
 import { matchStart, matchText } from './utils/pcre.ts'
@@ -99,16 +100,6 @@ function binaryNotice(io: IOResult, path: string): void {
   io.stderr = err
 }
 
-export function validUtf8(data: Uint8Array): boolean {
-  try {
-    new TextDecoder('utf-8', { fatal: true }).decode(data)
-    return true
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error
-    return false
-  }
-}
-
 /**
  * One output line, prefix fields in GNU's fixed order: filename, then line
  * number, then byte offset, whatever order the flags were given in. `offset`
@@ -150,7 +141,6 @@ export async function* grepInput(
 ): AsyncIterable<Uint8Array> {
   const budget = new YieldBudget(signal)
   io.exitCode = 1
-  pat = utf8Pattern(pat)
   const binary = new BinaryInput(f.binaryMode)
   let count = 0
   let notified = false
@@ -197,7 +187,7 @@ export async function* grepInput(
       number += 1
       const lineStart = bytePos
       bytePos += raw.length + 1
-      const line = decodeLine(raw)
+      const line = byteView(raw)
       let hit = pat.test(line) !== f.invert
       if (f.maxCount !== null && count >= f.maxCount) hit = false
       if (hit) {
@@ -233,7 +223,6 @@ export async function* grepInput(
               pat.source,
               pat.flags.includes('g') ? pat.flags : pat.flags + 'g',
             )
-            const offsets = f.byteOffsets ? new MatchOffsets(lineStart, line) : null
             for (const m of line.matchAll(re)) {
               const pending = budget.run()
               if (pending !== undefined) await pending
@@ -241,13 +230,13 @@ export async function* grepInput(
               if (text !== '')
                 chunks.push(
                   outputLine(
-                    encodeLine(text),
+                    fromByteView(text),
                     number,
                     true,
                     path,
                     showFilename,
                     f,
-                    offsets?.at(matchStart(m)) ?? 0,
+                    lineStart + matchStart(m),
                   ),
                 )
             }
@@ -276,7 +265,7 @@ export async function* grepInput(
         notified = true
       }
       for (const chunk of chunks) {
-        if (f.binaryMode !== 'text' && (binary.nul || !validUtf8(chunk))) {
+        if (f.binaryMode !== 'text' && binary.nul) {
           if (f.binaryMode === 'binary' && !notified) {
             binaryNotice(io, path)
             notified = true
@@ -309,32 +298,4 @@ export async function* grepInput(
   }
   if (f.countOnly && !(f.quiet || f.filesOnly))
     yield ENC.encode((showFilename ? path + ':' : '') + String(count) + '\n')
-}
-
-function utf8Pattern(pat: RegExp): RegExp {
-  let pattern = ''
-  let escaped = false
-  let inClass = false
-  let classStart = 0
-  for (let index = 0; index < pat.source.length; index += 1) {
-    const char = pat.source.charAt(index)
-    if (escaped) {
-      pattern += char
-      escaped = false
-    } else if (char === '\\') {
-      pattern += char
-      escaped = true
-    } else if (char === '[' && !inClass) {
-      pattern += char
-      inClass = true
-      // A leading ] after an optional ^ is a class member.
-      classStart = index + 1
-      if (pat.source.charAt(classStart) === '^') classStart += 1
-    } else if (char === ']' && inClass && index > classStart) {
-      pattern += char
-      inClass = false
-    } else if (char === '.' && !inClass) pattern += '[^\\n\\udc80-\\udcff]'
-    else pattern += char
-  }
-  return compilePosixRegex(pattern, pat.flags)
 }

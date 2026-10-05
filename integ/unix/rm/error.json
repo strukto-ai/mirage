@@ -85,7 +85,9 @@
         "nextcloud",
         "gdrive",
         "gdrive-folder",
-        "box"
+        "box",
+        "databricks",
+        "databricks-prefix"
       ],
       "command": "rm -f /data/prm7_nope.txt; echo rc=$?",
       "expect": {

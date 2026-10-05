@@ -1034,6 +1034,27 @@
         "n",
         "c"
       ]
+    },
+    {
+      "id": "jq_input_and_args_read_as_jq_reads_them",
+      "seq": 15800078,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/crj && printf '1\\n2\\n3\\n4\\n' > /data/crj/four.json && : > /data/crj/none.json && jq -c '[., input]' /data/crj/four.json; jq -c input /data/crj/four.json; echo rc=$?; jq -n input /data/crj/none.json; echo rc=$?; jq '[., input] | error(tojson)' /data/crj/four.json; echo rc=$?; jq '[., inputs] | error(tojson)' /data/crj/four.json; echo rc=$?; jq -n -c '$ARGS'; jq -n -c --args '$ARGS' a b; rm -r /data/crj",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1,2]\n[3,4]\n2\n4\nrc=0\nrc=5\nrc=5\nrc=5\n{\"positional\":[],\"named\":{}}\n{\"positional\":[\"a\",\"b\"],\"named\":{}}\n",
+        "stderr": "jq: error (at /data/crj/none.json:0): break\njq: error (at /data/crj/four.json:2): [1,2]\njq: error (at /data/crj/four.json:4): [3,4]\njq: error (at /data/crj/four.json:4): [1,2,3,4]\n"
+      },
+      "flags": [
+        "c",
+        "n",
+        "args"
+      ]
     }
   ]
 }

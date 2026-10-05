@@ -415,6 +415,32 @@
         "stdout": "",
         "stderr": "rg: /pg-bytes/byte_budget/tables/wide/rows.jsonl: File too large\n"
       }
+    },
+    {
+      "id": "postgres_head_past_the_cap_prints_a_short_table_whole",
+      "seq": 611013,
+      "targets": [
+        "postgres"
+      ],
+      "command": "head -n 25 /pg-limited/public/tables/authors/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"name\":\"ada\",\"books\":2}\n{\"id\":2,\"name\":\"ben\",\"books\":2}\n{\"id\":3,\"name\":\"cara\",\"books\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_tail_follow_reads_the_relation_whole",
+      "seq": 611014,
+      "targets": [
+        "postgres"
+      ],
+      "command": "tail -n 1 -f /pg/public/tables/books/rows.jsonl | head -n 1; tail -n 1 -f /pg-limited/public/tables/books/rows.jsonl | head -n 1; tail -n 1 /pg-limited/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": "tail: error reading '/pg-limited/public/tables/books/rows.jsonl': File too large\ntail: no files remaining\n"
+      }
     }
   ]
 }

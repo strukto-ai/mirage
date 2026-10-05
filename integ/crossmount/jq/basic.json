@@ -123,6 +123,99 @@
         "stdout": "[[{\"b\":2}],[{\"x\":1}]]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_jq_global_slurp",
+      "seq": 602026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '{\"n\":1}\\n' > /data/jq_a.json; printf '{\"n\":2}\\n' > /data2/jq_b.json; jq -cs 'map(.n)|add' /data/jq_a.json /data2/jq_b.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_jq_repeated_operand_order",
+      "seq": 602027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "jq -cs 'map(.n)' /data/jq_a.json /data2/jq_b.json /data/jq_a.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1,2,1]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_jq_slurp_with_stdin",
+      "seq": 602028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '{\"n\":3}\\n' | jq -cs 'map(.n)' /data/jq_a.json - /data2/jq_b.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1,3,2]\n",
+        "stderr": ""
+      }
     }
   ]
 }

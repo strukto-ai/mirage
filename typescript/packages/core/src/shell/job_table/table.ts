@@ -17,6 +17,7 @@ import { PathSpec } from '../../types.ts'
 import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from '../console/index.ts'
 import { KILLED_EXIT_CODE } from './constants.ts'
 import { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
+import { encodeText } from '../bytes.ts'
 
 function isAbortError(err: unknown): boolean {
   if (err instanceof Error && err.name === 'AbortError') return true
@@ -46,7 +47,7 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
     if (isAbortError(err)) {
       job.status = JobStatus.KILLED
       job.exitCode = KILLED_EXIT_CODE
-      await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
+      await job.console.emit(Channel.STDERR, encodeText('Killed'))
       await job.console.finish(KILLED_OUTCOME)
       return KILLED_EXIT_CODE
     }
@@ -56,7 +57,7 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
     job.status = JobStatus.COMPLETED
     job.exitCode = 1
     const msg = err instanceof Error ? err.message : String(err)
-    await job.console.emit(Channel.STDERR, new TextEncoder().encode(msg))
+    await job.console.emit(Channel.STDERR, encodeText(msg))
     await job.console.finish(exitOutcome(1))
     return 1
   }
@@ -281,7 +282,7 @@ export class JobTable {
     else job.abort?.abort()
     job.status = JobStatus.KILLED
     job.exitCode = KILLED_EXIT_CODE
-    await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
+    await job.console.emit(Channel.STDERR, encodeText('Killed'))
     await job.console.finish(KILLED_OUTCOME)
     return true
   }
@@ -335,7 +336,7 @@ export class JobTable {
         else job.abort?.abort()
         job.status = JobStatus.KILLED
         job.exitCode = KILLED_EXIT_CODE
-        await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
+        await job.console.emit(Channel.STDERR, encodeText('Killed'))
         await job.console.finish(KILLED_OUTCOME)
       }
     }

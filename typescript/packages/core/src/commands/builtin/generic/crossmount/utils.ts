@@ -12,11 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { abortable } from '../../../../workspace/abort.ts'
+import { discardStreams } from '../../../../io/stream.ts'
+import { chunks } from '../../../../io/cooperative.ts'
+import { concat as concatBytes } from '../../../../io/cachable_iterator.ts'
+import { isStdin } from '../../utils/stream.ts'
 import type { TransferLinks } from '../cp.ts'
 import type { LinkView } from '../../../../ops/types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { eisdir, fsErrorLine, isFsError } from '../../../../utils/errors.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
 import type { CommandOpts } from '../../../config.ts'
 import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
@@ -26,8 +31,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { parseFlags as parseGrepFlags, printsContext as grepPrintsContext } from '../grep.ts'
 import { betweenFiles as rgBetweenFiles, parseFlags as parseRgFlags } from '../rg.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // Run one native single-mount command per operand, in operand order. Each
 // operand executes on its owning mount through `runSingle` (which also
@@ -56,23 +60,20 @@ export async function runOperands(
   scopes: PathSpec[],
   texts: string[],
   flagKwargs: Record<string, FlagValue>,
-  stopAtSuccess = false,
 ): Promise<OperandRun[]> {
-  // `stopAtSuccess` runs no operand after one that exits 0, which is how
-  // grep -q and rg -q stop at their first match.
   const results: OperandRun[] = []
   for (const scope of scopes) {
     const [out, io] = await runSingle(cmdName, [scope], texts, flagKwargs, {})
-    let data: Uint8Array
+    const parts: Uint8Array[] = []
     try {
-      data = out !== null ? await materialize(out) : new Uint8Array()
+      for await (const part of chunks(out ?? new Uint8Array())) parts.push(part)
     } catch (e) {
       // A lazy stream can fail on first pull (head/tail opening the operand
       // mid-drain); report it like the native run would and keep the
       // remaining operands, GNU-style.
       if (!isFsError(e)) throw e
       const existing = await materialize(io.stderr)
-      const line = ENC.encode(fsErrorLine(cmdName, scope, e))
+      const line = encodeText(fsErrorLine(cmdName, scope, e))
       const merged = new Uint8Array(existing.byteLength + line.byteLength)
       merged.set(existing, 0)
       merged.set(line, existing.byteLength)
@@ -81,10 +82,8 @@ export async function runOperands(
       // lazy operand that fails here is the same failure the single-mount
       // run reports eagerly, and it must answer the same number.
       io.exitCode = readFailExitCode(cmdName, e)
-      data = new Uint8Array()
     }
-    results.push({ scope, data, io })
-    if (stopAtSuccess && io.exitCode === 0) break
+    results.push({ scope, data: concatBytes(parts), io })
   }
   return results
 }
@@ -205,4 +204,88 @@ export function transferLinksOf(links: LinkView, dispatch: DispatchFn, cwd: stri
     },
     relayStat,
   }
+}
+
+/** Stream independent native reads in order, keeping at most four invocations open. */
+export function streamOperands(
+  runSingle: RunSingle,
+  cmdName: string,
+  scopes: readonly PathSpec[],
+  texts: string[],
+  bag: Record<string, FlagValue>,
+  separator = '',
+): [ByteSource, IOResult] {
+  const io = new IOResult()
+  async function* stream(): AsyncGenerator<Uint8Array> {
+    const controller = new AbortController()
+    const pending: {
+      scope: PathSpec
+      result: Promise<readonly [ByteSource | null, IOResult]>
+      ready?: readonly [ByteSource | null, IOResult]
+    }[] = []
+    let next = 0
+    let printed = false
+    const start = (): void => {
+      const scope = scopes[next++]
+      if (scope === undefined) return
+      const result = runSingle(cmdName, [scope], texts, bag, { signal: controller.signal })
+      // Attach a rejection observer immediately while earlier operands drain.
+      void result.catch(() => undefined)
+      const item: (typeof pending)[number] = { scope, result }
+      void result.then(
+        (ready) => {
+          item.ready = ready
+        },
+        () => undefined,
+      )
+      pending.push(item)
+    }
+    const concurrency = scopes.some((p) => isStdin(p)) ? 1 : 4
+    for (let i = 0; i < concurrency; i++) start()
+    try {
+      while (pending.length > 0) {
+        const head = pending[0]
+        if (head === undefined) break
+        const { scope, result } = head
+        const [out, branch] = await abortable(result, controller.signal)
+        let first = true
+        try {
+          for await (const data of chunks(out ?? new Uint8Array(), controller.signal)) {
+            if (data.byteLength === 0) continue
+            if (first && printed && separator !== '') yield encodeText(separator)
+            first = false
+            printed = true
+            yield data
+          }
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          branch.stderr = concatBytes([
+            await materialize(branch.stderr),
+            encodeText(fsErrorLine(cmdName, scope, err)),
+          ])
+          branch.exitCode = readFailExitCode(cmdName, err)
+        }
+        Object.assign(io.reads, branch.reads)
+        Object.assign(io.writes, branch.writes)
+        io.cache.push(...branch.cache)
+        io.renames.push(...branch.renames)
+        io.stderr = concatBytes([await materialize(io.stderr), await materialize(branch.stderr)])
+        io.exitCode = Math.max(io.exitCode, branch.exitCode)
+        if (branch.refusal !== null) io.refusal = branch.refusal
+        pending.shift()
+        start()
+      }
+    } finally {
+      controller.abort()
+      for (const item of pending) {
+        if (item.ready !== undefined) await discardStreams(item.ready[0], item.ready[1].stderr)
+        else
+          void item.result.then(
+            ([out, branch]) => discardStreams(out, branch.stderr),
+            () => undefined,
+          )
+      }
+    }
+  }
+  return [stream(), io]
 }

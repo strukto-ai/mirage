@@ -28,6 +28,7 @@ from mirage.ops.types import SessionView
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessView
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import (
     Channel,
@@ -239,7 +240,7 @@ async def handle_background(
                     ends_shell=True,
                 )
             except CommandTimeoutError as exc:
-                msg = (str(exc) + "\n").encode()
+                msg = encode_text(str(exc) + "\n")
                 stdout = b""
                 io = IOResult(exit_code=124, stderr=msg)
                 exec_node = ExecutionNode(
@@ -399,13 +400,13 @@ async def run_statement(
 
 _WAIT_USAGE = "wait: usage: wait [-fn] [-p var] [id ...]"
 _DISOWN_USAGE = "disown: usage: disown [-h] [-ar] [jobspec ... | pid ...]"
-_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_JOB_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _job_result(
     cmd_str: str, msg: str, code: int
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    err = msg.encode()
+    err = encode_text(msg)
     return (
         None,
         IOResult(exit_code=code, stderr=err),
@@ -592,7 +593,7 @@ async def handle_wait(
             j += 1
         i += 1
     if var is not None:
-        if _IDENTIFIER.fullmatch(var) is None:
+        if _JOB_IDENTIFIER.fullmatch(var) is None:
             return _job_result(
                 cmd_str, f"bash: wait: `{var}': not a valid identifier\n", 1
             )
@@ -622,7 +623,7 @@ async def handle_wait(
             code = 127
             return (
                 None,
-                IOResult(exit_code=code, stderr=err_text.encode() or None),
+                IOResult(exit_code=code, stderr=encode_text(err_text) or None),
                 ExecutionNode(command=cmd_str, exit_code=code),
             )
         job = await _wait_first(job_table, candidates)
@@ -630,7 +631,7 @@ async def handle_wait(
             await view.set(var, str(job.pid))
         stdout, io, node = _reaped(job_table, job, cmd_str)
         if err_text:
-            io.stderr = err_text.encode()
+            io.stderr = encode_text(err_text)
         return stdout, io, node
     if not specs:
         await job_table.wait_all(sid)
@@ -657,7 +658,7 @@ async def handle_wait(
         await view.set(var, str(last_job.pid))
     return (
         None,
-        IOResult(exit_code=last_code, stderr=err_text.encode() or None),
+        IOResult(exit_code=last_code, stderr=encode_text(err_text) or None),
         ExecutionNode(command=cmd_str, exit_code=last_code),
     )
 
@@ -721,7 +722,7 @@ async def handle_disown(
     if not keep:
         for job in targets:
             job_table.disown(job.id, sid)
-    err = ("\n".join(errors) + "\n").encode() if errors else None
+    err = encode_text("\n".join(errors) + "\n") if errors else None
     code = 1 if errors else 0
     return (
         None,
@@ -774,7 +775,7 @@ async def handle_fg(
         try:
             job_id = int(raw)
         except ValueError:
-            err = f"bash: fg: {parts[1]}: no such job\n".encode()
+            err = encode_text(f"bash: fg: {parts[1]}: no such job\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -782,14 +783,14 @@ async def handle_fg(
             )
         numbered = _job_numbered(jobs, job_id)
         if numbered is None:
-            err = f"bash: fg: {parts[1]}: no such job\n".encode()
+            err = encode_text(f"bash: fg: {parts[1]}: no such job\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
                 ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
             )
         target = numbered
-    header = (target.command + "\n").encode()
+    header = encode_text(target.command + "\n")
     if sink is not None:
         await sink.emit(Channel.STDOUT, header)
     job = await job_table.wait(target.id, sid)
@@ -940,7 +941,7 @@ async def handle_kill(
             continue
         signalled = True
     code = 0 if signalled else 1
-    err = ("\n".join(errors) + "\n").encode() if errors else b""
+    err = encode_text("\n".join(errors) + "\n") if errors else b""
     node = ExecutionNode(command=cmd_str, exit_code=code, stderr=err)
     return None, IOResult(exit_code=code, stderr=err or None), node
 
@@ -993,9 +994,9 @@ async def handle_jobs(
                 continue
             bad = next((c for c in word[1:] if c not in _JOBS_FLAGS), None)
             if bad is not None:
-                err = (
+                err = encode_text(
                     f"bash: jobs: -{bad}: invalid option\n{_JOBS_USAGE}\n"
-                ).encode()
+                )
                 return (
                     None,
                     IOResult(exit_code=2, stderr=err),
@@ -1011,7 +1012,7 @@ async def handle_jobs(
             raw = spec.lstrip("%")
             job = _job_numbered(jobs, int(raw)) if raw.isdigit() else None
             if job is None:
-                err = f"bash: jobs: {spec}: no such job\n".encode()
+                err = encode_text(f"bash: jobs: {spec}: no such job\n")
                 return (
                     None,
                     IOResult(exit_code=1, stderr=err),
@@ -1030,7 +1031,7 @@ async def handle_jobs(
     else:
         lines = [_job_row(j, "l" in flags) for j in jobs]
     job_table.pop_completed(sid)
-    out = ("\n".join(lines) + "\n").encode() if lines else b""
+    out = encode_text("\n".join(lines) + "\n") if lines else b""
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 
 
@@ -1251,7 +1252,7 @@ async def handle_ps(
     else:
         lines = [f"{info.pid}\t{info.command}" for info in processes]
     code = 0 if processes else 1
-    out = ("\n".join(lines) + "\n").encode() if lines else b""
+    out = encode_text("\n".join(lines) + "\n") if lines else b""
     return (
         out,
         IOResult(exit_code=code),

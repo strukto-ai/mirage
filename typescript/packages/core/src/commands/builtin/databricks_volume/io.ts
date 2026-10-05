@@ -34,7 +34,7 @@ export const IO: CommandIO<DatabricksVolumeAccessor> = new VFSAdapter<Databricks
   read: { readdir: dbxReaddir, readBytes: dbxRead, stat: dbxStat },
   native: { readRange: rangeOf(dbxRead), readStream: dbxStream, exists: dbxExists },
   writes: {
-    append: appendFromRead(dbxRead, dbxWrite),
+    append: appendFromRead(dbxRead, dbxWrite, dbxStat),
     write: dbxWrite,
     mkdir: (accessor, path, parents) => dbxMkdir(accessor, path, undefined, parents === true),
     unlink: dbxUnlink,

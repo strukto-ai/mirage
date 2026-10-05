@@ -26,7 +26,7 @@ import type {
   RuntimeContext,
 } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
-import { installQuickJsFs } from './fs.ts'
+import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
 import BOOTSTRAP from '../../../generated/quickjs.ts'
 import { loadQuickJsModule, type NewAsyncModule } from './loader.ts'
@@ -304,7 +304,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     }
     const hostLog = (sink: string[]): QuickJSHandle =>
       ctx.newFunction('', (h) => {
-        sink.push(ctx.getString(h))
+        sink.push(fromGuestText(ctx, h))
       })
     setGlobal('__mirage_log', hostLog(out))
     setGlobal('__mirage_error', hostLog(err))
@@ -316,7 +316,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       }),
     )
     const stdin = args.stdin !== null ? DEC.decode(args.stdin) : ''
-    setGlobal('__mirage_stdin', ctx.newString(stdin))
+    setGlobal('__mirage_stdin', toGuestText(ctx, stdin))
     const argv = ctx.newArray()
     // A named program takes scriptArgs[0], the slot qjs fills with a
     // script's path when it runs a file; an unnamed run leaves the args

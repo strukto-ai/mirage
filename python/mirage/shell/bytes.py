@@ -49,3 +49,59 @@ def encode_text(text: str) -> bytes:
         text (str): the text to write.
     """
     return text.encode("utf-8", "surrogateescape")
+
+
+def decode_text(data: bytes) -> str:
+    """Read bytes back as shell text, the inverse of ``encode_text``.
+
+    Valid UTF-8 comes back as its characters and every other byte as its
+    surrogate escape, the stand-in ``byte_char`` makes, so the text
+    round-trips to exactly the bytes it was read from. A lossy decode
+    cannot: one invalid byte becomes U+FFFD, three bytes wide, and every
+    byte offset counted back past it runs ahead of GNU's.
+
+    Args:
+        data (bytes): the bytes to read as text.
+    """
+    return data.decode("utf-8", "surrogateescape")
+
+
+def byte_view(value: str | bytes) -> str:
+    """The same bytes as a string of one character per byte.
+
+    A command that runs in GNU's C locale (grep, sed, awk, tr, expr)
+    counts, matches and indexes bytes, not characters: `.` matches one
+    byte, `length` counts bytes, and a match may end inside a character.
+    All of that follows from running on this representation and
+    converting only at the command's edges, where a typed `é`, its
+    `$'\\xc3\\xa9'` spelling and the file's own bytes all arrive as the
+    same two characters.
+
+    Args:
+        value (str | bytes): shell text, a raw byte riding as its
+            surrogate escape, or bytes as read.
+    """
+    return (encode_text(value) if isinstance(value, str) else value).decode(
+        "latin-1"
+    )
+
+
+def from_byte_view(view: str) -> bytes:
+    """The bytes a byte view stands for, the inverse of ``byte_view``.
+
+    An invalid sequence or half a character comes back as itself, which
+    is what GNU writes.
+
+    Args:
+        view (str): one character per byte, every code point below 256.
+    """
+    return view.encode("latin-1")
+
+
+def text_view(view: str) -> str:
+    """A byte view as shell text again, for a path or a nested command line.
+
+    Args:
+        view (str): one character per byte, every code point below 256.
+    """
+    return decode_text(from_byte_view(view))

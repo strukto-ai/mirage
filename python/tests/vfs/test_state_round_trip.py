@@ -64,7 +64,11 @@ def test_disk_get_state_walks_tree(tmp_path):
     state = p.get_state()
     assert state["type"] == "disk"
     assert "redacted_fields" not in state
-    assert state["files"] == {"a.txt": b"hello", "sub/b.txt": b"world"}
+    # By reference: each file is its host path, read by the consumer.
+    assert state["files"] == {
+        "a.txt": root / "a.txt",
+        "sub/b.txt": root / "sub" / "b.txt",
+    }
 
 
 def test_disk_round_trip(tmp_path):

@@ -18,7 +18,7 @@ import { RegexSyntax, type GrepSearchOptions, type GrepSearchMeta } from './type
 import type { PathSpec } from '../../types.ts'
 import { getExtension } from '../resolve.ts'
 import { BINARY_EXTENSIONS, PatternType } from './constants.ts'
-import { hasUnresolvedGlob } from './utils/operands.ts'
+import { hasUnresolvedGlob } from './utils/paths.ts'
 import { isStdin } from './utils/stream.ts'
 import { breSource, ereSource, perlRegex, rustSource } from './grep_pattern.ts'
 import { FlagView } from '../spec/flag_view.ts'

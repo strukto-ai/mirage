@@ -23,4 +23,4 @@ export {
   READ_DESCRIPTION,
   SHELL_DESCRIPTION,
   WRITE_DESCRIPTION,
-} from '../tool_descriptions.ts'
+} from '@struktoai/mirage-core/workspace/tools/tool_descriptions'

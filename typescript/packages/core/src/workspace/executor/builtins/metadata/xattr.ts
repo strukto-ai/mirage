@@ -24,6 +24,7 @@ import { POSIX } from '../../../../errors/posix.ts'
 import { PathSpec } from '../../../../types.ts'
 import { result } from '../shared.ts'
 import type { Result } from '../types.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 
 // attr 2.5.2's usage blocks, which follow getopt's one-line refusal and
 // end every usage error (exit 2) with the older backquote hint.
@@ -60,7 +61,7 @@ export function attrUsageRefusal(cmd: string, parsed: ParsedArgs, usage: string)
     ;[message] = missingValueError(cmd, needsValue)
   }
   if (message === null) return null
-  const line = new TextDecoder().decode(message).split('\n', 1)[0] ?? ''
+  const line = decodeText(message).split('\n', 1)[0] ?? ''
   return result(cmd, { exitCode: 2, stderr: `${line}\n${usage}` })
 }
 

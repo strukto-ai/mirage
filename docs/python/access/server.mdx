@@ -4,7 +4,7 @@ description: The Mirage server in Python, a FastAPI app that holds workspaces an
 icon: server
 ---
 
-The Mirage server is a FastAPI app. It holds workspaces and serves them over the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc), and over [SSH](/home/access/ssh) when `ssh_port` is set. The TypeScript server speaks the same protocol, so a client of one works against the other.
+The Mirage server is a FastAPI app. It holds workspaces and serves them over the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc), and over [SSH](/home/access/ssh), on its own port when `ssh_port` is set and through its HTTP port either way. The TypeScript server speaks the same protocol, so a client of one works against the other.
 
 ## Install
 
@@ -47,6 +47,51 @@ uvicorn.run(app, host="127.0.0.1", port=8765)
 
 The CLI runs the same app as a daemon, `mirage.server.daemon:app`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the two daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, and exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last workspace is deleted. Its settings are on the [CLI page](/home/access/cli#config).
 
+## Beside your own event loop
+
+`WorkspaceRunner` pins a [workspace](/python/access/in-app) to a thread and event loop of its own. A slow line then never stalls your app's loop, and workspaces in one process never hold each other up. The Mirage server hosts every workspace this way.
+
+```python
+from mirage.workspace.runner import WorkspaceRunner
+
+runner = WorkspaceRunner(ws)
+result = await runner.call(runner.ws.shell("ls /"))
+await runner.stop()
+```
+
+`call` runs a coroutine on the workspace's loop and is safe from any other loop; cancelling the caller cancels the coroutine. `stop` closes the workspace (`delete=True` also deletes its state), then stops the loop and refuses new calls.
+
+## MCP and RPC on their own
+
+The [MCP](/home/access/mcp) and [RPC](/home/access/rpc) servers are classes you can run over a transport of your own, without the Mirage server. Both serve one session of a [workspace](/python/access/in-app).
+
+```python
+from mcp.server.stdio import stdio_server
+
+from mirage.server.mcp import MirageMcpServer
+
+server = MirageMcpServer(ws, session_id="agent").server
+async with stdio_server() as (read, write):
+    options = server.create_initialization_options()
+    await server.run(read, write, options)
+```
+
+`MirageMcpServer(workspace, stale_write_protection=True, name="mirage", version=..., session_id=None, operations=None)`. Its `server` is the MCP SDK's low-level `Server`.
+
+```python
+from mirage.server.rpc import MirageRpcServer
+
+server = MirageRpcServer(ws, session_id="agent")
+answer = await server.handle({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "glob",
+    "params": {"pattern": "/*"},
+})
+```
+
+`MirageRpcServer(workspace, session_id=None, operations=None, name="mirage", version=...)`. `handle(message)` answers one message, and `None` for a notification. `serve(read_line, write_line)` answers newline-delimited messages until `read_line` returns `""`.
+
 ## What is particular to this server
 
 The protocol is the same on both servers. These are the differences in how this one serves it:
@@ -55,7 +100,7 @@ The protocol is the same on both servers. These are the differences in how this 
 - **Legacy `scp -O`.** The SCP protocol is served, as well as SFTP.
 - **`authorized_keys` options.** asyncssh enforces OpenSSH's options (`from=`, `command=`, ...), and `command=` forces the line that runs. `mirage-profile` binds the key to a [profile](/home/access/ssh#bind-a-key-to-a-profile).
 - **Terminal line limit.** 1024 characters.
-- **A thread per workspace.** Each workspace runs on its own thread and event loop through a [`WorkspaceRunner`](/python/access/in-app#beside-your-own-event-loop), so a busy workspace does not hold up another or the HTTP server.
+- **A thread per workspace.** Each workspace runs on its own thread and event loop through a [`WorkspaceRunner`](#beside-your-own-event-loop), so a busy workspace does not hold up another or the HTTP server.
 
 ## Code map
 
@@ -67,5 +112,5 @@ The protocol is the same on both servers. These are the differences in how this 
 | [`mirage/server/mcp/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/server/mcp) | `MirageMcpServer`, the `/mcp` endpoint, and the stdio relay `mirage mcp` runs. |
 | [`mirage/server/rpc/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/server/rpc) | `MirageRpcServer`, the `/rpc` endpoint, and the stdio relay `mirage rpc` runs. |
 | [`mirage/server/ssh/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/server/ssh) | The SSH server: shell, exec, SFTP and SCP. |
-| [`mirage/agents/tool_operations.py`](https://github.com/strukto-ai/mirage/blob/main/python/mirage/agents/tool_operations.py) | The agent tool table every interface calls. |
+| [`mirage/workspace/tools/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/workspace/tools) | The agent tool table behind `session.tools`, which every interface calls. |
 | [`mirage/cli/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/cli) | The `mirage` CLI, one module per verb. |

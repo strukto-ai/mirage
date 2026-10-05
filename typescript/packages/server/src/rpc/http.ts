@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
-import type { MirageToolOperations } from '@struktoai/mirage-agents/tool_operations'
+import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { InFlight } from '../inflight.ts'
@@ -99,8 +99,12 @@ class RpcDoor {
   ) {}
 
   /** The RPC server for a workspace session, or why there is none. */
-  async server(workspaceId: string, sessionId?: string | null): Promise<DaemonRpcServer | string> {
-    const operations = await this.mcp.tools(workspaceId, sessionId)
+  async server(
+    workspaceId: string,
+    sessionId: string | null,
+    account: string | null,
+  ): Promise<DaemonRpcServer | string> {
+    const operations = await this.mcp.tools(workspaceId, sessionId, account)
     if (typeof operations === 'string') return operations
     const entry = this.registry.get(workspaceId)
     return new DaemonRpcServer(
@@ -116,7 +120,7 @@ class RpcDoor {
     reply: FastifyReply,
   ): Promise<FastifyReply> {
     const workspaceId = req.params.workspaceId
-    const server = await this.server(workspaceId, req.query.session_id ?? null)
+    const server = await this.server(workspaceId, req.query.session_id ?? null, req.account)
     if (typeof server === 'string') return reply.status(404).send({ detail: server })
     const parsed: unknown = req.body
     const batch = Array.isArray(parsed)

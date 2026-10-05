@@ -28,6 +28,7 @@ import { sleep } from '../../../abort.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { SLEEP_INTERVAL, SLEEP_SUFFIXES } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 // The only two options coreutils sleep declares, through gnulib's
 // `parse_gnu_standard_options_only`. They share no prefix, so an abbreviation
@@ -62,7 +63,7 @@ function standardMatches(name: string): string[] {
 function standardResponse(option: string): Result {
   const text = option === '--help' ? helpPage('sleep', specOf('sleep')) : versionLine('sleep')
   return [
-    yieldBytes(new TextEncoder().encode(text)),
+    yieldBytes(encodeText(text)),
     new IOResult(),
     new ExecutionNode({ command: 'sleep', exitCode: 0 }),
   ]
@@ -158,7 +159,7 @@ export async function handleSleep(args: string[], signal?: AbortSignal): Promise
     // Missing operand is the same `usage (EXIT_FAILURE)` refusal the
     // invalid-interval one is, so it carries the same Try-help line (measured
     // on 9.4: `sleep` is two lines, not one).
-    const err = new TextEncoder().encode(`sleep: missing operand\n${usageHint('sleep')}\n`)
+    const err = encodeText(`sleep: missing operand\n${usageHint('sleep')}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -199,7 +200,7 @@ export async function handleSleep(args: string[], signal?: AbortSignal): Promise
     // operand goes through gnulib's `quote()` like every other coreutils
     // operand diagnostic (measured on 9.4: `sleep -- é` names `'\303\251'`).
     const lines = bad.map((raw) => `sleep: invalid time interval '${quoteText(raw)}'\n`)
-    const err = new TextEncoder().encode(`${lines.join('')}${usageHint('sleep')}\n`)
+    const err = encodeText(`${lines.join('')}${usageHint('sleep')}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),

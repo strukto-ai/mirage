@@ -20,7 +20,7 @@ from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.rg_filetypes import FileTypes
 from mirage.commands.builtin.rg_glob import Overrides, Verdict, walk_candidate
 from mirage.commands.builtin.utils.links import LinkDoor
-from mirage.commands.builtin.utils.types import AsyncReaddir, AsyncStat
+from mirage.commands.builtin.utils.types import AsyncReaddirFn, AsyncStatFn
 from mirage.commands.resolve import get_extension
 from mirage.errors.classify import classify
 from mirage.errors.posix import linux_errno
@@ -47,17 +47,25 @@ def os_error_text(exc: BaseException) -> str:
     return f"{text} (os error {linux_errno(condition)})"
 
 
-def walk_error_line(shown: str, exc: BaseException) -> str:
+def walk_error_line(
+    shown: str, exc: BaseException, parallel: bool = False
+) -> str:
     """ripgrep's line for a path its walker could not stat or list.
 
-    The walker's I/O error names the path a second time: ``rg: nope: IO
-    error for operation on nope: No such file or directory (os error 2)``
-    (ripgrep 14.1.1).
+    ripgrep words it by the walker it ran. The sequential one names the
+    path a second time: ``rg: nope: IO error for operation on nope: No
+    such file or directory (os error 2)``; the parallel one, which it
+    runs for more than one path or a directory unless ``-j1`` or a sort
+    holds it to one thread, names it once: ``rg: nope: No such file or
+    directory (os error 2)`` (ripgrep 14.1.1).
 
     Args:
         shown (str): the path as ripgrep names it.
         exc (BaseException): the failure.
+        parallel (bool): ripgrep would walk with its parallel walker.
     """
+    if parallel:
+        return f"rg: {shown}: {os_error_text(exc)}"
     return (
         f"rg: {shown}: IO error for operation on {shown}: {os_error_text(exc)}"
     )
@@ -212,8 +220,8 @@ def on_other_mount(root_of: MountRoot, home: str, path: str) -> bool:
 
 
 async def walk_haystacks(
-    readdir_fn: AsyncReaddir,
-    stat_fn: AsyncStat,
+    readdir_fn: AsyncReaddirFn,
+    stat_fn: AsyncStatFn,
     root: str,
     shown_root: str,
     cwd: str,
@@ -223,6 +231,7 @@ async def walk_haystacks(
     boundary: MountIsRoot | None = None,
     door: LinkDoor | None = None,
     follow: bool = False,
+    parallel: bool = False,
 ) -> AsyncIterator[Haystack]:
     """The files a walk of one directory operand searches, in walk order.
 
@@ -233,8 +242,8 @@ async def walk_haystacks(
     above it is reported in ripgrep's words and skipped.
 
     Args:
-        readdir_fn (AsyncReaddir): directory reader.
-        stat_fn (AsyncStat): stat reader.
+        readdir_fn (AsyncReaddirFn): directory reader.
+        stat_fn (AsyncStatFn): stat reader.
         root (str): the operand's virtual path.
         shown_root (str): the operand as typed, which every printed path
             below it starts with; empty for the implicit cwd, whose
@@ -251,6 +260,8 @@ async def walk_haystacks(
         door (LinkDoor | None): the namespace's links and the door past
             them, None outside a workspace, where no link can stand.
         follow (bool): -L, walk through a link rather than skip it.
+        parallel (bool): ripgrep would walk with its parallel walker,
+            which words a failure without repeating the path.
     """
     walker = _Walker(
         readdir_fn,
@@ -263,6 +274,7 @@ async def walk_haystacks(
         door,
         follow,
         shown_root == "",
+        parallel,
     )
     top = walker.named(shown_root)
     async for found in walker.below(
@@ -276,8 +288,8 @@ class _Walker:
     """What one operand's walk reads with and keeps, for every level.
 
     Args:
-        readdir_fn (AsyncReaddir): the operand's directory reader.
-        stat_fn (AsyncStat): the operand's stat reader.
+        readdir_fn (AsyncReaddirFn): the operand's directory reader.
+        stat_fn (AsyncStatFn): the operand's stat reader.
         cwd (str): the root the globs are matched from.
         walk (WalkFilter): what the walk keeps.
         sort_by_name (bool): each directory's entries in name order.
@@ -286,10 +298,11 @@ class _Walker:
         door (LinkDoor | None): the namespace's links and the door.
         follow (bool): -L.
         implicit (bool): the operand is the implicit cwd.
+        parallel (bool): ripgrep would walk with its parallel walker.
     """
 
-    readdir_fn: AsyncReaddir
-    stat_fn: AsyncStat
+    readdir_fn: AsyncReaddirFn
+    stat_fn: AsyncStatFn
     cwd: str
     walk: WalkFilter
     sort_by_name: bool
@@ -298,6 +311,7 @@ class _Walker:
     door: LinkDoor | None
     follow: bool
     implicit: bool
+    parallel: bool
 
     def named(self, shown: str) -> str:
         """A path as the walker names it in a warning.
@@ -368,7 +382,7 @@ class _Walker:
             else:
                 entries = await self.readdir_fn(here)
         except WALK_ERRORS as exc:
-            self.warn(walk_error_line(chain[0][1], exc))
+            self.warn(walk_error_line(chain[0][1], exc, self.parallel))
             return
         if self.follow and self.door is not None:
             listed = {_entry_name(entry) for entry in entries}
@@ -399,7 +413,9 @@ class _Walker:
                 else:
                     s = await self.stat_fn(entry)
             except WALK_ERRORS as exc:
-                self.warn(walk_error_line(self.named(shown), exc))
+                self.warn(
+                    walk_error_line(self.named(shown), exc, self.parallel)
+                )
                 continue
             name = posixpath.basename(child)
             candidate = walk_candidate(shown, self.cwd)
@@ -450,7 +466,7 @@ class _Walker:
             target = door.target(link)
             s = await door.stat(target)
         except WALK_ERRORS as exc:
-            self.warn(walk_error_line(named, exc))
+            self.warn(walk_error_line(named, exc, self.parallel))
             return
         name = posixpath.basename(link)
         candidate = walk_candidate(shown, self.cwd)

@@ -45,13 +45,15 @@ from mirage.server.paths import (
     pid_file_path,
     state_root_path,
 )
-from mirage.server.registry import WorkspaceRegistry
+from mirage.server.registry import OWNERS_PREFIX, WorkspaceRegistry
 from mirage.server.routers import (
     asks,
     health,
     jobs,
+    oauth,
     sessions,
     shell,
+    ssh,
     tools,
     workspaces,
 )
@@ -61,6 +63,7 @@ from mirage.server.ssh.constants import SERVER_MODULE
 from mirage.server.ssh.errors import SSHConfigError
 from mirage.server.ssh.types import SSHListener, StartSSH
 from mirage.vfs.s3.config import S3Config
+from mirage.workspace.record.disk import DiskRecordClient
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +125,8 @@ async def _start_ssh(app: FastAPI) -> SSHListener | None:
         SSHListener | None: the running listener, or None when SSH is
             off.
     """
-    config: SSHConfig | None = app.state.ssh_config
-    if config is None:
+    config: SSHConfig = app.state.ssh_config
+    if config.port is None:
         return None
     start = _load_ssh_starter()
     return await start(app.state.registry, config)
@@ -131,8 +134,8 @@ async def _start_ssh(app: FastAPI) -> SSHListener | None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    ssh = await _start_ssh(app)
-    app.state.ssh = ssh
+    listener = await _start_ssh(app)
+    app.state.ssh = listener
     if app.state.pid_file is not None:
         await run_blocking(_write_pid_file, app.state.pid_file)
     on_exit = app.state.on_idle_exit
@@ -146,9 +149,9 @@ async def _lifespan(app: FastAPI):
     finally:
         if exit_task is not None:
             exit_task.cancel()
-        if ssh is not None:
-            ssh.close()
-            await ssh.wait_closed()
+        if listener is not None:
+            listener.close()
+            await listener.wait_closed()
         try:
             await app.state.mcp.close()
             await app.state.jobs.close()
@@ -232,16 +235,18 @@ def build_app(
     app.state.started_at = time.time()
     app.state.exit_event = exit_event or asyncio.Event()
     app.state.on_idle_exit = on_idle_exit
+    app.state.state_root = state_root_path(state_root)
     app.state.registry = WorkspaceRegistry(
         idle_grace_seconds=idle_grace_seconds,
         exit_event=app.state.exit_event,
+        accounts_required=auth.mode == AuthMode.JWT,
+        owners=DiskRecordClient(str(app.state.state_root), OWNERS_PREFIX),
     )
     app.state.jobs = JobTable()
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )
     app.state.snapshot_store = snapshot_store
-    app.state.state_root = state_root_path(state_root)
     app.state.ssh_config = (
         ssh_config if ssh_config is not None else resolve_ssh_config()
     )
@@ -250,9 +255,11 @@ def build_app(
     app.include_router(sessions.router)
     app.include_router(asks.router)
     app.include_router(shell.router)
+    app.include_router(ssh.router)
     app.include_router(tools.router)
     app.include_router(jobs.router)
     app.include_router(health.router)
+    app.include_router(oauth.router)
     app.state.mcp = register_mcp_routes(
         app, app.state.registry, app.state.jobs
     )

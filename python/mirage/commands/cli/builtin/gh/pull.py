@@ -18,6 +18,7 @@ from typing import Any
 from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
     camel,
+    gh_bool,
     json_fields,
     list_limit,
     repo_for,
@@ -510,7 +511,7 @@ async def view_cmd(
         row,
         fl,
         comments_text(comments or [])
-        if fl.as_bool("comments")
+        if gh_bool(fl, "comments")
         else _view_text(row),
         PR_FIELDS,
     )
@@ -532,8 +533,8 @@ async def create_cmd(
         "head": required["head"] or "",
         "base": required["base"] or "",
         "body": body_text or "",
-        "draft": fl.as_bool("draft"),
-        "maintainer_can_modify": not fl.as_bool("no_maintainer_edit"),
+        "draft": gh_bool(fl, "draft"),
+        "maintainer_can_modify": not gh_bool(fl, "no_maintainer_edit"),
     }
     created = _pull(await create_pull(inv.config, repo_for(inv, fl), body))
     return text_out(f"{created.get('url', '')}\n")
@@ -563,7 +564,7 @@ async def merge_cmd(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     methods = [
-        name for name in ("merge", "rebase", "squash") if fl.as_bool(name)
+        name for name in ("merge", "rebase", "squash") if gh_bool(fl, name)
     ]
     if len(methods) > 1:
         raise ValueError("choose only one merge strategy")
@@ -612,7 +613,7 @@ async def diff_cmd(
     fl = FlagView(inv.flags)
     ref, number = _target(inv, fl)
     value = await diff_pull(inv.config, ref, number)
-    if fl.as_bool("name_only"):
+    if gh_bool(fl, "name_only"):
         return text_out("".join(f"{name}\n" for name in _changed_names(value)))
     return text_out(value if value.endswith("\n") else f"{value}\n")
 

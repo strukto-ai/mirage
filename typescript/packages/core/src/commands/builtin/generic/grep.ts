@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteView } from '../../../shell/bytes.ts'
 import { isStdin, operandLabel } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { guardInput } from '../utils/limit.ts'
@@ -21,7 +22,7 @@ import { fsStrerror, isWalkError, walkRefusal } from '../../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne } from '../../../utils/path.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
-import { mountParentReaddir, mountParentStat } from '../utils/operands.ts'
+import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -213,7 +214,13 @@ export async function grepGeneric(
   try {
     pat = resolution.neverMatch
       ? new RegExp(NEVER_MATCH)
-      : compilePattern(resolution.pattern, f.ignoreCase, f.fixedString, f.wholeWord, f.syntax)
+      : compilePattern(
+          byteView(resolution.pattern),
+          f.ignoreCase,
+          f.fixedString,
+          f.wholeWord,
+          f.syntax,
+        )
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]

@@ -33,6 +33,74 @@
         "stdout": "/data/xdiff.txt /data2/xdiff.txt differ: char 6, line 2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_cmp_names_the_shorter_file_at_eof",
+      "seq": 15800036,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab' > /data/xcmpe.txt && printf 'abc' > /data2/xcmpe.txt && cmp /data/xcmpe.txt /data2/xcmpe.txt; echo rc=$?; rm /data/xcmpe.txt /data2/xcmpe.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "cmp: EOF on /data/xcmpe.txt after byte 2, in line 1\n"
+      }
+    },
+    {
+      "id": "xm_cmp_skips_reach_across_mounts",
+      "seq": 15800073,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'xab' > /data/xmskip && printf 'ab' > /data2/xmskip && cmp /data/xmskip /data2/xmskip 1; echo rc=$?; cmp /data/xmskip /data2/xmskip; echo rc=$?; cmp /data/xmskip /data2/xmskip z; echo rc=$?; rm /data/xmskip /data2/xmskip",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n/data/xmskip /data2/xmskip differ: char 1, line 1\nrc=1\nrc=2\n",
+        "stderr": "cmp: invalid --ignore-initial value 'z'\ncmp: Try 'cmp --help' for more information.\n"
+      }
     }
   ]
 }

@@ -22,12 +22,12 @@ except ImportError as exc:
         "`agno` not installed. Install with: pip install 'mirage-ai[agno]'"
     ) from exc
 
-from mirage.agents.tool_operations import (
+from mirage.bridge.sync import run_async_from_sync
+from mirage.workspace.tools.tool_operations import (
     DEFAULT_READ_LIMIT,
     MirageToolOperations,
 )
-from mirage.bridge.sync import run_async_from_sync
-from mirage.workspace.workspace import Workspace
+from mirage.workspace.workspace import Session, Workspace
 
 T = TypeVar("T")
 
@@ -55,8 +55,11 @@ class MirageToolkit(Toolkit):
         session_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        self._ops = MirageToolOperations(
-            workspace, stale_write_protection, session_id
+        session = Session(workspace, session_id)
+        self._ops = (
+            session.tools
+            if stale_write_protection
+            else MirageToolOperations(session, stale_write_protection=False)
         )
         tools: list[Callable[..., Any]] = [
             self.shell,

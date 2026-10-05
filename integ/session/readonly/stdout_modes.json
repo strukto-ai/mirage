@@ -908,6 +908,56 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "sro_crro_prep",
+      "seq": 15800101,
+      "command": "mkdir -p /res/crro && printf 'y\\n' | gzip > /res/crro/only.gz && printf 'x\\n' > /res/crro/p.txt && printf 'q\\n' | gzip > /res/crro/q.gz && printf 'old\\n' > /res/crro/q",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sro_gunzip_is_refused_at_the_write",
+      "seq": 15800102,
+      "session": "narrowed",
+      "command": "gunzip /res/crro/only.gz; echo rc=$?; gunzip -k /res/crro/only.gz; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "\ngzip: /res/crro/only: Read-only file system\n\ngzip: /res/crro/only: Read-only file system\n"
+      },
+      "flags": [
+        "k"
+      ]
+    },
+    {
+      "id": "sro_gzip_k_d_and_df_are_refused_at_the_write",
+      "seq": 15800103,
+      "session": "narrowed",
+      "command": "gzip -k /res/crro/p.txt; echo rc=$?; gzip -d /res/crro/only.gz; echo rc=$?; gzip -df /res/crro/only.gz; echo rc=$?; gzip -df /res/crro/q.gz; echo rc=$?; ls /res/crro; cat /res/crro/q",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nonly.gz\np.txt\nq\nq.gz\nold\n",
+        "stderr": "\ngzip: /res/crro/p.txt.gz: Read-only file system\n\ngzip: /res/crro/only: Read-only file system\n\ngzip: /res/crro/only: Read-only file system\ngzip: /res/crro/q: Read-only file system\n"
+      },
+      "flags": [
+        "k",
+        "d",
+        "f"
+      ]
+    },
+    {
+      "id": "sro_crro_cleanup",
+      "seq": 15800104,
+      "command": "rm -r /res/crro",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

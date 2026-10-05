@@ -409,6 +409,40 @@
       }
     },
     {
+      "id": "sym_eloop_rg_beside_a_file_is_named_once",
+      "seq": 635,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -c o /data/a.txt /data/lp1",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/a.txt:3\n",
+        "stderr": "rg: /data/lp1: Too many levels of symbolic links (os error 40)\n"
+      }
+    },
+    {
       "id": "sym_eloop_sed",
       "seq": 635,
       "targets": [

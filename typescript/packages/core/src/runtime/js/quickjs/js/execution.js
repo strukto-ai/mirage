@@ -1,4 +1,8 @@
 const __join = (a) => a.map(String).join(' ')
+// The host's string door is a C string: text with a NUL in it crosses
+// as the pieces between its NULs.
+const __text = (v) => (typeof v === 'string' ? v : v.join('\0'))
+const __pieces = (s) => (s.includes('\0') ? s.split('\0') : s)
 const __pad = (s, flags, width) => {
   if (s.length >= width) return s
   if (flags.includes('-')) return s + ' '.repeat(width - s.length)
@@ -103,23 +107,23 @@ const __sprintf = (fmtIn, args) => {
   }
   return out
 }
-globalThis.console = { log: (...a) => __mirage_log(__join(a) + '\n') }
-globalThis.print = (...a) => __mirage_log(__join(a) + '\n')
+globalThis.console = { log: (...a) => __mirage_log(__pieces(__join(a) + '\n')) }
+globalThis.print = (...a) => __mirage_log(__pieces(__join(a) + '\n'))
 globalThis.std = {
-  in: { readAsString: () => __mirage_stdin },
+  in: { readAsString: () => __text(__mirage_stdin) },
   out: {
-    puts: (s) => __mirage_log(String(s)),
+    puts: (s) => __mirage_log(__pieces(String(s))),
     printf: (fmt, ...a) => {
       const s = __sprintf(fmt, a)
-      __mirage_log(s)
+      __mirage_log(__pieces(s))
       return s.length
     },
   },
   err: {
-    puts: (s) => __mirage_error(String(s)),
+    puts: (s) => __mirage_error(__pieces(String(s))),
     printf: (fmt, ...a) => {
       const s = __sprintf(fmt, a)
-      __mirage_error(s)
+      __mirage_error(__pieces(s))
       return s.length
     },
   },

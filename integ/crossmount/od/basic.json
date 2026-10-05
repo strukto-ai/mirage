@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_od_across_mounts",
+      "seq": 963211,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf 'ab' > /data/xm_rt_od; printf 'c' > /data2/xm_rt_od; od -c /data/xm_rt_od /data2/xm_rt_od; rm /data/xm_rt_od /data2/xm_rt_od",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   a   b   c\n0000003\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

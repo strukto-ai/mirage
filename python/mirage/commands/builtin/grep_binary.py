@@ -4,9 +4,6 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 
 from mirage.commands.builtin.grep_offsets import (
-    MatchOffsets,
-    decode_line,
-    encode_line,
     prefix_of,
 )
 from mirage.commands.builtin.grep_prefilter import required_needles
@@ -17,6 +14,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import close_quietly
 from mirage.io.types import IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
+from mirage.shell.bytes import byte_view, from_byte_view
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,14 +98,6 @@ async def binary_notice(io: IOResult, path: str) -> None:
     ) + f"grep: {path}: binary file matches\n".encode()
 
 
-def valid_utf8(data: bytes) -> bool:
-    try:
-        data.decode("utf-8")
-        return True
-    except UnicodeDecodeError:
-        return False
-
-
 def output_line(
     raw: bytes,
     number: int,
@@ -164,7 +154,6 @@ async def grep_input(
     """
     budget = YieldBudget()
     io.exit_code = 1
-    pat = utf8_pattern(pat)
     binary = BinaryInput(f.binary_mode)
     count = 0
     notified = False
@@ -223,8 +212,7 @@ async def grep_input(
             number += 1
             line_start = byte_pos
             byte_pos += len(raw) + 1
-            # Surrogate escapes preserve raw bytes under -a and -ao.
-            line = decode_line(raw)
+            line = byte_view(raw)
             hit = bool(pat.search(line)) != f.invert
             if f.max_count is not None and count >= f.max_count:
                 hit = False
@@ -261,26 +249,19 @@ async def grep_input(
             if hit:
                 if f.only_matching:
                     if not f.invert:
-                        offsets = (
-                            MatchOffsets(line_start, line)
-                            if f.byte_offsets
-                            else None
-                        )
                         for m in pat.finditer(line):
                             await budget.run()
                             text = match_text(m)
                             if text:
                                 chunks.append(
                                     output_line(
-                                        encode_line(text),
+                                        from_byte_view(text),
                                         number,
                                         True,
                                         path,
                                         show_filename,
                                         f,
-                                        offsets.at(match_start(m))
-                                        if offsets
-                                        else 0,
+                                        line_start + match_start(m),
                                     )
                                 )
                 else:
@@ -332,9 +313,7 @@ async def grep_input(
                 await binary_notice(io, path)
                 notified = True
             for chunk in chunks:
-                if f.binary_mode != "text" and (
-                    binary.nul or not valid_utf8(chunk)
-                ):
+                if f.binary_mode != "text" and binary.nul:
                     if f.binary_mode == "binary" and not notified:
                         await binary_notice(io, path)
                         notified = True
@@ -367,32 +346,3 @@ async def grep_input(
         yield (
             f"{path}:" if show_filename else ""
         ).encode() + f"{count}\n".encode()
-
-
-def utf8_pattern(pat: re.Pattern[str]) -> re.Pattern[str]:
-    parts: list[str] = []
-    escaped = False
-    in_class = False
-    class_start = 0
-    for index, char in enumerate(pat.pattern):
-        if escaped:
-            parts.append(char)
-            escaped = False
-        elif char == "\\":
-            parts.append(char)
-            escaped = True
-        elif char == "[" and not in_class:
-            parts.append(char)
-            in_class = True
-            # A leading ] after an optional ^ is a class member.
-            class_start = index + 1
-            if pat.pattern[class_start : class_start + 1] == "^":
-                class_start += 1
-        elif char == "]" and in_class and index > class_start:
-            parts.append(char)
-            in_class = False
-        elif char == "." and not in_class:
-            parts.append(r"[^\n\udc80-\udcff]")
-        else:
-            parts.append(char)
-    return re.compile("".join(parts), pat.flags)

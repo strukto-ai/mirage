@@ -14,7 +14,7 @@
 
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Shell, ShellAction, ShellResult, ShellOutputResult } from '@openai/agents'
-import { withRefusal } from '../io_text.ts'
+import { withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 export class MirageShell implements Shell {
   constructor(private readonly ws: Workspace) {}

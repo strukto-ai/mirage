@@ -17,6 +17,7 @@
     {
       "description": "Add a custom header to the request.",
       "long": "--header",
+      "multiple": true,
       "short": "-H",
       "type": "str"
     },
@@ -35,7 +36,38 @@
     {
       "description": "Send the given data as the request body.",
       "long": "--data",
+      "multiple": true,
       "short": "-d",
+      "type": "str"
+    },
+    {
+      "description": "Send the data exactly as given, a file unchanged.",
+      "long": "--data-binary",
+      "multiple": true,
+      "type": "str"
+    },
+    {
+      "description": "Send the data with no special meaning for @.",
+      "long": "--data-raw",
+      "multiple": true,
+      "type": "str"
+    },
+    {
+      "description": "Send the data URL-encoded.",
+      "long": "--data-urlencode",
+      "multiple": true,
+      "type": "str"
+    },
+    {
+      "description": "Send the data as JSON.",
+      "long": "--json",
+      "multiple": true,
+      "type": "str"
+    },
+    {
+      "description": "Send the user and password for basic auth.",
+      "long": "--user",
+      "short": "-u",
       "type": "str"
     },
     {

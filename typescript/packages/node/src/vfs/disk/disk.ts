@@ -14,15 +14,9 @@
 
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
-import {
-  chmod,
-  mkdir,
-  readFile,
-  stat as fsStat,
-  statfs as fsStatfs,
-  writeFile,
-} from 'node:fs/promises'
-import { mkdirSync } from 'node:fs'
+import { chmod, mkdir, stat as fsStat, statfs as fsStatfs, writeFile } from 'node:fs/promises'
+import { createWriteStream, mkdirSync } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
@@ -32,8 +26,10 @@ import { CapacityState, ListingVersion, PathSpec, VFSName } from '@struktoai/mir
 import type { CapacityResult } from '@struktoai/mirage-core/types'
 
 import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
+import { IO } from '../../commands/builtin/disk/io.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '@struktoai/mirage-core/commands/builtin/generic/du'
 
-import { readEntries, resolveInside } from '../../core/disk/utils.ts'
+import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
 import { DISK_OPS } from '../../ops/disk/index.ts'
 import { PROMPT } from './prompt.ts'
@@ -51,7 +47,11 @@ export interface DiskVFSOptions {
 export interface DiskVFSState {
   type: string
   config?: { root: string; folderVersions: boolean }
-  files: Record<string, Uint8Array>
+  /**
+   * Each file as bytes, or as a host path read by whoever consumes the
+   * state (a snapshot tar, a copy).
+   */
+  files: Record<string, Uint8Array | string>
   modes?: Record<string, number>
 }
 
@@ -72,6 +72,8 @@ export class DiskVFS extends BaseVFS {
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
+  override readonly maxDuEntries: number | null =
+    IO.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : IO.maxDuEntries
   override readonly indexTtl: number = 60
   override readonly prompt = PROMPT
   // Each folder's listing is stored at the folder's own version (inode and
@@ -133,14 +135,16 @@ export class DiskVFS extends BaseVFS {
 
   override async getState(): Promise<DiskVFSState> {
     await mkdir(this.root, { recursive: true })
-    const files: Record<string, Uint8Array> = {}
+    const files: Record<string, string> = {}
     const modes: Record<string, number> = {}
     const fileList: string[] = []
     await walkFiles(this.root, fileList)
     for (const full of fileList) {
       const rel = path.relative(this.root, full).split(path.sep).join('/')
-      const data = await readFile(full)
-      files[rel] = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      // By reference: the consumer reads each file, one at a time, so
+      // capturing a large tree costs no memory. It keeps the files still
+      // until it has read them.
+      files[rel] = full
       // Capture the real inode mode: it is the base truth for disk
       // permissions (the sidecar is gone), so restore must reapply it or
       // a chmod would reset to the host umask.
@@ -160,7 +164,14 @@ export class DiskVFS extends BaseVFS {
       if (path.isAbsolute(rel)) throw new Error(`snapshot path must be relative: ${rel}`)
       const full = await resolveInside(this.root, PathSpec.fromStrPath('/' + rel), rel)
       await mkdir(path.dirname(full), { recursive: true })
-      await writeFile(full, data)
+      // A host path (a staged restore, another disk mount's state) is
+      // copied; one that already is the target (a copy over the same root)
+      // is left alone.
+      if (typeof data !== 'string') await writeFile(full, data)
+      else if (path.resolve(data) !== path.resolve(full)) {
+        const source = await openRegular(data)
+        await pipeline(source.createReadStream(), createWriteStream(full))
+      }
       const mode = state.modes?.[rel]
       if (mode !== undefined) await chmod(full, mode)
     }

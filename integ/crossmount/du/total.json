@@ -33,6 +33,40 @@
         "stdout": "6\t/data/b.txt\n6\t/data2/xm.txt\n12\ttotal\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_du_ch_rounds_the_total_once",
+      "seq": 15800007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head -c 1025 /dev/zero > /data/crh && head -c 1025 /dev/zero > /data2/crh && du -ch /data/crh /data2/crh; rm /data/crh /data2/crh; du -c /data/nosuch /data2/nosuch 2>/dev/null; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1.1K\t/data/crh\n1.1K\t/data2/crh\n2.1K\ttotal\n0\ttotal\nrc=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

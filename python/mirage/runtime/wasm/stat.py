@@ -63,6 +63,9 @@ def pack_fdstat(filetype: int) -> bytes:
 def pack_filestat(size: int, mtime_ns: int, filetype: int, ino: int) -> bytes:
     """Encode a filestat record.
 
+    A directory links twice, from its parent and from its own ``.``, and
+    a file once, as ``st_nlink`` reads on Linux.
+
     Args:
         size (int): file size in bytes.
         mtime_ns (int): modification time, epoch nanoseconds.
@@ -74,7 +77,7 @@ def pack_filestat(size: int, mtime_ns: int, filetype: int, ino: int) -> bytes:
         0,
         ino,
         filetype,
-        1,
+        2 if filetype == FT_DIR else 1,
         size,
         mtime_ns,
         mtime_ns,

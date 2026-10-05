@@ -67,6 +67,28 @@ function echo(method: string) {
   }
 }
 
+// Reports the whole request a case can steer: the method, the three headers
+// curl adds on its own, every `x-` header by name (the harness's own
+// `x-mirage-` ones aside), and the body, so a case can assert that each -H,
+// -u and data option reached the wire and nothing else was dropped or doubled.
+function request(method: string) {
+  return (ctx: Ctx<C>): Reply => {
+    const custom = Object.keys(ctx.headers)
+      .filter((name) => name.startsWith('x-') && !name.startsWith('x-mirage-'))
+      .sort()
+      .map((name) => `${name}=${headerOf(ctx, name)}`)
+    const lines = [
+      `method=${method}`,
+      `accept=${headerOf(ctx, 'accept')}`,
+      `authorization=${headerOf(ctx, 'authorization')}`,
+      `content-type=${headerOf(ctx, 'content-type')}`,
+      ...custom,
+      `body=${ctx.body.toString('utf8')}`,
+    ]
+    return text(200, `${lines.join('\n')}\n`)
+  }
+}
+
 // Reports the request's content type alone, so a case can assert what -d
 // puts on the wire, and that -H replaces it rather than doubling it.
 function contentType(ctx: Ctx<C>): Reply {
@@ -93,6 +115,8 @@ export function httpRoutes(): KitRoute<C>[] {
     route<C>('POST', '/echo', echo('POST')),
     route<C>('DELETE', '/echo', echo('DELETE')),
     route<C>('POST', '/type', contentType),
+    route<C>('GET', '/request', request('GET')),
+    route<C>('POST', '/request', request('POST')),
     route<C>('POST', '/form', form),
   ]
 }

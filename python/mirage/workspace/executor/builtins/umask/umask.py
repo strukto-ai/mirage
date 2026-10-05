@@ -14,6 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.utils.mode import parse_chmod
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import fail
@@ -122,7 +123,7 @@ async def handle_umask(
         if reusable:
             body = f"umask {'-S ' if symbolic else ''}{body}"
         return (
-            (body + "\n").encode(),
+            encode_text(body + "\n"),
             IOResult(),
             ExecutionNode(command="umask", exit_code=0),
         )

@@ -14,7 +14,7 @@
 
 import { Buffer } from 'node:buffer'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
-import { MirageToolOperations } from '@struktoai/mirage-agents/tool_operations'
+import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
@@ -113,8 +113,7 @@ export class MirageRpcServer {
     this.ws = workspace
     this.sessionId = options.sessionId ?? workspace.defaultSessionId
     this.session = new Session(workspace, this.sessionId)
-    this.operations =
-      options.operations ?? new MirageToolOperations(workspace, { sessionId: this.sessionId })
+    this.operations = options.operations ?? this.session.tools
     this.name = options.name ?? 'mirage'
     this.version = options.version ?? VERSION
     const vfs = (): ReturnType<Session['vfs']['forSession']> => this.session.vfs

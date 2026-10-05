@@ -31,7 +31,7 @@
       "command": "numfmt --grouping 1234567",
       "expect": {
         "exit": 0,
-        "stdout": "1,234,567\n",
+        "stdout": "1234567\n",
         "stderr": ""
       },
       "flags": [
@@ -69,6 +69,21 @@
         "exit": 0,
         "stdout": "1\nrc=2\n1\nrc=2\n1000\nrc=2\n",
         "stderr": "numfmt: invalid number: 'abc'\nnumfmt: invalid number: 'abc'\nnumfmt: invalid number: 'abc'\n"
+      }
+    },
+    {
+      "id": "numfmt_grouping_groups_nothing_in_the_c_locale",
+      "seq": 910047,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --grouping --suffix=B 1234B; echo rc=$?; numfmt --grouping --to=si 1000; echo rc=$?; numfmt --grouping --from=si 1K; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1234B\nrc=0\nrc=1\n1000\nrc=0\n",
+        "stderr": "numfmt: grouping cannot be combined with --to\n"
       }
     }
   ]

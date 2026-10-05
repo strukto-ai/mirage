@@ -77,6 +77,10 @@
       "types": "./dist/ssh/config.d.ts",
       "import": "./dist/ssh/config.js"
     },
+    "./ssh/relay": {
+      "types": "./dist/ssh/relay.d.ts",
+      "import": "./dist/ssh/relay.js"
+    },
     "./mcp": {
       "types": "./dist/mcp/index.d.ts",
       "import": "./dist/mcp/index.js"
@@ -101,14 +105,15 @@
   },
   "dependencies": {
     "@fastify/rate-limit": "^10.0.0",
+    "@fastify/websocket": "^11.3.3",
     "@modelcontextprotocol/client": "^2.3.0",
     "@modelcontextprotocol/server": "^2.3.0",
-    "@struktoai/mirage-agents": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
     "fastify": "^5.12.5",
     "jose": "^6.2.3",
-    "rate-limiter-flexible": "^11.2.0"
+    "rate-limiter-flexible": "^11.2.0",
+    "ws": "^8.21.3"
   },
   "peerDependencies": {
     "ssh2": "^1.16.0"
@@ -121,6 +126,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/ssh2": "^1.15.0",
+    "@types/ws": "^8.18.1",
     "ssh2": "^1.16.0",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",

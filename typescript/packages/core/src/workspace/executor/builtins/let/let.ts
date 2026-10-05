@@ -27,6 +27,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { readonlyRefusal, refusal, requireView } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * `(( ))` as a builtin: every operand is one expression, the writes land
@@ -40,7 +41,7 @@ export async function handleLet(
   state: SessionView | null = null,
 ): Promise<Result> {
   if (args.length === 0) {
-    const err = new TextEncoder().encode('bash: let: expression expected\n')
+    const err = encodeText('bash: let: expression expected\n')
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -91,7 +92,7 @@ export async function handleLet(
       throw err
     }
     if (error !== null) {
-      const errBytes = new TextEncoder().encode(`bash: let: ${expr}: ${error.message}\n`)
+      const errBytes = encodeText(`bash: let: ${expr}: ${error.message}\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: errBytes }),

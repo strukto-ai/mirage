@@ -17,9 +17,9 @@ import pytest
 from mirage.cache.context import push_cache_manager
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.builtin.generic.head import head_multi
-from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.rg import rg_generic
 from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.generic.wc import format_multi
 from mirage.commands.config import CommandOpts
@@ -126,7 +126,7 @@ async def test_generic_grep_serves_cache_without_backend():
     manager = await _warm_manager()
     prev = push_cache_manager(manager)
     try:
-        out, io = await generic_grep(
+        out, io = await grep_generic(
             [_spec()],
             ("alpha",),
             CommandOpts(),
@@ -147,7 +147,7 @@ async def test_generic_rg_serves_cache_without_backend():
     manager = await _warm_manager()
     prev = push_cache_manager(manager)
     try:
-        out, io = await generic_rg(
+        out, io = await rg_generic(
             [_spec()],
             ("alpha",),
             CommandOpts(),
@@ -165,7 +165,7 @@ async def test_generic_rg_serves_cache_without_backend():
 @pytest.mark.asyncio
 async def test_generic_grep_awaits_byte_reader_before_returning():
     reader = _CountingReader(_PAYLOAD)
-    out, io = await generic_grep(
+    out, io = await grep_generic(
         [_spec()],
         ("alpha",),
         CommandOpts(),

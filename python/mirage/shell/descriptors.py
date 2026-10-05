@@ -19,6 +19,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from mirage.io.async_line_iterator import SharedInput
+from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole, OwnedStream, Terminal
 from mirage.shell.constants import FD_BOTH, FD_CLOSE
 from mirage.shell.types import Redirect, RedirectKind
@@ -61,7 +62,7 @@ def bad_descriptor_line(fd: int) -> bytes:
     Args:
         fd (int): the descriptor that was named.
     """
-    return f"{fd}: Bad file descriptor\n".encode()
+    return encode_text(f"{fd}: Bad file descriptor\n")
 
 
 async def unreadable_stdin() -> AsyncIterator[bytes]:

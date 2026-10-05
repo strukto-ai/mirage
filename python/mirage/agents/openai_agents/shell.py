@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.agents.io_text import io_to_str
+from mirage.workspace.tools.io_text import io_to_str
 from mirage.workspace.workspace import Workspace
 
 

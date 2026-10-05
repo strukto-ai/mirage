@@ -16,6 +16,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from itertools import chain
 
 from mirage.io import IOResult
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.constants import (
     BASH_KEYWORDS,
     CASE_TERMINATORS,
@@ -123,7 +124,7 @@ def _stray_case_terminators(node: TSNodeLike) -> Iterator[tuple[int, str]]:
                 text = child.text
                 yield (
                     child.start_byte,
-                    (text.decode(errors="replace") if text else child.type),
+                    (decode_text(text) if text else child.type),
                 )
             stack.append(child)
 
@@ -168,7 +169,7 @@ def _empty_compounds(node: TSNodeLike) -> Iterator[tuple[int, str]]:
             if opened and kid.type in _BODY_CLOSERS:
                 yield (
                     kid.start_byte,
-                    (kid.text or b"").decode(errors="replace"),
+                    decode_text(kid.text or b""),
                 )
             if kid.type in _BODY_OPENERS:
                 opened = True
@@ -225,7 +226,7 @@ def _stray_reserved_words(
         if current.type != "command" or not current.children:
             continue
         name = current.children[0]
-        text = (name.text or b"").decode(errors="replace")
+        text = decode_text(name.text or b"")
         if name.type != "command_name" or text not in _RESERVED_CLOSERS:
             continue
         span = own.get(text)
@@ -248,7 +249,7 @@ def _is_recovered_quoted_heredoc_end(
 ) -> bool:
     if previous is None:
         return False
-    error_text = (error.text or b"").decode().strip()
+    error_text = decode_text(error.text or b"").strip()
     if not error_text:
         return False
     for candidate in _walk_named(previous):
@@ -258,9 +259,9 @@ def _is_recovered_quoted_heredoc_end(
         end = None
         for child in candidate.named_children:
             if child.type == "heredoc_start":
-                start = (child.text or b"").decode()
+                start = decode_text(child.text or b"")
             elif child.type == "heredoc_end":
-                end = (child.text or b"").decode()
+                end = decode_text(child.text or b"")
         if (
             start is not None
             and ("'" in start or '"' in start)
@@ -321,7 +322,7 @@ def find_syntax_error(
     ):
         return _missing_quote(node)
     if node.type == "command_substitution":
-        source = (node.text or b"").decode()
+        source = decode_text(node.text or b"")
         unclosed = find_unterminated_backtick(source)
         if unclosed is not None:
             return unclosed
@@ -355,7 +356,7 @@ def find_syntax_error(
             continue
         if child.is_missing:
             text = child.text
-            return text.decode(errors="replace") if text else ""
+            return decode_text(text) if text else ""
         if (
             child.type == "ERROR"
             and _is_structural_error(child)
@@ -368,7 +369,7 @@ def find_syntax_error(
                 previous = child
                 continue
             text = child.text
-            return text.decode(errors="replace") if text else ""
+            return decode_text(text) if text else ""
         if child.type != "ERROR":
             nested = find_syntax_error(child, aliases, own, offsets)
             if nested is not None:
@@ -403,7 +404,7 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
         if current.is_missing and current.type in ("'", '"'):
             return current.type
         if current.type == "ansi_c_string":
-            source = (current.text or b"").decode()
+            source = decode_text(current.text or b"")
             before = source[:-1]
             if (len(before) - len(before.rstrip("\\"))) % 2:
                 return "'"
@@ -424,18 +425,13 @@ def syntax_error_result(
         node (TSNodeLike | None): the parsed command, for quote diagnostics.
     """
     quote = find_unterminated_quote(node) if node is not None else None
-    if quote is not None:
-        return IOResult(
-            exit_code=2,
-            stderr=(
-                "mirage: unexpected EOF while looking for matching "
-                f"`{quote}'\n"
-            ).encode(),
-        )
     snippet = offending.strip()
-    err = (
-        f"mirage: syntax error near {snippet!r}\n".encode()
-        if snippet
-        else b"mirage: syntax error in command\n"
-    )
-    return IOResult(exit_code=2, stderr=err)
+    if quote is not None:
+        message = (
+            f"mirage: unexpected EOF while looking for matching `{quote}'\n"
+        )
+    elif snippet:
+        message = f"mirage: syntax error near '{snippet}'\n"
+    else:
+        message = "mirage: syntax error in command\n"
+    return IOResult(exit_code=2, stderr=encode_text(message))

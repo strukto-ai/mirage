@@ -28,7 +28,6 @@ import {
 } from './diff_output.ts'
 import {
   FULL_SHA,
-  needsDecorations,
   oneline,
   presetBlock,
   renderTemplate,
@@ -37,6 +36,7 @@ import {
 } from './format.ts'
 import { CommitGraph } from './graph.ts'
 import {
+  decorationFor,
   decorations,
   parseFlags,
   refCommits,
@@ -48,8 +48,9 @@ import {
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { splitRevisions } from './revparse.ts'
-import { checkOperands, escaped, fatal } from './util.ts'
+import { checkOperands, fatal } from './util.ts'
 import { HEAD } from './constants.ts'
+import { Decoration } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
@@ -73,7 +74,9 @@ function rendered(
   if (fmt.kind === 'oneline') {
     const length = flags.abbrevCommit ? width : FULL_SHA
     const lines = commits.map((commit) =>
-      flags.decorate ? renderTemplate('%h%d %s', commit, length, decor) : oneline(commit, length),
+      flags.decorate !== Decoration.NONE
+        ? renderTemplate('%h%d %s', commit, length, decor)
+        : oneline(commit, length),
     )
     return lines.length > 0 ? `${lines.join('\n')}\n` : ''
   }
@@ -92,7 +95,7 @@ function rendered(
   commits.forEach((commit, index) => {
     if (index > 0) lines.push('')
     const block = presetBlock(commit, fmt.kind, width, flags.date, mailmap)
-    if (flags.decorate && block[0]?.startsWith('commit '))
+    if (flags.decorate !== Decoration.NONE && block[0]?.startsWith('commit '))
       block[0] += renderTemplate('%d', commit, width, decor)
     lines.push(...block)
   })
@@ -163,7 +166,8 @@ async function graphed(
         !user && parent !== null
           ? ` (from ${parent.slice(0, fmt.kind === 'oneline' ? length : FULL_SHA)})`
           : ''
-      const labels = flags.decorate ? renderTemplate('%d', commit, width, decor) : ''
+      const labels =
+        flags.decorate !== Decoration.NONE ? renderTemplate('%d', commit, width, decor) : ''
       let text: string
       if (fmt.kind === 'oneline') {
         out += `${renderTemplate('%h', commit, length, decor)}${from}${labels} `
@@ -210,17 +214,18 @@ export async function log(inv: CLIInvocation): Promise<CommandFnResult> {
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands(texts, undefined, escaped(inv.argv))
+    checkOperands(inv, texts)
     const flags = parseFlags(fl, inv.env)
     const repo = await opened(fl, doors)
     const parsed = {
       ...flags,
       mailmap: await loadMailmap(repo.dispatch, repo.location),
       useMailmap: useMailmap(fl, await configBool(repo, 'log.mailmap', true)),
+      decorate: await decorationFor(repo, fl, flags.pretty),
     }
     const [starts, hidden] = await startingPoints(repo, texts, parsed)
     const decor =
-      parsed.decorate || needsDecorations(parsed.pretty) ? await decorations(repo) : null
+      parsed.decorate === Decoration.NONE ? null : await decorations(repo, parsed.decorate)
     let diffFlags = parseDiffFlags(fl, false)
     const diffing =
       diffFlags.patch ||

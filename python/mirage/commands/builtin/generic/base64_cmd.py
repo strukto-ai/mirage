@@ -15,6 +15,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, ReadStreamFn, StatFn
 
 
@@ -28,13 +29,13 @@ async def _base64_encode_stream(
     if not encoded:
         return
     if wrap is not None and wrap == 0:
-        yield encoded.encode() + b"\n"
+        yield encode_text(encoded) + b"\n"
         return
     line_len = wrap if wrap is not None else 76
     lines: list[str] = []
     for i in range(0, len(encoded), line_len):
         lines.append(encoded[i : i + line_len])
-    yield "\n".join(lines).encode() + b"\n"
+    yield encode_text("\n".join(lines)) + b"\n"
 
 
 async def _base64_decode_stream(

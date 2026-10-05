@@ -17,10 +17,12 @@ import io
 import logging
 import posixpath
 import shlex
+import shutil
+import tempfile
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from agents.sandbox.errors import ExecTimeoutError
 from agents.sandbox.manifest import Manifest
@@ -38,7 +40,6 @@ from agents.sandbox.session.sandbox_session_state import SandboxSessionState
 from agents.sandbox.snapshot import NoopSnapshot, SnapshotBase, SnapshotSpec
 from agents.sandbox.types import ExecResult, User
 
-from mirage.agents.io_text import with_refusal_bytes
 from mirage.agents.openai_agents.constants import (
     DEFAULT_EXEC_YIELD_MS,
     DEFAULT_WRITE_YIELD_MS,
@@ -46,7 +47,9 @@ from mirage.agents.openai_agents.constants import (
     INTERRUPTED_EXIT_CODE,
     NO_STDIN,
 )
+from mirage.concurrency.limiter import run_blocking
 from mirage.workspace.snapshot import apply_state_dict, read_tar
+from mirage.workspace.tools.io_text import with_refusal_bytes
 from mirage.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -284,10 +287,16 @@ class MirageSandboxSession(BaseSandboxSession):
         return not self._ws._closed
 
     async def persist_workspace(self) -> io.IOBase:
-        buf = io.BytesIO()
-        await self._ws.snapshot(buf)
-        buf.seek(0)
-        return buf
+        # Spooled to an anonymous temp file, not memory: the SDK reads
+        # it into the snapshot store and closes it, which deletes it.
+        spool = await run_blocking(tempfile.TemporaryFile)
+        try:
+            await self._ws.snapshot(spool)
+            await run_blocking(spool.seek, 0)
+        except BaseException:
+            spool.close()
+            raise
+        return cast(io.IOBase, spool)
 
     async def hydrate_workspace(self, data: io.IOBase) -> None:
         # Restore the snapshot's non-mount state (cache, sessions,
@@ -298,8 +307,16 @@ class MirageSandboxSession(BaseSandboxSession):
         # scratch.
         if hasattr(data, "seek"):
             data.seek(0)
-        state = read_tar(data)
-        await apply_state_dict(self._ws, state)
+        # Disk mount files are staged on disk until the mounts have
+        # copied them in, and the tar is read off the loop.
+        staging = Path(
+            await run_blocking(tempfile.mkdtemp, prefix="mirage-restore-")
+        )
+        try:
+            state = await run_blocking(read_tar, data, staging)
+            await apply_state_dict(self._ws, state)
+        finally:
+            await run_blocking(shutil.rmtree, staging, ignore_errors=True)
 
     async def close_mirage_session(self) -> None:
         """Stop the session's lines and close its Mirage session."""

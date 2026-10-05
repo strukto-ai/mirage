@@ -1,7 +1,6 @@
 import pytest
 
 from mirage.commands.builtin.utils.identity import (
-    NO_IDENTITY,
     Identity,
     group_name,
     identity_from,
@@ -28,7 +27,7 @@ def test_owner_and_group_prefer_the_entry_then_the_identity_then_dash():
     assert group_name("staff", identity) == "staff"
     assert group_name(None, identity) == "admin"
     assert group_name(None, Identity(user="alice")) == "-"
-    assert group_name(None, NO_IDENTITY) == "-"
+    assert group_name(None, Identity()) == "-"
 
 
 def test_identity_reads_the_name_plane_and_the_session_plane():
@@ -36,11 +35,11 @@ def test_identity_reads_the_name_plane_and_the_session_plane():
     view = session_view(session)
     ns = NamespaceView(user="alice")
     assert identity_from(ns, view) == Identity(user="alice", profile="admin")
-    assert identity_from(None, None) == NO_IDENTITY
+    assert identity_from(None, None) == Identity()
     assert identity_of(CommandOpts(ns=ns, session_view=view)) == Identity(
         user="alice", profile="admin"
     )
-    assert identity_of(CommandOpts()) == NO_IDENTITY
+    assert identity_of(CommandOpts()) == Identity()
 
 
 async def _run(ws: Workspace, line: str) -> tuple[int, str]:

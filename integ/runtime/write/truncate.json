@@ -79,6 +79,19 @@
             "exit": 0,
             "stdout": "012"
           }
+        },
+        {
+          "program": {
+            "python": "import os\ntry:\n    os.truncate('/data/nope.txt', 3)\nexcept OSError as e:\n    print(type(e).__name__)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "FileNotFoundError\n",
+            "ops_absent": [
+              "create /data/nope.txt",
+              "truncate /data/nope.txt"
+            ]
+          }
         }
       ]
     }

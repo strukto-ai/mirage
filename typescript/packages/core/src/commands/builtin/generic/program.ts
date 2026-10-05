@@ -8,6 +8,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { loadFailure } from '../../../core/jq/index.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
+import { decodeText } from '../../../shell/bytes.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
 import { eisdir, fsErrorLine, fsStrerror, isEisdir, isFsError } from '../../../utils/errors.ts'
 
@@ -145,7 +146,6 @@ export async function prepareProgram(
     ]
   }
   const out = Object.fromEntries(Object.entries(bag).filter(([name]) => name !== key))
-  const dec = new TextDecoder()
   if (name === 'grep' || name === 'rg' || name === 'zgrep') {
     const patternKey = PATTERN_KEYS[name] ?? 'e'
     const expressions = fl.asList(patternKey)
@@ -156,12 +156,12 @@ export async function prepareProgram(
     out[patternKey] = pattern === null ? [] : [pattern]
   } else if (name === 'sed') {
     const expressions = fl.asList('e').values()
-    const scripts = pieces.map((data) => dec.decode(data)).values()
+    const scripts = pieces.map((data) => decodeText(data)).values()
     out.e = fl
       .occurrences('e', 'f')
       .map(([kind]) => (kind === 'e' ? expressions : scripts).next().value ?? '')
   } else {
-    texts = [pieces.map((data) => dec.decode(data)).join('\n'), ...texts]
+    texts = [pieces.map((data) => decodeText(data)).join('\n'), ...texts]
   }
   return [texts, out, consumed ? source : stdin, null]
 }

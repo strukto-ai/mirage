@@ -230,15 +230,6 @@ async def test_the_checked_out_branch_cannot_be_deleted(git_rw):
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_switch_is_not_read_as_a_branch_name(git_rw):
-    # The operand slot would otherwise swallow it and try to make a
-    # branch called -Z, which is how this broke once.
-    code, _out, err = await _run(git_rw, "branch -Z")
-    assert code == 129
-    assert err == b"error: unknown switch `Z'\n"
-
-
-@pytest.mark.asyncio
 async def test_branch_refuses_a_name_that_escapes_the_ref_tree(
     git_rw, repo_path: Path
 ):

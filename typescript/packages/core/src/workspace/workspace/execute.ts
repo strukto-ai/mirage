@@ -30,7 +30,7 @@ import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import {
-  syntaxErrorMessage,
+  syntaxErrorResult,
   findSyntaxError,
   findUnterminatedBacktick,
   type ShellParser,
@@ -65,7 +65,8 @@ import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
-import { type SessionState, type StatusWriter, newStatusWriter } from '../session/session.ts'
+import { type SessionState } from '../session/session.ts'
+import { type StatusWriter, newStatusWriter } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
@@ -82,6 +83,7 @@ import type { Router } from './routing.ts'
 import type { Runtimes } from './runtimes.ts'
 import { ExecuteResult, type ExecuteOptions } from './types.ts'
 import { commandName, forkForCall } from './utils.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -122,11 +124,6 @@ export interface ExecuteEnv {
  */
 interface NestedRefusal {
   latest: Refusal | null
-}
-
-function syntaxErrorResult(offending: string, root: TSNodeLike): ExecuteResult {
-  const errMsg = syntaxErrorMessage(offending, root)
-  return new ExecuteResult(new Uint8Array(), new TextEncoder().encode(errMsg), 2)
 }
 
 /**
@@ -334,11 +331,7 @@ async function runLine(
     } catch (error) {
       if ((error as { code?: unknown }).code !== 'EAGAIN') throw error
       recordStatus(targetSession, FORK_FAILED_STATUS)
-      return new ExecuteResult(
-        new Uint8Array(),
-        new TextEncoder().encode(FORK_FAILED),
-        FORK_FAILED_STATUS,
-      )
+      return new ExecuteResult(new Uint8Array(), encodeText(FORK_FAILED), FORK_FAILED_STATUS)
     }
     targetSession.processId = process.info.pid
     targetSession.shellPid ??= process.info.pid
@@ -418,14 +411,16 @@ async function runPreparedLine(
                 expandingAliases(effectiveSession),
               ) ?? findUnterminatedBacktick(root.text))
             : null
-        if (offending !== null)
+        if (offending !== null) {
+          const io = syntaxErrorResult(offending, root)
           return answerLine(
             env,
             command,
             options,
             targetSession,
-            syntaxErrorResult(offending, root),
+            new ExecuteResult(new Uint8Array(), await materialize(io.stderr), io.exitCode),
           )
+        }
         const rootNode = root as unknown as TSNodeLike
         let routingDecision: RouteDecision | null
         try {
@@ -976,7 +971,7 @@ async function runParsedLine(
   // wrapper around them, like a group.
   // A rejected invocation records its outcome without changing shell status.
   if (rootNode.warnings)
-    io.stderr = new TextEncoder().encode(rootNode.warnings + (await io.stderrStr()))
+    io.stderr = concat([encodeText(rootNode.warnings), await io.materializeStderr()])
   if (!callerError) recordStatus(targetSession, io.exitCode, true)
   let stdoutBytes: Uint8Array
   try {
@@ -1003,7 +998,7 @@ async function runParsedLine(
       io.exitCode = 1
       io.stderr = isFsError(err)
         ? formatFsError(cmdName, err)
-        : new TextEncoder().encode(`${err instanceof Error ? err.message : String(err)}\n`)
+        : encodeText(`${err instanceof Error ? err.message : String(err)}\n`)
       recordStatus(targetSession, 1)
       stdoutBytes = new Uint8Array()
     }

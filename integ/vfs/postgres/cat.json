@@ -337,6 +337,19 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "pg_tail_glob_reads_each_relation",
+      "seq": 610016,
+      "targets": [
+        "postgres"
+      ],
+      "command": "tail -n 1 /pg/public/tables/*/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /pg/public/tables/authors/rows.jsonl <==\n{\"id\":3,\"name\":\"cara\",\"books\":1}\n\n==> /pg/public/tables/books/rows.jsonl <==\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": ""
+      }
     }
   ]
 }

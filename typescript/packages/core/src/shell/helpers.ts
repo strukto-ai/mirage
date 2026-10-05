@@ -72,7 +72,7 @@ export function* quotedParts(node: TSNodeLike): Generator<string | TSNodeLike> {
  * `encodeText` rather than `TextEncoder` because a byte that is not valid
  * UTF-8 rides as a surrogate escape and stands for one byte. That is a
  * requirement on the caller, not a hope: grep's family decodes every line
- * through `grep_offsets.decodeLine` for it.
+ * through `decodeText` for it.
  */
 export function byteOffset(text: string, index: number): number {
   return encodeText(text.slice(0, index)).length
@@ -761,10 +761,6 @@ export function getCaseItems(node: TSNodeLike): [TSNodeLike[], TSNodeLike[], str
   return items
 }
 
-export function getDeclarationAssignments(node: TSNodeLike): string[] {
-  return node.namedChildren.filter((c) => c.type === NT.VARIABLE_ASSIGNMENT).map((c) => getText(c))
-}
-
 export function getDeclarationKeyword(node: TSNodeLike): string {
   return node.children[0]?.type ?? ''
 }
@@ -834,14 +830,6 @@ export function getUnsetArgs(node: TSNodeLike): string[] {
     if (split !== null) return split
   }
   return node.namedChildren.map((c) => getText(c))
-}
-
-export function getTestArgv(node: TSNodeLike): string[] {
-  return node.namedChildren.map((c) => getText(c))
-}
-
-export function getCommandAssignments(node: TSNodeLike): string[] {
-  return node.namedChildren.filter((c) => c.type === NT.VARIABLE_ASSIGNMENT).map((c) => getText(c))
 }
 
 export function getNegatedCommand(node: TSNodeLike): TSNodeLike {

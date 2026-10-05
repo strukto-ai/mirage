@@ -25,14 +25,15 @@ from mirage.commands.cli.builtin.git.diff_output import commit_summary
 from mirage.commands.cli.builtin.git.errors import (
     AllWithPathsError,
     GitError,
+    LockExistsError,
     MissingMessageError,
     NothingToCommitError,
     NoWorkspaceError,
     PartialCommitError,
-    UnknownSwitchError,
     UnmergedIndexError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
+from mirage.commands.cli.builtin.git.io import take_lock
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.reflog import record
 from mirage.commands.cli.builtin.git.refs import (
@@ -47,12 +48,10 @@ from mirage.commands.cli.builtin.git.status import render_report
 from mirage.commands.cli.builtin.git.summary import report
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.commands.cli.builtin.git.util import (
-    check_operands,
-    escaped,
+    check_switches,
     fatal,
     links_of,
     start_point,
-    switches,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
@@ -186,9 +185,7 @@ async def commit(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(
-            inv.texts, UnknownSwitchError, escaped(inv.argv), switches(inv)
-        )
+        check_switches(inv, inv.texts)
         staging = fl.as_bool("all")
         if inv.texts:
             raise (AllWithPathsError if staging else PartialCommitError)(
@@ -198,6 +195,12 @@ async def commit(
         if not message:
             raise MissingMessageError()
         repo, location = await opened(fl, doors, work_tree=True)
+        # git takes the index's lock before it looks for anything to
+        # commit, so a read-only repository refuses an empty commit too.
+        try:
+            await take_lock(dispatch, f"{location.gitdir}/index")
+        except FileExistsError as exc:
+            raise LockExistsError(exc.filename) from exc
         state = await read_index(dispatch, location.gitdir)
         if state.conflicts:
             raise UnmergedIndexError()
@@ -211,7 +214,11 @@ async def commit(
             path: (entry.mode, entry.sha)
             for path, entry in state.entries.items()
         }
-        if before is not None and before == after:
+        if (
+            before is not None
+            and before == after
+            and not fl.as_bool("allow_empty")
+        ):
             raise NothingToCommitError(
                 await render_report(
                     dispatch,

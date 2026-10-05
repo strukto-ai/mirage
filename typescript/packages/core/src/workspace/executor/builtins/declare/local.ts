@@ -37,6 +37,7 @@ import {
 } from './declare.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 export async function handleLocal(
   assignments: string[],
@@ -57,7 +58,7 @@ export async function handleLocal(
     // Without the check the builtin took its operands, stored them
     // globally and exited 0, which is the silent-accept this whole tier
     // exists to remove.
-    const err = new TextEncoder().encode('bash: local: can only be used in a function\n')
+    const err = encodeText('bash: local: can only be used in a function\n')
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),

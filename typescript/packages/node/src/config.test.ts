@@ -14,7 +14,7 @@
 
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/index'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'

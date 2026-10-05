@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
 import { readdir } from '../../core/opfs/readdir.ts'

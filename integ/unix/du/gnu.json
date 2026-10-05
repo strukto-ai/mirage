@@ -246,6 +246,74 @@
         "stdout": "0\ttotal\ncode=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "du_a_prints_a_file_operand_once_and_rows_as_typed",
+      "seq": 15800001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/dua/sub/deep && printf 'deep\\n' > /data/dua/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dua/sub/nested.txt && du -a /data/a.txt; (cd /data/dua && du -a sub); rm -r /data/dua",
+      "expect": {
+        "exit": 0,
+        "stdout": "24\t/data/a.txt\n5\tsub/deep/deeper.txt\n5\tsub/deep\n15\tsub/nested.txt\n20\tsub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "du_missing_operand_keeps_the_present_ones",
+      "seq": 15800002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/dum/sub/deep && printf 'deep\\n' > /data/dum/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dum/sub/nested.txt && du /data/dum/sub /data/dum/nosuch; echo code=$?; rm -r /data/dum",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\t/data/dum/sub/deep\n20\t/data/dum/sub\ncode=1\n",
+        "stderr": "du: cannot access '/data/dum/nosuch': No such file or directory\n"
+      }
     }
   ]
 }

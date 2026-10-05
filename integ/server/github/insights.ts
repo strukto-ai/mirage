@@ -25,8 +25,8 @@ import { accountId, simpleUser } from './repos.ts'
 import {
   accountOf,
   accountsOf,
+  branchCommits,
   branchNames,
-  commitList,
   loginsOf,
   metaOf,
   peeled,
@@ -70,7 +70,7 @@ async function contributors(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   )
   const known = new Map<string, number>()
   const anonymous = new Map<string, { name: string; count: number }>()
-  for (const row of await commitList(ctx.db, ctx.tenant, repo, repo.defaultBranch)) {
+  for (const row of await branchCommits(ctx.db, ctx.tenant, repo, repo.defaultBranch)) {
     const who = commitIdentity(row)
     if (logins.has(who.login.toLowerCase())) {
       known.set(who.login, (known.get(who.login) ?? 0) + 1)
@@ -113,7 +113,7 @@ async function events(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const pushed = new Set<string>()
   const branches = await branchNames(ctx.db, ctx.tenant, repo)
   for (const branch of branches) {
-    const history = await commitList(ctx.db, ctx.tenant, repo, branch)
+    const history = await branchCommits(ctx.db, ctx.tenant, repo, branch)
     if (branch !== repo.defaultBranch) {
       out.push({
         type: 'CreateEvent',
@@ -130,7 +130,7 @@ async function events(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   }
   for (const tag of await tagRefs(ctx.db, ctx.tenant, repo)) {
     const sha = await peeled(ctx.db, ctx.tenant, repo, tag.sha)
-    const commit = (await commitList(ctx.db, ctx.tenant, repo, repo.defaultBranch)).find(
+    const commit = (await branchCommits(ctx.db, ctx.tenant, repo, repo.defaultBranch)).find(
       (row) => row.sha === sha,
     )
     out.push({

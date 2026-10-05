@@ -55,7 +55,6 @@ import { charWidth } from '../../../utils/width.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
-type SortBy = LsSortBy
 
 export const LS_OK = 0
 export const LS_MINOR_PROBLEM = 1
@@ -72,7 +71,7 @@ interface LsWarning {
 interface WalkOpts {
   escape: boolean
   all: boolean
-  sortBy: SortBy
+  sortBy: LsSortBy
   reverse: boolean
   // Which timestamp -t compares, and --group-directories-first.
   timeKind: LsTimeKind
@@ -169,7 +168,7 @@ export function typeIndicator(entry: FileStat | null, style: LsIndicator): strin
 }
 
 // Short rows: the name, the indicator style's mark, and -i/-Z's lead.
-function formatShort(
+function formatSimple(
   s: FileStat,
   indicator: LsIndicator,
   columns: LsColumns,
@@ -242,7 +241,7 @@ export function uriEscape(path: string): string {
       out += ch
       continue
     }
-    for (const byte of new TextEncoder().encode(ch)) out += `%${byte.toString(16).padStart(2, '0')}`
+    for (const byte of ENC.encode(ch)) out += `%${byte.toString(16).padStart(2, '0')}`
   }
   return out
 }
@@ -285,7 +284,7 @@ function appendListing(
     for (const line of formatLsLong(stats, opts)) lines.push(line)
     return
   }
-  stats.forEach((s, i) => lines.push(formatShort(s, render.indicator, render.columns, names?.[i])))
+  stats.forEach((s, i) => lines.push(formatSimple(s, render.indicator, render.columns, names?.[i])))
 }
 
 const isDigit = (c: number | undefined): boolean => c !== undefined && c >= 0x30 && c <= 0x39
@@ -358,7 +357,7 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length - b.length
 }
 
-const NAME_BYTES = new TextEncoder()
+const ENC = new TextEncoder()
 
 // gnulib's filevercmp, the order behind `ls -v`: the empty name, `.` and
 // `..` first, then hidden names, then the names compared as versions with
@@ -373,8 +372,8 @@ export function filevercmp(a: string, b: string): number {
   const aHidden = a.startsWith('.')
   const bHidden = b.startsWith('.')
   if (aHidden !== bHidden) return aHidden ? -1 : 1
-  const ab = NAME_BYTES.encode(a)
-  const bb = NAME_BYTES.encode(b)
+  const ab = ENC.encode(a)
+  const bb = ENC.encode(b)
   let result = verrevcmp(ab.subarray(0, versionPrefixLen(ab)), bb.subarray(0, versionPrefixLen(bb)))
   if (result === 0) result = verrevcmp(ab, bb)
   if (result === 0) result = compareBytes(ab, bb)
@@ -397,7 +396,7 @@ function extensionOf(name: string): string {
   return dot >= 0 ? name.slice(dot) : ''
 }
 
-function primaryValue(entry: FileStat, sortBy: SortBy, timeKind: LsTimeKind): string | number {
+function primaryValue(entry: FileStat, sortBy: LsSortBy, timeKind: LsTimeKind): string | number {
   if (sortBy === 'time') return timeOf(entry, timeKind) ?? ''
   // A row whose stat failed sorts as 0, as GNU's zeroed stat does.
   return entry.extra[STAT_FAILED_KEY] === true ? 0 : contentSize(entry)
@@ -411,7 +410,7 @@ function primaryValue(entry: FileStat, sortBy: SortBy, timeKind: LsTimeKind): st
 function compareStats(
   a: FileStat,
   b: FileStat,
-  sortBy: SortBy,
+  sortBy: LsSortBy,
   timeKind: LsTimeKind,
   escape = false,
 ): number {
@@ -440,7 +439,7 @@ function compareStats(
 // directories come first in every sort but -U, where GNU ignores it.
 export function sortStats(
   stats: readonly FileStat[],
-  sortBy: SortBy,
+  sortBy: LsSortBy,
   reverse: boolean,
   timeKind: LsTimeKind = 'mtime',
   groupDirsFirst = false,
@@ -740,7 +739,7 @@ async function probeOperand(
 }
 
 // Sort row for one operand, named with the operand's own spelling.
-async function operandKey(operand: Operand, sortBy: SortBy, stat: Stat): Promise<FileStat> {
+async function operandKey(operand: Operand, sortBy: LsSortBy, stat: Stat): Promise<FileStat> {
   if (operand.row !== null) return operand.row
   if (sortBy === 'name') {
     return new FileStat({ name: operand.path.rawPath, type: FileType.DIRECTORY })
@@ -757,7 +756,7 @@ async function operandKey(operand: Operand, sortBy: SortBy, stat: Stat): Promise
 
 async function sortOperands(
   operands: readonly Operand[],
-  sortBy: SortBy,
+  sortBy: LsSortBy,
   reverse: boolean,
   stat: Stat,
   timeKind: LsTimeKind,
@@ -785,7 +784,7 @@ export interface LsFlags {
   readonly listDir: boolean
   readonly deref: boolean
   readonly followArgs: boolean
-  readonly sortBy: SortBy
+  readonly sortBy: LsSortBy
   readonly timeKind: LsTimeKind
   readonly groupDirsFirst: boolean
   readonly columns: LsColumns
@@ -793,17 +792,16 @@ export interface LsFlags {
   readonly hyperlink: boolean
 }
 
-// GNU's own `sort_args`, in its own order, which is what `--sort=x` lists
-// back. `name` is deliberately absent: coreutils 9.4 refuses
-// `ls --sort=name` (name order is what no `--sort` at all means), and a
-// word mirage accepted but GNU did not was also a word missing from the
-// list GNU prints.
+// GNU's own `sort_args` (coreutils 9.7), in its own order, which is what
+// `--sort=x` lists back. 9.7 added `name`, the order no `--sort` at all
+// means, so `--sort=n` is ambiguous between it and `none`.
 const SORT_WORDS: Readonly<Record<string, LsSortBy>> = {
   none: 'none',
-  time: 'time',
   size: 'size',
-  extension: 'extension',
+  time: 'time',
   version: 'version',
+  extension: 'extension',
+  name: 'name',
   width: 'width',
 }
 const SORT_FLAGS: Readonly<Record<string, LsSortBy>> = {
@@ -831,8 +829,12 @@ const WHEN_GROUPS: readonly (readonly string[])[] = [
   ['never', 'no', 'none'],
   ['auto', 'tty', 'if-tty'],
 ]
-const INDICATOR_STYLES: readonly LsIndicator[] = ['none', 'slash', 'file-type', 'classify']
-const INDICATOR_GROUPS: readonly (readonly string[])[] = INDICATOR_STYLES.map((w) => [w])
+const INDICATOR_GROUPS: readonly (readonly string[])[] = [
+  ['none'],
+  ['slash'],
+  ['file-type'],
+  ['classify'],
+]
 // The four spellings of an indicator style; the last one typed wins.
 const INDICATOR_DESTS = ['classify', 'file_type', 'p', 'indicator_style'] as const
 // The three spellings of a command-line link policy; the last one wins.
@@ -854,9 +856,45 @@ function groupedArgumentError(
   return argmatchError('ls', option, value, groups, 1, kind)
 }
 
+const WORD_OPTIONS: Readonly<Record<string, [string, readonly (readonly string[])[]]>> = {
+  sort: ['--sort', Object.keys(SORT_WORDS).map((word) => [word])],
+  time: ['--time', TIME_GROUPS],
+  hyperlink: ['--hyperlink', WHEN_GROUPS],
+  color: ['--color', WHEN_GROUPS],
+  classify: ['--classify', WHEN_GROUPS],
+  indicator_style: ['--indicator-style', INDICATOR_GROUPS],
+}
+
+/**
+ * Refuse a bad option value where GNU does: while it reads the line.
+ *
+ * GNU checks each value inside its getopt loop, so the first bad one typed is
+ * the one it names, and a later good value of the same option does not rescue
+ * an earlier bad one (coreutils 9.7: `ls --sort=bogus --sort=size` and
+ * `ls --time=x --sort=y` both refuse, the second naming `--time`).
+ * `--time-style` is the exception: GNU reads only its last value, after the
+ * loop.
+ */
+function checkOptionWords(fl: FlagView): void {
+  for (const [dest, value] of fl.occurrences(...Object.keys(WORD_OPTIONS), 'block_size')) {
+    if (value === true) continue
+    const word = String(value)
+    if (dest === 'block_size') {
+      const parsed = parseBlockSize(word)
+      if (typeof parsed === 'string') throw new UsageError(blockSizeError(word, parsed), 2)
+      continue
+    }
+    const entry = WORD_OPTIONS[dest]
+    if (entry === undefined) continue
+    const [option, groups] = entry
+    const match = argmatch(word, groups)
+    if (!match.matched) throw groupedArgumentError(option, word, groups, match.kind)
+  }
+}
+
 // The sort key the line asked for, last spelling winning, and whether it
 // asked at all.
-function sortFlag(fl: FlagView): [SortBy, boolean] {
+function sortFlag(fl: FlagView): [LsSortBy, boolean] {
   const typed = fl.typedOrder('t', 'S', 'X', 'v', 'U', 'sort')
   const last = typed[typed.length - 1]
   if (last === undefined) return ['name', false]
@@ -937,10 +975,9 @@ function hyperlinkFlag(fl: FlagView): boolean {
 // bare --classify classify; --classify=WHEN does for `always` and never
 // otherwise, since output here is never a terminal. A refused value is GNU's
 // ARGMATCH refusal, exit 1. Mirrors Python's _indicator_word.
-function indicatorWord(fl: FlagView, dest: (typeof INDICATOR_DESTS)[number]): LsIndicator {
+function indicatorWord(dest: string, raw: unknown): LsIndicator {
   if (dest === 'p') return 'slash'
   if (dest === 'file_type') return 'file-type'
-  const raw: unknown = fl.raw(dest)
   if (dest === 'classify' && raw === true) return 'classify'
   const word = typeof raw === 'string' ? raw : ''
   const option = dest === 'classify' ? '--classify' : '--indicator-style'
@@ -959,8 +996,8 @@ function indicatorWord(fl: FlagView, dest: (typeof INDICATOR_DESTS)[number]): Ls
  */
 export function indicatorFlag(fl: FlagView): LsIndicator {
   let style: LsIndicator = 'none'
-  for (const dest of fl.typedOrder(...INDICATOR_DESTS)) {
-    style = indicatorWord(fl, dest as (typeof INDICATOR_DESTS)[number])
+  for (const [dest, raw] of fl.occurrences(...INDICATOR_DESTS)) {
+    style = indicatorWord(dest, raw)
   }
   return style
 }
@@ -1015,12 +1052,13 @@ function blockSizeError(text: string, refusal: BlockSizeRefusal): string {
 }
 
 export function parseFlags(fl: FlagView): LsFlags {
+  checkOptionWords(fl)
   const [askedSort, sortedExplicitly] = sortFlag(fl)
   const timeKind = timeFlag(fl)
   const noOwner = fl.asBool('g')
   const noGroup = fl.asBool('o')
   const long = fl.asBool('args_l') || noOwner || noGroup || fl.asBool('numeric_uid_gid')
-  const sortBy: SortBy = !sortedExplicitly && timeKind !== 'mtime' && !long ? 'time' : askedSort
+  const sortBy: LsSortBy = !sortedExplicitly && timeKind !== 'mtime' && !long ? 'time' : askedSort
   const blockText = fl.asStr('block_size')
   let blockSize = null
   if (blockText !== undefined) {

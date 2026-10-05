@@ -112,7 +112,7 @@ def view_children(table: dict[str, Any]) -> Listing:
     return entries
 
 
-async def _list_bases(
+async def _list_bases_dir(
     accessor: AirtableAccessor, match: ScopeMatch
 ) -> Listing:
     entries: Listing = []
@@ -209,7 +209,7 @@ async def _list_views(
 readdir = make_readdir(
     detect_scope,
     listers={
-        "bases": _list_bases,
+        "bases": _list_bases_dir,
     },
     entry_listers={
         "base": _list_base,

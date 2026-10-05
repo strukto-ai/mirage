@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { byteView } from '../../shell/bytes.ts'
 import { RecordReader } from './reader.ts'
 
 const ENC = new TextEncoder()
@@ -43,10 +44,10 @@ describe('awk record reader', () => {
     expect(await reader.next()).toBeNull()
   })
 
-  it('decodes a multibyte character split across chunks', async () => {
+  it('preserves multibyte bytes across chunk boundaries', async () => {
     const data = ENC.encode('é\n')
     const reader = new RecordReader(pieces(data.subarray(0, 1), data.subarray(1)), () => '\n')
-    expect(await records(reader)).toEqual(['é'])
+    expect(await records(reader)).toEqual([byteView('é')])
   })
 
   it('reads RS again before each record', async () => {

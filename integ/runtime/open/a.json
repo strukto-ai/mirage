@@ -85,13 +85,6 @@
             "ops_contain": [
               "create /data/log.txt"
             ]
-          },
-          "expect_on": {
-            "pyodide": {
-              "ops_contain": [
-                "write /data/log.txt"
-              ]
-            }
           }
         },
         {

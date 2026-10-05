@@ -1,10 +1,10 @@
 ---
 title: Mastra
 description: Wire mirage tools into a Mastra Agent via the @struktoai/mirage-agents/mastra adapter.
-icon: wand-magic-sparkles
+icon: /images/mastra-logo.svg
 ---
 
-[Mastra](https://mastra.ai) is an opinionated TypeScript framework for AI agents and workflows. Mirage ships a tool factory that exposes a `Workspace` as Mirage's seven tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`), the same table MCP serves, as `createTool()` instances ready to plug into `new Agent({ tools })`.
+[Mastra](https://mastra.ai) is an opinionated TypeScript framework for AI agents and workflows. Mirage ships a tool factory that gives a Mastra `Agent` a session's seven tools.
 
 <Note>
   Node only. The Mirage adapter is runtime-agnostic, but most Mastra setups (memory, evals, workflows) depend on Node APIs.
@@ -19,15 +19,12 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-node @mastra/core
 ## Usage
 
 ```ts
-import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent } from '@mastra/core/agent'
 import { mirageTools } from '@struktoai/mirage-agents/mastra'
 import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
 
-const ram = new RAMVFS()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
 const agent = new Agent({
   id: 'mirage-ram-agent',
@@ -50,21 +47,7 @@ console.log(result.text)
 
 | Symbol | Purpose |
 | --- | --- |
-| `mirageTools(ws, options?)` | Returns `{ shell, read, write, edit, ls, grep, glob }`, each a `createTool()` from `@mastra/core/tools` with the id `mirage-<tool>` and the shared input schema. Each answers `{ text, isError }` as the MCP tool of the same name does. |
-
-### Tool reference
-
-| Tool | Input | Answer |
-| --- | --- | --- |
-| `shell` | `{ command }` | the line's output; `isError` when it exits nonzero |
-| `read` | `{ path, offset?, limit? }` | numbered lines |
-| `write` | `{ path, content }` | creates parents; an existing file must be read in full first |
-| `edit` | `{ path, old_string, new_string, replace_all? }` | refuses a file changed since it was read |
-| `ls` | `{ path }` | one entry per line |
-| `grep` | `{ pattern, path, ignore_case?, fixed_strings?, include?, context?, files_with_matches?, count?, max_count? }` | `grep -rn` output |
-| `glob` | `{ pattern, path? }` | matching files, sorted |
-
-The execute signature follows Mastra v1: `execute(inputData, context)`. You don't need to call it directly, the agent runtime invokes it on tool calls.
+| `mirageTools(ws, options?)` | `{ shell, read, write, edit, ls, grep, glob }`, each a Mastra `createTool()` with the id `mirage-<tool>`. They answer as the session's [`session.tools`](/typescript/access/in-app#session-tools) do; `options` takes `sessionId` and `staleWriteProtection`. |
 
 ## Examples
 

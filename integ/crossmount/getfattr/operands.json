@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_getfattr_both_mounts",
+      "seq": 9900023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr -n user.tag -v red /data2/xm_attr && getfattr -n user.tag --only-values /data/xm_attr /data2/xm_attr",
+      "expect": {
+        "exit": 0,
+        "stdout": "bluered",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_getfattr_continues_after_missing",
+      "seq": 9900026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "getfattr -n user.tag --only-values /data/xm_attr_missing /data2/xm_attr",
+      "expect": {
+        "exit": 1,
+        "stdout": "green",
+        "stderr": "getfattr: /data/xm_attr_missing: No such file or directory\n"
+      }
+    }
+  ]
+}

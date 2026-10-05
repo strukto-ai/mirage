@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import logging
 
 from mirage.commands.config import ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -25,6 +26,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.command.flags import parse_flags
@@ -38,6 +40,8 @@ from mirage.workspace.mount.namespace.probe import path_readdir, path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.session import SessionState, env_snapshot, session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 
 async def exec_node(
@@ -69,7 +73,7 @@ def admission_denial(cmd_name: str) -> IOResult:
         cmd_name (str): the refused command.
     """
     msg = f"{cmd_name}: no runtime accepted this line\n"
-    return IOResult(exit_code=126, stderr=msg.encode())
+    return IOResult(exit_code=126, stderr=encode_text(msg))
 
 
 def line_runtime_for(
@@ -252,10 +256,11 @@ async def run_on_mount(
                 cmd_name, resolve_paths, session.cwd
             )
         except MountCommandUnsupported as exc:
-            return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
+            return None, IOResult(exit_code=1, stderr=encode_text(f"{exc}\n"))
         if mount is None:
             return None, IOResult(
-                exit_code=127, stderr=f"{cmd_name}: command not found".encode()
+                exit_code=127,
+                stderr=encode_text(f"{cmd_name}: command not found"),
             )
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
@@ -332,7 +337,7 @@ async def run_on_mount(
         # become this command's IOResult so the rest of the line keeps
         # running, like a real shell (#452).
         return None, IOResult(
-            exit_code=exc.exit_code, stderr=f"{exc}\n".encode()
+            exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
         )
     except CommandTimeoutError:
         # A limit timeout is answered by the workspace-level handler
@@ -343,8 +348,9 @@ async def run_on_mount(
         # ValueError, or a filesystem OSError) becomes this command's
         # IOResult, prefixed with the command name like GNU (prog: message)
         # and the TypeScript executor.
+        logger.debug("%s failed", cmd_name, exc_info=True)
         return None, IOResult(
-            exit_code=read_fail_exit(cmd_name, exc),
+            exit_code=read_fail_exit_code(cmd_name, exc),
             stderr=format_fs_error(cmd_name, exc, paths),
         )
 

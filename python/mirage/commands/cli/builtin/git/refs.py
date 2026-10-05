@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+import re
 from io import BytesIO
 
 from dulwich.refs import DictRefsContainer, Ref, read_packed_refs_with_peeled
@@ -26,7 +27,11 @@ from mirage.commands.cli.builtin.git.io import (
     remove_file,
     write_file,
 )
-from mirage.commands.cli.builtin.git.types import HeadRef, Refspec
+from mirage.commands.cli.builtin.git.types import (
+    HeadRef,
+    Refspec,
+    SymbolicEnd,
+)
 from mirage.runtime.types import DispatchFn
 
 HEAD_FILE = "HEAD"
@@ -35,6 +40,8 @@ REFS_DIR = "refs"
 SYMREF_PREFIX = "ref: "
 BRANCH_PREFIX = "refs/heads/"
 TAG_PREFIX = "refs/tags/"
+MAX_SYMREF_DEPTH = 5
+SAFE_ONE_LEVEL = re.compile(r"[A-Z_]+")
 
 
 async def read_head(dispatch: DispatchFn, gitdir: str) -> HeadRef:
@@ -319,6 +326,101 @@ def valid_ref_name(name: str) -> bool:
         if part.startswith(".") or part.endswith(LOCK_SUFFIX):
             return False
     return True
+
+
+def whole_ref_name(name: str) -> bool:
+    """Whether git's ref rules take a whole ref name, one level allowed.
+
+    ``check_refname_format`` with ``REFNAME_ALLOW_ONELEVEL``: a bare
+    ``@`` is the one name they refuse whole that they take below
+    ``refs/``.
+
+    Args:
+        name (str): the full ref name.
+    """
+    return name != "@" and valid_ref_name(name)
+
+
+async def raw_ref(
+    dispatch: DispatchFn, gitdir: str, table: DictRefsContainer, name: str
+) -> str | None:
+    """A ref's raw value, an object id or ``ref: <target>``, None for none.
+
+    Read from the ref table, or for a one-level name outside it
+    (``ORIG_HEAD`` and its kin) from the checkout's git directory, which
+    is where git keeps them.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        gitdir (str): this checkout's git directory.
+        table (DictRefsContainer): every ref, as load_refs reads them.
+        name (str): the full ref name.
+    """
+    known = table.read_ref(Ref(name.encode()))
+    if known is not None:
+        return known.decode("utf-8", errors="replace")
+    if name.startswith(f"{REFS_DIR}/"):
+        return None
+    data = await read_optional(dispatch, posixpath.join(gitdir, name))
+    return None if data is None else data.decode(errors="replace").strip()
+
+
+async def resolve_symbolic(
+    dispatch: DispatchFn,
+    gitdir: str,
+    table: DictRefsContainer,
+    name: str,
+    recurse: bool,
+) -> SymbolicEnd | None:
+    """Follow a ref the way ``refs_resolve_ref_unsafe`` does without
+    reading.
+
+    One hop when ``recurse`` is off, otherwise to the end of the chain,
+    which may name a ref that does not exist yet (an unborn branch).
+    None where git finds no such ref: a name its rules refuse, or a
+    chain more than five deep. Pinned against git 2.47.3.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        gitdir (str): this checkout's git directory.
+        table (DictRefsContainer): every ref, as load_refs reads them.
+        name (str): the full ref name to start from.
+        recurse (bool): follow every hop rather than the first.
+    """
+    if not whole_ref_name(name):
+        return None
+    current = name
+    symbolic = False
+    for _ in range(MAX_SYMREF_DEPTH):
+        raw = await raw_ref(dispatch, gitdir, table, current)
+        if raw is None or not raw.startswith(SYMREF_PREFIX):
+            return SymbolicEnd(name=current, symbolic=symbolic)
+        symbolic = True
+        current = raw[len(SYMREF_PREFIX) :].strip()
+        if not recurse:
+            return SymbolicEnd(name=current, symbolic=symbolic)
+        if not whole_ref_name(current):
+            return None
+    return None
+
+
+def safe_ref_name(name: str) -> bool:
+    """Whether git lets a ref transaction write a name it has no object
+    for (``refname_is_safe``).
+
+    Below ``refs/``, a path with no empty, ``.`` or ``..`` component;
+    anywhere else, capitals and underscores only, which is HEAD and its
+    kin. Pinned against git 2.47.3.
+
+    Args:
+        name (str): the full ref name about to be written.
+    """
+    if name.startswith(f"{REFS_DIR}/"):
+        return all(
+            part not in ("", ".", "..")
+            for part in name[len(REFS_DIR) + 1 :].split("/")
+        )
+    return SAFE_ONE_LEVEL.fullmatch(name) is not None
 
 
 def parse_refspec(text: str) -> Refspec:

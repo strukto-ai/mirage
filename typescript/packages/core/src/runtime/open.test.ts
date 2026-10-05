@@ -13,11 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseMode } from './handles/mode.ts'
+import { parseMode, type OpenMode } from './handles/mode.ts'
 import { applyOpen, type OpenSurface } from './open.ts'
-import type { VFSEntry, VFSStat } from './vfs.ts'
+import type { VFSEntry, VFSStat } from './types.ts'
 
 const F = '/data/f'
+// C fopen's "wx", what a QuickJS guest opens with: exclusive creation
+// that also carries the truncate fact, which exclusivity must outrank
+// so a refused open leaves the content alone.
+const WX: OpenMode = {
+  readable: false,
+  writable: true,
+  truncate: true,
+  append: false,
+  create: true,
+  exclusive: true,
+  binary: false,
+}
 
 interface Shape {
   files?: string[]
@@ -58,7 +70,7 @@ function world(shape: Shape): OpenSurface & { effects: string[] } {
 }
 
 describe('applyOpen', () => {
-  it.each<[string, Shape, string[], boolean, string | null]>([
+  it.each<[string | OpenMode, Shape, string[], boolean, string | null]>([
     ['r', { files: [F] }, [], true, null],
     ['r', {}, [], false, 'ENOENT'],
     ['r', { dirs: [F] }, [], false, 'EISDIR'],
@@ -70,24 +82,22 @@ describe('applyOpen', () => {
     ['a', { files: [F] }, [], true, null],
     ['a', {}, [`create ${F}`], false, null],
     ['a', { implied: [F] }, [], false, 'EISDIR'],
-    ['wx', { files: [F] }, [], false, 'EEXIST'],
-    ['wx', { links: [F] }, [], false, 'EEXIST'],
-    ['wx', { implied: [F] }, [], false, 'EEXIST'],
-    ['wx', {}, [`create ${F}`], false, null],
-  ])(
-    "lands open '%s' over %j before any byte moves",
-    async (mode, shape, effect, kept, refusal) => {
-      const surface = world(shape)
-      if (refusal === null) {
-        expect((await applyOpen(surface, F, parseMode(mode))) !== null).toBe(kept)
-      } else {
-        await expect(applyOpen(surface, F, parseMode(mode))).rejects.toMatchObject({
-          code: refusal,
-        })
-      }
-      expect(surface.effects).toEqual(effect)
-    },
-  )
+    [WX, { files: [F] }, [], false, 'EEXIST'],
+    [WX, { links: [F] }, [], false, 'EEXIST'],
+    [WX, { implied: [F] }, [], false, 'EEXIST'],
+    [WX, {}, [`create ${F}`], false, null],
+  ])('lands open %j over %j before any byte moves', async (mode, shape, effect, kept, refusal) => {
+    const surface = world(shape)
+    const facts = typeof mode === 'string' ? parseMode(mode) : mode
+    if (refusal === null) {
+      expect((await applyOpen(surface, F, facts)) !== null).toBe(kept)
+    } else {
+      await expect(applyOpen(surface, F, facts)).rejects.toMatchObject({
+        code: refusal,
+      })
+    }
+    expect(surface.effects).toEqual(effect)
+  })
 
   it('empties through create on a mount with no truncate', async () => {
     // hf buckets and databricks volumes register create but no truncate;

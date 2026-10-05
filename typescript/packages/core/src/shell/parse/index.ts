@@ -28,4 +28,4 @@ export {
   type ShellParserConfig,
   joinContinuations,
 } from './parse.ts'
-export { findSyntaxError, findUnterminatedBacktick, syntaxErrorMessage } from './syntax.ts'
+export { findSyntaxError, findUnterminatedBacktick, syntaxErrorResult } from './syntax.ts'

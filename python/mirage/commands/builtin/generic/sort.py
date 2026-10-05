@@ -186,8 +186,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
     output: PathSpec | None = None
     # Each -o is the next word typed, and GNU compares two by that word
     # (STREQ), so `-o ./out -o out` names two outputs even though they
-    # are one file. A line parsed for a cross-mount strategy keeps the
-    # resolved strings, compared as they are.
+    # are one file.
     typed = iter(fl.as_paths("output"))
     for dest, value in fl.occurrences("key", "output", "c", "C", "check"):
         if dest == "key" and isinstance(value, str):
@@ -253,7 +252,7 @@ def _config(parsed: SortFlags) -> SortConfig:
     )
 
 
-def _refusal(exc: ValueError) -> IOResult:
+def _refusal_of(exc: ValueError) -> IOResult:
     if isinstance(exc, UsageError):
         # Already GNU-worded and carrying its own code: gnulib's argmatch
         # dies with EXIT_FAILURE, so `--check=x` is 1 where sort's other
@@ -416,7 +415,7 @@ async def sort(
         )
         cfg = _config(parsed)
     except (UsageError, SortKeyError, ValueError) as exc:
-        return b"", _refusal(exc)
+        return b"", _refusal_of(exc)
 
     refusal = operand_refusal(paths, parsed)
     if refusal is not None:

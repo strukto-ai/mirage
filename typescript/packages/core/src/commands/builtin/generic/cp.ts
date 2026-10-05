@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { pathAllowed } from '../../../context/session_context.ts'
-import { mountedPath, rekey, respelled } from '../../../utils/key_prefix.ts'
+import { mountedPath, respelled } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -76,7 +76,7 @@ export interface CpFlags {
   update: string | null
   backup: string | null
   suffix: string
-  targetDir: PathSpec | string | null
+  targetDir: PathSpec | null
   noTargetDir: boolean
   dereference: CopyDeref
 }
@@ -209,13 +209,10 @@ export function backupRaw(fl: FlagView): string | boolean | undefined {
   return undefined
 }
 
-// -t arrives as the PathSpec of the word that spelled it on the
-// single-mount path, and as its resolved virtual-path string on the relay
-// path, which parses for a cross-mount strategy. Mirrors Python.
-export function targetFlags(cmdName: string, fl: FlagView): [PathSpec | string | null, boolean] {
+// -t arrives as the PathSpec of the word that spelled it. Mirrors Python.
+export function targetFlags(cmdName: string, fl: FlagView): [PathSpec | null, boolean] {
   const raw: unknown = fl.raw('target_directory')
-  const targetDir: PathSpec | string | null =
-    raw instanceof PathSpec || typeof raw === 'string' ? raw : null
+  const targetDir = raw instanceof PathSpec ? raw : null
   const noTarget = fl.asBool('no_target_directory')
   if (targetDir !== null && noTarget) {
     throw new UsageError(
@@ -465,21 +462,20 @@ export async function copyTreeLinks(
 }
 
 // Split operands into sources and destination, GNU arity errors. With -t
-// every operand is a source and the returned destination is null (the
-// caller wraps the target-directory string itself). -T requires exactly
-// two operands.
+// every operand is a source and the target directory is the destination.
+// -T requires exactly two operands.
 export function splitOperands(
   cmdName: string,
   paths: PathSpec[],
-  targetDir: PathSpec | string | null,
+  targetDir: PathSpec | null,
   noTargetDir: boolean,
-): [PathSpec[], PathSpec | null] {
+): [PathSpec[], PathSpec] {
   const hint = `Try '${cmdName} --help' for more information.`
   const first = paths[0]
   if (first === undefined) {
     throw new UsageError(`${cmdName}: missing file operand\n${hint}`, 1)
   }
-  if (targetDir !== null) return [[...paths], null]
+  if (targetDir !== null) return [[...paths], targetDir]
   if (paths.length === 1) {
     throw new UsageError(
       `${cmdName}: missing destination file operand after '${first.rawPath}'\n${hint}`,
@@ -489,13 +485,7 @@ export function splitOperands(
   if (noTargetDir && paths.length > 2) {
     throw extraOperandError(cmdName, paths[2]?.rawPath ?? '')
   }
-  const dst = paths[paths.length - 1]
-  return [paths.slice(0, -1), dst ?? null]
-}
-
-// Build the -t directory PathSpec from a same-mount reference operand.
-export function wrapTargetDir(ref: PathSpec, virtual: string): PathSpec {
-  return PathSpec.fromStrPath(virtual, rekey(ref.virtual, ref.vfsPath, virtual))
+  return [paths.slice(0, -1), paths[paths.length - 1] ?? first]
 }
 
 // GNU error line when a -t operand is missing or not a directory.
@@ -810,30 +800,37 @@ function transferLine(src: PathSpec, target: PathSpec, backup: PathSpec | null):
 // destination, and an entirely empty tree would copy to nothing. A backend
 // exposing no mkdir (directories are implied by keys) is a no-op. Parents
 // sort before children so a nested tree lands in order.
-// GNU -v lines for a natively copied tree, parents first. GNU `cp -rv`
-// reports directories as well as files, including the source root itself.
-// Deliberate divergence: GNU's sibling order follows readdir, which no backend
-// can reproduce, so entries are sorted lexicographically instead. That keeps
-// every parent ahead of its children (GNU's only load-bearing ordering
-// guarantee) and is stable across backends.
+// GNU -v lines for a tree about to be copied natively, parents first. GNU
+// `cp -rv` reports every file and every directory it creates, including the
+// source root itself; a directory already at the destination is merged into
+// without a line. Read before the copy, so the destination still shows which
+// directories exist. Deliberate divergence: GNU's sibling order follows
+// readdir, which no backend can reproduce, so entries are sorted
+// lexicographically instead. That keeps every parent ahead of its children
+// (GNU's only load-bearing ordering guarantee) and is stable across backends.
 async function treeLines(
   strategy: NativeCopy,
+  stat: StatFn,
   src: PathSpec,
   target: PathSpec,
   srcBase: string,
   dstBase: string,
+  index?: IndexCacheStore,
 ): Promise<string[]> {
-  const dirs = await strategy.find(src, { type: 'd' })
+  const dirs = new Set([srcBase, ...(await strategy.find(src, { type: 'd' }))])
   const files = await strategy.find(src, { type: 'f' })
-  const unique = [...new Set([srcBase, ...dirs, ...files])].sort(compareCodePoints)
-  return unique.map((entryMount) => {
+  const unique = [...new Set([...dirs, ...files])].sort(compareCodePoints)
+  const lines: string[] = []
+  for (const entryMount of unique) {
     const entry = spelledFrom(mountedPath(src, entryMount), src)
     const entryDst = spelledFrom(
       mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
       target,
     )
-    return `'${entry.rawPath}' -> '${entryDst.rawPath}'`
-  })
+    if (dirs.has(entryMount) && (await isDirectory(stat, entryDst, index))) continue
+    lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+  }
+  return lines
 }
 
 // A failed mkdir stops the whole source, mirroring copyEntries and GNU: the
@@ -875,10 +872,6 @@ async function mirrorDirs(
       mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
       target,
     )
-    if (lines !== undefined) {
-      const entry = spelledFrom(mountedPath(src, entryMount), src)
-      lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
-    }
     if (await isDirectory(stat, entryDst, index)) continue
     try {
       await strategy.mkdir(entryDst)
@@ -888,6 +881,10 @@ async function mirrorDirs(
       return false
     }
     writes[entryDst.mountPath] = new Uint8Array()
+    if (lines !== undefined) {
+      const entry = spelledFrom(mountedPath(src, entryMount), src)
+      lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+    }
   }
   return true
 }
@@ -1101,18 +1098,11 @@ export async function cpGeneric(
   stdin?: ByteSource | null,
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
-  const [sources, dstOperand] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
-  let dst: PathSpec
+  const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
   let dstIsDir: boolean
   let dstExists: boolean
   let dstErr: string | null = null
-  if (dstOperand === null) {
-    const firstSource = sources[0]
-    if (firstSource === undefined) return [null, new IOResult()]
-    dst =
-      flags.targetDir instanceof PathSpec
-        ? flags.targetDir
-        : wrapTargetDir(firstSource, String(flags.targetDir))
+  if (flags.targetDir !== null) {
     const err = await targetDirError('cp', stat, dst)
     if (err !== null) {
       return [null, new IOResult({ stderr: ENC.encode(`${err}\n`), exitCode: 1 })]
@@ -1120,11 +1110,9 @@ export async function cpGeneric(
     dstIsDir = true
     dstExists = true
   } else if (flags.noTargetDir) {
-    dst = dstOperand
     dstIsDir = false
     dstExists = true
   } else {
-    dst = dstOperand
     const probe = await destKind(stat, dst)
     dstExists = probe.exists
     dstIsDir = probe.isDir
@@ -1299,13 +1287,13 @@ export async function cpGeneric(
         continue
       }
       if (strategy.dirCopy !== undefined && !perEntryNative && !intoItself) {
+        if (flags.verbose) {
+          lines.push(...(await treeLines(strategy, stat, src, target, srcBase, dstBase, index)))
+        }
         await strategy.dirCopy(src, target)
         for (const entryMount of await strategy.find(src, { type: 'f' })) {
           const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
           writes[entryDst.mountPath] = new Uint8Array()
-        }
-        if (flags.verbose) {
-          lines.push(...(await treeLines(strategy, src, target, srcBase, dstBase)))
         }
         if (copies !== undefined) {
           await copyTreeLinks(

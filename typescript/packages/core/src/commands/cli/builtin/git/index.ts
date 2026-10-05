@@ -15,8 +15,8 @@
 import { lsFiles } from './ls_files.ts'
 import { forEachRef } from './for_each_ref.ts'
 import { reflog } from './reflog.ts'
-import { fetch } from './fetch.ts'
-import { clone } from './clone.ts'
+import { fetch, fetchReadOnly } from './fetch.ts'
+import { clone, cloneReadOnly } from './clone.ts'
 import { Operand, Option } from '../../../spec/types.ts'
 import { CLISpec } from '../../types.ts'
 import { UsageStyle } from '../../../spec/types.ts'
@@ -28,8 +28,8 @@ import { nodeHelp, findNode } from '../../walk.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
-import { branch } from './branch.ts'
-import { checkout } from './checkout.ts'
+import { branch, branchReadOnly } from './branch.ts'
+import { checkout, checkoutReadOnly } from './checkout.ts'
 import { commit } from './commit.ts'
 import { diff } from './diff.ts'
 import { log } from './log.ts'
@@ -40,10 +40,14 @@ import { rm } from './rm.ts'
 import { revParse } from './inspect.ts'
 import { shortlog } from './shortlog.ts'
 import { config, remote, revList, version, showRef } from './inspect.ts'
+import { symbolicRef, symbolicRefReadOnly } from './symbolic_ref.ts'
+import { indexLocked, verb } from './session.ts'
 import { show, diffTree } from './show.ts'
 import { status } from './status.ts'
-import { switchBranch } from './switch.ts'
-import { tag } from './tag.ts'
+import { switchBranch, switchReadOnly } from './switch.ts'
+import { tag, tagReadOnly } from './tag.ts'
+import { GitError } from './errors.ts'
+import { checkSwitches, fatal } from './util.ts'
 
 // `-C` is git's own before-anything-else option, so it sits on the root and
 // every verb inherits it. The "." default is load-bearing: a PATH default lands
@@ -123,6 +127,18 @@ const DIFF_OPTIONS = [
   new Option({ long: '--raw', description: 'Show the raw diff format' }),
 ]
 
+// git's optional-value form: a bare --decorate is short, and a detached next
+// word is a revision, never a style.
+const DECORATE_OPTIONS = [
+  new Option({
+    long: '--decorate',
+    type: 'str',
+    valueOptional: true,
+    description: 'Print ref names on commits: short (the default), full, auto or no',
+  }),
+  new Option({ long: '--no-decorate', description: 'Print no ref names on commits' }),
+]
+
 const MERGE_OPTIONS = [
   new Option({ short: '-m', description: 'Show merge diffs separately against each parent' }),
   new Option({ short: '-c', description: 'Show combined merge diffs' }),
@@ -192,7 +208,7 @@ const LOG_OPTIONS = [
   new Option({ long: '--no-merges', description: 'Leave out merge commits' }),
 
   DATE_OPTION,
-  new Option({ long: '--decorate', description: 'Print ref names on commits' }),
+  ...DECORATE_OPTIONS,
   new Option({
     short: '-n',
     long: '--max-count',
@@ -309,10 +325,15 @@ const COMMIT_OPTIONS = [
   // has none to open.
   new Option({ short: '-m', long: '--message', type: 'str', description: 'Commit message' }),
   new Option({ long: '--author', type: 'str', description: 'Override the recorded author' }),
+  new Option({
+    long: '--allow-empty',
+    description: 'Record a commit that changes nothing from its parent',
+  }),
 ]
 
 const CHECKOUT_OPTIONS = [
   new Option({ short: '-b', description: 'Create the branch and switch to it' }),
+  new Option({ long: '--detach', description: 'Leave HEAD on the commit itself' }),
   new Option({ short: '-q', long: '--quiet', description: 'Suppress feedback messages' }),
 ]
 
@@ -505,6 +526,7 @@ const TAG_OPTIONS = [
 
 const BRANCH_OPTIONS = [
   new Option({ long: '--show-current', description: 'Show the current branch name' }),
+  new Option({ short: '-q', long: '--quiet', description: 'Suppress feedback messages' }),
   new Option({
     short: '-v',
     long: '--verbose',
@@ -533,6 +555,12 @@ const BRANCH_OPTIONS = [
  * in a browser works exactly as one mounted over disk.
  */
 function helpCmd(inv: CLIInvocation): CommandFnResult {
+  try {
+    checkSwitches(inv, inv.texts)
+  } catch (err) {
+    if (err instanceof GitError) return fatal(err)
+    throw err
+  }
   const found = findNode(GIT, inv.texts)
   if (found === null)
     return [
@@ -575,7 +603,7 @@ export const GIT = new CLISpec({
   subcommands: [
     new CLISpec({
       name: 'reflog',
-      fn: reflog,
+      fn: verb(reflog),
       description: 'Show reference history',
       options: [
         new Option({
@@ -590,14 +618,14 @@ export const GIT = new CLISpec({
     }),
     new CLISpec({
       name: 'for-each-ref',
-      fn: forEachRef,
+      fn: verb(forEachRef),
       description: 'List references with a format',
       options: FOR_EACH_REF_OPTIONS,
       rest: REVISION,
     }),
     new CLISpec({
       name: 'ls-files',
-      fn: lsFiles,
+      fn: verb(lsFiles),
       description: 'Show files in the index',
       options: [
         new Option({ short: '-z', description: 'Terminate paths with NUL' }),
@@ -608,7 +636,7 @@ export const GIT = new CLISpec({
     }),
     new CLISpec({
       name: 'fetch',
-      fn: fetch,
+      fn: verb(fetch, fetchReadOnly),
       description: 'Download objects and refs from another repository',
       options: [
         new Option({ short: '-q', long: '--quiet', description: 'Print nothing but errors' }),
@@ -625,7 +653,7 @@ export const GIT = new CLISpec({
     }),
     new CLISpec({
       name: 'clone',
-      fn: clone,
+      fn: verb(clone, cloneReadOnly),
       description: 'Clone a repository into a new directory',
       options: [
         new Option({ short: '-q', long: '--quiet', description: 'Print nothing but errors' }),
@@ -651,13 +679,13 @@ export const GIT = new CLISpec({
     }),
     new CLISpec({
       name: 'help',
-      fn: helpCmd,
+      fn: verb(helpCmd),
       description: 'Show command help',
       rest: new Operand({ type: 'str' }),
     }),
     new CLISpec({
       name: 'init',
-      fn: init,
+      fn: verb(init),
       description: 'Create an empty Git repository or reinitialize an existing one',
       write: true,
       options: [
@@ -669,7 +697,7 @@ export const GIT = new CLISpec({
     }),
     new CLISpec({
       name: 'fsck',
-      fn: fsck,
+      fn: verb(fsck),
       description: 'Verify object hashes and connectivity',
       options: [new Option({ long: '--full' }), new Option({ long: '--no-dangling' })],
     }),
@@ -677,10 +705,10 @@ export const GIT = new CLISpec({
       name: 'stash',
       description: 'Inspect saved working trees',
       subcommands: [
-        new CLISpec({ name: 'list', fn: stashList, description: 'List stashed changes' }),
+        new CLISpec({ name: 'list', fn: verb(stashList), description: 'List stashed changes' }),
         new CLISpec({
           name: 'show',
-          fn: stashShow,
+          fn: verb(stashShow),
           description: 'Show stashed changes',
           options: DIFF_OPTIONS,
           positional: [new Operand({ type: 'str', name: 'stash' })],
@@ -690,19 +718,19 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'version',
       aliases: ['--version', '-v'],
-      fn: version,
+      fn: verb(version),
       description: 'Show the Mirage Git implementation version',
     }),
     new CLISpec({
       name: 'remote',
       description: 'List remotes',
-      fn: remote,
+      fn: verb(remote),
       options: [new Option({ short: '-v', long: '--verbose', description: 'Show remote URLs' })],
     }),
     new CLISpec({
       name: 'config',
       description: 'Read repository configuration',
-      fn: config,
+      fn: verb(config),
       options: [
         new Option({ long: '--global', description: 'Read global configuration' }),
         new Option({ long: '--get', description: 'Get a configuration value' }),
@@ -715,11 +743,48 @@ export const GIT = new CLISpec({
       ],
       positional: [new Operand({ type: 'str', name: 'name' })],
     }),
-    new CLISpec({ name: 'show-ref', description: 'List references', fn: showRef, rest: REVISION }),
+    new CLISpec({
+      name: 'show-ref',
+      description: 'List references',
+      fn: verb(showRef),
+      rest: REVISION,
+    }),
+    // symbolic-ref has every option git's has, so its rows carry git's own
+    // help and its usage block reads exactly as git's.
+    new CLISpec({
+      name: 'symbolic-ref',
+      description: 'Read, change or delete a symbolic ref',
+      fn: verb(symbolicRef, symbolicRefReadOnly),
+      options: [
+        new Option({
+          short: '-q',
+          long: '--quiet',
+          description: 'suppress error message for non-symbolic (detached) refs',
+        }),
+        new Option({ long: '--no-quiet', description: 'Refuse a ref that is not symbolic aloud' }),
+        new Option({ short: '-d', long: '--delete', description: 'delete symbolic ref' }),
+        new Option({ long: '--no-delete', description: 'Read or change the ref instead' }),
+        new Option({ long: '--short', description: 'shorten ref output' }),
+        new Option({ long: '--no-short', description: 'Print the full name it points at' }),
+        new Option({ long: '--recurse', description: 'recursively dereference (default)' }),
+        new Option({
+          long: '--no-recurse',
+          description: 'Print only the ref this one points at directly',
+        }),
+        new Option({
+          short: '-m',
+          type: 'str',
+          metavar: 'reason',
+          description: 'reason of the update',
+        }),
+      ],
+      rest: new Operand({ type: 'str' }),
+      write: true,
+    }),
     // shortlog's -n is --numbered, so the count keeps only its long spelling.
     new CLISpec({
       name: 'shortlog',
-      fn: shortlog,
+      fn: verb(shortlog),
       description: 'Summarize commit history',
       options: [
         ...LOG_OPTIONS.filter((opt) => opt.short !== '-n'),
@@ -736,25 +801,53 @@ export const GIT = new CLISpec({
     }),
     new CLISpec({
       name: 'rev-parse',
-      fn: revParse,
+      fn: verb(revParse),
       description: 'Resolve revisions',
       options: [
         new Option({ long: '--show-toplevel', description: 'Show the worktree root' }),
-        new Option({ long: '--abbrev-ref', description: 'Show abbreviated reference names' }),
+        new Option({
+          long: '--abbrev-ref',
+          type: 'str',
+          valueOptional: true,
+          description: 'Show abbreviated reference names, strict or loose',
+        }),
+        new Option({
+          long: '--show-prefix',
+          description: 'Show the current directory relative to the worktree root',
+        }),
+        new Option({
+          long: '--is-inside-work-tree',
+          description: 'Print whether the current directory is inside the work tree',
+        }),
+        new Option({
+          long: '--verify',
+          description: 'Require exactly one revision that names an object',
+        }),
+        new Option({
+          long: '--short',
+          type: 'str',
+          valueOptional: true,
+          description: 'Abbreviate the object name; implies --verify',
+        }),
+        new Option({
+          short: '-q',
+          long: '--quiet',
+          description: 'With --verify, exit 1 without a message',
+        }),
       ],
       rest: REVISION,
     }),
     new CLISpec({
       name: 'rev-list',
       description: 'List reachable commits',
-      fn: revList,
+      fn: verb(revList),
       options: [...LOG_OPTIONS, new Option({ long: '--count', description: 'Print commit count' })],
       rest: REVISION,
     }),
     new CLISpec({
       name: 'diff-tree',
       description: 'Compare a commit with its parent',
-      fn: diffTree,
+      fn: verb(diffTree),
       options: [
         ...SHOW_OPTIONS,
         new Option({ long: '--no-commit-id', description: 'Suppress commit ID' }),
@@ -766,27 +859,27 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'status',
       description: 'Show the working tree status',
-      fn: status,
+      fn: verb(status),
       options: STATUS_OPTIONS,
     }),
     new CLISpec({
       name: 'log',
       description: 'Show commit logs',
-      fn: log,
+      fn: verb(log),
       options: [...LOG_OPTIONS, ...MAILMAP_OPTIONS, ...DIFF_OPTIONS],
       rest: REVISION,
     }),
     new CLISpec({
       name: 'show',
       description: 'Show a commit and its diff',
-      fn: show,
-      options: SHOW_OPTIONS,
+      fn: verb(show),
+      options: [...SHOW_OPTIONS, ...DECORATE_OPTIONS],
       rest: REVISION,
     }),
     new CLISpec({
       name: 'diff',
       description: 'Show changes between commits',
-      fn: diff,
+      fn: verb(diff),
       options: [
         ...DIFF_OPTIONS,
         new Option({ long: '--cached', description: 'Compare the index with a commit' }),
@@ -797,7 +890,7 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'branch',
       description: 'List, create or delete branches',
-      fn: branch,
+      fn: verb(branch, branchReadOnly),
       options: BRANCH_OPTIONS,
       rest: new Operand({ type: 'str' }),
       write: true,
@@ -805,7 +898,7 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'add',
       description: 'Stage working tree content',
-      fn: add,
+      fn: verb(add, indexLocked),
       options: ADD_OPTIONS,
       rest: PATHSPEC,
       write: true,
@@ -813,7 +906,7 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'reset',
       description: 'Unstage, putting the index back to HEAD',
-      fn: reset,
+      fn: verb(reset, indexLocked),
       options: [new Option({ short: '-q', long: '--quiet', description: 'Only report errors' })],
       rest: PATHSPEC,
       write: true,
@@ -821,14 +914,14 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'commit',
       description: 'Record the index as a new commit',
-      fn: commit,
+      fn: verb(commit, indexLocked),
       options: COMMIT_OPTIONS,
       write: true,
     }),
     new CLISpec({
       name: 'checkout',
       description: 'Switch branches',
-      fn: checkout,
+      fn: verb(checkout, checkoutReadOnly),
       options: CHECKOUT_OPTIONS,
       rest: REVISION,
       write: true,
@@ -836,7 +929,7 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'switch',
       description: 'Switch branches',
-      fn: switchBranch,
+      fn: verb(switchBranch, switchReadOnly),
       options: SWITCH_OPTIONS,
       rest: REVISION,
       write: true,
@@ -844,7 +937,7 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'restore',
       description: 'Restore working tree files',
-      fn: restore,
+      fn: verb(restore, indexLocked),
       options: RESTORE_OPTIONS,
       rest: PATHSPEC,
       write: true,
@@ -852,7 +945,7 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'rm',
       description: 'Remove files from the working tree and the index',
-      fn: rm,
+      fn: verb(rm, indexLocked),
       options: RM_OPTIONS,
       rest: PATHSPEC,
       write: true,
@@ -860,7 +953,7 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'mv',
       description: 'Move or rename a file, a directory, or a symlink',
-      fn: mv,
+      fn: verb(mv, indexLocked),
       options: MV_OPTIONS,
       rest: PATHSPEC,
       write: true,
@@ -868,7 +961,7 @@ export const GIT = new CLISpec({
     new CLISpec({
       name: 'tag',
       description: 'Create, list or delete a tag',
-      fn: tag,
+      fn: verb(tag, tagReadOnly),
       options: TAG_OPTIONS,
       rest: new Operand({ type: 'str' }),
       write: true,

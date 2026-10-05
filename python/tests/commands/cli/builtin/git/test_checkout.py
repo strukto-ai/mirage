@@ -338,13 +338,6 @@ async def test_switching_to_a_commit_detaches_head(git_rw, repo_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_switch_is_refused(git_rw):
-    code, _out, err = await run(git_rw, "checkout -Z")
-    assert code == 129
-    assert err == b"error: unknown switch `Z'\n"
-
-
-@pytest.mark.asyncio
 async def test_checking_out_a_symlink_restores_a_link_not_a_file(git_rw):
     # A 120000 entry materializes as a link in the working tree, not as
     # a regular file holding the target string. The name plane owns

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { FS_CONDITIONS } from '../../../errors/index.ts'
-import { WASI, wasiErrno } from './errors.ts'
+import { WASI } from './errors.ts'
 
 describe('the preview1 wire table', () => {
   it('covers the whole vocabulary', () => {
@@ -37,7 +37,6 @@ describe('the preview1 wire table', () => {
       EPERM: 63,
       ENOTEMPTY: 55,
       EXDEV: 75,
-      CROSS_MOUNT: 44,
       ENOTSUP: 58,
       ELOOP: 32,
       EINVAL: 28,
@@ -46,13 +45,5 @@ describe('the preview1 wire table', () => {
       EROFS: 69,
       NO_XATTR: 58,
     })
-  })
-
-  it('keeps the cross-mount rename deliberately ENOENT on this wire', () => {
-    // Finding 8: each mount is its own preopen to a WASI guest, so a
-    // rename between two of them reads as a destination that is not
-    // there. Do not "fix" this to 75.
-    expect(wasiErrno('CROSS_MOUNT')).toBe(wasiErrno('ENOENT'))
-    expect(wasiErrno('CROSS_MOUNT')).not.toBe(wasiErrno('EXDEV'))
   })
 })

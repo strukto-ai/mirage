@@ -2043,3 +2043,38 @@ it('does not turn cmp options into numeric skips while retaining seq operands', 
   expect(sequence.texts()).toEqual(['-1', '1'])
   expect(sequence.optionErrorKinds).toEqual([])
 })
+
+// seq's getopt string starts with `+`, and seq.c reads a dash before a digit
+// or a point as a negative number before getopt sees it, so either one ends
+// the options and every later word is an operand (coreutils 9.7). Mirrors
+// test_parser.py.
+it.each([
+  [
+    ['-1.5', '1'],
+    ['-1.5', '1'],
+  ],
+  [
+    ['-.5', '.5'],
+    ['-.5', '.5'],
+  ],
+  [
+    ['1', '-0.5', '0'],
+    ['1', '-0.5', '0'],
+  ],
+  [
+    ['1', '-w', '3'],
+    ['1', '-w', '3'],
+  ],
+  [
+    ['-1', '-w', '1'],
+    ['-1', '-w', '1'],
+  ],
+  [
+    ['-w', '--', '-1', '1'],
+    ['-1', '1'],
+  ],
+])('ends seq options at its first operand: %j', (argv, texts) => {
+  const parsed = parseCommand(specOf('seq'), argv, '/', 'seq')
+  expect(parsed.texts()).toEqual(texts)
+  expect(parsed.optionErrorKinds).toEqual([])
+})

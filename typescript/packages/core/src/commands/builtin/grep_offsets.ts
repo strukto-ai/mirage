@@ -17,87 +17,6 @@ import { encodeText } from '../../shell/bytes.ts'
 import { byteOffset } from '../../shell/helpers.ts'
 import { matchStart, matchText } from './utils/pcre.ts'
 
-const DEC_FATAL = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
-
-/**
- * The input's bytes as text a byte offset can be counted back out of.
- *
- * The whole family holds a line as text, so every byte offset it prints is a
- * code-unit index converted back. That only answers GNU's number when the
- * conversion round-trips, which `TextDecoder`'s replacement does not: an
- * invalid byte becomes U+FFFD, three bytes wide, so a `-bo` match offset
- * inside such a line ran ahead of GNU's. A byte above ASCII is carried as its
- * surrogate escape instead, the convention `byteOffset` in `shell/helpers.ts`
- * already assumes through `encodeText`, and the twin of `decode_line` in
- * `grep_offsets.py`.
- */
-export function decodeLine(raw: Uint8Array): string {
-  try {
-    return DEC_FATAL.decode(raw)
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error
-  }
-  const parts: string[] = []
-  const units = new Uint16Array(Math.min(raw.length, 8192))
-  let used = 0
-  for (let i = 0; i < raw.length;) {
-    const byte = raw[i] ?? 0
-    const second = raw[i + 1] ?? 0
-    const third = raw[i + 2] ?? 0
-    const fourth = raw[i + 3] ?? 0
-    let code = byte < 0x80 ? byte : 0xdc00 + byte
-    let width = 1
-    // Reject overlong encodings, surrogate code points and values above
-    // U+10FFFF. An invalid sequence escapes only its first byte, just as
-    // Python's surrogateescape does, then retries at the following byte.
-    if (byte >= 0xc2 && byte <= 0xdf && second >= 0x80 && second <= 0xbf) {
-      code = ((byte & 0x1f) << 6) | (second & 0x3f)
-      width = 2
-    } else if (
-      byte >= 0xe0 &&
-      byte <= 0xef &&
-      second >= (byte === 0xe0 ? 0xa0 : 0x80) &&
-      second <= (byte === 0xed ? 0x9f : 0xbf) &&
-      third >= 0x80 &&
-      third <= 0xbf
-    ) {
-      code = ((byte & 0x0f) << 12) | ((second & 0x3f) << 6) | (third & 0x3f)
-      width = 3
-    } else if (
-      byte >= 0xf0 &&
-      byte <= 0xf4 &&
-      second >= (byte === 0xf0 ? 0x90 : 0x80) &&
-      second <= (byte === 0xf4 ? 0x8f : 0xbf) &&
-      third >= 0x80 &&
-      third <= 0xbf &&
-      fourth >= 0x80 &&
-      fourth <= 0xbf
-    ) {
-      code = ((byte & 7) << 18) | ((second & 0x3f) << 12) | ((third & 0x3f) << 6) | (fourth & 0x3f)
-      width = 4
-    }
-    if (code > 0xffff) {
-      code -= 0x10000
-      units[used++] = 0xd800 + (code >> 10)
-      units[used++] = 0xdc00 + (code & 0x3ff)
-    } else {
-      units[used++] = code
-    }
-    i += width
-    if (used >= units.length - 1) {
-      parts.push(String.fromCharCode(...units.subarray(0, used)))
-      used = 0
-    }
-  }
-  if (used > 0) parts.push(String.fromCharCode(...units.subarray(0, used)))
-  return parts.join('')
-}
-
-/** Text back to the bytes `decodeLine` read it from. */
-export function encodeLine(text: string): Uint8Array {
-  return encodeText(text)
-}
-
 /**
  * Byte offset of each line's own first byte within the whole input.
  *
@@ -105,7 +24,7 @@ export function encodeLine(text: string): Uint8Array {
  * more than the line's own length. The extra byte past the last line is never
  * read, which is why a file with no final newline still reports a correct
  * offset for every line it does have. The lines must have come from
- * `decodeLine`; a lossily decoded one cannot be counted back.
+ * `decodeText`; a lossily decoded one cannot be counted back.
  */
 export function lineOffsets(lines: readonly string[]): number[] {
   const offsets: number[] = []
@@ -115,17 +34,6 @@ export function lineOffsets(lines: readonly string[]): number[] {
     position += encodeText(line).length + 1
   }
   return offsets
-}
-
-/**
- * Where a match begins in bytes, given its character index.
- *
- * The pattern engine reports a code-unit index because both hosts hold a line
- * as text; GNU reports a byte count and reports the same number under C and
- * C.utf8, so the index is converted rather than printed.
- */
-export function matchOffset(lineStart: number, line: string, index: number): number {
-  return lineStart + byteOffset(line, index)
 }
 
 /**

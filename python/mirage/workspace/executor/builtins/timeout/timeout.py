@@ -19,6 +19,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from mirage.commands.builtin.utils.strtod import STRTOD, strtod_double
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
@@ -34,6 +35,7 @@ from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io import IOResult
 from mirage.io.stream import ensure_stream, materialize, yield_bytes
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.workspace.executor.builtins.timeout.constants import (
     CONTINUE_SIGNALS,
@@ -54,15 +56,6 @@ from mirage.workspace.types import ExecutionNode
 
 _SYNOPSIS = "timeout [OPTION] DURATION COMMAND [ARG]..."
 
-_FLOAT = re.compile(
-    r"[ \t\n\v\f\r]*([+-]?)("
-    r"0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)"
-    r"(?:[pP][+-]?[0-9]+)?"
-    r"|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
-    r"|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?"
-    r"|[nN][aA][nN](?:\([0-9A-Za-z_]*\))?)"
-)
-
 _LONG = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
 
 _UNIT_SECONDS = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
@@ -79,7 +72,9 @@ _Run = asyncio.Future[tuple[bytes | None, IOResult]]
 def _usage_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
     # GNU timeout reserves 125 for its own failures; 124 means the
     # command was killed at the deadline.
-    return _refuse(f"timeout: {message}\n{usage_hint('timeout')}\n".encode())
+    return _refuse(
+        encode_text(f"timeout: {message}\n{usage_hint('timeout')}\n")
+    )
 
 
 def _refuse(
@@ -114,24 +109,13 @@ def parse_duration(raw: str) -> float | None:
     Args:
         raw (str): duration operand as typed.
     """
-    match = _FLOAT.match(raw)
+    match = STRTOD.match(raw)
     if match is None:
         return None
-    sign, body = match.groups()
     suffix = raw[match.end() :]
     if suffix not in _UNIT_SECONDS:
         return None
-    lowered = body.lower()
-    if lowered.startswith("nan"):
-        return None
-    try:
-        value = (
-            float.fromhex(body) if lowered.startswith("0x") else float(body)
-        )
-    except OverflowError:
-        value = math.inf
-    if sign == "-":
-        value = -value
+    value = strtod_double(match)
     if not value >= 0:
         return None
     return value * _UNIT_SECONDS[suffix]
@@ -242,9 +226,11 @@ async def handle_timeout(
     kill_after = 0.0
     for name, value in parse.given:
         if name == "help":
-            text = render_help(
-                "timeout", SHELL_SPECS["timeout"], synopsis=_SYNOPSIS
-            ).encode()
+            text = encode_text(
+                render_help(
+                    "timeout", SHELL_SPECS["timeout"], synopsis=_SYNOPSIS
+                )
+            )
             return (
                 yield_bytes(text),
                 IOResult(),
@@ -282,7 +268,7 @@ async def handle_timeout(
     if parse.needs_value is not None:
         return _refuse(*missing_value_error("timeout", parse.needs_value))
     if len(parse.operands) < 2:
-        return _refuse(f"{usage_hint('timeout')}\n".encode())
+        return _refuse(encode_text(f"{usage_hint('timeout')}\n"))
     raw = parse.operands[0]
     seconds = parse_duration(raw)
     if seconds is None:
@@ -290,7 +276,7 @@ async def handle_timeout(
 
     command = parse.operands[1:]
     if registry is not None and not execs(command[0], session, registry):
-        return _refuse(timeout_missing(command[0]).encode(), 127)
+        return _refuse(encode_text(timeout_missing(command[0])), 127)
     return await _supervise(
         execute_fn,
         shell_join(command),
@@ -471,7 +457,7 @@ async def _ended(
     stderr = held[0].stderr if held else None
     if finished:
         stderr = await materialize(stderr)
-    tail = "".join(said).encode()
+    tail = encode_text("".join(said))
     head = stderr if isinstance(stderr, bytes) else b""
     out = b"".join(drained) or None
     return (

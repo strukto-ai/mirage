@@ -59,14 +59,16 @@ def test_default_python_is_a_registered_python_engine():
     assert issubclass(NAMED[DEFAULT_PYTHON], PythonRuntime)
 
 
-def test_build_runtime_unknown_name_fails_loud():
-    with pytest.raises(ValueError, match="unknown runtime: 'ghost'"):
-        build_runtime("ghost")
-
-
-def test_build_runtime_pyodide_gets_cross_language_hint():
-    with pytest.raises(ValueError, match="TypeScript-only"):
-        build_runtime("pyodide")
+@pytest.mark.parametrize(
+    ("name", "refusal"),
+    [
+        ("ghost", "unknown runtime: 'ghost'"),
+        ("pyodide", "TypeScript-only"),
+    ],
+)
+def test_build_runtime_refuses_a_name_it_cannot_build(name, refusal):
+    with pytest.raises(ValueError, match=refusal):
+        build_runtime(name)
 
 
 def test_build_runtime_local_takes_options():
@@ -107,14 +109,16 @@ def test_runtime_bindings_for_maps_only_the_named_captures():
     assert bindings == {"python3": fake, "made-up": fake}
 
 
-def test_runtime_bindings_for_rejects_vfs():
-    with pytest.raises(ValueError, match="not a runtime you can select"):
-        runtime_bindings_for([FakeRuntime(), WorkspaceRuntime()], "workspace")
-
-
-def test_runtime_bindings_for_unknown_name_lists_entries():
-    with pytest.raises(ValueError, match="'fake', 'workspace'"):
-        runtime_bindings_for([FakeRuntime(), WorkspaceRuntime()], "nope")
+@pytest.mark.parametrize(
+    ("name", "refusal"),
+    [
+        ("workspace", "not a runtime you can select"),
+        ("nope", "'fake', 'workspace'"),
+    ],
+)
+def test_runtime_bindings_for_refuses_a_name_it_cannot_bind(name, refusal):
+    with pytest.raises(ValueError, match=refusal):
+        runtime_bindings_for([FakeRuntime(), WorkspaceRuntime()], name)
 
 
 class _LineRuntime(Runtime, LineExecutorMixin):

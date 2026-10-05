@@ -112,4 +112,40 @@ export function registerSessionCommands(program: Command): void {
         ),
       )
     })
+
+  sess
+    .command('cancel')
+    .description("Cancel the session's running and queued commands.")
+    .argument('<wsId>')
+    .argument('<sessionId>')
+    .action(async (wsId: string, sessionId: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request(
+            'POST',
+            `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/cancel`,
+          ),
+        ),
+      )
+    })
+
+  sess
+    .command('kill')
+    .description("Kill the session's background jobs; the session stays open.")
+    .argument('<wsId>')
+    .argument('<sessionId>')
+    .action(async (wsId: string, sessionId: string) => {
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request(
+            'POST',
+            `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/kill`,
+          ),
+        ),
+      )
+    })
 }

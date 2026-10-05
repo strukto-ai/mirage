@@ -493,7 +493,7 @@ describe('cpGeneric -t/-T', () => {
       ['/f.txt', new Uint8Array([2])],
     ])
     const [, io] = await run(files, new Set(), ['/a.txt'], {
-      flags: cpFlags({ targetDir: '/f.txt' }),
+      flags: cpFlags({ targetDir: PathSpec.fromStrPath('/f.txt') }),
     })
     expect(io.exitCode).toBe(1)
     expect(await io.stderrStr()).toBe("cp: target directory '/f.txt': Not a directory\n")

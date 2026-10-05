@@ -62,7 +62,7 @@ def test_every_key_is_a_lowercase_wire_name():
         and issubclass(value, StrEnum)
         and value is not StrEnum
     ]
-    assert len(enums) == 9
+    assert len(enums) == 8
     for enum in enums:
         for member in enum:
             assert member.value == member.name.lower()
