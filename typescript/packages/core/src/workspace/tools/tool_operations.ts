@@ -67,12 +67,6 @@ async function ensureParents(vfs: Ops, path: string): Promise<void> {
   }
 }
 
-/** Whether `err` carries an errno code: the TypeScript shape of Python's
- * OSError, which a session that does not exist never does. */
-function errnoError(err: unknown): boolean {
-  return typeof (err as { code?: unknown } | null)?.code === 'string'
-}
-
 /**
  * Whether a path a read just failed on is absent, which picks the
  * failure's wording. A probe the workspace refuses means the path is
@@ -84,7 +78,9 @@ async function missing(vfs: Ops, path: string): Promise<boolean> {
   try {
     return !(await vfs.exists(path))
   } catch (err) {
-    if (!errnoError(err)) throw err
+    // An errno-stamped error is the TypeScript shape of Python's OSError;
+    // anything else (an unknown session) is not a probe answer.
+    if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
     return false
   }
 }
@@ -209,7 +205,7 @@ export class MirageToolOperations {
     try {
       present = await versions.vfs.exists(path)
     } catch (err) {
-      if (!errnoError(err)) throw err
+      if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
       return errorResult(`Error: ${errorMessage(err)}`)
     }
     if (present && !versions.hasRead(path)) {
