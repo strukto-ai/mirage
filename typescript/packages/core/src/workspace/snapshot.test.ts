@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { BoxVFS } from '../vfs/box/box.ts'
 import { setCwd } from './session/shell_dirs.ts'
 import { IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
 import { Mount } from './mount/spec.ts'
@@ -1084,4 +1085,32 @@ describe('the read policy survives a snapshot round trip', () => {
       await restored.close()
     }
   })
+})
+
+it('copy preserves live Box mount policy and provenance', async () => {
+  const vfs = new BoxVFS({ accessToken: 'fake' })
+  const ws = new Workspace({
+    '/box': new Mount(vfs, {
+      mode: MountMode.READ,
+      read: { policy: ReadPolicy.FRESH, ttl: 45 },
+      vfsRef: 'box',
+    }),
+    '/alias': new Mount(vfs, { read: { policy: ReadPolicy.BOUNDED, ttl: 75 }, vfsRef: 'box' }),
+  })
+  const clone = await ws.copy()
+  try {
+    for (const prefix of ['/box', '/alias']) {
+      const original = ws.mount(prefix)
+      const copied = clone.mount(prefix)
+      expect(copied.read).toEqual(original.read)
+      expect(copied.mode).toBe(original.mode)
+      expect(copied.vfsRef).toBe('box')
+      expect(copied.vfs).toBe(original.vfs)
+      expect(copied.indexStore).not.toBe(original.indexStore)
+      expect(copied.cacheManager).not.toBe(original.cacheManager)
+    }
+  } finally {
+    await clone.close()
+    await ws.close()
+  }
 })

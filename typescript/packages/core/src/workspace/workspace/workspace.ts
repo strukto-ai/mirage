@@ -1963,11 +1963,11 @@ export class Workspace {
     opts.ops = options.ops ?? this.opsRegistry
     const parser = options.shellParser ?? this.shellParser
     if (parser !== null) opts.shellParser = parser
-    const overrides: Record<string, BaseVFS> = {}
+    const overrides: Record<string, Mount> = {}
     for (const mount of this.registry.allMounts()) {
       for (const snap of state.mounts) {
         if (snap.prefix === mount.prefix && vfsStateRequiresOverride(snap.vfs_state)) {
-          overrides[mount.prefix] = mount.vfs
+          overrides[mount.prefix] = new Mount(mount.vfs, { read: mount.read, vfsRef: mount.vfsRef })
         }
       }
     }
