@@ -31,7 +31,6 @@ async def test_mkdir_creates(fake_drive, gdrive_accessor):
     assert item["mimeType"] == FOLDER_MIME
 
 
-
 @pytest.mark.asyncio
 async def test_mkdir_missing_parent_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):

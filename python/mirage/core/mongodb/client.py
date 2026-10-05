@@ -189,15 +189,3 @@ async def get_validator(
         validator = spec.get("options", {}).get("validator", {})
         return validator.get("$jsonSchema")
     return None
-
-
-async def get_index_stats(
-    client: AsyncMongoClient[Any],
-    database: str,
-    collection: str,
-) -> dict[str, dict[str, Any]]:
-    col = client[database][collection]
-    out: dict[str, dict[str, Any]] = {}
-    async for doc in await col.aggregate([{"$indexStats": {}}]):
-        out[doc["name"]] = doc.get("accesses", {})
-    return out

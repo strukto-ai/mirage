@@ -42,9 +42,6 @@ function requirePeer(source: string, peer: string): void {
   }
 }
 
-/** The builtin source names this module registers, sorted. */
-export const BUILTIN_SOURCE_NAMES = ['1password', 'aws-sm', 'dotenv', 'env'] as const
-
 // Builtin fetchers load lazily: each registered fetch dynamically
 // imports its module on first use, so a source's SDK loads only when a
 // workspace actually uses it (Python spells the same table as import

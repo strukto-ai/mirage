@@ -60,7 +60,6 @@ async def test_mkdir_parents_creates_chain(
     assert f"{remote_root}/a/b/c" in files.directory_metadata
 
 
-
 @pytest.mark.asyncio
 async def test_mkdir_parent_is_file_fails(accessor, files, remote_root, index):
     _seed_directory(files, remote_root)

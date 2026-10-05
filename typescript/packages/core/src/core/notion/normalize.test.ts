@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import {
-  extractIdNoDashes,
-  extractTitle,
-  normalizePage,
-  pageSegmentName,
-  toJsonBytes,
-} from './normalize.ts'
+import { extractTitle, normalizePage, pageSegmentName, toJsonBytes } from './normalize.ts'
 
 describe('extractTitle', () => {
   it('joins title.title plain_text fragments', () => {
@@ -50,28 +44,6 @@ describe('extractTitle', () => {
 
   it('returns "untitled" when properties is missing', () => {
     expect(extractTitle({})).toBe('untitled')
-  })
-})
-
-describe('extractIdNoDashes', () => {
-  it('strips dashes from a UUID-formatted id', () => {
-    expect(extractIdNoDashes({ id: '2c4e9c3a-1234-5678-90ab-cdef01234567' })).toBe(
-      '2c4e9c3a1234567890abcdef01234567',
-    )
-  })
-
-  it('lowercases an already 32-hex id', () => {
-    expect(extractIdNoDashes({ id: 'ABC123DEF4567890123456789012345A' })).toBe(
-      'abc123def4567890123456789012345a',
-    )
-  })
-
-  it('throws when the id is not a 32-hex value', () => {
-    expect(() => extractIdNoDashes({ id: 'not-a-uuid' })).toThrow('notion page missing id')
-  })
-
-  it('throws when the page has no id at all', () => {
-    expect(() => extractIdNoDashes({})).toThrow('notion page missing id')
   })
 })
 

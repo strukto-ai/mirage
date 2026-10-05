@@ -131,44 +131,6 @@ def parse_line(
     return parsed, FlagView(parsed.flag_kwargs, spec=spec), None
 
 
-def split_flags(
-    args: list[str | PathSpec],
-    known: str,
-) -> tuple[set[str], list[str | PathSpec]]:
-    """Split leading single-letter flags, permissively.
-
-    A token containing any unknown letter is kept as an operand instead
-    of erroring (``ln``/``readlink`` behavior).
-
-    Args:
-        args (list[str | PathSpec]): args after the command name.
-        known (str): accepted single-letter flags.
-
-    Returns:
-        tuple: (flags, operands).
-    """
-    flags: set[str] = set()
-    operands: list[str | PathSpec] = []
-    parsing = True
-    for arg in args:
-        s = operand_text(arg)
-        if parsing and s == "--":
-            parsing = False
-            continue
-        if (
-            parsing
-            and s != "-"
-            and len(s) >= 2
-            and s.startswith("-")
-            and all(c in known for c in s[1:])
-        ):
-            flags.update(s[1:])
-            continue
-        parsing = False
-        operands.append(arg)
-    return flags, operands
-
-
 def split_value_flags(
     args: list[str | PathSpec],
     boolean: str,

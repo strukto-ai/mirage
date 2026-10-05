@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
 from typing import Any
 
 from mirage.core.api.client import SessionArg
@@ -26,21 +25,13 @@ from mirage.core.time_range import TimeRange
 DISCORD_EPOCH = 1420070400000
 
 
-def date_to_snowflake(date_str: str, end: bool = False) -> str:
-    """Convert a YYYY-MM-DD date to a Discord snowflake bound.
+def snowflake_at(seconds: float) -> int:
+    """The lowest snowflake Discord mints at ``seconds`` of Unix time.
 
     Args:
-        date_str (str): YYYY-MM-DD date.
-        end (bool): when True, returns the snowflake for 23:59:59 UTC.
-
-    Returns:
-        str: snowflake id usable as ``after``/``before`` parameter.
+        seconds (float): Unix time.
     """
-    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    if end:
-        dt = dt.replace(hour=23, minute=59, second=59)
-    ms = int(dt.timestamp() * 1000) - DISCORD_EPOCH
-    return str(ms << 22)
+    return (round(seconds * 1000) - DISCORD_EPOCH) << 22
 
 
 async def stream_messages_for_day(
@@ -71,8 +62,8 @@ async def stream_messages_for_day(
     start, end = scope.day_bounds(date_str)
     if start >= end:
         return
-    first = (round(start * 1000) - DISCORD_EPOCH) << 22
-    before_int = (round(end * 1000) - DISCORD_EPOCH) << 22
+    first = snowflake_at(start)
+    before_int = snowflake_at(end)
     after = str(max(0, first - 1))
     async for page in after_id_pages(
         config,

@@ -28,7 +28,6 @@ import {
   runWithOpPolicies,
   runWithRedirectPaths,
   runWithSession,
-  runWithSuspendedOpPolicies,
   sessionUmask,
 } from './session_context.ts'
 import { CLISpec } from '../commands/cli/types.ts'
@@ -337,30 +336,6 @@ describe('op policies on the fallback storage', () => {
     })
     await second
     expect(after).toBe(armed)
-  })
-
-  it('a suspension yields to a concurrently armed frame, and stands alone otherwise', async () => {
-    // Deliberate fallback divergence: with no execution identity, a
-    // suspension that silenced every live frame would disarm a
-    // concurrent command's op doors (failing open), so the delegated
-    // sub-command double-admits instead (failing closed). A lone
-    // suspension still answers null, which is the isolating behavior.
-    const [hold, release] = gate()
-    let besideArmed: Policies | null = null
-    const long = runWithOpPolicies(armed, async () => {
-      await hold
-    })
-    const short = runWithSuspendedOpPolicies(() => {
-      besideArmed = getOpPolicies()
-      release()
-      return Promise.resolve()
-    })
-    await Promise.all([long, short])
-    expect(besideArmed).toBe(armed)
-    await runWithSuspendedOpPolicies(() => {
-      expect(getOpPolicies()).toBeNull()
-      return Promise.resolve()
-    })
   })
 })
 

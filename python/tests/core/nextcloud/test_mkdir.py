@@ -82,7 +82,6 @@ def _refuse_create(acc) -> None:
     acc._fake.create_dir = create_dir
 
 
-
 @pytest.mark.asyncio
 async def test_mkdir_under_a_file_is_enotdir(make_acc):
     acc = make_acc({"mkp/f": b"x"})

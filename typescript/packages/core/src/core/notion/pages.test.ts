@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NotionTransport } from './client.ts'
 import {
-  appendBlocks,
   createComment,
   createPage,
   getChildBlocks,
@@ -26,7 +25,6 @@ import {
   queryDataSourcePage,
   searchDataSources,
   searchPages,
-  searchTopLevelPages,
 } from './pages.ts'
 
 class FakeTransport implements NotionTransport {
@@ -38,58 +36,6 @@ class FakeTransport implements NotionTransport {
     return Promise.resolve(this.responses.shift() as Record<string, unknown>)
   }
 }
-
-describe('searchTopLevelPages', () => {
-  it('invokes API-post-search with the right filter args and keeps workspace-rooted pages', async () => {
-    const transport = new FakeTransport()
-    transport.responses.push({
-      results: [
-        { id: 'page-1', parent: { type: 'workspace', workspace: true } },
-        { id: 'page-2', parent: { type: 'page_id', page_id: 'other' } },
-        { id: 'page-3', parent: { type: 'workspace', workspace: true } },
-      ],
-      has_more: false,
-      next_cursor: null,
-    })
-    const pages = await searchTopLevelPages(transport)
-    expect(transport.invocations).toEqual([
-      {
-        name: 'API-post-search',
-        args: { filter: { value: 'page', property: 'object' }, page_size: 100 },
-      },
-    ])
-    expect(pages).toEqual([
-      { id: 'page-1', parent: { type: 'workspace', workspace: true } },
-      { id: 'page-3', parent: { type: 'workspace', workspace: true } },
-    ])
-  })
-
-  it('paginates when has_more is true with a next_cursor', async () => {
-    const transport = new FakeTransport()
-    transport.responses.push({
-      results: [{ id: 'p1', parent: { type: 'workspace', workspace: true } }],
-      has_more: true,
-      next_cursor: 'cursor-a',
-    })
-    transport.responses.push({
-      results: [{ id: 'p2', parent: { type: 'workspace', workspace: true } }],
-      has_more: false,
-      next_cursor: null,
-    })
-    const pages = await searchTopLevelPages(transport)
-    expect(transport.invocations).toHaveLength(2)
-    expect(transport.invocations[0]?.args).toEqual({
-      filter: { value: 'page', property: 'object' },
-      page_size: 100,
-    })
-    expect(transport.invocations[1]?.args).toEqual({
-      filter: { value: 'page', property: 'object' },
-      page_size: 100,
-      start_cursor: 'cursor-a',
-    })
-    expect(pages.map((p) => p.id)).toEqual(['p1', 'p2'])
-  })
-})
 
 describe('searchDataSources', () => {
   // 2025-09-03 dropped "database" as a search filter value: the searchable
@@ -109,20 +55,6 @@ describe('searchDataSources', () => {
       },
     ])
     expect(sources).toEqual([{ id: 'ds1', object: 'data_source' }])
-  })
-})
-
-describe('searchPages', () => {
-  it('caps the page size at the API maximum and stops at maxResults', async () => {
-    const transport = new FakeTransport()
-    transport.responses.push(
-      { results: [{ id: 'p1' }, { id: 'p2' }], has_more: true, next_cursor: 'c1' },
-      { results: [{ id: 'p3' }, { id: 'p4' }], has_more: true, next_cursor: 'c2' },
-    )
-    const pages = await searchPages(transport, '', 250, 3)
-    expect(pages.map((p) => p.id)).toEqual(['p1', 'p2', 'p3'])
-    expect(transport.invocations).toHaveLength(2)
-    expect(transport.invocations[0]?.args.page_size).toBe(100)
   })
 })
 
@@ -284,6 +216,18 @@ describe('createPage', () => {
 })
 
 describe('searchPages', () => {
+  it('caps the page size at the API maximum and stops at maxResults', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push(
+      { results: [{ id: 'p1' }, { id: 'p2' }], has_more: true, next_cursor: 'c1' },
+      { results: [{ id: 'p3' }, { id: 'p4' }], has_more: true, next_cursor: 'c2' },
+    )
+    const pages = await searchPages(transport, '', 250, 3)
+    expect(pages.map((p) => p.id)).toEqual(['p1', 'p2', 'p3'])
+    expect(transport.invocations).toHaveLength(2)
+    expect(transport.invocations[0]?.args.page_size).toBe(100)
+  })
+
   it('invokes API-post-search with query, filter, and page_size, paginating to the end', async () => {
     const transport = new FakeTransport()
     transport.responses.push({
@@ -313,20 +257,6 @@ describe('searchPages', () => {
       filter: { value: 'page', property: 'object' },
       page_size: 100,
     })
-  })
-})
-
-describe('appendBlocks', () => {
-  it('invokes API-patch-block-children with the block id merged into the body', async () => {
-    const transport = new FakeTransport()
-    const response = { results: [{ id: 'b1' }] }
-    transport.responses.push(response)
-    const children = [{ type: 'paragraph', paragraph: { rich_text: [] } }]
-    const result = await appendBlocks(transport, 'block-1', { children })
-    expect(transport.invocations).toEqual([
-      { name: 'API-patch-block-children', args: { block_id: 'block-1', children } },
-    ])
-    expect(result).toEqual(response)
   })
 })
 

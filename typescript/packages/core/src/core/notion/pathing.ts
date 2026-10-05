@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fitIdName, parseIdName } from '../../utils/naming.ts'
+import { fitIdName } from '../../utils/naming.ts'
 import { sanitizeName } from '../../utils/sanitize.ts'
 
 export { sanitizeName } from '../../utils/sanitize.ts'
@@ -30,9 +30,4 @@ export function stripDashes(id: string): string {
 export function formatSegment(page: { id: string; title: string }): string {
   const label = page.title !== '' ? sanitizeName(page.title) : 'untitled'
   return fitIdName(label, page.id)
-}
-
-export function parseSegment(segment: string): { title: string; id: string } {
-  const [title, id] = parseIdName(segment)
-  return { title, id }
 }

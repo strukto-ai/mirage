@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import type { MongoFindOptions, MongoIndexAccess, MongoIterOptions } from './_driver.ts'
+import type { MongoFindOptions, MongoIterOptions } from './_driver.ts'
 import { EntityKind } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -139,12 +139,4 @@ export async function getValidator(
     return validator?.$jsonSchema ?? null
   }
   return null
-}
-
-export async function getIndexStats(
-  accessor: MongoDBAccessor,
-  database: string,
-  collection: string,
-): Promise<Record<string, MongoIndexAccess>> {
-  return accessor.driver.getIndexStats(database, collection)
 }
