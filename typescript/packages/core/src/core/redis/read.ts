@@ -17,6 +17,7 @@ import { record, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
+import { eisdir } from '../../utils/errors.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from '../../utils/path.ts'
 
@@ -44,6 +45,7 @@ export async function read(
       ? await accessor.store.getFileRange(p, offset, size)
       : await accessor.store.getFile(p)
   if (data === null) {
+    if (await accessor.store.hasDir(p)) throw eisdir(path)
     throw await lookupError(accessor.store, path, p)
   }
   record('read', path.virtual, VFSName.REDIS, data.byteLength, timer)

@@ -79,3 +79,12 @@ async def test_stream_empty_file(mk_store):
     async for chunk in stream(a, PathSpec.from_str_path("/empty")):
         chunks.append(chunk)
     assert b"".join(chunks) == b""
+
+
+@pytest.mark.asyncio
+async def test_stream_directory_is_eisdir(mk_store):
+    a = await mk_store("test:stream:dir:")
+    await a.store.add_dir("/sub")
+    with pytest.raises(IsADirectoryError):
+        async for _ in stream(a, PathSpec.from_str_path("/sub")):
+            pass

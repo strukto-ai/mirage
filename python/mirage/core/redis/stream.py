@@ -19,7 +19,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
+from mirage.utils.errors import eisdir, enoent
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 
@@ -38,6 +38,8 @@ async def stream(
     key = norm(raw)
     data = await store.get_file(key)
     if data is None:
+        if await store.has_dir(key):
+            raise eisdir(path)
         raise await lookup_error(store, path, key)
     rec = record_stream("read", virtual, "redis")
     if rec is not None:

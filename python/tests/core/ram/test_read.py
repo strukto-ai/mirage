@@ -104,3 +104,9 @@ async def test_read_bytes_normalizes_path():
         ),
     )
     assert result == b"data"
+
+
+@pytest.mark.asyncio
+async def test_read_bytes_directory_is_eisdir(store):
+    with pytest.raises(IsADirectoryError):
+        await read_bytes(store, PathSpec.from_str_path("/sub"))

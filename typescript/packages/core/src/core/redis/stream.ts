@@ -17,6 +17,7 @@ import { recordStream } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
+import { eisdir } from '../../utils/errors.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from '../../utils/path.ts'
 
@@ -27,7 +28,10 @@ export async function* stream(
 ): AsyncIterable<Uint8Array> {
   const p = norm(path.mountPath)
   const data = await accessor.store.getFile(p)
-  if (data === null) throw await lookupError(accessor.store, path, p)
+  if (data === null) {
+    if (await accessor.store.hasDir(p)) throw eisdir(path)
+    throw await lookupError(accessor.store, path, p)
+  }
   const rec = recordStream('read', path.virtual, VFSName.REDIS)
   if (rec !== null) rec.bytes = data.byteLength
   yield data
