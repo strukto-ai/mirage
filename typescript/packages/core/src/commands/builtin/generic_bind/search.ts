@@ -18,6 +18,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
 import type { SearchQuery } from '../../../vfs/types.ts'
 import { IOResult } from '../../../io/types.ts'
+import { utf8Locale } from '../../../shell/bytes.ts'
 import { isEfbig, isFsError } from '../../../utils/errors.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -87,11 +88,13 @@ async function* nativeOrBytes<A extends Accessor>(
   }
 }
 
-// How a native search matches the pushed-down pattern.
+// How a native search matches the pushed-down pattern. `utf8` is grep under a
+// UTF-8 locale; ripgrep matches text under any.
 export function searchOptions(
   name: 'grep' | 'rg',
   fl: FlagView,
   pattern: string,
+  utf8 = false,
 ): Record<string, boolean | string> {
   if (name === 'rg') {
     const f = parseRgFlags(fl)
@@ -107,6 +110,7 @@ export function searchOptions(
     fixed_string: fl.asBool('F'),
     whole_word: fl.asBool('w'),
     syntax: matcherSyntax(fl),
+    utf8,
   }
 }
 
@@ -135,7 +139,7 @@ export async function runSearch<A extends Accessor>(
   ) {
     const query: SearchQuery = {
       query: pattern,
-      options: { grep: searchOptions(name, fl, pattern) },
+      options: { grep: searchOptions(name, fl, pattern, utf8Locale(opts.env)) },
     }
     let lines: string[] | null
     try {

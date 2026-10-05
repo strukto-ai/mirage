@@ -281,12 +281,14 @@ export function buildPatternStr(
   return subs.join('|')
 }
 
+/** Compile a pattern list into one matcher; `utf8` means the lines are text under a UTF-8 locale. */
 export function compilePattern(
   pattern: string,
   ignoreCase = false,
   fixedString = false,
   wholeWord = false,
   syntax = RegexSyntax.EXTENDED,
+  utf8 = false,
 ): RegExp {
   if (syntax === RegexSyntax.RUST) {
     const translated = rustSource(pattern, fixedString, wholeWord, ignoreCase)
@@ -294,11 +296,15 @@ export function compilePattern(
   }
   if (syntax === RegexSyntax.PERL && !fixedString) {
     const translated = perlRegex(pattern, ignoreCase, wholeWord)
-    return compilePosixRegex(translated.source, hostFlags(translated.source, translated.ignoreCase))
+    return compilePosixRegex(
+      translated.source,
+      hostFlags(translated.source, translated.ignoreCase),
+      utf8,
+    )
   }
   const source = buildPatternStr(pattern, fixedString, wholeWord, syntax)
   try {
-    return compilePosixRegex(source, ignoreCase ? 'i' : '')
+    return compilePosixRegex(source, ignoreCase ? 'i' : '', utf8)
   } catch (err) {
     if (!(err instanceof SyntaxError)) throw err
     throw new UsageError('grep: Invalid regular expression')

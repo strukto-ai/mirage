@@ -197,7 +197,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff -ruN /data/dn/a /data/dn/b",
+      "command": "( set -o pipefail; diff -ruN /data/dn/a /data/dn/b | cut -f1 )",
       "expect": {
         "exit": 1,
         "stdout": "diff -ruN /data/dn/a/f /data/dn/b/f\n--- /data/dn/a/f\n+++ /data/dn/b/f\n@@ -1 +0,0 @@\n-x\ndiff -ruN /data/dn/a/g /data/dn/b/g\n--- /data/dn/a/g\n+++ /data/dn/b/g\n@@ -0,0 +1 @@\n+y\n",
@@ -571,7 +571,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff --recursive -U1 /data/dn/e /data/dn/f",
+      "command": "( set -o pipefail; diff --recursive -U1 /data/dn/e /data/dn/f | cut -f1 )",
       "expect": {
         "exit": 1,
         "stdout": "diff --recursive -U1 /data/dn/e/two /data/dn/f/two\n--- /data/dn/e/two\n+++ /data/dn/f/two\n@@ -1 +1 @@\n-2\n+3\n",

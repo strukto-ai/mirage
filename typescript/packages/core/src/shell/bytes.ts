@@ -23,6 +23,8 @@ const HIGH_SURROGATE_HIGH = 0xdbff
 const ASCII_MAX = 0x80
 const BYTE_MASK = 0xff
 const VIEW_CHUNK = 8192
+const LOCALE_VARS = ['LC_ALL', 'LC_CTYPE', 'LANG'] as const
+const UTF8_CODESET = 'utf8'
 
 /**
  * Stand in for one raw output byte inside a text string.
@@ -170,6 +172,28 @@ export function decodeText(raw: Uint8Array): string {
 }
 
 /**
+ * Whether the environment names a UTF-8 locale, as setlocale reads it.
+ *
+ * POSIX takes the character type from the first of `LC_ALL`, `LC_CTYPE` and
+ * `LANG` that is set and not empty, so `LC_ALL=C` outranks `LANG=C.UTF-8`. A
+ * name is `language[_territory][.codeset][@modifier]`, and glibc compares the
+ * codeset with case and punctuation dropped, so `C.UTF-8`, `en_US.utf8` and
+ * `de_DE.UTF-8@euro` all name UTF-8. Every UTF-8 name counts as installed,
+ * where glibc falls back to the C locale for one it lacks. Mirrors Python's
+ * `utf8_locale`.
+ */
+export function utf8Locale(env: Readonly<Record<string, string>> | undefined): boolean {
+  for (const name of LOCALE_VARS) {
+    const value = env?.[name] ?? ''
+    if (value !== '') {
+      const codeset = value.split('@')[0]?.split('.').slice(1).join('.') ?? ''
+      return codeset.toLowerCase().replace(/[^a-z0-9]/g, '') === UTF8_CODESET
+    }
+  }
+  return false
+}
+
+/**
  * The same bytes as a string of one character per byte.
  *
  * A command that runs in GNU's C locale (grep, sed, awk, tr, expr) counts,
@@ -178,8 +202,14 @@ export function decodeText(raw: Uint8Array): string {
  * from running on this representation and converting only at the command's
  * edges, where a typed `é`, its `$'\xc3\xa9'` spelling and the file's own
  * bytes all arrive as the same two characters. Mirrors Python's `byte_view`.
+ *
+ * Under a UTF-8 locale (`utf8`) grep, sed and expr count, match and index
+ * characters instead, so the view is the text itself: a byte that is no part
+ * of a character stays its surrogate escape, one element of its own, as it
+ * does in glibc's matcher.
  */
-export function byteView(value: string | Uint8Array): string {
+export function byteView(value: string | Uint8Array, utf8 = false): string {
+  if (utf8) return typeof value === 'string' ? value : decodeText(value)
   const bytes = typeof value === 'string' ? encodeText(value) : value
   const parts: string[] = []
   for (let at = 0; at < bytes.length; at += VIEW_CHUNK)
@@ -190,9 +220,10 @@ export function byteView(value: string | Uint8Array): string {
 /**
  * The bytes a byte view stands for, the inverse of `byteView`. An invalid
  * sequence or half a character comes back as itself, which is what GNU
- * writes.
+ * writes. Under `utf8` the view is the text itself.
  */
-export function fromByteView(view: string): Uint8Array {
+export function fromByteView(view: string, utf8 = false): Uint8Array {
+  if (utf8) return encodeText(view)
   const out = new Uint8Array(view.length)
   for (let at = 0; at < view.length; at++) {
     const byte = view.charCodeAt(at)
@@ -203,6 +234,6 @@ export function fromByteView(view: string): Uint8Array {
 }
 
 /** A byte view as shell text again, for a path or a nested command line. */
-export function textView(view: string): string {
-  return decodeText(fromByteView(view))
+export function textView(view: string, utf8 = false): string {
+  return utf8 ? view : decodeText(fromByteView(view))
 }

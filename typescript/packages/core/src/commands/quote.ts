@@ -60,10 +60,13 @@ const QUOTE_ESCAPES = new Map<string, string>([
 // `unrecognized option '<w>'` prints `argv[optind]` with a plain `%s`, so
 // it carries the raw bytes and must NOT be routed here.
 //
+// `utf8` means the word is text, as a command under a UTF-8 locale holds it;
+// it is quoted per byte all the same, as the C locale quotes it.
+//
 // `quote_word` in quote.py is the twin.
-export function quoteWord(view: string): string {
+export function quoteWord(view: string, utf8 = false): string {
   let out = ''
-  for (const ch of view) {
+  for (const ch of utf8 ? byteView(view) : view) {
     const named = QUOTE_ESCAPES.get(ch)
     if (named !== undefined) {
       out += named

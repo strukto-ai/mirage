@@ -766,6 +766,19 @@ describe('expr through the shell', () => {
     ['expr substr \u00e9\u00e9 3 2', '\u00e9\n', '', 0],
     ["expr \u00e9 ':' '..'", '2\n', '', 0],
     ["expr $'12\\n' + 1", '', 'expr: non-integer argument\n', 2],
+    // Under a UTF-8 locale the same operators count characters; the
+    // diagnostics still quote per byte, as the C locale does.
+    ['LC_ALL=C.UTF-8 expr length \u89c4\u5b9a\u{1f600}', '3\n', '', 0],
+    ['LC_ALL=C.UTF-8 expr substr \u89c4\u{1f600}x 2 1', '\u{1f600}\n', '', 0],
+    ['LC_ALL=C.UTF-8 expr index a\u{1f600}b b', '3\n', '', 0],
+    ["LC_ALL=C.UTF-8 expr \u{1f600}x ':' '.*'", '2\n', '', 0],
+    ["LC_ALL=C.UTF-8 expr \u00e9 ':' '\\(.\\)'", '\u00e9\n', '', 0],
+    [
+      "LC_ALL=C.UTF-8 expr '(' \u00e9",
+      '',
+      "expr: syntax error: expecting ')' after '\\303\\251'\n",
+      2,
+    ],
     // The two diagnostic-wording families, through the whole shell path:
     // gnulib's quote() escaping the word, and the `instead of` clause.
     ["expr a '\\(' 2", '', "expr: syntax error: unexpected argument '\\\\('\n", 2],

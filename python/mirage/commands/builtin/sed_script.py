@@ -23,7 +23,7 @@ from mirage.commands.builtin.utils.bre import (
     translate_bre,
     translate_ere,
 )
-from mirage.shell.bytes import byte_char, byte_view, encode_text
+from mirage.shell.bytes import byte_char, byte_view, encode_text, text_view
 from mirage.utils.posix import compile_posix_regex
 
 SED_VERSION = "4.9"
@@ -305,8 +305,9 @@ class _Compiler:
     range comma and after ``!``, then the command's own rules.
     """
 
-    def __init__(self, extended: bool) -> None:
+    def __init__(self, extended: bool, utf8: bool = False) -> None:
         self.extended = extended
+        self.utf8 = utf8
         self.chars: list[str] = []
         self.pos = 0
         self.line = 0
@@ -560,7 +561,7 @@ class _Compiler:
             source = _line_anchors(source)
         regex = SedRegex(pattern, source, groups, icase, multiline)
         try:
-            compile_posix_regex(source, sed_regex_flags(regex))
+            compile_posix_regex(source, sed_regex_flags(regex), self.utf8)
         except re.error as exc:
             raise self._bad(INVALID_PATTERN) from exc
         if reference > groups:
@@ -581,7 +582,8 @@ class _Compiler:
         backslash before any other character is dropped; in a regex it
         stays for regcomp, and what an escape produced is read as regex
         syntax, so ``\\x2e`` is any character and ``\\x5c`` a trailing
-        backslash.
+        backslash. Under a UTF-8 locale the result is read back as text,
+        so ``\\xc3\\xa9`` is the one character it spells.
 
         Args:
             text (str): the text as read.
@@ -642,7 +644,8 @@ class _Compiler:
                     i += 1
                 continue
             out.append(nx if kind is SedText.BUFFER else "\\" + nx)
-        return "".join(out)
+        view = "".join(out)
+        return text_view(view) if self.utf8 else view
 
     def _read_text(self, cmd: SedCommand | None, leadin: str | None) -> None:
         """GNU's read_text.
@@ -957,7 +960,9 @@ class _Compiler:
                 f"sed: {where}: {EXCESS_OPEN_BRACE}", 1, self.wfiles
             )
         if self.pending_text is not None and self.old_text_cmd is not None:
-            self.old_text_cmd.text = byte_view(self.pending_text) or None
+            self.old_text_cmd.text = (
+                byte_view(self.pending_text, self.utf8) or None
+            )
             self.pending_text = None
         for index, label in self.jumps:
             target = self.labels.get(label)
@@ -974,7 +979,9 @@ class _Compiler:
 
 
 def compile_script(
-    pieces: Sequence[SedScriptPiece], extended: bool = False
+    pieces: Sequence[SedScriptPiece],
+    extended: bool = False,
+    utf8: bool = False,
 ) -> SedProgram:
     """Compile a sed script given as its -e and -f pieces, as GNU 4.9 does.
 
@@ -984,8 +991,10 @@ def compile_script(
     Args:
         pieces (Sequence[SedScriptPiece]): the -e and -f pieces in order.
         extended (bool): -E, the POSIX extended syntax.
+        utf8 (bool): a UTF-8 locale, so the script's texts and regexes
+            are characters rather than bytes.
     """
-    return _Compiler(extended).compile(pieces)
+    return _Compiler(extended, utf8).compile(pieces)
 
 
 def looks_ahead(program: SedProgram) -> bool:

@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from enum import Enum
 
 from mirage.commands.builtin.constants import UINTMAX
@@ -33,7 +35,10 @@ from mirage.types import (
     FileType,
     LsTimeKind,
 )
+from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import content_size, is_dir
+
+logger = logging.getLogger(__name__)
 
 # GNU's --block-size units: the letter, its 1024-based factor and the two
 # suffixes it prints (K for KiB, kB for KB). xstrtoumax's table, which
@@ -44,6 +49,8 @@ _LOWER_BLOCK_UNITS = "kmgt"
 _C_SPACE = " \t\n\v\f\r"
 LS_TIME_STYLES = ("full-iso", "long-iso", "iso", "locale")
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+# The fraction of a second as the stamp spells it.
+_FRACTION = re.compile(r"\d\d:\d\d:\d\d\.(\d+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -327,6 +334,41 @@ def _ls_time_string(modified: str | None, *, find_rule: bool = False) -> str:
     return f"{month} {day}  {dt.year}"
 
 
+def full_iso_time(modified: str | None, zone: tzinfo | None = None) -> str:
+    """A timestamp in GNU's full-iso layout, ``%Y-%m-%d %H:%M:%S.%N %z``.
+
+    The nine fraction digits are the ones the stamp spells, so both hosts
+    print what the backend recorded rather than what their clock type
+    keeps (a ``datetime`` stops at microseconds, a JavaScript ``Date`` at
+    milliseconds). The whole seconds never pass through a float, which
+    would round ``9999-12-31T23:59:59.999999`` into year 10000. The time
+    reads in ``zone``, UTC when None (a moment the zone would carry past
+    year 9999 stays in UTC), and an unknown time is the epoch, as GNU
+    renders a missing file's.
+
+    Args:
+        modified (str | None): the ISO timestamp, None when unknown.
+        zone (tzinfo | None): the zone the command's ``TZ`` names.
+    """
+    stamp = _EPOCH
+    digits = ""
+    if modified and iso_timestamp(modified) is not None:
+        stamp = datetime.fromisoformat(modified)
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        match = _FRACTION.search(modified)
+        digits = match.group(1) if match else ""
+    whole = stamp.replace(microsecond=0)
+    try:
+        whole = whole.astimezone(zone or timezone.utc)
+    except OverflowError as exc:
+        logger.debug(
+            "%s does not fit a datetime in %s: %s", modified, zone, exc
+        )
+    fraction = digits.ljust(9, "0")[:9]
+    return gnu_strftime(whole, f"%Y-%m-%d %H:%M:%S.{fraction} %z")
+
+
 def styled_time(modified: str | None, style: str) -> str:
     """The time column under ``--time-style``.
 
@@ -343,9 +385,9 @@ def styled_time(modified: str | None, style: str) -> str:
     """
     if style == "locale":
         return _ls_time_string(modified)
-    dt = _parse_when(modified) or _EPOCH
     if style == "full-iso":
-        return gnu_strftime(dt, "%Y-%m-%d %H:%M:%S.%N %z")
+        return full_iso_time(modified)
+    dt = _parse_when(modified) or _EPOCH
     if style == "long-iso":
         return gnu_strftime(dt, "%Y-%m-%d %H:%M")
     recent = _is_recent(dt.timestamp(), find_rule=False)
