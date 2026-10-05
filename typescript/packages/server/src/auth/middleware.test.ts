@@ -421,6 +421,88 @@ describe('AuthMiddleware integration', () => {
         await app.close()
       }
     })
+
+    it('reads a leading slash as the same key', async () => {
+      const app = buildApp({
+        stateRoot: join(root, 'state'),
+        snapshotStore: { bucket: 'snaps', region: 'us-east-1' },
+      })
+      try {
+        await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { ...RAM, id: 'a' } })
+        const save = vi.spyOn(app.registry.get('a').runner.ws, 'snapshot').mockResolvedValue(42)
+        const r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces/a/snapshot',
+          payload: { key: '/lead.tar' },
+        })
+        expect(r.statusCode, r.body).toBe(200)
+        expect(save.mock.calls[0]?.[0]).toBe('lead.tar')
+      } finally {
+        vi.restoreAllMocks()
+        await app.close()
+      }
+    })
+
+    it('leaves the id free after a failed create', async () => {
+      const app = jwtApp()
+      try {
+        let r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: await bearer({ sub: 'alice' }),
+          payload: { config: { ...RAM.config, secrets: { prod: { source: 'nope' } } }, id: 'w' },
+        })
+        expect(r.statusCode).toBe(400)
+        r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: await bearer({ sub: 'bob' }),
+          payload: { ...RAM, id: 'w' },
+        })
+        expect(r.statusCode, r.body).toBe(201)
+      } finally {
+        await app.close()
+      }
+    })
+
+    it('leaves state from before accounts to no account', async () => {
+      const local = buildApp({ stateRoot: join(root, 'state') })
+      try {
+        let r = await local.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          payload: { ...RAM, id: 'w' },
+        })
+        expect(r.statusCode, r.body).toBe(201)
+        r = await local.inject({
+          method: 'POST',
+          url: '/v1/workspaces/w/shell',
+          payload: { command: 'echo kept' },
+        })
+        expect(r.statusCode, r.body).toBe(200)
+      } finally {
+        await local.close()
+      }
+      const app = jwtApp()
+      try {
+        let r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: await bearer({ sub: 'alice' }),
+          payload: { ...RAM, id: 'w' },
+        })
+        expect(r.statusCode).toBe(409)
+        r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: await bearer({ sub: 'alice' }),
+          payload: { ...RAM, id: 'fresh' },
+        })
+        expect(r.statusCode, r.body).toBe(201)
+      } finally {
+        await app.close()
+      }
+    })
   })
 
   it('health endpoint is always open', async () => {

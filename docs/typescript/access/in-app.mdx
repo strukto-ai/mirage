@@ -111,7 +111,7 @@ ws.snapshot(target, { s3? }): Promise<number>
 Workspace.load(source, { s3?, ... }): Promise<Workspace>
 ```
 
-Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. While it captures, new lines wait and running ones get 30 seconds to end, else it rejects with an `EBUSY` error; a path target streams disk mount files rather than holding them whole. See [Snapshots](/home/snapshot) for what a tar holds.
+Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it rejects with an `EBUSY` error; a path target streams disk mount files rather than holding them whole. See [Snapshots](/home/snapshot) for what a tar holds.
 
 ```ts
 const tar = await ws.snapshot()

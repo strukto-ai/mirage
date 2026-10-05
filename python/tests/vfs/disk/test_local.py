@@ -291,3 +291,20 @@ async def test_snapshot_round_trip_streams_disk_files(tmp_path, monkeypatch):
     assert await io.stdout_str() == "kept\n"
     await ws.close()
     await loaded.close()
+
+
+def test_load_state_refuses_a_captured_file_replaced_by_a_link(tmp_path):
+    # A copy reads each file after the state named it; one swapped for a
+    # link to a host file in between must not be copied through.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "f.txt").write_text("mine")
+    state = DiskVFS(str(src)).get_state()
+    secret = tmp_path / "secret"
+    secret.write_text("host")
+    (src / "f.txt").unlink()
+    (src / "f.txt").symlink_to(secret)
+    dst = tmp_path / "dst"
+    with pytest.raises(OSError):
+        DiskVFS(str(dst)).load_state(state)
+    assert not (dst / "f.txt").exists()

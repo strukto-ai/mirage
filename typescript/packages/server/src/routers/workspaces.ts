@@ -23,7 +23,7 @@ import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
-import { type WorkspaceRegistry } from '../registry.ts'
+import { Claim, type WorkspaceRegistry } from '../registry.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
@@ -154,12 +154,52 @@ const ACCOUNTS_DIR = 'accounts'
  * its key.
  */
 function storeKey(account: string | null, key: string): string | null {
-  if (!isSafeBlobPath(key)) return null
-  return account === null ? key : `${ACCOUNTS_DIR}/${quoteName(account)}/${key}`
+  const relative = key.replace(/^\/+/, '')
+  if (!isSafeBlobPath(relative)) return null
+  return account === null ? relative : `${ACCOUNTS_DIR}/${quoteName(account)}/${relative}`
 }
 
 function noStore(reply: FastifyReply): FastifyReply {
   return reply.status(400).send({ detail: 'this server has no snapshot store' })
+}
+
+/** Whether the server's state root holds state for `id`. */
+async function hasState(stateRoot: string, id: string): Promise<boolean> {
+  const store = new DiskWorkspaceStateStore({ root: stateRoot })
+  try {
+    return (await store.loadMeta(id)) !== null
+  } finally {
+    await store.close()
+  }
+}
+
+/**
+ * Run a create's `build` under the caller's claim on `id`, or answer 409
+ * when the id is not theirs to create. A claim this create made is released
+ * when the build answers anything but success or throws, so a failed
+ * create leaves the id free; one the account already held (its own closed
+ * or stored workspace) stays.
+ */
+async function claimed(
+  deps: WorkspaceRoutesDeps,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  id: string,
+  build: () => Promise<FastifyReply>,
+): Promise<FastifyReply> {
+  const stored = req.account !== null && (await hasState(deps.stateRoot, id))
+  const claim = await deps.registry.claim(id, req.account, stored)
+  if (claim === Claim.Taken) {
+    return reply.status(409).send({ detail: `workspace id already exists: ${id}` })
+  }
+  let built = false
+  try {
+    const answer = await build()
+    built = reply.statusCode < 300
+    return answer
+  } finally {
+    if (!built && claim === Claim.New) await deps.registry.release(id)
+  }
 }
 
 /** Refuse an id that would name the state root, not a workspace. */
@@ -224,64 +264,67 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         if (!admitted) {
           return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
         }
-        if (deps.registry.has(wid)) {
+        if (deps.registry.has(wid) || deps.registry.removing(wid)) {
           const held = deps.registry.visible(wid, req.account)
           if (held === null || deps.registry.removing(wid) || held.configDigest !== digest) {
             return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
           }
           return reply.status(200).send(await makeDetail(held))
         }
-        if (!(await deps.registry.claim(wid, req.account))) {
-          return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
-        }
-        let args: WorkspaceArgs
-        try {
-          args = await configToWorkspaceArgs(cfg)
-        } catch (e) {
-          if (e instanceof SecretsError || e instanceof z.ZodError || e instanceof VFSConfigError) {
-            // A `secrets:` block the host cannot resolve is the caller's
-            // config, not a backend that would not answer. Resolution moved
-            // into configToWorkspaceArgs, so without this the same body that
-            // python's create route refuses with 400 got a 502 here.
-            return reply.status(400).send({ detail: e.message })
+        return claimed(deps, req, reply, wid, async () => {
+          let args: WorkspaceArgs
+          try {
+            args = await configToWorkspaceArgs(cfg)
+          } catch (e) {
+            if (
+              e instanceof SecretsError ||
+              e instanceof z.ZodError ||
+              e instanceof VFSConfigError
+            ) {
+              // A `secrets:` block the host cannot resolve is the caller's
+              // config, not a backend that would not answer. Resolution moved
+              // into configToWorkspaceArgs, so without this the same body that
+              // python's create route refuses with 400 got a 502 here.
+              return reply.status(400).send({ detail: e.message })
+            }
+            return reply.status(502).send({ detail: `VFS build failed: ${(e as Error).message}` })
           }
-          return reply.status(502).send({ detail: `VFS build failed: ${(e as Error).message}` })
-        }
-        // The Mounts ride through whole; see workspace_config.ts.
-        const vfsMap: Record<string, MountSpec> = { ...args.mounts }
-        let ws: Workspace
-        try {
-          // Every option the config produced rides through: enumerating
-          // them by hand silently dropped `clis` and `guards`, so a yaml
-          // clis block parsed, validated, and then installed nothing.
-          // Only identity and the store default are the daemon's to
-          // decide.
-          ws = new Workspace(vfsMap, {
-            ...args.options,
-            workspaceId: wid,
-            // Daemon default is disk (a created workspace survives restart
-            // with zero infrastructure, like git init); the library default
-            // stays ram. An explicit store always wins.
-            store: args.options.store ?? new DiskWorkspaceStateStore({ root: deps.stateRoot }),
-            // Whichever of the two built it, no sibling workspace shares
-            // it, so this workspace is the one that closes it.
-            ownsStore: true,
-          })
-        } catch (e) {
-          return reply.status(400).send({ detail: (e as Error).message })
-        }
-        let entry
-        try {
-          for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
-            await ws.addFuseMount(prefix, mountpoint, undefined, backend)
+          // The Mounts ride through whole; see workspace_config.ts.
+          const vfsMap: Record<string, MountSpec> = { ...args.mounts }
+          let ws: Workspace
+          try {
+            // Every option the config produced rides through: enumerating
+            // them by hand silently dropped `clis` and `guards`, so a yaml
+            // clis block parsed, validated, and then installed nothing.
+            // Only identity and the store default are the daemon's to
+            // decide.
+            ws = new Workspace(vfsMap, {
+              ...args.options,
+              workspaceId: wid,
+              // Daemon default is disk (a created workspace survives restart
+              // with zero infrastructure, like git init); the library default
+              // stays ram. An explicit store always wins.
+              store: args.options.store ?? new DiskWorkspaceStateStore({ root: deps.stateRoot }),
+              // Whichever of the two built it, no sibling workspace shares
+              // it, so this workspace is the one that closes it.
+              ownsStore: true,
+            })
+          } catch (e) {
+            return reply.status(400).send({ detail: (e as Error).message })
           }
-          entry = deps.registry.add(ws, wid, req.account)
-          entry.configDigest = digest
-        } catch (e) {
-          await ws.close()
-          return reply.status(409).send({ detail: (e as Error).message })
-        }
-        return reply.status(201).send(await makeDetail(entry))
+          let entry
+          try {
+            for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
+              await ws.addFuseMount(prefix, mountpoint, undefined, backend)
+            }
+            entry = deps.registry.add(ws, wid, req.account)
+            entry.configDigest = digest
+          } catch (e) {
+            await ws.close()
+            return reply.status(409).send({ detail: (e as Error).message })
+          }
+          return reply.status(201).send(await makeDetail(entry))
+        })
       })
     },
   )
@@ -316,47 +359,50 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     }
     const { key, id: workspaceId, override } = body
     if (workspaceId !== undefined && DOT_IDS.has(workspaceId)) return refuseId(reply, workspaceId)
-    if (workspaceId !== undefined && deps.registry.has(workspaceId)) {
+    if (
+      workspaceId !== undefined &&
+      (deps.registry.has(workspaceId) || deps.registry.removing(workspaceId))
+    ) {
       return reply.status(409).send({ detail: `workspace id already exists: ${workspaceId}` })
     }
     const store = typeof source === 'string' ? deps.snapshotStore : undefined
     if (typeof source === 'string' && store === undefined) return noStore(reply)
     const wid = workspaceId ?? newWorkspaceId()
-    if (!(await deps.registry.claim(wid, req.account))) {
-      return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
-    }
-    let overrides: Record<string, BaseVFS | Mount>
-    try {
-      // An override mount's credential may be a pointer at one of
-      // these declarations; a container the constructor will reject
-      // is left for it to reject. Mirrors the python load route.
-      overrides = await buildOverrideMounts(override ?? null, override?.secrets)
-    } catch (e) {
-      return reply.status(400).send({ detail: `override build failed: ${(e as Error).message}` })
-    }
-    let ws: Workspace
-    try {
-      ws = await Workspace.load(
-        source,
-        {
-          ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
-          ...(store !== undefined ? { s3: store } : {}),
-        },
-        overrides,
-      )
-    } catch (e) {
-      if ((e as { code?: unknown }).code === 'ENOENT') {
-        return reply.status(400).send({ detail: `snapshot not found: ${String(key)}` })
+    return claimed(deps, req, reply, wid, async () => {
+      let overrides: Record<string, BaseVFS | Mount>
+      try {
+        // An override mount's credential may be a pointer at one of
+        // these declarations; a container the constructor will reject
+        // is left for it to reject. Mirrors the python load route.
+        overrides = await buildOverrideMounts(override ?? null, override?.secrets)
+      } catch (e) {
+        return reply.status(400).send({ detail: `override build failed: ${(e as Error).message}` })
       }
-      return reply.status(400).send({ detail: `load failed: ${(e as Error).message}` })
-    }
-    let entry
-    try {
-      entry = deps.registry.add(ws, wid, req.account)
-    } catch (e) {
-      return reply.status(409).send({ detail: (e as Error).message })
-    }
-    return reply.status(201).send(await makeDetail(entry))
+      let ws: Workspace
+      try {
+        ws = await Workspace.load(
+          source,
+          {
+            ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
+            ...(store !== undefined ? { s3: store } : {}),
+          },
+          overrides,
+        )
+      } catch (e) {
+        if ((e as { code?: unknown }).code === 'ENOENT') {
+          return reply.status(400).send({ detail: `snapshot not found: ${String(key)}` })
+        }
+        return reply.status(400).send({ detail: `load failed: ${(e as Error).message}` })
+      }
+      let entry
+      try {
+        entry = deps.registry.add(ws, wid, req.account)
+      } catch (e) {
+        await ws.close()
+        return reply.status(409).send({ detail: (e as Error).message })
+      }
+      return reply.status(201).send(await makeDetail(entry))
+    })
   })
 
   app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceGetQuery }>(
@@ -415,34 +461,37 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       if (source === null) return reply.status(404).send({ detail: 'workspace not found' })
       const body = req.body
       if (body.id !== undefined && DOT_IDS.has(body.id)) return refuseId(reply, body.id)
-      if (body.id !== undefined && deps.registry.has(body.id)) {
+      if (
+        body.id !== undefined &&
+        (deps.registry.has(body.id) || deps.registry.removing(body.id))
+      ) {
         return reply.status(409).send({ detail: `workspace id already exists: ${body.id}` })
       }
       const wid = body.id ?? newWorkspaceId()
-      if (!(await deps.registry.claim(wid, req.account))) {
-        return reply.status(409).send({ detail: `workspace id already exists: ${wid}` })
-      }
-      const src = source.runner.ws
-      let newWs
-      try {
-        newWs = await cloneWorkspaceWithOverride(src, body.override ?? null)
-      } catch (e) {
-        if (e instanceof SecretsError || e instanceof z.ZodError || e instanceof VFSConfigError) {
-          // An override naming a source the host cannot resolve, or a
-          // block the schema refuses, is the caller's mistake -- the
-          // answer create, load and the historical clone already give.
-          return reply.status(400).send({ detail: e.message })
+      return claimed(deps, req, reply, wid, async () => {
+        const src = source.runner.ws
+        let newWs
+        try {
+          newWs = await cloneWorkspaceWithOverride(src, body.override ?? null)
+        } catch (e) {
+          if (e instanceof SecretsError || e instanceof z.ZodError || e instanceof VFSConfigError) {
+            // An override naming a source the host cannot resolve, or a
+            // block the schema refuses, is the caller's mistake -- the
+            // answer create, load and the historical clone already give.
+            return reply.status(400).send({ detail: e.message })
+          }
+          if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
+          throw e
         }
-        if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
-        throw e
-      }
-      let entry
-      try {
-        entry = deps.registry.add(newWs, wid, req.account)
-      } catch (e) {
-        return reply.status(409).send({ detail: (e as Error).message })
-      }
-      return reply.status(201).send(await makeDetail(entry))
+        let entry
+        try {
+          entry = deps.registry.add(newWs, wid, req.account)
+        } catch (e) {
+          await newWs.close()
+          return reply.status(409).send({ detail: (e as Error).message })
+        }
+        return reply.status(201).send(await makeDetail(entry))
+      })
     },
   )
 

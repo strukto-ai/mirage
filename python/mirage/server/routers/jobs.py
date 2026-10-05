@@ -73,8 +73,8 @@ def _to_detail(entry: JobEntry) -> JobDetail:
 async def _require_job(request: Request, job_id: str) -> JobEntry:
     """The job, when its workspace is the caller's to reach.
 
-    A job of another account's workspace answers 404 like a missing
-    one.
+    A job of another account's workspace, or of an earlier workspace
+    under the same id, answers 404 like a missing one.
 
     Args:
         request (Request): the request.
@@ -86,7 +86,9 @@ async def _require_job(request: Request, job_id: str) -> JobEntry:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
     registry = request.app.state.registry
-    if not await registry.allows(entry.workspace_id, request.state.account):
+    if not await registry.allows(
+        entry.workspace_id, request.state.account, entry.submitted_at
+    ):
         raise HTTPException(status_code=404, detail="job not found")
     return entry
 
@@ -100,7 +102,7 @@ async def list_jobs(
     return [
         _to_brief(j)
         for j in await request.app.state.jobs.list(workspace_id=workspace_id)
-        if await registry.allows(j.workspace_id, account)
+        if await registry.allows(j.workspace_id, account, j.submitted_at)
     ]
 
 

@@ -28,19 +28,19 @@ Every way in but in-app goes through the Mirage server, a FastAPI app in [Python
 
 Each way in exposes what its own protocol defines. A dash means the protocol has no such operation.
 
-| | In-app | HTTP | MCP | RPC | CLI | SSH | FUSE |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Create, list, delete workspaces | ✓ | ✓ | – | – | ✓ | – | – |
-| Create, list, delete sessions | ✓ | ✓ | – | – | ✓ | – | – |
-| Run a line | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – |
-| Send stdin to a line | ✓ | ✓ | – | ✓ | ✓ | ✓ | – |
-| Cancel a running line | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | – |
-| Cancel or kill all of a session's or workspace's work | ✓ | ✓ | – | – | ✓ | – | – |
-| The seven agent tools | ✓ | ✓ | ✓ | ✓ | ✓ | – | – |
-| File operations on bytes | ✓ | via RPC | – | ✓ | – | `sftp`, `scp` | any program |
-| Snapshots | ✓ | ✓ | – | – | ✓ | – | – |
-| Asks | ✓ | ✓ | – | – | ✓ | – | – |
-| Jobs | – | ✓ | – | – | ✓ | – | – |
+| | In-app | HTTP | MCP | RPC | CLI | SSH |
+| --- | --- | --- | --- | --- | --- | --- |
+| Create, list, delete workspaces | ✓ | ✓ | – | – | ✓ | – |
+| Create, list, delete sessions | ✓ | ✓ | – | – | ✓ | – |
+| Run a line | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Send stdin to a line | ✓ | ✓ | – | ✓ | ✓ | ✓ |
+| Cancel a running line | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Cancel or kill all of a session's or workspace's work | ✓ | ✓ | – | – | ✓ | – |
+| The seven agent tools | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| File operations on bytes | ✓ | via RPC | – | ✓ | – | `sftp`, `scp`, `sshfs` |
+| Snapshots | ✓ | ✓ | – | – | ✓ | – |
+| Asks | ✓ | ✓ | – | – | ✓ | – |
+| Jobs | – | ✓ | – | – | ✓ | – |
 
 ## Sessions
 

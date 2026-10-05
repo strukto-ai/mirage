@@ -191,6 +191,10 @@ LINE_STOP: ContextVar[asyncio.Event | None] = ContextVar(
     "mirage_line_stop", default=None
 )
 
+# Set inside a write the capture gate let through, so the ops it runs
+# itself are not held behind it.
+WRITE_HELD: ContextVar[bool] = ContextVar("mirage_write_held", default=False)
+
 
 class Workspace:
     """Unified virtual filesystem over heterogeneous mounts.
@@ -291,6 +295,13 @@ class Workspace:
         self._admitting = asyncio.Event()
         self._admitting.set()
         self._capture_lock = asyncio.Lock()
+        # The lines the admission has let in, which a capture waits for;
+        # and the writes under way from outside every running line (a
+        # door's file op, a background job), which it waits out too.
+        self._admitted: set[asyncio.Event] = set()
+        self._writes = 0
+        self._writes_idle = asyncio.Event()
+        self._writes_idle.set()
         self._default_agent_id = agent_id
         # The env block, translated once: a literal entry becomes an
         # exported var, a managed one becomes a pointer the fill step
@@ -391,7 +402,10 @@ class Workspace:
             self._registry, store=stores.namespace, user=agent_id
         )
         self._dispatcher = Dispatcher(
-            self._namespace, self._cache, drift=self._drift
+            self._namespace,
+            self._cache,
+            drift=self._drift,
+            admit_write=self._admit_write,
         )
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch = WatchManager(self._registry)
@@ -1748,8 +1762,12 @@ class Workspace:
                 waiters = [
                     asyncio.ensure_future(ended.wait())
                     for stop, (_, ended) in self._lines.items()
-                    if stop is not own
+                    if stop in self._admitted and stop is not own
                 ]
+                if self._writes:
+                    waiters.append(
+                        asyncio.ensure_future(self._writes_idle.wait())
+                    )
                 if waiters:
                     _, pending = await asyncio.wait(waiters, timeout=seconds)
                     for waiter in pending:
@@ -1757,12 +1775,53 @@ class Workspace:
                     if pending:
                         raise OSError(
                             errno.EBUSY,
-                            f"workspace busy: {len(pending)} line(s) "
-                            "still running",
+                            f"workspace busy: {len(pending)} line(s) or "
+                            "write(s) still running",
                         )
                 yield
             finally:
                 self._admitting.set()
+
+    async def _admit_line(
+        self, stop: asyncio.Event, cancel: asyncio.Event | None
+    ) -> None:
+        """Hold a top-level line while a capture reads, then let it in.
+
+        The line is already listed, so ``cancel`` reaches it while it
+        waits; a capture waits only for lines let in.
+
+        Args:
+            stop (asyncio.Event): the line's own stop.
+            cancel (asyncio.Event | None): the caller's abort event.
+        """
+        while not self._admitting.is_set():
+            await run_cancellable(self._admitting.wait(), cancel, stop)
+        self._admitted.add(stop)
+
+    @asynccontextmanager
+    async def _admit_write(self) -> AsyncIterator[None]:
+        """Hold a write while a capture reads, unless its line is waited for.
+
+        A write from a running top-level line passes: the capture waits
+        for that line. Any other (a door's file op, SFTP, FUSE, a
+        background job) waits for the capture to finish, and counts as
+        under way until it ends, so a capture that starts waits it out.
+        """
+        if WRITE_HELD.get() or LINE_STOP.get() in self._admitted:
+            yield
+            return
+        while not self._admitting.is_set():
+            await self._admitting.wait()
+        self._writes += 1
+        self._writes_idle.clear()
+        token = WRITE_HELD.set(True)
+        try:
+            yield
+        finally:
+            WRITE_HELD.reset(token)
+            self._writes -= 1
+            if self._writes == 0:
+                self._writes_idle.set()
 
     async def kill(self, session_id: str | None = None) -> int:
         """Kill the background jobs and runners a session started.
@@ -2067,11 +2126,12 @@ class Workspace:
         ended = asyncio.Event()
         token = None
         if handed is None:
-            await self._admitting.wait()
             stop = asyncio.Event()
             self._lines[stop] = (session_id, ended)
             token = LINE_STOP.set(stop)
         try:
+            if stop is not None:
+                await self._admit_line(stop, cancel)
             result = await run_cancellable(
                 self._serialize_line(
                     session_id,
@@ -2113,6 +2173,7 @@ class Workspace:
         finally:
             if stop is not None and token is not None:
                 del self._lines[stop]
+                self._admitted.discard(stop)
                 ended.set()
                 LINE_STOP.reset(token)
         if sink is not None and isinstance(result, IOResult):

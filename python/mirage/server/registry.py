@@ -17,6 +17,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from enum import StrEnum
 from typing import Any, Iterable
 
 from mirage import Workspace, WorkspaceRunner
@@ -28,6 +29,14 @@ logger = logging.getLogger(__name__)
 # Under the daemon's state root: one record per workspace id naming the
 # account that owns it.
 OWNERS_PREFIX = "owners"
+
+
+class Claim(StrEnum):
+    """What a create's claim on an id found."""
+
+    NEW = "new"
+    HELD = "held"
+    TAKEN = "taken"
 
 
 class WorkspaceEntry:
@@ -141,13 +150,13 @@ class WorkspaceRegistry:
             done.set_result(None)
 
     def removing(self, workspace_id: str) -> bool:
-        """Whether ``workspace_id`` is still registered only to be deleted.
+        """Whether ``workspace_id`` is being deleted or closed.
 
         Args:
             workspace_id (str): id to check.
 
         Returns:
-            bool: True while a ``remove`` of it is in flight.
+            bool: True while a ``remove`` or ``close`` of it is in flight.
         """
         return workspace_id in self._removals
 
@@ -185,47 +194,74 @@ class WorkspaceRegistry:
             return None if self.accounts_required else entry
         return entry if entry.owner == account else None
 
-    async def allows(self, workspace_id: str, account: str | None) -> bool:
-        """Whether ``account`` may reach ``workspace_id``'s records.
+    async def allows(
+        self, workspace_id: str, account: str | None, at: float
+    ) -> bool:
+        """Whether ``account`` may reach a record ``workspace_id`` made.
 
         The same rule as ``visible``, for an id that may not be live:
-        a deleted workspace's jobs, or a stored workspace after a
-        restart, answer to the owner its claim names.
+        a closed workspace's jobs, or a stored workspace after a
+        restart, answer to the owner its claim names. A live workspace
+        answers only for records made since it was created, so a
+        workspace created again under a deleted one's id never reaches
+        what the deleted one left.
 
         Args:
-            workspace_id (str): the workspace the records belong to.
+            workspace_id (str): the workspace the record belongs to.
             account (str | None): the caller's account.
+            at (float): when the record was made.
         """
         if account is None:
             return not self.accounts_required
         if workspace_id in self._entries:
-            return self.visible(workspace_id, account) is not None
+            entry = self.visible(workspace_id, account)
+            return entry is not None and at >= entry.created_at
         if self._owners is None:
             return False
         stored, _ = await self._owners.get(workspace_id)
         return stored is not None and stored.get("account") == account
 
-    async def claim(self, workspace_id: str, account: str | None) -> bool:
+    async def claim(
+        self, workspace_id: str, account: str | None, stored: bool
+    ) -> Claim:
         """Record ``account`` as the owner of ``workspace_id``.
 
         The claim outlives the daemon, so after a restart the stored
         workspace under that id reopens only for the same account. A
-        caller with no account claims nothing.
+        caller with no account claims nothing. An id with stored state
+        and no owner (written before accounts were required) is no
+        account's to take.
 
         Args:
             workspace_id (str): the id being created.
             account (str | None): the creating caller's account.
+            stored (bool): whether the id already has stored state.
 
         Returns:
-            bool: False when another account already owns the id.
+            Claim: NEW when this call recorded the owner, HELD when the
+                account already owned the id (or none is recorded), TAKEN
+                when it is not the account's to create.
         """
         if account is None or self._owners is None:
-            return True
-        record = {"account": account, "generation": 1}
-        if await self._owners.cas_put(workspace_id, record, 0):
-            return True
-        stored, _ = await self._owners.get(workspace_id)
-        return stored is not None and stored.get("account") == account
+            return Claim.HELD
+        record, _ = await self._owners.get(workspace_id)
+        if record is None and not stored:
+            claimed = {"account": account, "generation": 1}
+            if await self._owners.cas_put(workspace_id, claimed, 0):
+                return Claim.NEW
+            record, _ = await self._owners.get(workspace_id)
+        if record is not None and record.get("account") == account:
+            return Claim.HELD
+        return Claim.TAKEN
+
+    async def release(self, workspace_id: str) -> None:
+        """Drop the owner a failed create recorded, freeing the id.
+
+        Args:
+            workspace_id (str): the id whose claim is released.
+        """
+        if self._owners is not None:
+            await self._owners.delete([workspace_id])
 
     def add(
         self,
@@ -244,10 +280,11 @@ class WorkspaceRegistry:
             WorkspaceEntry: the registered entry.
 
         Raises:
-            ValueError: ``workspace_id`` is already registered.
+            ValueError: ``workspace_id`` is already registered, or still
+                being deleted or closed.
         """
         wid = workspace_id or new_workspace_id()
-        if wid in self._entries:
+        if wid in self._entries or wid in self._removals:
             raise ValueError(f"workspace id already exists: {wid!r}")
         runner = WorkspaceRunner(workspace)
         entry = WorkspaceEntry(wid, runner, owner)
@@ -309,8 +346,10 @@ class WorkspaceRegistry:
 
         The runner stops, which cancels its lines and closes its
         sessions; the stored sessions, links, history and owner stay, so
-        the owner creating the same id later picks them up. The id is
-        released first, so no new request reaches the closing runner.
+        the owner creating the same id later picks them up. No new
+        request reaches the closing runner, and the id stays reserved
+        until it has stopped, so a create under it never loads state the
+        old runner is still writing.
 
         Args:
             workspace_id (str): id to close.
@@ -322,12 +361,22 @@ class WorkspaceRegistry:
             KeyError: ``workspace_id`` is not registered.
         """
         removal = self._removals.get(workspace_id)
-        if removal is not None:
-            return await asyncio.shield(removal)
-        entry = self._entries.pop(workspace_id)
+        if removal is None:
+            entry = self._entries.pop(workspace_id)
+            removal = asyncio.create_task(self._close(entry))
+            self._removals[workspace_id] = removal
+        return await asyncio.shield(removal)
+
+    async def _close(self, entry: WorkspaceEntry) -> WorkspaceEntry:
+        """Run one close, releasing the id once the runner has stopped.
+
+        Args:
+            entry (WorkspaceEntry): the entry being closed.
+        """
         try:
             await entry.runner.stop()
         finally:
+            del self._removals[entry.id]
             if not self._entries:
                 self._start_idle_timer()
         return entry

@@ -656,6 +656,94 @@ async def test_an_account_keeps_its_snapshots_under_its_own_prefix(
     ]
 
 
+def _jwt_app(secret: str, state_root, **kwargs):
+    return build_app(
+        idle_grace_seconds=10.0,
+        auth_config=AuthConfig(
+            mode="jwt", jwt=JWTConfig(key=secret, algorithm="HS256")
+        ),
+        state_root=state_root,
+        **kwargs,
+    )
+
+
+def _account(app, secret: str, sub: str) -> AsyncClient:
+    token = pyjwt.encode(
+        {"sub": sub, "exp": int(time.time()) + 60}, secret, "HS256"
+    )
+    return AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_leading_slash_names_the_same_key(snapshot_store):
+    app = build_app(idle_grace_seconds=10.0, snapshot_store=snapshot_store)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/snapshot", json={"key": "/lead.tar"}
+        )
+        assert r.status_code == 200, r.text
+        r = await client.post("/v1/workspaces/load", json={"key": "lead.tar"})
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_create_leaves_the_id_free(tmp_path):
+    secret = "s" * 32
+    app = _jwt_app(secret, tmp_path / "state")
+    bad = {**_minimal_config(), "id": "w"}
+    bad["config"] = {**bad["config"], "secrets": {"prod": {"source": "nope"}}}
+    async with (
+        _account(app, secret, "alice") as alice,
+        _account(app, secret, "bob") as bob,
+    ):
+        r = await alice.post("/v1/workspaces", json=bad)
+        assert r.status_code == 400, r.text
+        r = await bob.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_state_from_before_accounts_is_no_accounts_to_take(tmp_path):
+    state = tmp_path / "state"
+    local = build_app(idle_grace_seconds=10.0, state_root=state)
+    async with AsyncClient(
+        transport=ASGITransport(app=local), base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 201, r.text
+        r = await client.post(
+            "/v1/workspaces/w/shell", json={"command": "echo kept"}
+        )
+        assert r.status_code == 200, r.text
+    await local.state.registry.close_all()
+    secret = "s" * 32
+    app = _jwt_app(secret, state)
+    async with _account(app, secret, "alice") as alice:
+        r = await alice.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 409, r.text
+        r = await alice.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "fresh"}
+        )
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()
+
+
 @pytest.mark.asyncio
 async def test_a_key_needs_a_snapshot_store():
     app, _ = _make_app_with_short_grace(grace=10.0)

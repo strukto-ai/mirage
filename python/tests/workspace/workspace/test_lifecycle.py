@@ -1327,3 +1327,33 @@ async def test_a_line_started_during_a_capture_runs_after_it():
         assert order == ["captured", "after\n"]
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaches_a_line_queued_behind_a_capture():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    try:
+        async with ws._quiesced():
+            line = asyncio.create_task(ws.shell("echo late > /f"))
+            await asyncio.sleep(0.05)
+            assert await ws.cancel() == 1
+            with pytest.raises(MirageAbortError):
+                await line
+        result = await ws.shell("cat /f")
+        assert result.exit_code == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_from_outside_a_line_waits_for_a_capture():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    try:
+        async with ws._quiesced():
+            write = asyncio.create_task(ws.vfs.write("/f", b"late"))
+            await asyncio.sleep(0.05)
+            assert not write.done()
+        await write
+        assert await ws.vfs.read("/f") == b"late"
+    finally:
+        await ws.close()

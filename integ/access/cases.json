@@ -21,6 +21,7 @@
   "Run a line": "shell",
   "Send stdin to a line": "stdin",
   "Cancel a running line": "cancel",
+  "Cancel or kill all of a session's or workspace's work": "session_admin",
   "The seven agent tools": "tool",
   "File operations on bytes": "bytes",
   "Snapshots": "snapshot",
@@ -184,8 +185,14 @@
     {"id": "gets_its_internals", "accesses": ["http", "cli"], "input": {"step": "internals", "id": "w1"}, "expect": {"text": "cache_bytes cache_entries"}},
     {"id": "clones", "input": {"step": "clone", "id": "w1", "to": "w2"}, "expect": {"text": "w2"}},
     {"id": "the_clone_has_the_file", "input": {"step": "shell", "id": "w2", "command": "cat /f"}, "expect": {"text": "one\n", "is_error": false}},
+    {"id": "starts_a_background_job", "input": {"step": "shell", "id": "w2", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},
+    {"id": "cancels_its_lines", "input": {"step": "cancel_lines", "id": "w2"}, "expect": {"text": "0"}},
+    {"id": "kills_its_jobs", "input": {"step": "kill_jobs", "id": "w2"}, "expect": {"text": "1"}},
     {"id": "deletes", "input": {"step": "delete", "id": "w1"}, "expect": {"text": "deleted"}},
     {"id": "lists_what_is_left", "input": {"step": "list"}, "expect": {"text": "w2"}},
+    {"id": "creates_a_third", "input": {"step": "create", "id": "w3"}, "expect": {"text": "w3"}},
+    {"id": "closes_it", "input": {"step": "close_workspace", "id": "w3"}, "expect": {"text": "closed"}},
+    {"id": "lists_without_it", "input": {"step": "list"}, "expect": {"text": "w2"}},
     {"id": "deletes_the_clone", "input": {"step": "delete", "id": "w2"}, "expect": {"text": "deleted"}}
    ]
   },
@@ -200,6 +207,10 @@
     {"id": "the_session_has_its_profile", "input": {"step": "shell", "id": "w", "session": "s1", "command": "cat /vault/key.txt"}, "expect": {"text": "cat: /vault/key.txt: No such file or directory\n", "is_error": true}},
     {"id": "deletes_the_session", "input": {"step": "session_delete", "id": "w", "session": "s1"}, "expect": {"text": "deleted"}},
     {"id": "lists_what_is_left", "input": {"step": "session_list", "id": "w"}, "expect": {"text": ""}},
+    {"id": "creates_another_session", "input": {"step": "session_create", "id": "w", "session": "s2", "profile": "asker"}, "expect": {"text": "s2"}},
+    {"id": "starts_a_job_in_it", "input": {"step": "shell", "id": "w", "session": "s2", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},
+    {"id": "cancels_the_sessions_lines", "input": {"step": "cancel_lines", "id": "w", "session": "s2"}, "expect": {"text": "0"}},
+    {"id": "kills_the_sessions_jobs", "input": {"step": "kill_jobs", "id": "w", "session": "s2"}, "expect": {"text": "1"}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },
@@ -309,6 +320,11 @@
    "delete": 405
   },
   "no_snapshot_store": [400, "this server has no snapshot store"],
+  "shutdown": {
+   "dev": 200,
+   "token": 200,
+   "jwt": 403
+  },
   "after_shutdown": {
    "dev": "exited",
    "token": "serving",

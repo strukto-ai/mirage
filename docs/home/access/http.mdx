@@ -50,7 +50,7 @@ In `jwt` mode the server checks the signature against that public key, accepts o
 In `jwt` mode the token's `sub` is the caller's account, and an account reaches only the workspaces it created:
 
 - Another account's workspace answers `404` on every route, the same as a missing one, and so do its sessions, jobs and asks. `GET /v1/workspaces` and `GET /v1/jobs` list only the caller's.
-- The owner is kept under the state root, so after a restart a stored workspace reopens only for its owner.
+- The owner is kept under the state root, so after a restart a stored workspace reopens only for its owner. A workspace stored before the server ran in `jwt` mode has no owner, and no account can create its id.
 - Snapshot keys live under `accounts/<account>/` in the snapshot store.
 - `POST /v1/shutdown` answers `403`.
 
@@ -152,7 +152,7 @@ Kills every session's background jobs (`cmd &`) and the processes runtimes start
 
 <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/snapshot`
 
-Answers the tar (`application/x-tar`). Secrets are stored redacted. The server never writes a snapshot to its own disk. While it captures, new lines wait and running ones get 30 seconds to end; lines still running then answer `409`, so cancel them and retry. A clone waits the same way.
+Answers the tar (`application/x-tar`). Secrets are stored redacted. The server never writes a snapshot to its own disk. While it captures, new lines and file writes wait, and running ones get 30 seconds to end; if any are still running then, it answers `409`, so cancel them and retry. A clone waits the same way.
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/snapshot`
 

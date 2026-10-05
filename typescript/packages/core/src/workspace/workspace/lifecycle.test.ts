@@ -786,4 +786,38 @@ describe('capture barrier', () => {
       await ws.close()
     }
   })
+
+  it('lets cancel reach a line queued behind a capture', async () => {
+    const ws = buildWs()
+    try {
+      await ws.quiesced(async () => {
+        const line = ws.shell('echo late > /m/f')
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        expect(await ws.cancel()).toBe(1)
+        await expect(line).rejects.toMatchObject({ name: 'AbortError' })
+      })
+      expect((await ws.shell('cat /m/f')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('holds a write from outside a line until a capture ends', async () => {
+    const ws = buildWs()
+    try {
+      let write: Promise<void> = Promise.resolve()
+      let done = false
+      await ws.quiesced(async () => {
+        write = ws.vfs.write('/m/f', 'late').then(() => {
+          done = true
+        })
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        expect(done).toBe(false)
+      })
+      await write
+      expect(new TextDecoder().decode(await ws.vfs.read('/m/f'))).toBe('late')
+    } finally {
+      await ws.close()
+    }
+  })
 })

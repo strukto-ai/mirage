@@ -20,17 +20,30 @@ interface FileHandle {
     position: number | null,
   ): Promise<{ bytesRead: number }>
   write(data: Uint8Array): Promise<unknown>
+  stat(): Promise<{ isFile(): boolean }>
   close(): Promise<void>
 }
 
 interface NodeFs {
   readFile(path: string): Promise<Uint8Array>
   writeFile(path: string, data: Uint8Array): Promise<void>
-  open(path: string, flags: string): Promise<FileHandle>
+  open(path: string, flags: string | number): Promise<FileHandle>
   stat(path: string): Promise<{ size: number }>
   mkdir(path: string, options: { recursive: true }): Promise<unknown>
+  realpath(path: string): Promise<string>
   mkdtemp(prefix: string): Promise<string>
   rm(path: string, options: { recursive: true; force: true }): Promise<void>
+  constants: { O_RDONLY: number; O_NOFOLLOW?: number }
+}
+
+interface NodePath {
+  resolve(...paths: string[]): string
+  relative(from: string, to: string): string
+  isAbsolute(path: string): boolean
+  dirname(path: string): string
+  basename(path: string): string
+  join(...paths: string[]): string
+  sep: string
 }
 
 // How much of a file one read or write moves while a tar streams.
@@ -78,8 +91,12 @@ export async function copyFileInto(
   sink: WritableStreamDefaultWriter<Uint8Array>,
   size: number,
 ): Promise<void> {
-  const handle = await requireFs('copyFileInto').open(path, 'r')
+  // A captured file read later is refused when a link or anything but a
+  // regular file has replaced it since its state named it.
+  const fs = requireFs('copyFileInto')
+  const handle = await fs.open(path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0))
   try {
+    if (!(await handle.stat()).isFile()) throw new Error(`not a regular file: ${path}`)
     let left = size
     while (left > 0) {
       const chunk = new Uint8Array(Math.min(CHUNK, left))
@@ -141,6 +158,27 @@ export function fileReadable(path: string): ReadableStream<Uint8Array> {
 }
 
 /** A fresh directory under the system temp dir, for staging a restore. */
+/**
+ * Where blob `name` is staged under `staging`, its directory made; a name
+ * landing outside it, as written or through a link, is refused.
+ */
+export async function stagedPath(staging: string, name: string): Promise<string> {
+  const fs = requireFs('stagedPath')
+  const modName = 'node:path'
+  const path = (await import(/* @vite-ignore */ modName)) as NodePath
+  const root = await fs.realpath(staging)
+  const inside = (target: string): boolean => {
+    const rel = path.relative(root, target)
+    return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
+  }
+  const target = path.resolve(root, name)
+  if (!inside(target)) throw new Error(`Unsafe blob path: ${name}`)
+  await fs.mkdir(path.dirname(target), { recursive: true })
+  const real = path.join(await fs.realpath(path.dirname(target)), path.basename(target))
+  if (!inside(real)) throw new Error(`Unsafe blob path: ${name}`)
+  return real
+}
+
 export async function makeStagingDir(): Promise<string> {
   const modName = 'node:os'
   const os = (await import(/* @vite-ignore */ modName)) as { tmpdir(): string }

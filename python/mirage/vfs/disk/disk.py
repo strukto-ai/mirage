@@ -21,7 +21,11 @@ from typing import Any
 from mirage.accessor.disk import DiskAccessor
 from mirage.commands.builtin.disk import COMMANDS as DISK_COMMANDS
 from mirage.commands.config import RegisteredCommand, registered_commands
-from mirage.core.disk.utils import resolve_inside_sync, walk_entries
+from mirage.core.disk.utils import (
+    open_regular,
+    resolve_inside_sync,
+    walk_entries,
+)
 from mirage.core.disk.watch import build_delta_hook
 from mirage.ops.disk import OPS as DISK_OPS
 from mirage.ops.registry import RegisteredOp
@@ -150,7 +154,8 @@ class DiskVFS(BaseVFS):
             if not isinstance(data, Path):
                 target.write_bytes(data)
             elif not (target.exists() and os.path.samefile(data, target)):
-                shutil.copyfile(data, target)
+                with open_regular(data) as src, target.open("wb") as out:
+                    shutil.copyfileobj(src, out)
             mode = modes.get(rel)
             if mode is not None:
                 os.chmod(target, mode)

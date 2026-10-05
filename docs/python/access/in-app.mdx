@@ -109,7 +109,7 @@ await ws.snapshot(target, *, compress=None, s3=None) -> int
 await Workspace.load(source, *, s3=None, ...) -> Workspace
 ```
 
-Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines wait and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole. See [Snapshots](/home/snapshot) for what a tar holds.
+Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole. See [Snapshots](/home/snapshot) for what a tar holds.
 
 ```python
 await ws.snapshot("run.tar")

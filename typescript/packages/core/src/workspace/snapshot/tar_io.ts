@@ -20,7 +20,14 @@ import {
 } from '../../commands/builtin/tar_helper.ts'
 import { VFSName } from '../../types.ts'
 import { gzip, gunzip } from '../../utils/compress.ts'
-import { copyFileInto, fileReadable, fileSize, readFileBytes, writeStreamToFile } from './fs.ts'
+import {
+  copyFileInto,
+  fileReadable,
+  fileSize,
+  readFileBytes,
+  stagedPath,
+  writeStreamToFile,
+} from './fs.ts'
 import { MountKey, StateKey, VFSStateKey } from './keys.ts'
 import { resolveManifest } from './manifest.ts'
 import { BLOB_REF_KEY, isSafeBlobPath } from './utils.ts'
@@ -125,25 +132,32 @@ export async function readTar(source: string, staging: string): Promise<unknown>
   let diskBlobs = new Set<string>()
   const staged = new Map<string, string>()
   const byName = new Map<string, Uint8Array>()
-  for (;;) {
-    const { done, value: entry } = await reader.read()
-    if (done) break
-    const name = entry.header.name
-    if (manifest === null) {
-      if (name !== MANIFEST_NAME) throw new Error(`${MANIFEST_NAME} missing or unreadable`)
-      const text = DEC.decode(await new Response(entry.body).bytes())
-      manifest = JSON.parse(text) as Record<string, unknown>
-      diskBlobs = new Set(diskFileRefs(manifest).map(([, , blobPath]) => blobPath))
-      continue
+  // A failed read leaves the source open until it is cancelled.
+  let finished = false
+  try {
+    for (;;) {
+      const { done, value: entry } = await reader.read()
+      if (done) break
+      const name = entry.header.name
+      if (manifest === null) {
+        if (name !== MANIFEST_NAME) throw new Error(`${MANIFEST_NAME} missing or unreadable`)
+        const text = DEC.decode(await new Response(entry.body).bytes())
+        manifest = JSON.parse(text) as Record<string, unknown>
+        diskBlobs = new Set(diskFileRefs(manifest).map(([, , blobPath]) => blobPath))
+        continue
+      }
+      if (!isSafeBlobPath(name)) throw new Error(`Unsafe blob path: ${String(name)}`)
+      if (diskBlobs.has(name)) {
+        const target = await stagedPath(staging, name)
+        await writeStreamToFile(target, entry.body)
+        staged.set(name, target)
+      } else {
+        byName.set(name, await new Response(entry.body).bytes())
+      }
     }
-    if (!isSafeBlobPath(name)) throw new Error(`Unsafe blob path: ${String(name)}`)
-    if (diskBlobs.has(name)) {
-      const target = `${staging}/${name}`
-      await writeStreamToFile(target, entry.body)
-      staged.set(name, target)
-    } else {
-      byName.set(name, await new Response(entry.body).bytes())
-    }
+    finished = true
+  } finally {
+    if (!finished) await reader.cancel()
   }
   if (manifest === null) throw new Error(`${MANIFEST_NAME} missing or unreadable`)
   for (const [files, rel, blobPath] of diskFileRefs(manifest)) {

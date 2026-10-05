@@ -52,13 +52,15 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
   const reachable = async (id: string, account: string | null): Promise<JobEntry | null> => {
     const entry = await deps.jobs.store.get(id)
     if (entry === null) return null
-    return (await deps.registry.allows(entry.workspaceId, account)) ? entry : null
+    return (await deps.registry.allows(entry.workspaceId, account, entry.submittedAt))
+      ? entry
+      : null
   }
 
   app.get<{ Querystring: JobsListQuery }>('/v1/jobs', async (req) => {
     const jobs: JobEntry[] = []
     for (const job of await deps.jobs.list(req.query.workspace_id)) {
-      if (await deps.registry.allows(job.workspaceId, req.account)) jobs.push(job)
+      if (await deps.registry.allows(job.workspaceId, req.account, job.submittedAt)) jobs.push(job)
     }
     return jobs.map(toBriefDict)
   })

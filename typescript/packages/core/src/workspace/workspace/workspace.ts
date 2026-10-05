@@ -144,6 +144,10 @@ export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
 // cancels its own session does not wait on itself.
 const LINE_STOP = createAsyncContext<AbortController>()
 
+// Set inside a write the capture gate let through, so the ops it runs
+// itself are not held behind it.
+const WRITE_HELD = createAsyncContext<boolean>()
+
 export class Workspace {
   private readonly runtimeBinding: WorkspaceBinding
   readonly registry: MountRegistry
@@ -193,6 +197,17 @@ export class Workspace {
   private admitting: Promise<void> = Promise.resolve()
   /** Captures take turns; each waits for the one before it. */
   private captures: Promise<void> = Promise.resolve()
+  /** Whether a capture holds the admission. */
+  private capturing = false
+  /** The lines the admission has let in, which a capture waits for. */
+  private readonly admitted = new Set<AbortController>()
+  /**
+   * Writes under way from outside every running line (a door's file op, a
+   * background job), which a capture waits out too.
+   */
+  private writes = 0
+  private writesIdle: Promise<void> = Promise.resolve()
+  private settleWrites: () => void = () => undefined
   private readonly closers: (() => Promise<void>)[] = []
   private closing: Promise<void> | null = null
   private stateDropped = false
@@ -422,6 +437,7 @@ export class Workspace {
       this.opsRegistry,
       this.registry.policies,
       this.drift,
+      (write) => this.admitWrite(write),
     )
     this.registry.setReconciler(this.dispatcher.reconciler)
     this.registry.setOpStat((mount, path) => this.dispatcher.opStat(mount, path))
@@ -1574,27 +1590,25 @@ export class Workspace {
     // internal dispatch path stays open, which is what the journal replay
     // uses.
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    await this.admitting
     // A top-level line also answers the workspace's own stop, set by
-    // `cancel`; nested lines take the internal path and inherit it.
+    // `cancel`; nested lines take the internal path and inherit it. It is
+    // listed before it waits out a capture, so `cancel` reaches it queued;
+    // a capture waits only for the lines it let in.
     const stop = new AbortController()
     let settle = (): void => undefined
     const ended = new Promise<void>((resolve) => {
       settle = resolve
     })
     this.lines.set(stop, { sessionId: options.sessionId, ended })
+    const signal =
+      options.signal === undefined ? stop.signal : AbortSignal.any([options.signal, stop.signal])
     try {
-      return await LINE_STOP.run(stop, () =>
-        this.executeInternal(command, {
-          ...options,
-          signal:
-            options.signal === undefined
-              ? stop.signal
-              : AbortSignal.any([options.signal, stop.signal]),
-        }),
-      )
+      while (this.capturing) await abortable(this.admitting, signal)
+      this.admitted.add(stop)
+      return await LINE_STOP.run(stop, () => this.executeInternal(command, { ...options, signal }))
     } finally {
       this.lines.delete(stop)
+      this.admitted.delete(stop)
       settle()
     }
   }
@@ -1639,9 +1653,13 @@ export class Workspace {
     this.admitting = new Promise<void>((resolve) => {
       reopen = resolve
     })
+    this.capturing = true
     try {
       const own = LINE_STOP.getStore()
-      const running = [...this.lines].filter(([stop]) => stop !== own).map(([, line]) => line.ended)
+      const waited = ([stop]: [AbortController, unknown]): boolean =>
+        stop !== own && this.admitted.has(stop)
+      const running = [...this.lines].filter(waited).map(([, line]) => line.ended)
+      if (this.writes > 0) running.push(this.writesIdle)
       if (running.length > 0) {
         let timer: ReturnType<typeof setTimeout> | undefined
         const late = new Promise<true>((resolve) => {
@@ -1652,17 +1670,43 @@ export class Workspace {
         const busy = await Promise.race([Promise.all(running).then(() => false), late])
         clearTimeout(timer)
         if (busy) {
-          const pending = [...this.lines].filter(([stop]) => stop !== own).length
+          const pending = [...this.lines].filter(waited).length + (this.writes > 0 ? 1 : 0)
           throw Object.assign(
-            new Error(`workspace busy: ${String(pending)} line(s) still running`),
+            new Error(`workspace busy: ${String(pending)} line(s) or write(s) still running`),
             { code: 'EBUSY' },
           )
         }
       }
       return await capture()
     } finally {
+      this.capturing = false
       reopen()
       finished()
+    }
+  }
+
+  /**
+   * Hold a write while a capture reads, unless its line is waited for. A
+   * write from a running top-level line passes: the capture waits for that
+   * line. Any other (a door's file op, SFTP, FUSE, a background job) waits
+   * for the capture to finish, and counts as under way until it ends, so a
+   * capture that starts waits it out.
+   */
+  private async admitWrite<T>(write: () => Promise<T>): Promise<T> {
+    const line = LINE_STOP.getStore()
+    if (WRITE_HELD.getStore() === true || (line !== undefined && this.admitted.has(line))) {
+      return write()
+    }
+    while (this.capturing) await this.admitting
+    if (this.writes++ === 0) {
+      this.writesIdle = new Promise<void>((resolve) => {
+        this.settleWrites = resolve
+      })
+    }
+    try {
+      return await WRITE_HELD.run(true, write)
+    } finally {
+      if (--this.writes === 0) this.settleWrites()
     }
   }
 

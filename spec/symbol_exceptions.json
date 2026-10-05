@@ -169,7 +169,6 @@
   },
   "server/routers/workspaces": {
    "python_only": {
-    "_claim": "The owner claim create, clone and load make before building; TypeScript calls registry.claim inline in each route.",
     "_require_entry": "The account check every workspace route shares, raising 404; TypeScript calls registry.visible inline and answers 404 in each route.",
     "cancel_workspace_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "close_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
@@ -197,6 +196,11 @@
    },
    "typescript_only": {
     "diskFileRefs": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+   }
+  },
+  "workspace/dispatcher/dispatcher": {
+   "typescript_only": {
+    "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable."
    }
   }
  }

@@ -18,7 +18,8 @@ import io
 import json
 import tarfile
 import time
-from collections.abc import Coroutine
+from collections.abc import AsyncIterator, Coroutine
+from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 from urllib.parse import quote
 
@@ -38,7 +39,7 @@ from mirage.server.multipart import (
     PartEvent,
     part_events,
 )
-from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
+from mirage.server.registry import Claim, WorkspaceEntry, WorkspaceRegistry
 from mirage.server.schemas import (
     CancelLinesResponse,
     CloneWorkspaceRequest,
@@ -74,19 +75,47 @@ def _require_entry(request: Request, workspace_id: str) -> WorkspaceEntry:
     return entry
 
 
-async def _claim(request: Request, workspace_id: str) -> None:
-    """Make the caller the owner of ``workspace_id`` before it is built.
+async def _has_state(request: Request, workspace_id: str) -> bool:
+    """Whether the server's state root holds state for ``workspace_id``.
+
+    Args:
+        request (Request): the request, for the app's state root.
+        workspace_id (str): the id asked about.
+    """
+    store = DiskWorkspaceStateStore(str(request.app.state.state_root))
+    try:
+        return await store.load_meta(workspace_id) is not None
+    finally:
+        await store.close()
+
+
+@asynccontextmanager
+async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
+    """Hold the caller's claim on ``workspace_id`` while it is built.
+
+    A claim this create made is released when the build fails, so a
+    failed create leaves the id free; one the account already held (its
+    own closed or stored workspace) stays.
 
     Args:
         request (Request): the creating request.
         workspace_id (str): the id being created.
     """
     registry = request.app.state.registry
-    if not await registry.claim(workspace_id, request.state.account):
+    account = request.state.account
+    stored = account is not None and await _has_state(request, workspace_id)
+    claim = await registry.claim(workspace_id, account, stored)
+    if claim is Claim.TAKEN:
         raise HTTPException(
             status_code=409,
             detail=f"workspace id already exists: {workspace_id!r}",
         )
+    try:
+        yield
+    except BaseException:
+        if claim is Claim.NEW:
+            await registry.release(workspace_id)
+        raise
 
 
 def store_key(request: Request, key: str) -> str:
@@ -99,14 +128,15 @@ def store_key(request: Request, key: str) -> str:
         request (Request): the request naming a snapshot.
         key (str): the key the caller gave.
     """
-    if not is_safe_blob_path(key):
+    relative = key.lstrip("/")
+    if not is_safe_blob_path(relative):
         raise HTTPException(
             status_code=400, detail=f"invalid snapshot key: {key!r}"
         )
     account = request.state.account
     if account is None:
-        return key
-    return f"{ACCOUNTS_DIR}/{quote(account, safe='')}/{key}"
+        return relative
+    return f"{ACCOUNTS_DIR}/{quote(account, safe='')}/{relative}"
 
 
 async def run_capture(
@@ -195,7 +225,7 @@ async def create_workspace(
                 status_code=409,
                 detail=f"workspace id already exists: {wid!r}",
             )
-        if wid in registry:
+        if wid in registry or registry.removing(wid):
             held = registry.visible(wid, request.state.account)
             if (
                 held is None
@@ -208,54 +238,61 @@ async def create_workspace(
                 )
             response.status_code = 200
             return await make_detail(held)
-        await _claim(request, wid)
-        try:
-            # Map runtime entries construct their instances here, so a bad
-            # entry (a wasi build dir that does not exist, an unknown
-            # option) fails the create like any other config mistake.
-            kwargs = (await resolve_secrets(req.config)).to_workspace_kwargs()
-        except (
-            FileNotFoundError,
-            ImportError,
-            SecretsError,
-            ValueError,
-            TypeError,
-        ) as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        kwargs["workspace_id"] = wid
-        # Daemon default is disk (a created workspace survives restart with
-        # zero infrastructure, like git init); the library default stays ram.
-        # A config with an explicit store: block always wins.
-        if "store" not in kwargs:
-            kwargs["store"] = DiskWorkspaceStateStore(
-                str(request.app.state.state_root)
-            )
-            kwargs["owns_store"] = True
-        try:
-            ws = Workspace(**kwargs)
-        except (FileNotFoundError, ImportError, SecretsError, ValueError) as e:
-            # Construction failures (a wasi build dir that does not exist, a
-            # missing runtime extra, a `secrets:` block naming a source the
-            # host cannot resolve) are the caller's to fix, not a 500.
-            raise HTTPException(status_code=400, detail=str(e))
-        try:
-            for prefix, (
-                backend,
-                mountpoint,
-            ) in req.config.kernel_mounts().items():
-                await run_blocking(
-                    ws.add_fuse_mount, prefix, mountpoint, backend=backend
+        async with _claimed(request, wid):
+            try:
+                # Map runtime entries construct their instances here, so a bad
+                # entry (a wasi build dir that does not exist, an unknown
+                # option) fails the create like any other config mistake.
+                kwargs = (
+                    await resolve_secrets(req.config)
+                ).to_workspace_kwargs()
+            except (
+                FileNotFoundError,
+                ImportError,
+                SecretsError,
+                ValueError,
+                TypeError,
+            ) as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            kwargs["workspace_id"] = wid
+            # Daemon default is disk (a created workspace survives restart with
+            # zero infrastructure, like git init); the library default stays ram.
+            # A config with an explicit store: block always wins.
+            if "store" not in kwargs:
+                kwargs["store"] = DiskWorkspaceStateStore(
+                    str(request.app.state.state_root)
                 )
-            entry = registry.add(
-                ws, workspace_id=wid, owner=request.state.account
-            )
-            entry.config_digest = digest
-        except ValueError as e:
-            await ws.close()
-            raise HTTPException(status_code=409, detail=str(e))
-        except Exception:
-            await ws.close()
-            raise
+                kwargs["owns_store"] = True
+            try:
+                ws = Workspace(**kwargs)
+            except (
+                FileNotFoundError,
+                ImportError,
+                SecretsError,
+                ValueError,
+            ) as e:
+                # Construction failures (a wasi build dir that does not exist, a
+                # missing runtime extra, a `secrets:` block naming a source the
+                # host cannot resolve) are the caller's to fix, not a 500.
+                raise HTTPException(status_code=400, detail=str(e))
+            try:
+                for prefix, (
+                    backend,
+                    mountpoint,
+                ) in req.config.kernel_mounts().items():
+                    await run_blocking(
+                        ws.add_fuse_mount, prefix, mountpoint, backend=backend
+                    )
+                entry = registry.add(
+                    ws, workspace_id=wid, owner=request.state.account
+                )
+                entry.config_digest = digest
+            except ValueError as e:
+                await ws.close()
+                raise HTTPException(status_code=409, detail=str(e))
+            except Exception:
+                await ws.close()
+                raise
         return await make_detail(entry)
 
 
@@ -341,23 +378,26 @@ async def clone_workspace(
             status_code=409, detail=f"workspace id already exists: {req.id!r}"
         )
     wid = req.id or new_workspace_id()
-    await _claim(request, wid)
-    try:
-        new_ws = await run_capture(
-            src_entry,
-            clone_workspace_with_override(src_entry.runner.ws, req.override),
-        )
-    except (SecretsError, ValueError) as e:
-        # An override naming a source the host cannot resolve, or a
-        # block the schema refuses, is the caller's mistake -- the
-        # answer create, load and the historical clone already give.
-        raise HTTPException(status_code=400, detail=str(e))
-    try:
-        entry = registry.add(
-            new_ws, workspace_id=wid, owner=request.state.account
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    async with _claimed(request, wid):
+        try:
+            new_ws = await run_capture(
+                src_entry,
+                clone_workspace_with_override(
+                    src_entry.runner.ws, req.override
+                ),
+            )
+        except (SecretsError, ValueError) as e:
+            # An override naming a source the host cannot resolve, or a
+            # block the schema refuses, is the caller's mistake -- the
+            # answer create, load and the historical clone already give.
+            raise HTTPException(status_code=400, detail=str(e))
+        try:
+            entry = registry.add(
+                new_ws, workspace_id=wid, owner=request.state.account
+            )
+        except ValueError as e:
+            await new_ws.close()
+            raise HTTPException(status_code=409, detail=str(e))
     return await make_detail(entry)
 
 
@@ -408,40 +448,43 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         store = _snapshot_store(request)
         source = store_key(request, req.key)
     wid = req.id or new_workspace_id()
-    await _claim(request, wid)
-    secrets = _build_load_secrets(req.override)
-    try:
-        # An override mount's credential may be a pointer at one of
-        # these declarations; a container the constructor will reject
-        # is left for it to reject.
-        mounts = await build_override_mounts(req.override, secrets)
-    except (KeyError, TypeError, ValueError, SecretsError) as e:
-        # An override naming a VFS the daemon cannot build (an
-        # unknown name, an unloadable ref, a ref that is not a VFS,
-        # a secrets source it cannot resolve) is the caller's mistake,
-        # the answer the TypeScript daemon gives too; it used to escape
-        # as a 500.
-        raise HTTPException(
-            status_code=400, detail=f"override build failed: {e}"
-        )
-    try:
-        ws = await Workspace.load(
-            source, mounts=mounts, secrets=secrets, s3=store
-        )
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=400, detail=f"snapshot not found: {req.key}"
-        )
-    except (SecretsError, ValueError, tarfile.TarError, KeyError) as e:
-        # A secrets override naming an unknown source, or one whose
-        # optional dependency is absent, is a bad request like any
-        # other override the deployment got wrong; so is an upload
-        # that is not a snapshot.
-        raise HTTPException(status_code=400, detail=f"load failed: {e}")
-    try:
-        entry = registry.add(ws, workspace_id=wid, owner=request.state.account)
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    async with _claimed(request, wid):
+        secrets = _build_load_secrets(req.override)
+        try:
+            # An override mount's credential may be a pointer at one of
+            # these declarations; a container the constructor will reject
+            # is left for it to reject.
+            mounts = await build_override_mounts(req.override, secrets)
+        except (KeyError, TypeError, ValueError, SecretsError) as e:
+            # An override naming a VFS the daemon cannot build (an
+            # unknown name, an unloadable ref, a ref that is not a VFS,
+            # a secrets source it cannot resolve) is the caller's mistake,
+            # the answer the TypeScript daemon gives too; it used to escape
+            # as a 500.
+            raise HTTPException(
+                status_code=400, detail=f"override build failed: {e}"
+            )
+        try:
+            ws = await Workspace.load(
+                source, mounts=mounts, secrets=secrets, s3=store
+            )
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=400, detail=f"snapshot not found: {req.key}"
+            )
+        except (SecretsError, ValueError, tarfile.TarError, KeyError) as e:
+            # A secrets override naming an unknown source, or one whose
+            # optional dependency is absent, is a bad request like any
+            # other override the deployment got wrong; so is an upload
+            # that is not a snapshot.
+            raise HTTPException(status_code=400, detail=f"load failed: {e}")
+        try:
+            entry = registry.add(
+                ws, workspace_id=wid, owner=request.state.account
+            )
+        except ValueError as e:
+            await ws.close()
+            raise HTTPException(status_code=409, detail=str(e))
     return await make_detail(entry)
 
 

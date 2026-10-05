@@ -14,15 +14,9 @@
 
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
-import {
-  chmod,
-  copyFile,
-  mkdir,
-  stat as fsStat,
-  statfs as fsStatfs,
-  writeFile,
-} from 'node:fs/promises'
-import { mkdirSync } from 'node:fs'
+import { chmod, mkdir, stat as fsStat, statfs as fsStatfs, writeFile } from 'node:fs/promises'
+import { createWriteStream, mkdirSync } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
@@ -33,7 +27,7 @@ import type { CapacityResult } from '@struktoai/mirage-core/types'
 
 import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
 
-import { readEntries, resolveInside } from '../../core/disk/utils.ts'
+import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
 import { DISK_OPS } from '../../ops/disk/index.ts'
 import { PROMPT } from './prompt.ts'
@@ -170,7 +164,10 @@ export class DiskVFS extends BaseVFS {
       // copied; one that already is the target (a copy over the same root)
       // is left alone.
       if (typeof data !== 'string') await writeFile(full, data)
-      else if (path.resolve(data) !== path.resolve(full)) await copyFile(data, full)
+      else if (path.resolve(data) !== path.resolve(full)) {
+        const source = await openRegular(data)
+        await pipeline(source.createReadStream(), createWriteStream(full))
+      }
       const mode = state.modes?.[rel]
       if (mode !== undefined) await chmod(full, mode)
     }

@@ -24,6 +24,13 @@ export const OWNERS_PREFIX = 'owners'
  * One registered workspace. `owner` is the account that created it; null
  * when it was created by a caller with no account.
  */
+/** What a create's claim on an id found. */
+export enum Claim {
+  New = 'new',
+  Held = 'held',
+  Taken = 'taken',
+}
+
 export class WorkspaceEntry {
   readonly id: string
   readonly runner: WorkspaceRunner
@@ -107,7 +114,7 @@ export class WorkspaceRegistry {
     }
   }
 
-  /** Whether `id` is still registered only to be deleted. */
+  /** Whether `id` is being deleted or closed. */
   removing(id: string): boolean {
     return this.removals.has(id)
   }
@@ -142,14 +149,19 @@ export class WorkspaceRegistry {
   }
 
   /**
-   * Whether `account` may reach `id`'s records: the same rule as
-   * `visible`, for an id that may not be live. A deleted workspace's
-   * jobs, or a stored workspace after a restart, answer to the owner its
-   * claim names.
+   * Whether `account` may reach a record `id` made at `at` (seconds):
+   * the same rule as `visible`, for an id that may not be live. A closed
+   * workspace's jobs, or a stored workspace after a restart, answer to
+   * the owner its claim names. A live workspace answers only for records
+   * made since it was created, so a workspace created again under a
+   * deleted one's id never reaches what the deleted one left.
    */
-  async allows(id: string, account: string | null): Promise<boolean> {
+  async allows(id: string, account: string | null, at: number): Promise<boolean> {
     if (account === null) return !this.accountsRequired
-    if (this.entries.has(id)) return this.visible(id, account) !== null
+    if (this.entries.has(id)) {
+      const entry = this.visible(id, account)
+      return entry !== null && at >= entry.createdAt
+    }
     if (this.owners === null) return false
     const [stored] = await this.owners.get(id)
     return stored !== null && stored.account === account
@@ -159,18 +171,30 @@ export class WorkspaceRegistry {
    * Record `account` as the owner of `id`. The claim outlives the
    * daemon, so after a restart the stored workspace under that id reopens
    * only for the same account. A caller with no account claims nothing.
-   * False when another account already owns the id.
+   * An id with stored state and no owner (written before accounts were
+   * required) is no account's to take. `New` when this call recorded the
+   * owner, `Held` when the account already owned the id (or none is
+   * recorded), `Taken` when it is not the account's to create.
    */
-  async claim(id: string, account: string | null): Promise<boolean> {
-    if (account === null || this.owners === null) return true
-    if (await this.owners.casPut(id, { account, generation: 1 }, 0)) return true
-    const [stored] = await this.owners.get(id)
-    return stored !== null && stored.account === account
+  async claim(id: string, account: string | null, stored: boolean): Promise<Claim> {
+    if (account === null || this.owners === null) return Claim.Held
+    let [record] = await this.owners.get(id)
+    if (record === null && !stored) {
+      if (await this.owners.casPut(id, { account, generation: 1 }, 0)) return Claim.New
+      ;[record] = await this.owners.get(id)
+    }
+    return record !== null && record.account === account ? Claim.Held : Claim.Taken
+  }
+
+  /** Drop the owner a failed create recorded, freeing the id. */
+  async release(id: string): Promise<void> {
+    if (this.owners !== null) await this.owners.delete([id])
   }
 
   add(ws: Workspace, id?: string, owner: string | null = null): WorkspaceEntry {
     const wid = id ?? newWorkspaceId()
-    if (this.entries.has(wid)) throw new Error(`workspace id already exists: ${wid}`)
+    if (this.entries.has(wid) || this.removals.has(wid))
+      throw new Error(`workspace id already exists: ${wid}`)
     const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws), owner)
     this.entries.set(wid, entry)
     this.cancelIdleTimer()
@@ -217,18 +241,28 @@ export class WorkspaceRegistry {
    * Close `id` and keep its state. The runner stops, which cancels its
    * lines and closes its sessions; the stored sessions, links, history
    * and owner stay, so the owner creating the same id later picks them
-   * up. The id is released first, so no new request reaches the closing
-   * runner.
+   * up. No new request reaches the closing runner, and the id stays
+   * reserved until it has stopped, so a create under it never loads state
+   * the old runner is still writing.
    */
   async close(id: string): Promise<WorkspaceEntry> {
-    const removal = this.removals.get(id)
-    if (removal !== undefined) return removal
-    const entry = this.entries.get(id)
-    if (entry === undefined) throw new Error(`workspace not found: ${id}`)
-    this.entries.delete(id)
+    let removal = this.removals.get(id)
+    if (removal === undefined) {
+      const entry = this.entries.get(id)
+      if (entry === undefined) throw new Error(`workspace not found: ${id}`)
+      this.entries.delete(id)
+      removal = this.shut(entry)
+      this.removals.set(id, removal)
+    }
+    return removal
+  }
+
+  /** Run one close, releasing the id once the runner has stopped. */
+  private async shut(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
     try {
       await entry.runner.stop()
     } finally {
+      this.removals.delete(entry.id)
       if (this.entries.size === 0) this.startIdleTimer()
     }
     return entry

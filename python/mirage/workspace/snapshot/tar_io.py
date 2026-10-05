@@ -20,6 +20,7 @@ import tarfile
 from pathlib import Path
 from typing import Any, Literal
 
+from mirage.core.disk.utils import open_regular
 from mirage.types import VFSName
 from mirage.workspace.snapshot.keys import MountKey, StateKey, VFSStateKey
 from mirage.workspace.snapshot.manifest import resolve_manifest
@@ -124,7 +125,10 @@ def _stage_disk_files(
                 continue
             blob_path = ref[BLOB_REF_KEY]
             src = _make_reader(tar, stream=True)(blob_path)
-            target = staging / blob_path
+            target = (staging / blob_path).resolve()
+            if not target.is_relative_to(staging.resolve()):
+                src.close()
+                raise ValueError(f"Unsafe blob path: {blob_path!r}")
             target.parent.mkdir(parents=True, exist_ok=True)
             with src, target.open("wb") as out:
                 shutil.copyfileobj(src, out)
@@ -154,7 +158,7 @@ def _add(tar: tarfile.TarFile, name: str, data: bytes | Path) -> None:
     info = tarfile.TarInfo(name=name)
     info.mode = 0o644
     if isinstance(data, Path):
-        with data.open("rb") as f:
+        with open_regular(data) as f:
             info.size = os.fstat(f.fileno()).st_size
             tar.addfile(info, f)
         return
