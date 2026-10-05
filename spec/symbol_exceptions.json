@@ -1,6 +1,11 @@
 {
- "baseline": 4496,
+ "baseline": 4492,
  "modules": {
+  "ops/registry": {
+   "typescript_only": {
+    "OpsRegistry": "Python keeps each mount's op table on its Mount (`Mount._ops`, `register_op`, the filetype-then-VFS cascade); TypeScript holds one OpsRegistry on the Workspace and scopes entries per VFS. Same lookup, held in a different place."
+   }
+  },
   "ops/generic/factory": {
    "python_only": {
     "_make_pwrite": "Python builds every emitted op through a named `_make_*` closure builder; TypeScript writes the same closure inline in makeGenericOps, as it does for the module's older builders.",

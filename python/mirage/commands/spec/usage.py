@@ -123,7 +123,7 @@ def _line_read_fail_code(cmd_name: str, line: str) -> int | None:
     return None
 
 
-def read_fail_exit_line(cmd_name: str, rendered: bytes) -> int:
+def read_fail_exit_code_from_line(cmd_name: str, rendered: bytes) -> int:
     """The same code, for a read failure known only as a rendered line.
 
     The cross-mount stream path fetches each operand with a native ``cat``

@@ -21,7 +21,6 @@ from mirage.accessor.base import NOOPAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.ops.generic import make_generic_ops
-from mirage.ops.registry import OpsRegistry
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -342,13 +341,6 @@ def test_native_truncate_wins_over_emulation():
     ops = make_generic_ops("x", table, emulate_truncate=True)
     truncates = [o for o in ops if o.name == "truncate"]
     assert len(truncates) == 1
-
-
-def test_registry_resolution():
-    registry = OpsRegistry()
-    for ro in make_generic_ops("x", make_table()):
-        registry.register(ro)
-    assert registry.resolve("read", "x") is not None
 
 
 def read_op(table: CommandIO):
