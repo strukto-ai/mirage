@@ -45,11 +45,6 @@ describe('gdrive mkdir', () => {
     expect(fake.find('d')?.mimeType).toBe(FOLDER_MIME)
   })
 
-  it('existing target raises EEXIST', async () => {
-    fake.folder('d')
-    await expect(mkdir(accessor, spec('/d'))).rejects.toMatchObject({ code: 'EEXIST' })
-  })
-
   it('missing parent raises ENOENT', async () => {
     await expect(mkdir(accessor, spec('/no/d'))).rejects.toMatchObject({ code: 'ENOENT' })
   })

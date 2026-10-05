@@ -35,9 +35,14 @@ async function metadataTag(
   }
 }
 
-// create_folder_v2 auto-creates missing parents and rejects existing
-// paths, so the GNU semantics (EEXIST without -p on an existing dir,
-// ENOENT on a missing parent without -p) live here.
+/**
+ * Create a folder; the doors have refused a taken name already.
+ *
+ * create_folder_v2 auto-creates missing parents, so ENOENT on a missing
+ * parent without -p lives here, and its path conflict answers a name taken
+ * after the doors looked. Under -p an existing folder is skipped, since the
+ * create would conflict on it.
+ */
 export async function mkdir(
   accessor: DropboxAccessor,
   path: PathSpec,
@@ -49,11 +54,7 @@ export async function mkdir(
     if (parents) return
     throw eexist(path.virtual)
   }
-  const existing = await metadataTag(accessor, apiPath)
-  if (existing !== null) {
-    if (parents && existing === 'folder') return
-    throw eexist(path.virtual)
-  }
+  if (parents && (await metadataTag(accessor, apiPath)) === 'folder') return
   if (!parents) {
     const parent = apiPath.slice(0, apiPath.lastIndexOf('/'))
     if (parent !== accessor.rootPath && (await metadataTag(accessor, parent)) !== 'folder') {

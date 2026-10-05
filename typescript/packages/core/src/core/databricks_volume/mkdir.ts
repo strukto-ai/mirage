@@ -18,10 +18,10 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
-import { alreadyExistsError, isNotFound, notADirectoryError, notFoundError } from './errors.ts'
-import { exists } from './exists.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { stat } from './stat.ts'
+import { enoent, enotdir } from '../../utils/errors.ts'
 
 async function createDirectory(
   accessor: DatabricksVolumeAccessor,
@@ -31,7 +31,7 @@ async function createDirectory(
   try {
     await dbxFetch(accessor, 'PUT', 'directories', remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(virtualTarget)
+    if (isNotFound(exc)) throw enoent(virtualTarget)
     throw exc
   }
 }
@@ -50,12 +50,9 @@ export async function mkdir(
     await invalidateAncestors(p)
     return
   }
-  if (await exists(accessor, p)) {
-    throw alreadyExistsError(p.virtual)
-  }
   const parentStat = await stat(accessor, parentPath(p), index)
   if (parentStat.type !== FileType.DIRECTORY) {
-    throw notADirectoryError(p.virtual)
+    throw enotdir(p.virtual)
   }
   await createDirectory(accessor, remotePath, p.virtual)
   await invalidateAfterWrite(p)

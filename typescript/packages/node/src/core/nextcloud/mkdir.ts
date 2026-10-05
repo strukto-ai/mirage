@@ -41,9 +41,9 @@ export async function mkdir(
 ): Promise<void> {
   const key = rstripSlash(nextcloudKey(path))
   const op = await accessor.operator()
-  // MKCOL under a file is a 409 opendal leaves unnamed, and opendal reads
-  // MKCOL's 405 on a taken name as done, a file holding the name included:
-  // look the levels up to tell ENOTDIR from EEXIST.
+  // MKCOL under a file is a 409 opendal leaves unnamed: look the levels up
+  // to tell ENOTDIR from EEXIST. Its 405 on a taken name reads as done, so a
+  // taken name is the doors' to refuse (refuseTaken).
   try {
     await op.createDir(`${key}/`)
   } catch (error) {
@@ -56,11 +56,4 @@ export async function mkdir(
   }
   await invalidateAfterWrite(path)
   await invalidateAncestors(path)
-  let taken = false
-  try {
-    taken = !(await op.stat(key)).isDirectory()
-  } catch (error) {
-    if (!isNotFound(error)) throw error
-  }
-  if (taken) throw eexist(path)
 }
