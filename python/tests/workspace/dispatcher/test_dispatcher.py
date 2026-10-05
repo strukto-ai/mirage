@@ -723,9 +723,9 @@ async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
     recorded: list[str] = []
     real = Dispatcher.invalidate_after_write
 
-    async def spy(self, mount, path, observed=None):
+    async def spy(self, mount, path, observed=None, times=True):
         recorded.append(path.virtual)
-        await real(self, mount, path, observed=observed)
+        await real(self, mount, path, observed=observed, times=times)
 
     monkeypatch.setattr(Dispatcher, "invalidate_after_write", spy)
     token = set_current_session(sess)
