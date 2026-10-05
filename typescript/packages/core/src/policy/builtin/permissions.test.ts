@@ -124,15 +124,16 @@ describe('PermissionsPolicy', () => {
     expect(p.preCommand(ctx('rm', ['x'], { paths: [path('/repo/x', 'x')], cwd: '/repo' }))).toEqual(
       {
         kind: 'deny',
-        reason: 'x: no deletes in the repo',
+        reason: 'no deletes in the repo',
         scope: 'operand',
+        path: 'x',
       },
     )
     expect(p.preCommand(ctx('rm', ['/scratch/x'], { paths: [path('/scratch/x')] }))).toBeNull()
     // A pure path rule refuses any command that names the path.
     expect(
       p.preCommand(ctx('cat', ['/repo/locked/a'], { paths: [path('/repo/locked/a')] })),
-    ).toEqual({ kind: 'deny', reason: '/repo/locked/a: frozen', scope: 'operand' })
+    ).toEqual({ kind: 'deny', reason: 'frozen', scope: 'operand', path: '/repo/locked/a' })
   })
 
   it('the deeper anchor wins and deny breaks a tie', () => {
@@ -146,7 +147,7 @@ describe('PermissionsPolicy', () => {
     )
     expect(
       p.preCommand(ctx('rm', ['/repo/sealed/y'], { paths: [path('/repo/sealed/y')] })),
-    ).toEqual({ kind: 'deny', reason: '/repo/sealed/y: sealed', scope: 'operand' })
+    ).toEqual({ kind: 'deny', reason: 'sealed', scope: 'operand', path: '/repo/sealed/y' })
     // Outside the deeper rule's anchor the shallow one is what is left.
     expect(p.preCommand(ctx('rm', ['/repo/x'], { paths: [path('/repo/x')] }))).toEqual({
       kind: 'ask',
@@ -185,7 +186,7 @@ describe('PermissionsPolicy', () => {
     const p = new PermissionsPolicy(new Sessions({ s: { allow: null, ask: [ask], deny: [deny] } }))
     expect(
       p.preCommand(ctx('cat', ['/repo/private/x'], { paths: [path('/repo/private/x')] })),
-    ).toEqual({ kind: 'deny', reason: '/repo/private/x: private', scope: 'operand' })
+    ).toEqual({ kind: 'deny', reason: 'private', scope: 'operand', path: '/repo/private/x' })
     // The unrelated entry still speaks where it does anchor.
     expect(
       p.preCommand(ctx('cat', ['/else/very/deep/x'], { paths: [path('/else/very/deep/x')] })),

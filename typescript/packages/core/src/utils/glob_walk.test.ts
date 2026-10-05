@@ -284,7 +284,7 @@ describe('resolveGlobWith', () => {
 describe('resolveGlobWith under hidden paths', () => {
   it('drops hidden matches', async () => {
     const sess = new SessionState({ sessionId: 'narrowed' })
-    sess.hiddenPaths = { patterns: ['*.json'] }
+    sess.visibility = { ...sess.visibility, paths: { patterns: ['*.json'] } }
     const result = await runWithSession(sess, () =>
       resolveGlobWith(
         fakeReaddir,
@@ -298,7 +298,7 @@ describe('resolveGlobWith under hidden paths', () => {
 
   it('an all-hidden match set falls back to the literal', async () => {
     const sess = new SessionState({ sessionId: 'narrowed' })
-    sess.hiddenPaths = { patterns: ['*.json'] }
+    sess.visibility = { ...sess.visibility, paths: { patterns: ['*.json'] } }
     const result = await runWithSession(sess, () =>
       resolveGlobWith(
         fakeReaddir,

@@ -496,6 +496,7 @@ describe('MountRegistry read gate', () => {
     }
     const gate = {
       scoped: true,
+      scopes: () => true,
       granted: [],
       check: (virtual: string): void => {
         if (virtual === '/data/sealed.txt') throw new Error(`refused ${virtual}`)

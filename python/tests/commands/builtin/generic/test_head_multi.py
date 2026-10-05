@@ -43,7 +43,6 @@ async def _read_bytes(p: PathSpec) -> bytes:
 
 
 def _read_stream(p: PathSpec):
-
     async def gen():
         for chunk in _CHUNKS[p.virtual]:
             yield chunk

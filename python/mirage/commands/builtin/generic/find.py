@@ -21,14 +21,14 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.context import path_allowed
 from mirage.core.generic.find import link_results, modified_ts, walk_find
 from mirage.errors.classify import failure_text
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatPath
-from mirage.types import FileStat, FileType, FindType, PathSpec
+from mirage.types import FileStat, FileType, FindType, PathSpec, Visibility
 from mirage.utils.dates import matches_mtime
 from mirage.utils.errors import MISS_ERRORS, fs_strerror, walk_refusal
+from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw
 
@@ -319,7 +319,16 @@ async def resolve_start(
         )
     if is_link:
         return WALK_START
-    start = await stat_path(search.virtual)
+    try:
+        start = await stat_path(search.virtual)
+    except OSError as exc:
+        # A start point the door refuses to stat is GNU's own
+        # diagnostic for it, quoted like a missing one
+        # (`find: 'P': Permission denied`), not an escaped error.
+        detail = fs_strerror(exc)
+        if detail is None:
+            raise
+        return StartPoint(walk=False, results=[], missing=True, detail=detail)
     if start is None:
         return await _missing_start(search, stat)
     manager = active_cache_manager()
@@ -495,6 +504,7 @@ async def find(
     empty: bool = False,
     links: LinkView | None = None,
     follow: bool = False,
+    visibility: Visibility | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     args = parse_find_args(
         texts,
@@ -522,7 +532,9 @@ async def find(
     async def stream() -> AsyncIterator[bytes]:
         missing: list[str] = []
         for search_path in searches:
-            first = await early_root(search_path, args, stat_path, stat, links)
+            first = await early_root(
+                search_path, args, stat_path, stat, links, visibility
+            )
             for row in first:
                 yield (row + "\n").encode()
             rows, detail = await _find_root(
@@ -534,6 +546,7 @@ async def find(
                 dir_empty=dir_empty,
                 links=links,
                 follow=follow,
+                visibility=visibility,
             )
             if rows is None:
                 missing.append(missing_start_line(search_path, detail))
@@ -558,6 +571,7 @@ async def early_root(
     stat_path: StatPath | None,
     stat: Callable[[PathSpec], Awaitable[FileStat]] | None,
     links: LinkView | None,
+    visibility: Visibility | None,
 ) -> list[str]:
     """Emit an independently known start point before asking for descendants.
 
@@ -571,6 +585,7 @@ async def early_root(
         stat_path (StatPath | None): dispatcher-backed stat probe.
         stat (Callable | None): overlay-aware stat for the mtime filter.
         links (LinkView | None): the namespace's symlink facts.
+        visibility (Visibility | None): the session's visibility.
 
     Returns:
         list[str]: the start point's own row, or nothing when it cannot
@@ -588,7 +603,7 @@ async def early_root(
         is_link=is_link(links, search),
         follow=link_follow(links),
     )
-    if start.stat is None or not path_allowed(search.virtual):
+    if start.stat is None or not path_visible(visibility, search.virtual):
         return []
     prefix = mount_prefix_of(search.virtual, search.vfs_path)
     tree = find_eval.bind_tree(
@@ -618,6 +633,7 @@ async def _find_root(
     dir_empty: Callable[[PathSpec], Awaitable[bool]] | None,
     links: LinkView | None,
     follow: bool,
+    visibility: Visibility | None = None,
 ) -> tuple[list[str] | None, str]:
     """One start point's rows on the native-op path, None when missing.
 
@@ -634,6 +650,7 @@ async def _find_root(
         dir_empty (Callable | None): emptiness probe for ``-empty``.
         links (LinkView | None): the namespace's symlink facts.
         follow (bool): whether ``-L`` follows namespace links.
+        visibility (Visibility | None): the session's visibility.
     """
     # A start point that is itself a symlink has no backend inode, so
     # neither the existence guard nor the backend walk can see it. GNU's
@@ -777,7 +794,7 @@ async def _find_root(
     # Hidden rows drop here, above the native-op/walk fork and after the
     # link merge, so a mount's visibility behavior cannot depend on
     # whether its backend ships a native find op.
-    results = [r for r in results if path_allowed(r)]
+    results = [r for r in results if path_visible(visibility, r)]
     return respell_raw(
         results, search_path.virtual, search_path.raw_path
     ), start.detail
@@ -853,6 +870,7 @@ async def find_generic(
         mindepth=parsed.mindepth,
         empty=parsed.empty,
         links=opts.ns.links if opts.ns is not None else None,
+        visibility=opts.ns.visibility if opts.ns is not None else None,
         follow=parsed.follow,
     )
 
@@ -906,7 +924,14 @@ async def find_walk_generic(
     async def stream() -> AsyncIterator[bytes]:
         missing: list[str] = []
         for search in searches:
-            first = await early_root(search, args, stat_path, None, links)
+            first = await early_root(
+                search,
+                args,
+                stat_path,
+                None,
+                links,
+                opts.ns.visibility if opts.ns is not None else None,
+            )
             for row in first:
                 yield (row + "\n").encode()
             # Same start-point rule as the native-op path, so what `find` does

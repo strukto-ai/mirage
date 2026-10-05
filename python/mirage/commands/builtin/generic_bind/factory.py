@@ -268,7 +268,7 @@ async def _run_with_namespace_globs(
     bound = with_dir_guard(
         with_command_guards(with_policy_guard(finish(stamped)))
     )
-    bound = scoped_io(bound, paths or [opts.cwd], opts.mount_prefix)
+    bound = scoped_io(bound, opts.ns, paths or [opts.cwd], opts.mount_prefix)
     return await fn(bound, accessor, paths, texts, opts)
 
 

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from mirage.shell.variable import ShellValue, VarAttr
-from mirage.types import FileStat
+from mirage.types import FileStat, Visibility
 
 StatOverlay = Callable[[str, FileStat], FileStat]
 # Stat one virtual path through the workspace rather than one backend, so
@@ -235,7 +235,7 @@ class NamespaceView:
     field it wants, so there is no signature for the dispatcher to
     inspect and no registry to keep in step. Fields default to None so
     a unit test constructs only what it exercises; inside a workspace
-    the dispatcher fills all five.
+    the dispatcher fills them all.
     """
 
     # The symlink facts; None when the namespace holds no links, which
@@ -251,6 +251,10 @@ class NamespaceView:
     # claimed the workspace. What an owner-rendering command prints in
     # the owner column for an entry whose backend reports no uid.
     user: str | None = None
+    # The running session's hides and shows; None when unrestricted.
+    visibility: Visibility | None = None
+    # Whether anything at or under a path is judged; a native walk yields.
+    scoped: Callable[[str], bool] | None = None
 
 
 # Run one facade op as a session: ``(session_id, run) -> result``, None

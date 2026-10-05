@@ -51,7 +51,6 @@ async def test_send_builds_a_token_manager_from_the_config(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_read_fetches_processed_message(monkeypatch):
-
     async def fake_get(tm, message_id):
         return {"id": message_id, "subject": "S"}
 

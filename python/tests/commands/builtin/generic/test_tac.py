@@ -5,7 +5,6 @@ from mirage.types import PathSpec
 
 
 def _read_stream(files: dict[str, bytes]):
-
     async def read_stream(path: PathSpec):
         if path.virtual not in files:
             raise FileNotFoundError(path.virtual)

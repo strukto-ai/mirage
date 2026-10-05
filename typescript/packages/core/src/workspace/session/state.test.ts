@@ -218,7 +218,7 @@ function makeHiddenView(): [SessionView, SessionState] {
     sessionId: 's',
     cwd: '/',
     vars: varsFromEnv({ PUBLIC: '1', SLACK_TOKEN: 'xoxb', AWS_SECRET_KEY: 'k' }),
-    hiddenVars: { names: ['SLACK_TOKEN'], patterns: ['AWS_*'] },
+    visibility: { vars: { names: ['SLACK_TOKEN'], patterns: ['AWS_*'] } },
   })
   return [sessionView(session), session]
 }

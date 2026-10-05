@@ -94,7 +94,6 @@ async def test_caller_cancel_joins_producer():
 
 @pytest.mark.asyncio
 async def test_long_line_preserves_delimiter_and_tail():
-
     async def source():
         yield b"x" * 100_000 + b"\nlast"
 

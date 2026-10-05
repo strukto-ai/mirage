@@ -52,8 +52,9 @@ describe('RulePolicy grammar', () => {
     const policy = new RulePolicy({ reason: 'keys', paths: ['*.key'] })
     expect(policy.preCommand(ctx('cat', [path('/a/b.key/c')]))).toEqual({
       kind: 'deny',
-      reason: '/a/b.key/c: keys',
+      reason: 'keys',
       scope: 'operand',
+      path: '/a/b.key/c',
     })
     expect(policy.preCommand(ctx('cat', [path('/a/b.keyx')]))).toBeNull()
     const op: OpsContext = { op: 'read', path: path('/x/y.key'), write: false, prefix: '/x/' }
@@ -80,8 +81,9 @@ describe('RulePolicy', () => {
     const deny = policy.preCommand(ctx('rm', [path('/data/prod/x.txt', 'prod/x.txt')]))
     expect(deny).toEqual({
       kind: 'deny',
-      reason: 'prod/x.txt: prod is protected',
+      reason: 'prod is protected',
       scope: 'operand',
+      path: 'prod/x.txt',
     })
     expect(policy.preCommand(ctx('rm', [path('/data/dev/x.txt')]))).toBeNull()
     expect(policy.preCommand(ctx('cat', [path('/data/prod/x.txt')]))).toBeNull()

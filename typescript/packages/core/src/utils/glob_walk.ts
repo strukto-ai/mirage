@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dotglobActive, pathAllowed } from '../context/session_context.ts'
+import { dotglobActive, sessionVisibility } from '../context/session_context.ts'
+import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../ops/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from './errors.ts'
@@ -383,6 +384,7 @@ export async function resolveGlobWith<A, I>(
   targetStat?: TargetStat,
 ): Promise<PathSpec[]> {
   const result: PathSpec[] = []
+  const vis = sessionVisibility()
   for (const p of paths) {
     if (p.resolved) {
       result.push(p)
@@ -413,7 +415,7 @@ export async function resolveGlobWith<A, I>(
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.
       let matched = (await expandPattern(readdir, accessor, word, index, children)).filter((m) =>
-        pathAllowed(m.virtual),
+        pathVisible(vis, m.virtual),
       )
       if (dirsOnly) {
         const kept: PathSpec[] = []

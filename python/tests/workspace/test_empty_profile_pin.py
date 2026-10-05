@@ -63,7 +63,6 @@ def _seeded() -> Workspace:
 def _outputs(
     ws: Workspace, session_id: str
 ) -> list[tuple[str, int, bytes, bytes]]:
-
     async def go():
         out = []
         for line in BATTERY:

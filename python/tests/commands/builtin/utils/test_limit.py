@@ -156,7 +156,6 @@ async def test_run_with_timeout_raises_on_overrun():
 async def test_bounds_are_independent_of_chunks(
     chunk_size, data, limit, expected, truncated
 ):
-
     async def source():
         for at in range(0, len(data), chunk_size):
             yield data[at : at + chunk_size]

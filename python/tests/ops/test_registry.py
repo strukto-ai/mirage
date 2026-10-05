@@ -32,7 +32,6 @@ def _spec(virtual: str) -> PathSpec:
 
 class TestOpDecorator:
     def test_attaches_metadata(self):
-
         @op("read", vfs="s3")
         async def my_read(config, path):
             return b"data"
@@ -46,7 +45,6 @@ class TestOpDecorator:
         assert ro.filetype is None
 
     def test_write_defaults_false(self):
-
         @op("read", vfs="s3")
         async def my_read2(config, path):
             return b"data"
@@ -55,7 +53,6 @@ class TestOpDecorator:
         assert ro.write is False
 
     def test_write_flag_true(self):
-
         @op("write", vfs="s3", write=True)
         async def my_write(config, path, data):
             pass
@@ -64,7 +61,6 @@ class TestOpDecorator:
         assert ro.write is True
 
     def test_with_filetype(self):
-
         @op("read", vfs="s3", filetype=".parquet")
         async def read_parquet(config, path):
             return b"parquet data"
@@ -74,7 +70,6 @@ class TestOpDecorator:
         assert ro.vfs == "s3"
 
     def test_stacks(self):
-
         @op("read", vfs="s3")
         @op("read", vfs="ram")
         async def read_multi(bind_arg, path):

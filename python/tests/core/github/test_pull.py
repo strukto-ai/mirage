@@ -29,7 +29,6 @@ from mirage.core.github.repo import RepoRef
 
 @pytest.mark.asyncio
 async def test_pull_checks_follow_the_head_sha(monkeypatch):
-
     async def get_pull(config, ref, number):
         return {"head": {"sha": "abc"}}
 
@@ -56,7 +55,6 @@ async def test_pull_checks_follow_the_head_sha(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pull_checks_merge_commit_status_contexts(monkeypatch):
-
     async def get_pull(config, ref, number):
         return {"head": {"sha": "abc"}}
 

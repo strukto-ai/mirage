@@ -31,7 +31,6 @@ SIZES = {"/db/a.txt": 3, "/db/sub/b.txt": 2}
 
 
 def _ops(max_du_entries: int | None = None) -> CommandIO:
-
     async def readdir(_accessor, path, _index=None):
         return TREE.get(path.virtual.rstrip("/") or "/", [])
 

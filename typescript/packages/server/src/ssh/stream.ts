@@ -16,6 +16,8 @@ import type { Writable } from 'node:stream'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { ServerChannel } from 'ssh2'
 import { concat } from '@struktoai/mirage-core/io/cachable_iterator'
+import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { REFUSAL_WINDOW } from './constants.ts'
 
 // How far the client may type or pipe ahead of whoever reads it before
 // the channel is paused and SSH flow control pushes back.
@@ -409,8 +411,42 @@ export async function* channelStdin(source: ChannelInput): AsyncGenerator<Uint8A
   }
 }
 
-/** A line's stdout, then its stderr, onto the channel. */
+/**
+ * A stream's first `REFUSAL_WINDOW` bytes, then on to the end of the line
+ * that window cuts (at most a window more), whole lines only unless the
+ * stream ends inside them. `prefix` is the stream's first two windows and
+ * `total` its whole length. Mirrors Python's `head_window`.
+ */
+function headWindow(prefix: Uint8Array, total: number): Uint8Array {
+  if (total <= REFUSAL_WINDOW) return prefix
+  const end = prefix.indexOf(10, REFUSAL_WINDOW - 1)
+  if (end !== -1) return prefix.subarray(0, end + 1)
+  if (total <= 2 * REFUSAL_WINDOW) return prefix
+  return prefix.subarray(0, prefix.subarray(0, REFUSAL_WINDOW).lastIndexOf(10) + 1)
+}
+
+/**
+ * A line's stdout, then its stderr, onto the channel, then the refusal's
+ * line on stderr when a policy refused part of it. The terminal's output
+ * goes out as the line printed it; the policy's reason is the one line
+ * `refusalLine` appends. Whether the output already says why is read off
+ * each stream's first and last `REFUSAL_WINDOW` bytes: the first runs on
+ * to the end of the line it cuts (at most a window more) and keeps whole
+ * lines only, so a line split at a cut can neither pose as the diagnostic
+ * nor hide one. A diagnostic deep inside a long output may be missed,
+ * which repeats the reason and never drops it. Mirrors Python's `deliver`.
+ */
 export async function deliver(result: ExecuteResult, output: ChannelOutput): Promise<void> {
   await output.write(result.stdout)
   await output.write(result.stderr, true)
+  const dec = new TextDecoder()
+  const said = [result.stdout, result.stderr]
+    .flatMap((bytes) => {
+      const prefix = bytes.subarray(0, 2 * REFUSAL_WINDOW)
+      return [headWindow(prefix, bytes.length), bytes.subarray(-REFUSAL_WINDOW)]
+    })
+    .map((bytes) => dec.decode(bytes))
+    .join('\n')
+  const line = refusalLine(said, result.refusal)
+  if (line !== '') await output.write(new TextEncoder().encode(line), true)
 }

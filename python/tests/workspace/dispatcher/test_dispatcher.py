@@ -33,7 +33,14 @@ from mirage.policy import (
     PolicyDenied,
 )
 from mirage.policy.rule import RulePolicy
-from mirage.types import FileStat, FileType, HiddenPaths, MountMode, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    HiddenPaths,
+    MountMode,
+    PathSpec,
+    Visibility,
+)
 from mirage.utils.errors import ReadOnlyError
 from mirage.utils.ranges import slice_window, splice_window
 from mirage.vfs.disk import DiskVFS
@@ -183,7 +190,7 @@ async def test_spec_op_twin_holds_on_the_dispatch_door():
     dispatcher, _ = _dispatcher(policies)
     with pytest.raises(PolicyDenied) as excinfo:
         await dispatcher.dispatch("read", _path("/data/locked/a.txt"))
-    assert "frozen" in str(excinfo.value)
+    assert excinfo.value.refusal and "frozen" in excinfo.value.refusal.reason
 
 
 def _structure_only(dispatcher) -> None:
@@ -229,8 +236,10 @@ def scoped_session():
     leaving the mount nested below it reachable."""
     session = SessionState(
         session_id="agent",
-        hidden_paths=HiddenPaths(
-            paths=("/data/locked/other", "/data/locked/f.txt")
+        visibility=Visibility(
+            paths=HiddenPaths(
+                paths=("/data/locked/other", "/data/locked/f.txt")
+            )
         ),
     )
     token = set_current_session(session)
@@ -1405,7 +1414,8 @@ async def test_hidden_space_answers_a_marked_op_before_any_rule():
     )
     token = set_current_session(
         SessionState(
-            session_id="hider", hidden_paths=HiddenPaths(paths=("/data/hid",))
+            session_id="hider",
+            visibility=Visibility(paths=HiddenPaths(paths=("/data/hid",))),
         )
     )
     try:

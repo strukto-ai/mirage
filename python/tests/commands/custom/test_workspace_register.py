@@ -29,7 +29,6 @@ def _register(ws, fn):
 
 
 def test_workspace_accepts_commands_param():
-
     @command("myecho", vfs="ram", spec=CommandSpec(rest=Operand(type="str")))
     async def my_echo(store, paths, texts, opts):
         return " ".join(texts).encode(), IOResult()
@@ -67,7 +66,6 @@ def test_workspace_register_method():
 
 
 def test_workspace_user_command_overrides_builtin():
-
     @command("stat", vfs="ram", spec=CommandSpec())
     async def my_stat(store, paths, texts, opts):
         return b"custom-stat", IOResult()

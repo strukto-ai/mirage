@@ -32,7 +32,6 @@ def make_accessor() -> DropboxAccessor:
 
 @pytest.mark.asyncio
 async def test_mkdir_creates_when_parent_exists():
-
     async def fake_meta(tm, path):
         if path == "/docs":
             raise NOT_FOUND

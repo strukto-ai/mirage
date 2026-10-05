@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.context import invalidate_subtree
+from mirage.cache.context import invalidate_after_move
 from mirage.core.msgraph.drive import rename_replace
 from mirage.core.sharepoint.resolve import drive_loc, resolve_item
 from mirage.types import PathSpec
@@ -25,11 +25,17 @@ async def rename(
     config = accessor.config
     src_resolved = await resolve_item(accessor, src)
     dst_resolved = await resolve_item(accessor, dst)
-    await rename_replace(
+    result = await rename_replace(
         config,
         drive_loc(config, src_resolved, src.vfs_path),
         drive_loc(config, dst_resolved, dst.vfs_path),
         session=accessor.pool,
     )
-    await invalidate_subtree(dst)
-    await invalidate_subtree(src)
+    # A folder carries a subtree under both names. dst also loses one when
+    # the move replaced anything there but a file (an empty folder, or an
+    # item of no known kind), whose name may still have cached children.
+    # Only a file facet narrows; a reply that names no type keeps the
+    # subtree.
+    folder = "file" not in result.moved
+    await invalidate_after_move(dst, folder or result.replaced_non_file)
+    await invalidate_after_move(src, folder)

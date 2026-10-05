@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { operandExitCode } from '../commands/spec/usage.ts'
+import { noteRefusal } from '../context/session_context.ts'
+import { eacces, fsErrorLine } from '../utils/errors.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
@@ -26,6 +28,7 @@ import {
   type CommandContext,
   type Deny,
   type ExecuteResultContext,
+  type Hide,
   type OpsContext,
   type OpsResultContext,
   type Pending,
@@ -37,16 +40,23 @@ type Hook = keyof typeof VALIDITY
 /**
  * The command plane's rendering of a refusal: stderr and exit code. The
  * one place the outcome table for that plane is written down, so a
- * document rule and a coded policy print alike: a whole-command Deny is
- * bash's own `<subject>: Permission denied` at 126, with the reason on
- * the result's `refusal` record rather than on stderr; an operand Deny
- * keeps the GNU voice `<subject>: <reason>` at the command's
- * operand-refusal code (1, tar 2), because there the reason is the
- * diagnostic.
+ * document rule and a coded policy print alike, and the policy's reason
+ * is never mixed into what the terminal says: a whole-command Deny is
+ * bash's own `<subject>: Permission denied` at 126; an operand Deny
+ * about a path is the command's own GNU line for that operand and
+ * EACCES; both leave the reason on the result's `refusal` record. An
+ * operand Deny that names no path keeps `<subject>: <reason>`, because
+ * there the reason is the diagnostic a built-in worded in POSIX's
+ * terms. Operand refusals exit at the command's operand-refusal code
+ * (1, tar 2).
  */
 export function renderDeny(subject: string, deny: Deny): [Uint8Array, number] {
   if (deny.scope === 'operand') {
-    return [new TextEncoder().encode(`${subject}: ${deny.reason}\n`), operandExitCode(subject)]
+    const line =
+      deny.path !== undefined
+        ? fsErrorLine(subject, deny.path, eacces(deny.path))
+        : `${subject}: ${deny.reason}\n`
+    return [new TextEncoder().encode(line), operandExitCode(subject)]
   }
   return [new TextEncoder().encode(`${subject}: Permission denied\n`), POLICY_DENIED_EXIT]
 }
@@ -96,8 +106,8 @@ export function describeRefusal(refusal: Refusal): string {
 
 /**
  * Whether `text` already carries the line that says why the command was
- * refused. Only an operand-scoped denial has one: its GNU diagnostic
- * `<command>: <reason>` is the reason, wherever a redirect landed it, so
+ * refused. Only an operand-scoped denial that names no path has one: its
+ * diagnostic `<command>: <reason>` is the reason, wherever a redirect landed it, so
  * a surface that describes the record after the text looks for that
  * line rather than for the scope (`2>/dev/null` takes the line away and
  * the record is the only reason left, `2>&1` moves it onto stdout and
@@ -125,6 +135,23 @@ function denyOnly(hook: Hook, action: Deny | Ask | null): Deny | null {
 }
 
 /**
+ * The error a door throws for a policy's Deny, its record noted for the
+ * line running it. The message says what the terminal would
+ * (`Permission denied` unless the door words its own); the reason rides
+ * the record, on the error for a caller that catches it and on the
+ * line's result for one that only reads what a command printed.
+ */
+export function policyDenied(
+  deny: Deny,
+  filename: string,
+  message = 'Permission denied',
+): PolicyDenied {
+  const refusal = refusalOf(deny)
+  noteRefusal(refusal)
+  return new PolicyDenied(message, filename, refusal)
+}
+
+/**
  * Fire preOps at the op door; a Deny becomes a PolicyDenied (EACCES),
  * or the built-in's own error (ENOENT for a hide, EROFS for a mode).
  * The one seam helper the dispatcher calls, so a refusal is identical
@@ -148,7 +175,7 @@ export async function preOpsGate(
   if (!(policies.wants('preOps') || checkHidden || (write && context.mode !== undefined))) {
     return
   }
-  const deny = await policies.preOps(
+  const answer = await policies.preOps(
     {
       op,
       path,
@@ -160,10 +187,10 @@ export async function preOpsGate(
     },
     checkHidden,
   )
-  if (deny !== null) {
-    if (deny.error !== undefined) throw deny.error
-    throw new PolicyDenied(deny.reason, path.virtual)
-  }
+  if (answer === null) return
+  if (answer.kind === 'hide') throw answer.error
+  if (answer.error !== undefined) throw answer.error
+  throw policyDenied(answer, path.virtual)
 }
 
 /**
@@ -184,7 +211,7 @@ export async function postOpsGate(
   const [deny, bound] = await policies.postOps({ op, path, write, prefix, result })
   if (deny !== null) {
     if (deny.error !== undefined) throw deny.error
-    throw new PolicyDenied(deny.reason, path.virtual)
+    throw policyDenied(deny, path.virtual)
   }
   return bound
 }
@@ -216,7 +243,7 @@ export async function preSessionGate(
   if (!policies?.wants('preSession')) return
   const deny = await policies.preSession(ctx)
   if (deny !== null) {
-    throw new PolicyDenied(deny.reason, ctx.key)
+    throw policyDenied(deny, ctx.key, `${ctx.key}: permission denied`)
   }
 }
 
@@ -238,7 +265,7 @@ export async function preSessionGate(
  */
 export class Policies {
   private readonly policies: Policy[]
-  private readonly hidden: Policy = new HiddenPathsPolicy()
+  private readonly hidden = new HiddenPathsPolicy()
   private readonly mode: Policy = new MountModePolicy()
   private wanted: ReadonlySet<Hook> = new Set()
 
@@ -311,7 +338,6 @@ export class Policies {
   private async fire(
     hook: Hook,
     ctx: CommandContext | OpsContext | OpsResultContext | ExecuteResultContext | SessionContext,
-    checkHidden = true,
   ): Promise<[Deny | Ask | null, Limit | null]> {
     const limits: Limit[] = []
     let asked: Ask | null = null
@@ -319,10 +345,9 @@ export class Policies {
     // while a hook awaits. Changes take effect at the next gate.
     let chain = [...this.policies]
     if (hook === 'preOps') {
-      // Hides answer first, so a refusal never tells a session a hidden
-      // name exists; the mode answers last, after every policy that
-      // could explain the refusal in its own words.
-      chain = [...(checkHidden ? [this.hidden] : []), ...chain, this.mode]
+      // The mode answers last, after every policy that could explain the
+      // refusal in its own words.
+      chain = [...chain, this.mode]
     }
     for (const policy of chain) {
       const fn = policy[hook]
@@ -365,7 +390,7 @@ export class Policies {
         asked ??= action
         continue
       }
-      limits.push(action)
+      if (action instanceof Limit) limits.push(action)
     }
     return [asked, Limit.aggr(limits)]
   }
@@ -376,9 +401,20 @@ export class Policies {
     return action
   }
 
-  /** Fire preOps across the policies; the first Deny wins. */
-  async preOps(ctx: OpsContext, checkHidden = true): Promise<Deny | null> {
-    const [action] = await this.fire('preOps', ctx, checkHidden)
+  /**
+   * Fire preOps across the policies; the first Deny wins. The built-in
+   * hides answer before every policy, with a Hide that outranks whatever
+   * a policy would say, so a refusal never tells a session a hidden name
+   * exists; the built-in mount mode answers after them. Both hold
+   * whether or not any policy overrides the hook; `checkHidden` false
+   * only for a door that has already answered the hides itself.
+   */
+  async preOps(ctx: OpsContext, checkHidden = true): Promise<Hide | Deny | null> {
+    if (checkHidden) {
+      const hidden = await this.hidden.preOps(ctx)
+      if (hidden !== null) return hidden
+    }
+    const [action] = await this.fire('preOps', ctx)
     return denyOnly('preOps', action)
   }
 

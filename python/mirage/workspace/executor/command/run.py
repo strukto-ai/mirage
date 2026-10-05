@@ -276,7 +276,7 @@ async def run_on_mount(
     # A traversal command's start point is statted through the dispatcher
     # so a start point under another mount answers (`find -L` follows a
     # link across mounts before the command ever runs).
-    ns = namespace_view_of(registry, namespace, dispatch)
+    ns = namespace_view_of(registry, namespace, dispatch, session)
     stat_path = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None

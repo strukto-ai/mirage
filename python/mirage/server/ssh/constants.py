@@ -31,6 +31,12 @@ TUNNEL_MODULE = "mirage.server.ssh.server:serve_tunnel"
 # How many bytes the HTTPS route relays at a time.
 TUNNEL_CHUNK = 64 * 1024
 
+# How much of each stream's start and end the door keeps to tell whether
+# a refusal already says why: the refused command's own diagnostic sits
+# near the start of a line refused early and near the end of one refused
+# late, so both ends hold it without the whole output.
+REFUSAL_WINDOW = 4096
+
 # The most entry stats one listing keeps in flight. Each is a hop to the
 # workspace loop and, on a mount that keeps no listing index, a backend
 # request, so a wide directory does not put every one on the wire.

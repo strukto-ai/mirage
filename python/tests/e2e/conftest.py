@@ -255,7 +255,6 @@ def memory_create_file(vfs: RAMVFS, path: str, content: bytes):
 
 
 def run(ws: Workspace, cmd: str) -> str:
-
     async def _run():
         io = await ws.shell(cmd)
         return await io.stdout_str()

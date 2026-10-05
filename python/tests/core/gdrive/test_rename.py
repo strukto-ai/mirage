@@ -16,14 +16,26 @@ import errno
 
 import pytest
 
+from mirage.cache.context import push_cache_manager
 from mirage.core.gdrive.rename import rename
 from mirage.types import PathSpec
+from tests.core.object_store.conftest import FakeManager
 
 DOC_MIME = "application/vnd.google-apps.document"
 
 
 def spec(virtual: str) -> PathSpec:
     return PathSpec.from_str_path(virtual)
+
+
+async def _managed(accessor, src: str, dst: str) -> FakeManager:
+    manager = FakeManager()
+    prev = push_cache_manager(manager)
+    try:
+        await rename(accessor, spec(src), spec(dst))
+    finally:
+        push_cache_manager(prev)
+    return manager
 
 
 @pytest.mark.asyncio
@@ -91,3 +103,47 @@ async def test_rename_native_strips_suffix(fake_drive, gdrive_accessor):
         gdrive_accessor, spec("/Report.gdoc.json"), spec("/Plan.gdoc.json")
     )
     assert fake_drive.items[doc_id]["name"] == "Plan"
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_file_drops_no_subtree(fake_drive, gdrive_accessor):
+    fake_drive.add("old.txt", content=b"x")
+    manager = await _managed(gdrive_accessor, "/old.txt", "/new.txt")
+    assert manager.unlinks == ["/new.txt", "/old.txt"]
+    assert manager.subtrees == []
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_folder_drops_both_subtrees(
+    fake_drive, gdrive_accessor
+):
+    folder = fake_drive.folder("a")
+    fake_drive.add("f.txt", parent=folder, content=b"x")
+    manager = await _managed(gdrive_accessor, "/a", "/b")
+    assert manager.subtrees == ["/b", "/a"]
+    assert manager.unlinks == []
+
+
+@pytest.mark.asyncio
+async def test_a_file_replacing_an_empty_folder_drops_its_subtree(
+    fake_drive, gdrive_accessor
+):
+    # The rename deleted the folder at dst, so whatever is still cached
+    # under that name (children removed outside mirage, say) goes too.
+    fake_drive.add("src.txt", content=b"x")
+    fake_drive.folder("d")
+    manager = await _managed(gdrive_accessor, "/src.txt", "/d")
+    assert manager.subtrees == ["/d"]
+    assert manager.unlinks == ["/src.txt"]
+    assert manager.writes == []
+
+
+@pytest.mark.asyncio
+async def test_a_file_replacing_a_file_drops_no_subtree(
+    fake_drive, gdrive_accessor
+):
+    fake_drive.add("src.txt", content=b"x")
+    fake_drive.add("dst.txt", content=b"y")
+    manager = await _managed(gdrive_accessor, "/src.txt", "/dst.txt")
+    assert manager.unlinks == ["/dst.txt", "/src.txt"]
+    assert manager.subtrees == []

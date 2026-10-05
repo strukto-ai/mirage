@@ -667,7 +667,6 @@ async def test_a_late_older_check_never_replaces_a_newer_memo(clock):
         return "V1"
 
     def answer(version: str):
-
         async def check() -> str:
             asked.append(version)
             return version

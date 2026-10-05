@@ -24,7 +24,6 @@ INDEX = RAMIndexCacheStore()
 
 
 def _ops(removed: list[str] | None = None) -> CommandIO:
-
     async def readdir(_accessor, path, index=None):
         return ["/m/a.txt", "/m/locked"] if path.virtual == "/m" else []
 

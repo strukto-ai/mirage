@@ -134,6 +134,26 @@ async def invalidate_subtree(path: PathSpec) -> None:
         await manager.invalidate_subtree(path)
 
 
+async def invalidate_after_move(path: PathSpec, folder: bool) -> None:
+    """Report one end of a backend rename.
+
+    A renamed folder strands everything cached beneath both of its
+    names, so it takes :func:`invalidate_subtree`. A renamed file has
+    nothing beneath it and takes :func:`invalidate_after_unlink`, which
+    spares the walk of every store. The caller passes ``folder=True``
+    whenever it cannot tell, and for a destination the backend may have
+    replaced a non-empty folder at.
+
+    Args:
+        path (PathSpec): one end of the rename.
+        folder (bool): whether that end may hold a subtree.
+    """
+    if folder:
+        await invalidate_subtree(path)
+    else:
+        await invalidate_after_unlink(path)
+
+
 async def evict_after(
     op: Awaitable[T], evict: Callable[[T | None], Awaitable[None]]
 ) -> T:

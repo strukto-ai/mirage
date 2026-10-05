@@ -18,7 +18,8 @@ import { DEFAULT_ASK_REASON } from '../../policy/constants.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { matchOp, ruleScope } from '../../policy/match/rule.ts'
 import type { OpsContext } from '../../policy/types.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
+import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
 import { pathHidden, pathVisible } from '../../utils/hidden.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
 import {
@@ -235,16 +236,16 @@ describe('compileProfile', () => {
         vars: { hide: ['SLACK_TOKEN', 'AWS_*'] },
       }),
     )
-    expect(out.mountModes).toEqual(
+    expect(out.policies.mountModes).toEqual(
       new Map([
         ['/a', MountMode.WRITE],
         ['/b', MountMode.READ],
       ]),
     )
-    expect(out.hiddenPaths).toEqual({ paths: ['/a/secrets'], patterns: ['*.key'] })
-    expect(out.hiddenVars).toEqual({ names: ['SLACK_TOKEN'], patterns: ['AWS_*'] })
-    expect(out.env).toEqual({ ROLE: 'x' })
-    expect(out.cwd).toBe('/scratch')
+    expect(out.visibility.paths).toEqual({ paths: ['/a/secrets'], patterns: ['*.key'] })
+    expect(out.visibility.vars).toEqual({ names: ['SLACK_TOKEN'], patterns: ['AWS_*'] })
+    expect(out.setup.env).toEqual({ ROLE: 'x' })
+    expect(out.setup.cwd).toBe('/scratch')
   })
 
   it('carries the name, which narrow stamps onto the session', () => {
@@ -274,36 +275,38 @@ describe('compileProfile', () => {
     // The set is one list for the whole session, so a name pattern
     // written under a mount has to carry the mount with it: raw, `*.pem`
     // would hide `/scratch/key.pem` too.
-    expect(out.hiddenPaths).toEqual({
+    expect(out.visibility.paths).toEqual({
       paths: ['/shared/finance', '/repo/.env'],
       patterns: ['/repo/*.pem'],
     })
-    expect(pathHidden(out.hiddenPaths, '/repo/deep/key.pem')).toBe(true)
-    expect(pathHidden(out.hiddenPaths, '/scratch/key.pem')).toBe(false)
+    expect(pathHidden(out.visibility.paths, '/repo/deep/key.pem')).toBe(true)
+    expect(pathHidden(out.visibility.paths, '/scratch/key.pem')).toBe(false)
     // The profile's own hide is not a mount section's and stays global.
     const profile = compileProfile(parseSessionProfile({ paths: { hide: ['*.pem'] } }))
-    expect(pathHidden(profile.hiddenPaths, '/scratch/key.pem')).toBe(true)
+    expect(pathHidden(profile.visibility.paths, '/scratch/key.pem')).toBe(true)
   })
 
   it('of a bare or absent profile states nothing', () => {
     const empty = compileProfile(null)
     expect(empty).toEqual({
-      mountModes: null,
-      hiddenPaths: null,
-      hiddenVars: null,
-      env: null,
-      cwd: null,
-      commands: null,
-      commandLimits: null,
-      script: null,
-      shownPaths: null,
+      setup: { env: null, cwd: null },
+      visibility: DEFAULT_VISIBILITY,
+      policies: {
+        mountModes: null,
+        commands: null,
+        script: null,
+        commandLimits: null,
+        processes: DEFAULT_PROCESS_PERMISSIONS,
+      },
       hideReasons: [],
       profile: null,
     })
     expect(compileProfile({})).toEqual(empty)
     // A profile that names a mount without a mode narrows nothing: the
     // mount keeps whatever the workspace gave it.
-    expect(compileProfile(parseSessionProfile({ mounts: { '/a': {} } })).mountModes).toBeNull()
+    expect(
+      compileProfile(parseSessionProfile({ mounts: { '/a': {} } })).policies.mountModes,
+    ).toBeNull()
   })
 })
 
@@ -321,9 +324,9 @@ describe('narrow / applyProfile', () => {
     const narrowed = new SessionState({ sessionId: 's1' })
     narrow(narrowed, compiled)
     expect(narrowed.mountModes).toEqual(new Map([['/a', MountMode.WRITE]]))
-    expect(narrowed.mountModes).not.toBe(compiled.mountModes)
-    expect(narrowed.hiddenPaths).toEqual({ paths: ['/a/secrets'], patterns: [] })
-    expect(narrowed.hiddenVars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
+    expect(narrowed.mountModes).not.toBe(compiled.policies.mountModes)
+    expect(narrowed.visibility.paths).toEqual({ paths: ['/a/secrets'], patterns: [] })
+    expect(narrowed.visibility.vars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
     expect(narrowed.cwd).toBe('/')
     expect(narrowed.env.ROLE).toBeUndefined()
     const applied = new SessionState({ sessionId: 's2' })
@@ -338,15 +341,26 @@ describe('narrow / applyProfile', () => {
     const compiled = compileProfile(
       parseSessionProfile({ commands: { allow: ['ls'], ask: ['git'] } }),
     )
-    expect(compiled.commands).toEqual({
+    expect(compiled.policies.commands).toEqual({
       allow: ['ls'],
       ask: [{ reason: DEFAULT_ASK_REASON, commands: ['git'] }],
       deny: [],
     })
     const session = new SessionState({ sessionId: 's' })
     narrow(session, compiled)
-    expect(session.commands).toEqual(compiled.commands)
-    expect(compileProfile({ cwd: '/x' }).commands).toBeNull()
+    expect(session.commands).toEqual(compiled.policies.commands)
+    expect(session.visibility.commands).toEqual(['ls'])
+    expect(compileProfile({ cwd: '/x' }).policies.commands).toBeNull()
+  })
+
+  it('the process list scope is part of what a session sees', () => {
+    const seen = compileProfile(parseSessionProfile({ processes: 'workspace' }))
+    expect(seen.visibility.processes).toBe('workspace')
+    expect(seen.policies.processes.list).toBe('workspace')
+    const session = new SessionState({ sessionId: 's' })
+    narrow(session, seen)
+    expect(session.visibility.processes).toBe('workspace')
+    expect(compileProfile({ cwd: '/x' }).visibility.processes).toBe('session')
   })
 })
 
@@ -404,15 +418,15 @@ describe('the path axis through resolve', () => {
         mounts: { '/data': { paths: { hide: ['/data'], show: { '/data/out': 'rw' } } } },
       }),
     )
-    expect(out.shownPaths).toEqual({
+    expect(out.visibility.shown).toEqual({
       entries: [
         { path: '/repo/public', mode: null },
         { path: '/data/out', mode: MountMode.WRITE },
       ],
     })
     // The axis reads them together: the show reopens its subtree.
-    expect(pathVisible(out.hiddenPaths, out.shownPaths, '/repo/public/a')).toBe(true)
-    expect(pathVisible(out.hiddenPaths, out.shownPaths, '/repo/x')).toBe(false)
+    expect(pathVisible(out.visibility, '/repo/public/a')).toBe(true)
+    expect(pathVisible(out.visibility, '/repo/x')).toBe(false)
   })
 
   it("compileProfile anchors a mount section's reasons", () => {
@@ -438,10 +452,10 @@ describe('the path axis through resolve', () => {
     )
     const session = new SessionState({ sessionId: 's' })
     narrow(session, compiled)
-    expect(session.shownPaths).toEqual(compiled.shownPaths)
+    expect(session.visibility.shown).toEqual(compiled.visibility.shown)
     expect(session.hideReasons).toEqual(compiled.hideReasons)
     const empty = compileProfile(null)
-    expect(empty.shownPaths).toBeNull()
+    expect(empty.visibility.shown).toBeNull()
     expect(empty.hideReasons).toEqual([])
   })
 })

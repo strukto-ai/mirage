@@ -9,7 +9,6 @@ def _spec(path: str) -> PathSpec:
 
 
 def _make_backend(files: dict[str, tuple[bytes, ContentType]], dirs: set[str]):
-
     async def stat_fn(p: PathSpec) -> FileStat:
         if p.virtual in dirs:
             return FileStat(name=p.virtual, type=FileType.DIRECTORY, size=0)

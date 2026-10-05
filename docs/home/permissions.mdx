@@ -97,7 +97,8 @@ neither:
   too, the answer every read gives for that directory, so a write
   cannot detect a hide a read could not; only a create at a hidden
   name inside a visible directory answers `EACCES`, the way an existing
-  file the session cannot write does.
+  file the session cannot write does. A hide leaves no `refusal`
+  record, so nothing an agent reads names it.
 
 ### `commands`: allow, ask, deny
 
@@ -129,32 +130,41 @@ A command pattern is a **prefix of the line**: `git push` covers
 The same patterns spell the `allow` list.
 
 A rule with `paths` and no command also reaches the VFS op door, so FUSE
-mounts and `ws.vfs` cannot go around it. A whole-command `deny` refuses
+mounts and `ws.vfs` cannot go around it. Every other rule, and the
+`allow` list, judges a line, so a door that sees only ops (a FUSE mount,
+SFTP, codex-exec's file calls) cannot apply it and logs a warning naming
+what it skips when the session mounts. A whole-command `deny` refuses
 in bash's own voice, `<command>: Permission denied` at exit 126, and the
 reason rides beside the output as the result's `refusal` record
 (`{"kind": "deny", "reason": ..., "policy": ..., "scope": "command"}`,
 `null` on a line that ran). A `deny` matched through `paths` refuses the
-operand instead, in the GNU voice `<command>: <path>: <reason>` at the
-command's own operand exit code
-(`cat: /vault/aws.token: credentials are never read by hand`, exit 1),
-with the reason on the line and the record's `scope` set to `operand`.
-An `ask` refuses at 126 the same way, with a `pending` record naming the
-ask id, until a host answers; see [Asks](#asks) below.
+operand instead, with the command's own GNU line for an operand it may
+not open, at its operand exit code (`cat: /vault/aws.token: Permission
+denied`, `rm: cannot remove 'x': Permission denied`, exit 1), the reason
+on the record and its `scope` set to `operand`. An `ask` refuses at 126
+the same way, with a `pending` record naming the ask id, until a host
+answers; see [Asks](#asks) below.
+
+The terminal's text never carries the policy's words. A surface that
+hands the agent text (the tools, MCP, HTTP, the CLI, the agent adapters,
+SSH) adds the record as one more line after the output,
+`policy denied: <reason>` or `requires approval: <reason> (ask <id>)`.
+FUSE and SFTP can hand back only an errno, so they log the reason.
 
 A rule holds past the paths typed on the line:
 
 - **Walks and lines across mounts.** Every entry `grep -r`, `rg`, `tar`,
   `cp -r` or `find -delete` reaches is refused in the command's own voice
-  for an entry it cannot open (`grep: <path>: Permission denied`);
-  `find -delete` names the reason.
+  for an entry it cannot open (`grep: <path>: Permission denied`), and
+  the line's record carries the rule's reason.
 - **Paths a command opens itself**, such as awk's `print >` and sed's `w`,
   judged on the path as written and with every link followed.
 - **The read cache.** Bytes another session left in the shared cache are
   refused exactly as a cold read of them.
 
 Unlike GNU, a rule answers before "No such file or directory" does. A path
-typed on the line is refused with the rule's reason even when it does not
-exist (`sed: /data/nope/y: sealed`), and so is a path a command opens
+typed on the line is refused even when it does not exist
+(`sed: can't read /data/nope/y: Permission denied`), and so is a path a command opens
 itself whose parent directory is missing or that is a dangling link. Only
 a `..` through a missing directory answers "No such file or directory"
 first, as GNU does.

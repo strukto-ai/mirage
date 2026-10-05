@@ -371,7 +371,6 @@ def test_prune_with_a_known_mtime_needs_no_settling():
 
 
 def test_settling_needs_every_deferred_test_to_hold():
-
     def two() -> And:
         return bind_tree(
             And([Mtime(100.0, None), Mtime(None, 200.0), Prune()]), ""
@@ -502,7 +501,6 @@ def test_display_path_joins_like_apply_mount_prefix():
 
 
 def test_emit_start_path_counts_a_directory_as_dir_size():
-
     def emit(min_size: int | None, max_size: int | None) -> list[str]:
         results: list[str] = []
         emit_start_path(

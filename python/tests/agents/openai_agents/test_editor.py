@@ -33,7 +33,6 @@ def _workspace() -> Workspace:
 
 
 def test_create_file_makes_every_missing_parent():
-
     async def _run():
         ws = _workspace()
         result = await MirageEditor(ws).create_file(
@@ -48,7 +47,6 @@ def test_create_file_makes_every_missing_parent():
 
 
 def test_create_file_under_a_read_only_mount_fails():
-
     async def _run():
         result = await MirageEditor(_workspace()).create_file(
             ApplyPatchOperation(

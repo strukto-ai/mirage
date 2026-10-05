@@ -59,7 +59,6 @@ async def test_wc_counts(data, field, value):
 async def test_wc_counts_the_same_across_chunk_boundaries(
     chunks: list[bytes], expected: WCCounts
 ):
-
     async def src():
         for chunk in chunks:
             yield chunk
@@ -119,7 +118,6 @@ async def test_format_multi_accepts_a_sync_or_async_iterator_read(read):
 
 @pytest.mark.asyncio
 async def test_format_multi_empty_paths_returns_empty():
-
     async def fake_read(_path):
         return b""
 

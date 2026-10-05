@@ -167,7 +167,7 @@ export class SessionManager {
   commandsOf(sessionId: string): AdmissionRules | null {
     const session = this.sessions.get(sessionId)
     return session === undefined
-      ? (this.defaultProfileInternal?.commands ?? null)
+      ? (this.defaultProfileInternal?.policies.commands ?? null)
       : session.commands
   }
 
@@ -180,7 +180,9 @@ export class SessionManager {
    */
   scriptOf(sessionId: string): ProfileScript | null {
     const session = this.sessions.get(sessionId)
-    return session === undefined ? (this.defaultProfileInternal?.script ?? null) : session.script
+    return session === undefined
+      ? (this.defaultProfileInternal?.policies.script ?? null)
+      : session.script
   }
 
   /**
@@ -291,9 +293,7 @@ export class SessionManager {
         // state: dropping them here would wake a restarted daemon
         // unrestricted and let the next flush erase them from the
         // store.
-        dflt.hiddenPaths = stored.hiddenPaths
-        dflt.shownPaths = stored.shownPaths
-        dflt.hiddenVars = stored.hiddenVars
+        dflt.visibility = stored.visibility
         dflt.hideReasons = stored.hideReasons
         dflt.commands = stored.commands
         dflt.script = stored.script

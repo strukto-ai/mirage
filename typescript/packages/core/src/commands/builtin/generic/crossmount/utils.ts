@@ -22,7 +22,7 @@ import type { LinkView } from '../../../../ops/types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { eisdir, fsErrorLine, isFsError } from '../../../../utils/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
-import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { type FileStat, FileType, PathSpec, type Visibility } from '../../../../types.ts'
 import type { CommandOpts } from '../../../config.ts'
 import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
@@ -186,12 +186,18 @@ export function streamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<U
   return gen
 }
 
-export function transferLinksOf(links: LinkView, dispatch: DispatchFn, cwd: string): TransferLinks {
+export function transferLinksOf(
+  links: LinkView,
+  dispatch: DispatchFn,
+  cwd: string,
+  visibility: Visibility | undefined,
+): TransferLinks {
   const relayStat = statOp(dispatch)
   return {
     links,
     dispatch,
     cwd,
+    ...(visibility !== undefined ? { visibility } : {}),
     relay: {
       readBytes: readBytesOp(dispatch),
       write: async (p: PathSpec, data: Uint8Array) => {

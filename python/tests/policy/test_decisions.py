@@ -197,7 +197,6 @@ async def test_answering_rejects_ask_and_an_unknown_id():
 
 @pytest.mark.asyncio
 async def test_a_host_that_answers_inside_the_line_leaves_nothing_waiting():
-
     async def allow(record: Decision) -> Decision:
         return dataclasses.replace(
             record, outcome=Outcome.ALLOW, scope=Scope.SESSION

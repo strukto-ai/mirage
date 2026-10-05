@@ -12,17 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  parseProcessPermissions,
-  type ProcessPermissions,
-  type ProcessScope,
-} from '../process/config.ts'
+import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
 import type { Limit } from '../types.ts'
 import { parseCommandLimits } from './builtin/output_cap.ts'
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import type { CommandRule, AdmissionRules, ProfileScript } from './types.ts'
 import { ScriptSource } from '../runtime/types.ts'
-import type { HiddenPaths, HiddenVars, ShowEntry, ShownPaths } from '../types.ts'
+import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode } from '../types.ts'
 import type { HideReason } from './types.ts'
 import { isGlob } from '../utils/hidden.ts'
@@ -174,27 +170,45 @@ export interface ProfilePolicySpec {
 }
 
 /**
- * The session fields a profile compiles to. `commands` is the profile's
- * admission rules, its own and its mount sections' in one list;
- * `script` is its policy program, which `ScriptPolicy` calls at the
- * admission gate.
+ * What a profile seeds a new session with; the agent's to change
+ * afterwards, so a stored session keeps its own.
  */
-export interface CompiledProfile {
-  readonly mountModes: ReadonlyMap<string, MountMode> | null
-  readonly hiddenPaths: HiddenPaths | null
-  readonly hiddenVars: HiddenVars | null
+export interface ProfileSetup {
   readonly env: Readonly<Record<string, string>> | null
   readonly cwd: string | null
+}
+
+/**
+ * What a profile lets a session do, for the policy chain to judge.
+ * `mountModes` is the mode each mount section states (a mount absent
+ * from the map keeps its own); `commands` the admission rules, its own
+ * and its mount sections' in one list; `script` its policy program,
+ * which `ScriptPolicy` calls at the admission gate; `processes` whose
+ * processes the session may stop and how many it may hold.
+ */
+export interface ProfilePolicies {
+  readonly mountModes: ReadonlyMap<string, MountMode> | null
   readonly commands: AdmissionRules | null
-  readonly script?: ProfileScript | null
-  /** Every show entry the profile states, its own and its mount sections'. */
-  readonly shownPaths?: ShownPaths | null
-  /** The operator's reasons for grouped hides, never rendered to the agent. */
-  readonly hideReasons?: readonly HideReason[]
-  /** The profile's name, null for a document passed without one; the session's group. */
-  readonly profile?: string | null
-  readonly commandLimits?: Readonly<Record<string, Limit>> | null
-  readonly processes?: ProcessPermissions
+  readonly script: ProfileScript | null
+  readonly commandLimits: Readonly<Record<string, Limit>> | null
+  readonly processes: ProcessPermissions
+}
+
+/**
+ * What an effective profile compiles to: the setup a session starts
+ * from, what exists for it (`visibility`, which the views and the op
+ * boundary read), and what it may do (`policies`, which the policy
+ * chain judges). `hideReasons` are the operator's reasons for grouped
+ * hides, never rendered to the agent; `profile` is the profile's name,
+ * null for a document passed without one, and what the session reports
+ * as its group.
+ */
+export interface CompiledProfile {
+  readonly setup: ProfileSetup
+  readonly visibility: Visibility
+  readonly policies: ProfilePolicies
+  readonly hideReasons: readonly HideReason[]
+  readonly profile: string | null
 }
 
 const RULE_FIELDS = ['reason', 'commands', 'paths'] as const

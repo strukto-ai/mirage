@@ -25,7 +25,6 @@ from mirage.workspace import Workspace
 
 
 def _make_readdir(tree):
-
     def readdir(path):
         if path in tree:
             return tree[path]
@@ -35,7 +34,6 @@ def _make_readdir(tree):
 
 
 def _make_stat(files):
-
     def stat_fn(path):
         if path in files:
             return files[path]
@@ -46,7 +44,6 @@ def _make_stat(files):
 
 @pytest.mark.anyio
 async def test_rg_scan_collects_warnings_on_unreadable_file():
-
     async def read_bytes(path):
         if path.virtual == "/good.py":
             return b"hello world\n"

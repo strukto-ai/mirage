@@ -145,7 +145,7 @@ async def test_admit_line_refuses_the_first_offending_command():
         assert refusal is not None
         assert (refusal.exit_code, refusal.stderr) == (
             1,
-            b"cat: /data/secret: sealed\n",
+            b"cat: /data/secret: Permission denied\n",
         )
         # The same gate, one command at a time; a command that gets
         # through comes back as its gate.
@@ -187,17 +187,23 @@ async def test_a_bare_listing_reads_the_working_directory():
 
         assert await run("ls") is None
         await ws.shell("cd /data/private")
-        assert await run("ls") == (1, "ls: .: private\n")
+        assert await run("ls") == (
+            1,
+            "ls: cannot access '.': Permission denied\npolicy denied: private\n",
+        )
         # A named operand replaces the implied one.
         assert await run("ls", "/data") is None
         # grep reads the cwd only under -r; rg yields to a piped stdin.
         assert await run("grep", "x") is None
         assert await run("grep", "-r", "x") == (
             1,
-            "grep: /data/private: private\n",
+            "grep: /data/private: Permission denied\npolicy denied: private\n",
         )
         assert await run("rg", "x", stdin=b"x\n") is None
-        assert await run("rg", "x") == (1, "rg: /data/private: private\n")
+        assert await run("rg", "x") == (
+            1,
+            "rg: /data/private: Permission denied\npolicy denied: private\n",
+        )
     finally:
         await ws.close()
 
@@ -223,11 +229,11 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
         # is a path, a quoted head is the command.
         assert await line("'cat' \"/data/secret\"") == (
             1,
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
         assert await line("cat /data/sec\\ret") == (
             1,
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
         # A head only the runtime can expand is refused under any rule.
         assert await line("$cmd /data/x") == (
@@ -260,7 +266,7 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
         # What a word runs is admitted in turn.
         assert await line("eval 'cat /data/secret'") == (
             1,
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
         assert await line('eval "$p"') == (
             126,
@@ -270,7 +276,7 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
         )
         assert await line("echo $(cat /data/secret)") == (
             1,
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
         assert await line("ls | xargs cat") == (
             126,
@@ -312,7 +318,7 @@ async def test_admit_line_classifies_bare_operands_with_the_spec():
         assert refusal is not None
         assert (refusal.exit_code, refusal.stderr) == (
             1,
-            b"cat: secret: sealed\n",
+            b"cat: secret: Permission denied\n",
         )
         assert (
             await admit_line(parse("cat open"), session, registry, namespace)
@@ -350,7 +356,7 @@ async def test_admit_line_reads_an_interpreters_script_as_a_path():
         assert refusal is not None
         assert (refusal.exit_code, refusal.stderr) == (
             1,
-            b"python3: secret.py: sealed\n",
+            b"python3: secret.py: Permission denied\n",
         )
         refusal = await admit_line(
             parse("node -- secret.js"), session, registry, namespace
@@ -358,7 +364,7 @@ async def test_admit_line_reads_an_interpreters_script_as_a_path():
         assert refusal is not None
         assert (refusal.exit_code, refusal.stderr) == (
             1,
-            b"node: secret.js: sealed\n",
+            b"node: secret.js: Permission denied\n",
         )
         for text in (
             "python3 -c 'print(1)' secret.py",
@@ -442,12 +448,12 @@ async def test_admit_line_reads_redirect_targets_as_words_of_the_command():
 
         assert await line("cat < /data/secret") == (
             1,
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
         assert await line("head -c 1 /data/open > /data/secret2") is None
         assert await line("cat /data/open > /data/secret2") == (
             1,
-            "cat: /data/secret2: sealed\n",
+            "cat: /data/secret2: Permission denied\npolicy denied: sealed\n",
         )
         assert await line("cat < $F") == (
             126,
@@ -488,7 +494,7 @@ async def test_admit_line_binds_a_hoisted_redirect_to_its_command(text):
         assert refusal is not None
         assert (refusal.exit_code, _voiced(refusal)) == (
             1,
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
     finally:
         await ws.close()
@@ -505,7 +511,8 @@ async def test_a_hoisted_redirect_is_judged_with_its_command_on_the_run(text):
         await ws.shell("echo TOPSECRET > /data/secret")
         io = await ws.shell(text)
         assert "TOPSECRET" not in await io.stdout_str()
-        assert "cat: /data/secret: sealed" in await io.stderr_str()
+        assert "cat: /data/secret: Permission denied" in await io.stderr_str()
+        assert io.refusal is not None and io.refusal.reason == "sealed"
     finally:
         await ws.close()
 
@@ -540,19 +547,20 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
 
         assert await run(plain, "cat", "/data/secret") == (
             1,
-            "cat: /data/secret: sealed\n",
+            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
         )
         assert await run(veiled, "cat", "/data/secret") is None
         assert await run(plain, "ls", "/data/private") == (
             1,
-            "ls: /data/private: private\n",
+            "ls: cannot access '/data/private': Permission denied\n"
+            "policy denied: private\n",
         )
         assert await run(veiled, "ls", "/data/private") is None
         # The followed target and the implied operand are dropped too.
         await ws.shell("ln -s /data/secret /data/l")
         assert await run(plain, "cat", "/data/l") == (
             1,
-            "cat: /data/l: sealed\n",
+            "cat: /data/l: Permission denied\npolicy denied: sealed\n",
         )
         assert await run(veiled, "cat", "/data/l") is None
         # Whatever the session sees is still read as before.
@@ -560,7 +568,7 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
         await ws.shell("echo x > /data/private/f")
         assert await run(plain, "grep", "-r", "x", "/data/private") == (
             1,
-            "grep: /data/private: private\n",
+            "grep: /data/private: Permission denied\npolicy denied: private\n",
         )
         assert await run(veiled, "grep", "-r", "x", "/data/private") is None
     finally:
@@ -610,11 +618,13 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
     with pytest.raises(PolicyDenied) as info:
         gate.check("/data/sealed/s")
     assert info.value.errno == errno.EACCES
-    assert info.value.strerror == "sealed"
+    assert info.value.strerror == "Permission denied"
+    assert info.value.refusal and info.value.refusal.reason == "sealed"
     assert info.value.filename == "/data/sealed/s"
     with pytest.raises(PolicyDenied) as info:
         gate.check("/data/asked/a")
-    assert info.value.strerror == "nod"
+    assert info.value.strerror == "Permission denied"
+    assert info.value.refusal and info.value.refusal.reason == "nod"
     # An operand the gate judged passes whatever the rules say about it
     # (the line was admitted on it), and a grant under the asking rule
     # opens its scope to the walk.
@@ -641,6 +651,34 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
     ] == [False, False, True, True]
     assert not judged.refuses("/data/asked/a")
     assert not granted.refuses("/data/asked/a")
+
+
+def test_the_admitted_gate_scopes_each_start_point_on_its_own():
+    # A walk keeps its native op where no rule could reach: the gate of
+    # `find /data /other` sets aside only the walk of /data.
+    rules = AdmissionRules(
+        deny=(CommandRule(reason="sealed", paths=("/data/sealed",)),)
+    )
+    gate = Admitted(
+        rules=rules,
+        tokens=("find", "/data", "/other"),
+        judged=frozenset({"/data", "/other"}),
+        granted=(),
+        scoped=True,
+    )
+    assert gate.scopes("/data")
+    assert gate.scopes("/data/sealed/s")
+    assert not gate.scopes("/other")
+    # A pre_ops policy judges every op, so every walk is the guard's.
+    judged = Admitted(
+        rules=rules,
+        tokens=("find", "/other"),
+        judged=frozenset({"/other"}),
+        granted=(),
+        scoped=True,
+        ops_judged=True,
+    )
+    assert judged.scopes("/other")
 
 
 @pytest.mark.asyncio

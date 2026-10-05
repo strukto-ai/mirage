@@ -29,6 +29,7 @@ import {
   SEARCH_PAGE,
   continueFolder,
   listFolderState,
+  movePath,
   searchFiles,
 } from './api.ts'
 
@@ -138,5 +139,22 @@ describe('continueFolder', () => {
     expect(out.cursor).toBe('c2')
     expect(rpc.mock.calls[0]?.[1]).toBe('/files/list_folder/continue')
     expect(rpc.mock.calls[0]?.[2]).toEqual({ cursor: 'c0' })
+  })
+})
+
+describe('movePath', () => {
+  const entry = { '.tag': 'file', name: 'b' }
+  it.each([
+    ['the moved entry', { metadata: entry }, entry],
+    ['an empty body', null, {}],
+    ['no metadata', {}, {}],
+    ['null metadata', { metadata: null }, {}],
+    ['string metadata', { metadata: 'b' }, {}],
+    ['array metadata', { metadata: [] }, {}],
+  ])('reads %s', async (_label, reply, moved) => {
+    // Anything but an object names no kind, so the rename keeps its
+    // subtree drop; the transport reads an empty body as null.
+    rpc.mockResolvedValueOnce(reply)
+    expect(await movePath(TM, '/a', '/b')).toEqual(moved)
   })
 })

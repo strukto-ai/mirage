@@ -99,7 +99,6 @@ async def test_refresh_mode_rotates_refresh_token():
 
 @pytest.mark.asyncio
 async def test_refresh_fn_overrides_default_flow():
-
     async def refresh_fn(current: str) -> tuple[str, str, int]:
         assert current == "rt-1"
         return "at-custom", "rt-1", 3600

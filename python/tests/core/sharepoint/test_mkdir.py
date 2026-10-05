@@ -168,7 +168,6 @@ def _scoped_spec(rel: str) -> PathSpec:
 
 
 def _recording(posts: list[str], status: int = 201):
-
     def _cb(url, **kwargs):
         posts.append(f"{status} {url}")
         payload = {"id": "1"} if status < 400 else _NOT_FOUND

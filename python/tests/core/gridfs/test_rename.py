@@ -89,7 +89,6 @@ def _install(monkeypatch, files: _FakeFiles) -> None:
 
 
 def _latest_of(files: _FakeFiles):
-
     async def latest_file(
         accessor: GridFSAccessor, key: str
     ) -> dict[str, Any] | None:
@@ -102,7 +101,6 @@ def _latest_of(files: _FakeFiles):
 
 
 def _delete_of(files: _FakeFiles):
-
     async def delete_all(
         accessor: GridFSAccessor, query: dict[str, Any]
     ) -> None:

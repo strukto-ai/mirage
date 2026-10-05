@@ -169,7 +169,6 @@ def test_errors_number_the_pieces():
 
 
 def test_errors_name_a_script_file_and_line():
-
     def file(text: str) -> SedScriptPiece:
         return SedScriptPiece("file", text, "/s.sed")
 

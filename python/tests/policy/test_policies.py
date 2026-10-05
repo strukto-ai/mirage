@@ -255,7 +255,7 @@ async def test_pre_ops_gate_raises_eacces():
         await pre_ops_gate(policies, "read", _path("/data/x"), False, "/data/")
     assert excinfo.value.errno == errno.EACCES
     assert excinfo.value.filename == "/data/x"
-    assert "no reads" in str(excinfo.value)
+    assert excinfo.value.refusal and "no reads" in excinfo.value.refusal.reason
     # No opinion on writes: the gate passes silently.
     await pre_ops_gate(policies, "write", _path("/data/x"), True, "/data/")
 

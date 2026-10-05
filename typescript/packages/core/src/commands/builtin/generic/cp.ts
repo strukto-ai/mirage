@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { pathAllowed } from '../../../context/session_context.ts'
+import { pathVisible } from '../../../utils/hidden.ts'
 import { mountedPath, respelled } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
@@ -30,6 +30,7 @@ import {
   type PrimitiveMove,
   type ReaddirFn,
   type StatFn,
+  type Visibility,
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { argmatchError, extraOperandError } from '../../spec/usage.ts'
@@ -94,6 +95,8 @@ export interface TransferLinks {
   cwd: string
   relay: PrimitiveCopy
   relayStat: StatFn
+  /** The session's visibility; a link it hides is not copied. */
+  visibility?: Visibility
 }
 
 // Each option of cp's link policy, and what it asks for; the last typed wins
@@ -366,7 +369,7 @@ export async function copyTreeLinks(
   const shownDst = rstripSlash(target.rawPath) || target.rawPath
   const below = [...copies.links.subtree(base)].sort((a, b) => compareCodePoints(a[0], b[0]))
   for (const [virtual, row] of below) {
-    if (!pathAllowed(virtual)) continue
+    if (!pathVisible(copies.visibility, virtual)) continue
     const rel = virtual.slice(rstripSlash(base).length + 1)
     const landing = `${dstBase}/${rel}`
     const shown = `${shownSrc}/${rel}`

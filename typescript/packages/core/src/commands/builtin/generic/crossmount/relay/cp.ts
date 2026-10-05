@@ -100,7 +100,16 @@ export async function runCp(
     storageKey,
     undefined,
     undefined,
-    links === undefined ? undefined : { links, dispatch, cwd, relay: strategy, relayStat: stat },
+    links === undefined
+      ? undefined
+      : {
+          links,
+          dispatch,
+          cwd,
+          relay: strategy,
+          relayStat: stat,
+          ...(ns?.visibility !== undefined ? { visibility: ns.visibility } : {}),
+        },
     stdin,
   )
   // Every read went through the dispatcher, whose cold read keeps what the

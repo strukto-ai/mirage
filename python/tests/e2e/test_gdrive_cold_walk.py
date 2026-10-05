@@ -62,7 +62,6 @@ def cold():
 
 
 def _run(ws: Workspace, cmd: str) -> tuple[str, int]:
-
     async def _inner():
         io = await ws.shell(cmd)
         return await io.stdout_str(), io.exit_code

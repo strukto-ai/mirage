@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "id": "rm_r_warm_folder_keeps_only_its_sibling",
+      "seq": 613223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "ram-redis-cache"
+      ],
+      "command": "mkdir -p /data/rmw1/d/sub && printf 'x\\n' > /data/rmw1/d/sub/x.txt && printf 'k\\n' > /data/rmw1/k.txt && cat /data/rmw1/d/sub/x.txt /data/rmw1/k.txt > /dev/null && ls /data/rmw1 /data/rmw1/d > /dev/null && rm -r /data/rmw1/d && ls /data/rmw1 && cat /data/rmw1/k.txt; cat /data/rmw1/d/sub/x.txt; echo rc=$?; rm -r /data/rmw1",
+      "expect": {
+        "exit": 0,
+        "stdout": "k.txt\nk\nrc=1\n",
+        "stderr": "cat: /data/rmw1/d/sub/x.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

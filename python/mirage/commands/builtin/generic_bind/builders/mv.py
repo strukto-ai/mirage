@@ -60,6 +60,7 @@ async def mv(
                 opts.ns.links,
                 opts.dispatch,
                 opts.cwd.virtual if opts.cwd is not None else "/",
+                opts.ns.visibility,
             )
             if opts.ns is not None
             and opts.ns.links is not None

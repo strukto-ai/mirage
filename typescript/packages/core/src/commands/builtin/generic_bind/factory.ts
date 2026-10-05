@@ -233,6 +233,7 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
           ),
           opts.signal,
         ),
+        opts.ns,
         paths.length > 0 ? paths : [PathSpec.fromStrPath(opts.cwd)],
         opts.mountPrefix ?? '',
       )

@@ -49,7 +49,7 @@ function readonlyLines(session: SessionState, flags: Set<string>): string[] {
   const lines: string[] = []
   // A hidden readonly never prints even its bare `declare -r NAME` row.
   for (const name of [...session.readonlyVars]
-    .filter((name) => !varHidden(session.hiddenVars, name))
+    .filter((name) => !varHidden(session.visibility, name))
     .sort(compareCodePoints)) {
     const arr = session.arrays[name]
     const amap = session.assocs[name]

@@ -36,6 +36,7 @@ import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { Channel, JobConsole } from '@struktoai/mirage-core/shell/console/index'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
@@ -358,6 +359,7 @@ async function run(host: Host, testCase: Case): Promise<number> {
         actual = { error: err instanceof Error ? err.message : String(err) }
         const condition = classify(err)
         if (condition !== null) actual.errno = condition
+        if (err instanceof PolicyDenied && err.refusal !== null) actual.reason = err.refusal.reason
       }
       const expected = step.expect ?? { value: null }
       if (!matches(actual, expected)) {

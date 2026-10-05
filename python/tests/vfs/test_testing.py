@@ -125,7 +125,6 @@ async def test_a_table_built_driver_meets_the_driver_contract(content):
 
 @pytest.mark.asyncio
 async def test_driver_contract_catches_a_read_that_ignores_the_window():
-
     @op("read", vfs="custom")
     async def whole_read(accessor, path, **kwargs):
         return CONTENT
@@ -138,7 +137,6 @@ async def test_driver_contract_catches_a_read_that_ignores_the_window():
 
 @pytest.mark.asyncio
 async def test_driver_contract_catches_a_stat_that_answers_for_a_missing_path():
-
     @op("stat", vfs="custom")
     async def lenient_stat(accessor, path, *, index=None, **kwargs):
         if path.vfs_path == MISSING.vfs_path:

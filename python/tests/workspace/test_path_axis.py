@@ -52,7 +52,6 @@ def _carved() -> Workspace:
 
 
 def _run(ws: Workspace, line: str):
-
     async def go():
         return await ws.shell(line, session_id="rev")
 
@@ -455,7 +454,6 @@ def _boxed(profile: dict) -> Workspace:
 
 
 def _host(ws: Workspace, line: str):
-
     async def go():
         return await ws.shell(line)
 

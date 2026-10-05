@@ -196,6 +196,10 @@ export async function runTarget(
   if (target.console !== undefined && target.mounts[0].vfs !== 'ram') {
     throw new Error(`target ${target.id}: console targets ride ram mounts`)
   }
+  // The cache block is wired into the ram opener alone, for the same reason.
+  if (target.cache !== undefined && target.mounts[0].vfs !== 'ram') {
+    throw new Error(`target ${target.id}: cache targets ride ram mounts`)
+  }
   // The secrets env block is wired into the ram opener alone, for the
   // console block's reason: a target that declares one on an opener
   // that drops it would run with no managed vars and read as covered.

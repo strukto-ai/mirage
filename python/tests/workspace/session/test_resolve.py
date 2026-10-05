@@ -265,15 +265,18 @@ def test_compile_profile_turns_the_document_into_session_fields():
             vars=VarsBlock(hide=("SLACK_TOKEN", "AWS_*")),
         )
     )
-    assert out.mount_modes == {"/a": MountMode.WRITE, "/b": MountMode.READ}
-    assert out.hidden_paths == HiddenPaths(
+    assert out.policies.mount_modes == {
+        "/a": MountMode.WRITE,
+        "/b": MountMode.READ,
+    }
+    assert out.visibility.paths == HiddenPaths(
         paths=("/a/secrets",), patterns=("*.key",)
     )
-    assert out.hidden_vars == HiddenVars(
+    assert out.visibility.vars == HiddenVars(
         names=("SLACK_TOKEN",), patterns=("AWS_*",)
     )
-    assert out.env == {"ROLE": "x"}
-    assert out.cwd == "/scratch"
+    assert out.setup.env == {"ROLE": "x"}
+    assert out.setup.cwd == "/scratch"
 
 
 def test_compile_profile_collects_the_hides_of_every_mount_section():
@@ -291,26 +294,26 @@ def test_compile_profile_collects_the_hides_of_every_mount_section():
     # The set is one list for the whole session, so a name pattern
     # written under a mount has to carry the mount with it: raw,
     # ``*.pem`` would hide ``/scratch/key.pem`` too.
-    assert out.hidden_paths == HiddenPaths(
+    assert out.visibility.paths == HiddenPaths(
         paths=("/shared/finance", "/repo/.env"), patterns=("/repo/*.pem",)
     )
-    assert path_hidden(out.hidden_paths, "/repo/deep/key.pem")
-    assert not path_hidden(out.hidden_paths, "/scratch/key.pem")
+    assert path_hidden(out.visibility.paths, "/repo/deep/key.pem")
+    assert not path_hidden(out.visibility.paths, "/scratch/key.pem")
     profile = compile_profile(
         SessionProfile(paths=PathsBlock(hide=("*.pem",)))
     )
-    assert path_hidden(profile.hidden_paths, "/scratch/key.pem")
+    assert path_hidden(profile.visibility.paths, "/scratch/key.pem")
 
 
 def test_compile_profile_of_a_bare_or_absent_role_states_nothing():
     empty = compile_profile(None)
     assert (
-        empty.mount_modes,
-        empty.hidden_paths,
-        empty.hidden_vars,
-        empty.env,
-        empty.cwd,
-        empty.commands,
+        empty.policies.mount_modes,
+        empty.visibility.paths,
+        empty.visibility.vars,
+        empty.setup.env,
+        empty.setup.cwd,
+        empty.policies.commands,
     ) == (None, None, None, None, None, None)
     assert compile_profile(SessionProfile()) == empty
     # A profile that names a mount without a mode narrows nothing: the
@@ -318,7 +321,7 @@ def test_compile_profile_of_a_bare_or_absent_role_states_nothing():
     assert (
         compile_profile(
             SessionProfile(mounts={"/a": ProfileMount()})
-        ).mount_modes
+        ).policies.mount_modes
         is None
     )
 
@@ -336,9 +339,9 @@ def test_narrow_stamps_the_uneditable_fields_and_apply_seeds_the_rest():
     narrowed = SessionState(session_id="s1")
     narrow(narrowed, compiled)
     assert narrowed.mount_modes == {"/a": MountMode.WRITE}
-    assert narrowed.mount_modes is not compiled.mount_modes
-    assert narrowed.hidden_paths == HiddenPaths(paths=("/a/secrets",))
-    assert narrowed.hidden_vars == HiddenVars(names=("SLACK_TOKEN",))
+    assert narrowed.mount_modes is not compiled.policies.mount_modes
+    assert narrowed.visibility.paths == HiddenPaths(paths=("/a/secrets",))
+    assert narrowed.visibility.vars == HiddenVars(names=("SLACK_TOKEN",))
     assert narrowed.cwd == "/" and "ROLE" not in narrowed.env
     applied = SessionState(session_id="s2")
     apply_profile(applied, compiled)
@@ -352,14 +355,29 @@ def test_narrow_carries_the_role_s_admission_rules_onto_the_session():
     compiled = compile_profile(
         SessionProfile(commands=CommandsBlock(allow=("ls",), ask=("git",)))
     )
-    assert compiled.commands == AdmissionRules(
+    assert compiled.policies.commands == AdmissionRules(
         allow=("ls",),
         ask=(CommandRule(reason="no standing approval", commands=("git",)),),
     )
     session = SessionState(session_id="s")
     narrow(session, compiled)
-    assert session.commands == compiled.commands
-    assert compile_profile(SessionProfile(cwd="/x")).commands is None
+    assert session.commands == compiled.policies.commands
+    assert session.visibility.commands == ("ls",)
+    assert compile_profile(SessionProfile(cwd="/x")).policies.commands is None
+
+
+def test_the_process_list_scope_is_part_of_what_a_session_sees():
+    seen = compile_profile(
+        SessionProfile.model_validate({"processes": "workspace"})
+    )
+    assert seen.visibility.processes == "workspace"
+    assert seen.policies.processes.list == "workspace"
+    session = SessionState(session_id="s")
+    narrow(session, seen)
+    assert session.visibility.processes == "workspace"
+    assert compile_profile(SessionProfile(cwd="/x")).visibility.processes == (
+        "session"
+    )
 
 
 def test_with_inline_cannot_add_show_and_the_bases_survives():
@@ -456,15 +474,15 @@ def test_compile_profile_collects_the_shows_of_every_mount_section():
             },
         )
     )
-    assert out.shown_paths == ShownPaths(
+    assert out.visibility.shown == ShownPaths(
         entries=(
             ShowEntry(path="/repo/public", mode=None),
             ShowEntry(path="/data/out", mode=MountMode.WRITE),
         )
     )
     # The axis reads them together: the show reopens its subtree.
-    assert path_visible(out.hidden_paths, out.shown_paths, "/repo/public/a")
-    assert not path_visible(out.hidden_paths, out.shown_paths, "/repo/x")
+    assert path_visible(out.visibility, "/repo/public/a")
+    assert not path_visible(out.visibility, "/repo/x")
 
 
 def test_compile_profile_anchors_a_mount_sections_reasons():
@@ -504,10 +522,10 @@ def test_narrow_stamps_the_path_axis():
     )
     session = SessionState(session_id="s")
     narrow(session, compiled)
-    assert session.shown_paths == compiled.shown_paths
+    assert session.visibility.shown == compiled.visibility.shown
     assert session.hide_reasons == compiled.hide_reasons
     empty = compile_profile(None)
-    assert empty.shown_paths is None and empty.hide_reasons == ()
+    assert empty.visibility.shown is None and empty.hide_reasons == ()
 
 
 def test_compile_profile_carries_the_name_and_narrow_stamps_it():

@@ -33,12 +33,12 @@ from mirage.commands.builtin.rg_scan import walk_candidates
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.core.github.constants import SCOPE_ERROR
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.core.github.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 
 
@@ -57,9 +57,7 @@ async def rg(
     # under a hide or a path rule the scan sets search aside and reads
     # through the command guards, which report a refused directory where
     # ripgrep does and never open a sealed file.
-    scoped = path_rules_active() or any(
-        hidden_paths_intersect(p.virtual) for p in paths
-    )
+    scoped = paths_scoped(opts.ns, paths)
 
     run_opts = opts
     if paths:

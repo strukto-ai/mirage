@@ -30,7 +30,6 @@ from mirage.utils.ranges import (
 
 
 def _make_read(fn: OpCoreFn) -> OpCoreFn:
-
     async def read(
         accessor: Accessor,
         path: PathSpec,
@@ -118,7 +117,6 @@ def _make_glob(table: OpsTable) -> OpCoreFn:
 
 
 def _make_data_write(fn: OpCoreFn) -> OpCoreFn:
-
     async def write(
         accessor: Accessor, path: PathSpec, data: bytes, **kwargs
     ) -> None:
@@ -130,7 +128,6 @@ def _make_data_write(fn: OpCoreFn) -> OpCoreFn:
 def _make_emulated_append(
     stat: OpCoreFn, read_bytes: OpCoreFn, write_bytes: OpCoreFn
 ) -> OpCoreFn:
-
     async def append(
         accessor: Accessor,
         path: PathSpec,
@@ -176,7 +173,6 @@ def _expect_offset(offset: int, path: PathSpec) -> int:
 
 
 def _make_pwrite(fn: OpCoreFn) -> OpCoreFn:
-
     async def pwrite(
         accessor: Accessor, path: PathSpec, data: bytes, offset: int, **kwargs
     ) -> None:
@@ -188,7 +184,6 @@ def _make_pwrite(fn: OpCoreFn) -> OpCoreFn:
 def _make_emulated_pwrite(
     read_bytes: OpCoreFn, write_bytes: OpCoreFn, stat: OpCoreFn
 ) -> OpCoreFn:
-
     async def pwrite(
         accessor: Accessor,
         path: PathSpec,
@@ -242,7 +237,6 @@ def _make_emulated_pwrite(
 
 
 def _make_path_write(fn: OpCoreFn) -> OpCoreFn:
-
     async def mutate(accessor: Accessor, path: PathSpec, **kwargs) -> None:
         await fn(accessor, path)
 
@@ -284,7 +278,6 @@ async def refuse_taken(
 def _make_mkdir_parents(
     fn: OpCoreFn, stat: OpCoreFn, force_parents: bool = True
 ) -> OpCoreFn:
-
     async def mkdir(accessor: Accessor, path: PathSpec, **kwargs) -> None:
         parents = kwargs.get("parents") is True
         await refuse_taken(stat, accessor, path, parents)
@@ -294,7 +287,6 @@ def _make_mkdir_parents(
 
 
 def _make_rename(fn: OpCoreFn) -> OpCoreFn:
-
     async def rename(
         accessor: Accessor, src: PathSpec, dst: PathSpec, **kwargs
     ) -> None:
@@ -304,7 +296,6 @@ def _make_rename(fn: OpCoreFn) -> OpCoreFn:
 
 
 def _make_truncate(fn: OpCoreFn) -> OpCoreFn:
-
     async def truncate(
         accessor: Accessor,
         path: PathSpec,
@@ -320,7 +311,6 @@ def _make_truncate(fn: OpCoreFn) -> OpCoreFn:
 def _make_emulated_truncate(
     read_bytes: OpCoreFn, write_bytes: OpCoreFn
 ) -> OpCoreFn:
-
     async def truncate(
         accessor: Accessor,
         path: PathSpec,
@@ -340,7 +330,6 @@ def _make_emulated_truncate(
 
 
 def _make_set_attrs(fn: OpCoreFn) -> OpCoreFn:
-
     async def set_attrs(
         accessor: Accessor,
         path: PathSpec,

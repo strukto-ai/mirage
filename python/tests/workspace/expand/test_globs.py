@@ -31,7 +31,6 @@ from mirage.workspace.mount.mount import MountEntry
 
 
 def _mock_registry(resolve_result=None):
-
     async def _glob(accessor, path, **kwargs):
         if callable(resolve_result):
             return resolve_result([path])
@@ -767,7 +766,6 @@ async def _answers_nothing(_accessor, _path, *args, **kwargs):
 
 
 def _unstatable(virtual: str, stat):
-
     async def answer(accessor, path, *args, **kwargs):
         if path.virtual == virtual:
             return None

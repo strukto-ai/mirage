@@ -91,7 +91,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: secret.py: protected\n"
+            "stderr": "python3: secret.py: Permission denied\n"
           }
         },
         {
@@ -99,7 +99,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: secret.py: protected\n"
+            "stderr": "python3: secret.py: Permission denied\n"
           }
         },
         {
@@ -162,7 +162,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "python3: ./secret.py: protected\n"
+            "stderr": "python3: ./secret.py: Permission denied\n"
           }
         },
         {

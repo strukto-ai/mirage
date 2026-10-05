@@ -39,6 +39,7 @@ export {
   preSessionGate,
   describeRefusal,
   saysWhy,
+  policyDenied,
   refusalOf,
   renderDeny,
   renderPending,

@@ -20,7 +20,6 @@ async def _setup(ws: Workspace) -> None:
 
 
 def test_unknown_predicate_exits_1_and_prints_nothing() -> None:
-
     async def _go():
         ws = _ws()
         await _setup(ws)
@@ -33,7 +32,6 @@ def test_unknown_predicate_exits_1_and_prints_nothing() -> None:
 
 
 def test_unsupported_regex_exits_1() -> None:
-
     async def _go():
         ws = _ws()
         await _setup(ws)
@@ -44,7 +42,6 @@ def test_unsupported_regex_exits_1() -> None:
 
 
 def test_supported_name_still_exits_0() -> None:
-
     async def _go():
         ws = _ws()
         await _setup(ws)

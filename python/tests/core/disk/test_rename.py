@@ -69,3 +69,31 @@ async def test_rename_evicts_both_identities(tmp_path):
     assert manager.subtrees == ["/src", "/dst"]
     assert manager.writes == []
     assert (tmp_path / "dst" / "f.txt").read_bytes() == b"x"
+
+
+@pytest.mark.asyncio
+async def test_rename_of_a_file_evicts_no_subtree_once_it_has_landed(
+    tmp_path,
+):
+    # A regular file has nothing beneath it: both ends take the unlink
+    # flavor, which still drops the destination's own listing. Evicting
+    # before the rename left a window in which a listing read in between
+    # re-cached the pre-rename view, with nothing evicting it after.
+    (tmp_path / "a.txt").write_bytes(b"A")
+    manager = _FakeManager()
+    landed: list[bool] = []
+    record = manager.invalidate_after_unlink
+
+    async def invalidate_after_unlink(path: PathSpec) -> None:
+        landed.append((tmp_path / "b.txt").exists())
+        await record(path)
+
+    manager.invalidate_after_unlink = invalidate_after_unlink
+    prev = push_cache_manager(manager)
+    try:
+        await rename(DiskAccessor(tmp_path), _spec("/a.txt"), _spec("/b.txt"))
+    finally:
+        push_cache_manager(prev)
+    assert manager.subtrees == []
+    assert manager.unlinks == ["/a.txt", "/b.txt"]
+    assert landed == [True, True]

@@ -24,13 +24,14 @@ from mirage.types import (
     EntryGate,
     MountMode,
     PathSpec,
+    Refusal,
+    Visibility,
     WalkProbe,
     weaker_mode,
 )
 from mirage.utils.errors import ReadOnlyError
 from mirage.utils.hidden import (
     anchor_depth,
-    hides_intersect,
     is_glob,
     path_visible,
     show_head,
@@ -159,38 +160,6 @@ def _session_mode(mount_prefix: str) -> "MountMode":
     return sess.mount_modes.get(_norm_prefix(mount_prefix), MountMode.EXEC)
 
 
-def hidden_paths_active() -> bool:
-    """Whether the current session hides any paths at all.
-
-    For a summarizing fast path (du -s asks the backend for one total)
-    that must not be trusted when hidden leaves could be inside it.
-    Show entries do not trip it: a show without a covering hide
-    restricts nothing, and modes never change what a walk enumerates.
-
-    Args:
-        None
-    """
-    sess = get_current_session()
-    return sess is not None and sess.hidden_paths is not None
-
-
-def hidden_paths_intersect(virtual: str) -> bool:
-    """Whether the current session hides anything at or under this
-    path: the per-operand form of :func:`hidden_paths_active`.
-
-    The native fast paths (find's native op, du's summarize total)
-    classify the raw backend tree, so they fork to the guarded walk
-    when a hide could cover an entry inside the subtree they answer
-    for, and stay on when none can: one hidden ``.env`` under ``/repo``
-    must not force ``find`` on ``/s3`` off its native op.
-
-    Args:
-        virtual (str): absolute virtual path of the walk's start point.
-    """
-    sess = get_current_session()
-    return sess is not None and hides_intersect(sess.hidden_paths, virtual)
-
-
 DEFAULT_UMASK = 0o022
 
 
@@ -198,8 +167,8 @@ def session_umask() -> int:
     """The file-creation mask of the session bound to this context.
 
     Read by the creators that run inside a command handler (`mkdir`,
-    which cannot be handed the session) the way `path_allowed` reads
-    the hidden-paths spec: bash's default when no session is bound,
+    which cannot be handed the session) the way `dotglob_active` reads
+    the shell options: bash's default when no session is bound,
     which is also what mirage's own 644/755 defaults for a new entry
     already assume.
 
@@ -226,40 +195,24 @@ def dotglob_active() -> bool:
     return sess is not None and bool(sess.shopts.get("dotglob"))
 
 
-def session_path_allowed(sess: "SessionState", virtual: str) -> bool:
-    """Whether a session's path axis leaves this path visible: its
-    hides, re-opened where a deeper show entry says so.
+def session_visibility() -> Visibility | None:
+    """The bound session's visibility, None when no session is bound.
 
-    The explicit-session form of ``path_allowed``, for a door that
-    holds the session rather than running under it: the admission
-    gate drops a hidden operand before any policy reads it, so a rule
-    or an ask never names a path the session cannot see.
-
-    Args:
-        sess (SessionState): the session asking.
-        virtual (str): absolute virtual path.
-    """
-    return path_visible(sess.hidden_paths, sess.shown_paths, virtual)
-
-
-def path_allowed(virtual: str) -> bool:
-    """Whether the current session's hidden-paths specs, its own and
-    the workspace-bound one, leave this path visible.
-
-    Enumeration surfaces filter
-    names through it and the doors answer :func:`hidden_refusal` when
-    it says no, so hiding reads as nonexistence, never as a denial
-    that leaks the name. True when no session is bound or the session
-    hides nothing.
+    For the op boundary, which runs under the session it serves and
+    answers a hidden path as absent. A command reads the visibility off
+    its namespace view (``opts.ns.visibility``) instead, so nothing past
+    the boundary consults the session about what exists.
 
     Args:
-        virtual (str): absolute virtual path.
+        None
     """
     sess = get_current_session()
-    return sess is None or session_path_allowed(sess, virtual)
+    return sess.visibility if sess is not None else None
 
 
-def hidden_refusal(virtual: str, create: bool) -> OSError:
+def hidden_refusal(
+    vis: Visibility | None, virtual: str, create: bool
+) -> OSError:
     """The error a hidden path answers, in POSIX's own terms.
 
     ENOENT names a component that does not exist and EACCES an entry
@@ -273,11 +226,12 @@ def hidden_refusal(virtual: str, create: bool) -> OSError:
     not a create is ENOENT.
 
     Args:
+        vis (Visibility | None): the session's visibility.
         virtual (str): the hidden virtual path.
         create (bool): whether the op creates the path it names; a
             rename or copy destination is one.
     """
-    if create and path_allowed(parent(virtual.rstrip("/") or "/")):
+    if create and path_visible(vis, parent(virtual.rstrip("/") or "/")):
         return PermissionError(
             errno.EACCES, os.strerror(errno.EACCES), virtual
         )
@@ -387,6 +341,49 @@ def get_mount_gate() -> tuple[str, MountMode] | None:
     return _current_mount_gate.get()
 
 
+# Where a refusal a door raises is noted for the line running it.
+RefusalSink = Callable[[Refusal], None]
+
+_refusal_sink: ContextVar[RefusalSink | None] = ContextVar(
+    "mirage_refusal_sink",
+    default=None,
+)
+
+
+def set_refusal_sink(sink: RefusalSink) -> Token[Any]:
+    """Bind where the doors note a policy's refusal, for one line's run.
+
+    Set by the workspace around a typed line: a command renders an op
+    refusal in its own GNU words, which say nothing of the policy, so
+    the door notes the record here and the line carries it on its
+    result. Every task and nested line the line starts inherits the
+    binding, so a stream drained after its command returned still
+    reaches it.
+
+    Args:
+        sink (RefusalSink): takes each record as a door raises it.
+    """
+    return _refusal_sink.set(sink)
+
+
+def reset_refusal_sink(token: Token[Any]) -> None:
+    """Restore the previous refusal-sink binding."""
+    _refusal_sink.reset(token)
+
+
+def note_refusal(refusal: Refusal) -> None:
+    """Hand a door's refusal to the line running in this context; a
+    door reached outside any line (a programmatic op) has no line to
+    tell, and the record rides the raised error alone.
+
+    Args:
+        refusal (Refusal): the policy's record.
+    """
+    sink = _refusal_sink.get()
+    if sink is not None:
+        sink(refusal)
+
+
 _current_walk_probe: ContextVar[WalkProbe | None] = ContextVar(
     "mirage_current_walk_probe",
     default=None,
@@ -417,25 +414,6 @@ def get_walk_probe() -> WalkProbe | None:
     """The walk probe bound to the running command, None outside a
     mount's command (a generic invoked directly in a test)."""
     return _current_walk_probe.get()
-
-
-def path_rules_active() -> bool:
-    """Whether a path rule or a coded pre_ops policy judges the running
-    command's paths.
-
-    The twin of ``hidden_paths_active`` for the deny rules: a backend's
-    native find or du classifies the raw tree, so an entry a rule
-    refuses would be listed or summed past the gate; the readdir walk
-    passes every entry through it instead. A coded or scripted
-    ``pre_ops`` hook judges every path the same way, so admission sets
-    the flag for a session one speaks for too. False when no admitted
-    command is bound.
-
-    Args:
-        None
-    """
-    gate = get_admission()
-    return gate is not None and gate.scoped
 
 
 # Opens a statement's write targets as bash does before the command
@@ -615,7 +593,7 @@ def effective_path_mode(
     )
     best_depth = anchor_depth(prefix) if cap is not None else None
     best_mode = cap
-    deepest = shown_mode(sess.shown_paths, virtual)
+    deepest = shown_mode(sess.visibility.shown, virtual)
     if deepest is not None:
         depth, mode = deepest
         if best_depth is None or depth > best_depth:
@@ -663,10 +641,11 @@ def strongest_mode_under(
     """
     best = effective_mount_mode(mount_prefix, mount_mode)
     sess = get_current_session()
-    if sess is None or sess.shown_paths is None:
+    shown = sess.visibility.shown if sess is not None else None
+    if shown is None:
         return best
     prefix = _norm_prefix(mount_prefix)
-    for entry in sess.shown_paths.entries:
+    for entry in shown.entries:
         if entry.mode is None:
             continue
         if _reaches_under(show_head(entry.path), prefix):
@@ -699,10 +678,11 @@ def readonly_below(
         mount_mode (MountMode): the mount's configured mode.
     """
     sess = get_current_session()
-    if sess is None or sess.shown_paths is None:
+    shown = sess.visibility.shown if sess is not None else None
+    if shown is None:
         return None
     v = "/" + virtual.strip("/")
-    for entry in sess.shown_paths.entries:
+    for entry in shown.entries:
         if entry.mode is None:
             continue
         if is_glob(entry.path):

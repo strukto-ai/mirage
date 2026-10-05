@@ -631,7 +631,7 @@ def _pending_of(session: SessionState) -> dict[str, ManagedRef]:
     for name, var in session.vars.items():
         if var.managed is None or var.value is not None:
             continue
-        if var_hidden(session.hidden_vars, name):
+        if var_hidden(session.visibility, name):
             continue
         out[name] = var.managed
     return out

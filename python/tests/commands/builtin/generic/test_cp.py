@@ -293,7 +293,6 @@ _OLD = "2020-01-01T00:00:00+00:00"
 
 
 def _root_readdir(files, dirs):
-
     async def readdir(p) -> list[str]:
         base = _key(p) + "/" if _key(p) != "/" else "/"
         children = {

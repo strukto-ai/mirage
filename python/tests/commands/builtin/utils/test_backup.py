@@ -29,7 +29,6 @@ def _spec(path: str) -> PathSpec:
 
 
 def _listing(children: list[str]):
-
     async def readdir(p) -> list[str]:
         return children
 

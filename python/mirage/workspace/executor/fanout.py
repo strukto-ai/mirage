@@ -31,7 +31,6 @@ from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.errors import CommandTimeoutError, UsageError
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
-from mirage.context import path_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -40,6 +39,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.utils.errors import format_fs_error
+from mirage.utils.hidden import path_visible
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -223,12 +223,13 @@ async def _fan_out_traversal(
     # Only the mounts the walk can reach bound its output: a hidden one
     # never contributes a row, so its stricter limit must not apply.
     prefixes = {primary_mount.prefix}
+    vis = ns.visibility if ns is not None else None
     for path in paths:
         if path.walk_error is None:
             prefixes.update(
                 m.prefix
                 for m in registry.descendant_mounts(path.virtual)
-                if path_allowed("/" + m.prefix.strip("/"))
+                if path_visible(vis, "/" + m.prefix.strip("/"))
             )
     io.producer = Producer(command=cmd_name, prefixes=tuple(sorted(prefixes)))
     return (

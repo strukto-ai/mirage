@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -126,3 +127,24 @@ async def test_rename_into_own_subtree_fails(
     assert files.upload_calls == []
     assert files.delete_calls == []
     assert files.delete_directory_calls == []
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_file_narrows_only_the_source(
+    accessor, files, remote_root, index
+):
+    # The source end is a file, so it drops no subtree. The destination
+    # keeps one: the upload overwrites whatever stands at dst and nothing
+    # here checks that it is not a non-empty directory.
+    _seed_directory(files, remote_root)
+    _seed_file(files, f"{remote_root}/src.txt", b"data")
+    src, dst = _path("/dbx/src.txt"), _path("/dbx/dst.txt")
+    with patch(
+        "mirage.core.databricks_volume.rename.invalidate_after_move",
+        new_callable=AsyncMock,
+    ) as moved:
+        await rename(accessor, src, dst, index)
+    assert [c.args for c in moved.await_args_list] == [
+        (dst, True),
+        (src, False),
+    ]

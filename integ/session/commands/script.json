@@ -359,7 +359,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "credentials are set by the operator\n"
+        "stderr": "AWS_SECRET: permission denied\n"
       }
     },
     {
@@ -542,7 +542,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "credentials are set by the operator\n"
+        "stderr": "AWS_SECRET: permission denied\n"
       }
     },
     {

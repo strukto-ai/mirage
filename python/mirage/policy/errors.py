@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
+from mirage.types import Refusal
+
 
 class PolicyError(Exception):
     """A policy returned something a hook may not return.
@@ -23,7 +27,7 @@ class PolicyError(Exception):
 
 
 class PolicyDenied(PermissionError):
-    """An op refused by an admission policy at an op door.
+    """An op or a session write refused by an admission policy at a door.
 
     A PermissionError subclass so every existing consumer keeps
     working: FUSE adapters classify it to EACCES, programmatic callers
@@ -32,8 +36,23 @@ class PolicyDenied(PermissionError):
     handlers that special-case mount-mode refusals (the read-only
     wording) tell a policy deny apart without guessing from errno.
 
+    The error says what the terminal would (``Permission denied`` at an
+    op door, ``<name>: permission denied`` at the session door), and
+    the policy's own words ride ``refusal``, never the strerror, so a
+    door that renders the error stays byte-identical to a plain EACCES
+    and a door that hands the agent text appends the record's line.
+
     It carries no accounting: a post_ops refusal suppresses the result,
     not the effect, and the door reports the completed op through the
     caller's ``OpReport``, which covers this error and any foreign one
     the same way.
+
+    Args:
+        *args: the OSError arguments (errno, strerror, filename).
+        refusal (Refusal | None): the policy's record, None for a door
+            that refuses on no policy's behalf (a hidden variable).
     """
+
+    def __init__(self, *args: Any, refusal: Refusal | None = None) -> None:
+        super().__init__(*args)
+        self.refusal = refusal

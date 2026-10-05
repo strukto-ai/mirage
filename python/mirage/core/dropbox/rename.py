@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import invalidate_ancestors, invalidate_subtree
+from mirage.cache.context import invalidate_after_move, invalidate_ancestors
 from mirage.core.dropbox.api import (
     delete_path,
     get_metadata,
@@ -45,8 +45,9 @@ async def rename(
     from_path = dropbox_path_of(accessor, src)
     to_path = dropbox_path_of(accessor, dst)
     timer = start_op()
+    replaced_non_file = False
     try:
-        await move_path(accessor.token_manager, from_path, to_path)
+        moved = await move_path(accessor.token_manager, from_path, to_path)
     except DropboxApiError as exc:
         if exc.summary.startswith("from_lookup/not_found"):
             raise enoent(src.virtual) from exc
@@ -60,9 +61,16 @@ async def rename(
             if children:
                 raise
         await delete_path(accessor.token_manager, to_path)
-        await move_path(accessor.token_manager, from_path, to_path)
+        replaced_non_file = existing.get(".tag") != "file"
+        moved = await move_path(accessor.token_manager, from_path, to_path)
     record("rename", src.virtual, "dropbox", 0, timer)
-    await invalidate_subtree(src)
+    # A folder carries a subtree under both names. dst also loses one when
+    # the move replaced anything there but a file (an empty folder, or an
+    # entry of no known kind), whose name may still have cached children.
+    # Only a file tag narrows; a reply that names no type keeps the
+    # subtree.
+    folder = moved.get(".tag") != "file"
+    await invalidate_after_move(src, folder)
     await invalidate_ancestors(src)
-    await invalidate_subtree(dst)
+    await invalidate_after_move(dst, folder or replaced_non_file)
     await invalidate_ancestors(dst)

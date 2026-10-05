@@ -28,12 +28,11 @@ from mirage.policy.types import (
 from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import ScriptSource
 from mirage.types import (
-    HiddenPaths,
-    HiddenVars,
+    DEFAULT_VISIBILITY,
     Limit,
     MountMode,
     ShowEntry,
-    ShownPaths,
+    Visibility,
     parse_mount_mode,
 )
 from mirage.utils.hidden import is_glob
@@ -709,37 +708,62 @@ class SessionProfile(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledProfile:
-    """The session fields an effective profile compiles to.
+class ProfileSetup:
+    """What a profile seeds a new session with; the agent's to change
+    afterwards, so a stored session keeps its own.
+
+    Args:
+        env (dict[str, str] | None): variables to seed and export.
+        cwd (str | None): the working directory to start in.
+    """
+
+    env: dict[str, str] | None = None
+    cwd: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProfilePolicies:
+    """What a profile lets a session do, for the policy chain to judge.
 
     Args:
         mount_modes (dict[str, MountMode] | None): the mode each mount
             section states; a mount absent from the map keeps its own.
-        hidden_paths (HiddenPaths | None): every path the profile hides.
-        hidden_vars (HiddenVars | None): the profile's hidden variables.
-        env (dict[str, str] | None): variables to seed and export.
-        cwd (str | None): the working directory to start in.
-        commands (AdmissionRules | None): the profile's admission rules,
-            its own and its mount sections' in one list.
+        commands (AdmissionRules | None): the admission rules, its own
+            and its mount sections' in one list.
         script (ProfileScript | None): the profile's policy program,
             which ``ScriptPolicy`` calls at the admission gate.
-        shown_paths (ShownPaths | None): every show entry the profile
-            states, its own and its mount sections' in one list.
+        command_limits (Mapping[str, Limit] | None): per-command output
+            bounds.
+        processes (ProcessPermissions): whose processes the session may
+            stop and how many it may hold.
+    """
+
+    mount_modes: dict[str, MountMode] | None = None
+    commands: AdmissionRules | None = None
+    script: ProfileScript | None = None
+    command_limits: Mapping[str, Limit] | None = None
+    processes: ProcessPermissions = ProcessPermissions()
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledProfile:
+    """What an effective profile compiles to: the setup a session starts
+    from, what exists for it, and what it may do.
+
+    Args:
+        setup (ProfileSetup): the env and cwd a new session starts with.
+        visibility (Visibility): what exists for the session, which the
+            views and the op boundary read.
+        policies (ProfilePolicies): what the session may do, which the
+            policy chain judges.
         hide_reasons (tuple[HideReason, ...]): the operator's reasons
             for grouped hides, never rendered to the agent.
         profile (str | None): the profile's name, None for a document
             passed without one; what the session reports as its group.
     """
 
-    mount_modes: dict[str, MountMode] | None
-    hidden_paths: HiddenPaths | None
-    hidden_vars: HiddenVars | None
-    env: dict[str, str] | None
-    cwd: str | None
-    commands: AdmissionRules | None = None
-    script: ProfileScript | None = None
-    shown_paths: ShownPaths | None = None
+    setup: ProfileSetup = ProfileSetup()
+    visibility: Visibility = DEFAULT_VISIBILITY
+    policies: ProfilePolicies = ProfilePolicies()
     hide_reasons: tuple[HideReason, ...] = ()
     profile: str | None = None
-    command_limits: Mapping[str, Limit] | None = None
-    processes: ProcessPermissions = ProcessPermissions()

@@ -33,11 +33,11 @@ from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.core.generic.find import make_search_backed_find
 from mirage.core.slug_tree.tree import SlugTree
 from mirage.core.slug_tree.types import A
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.ops.namespace_view import paths_scoped
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.vfs.types import StatOp
@@ -176,9 +176,7 @@ def make_find(
         # hidden paths or a path rule it would answer for entries the
         # session cannot see; the walk classifies through the guarded
         # readdir/stat, the same fork the factory builder takes (rung 0).
-        if path_rules_active() or any(
-            hidden_paths_intersect(p.virtual) for p in paths
-        ):
+        if paths_scoped(opts.ns, paths):
             walk_io = walk_full if full else walk_light
             stdout, result = await find_walk_generic(
                 paths,

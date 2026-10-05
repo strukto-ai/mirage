@@ -28,7 +28,7 @@ from mirage.commands.cli.types import CLISpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
-from mirage.policy import Policy
+from mirage.policy import Policy, PolicyDenied
 from mirage.policy.types import (
     CommandContext,
     Deny,
@@ -291,6 +291,8 @@ async def run(case: dict[str, Any]) -> int:
                     actual["errno"] = errno.errorcode.get(exc.errno)
                 elif condition is not None:
                     actual["errno"] = condition.name
+                if isinstance(exc, PolicyDenied) and exc.refusal is not None:
+                    actual["reason"] = exc.refusal.reason
             expected = step.get("expect", {"value": None})
             if not matches(actual, expected):
                 raise AssertionError(

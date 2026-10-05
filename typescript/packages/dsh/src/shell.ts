@@ -47,6 +47,7 @@ import { StreamTail, TailBuffer } from './text.ts'
 import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
 import type {} from './service.ts'
 import type { Refusal } from '@struktoai/mirage-core/types'
+import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -376,6 +377,16 @@ class MirageShellExecution implements ShellExecution {
         this.failure = { error: err }
         const message = err instanceof Error ? err.message : String(err)
         await this.console.emit(Channel.STDERR, new TextEncoder().encode(message))
+      }
+    }
+    // A refusal's reason is one more stderr line, after what the shell
+    // printed in bash's own words.
+    if (result !== null) {
+      const before = this.stderrTail.readFrom(0).text
+      const line = refusalLine(before, result.refusal)
+      if (line !== '') {
+        const lead = before === '' || before.endsWith('\n') ? '' : '\n'
+        await this.console.emit(Channel.STDERR, new TextEncoder().encode(lead + line))
       }
     }
     // Every emit was awaited as it was made, so everything the command
@@ -745,13 +756,18 @@ export class MirageShellExecutor extends ShellExecutor {
     for (const entry of ws.mounts()) {
       grants[entry.prefix] = rstripSlash(entry.prefix) === SINK_PREFIX ? 'exec' : 'read'
     }
-    const hide = [...(source.hiddenPaths?.paths ?? []), ...(source.hiddenPaths?.patterns ?? [])]
+    const hidden = source.visibility.paths
+    const hide = [...(hidden?.paths ?? []), ...(hidden?.patterns ?? [])]
     const twin = ws.createSession(sessionId, {
       mounts: grants,
       ...(hide.length > 0 ? { permissions: { paths: { hide } } } : {}),
     })
     twin.commands = source.commands
-    twin.hiddenVars = source.hiddenVars
+    twin.visibility = {
+      ...twin.visibility,
+      vars: source.visibility.vars,
+      commands: source.visibility.commands,
+    }
     setCwd(twin, this.workdir)
     return sessionId
   }

@@ -17,7 +17,7 @@ from mirage.context.session_context import (
     redirect_target_judged,
 )
 from mirage.policy.base import Policy
-from mirage.policy.match import Outcome, decide, op_refusal, rule_scope
+from mirage.policy.match import Outcome, decide, op_refusal, posix_level
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
     Action,
@@ -72,9 +72,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
             return Ask(rule.reason, rule, decision.asks)
         if decision.matched_path is None:
             return Deny(rule.reason)
-        return Deny(
-            f"{decision.matched_path}: {rule.reason}", DenyScope.OPERAND
-        )
+        return Deny(rule.reason, DenyScope.OPERAND, path=decision.matched_path)
 
     async def pre_ops(self, ctx: OpsContext) -> Action | None:
         if redirect_target_judged(ctx.path.virtual):
@@ -104,7 +102,4 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         rules = self._sessions.commands_of(session_id)
         if rules is None:
             return False
-        return any(
-            not rule.commands and rule_scope(rule) is not None
-            for rule in (*rules.deny, *rules.ask)
-        )
+        return any(posix_level(rule) for rule in (*rules.deny, *rules.ask))

@@ -156,6 +156,7 @@ export async function runDu(
     null,
     undefined,
     () => [...measured.values()].flatMap(([, dirs]) => dirs),
+    ns,
   )
   merged.stderr = new Uint8Array([...out.stderr, ...(await materialize(merged.stderr))])
   merged.exitCode = Math.max(out.exitCode, ...done.map(({ io }) => io.exitCode))

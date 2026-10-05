@@ -1,8 +1,8 @@
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
-ProcessScope = Literal["session", "workspace"]
+from mirage.types import ProcessScope
 
 _SCOPES: tuple[ProcessScope, ...] = ("session", "workspace")
 

@@ -926,7 +926,7 @@ class Workspace:
             return capture_binding(
                 self._runtime_binding,
                 ns=namespace_view_of(
-                    self._registry, self._namespace, self.dispatch
+                    self._registry, self._namespace, self.dispatch, session
                 ),
                 session_view=session_view(session, self.policies),
                 processes=self._process_view(session),
@@ -1530,7 +1530,7 @@ class Workspace:
         compiled = compile_profile(
             with_inline(base, inline), self._profile_name(profile)
         )
-        check_cli_verbs(compiled.commands, self._cli_verbs())
+        check_cli_verbs(compiled.policies.commands, self._cli_verbs())
         session = self._session_mgr.create(session_id)
         apply_profile(session, compiled)
         return session
@@ -1663,7 +1663,7 @@ class Workspace:
         compiled = compile_profile(
             self._base_profile(profile), self._profile_name(profile)
         )
-        check_cli_verbs(compiled.commands, self._cli_verbs())
+        check_cli_verbs(compiled.policies.commands, self._cli_verbs())
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()
         if self._shutting_down:

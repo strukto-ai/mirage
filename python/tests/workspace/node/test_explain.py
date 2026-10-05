@@ -229,7 +229,7 @@ async def test_a_denied_command_stops_the_whole_line(ws):
     )
     assert ran.exit_code == 1
     assert ran.stderr == (
-        b"rm: /data/prod/x.txt: production data is protected\n"
+        b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
     )
     assert "/data/a.txt" in await ws.vfs.readdir("/data")
 
@@ -271,7 +271,7 @@ async def test_a_cd_earlier_in_the_line_moves_what_later_rules_read(ws):
     # whatever directory the session happened to be in.
     ran = await ws.shell("cd /data/prod && rm x.txt", session_id="s")
     assert ran.exit_code == 1
-    assert ran.stderr == b"rm: x.txt: production data is protected\n"
+    assert ran.stderr == b"rm: cannot remove 'x.txt': Permission denied\n"
 
 
 @pytest.mark.asyncio
@@ -370,7 +370,7 @@ async def test_a_rule_on_a_redirect_target_holds_the_whole_line(sealed):
         "rm /data/a.txt && echo x > /data/prod/x.txt", session_id="s"
     )
     assert ran.exit_code != 0
-    assert b"sealed until review" in (ran.stderr or b"")
+    assert ran.refusal and "sealed until review" in ran.refusal.reason
     assert "/data/a.txt" in await sealed.vfs.readdir("/data")
 
 
@@ -469,7 +469,7 @@ async def test_an_answered_ask_does_not_end_the_scan(inline):
         "cat /data/secret.txt && rm /data/prod/x.txt", session_id="s"
     )
     assert ran.exit_code != 0
-    assert b"production data is protected" in (ran.stderr or b"")
+    assert ran.refusal and "production data is protected" in ran.refusal.reason
     assert b"s\n" not in (ran.stdout or b"")
     assert "/data/prod/x.txt" in await inline.vfs.readdir("/data/prod")
 
@@ -714,7 +714,8 @@ async def test_a_grant_given_before_a_refused_line_does_not_outlive_it(ws):
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
     retry = await ws.shell(line, session_id="s")
     assert retry.exit_code != 0
-    assert b"production data is protected" in (retry.stderr or b"")
+    assert retry.refusal is not None
+    assert "production data is protected" in retry.refusal.reason
     assert ws.decisions.list("s") == ()
     again = await ws.shell("cat /data/secret.txt", session_id="s")
     assert again.exit_code == 126
@@ -729,7 +730,7 @@ async def test_a_cd_in_a_subshell_moves_the_commands_inside_it(ws):
     # subshell as "no cd applies" judged the command at the session cwd.
     ran = await ws.shell("(cd /data/prod && rm x.txt)", session_id="s")
     assert ran.exit_code == 1
-    assert ran.stderr == b"rm: x.txt: production data is protected\n"
+    assert ran.stderr == b"rm: cannot remove 'x.txt': Permission denied\n"
     assert "/data/prod/x.txt" in await ws.vfs.readdir("/data/prod")
 
 
@@ -744,7 +745,7 @@ async def test_a_one_command_line_is_refused_inside_the_shell(ws):
     ran = await ws.shell("rm /data/prod/x.txt 2>&1", session_id="s")
     assert ran.exit_code == 1
     assert ran.stdout == (
-        b"rm: /data/prod/x.txt: production data is protected\n"
+        b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
     )
     assert ran.stderr in (b"", None)
 

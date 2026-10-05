@@ -19,7 +19,7 @@ import { gnuDirname } from '../../utils/path.ts'
 import type { Session, SessionExecuteOptions } from '../workspace/handle.ts'
 import type { ExecuteResult } from '../workspace/types.ts'
 import { FileVersionTracker, StaleMirageFileError } from './file_version.ts'
-import { decode, ioToStr, replaceText } from './io_text.ts'
+import { decode, errorText, ioToStr, replaceText } from './io_text.ts'
 import { mediaOf, type WorkspaceMediaRead } from './read_file.ts'
 
 export interface ToolResult {
@@ -89,10 +89,6 @@ async function missing(vfs: Ops, path: string): Promise<boolean> {
     }
     return false
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**
@@ -180,7 +176,7 @@ export class MirageToolOperations {
     if (await missing(versions.vfs, path)) {
       return errorResult(`Error: file '${path}' not found`)
     }
-    return errorResult(`Error: ${errorMessage(err)}`)
+    return errorResult(errorText(err))
   }
 
   private numbered(
@@ -212,7 +208,7 @@ export class MirageToolOperations {
       present = await versions.vfs.exists(path)
     } catch (err) {
       if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
-      return errorResult(`Error: ${errorMessage(err)}`)
+      return errorResult(errorText(err))
     }
     if (present && !versions.hasRead(path)) {
       return errorResult(`Error: file '${path}' exists; read all of it before overwriting it`)
@@ -221,7 +217,7 @@ export class MirageToolOperations {
       await ensureParents(versions.vfs, path)
       await versions.write(path, content)
     } catch (err) {
-      return errorResult(`Error: ${errorMessage(err)}`)
+      return errorResult(errorText(err))
     }
     return textResult(`Written: ${path}`)
   }
@@ -241,7 +237,7 @@ export class MirageToolOperations {
       if (await missing(versions.vfs, path)) {
         return errorResult(`Error: file '${path}' not found`)
       }
-      return errorResult(`Error: ${errorMessage(err)}`)
+      return errorResult(errorText(err))
     }
     const [newContent, count] = replaceText(content, oldString, newString, replaceAll)
     if (count === 0) {
@@ -253,7 +249,7 @@ export class MirageToolOperations {
     try {
       await versions.writeEdit(path, newContent)
     } catch (err) {
-      return errorResult(`Error: ${errorMessage(err)}`)
+      return errorResult(errorText(err))
     }
     const occurrences = replaceAll ? count : 1
     return textResult(`Edited: ${path} (${String(occurrences)} occurrence(s))`)

@@ -76,7 +76,7 @@ async def run_mv(
         backend_key=storage_key,
         guard=refuse_reveal,
         copies=(
-            transfer_links_of(ns.links, dispatch, "/")
+            transfer_links_of(ns.links, dispatch, "/", ns.visibility)
             if ns is not None and ns.links is not None
             else None
         ),

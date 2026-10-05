@@ -41,7 +41,7 @@ export class RulePolicy implements Policy {
     const hit = matchRule(this.rule, this.scope, ctx)
     if (hit === null) return null
     if (hit.operand === null) return { kind: 'deny', reason: this.rule.reason }
-    return { kind: 'deny', reason: `${hit.operand}: ${this.rule.reason}`, scope: 'operand' }
+    return { kind: 'deny', reason: this.rule.reason, scope: 'operand', path: hit.operand }
   }
 
   preOps(ctx: OpsContext): Action | null {

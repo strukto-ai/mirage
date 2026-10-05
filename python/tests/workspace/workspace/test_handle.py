@@ -105,10 +105,10 @@ async def test_a_handle_adopts_a_persisted_session_before_creating_one():
     )
     try:
         created = await first.session("reviewer", profile="reviewer")
-        assert created.state.hidden_paths is not None
+        assert created.state.visibility.paths is not None
         await first.flush_sessions()
         adopted = await second.session("reviewer")
-        assert adopted.state.hidden_paths is not None
+        assert adopted.state.visibility.paths is not None
         with pytest.raises(ValueError, match="exists"):
             await second.session("reviewer", profile="reviewer")
     finally:

@@ -16,7 +16,7 @@ from dataclasses import replace
 
 import pytest
 
-from mirage.types import HiddenPaths, MountMode, PathSpec
+from mirage.types import HiddenPaths, MountMode, PathSpec, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.fanout import _should_fan_out
@@ -67,8 +67,8 @@ async def test_a_hidden_mount_does_not_bound_the_walk(line):
         },
         mode=MountMode.WRITE,
     )
-    ws.create_session("agent").hidden_paths = HiddenPaths(
-        paths=("/base/inner",)
+    ws.create_session("agent").visibility = Visibility(
+        paths=HiddenPaths(paths=("/base/inner",))
     )
     try:
         result = await ws.shell(line, session_id="agent")

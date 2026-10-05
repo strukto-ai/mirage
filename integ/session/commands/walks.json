@@ -165,7 +165,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "test: /scratch/wk/sealed: walled\n"
+        "stderr": "test: /scratch/wk/sealed: Permission denied\n"
       }
     },
     {
@@ -179,7 +179,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cp: /scratch/locked/y: frozen\n"
+        "stderr": "cp: /scratch/locked/y: Permission denied\n"
       }
     },
     {

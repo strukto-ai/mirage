@@ -66,7 +66,6 @@ def test_registered_ops_introspection(ws):
 
 
 def test_register_fns_adds_command(ws):
-
     @command("test_custom", vfs="ram", spec=SPECS["cat"])
     async def custom(accessor, paths, *texts, **kw):
         return b"custom", IOResult()
@@ -78,7 +77,6 @@ def test_register_fns_adds_command(ws):
 
 
 def test_register_fns_adds_registered_command(ws):
-
     @command("test_custom", vfs="ram", spec=SPECS["cat"])
     async def custom(accessor, paths, *texts, **kw):
         return b"custom", IOResult()
@@ -89,7 +87,6 @@ def test_register_fns_adds_registered_command(ws):
 
 
 def test_register_fns_adds_op(ws):
-
     @op("test_custom_op", vfs="ram")
     async def custom_op(accessor, scope, **kwargs):
         return b"hello"
@@ -152,7 +149,6 @@ def test_register_isolated_per_mount(ws_two_mounts):
 
 
 def test_register_fns_isolated_per_mount(ws_two_mounts):
-
     @command("only_on_a", vfs="ram", spec=SPECS["cat"])
     async def only_a(accessor, paths, *texts, **kw):
         return b"a", IOResult()
@@ -163,7 +159,6 @@ def test_register_fns_isolated_per_mount(ws_two_mounts):
 
 
 def test_register_fns_wrong_vfs_raises(ws):
-
     @command("s3_only", vfs="s3", spec=SPECS["cat"])
     async def s3_cmd(accessor, paths, *texts, **kw):
         return b"s3", IOResult()
@@ -174,7 +169,6 @@ def test_register_fns_wrong_vfs_raises(ws):
 
 
 def test_register_fns_wrong_vfs_op_raises(ws):
-
     @op("s3_read", vfs="s3")
     async def s3_op(accessor, scope, **kwargs):
         return b"s3"
@@ -185,7 +179,6 @@ def test_register_fns_wrong_vfs_op_raises(ws):
 
 
 def test_register_fns_multi_vfs_filters_to_matching(ws):
-
     @command("multi", vfs=["ram", "s3"], spec=SPECS["cat"])
     async def multi(accessor, paths, *texts, **kw):
         return b"multi", IOResult()

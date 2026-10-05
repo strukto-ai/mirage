@@ -20,7 +20,9 @@ from typing import Any
 import asyncssh
 import pytest
 
+from mirage.io.types import IOResult
 from mirage.server.ssh import stream
+from mirage.server.ssh.constants import REFUSAL_WINDOW
 from mirage.server.ssh.stream import (
     ChannelInput,
     ChannelOutput,
@@ -32,6 +34,7 @@ from mirage.server.ssh.stream import (
     loop_sender,
 )
 from mirage.server.stdin import LoopStdin
+from mirage.types import Refusal
 
 Step = str | BaseException
 
@@ -287,8 +290,50 @@ async def test_deliver_streams_stdout_then_stderr():
     async def send(data: bytes, is_stderr: bool) -> None:
         sent.append((data, is_stderr))
 
-    await deliver(_two_chunks(), b"warn", send)
+    await deliver(IOResult(stdout=_two_chunks(), stderr=b"warn"), send)
     assert sent == [(b"one", False), (b"two", False), (b"warn", True)]
+
+
+_W = REFUSAL_WINDOW
+_SAID = b"rm: cannot remove '/data': Device or resource busy\n"
+_BUSY = "cannot remove '/data': Device or resource busy"
+_MORE = b"y" * (_W * 4)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stdout,stderr,reason,said",
+    [
+        (b"", b"rm: cannot remove 'x': Permission denied\n", "sealed", False),
+        # A mount root's EBUSY lets the rest of the line run, so its
+        # diagnostic can sit at either end of a long output, or end
+        # right at the first window with its newline the next byte.
+        (_MORE, _MORE + _SAID, _BUSY, True),
+        (_MORE, _SAID + _MORE, _BUSY, True),
+        (_MORE, b"f" * (_W - len(_SAID)) + b"\n" + _SAID + _MORE, _BUSY, True),
+        # A long line cut right after the reason's words says nothing.
+        (
+            b"a" * (_W - 8) + b": sealed" + b"z" * 64 + b"\n",
+            b"",
+            "sealed",
+            False,
+        ),
+    ],
+    ids=["appended", "end", "start", "window_edge", "cut_line"],
+)
+async def test_deliver_appends_the_refusal_unless_the_output_says_why(
+    stdout: bytes, stderr: bytes, reason: str, said: bool
+):
+    sent: list[tuple[bytes, bool]] = []
+
+    async def send(data: bytes, is_stderr: bool) -> None:
+        sent.append((data, is_stderr))
+
+    refusal = Refusal(kind="deny", reason=reason, scope="operand")
+    io = IOResult(stdout=stdout, stderr=stderr, exit_code=1, refusal=refusal)
+    await deliver(io, send)
+    line = (f"policy denied: {reason}\n".encode(), True)
+    assert (sent[-1] == line) is not said
 
 
 def _run_other_loop(

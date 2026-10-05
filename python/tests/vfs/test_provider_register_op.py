@@ -36,7 +36,6 @@ def test_ram_vfs_serves_ops():
 
 
 def test_mount_registers_the_driver_tables():
-
     @op("read", vfs="probe")
     async def read_custom(store, path, **kwargs):
         return b"custom"

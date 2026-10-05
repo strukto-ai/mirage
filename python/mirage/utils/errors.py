@@ -506,9 +506,24 @@ _CANNOT_OPEN = "cannot open {quoted} for reading: {strerror}"
 # EINVAL, so a tac there says ``read error: Invalid argument``.
 FAILURE_WORDING: dict[str, tuple[str | None, str | None]] = {
     "csplit": (_CANNOT_OPEN, None),
+    "du": ("cannot access {quoted}: {strerror}", None),
+    "find": ("{quoted}: {strerror}", "{quoted}: {strerror}"),
     "fmt": (_CANNOT_OPEN, None),
     "head": (_CANNOT_OPEN, "error reading {quoted}: {strerror}"),
+    "ls": ("cannot access {quoted}: {strerror}", None),
+    "mkdir": (
+        "cannot create directory {quoted}: {strerror}",
+        "cannot create directory {quoted}: {strerror}",
+    ),
     "rev": ("cannot open {bare}: {strerror}", None),
+    "rm": (
+        "cannot remove {quoted}: {strerror}",
+        "cannot remove {quoted}: {strerror}",
+    ),
+    "rmdir": (
+        "failed to remove {quoted}: {strerror}",
+        "failed to remove {quoted}: {strerror}",
+    ),
     "sed": (
         "can't read {bare}: {strerror}",
         "read error on {bare}: {strerror}",
@@ -523,6 +538,10 @@ FAILURE_WORDING: dict[str, tuple[str | None, str | None]] = {
         "{shown}: read error: {strerror}",
     ),
     "tail": (_CANNOT_OPEN, "error reading {quoted}: {strerror}"),
+    "touch": (
+        "cannot touch {quoted}: {strerror}",
+        "cannot touch {quoted}: {strerror}",
+    ),
     "truncate": (
         "cannot open {quoted} for writing: {strerror}",
         "cannot open {quoted} for writing: {strerror}",

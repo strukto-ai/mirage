@@ -12,16 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.context import hidden_refusal, path_allowed
-from mirage.policy.base import Policy
-from mirage.policy.types import Deny, OpsContext
+from mirage.context import hidden_refusal, session_visibility
+from mirage.policy.types import Hide, OpsContext
+from mirage.utils.hidden import path_visible
 
 
-class HiddenPathsPolicy(Policy):
-    """Hidden paths answer as absent, including at subtree boundaries."""
+class HiddenPathsPolicy:
+    """Hidden paths answer as absent, including at subtree boundaries.
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
-        if path_allowed(ctx.path.virtual):
+    The built-in that answers ``Hide`` at the op boundary, before any
+    policy: not a ``Policy``, because no coded hook returns a Hide.
+    """
+
+    async def pre_ops(self, ctx: OpsContext) -> Hide | None:
+        """Hide the op's path when the bound session cannot see it.
+
+        Args:
+            ctx (OpsContext): the op about to run.
+        """
+        vis = session_visibility()
+        if path_visible(vis, ctx.path.virtual):
             return None
-        error = hidden_refusal(ctx.path.virtual, ctx.create)
-        return Deny(error.strerror or "No such file or directory", error=error)
+        return Hide(hidden_refusal(vis, ctx.path.virtual, ctx.create))

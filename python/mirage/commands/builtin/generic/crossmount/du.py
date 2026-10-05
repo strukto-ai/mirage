@@ -165,6 +165,7 @@ async def run_du(
         compute_entries=entries,
         flags=rendering,
         directories=lambda: [d for _, dirs in measured.values() for d in dirs],
+        ns=ns,
     )
     merged.stderr = out.stderr + await materialize(merged.stderr)
     merged.exit_code = max([out.exit_code, *(io.exit_code for _, io in done)])

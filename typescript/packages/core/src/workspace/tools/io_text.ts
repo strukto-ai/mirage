@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describeRefusal, saysWhy } from '../../policy/index.ts'
+import { PolicyDenied, describeRefusal, saysWhy } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import type { ExecuteResult } from '../workspace/workspace.ts'
 
@@ -41,6 +41,17 @@ export function withRefusal(text: string, refusal: Refusal | null): string {
   const line = refusalLine(text, refusal)
   if (line === '' || text === '') return text || line
   return text.endsWith('\n') ? `${text}${line}` : `${text}\n${line}`
+}
+
+/**
+ * A tool's failure as the agent reads it: the error's own words (a
+ * policy's refusal reads as a plain `Permission denied`), then the
+ * refusal's line when a policy refused the op. Mirrors Python's
+ * `error_text`.
+ */
+export function errorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return withRefusal(`Error: ${message}`, error instanceof PolicyDenied ? error.refusal : null)
 }
 
 export function ioToStr(io: ExecuteResult): string {

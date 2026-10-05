@@ -40,6 +40,12 @@ export const ACCOUNT_OPTION = 'mirage-account'
 export const KEEPALIVE_INTERVAL_SECONDS = 15
 export const KEEPALIVE_COUNT_MAX = 3
 
+// How much of each stream's start and end the door keeps to tell whether
+// a refusal already says why: the refused command's own diagnostic sits
+// near the start of a line refused early and near the end of one refused
+// late, so both ends hold it without the whole output.
+export const REFUSAL_WINDOW = 4096
+
 /**
  * The subsystem Codex opens (`ssh ... -s codex-exec`) to run its tools in
  * a workspace. It speaks Codex's exec-server protocol: one JSON-RPC

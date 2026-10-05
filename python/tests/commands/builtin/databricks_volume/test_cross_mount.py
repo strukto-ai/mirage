@@ -26,7 +26,6 @@ ROOT = "/Volumes/main/default/agent_files/root"
 
 
 def _run(ws, cmd):
-
     async def _inner():
         io = await ws.shell(cmd)
         return await io.stdout_str(), await io.stderr_str(), io.exit_code
