@@ -3232,7 +3232,7 @@ def cache_config(target: dict, run_id: str) -> RedisCacheConfig | None:
         target (dict): the target manifest entry.
         run_id (str): this open's unique id.
     """
-    if target.get("cache") is None:
+    if (target.get("cache") or {}).get("type") != "redis":
         return None
     return RedisCacheConfig(
         url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
