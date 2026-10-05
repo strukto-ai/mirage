@@ -26,20 +26,32 @@ import { compactJsonBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
 
 const GRID_DATA_PARAM = 'true'
+// The fields vfs/gsheets/prompt.ts documents. Without a mask every cell also
+// carries userEnteredFormat and effectiveFormat and every grid its row and
+// column metadata, which outweigh the values many times over.
+const SPREADSHEET_FIELDS =
+  'spreadsheetId,spreadsheetUrl,properties,namedRanges,' +
+  'sheets(properties,data(startRow,startColumn,' +
+  'rowData(values(formattedValue,userEnteredValue,effectiveValue))))'
 
 /**
- * Fetch full spreadsheet JSON, cell values included.
+ * Fetch spreadsheet JSON, cell values included and formats left out.
  *
  * `spreadsheets.get` returns no grid data unless asked, so without
  * `includeGridData` the rendered `.gsheet.json` is tab metadata and nothing
- * an agent can read a cell from.
+ * an agent can read a cell from. The `fields` mask then keeps the structure
+ * the VFS prompt documents; formatting stays reachable through
+ * `gws sheets spreadsheets get`.
  */
 export async function readSpreadsheet(
   tm: TokenManager,
   spreadsheetId: string,
 ): Promise<Uint8Array> {
   const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}`
-  const data = await googleGet(tm, url, { includeGridData: GRID_DATA_PARAM })
+  const data = await googleGet(tm, url, {
+    includeGridData: GRID_DATA_PARAM,
+    fields: SPREADSHEET_FIELDS,
+  })
   return compactJsonBytes(data)
 }
 

@@ -31,7 +31,7 @@ QUOTE_ESCAPES = {
 }
 
 
-def quote_word(view: str) -> str:
+def quote_word(view: str, utf8: bool = False) -> str:
     r"""One word as gnulib's `quote()` renders it inside a diagnostic.
 
     Every GNU coreutils diagnostic that names a word passes it through
@@ -67,13 +67,16 @@ def quote_word(view: str) -> str:
 
     Args:
         view (str): the word as a byte view, one character per byte.
+        utf8 (bool): the word is text, as a command under a UTF-8 locale
+            holds it; it is quoted per byte all the same, as the C locale
+            quotes it.
 
     Returns:
         str: the escaped body, still a byte view since every character
             it emits is ASCII.
     """
     out = []
-    for ch in view:
+    for ch in byte_view(view) if utf8 else view:
         named = QUOTE_ESCAPES.get(ch)
         if named is not None:
             out.append(named)

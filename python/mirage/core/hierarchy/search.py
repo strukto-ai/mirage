@@ -33,24 +33,26 @@ def query_matcher(query: SearchQuery) -> LineMatcher:
     A searcher that has to decide a line itself (a candidate the service
     returned, or a line it rendered) decides it with this, so what it
     prints is what grep over the same file would print. grep's dialects
-    run in the C locale and match a line's byte view, as its scan does;
-    ripgrep's match the text.
+    match a line's byte view in the C locale and its text under a UTF-8
+    one, as its scan does; ripgrep's match the text.
 
     Args:
         query (SearchQuery): the qualified request.
     """
     options = grep_search_options(query)
     rust = options.syntax is RegexSyntax.RUST
+    utf8 = options.utf8
     pattern = compile_pattern(
-        query.query if rust else byte_view(query.query),
+        query.query if rust else byte_view(query.query, utf8),
         ignore_case=options.ignore_case,
         fixed_string=options.fixed_string,
         whole_word=options.whole_word,
         syntax=options.syntax,
+        utf8=utf8,
     )
     if rust:
         return lambda line: pattern.search(line) is not None
-    return lambda line: pattern.search(byte_view(line)) is not None
+    return lambda line: pattern.search(byte_view(line, utf8)) is not None
 
 
 Searcher = Callable[[A, ScopeMatch, SearchQuery], Awaitable[list[str]]]

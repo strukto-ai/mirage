@@ -41,7 +41,10 @@ command-specific escapes, and `-f` program files must address the same
 bytes. Matching, string positions, and `tr` sets count bytes; a partial
 character or invalid UTF-8 byte survives output unchanged. These commands
 use this deterministic C-locale contract; `rg` retains its Unicode regex
-semantics.
+semantics. `unix/{grep,zgrep,sed,expr}/locale.json` pin the other side on the
+same image: when `LC_ALL`, `LC_CTYPE` or `LANG` names a UTF-8 codeset, those
+commands match and count whole characters, and neither `.` nor a negated
+bracket matches an invalid byte.
 
 ## Cross-mount commands
 

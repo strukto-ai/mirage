@@ -1,0 +1,35 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "gridfs",
+    "s3-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "expr_locale_utf8_counts_characters",
+      "seq": 14480300,
+      "command": "( expr length 规定; export LC_ALL=C.UTF-8; expr length 规定; expr substr 规定x 2 1; expr index a规b 规; expr 规定 : '.*'; expr 规定 : '\\(.\\)'; LC_ALL=C expr length 规定 )",
+      "expect": {
+        "exit": 0,
+        "stdout": "6\n2\n定\n2\n2\n规\n6\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

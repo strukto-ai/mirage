@@ -298,3 +298,25 @@ it.each([
   expect(await io.stderrStr()).toBe('\ngzip: /bad.gz: Permission denied\n')
   expect(reads).toEqual(['/bad', '/bad.gz', '/good.gz'])
 })
+
+it('under a UTF-8 locale leaves out a line no character owns', async () => {
+  const vfs = new RAMVFS()
+  vfs.store.files.set(
+    '/u.gz',
+    await gzip(new Uint8Array([0x61, 0x31, 10, 0x61, 0xff, 10, 0x61, 0x32, 10])),
+  )
+  const cmd = RAM_ZGREP[0]
+  if (cmd === undefined) throw new Error('zgrep not registered')
+  const path = PathSpec.fromStrPath('/u.gz')
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [path], ['a'], {
+    stdin: null,
+    flags: {},
+    filetypeFns: null,
+    cwd: '/',
+    env: { LC_ALL: 'C.UTF-8' },
+  })
+  if (result === null) throw new Error('zgrep answered nothing')
+  const [out, io] = result
+  expect(DEC.decode(await materialize(out as AsyncIterable<Uint8Array>))).toBe('a1\na2\n')
+  expect(DEC.decode(await io.materializeStderr())).toBe('grep: /u.gz: binary file matches\n')
+})

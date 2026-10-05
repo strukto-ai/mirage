@@ -32,7 +32,7 @@ import { fsErrorLine, fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import { contentSize, deviceRdev, isDir } from '../../../utils/stat_view.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { lsModeString } from '../utils/formatting.ts'
+import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError } from '../../spec/usage.ts'
@@ -406,16 +406,11 @@ function formatStat(fmt: string, s: FileStat, name: string, identity: Identity |
 
 // The fraction of a second as the backend spelled it, so both hosts print
 // the digits the stamp carries rather than what their clock type keeps.
-const FRACTION = /\d\d:\d\d:\d\d\.(\d+)/
 
 /** A known timestamp in GNU's layout, in UTC, or '-' when unknown. A naive
  * stamp is UTC, as everywhere else a backend time is read. */
 function statTime(value: string | null): string {
-  const seconds = isoTimestamp(value)
-  if (seconds === null || value === null) return '-'
-  const whole = new Date(Math.floor(seconds) * 1000).toISOString().slice(0, 19).replace('T', ' ')
-  const fraction = (FRACTION.exec(value)?.[1] ?? '').padEnd(9, '0').slice(0, 9)
-  return `${whole}.${fraction} +0000`
+  return isoTimestamp(value) === null ? '-' : fullIsoTime(value)
 }
 
 /** GNU coreutils 9.7's default layout, with unknown fields marked. A VFS has

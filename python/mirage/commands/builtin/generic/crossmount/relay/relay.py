@@ -96,7 +96,14 @@ async def run_relay(
         return await run_awk(scopes, text_args, flag_kwargs, run_single, stdin)
     if cmd_name == Cmd.SED:
         return await run_sed(
-            scopes, text_args, flag_kwargs, dispatch, stdin, cwd, argv
+            scopes,
+            text_args,
+            flag_kwargs,
+            dispatch,
+            stdin,
+            cwd,
+            argv,
+            session_view.snapshot() if session_view is not None else None,
         )
     if cmd_name == Cmd.WC:
         return await run_wc(

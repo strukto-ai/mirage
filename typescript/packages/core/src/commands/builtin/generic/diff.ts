@@ -21,6 +21,7 @@ import { FileType, type FileStat, PathSpec } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
+import type { StatPath } from '../../../ops/types.ts'
 import { formatFsError, isEnoent, isFsError } from '../../../utils/errors.ts'
 import { edScript, normalDiff, unifiedDiff } from '../diff_format.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
@@ -30,6 +31,8 @@ import { CommandName, type FlagValue, type Option } from '../../spec/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { shellQuote } from '../../../utils/quote.ts'
+import { fullIsoTime } from '../utils/formatting.ts'
+import { UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -99,11 +102,62 @@ interface Walk {
   flags: DiffFlags
   excluded: readonly string[]
   switches: string
+  statPath: StatPath | null
+  zone: Zone
 }
 
 type Absent = readonly [boolean, boolean]
 
 const PRESENT: Absent = [false, false]
+
+// diffutils' c_escape_char: the characters a header name spells as a C
+// escape. Any other control character is three octal digits.
+const C_ESCAPES: Readonly<Record<string, string>> = {
+  '\x07': 'a',
+  '\b': 'b',
+  '\t': 't',
+  '\n': 'n',
+  '\v': 'v',
+  '\f': 'f',
+  '\r': 'r',
+  '"': '"',
+  '\\': '\\',
+}
+
+/**
+ * A file name as GNU diff writes it in a header line. diffutils' `c_escape`
+ * double-quotes a name holding a space, a double quote, a backslash or a
+ * control character, and writes each of those but the space as a C escape
+ * (`"sp ace"`, `"t\\tab"`); any other name, bytes above ASCII included, is
+ * written as it is. The `---` and `+++` lines and the `diff -r` line use it;
+ * the `Only in` and `Files ... differ` lines do not. Mirrors Python's
+ * `c_escape`.
+ */
+export function cEscape(name: string): string {
+  const special = (ch: string): boolean => ch === ' ' || Object.hasOwn(C_ESCAPES, ch) || ch < ' '
+  if (!Array.from(name).some(special)) return name
+  let out = ''
+  for (const ch of name) {
+    const escape = Object.hasOwn(C_ESCAPES, ch) ? C_ESCAPES[ch] : undefined
+    if (escape !== undefined) out += '\\' + escape
+    else if (ch < ' ') out += '\\' + ch.charCodeAt(0).toString(8).padStart(3, '0')
+    else out += ch
+  }
+  return `"${out}"`
+}
+
+// The time a unified header gives one side, as GNU diff prints it: the
+// modification time as `%Y-%m-%d %H:%M:%S.%N %z` in the zone `TZ` names, read
+// through the dispatcher as `stat` reads it, so a time `touch` keeps in the namespace shows; the
+// epoch for a side -N reads as absent; and the present moment for standard
+// input, as POSIX asks and diffutils does.
+async function headerTime(walk: Walk, path: PathSpec, absent: boolean): Promise<string> {
+  if (absent) return fullIsoTime(null, walk.zone)
+  if (isStdin(path)) return fullIsoTime(new Date().toISOString(), walk.zone)
+  const info =
+    (walk.statPath !== null ? await walk.statPath(path.virtual) : null) ?? (await walk.stat(path))
+  return fullIsoTime(info.modified, walk.zone)
+}
 
 function childSpec(parent: PathSpec, name: string): PathSpec {
   const childPath = `${rstripSlash(parent.virtual)}/${name}`
@@ -218,7 +272,15 @@ async function diffPair(
   let result: string[]
   if (flags.ed) result = edScript(aLines, bLines)
   else if (flags.unified)
-    result = unifiedDiff(aLines, bLines, path1.rawPath, path2.rawPath, flags.context)
+    result = unifiedDiff(
+      aLines,
+      bLines,
+      cEscape(path1.rawPath),
+      cEscape(path2.rawPath),
+      flags.context,
+      await headerTime(walk, path1, absent[0]),
+      await headerTime(walk, path2, absent[1]),
+    )
   else result = normalDiff(aLines, bLines)
   return ENC.encode(result.join(''))
 }
@@ -283,7 +345,12 @@ async function diffDirs(
       if (flags.brief) parts.push(body)
       else
         parts.push(
-          concat([ENC.encode(`diff${walk.switches} ${childA.rawPath} ${childB.rawPath}\n`), body]),
+          concat([
+            ENC.encode(
+              `diff${walk.switches} ${cEscape(childA.rawPath)} ${cEscape(childB.rawPath)}\n`,
+            ),
+            body,
+          ]),
         )
     } else if (aDir) {
       differ = true
@@ -360,6 +427,8 @@ export async function diffGeneric(
       switches: switchWords(opts.argv ?? [])
         .map((word) => ` ${shellQuote(word)}`)
         .join(''),
+      statPath: opts.statPath ?? null,
+      zone: zoneFromEnv(opts.env) ?? UTC_ZONE,
     }
     if (dash0 !== dash1) {
       if ((await stat(dash0 ? p1 : p0)).type === FileType.DIRECTORY) {

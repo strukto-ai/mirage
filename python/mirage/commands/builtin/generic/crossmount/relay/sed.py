@@ -25,6 +25,7 @@ async def run_sed(
     stdin: ByteSource | None,
     cwd: str,
     argv: tuple[str, ...],
+    env: dict[str, str] | None = None,
 ) -> CrossResult:
     """Keep one sed machine and each operand's identity across mounts.
 
@@ -41,6 +42,8 @@ async def run_sed(
         stdin (ByteSource | None): Shared standard input cursor.
         cwd (str): Directory for filenames in the script.
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
+        env (dict[str, str] | None): The session's environment, whose
+            locale decides bytes or characters.
     """
     reads = IOResult()
 
@@ -56,6 +59,7 @@ async def run_sed(
             stdin=stdin,
             cwd=PathSpec.from_str_path(cwd),
             dispatch=dispatch,
+            env=env,
             argv=argv,
         ),
         _resolved,

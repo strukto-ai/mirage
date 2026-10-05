@@ -84,11 +84,17 @@ describe('gsheets read auto-bootstrap', () => {
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('asks for grid data, which spreadsheets.get omits by default', async () => {
+  it('asks for grid data, which spreadsheets.get omits by default, and values only', async () => {
     vi.mocked(client.googleGet).mockResolvedValue({ spreadsheetId: 's1' })
     await readSpreadsheet(STUB_TOKEN_MANAGER, 's1')
     expect(vi.mocked(client.googleGet).mock.lastCall?.[1]).toMatch(/\/spreadsheets\/s1$/)
-    expect(vi.mocked(client.googleGet).mock.lastCall?.[2]).toEqual({ includeGridData: 'true' })
+    expect(vi.mocked(client.googleGet).mock.lastCall?.[2]).toEqual({
+      includeGridData: 'true',
+      fields:
+        'spreadsheetId,spreadsheetUrl,properties,namedRanges,' +
+        'sheets(properties,data(startRow,startColumn,' +
+        'rowData(values(formattedValue,userEnteredValue,effectiveValue))))',
+    })
   })
 })
 
