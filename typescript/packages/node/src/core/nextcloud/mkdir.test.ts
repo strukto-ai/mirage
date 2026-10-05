@@ -109,6 +109,14 @@ describe('nextcloud mkdir', () => {
     expect(recorder.ancestors).toEqual(['/a/b/c'])
   })
 
+  // MKCOL's 405 on a taken name reads as done; the stat after names it.
+  it('refuses a name a file holds', async () => {
+    const fake = new FakeNextcloudOperator({ 'mkp/f': 'x' })
+    await expect(mkdir(accessorWith(fake), PathSpec.fromStrPath('/mkp/f'))).rejects.toMatchObject({
+      code: 'EEXIST',
+    })
+  })
+
   it('answers ENOTDIR under a file', async () => {
     const fake = refusingCreate({ 'mkp/f': 'x' })
     await expect(mkdir(accessorWith(fake), PathSpec.fromStrPath('/mkp/f/g'))).rejects.toMatchObject(
@@ -135,5 +143,20 @@ describe('nextcloud mkdir', () => {
     await expect(mkdir(accessorWith(fake), PathSpec.fromStrPath('/mkp/g'))).rejects.toThrow(
       'status 409',
     )
+  })
+
+  // A probe that fails after MKCOL landed still leaves no stale listing.
+  it('invalidates before the probe after the create', async () => {
+    const fake = new FakeNextcloudOperator()
+    fake.stat = () => Promise.reject(new Error('Unexpected (temporary) at stat, status 503'))
+    const recorder = new RecordingInvalidator()
+    await expect(
+      runWithCacheManager(recorder, () =>
+        mkdir(accessorWith(fake), PathSpec.fromStrPath('/newdir')),
+      ),
+    ).rejects.toThrow('status 503')
+    expect(fake.directories.has('newdir/')).toBe(true)
+    expect(recorder.writes).toEqual(['/newdir'])
+    expect(recorder.ancestors).toEqual([])
   })
 })

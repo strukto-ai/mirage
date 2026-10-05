@@ -101,13 +101,6 @@ import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/r
 import { encodeText } from '../../shell/bytes.ts'
 
 /**
- * Drop listing entries the current session's spec hides.
- *
- * Entry shapes vary by backend (bare names, trailing-slash names, full
- * paths), so each is keyed by its final segment against the listed
- * directory, the same normalization `mergeReaddir` dedups by.
- */
-/**
  * Whether a completed write op was an append of no bytes. That is an open for
  * appending (`true >> f`): it may create the file, but it leaves an existing
  * one's times as they were. Mirrors Python's `_appends_nothing`.
@@ -117,6 +110,13 @@ function appendsNothing(opName: string, args: readonly unknown[]): boolean {
   return opName === 'append' && data instanceof Uint8Array && data.byteLength === 0
 }
 
+/**
+ * Drop listing entries the current session's spec hides.
+ *
+ * Entry shapes vary by backend (bare names, trailing-slash names, full
+ * paths), so each is keyed by its final segment against the listed
+ * directory, the same normalization `mergeReaddir` dedups by.
+ */
 function visibleEntries(entries: string[], parent: string): string[] {
   const base = rstripSlash(parent)
   return entries.filter((e) => {

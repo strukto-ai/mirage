@@ -37,8 +37,7 @@ async def mkdir(
     opendal's ``create_dir`` is MKCOL over every missing level, so a bare
     mkdir looks its parent up first and refuses a missing one, as
     mkdir(2) does; only ``-p`` materializes a chain, and only it walks
-    the ancestor listings. Both doors refuse a taken name before calling
-    here (``refuse_taken``), so the create is not looked up again.
+    the ancestor listings.
 
     Args:
         accessor (NextcloudAccessor): Nextcloud accessor.
@@ -77,3 +76,9 @@ async def mkdir(
     await invalidate_after_write(path)
     if parents:
         await invalidate_ancestors(path)
+    try:
+        md = await op.stat(key)
+    except NotFound:
+        md = None
+    if md is not None and md.mode != EntryMode.Dir:
+        raise eexist(path)

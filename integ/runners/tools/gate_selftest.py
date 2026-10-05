@@ -1548,15 +1548,24 @@ def selftest_shard() -> None:
             sorted(ran) == want,
             f"{sorted(set(ran) ^ set(want))}",
         )
-        parts = shard.split(items, 2)
-        spread = [
-            target_id for part in parts for ids, _ in part for target_id in ids
-        ]
-        check(
-            f"shard ({host}): the shards partition the split",
-            sorted(spread) == sorted(ran),
-            f"{len(spread)} vs {len(ran)}",
-        )
+        for shards in (2, 3):
+            parts = shard.split(items, shards)
+            spread = [
+                target_id
+                for part in parts
+                for ids, _ in part
+                for target_id in ids
+            ]
+            check(
+                f"shard ({host}): {shards} shards partition the split",
+                sorted(spread) == sorted(ran),
+                f"{len(spread)} vs {len(ran)}",
+            )
+            check(
+                f"shard ({host}): each of {shards} shards gets a target",
+                all(parts),
+                f"{[len(part) for part in parts]}",
+            )
         check(
             f"shard ({host}): no skipped service and no foreign host",
             all(
