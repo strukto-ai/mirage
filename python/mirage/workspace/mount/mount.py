@@ -638,6 +638,15 @@ class MountEntry:
         key = (op.name, op.filetype)
         self._ops[key] = op
 
+    def has_filetype_op(self, name: str, filetype: str) -> bool:
+        """Whether an op named ``name`` is registered for ``filetype``.
+
+        Args:
+            name (str): the op name.
+            filetype (str): the extension the op is scoped to.
+        """
+        return (name, filetype) in self._ops
+
     def _resolve_cascade(
         self,
         name: str,
