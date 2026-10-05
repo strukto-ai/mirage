@@ -14,6 +14,7 @@
 
 import errno
 import functools
+import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
@@ -35,6 +36,7 @@ from mirage.context import (
     hidden_paths_intersect,
     hidden_refusal,
     path_allowed,
+    path_rules_active,
 )
 from mirage.context.session_context import require_paths_writable
 from mirage.io import IOResult
@@ -61,6 +63,7 @@ from mirage.utils.path import norm, parent
 from mirage.utils.remnants import remove_remnants, visible_below
 from mirage.vfs.types import (
     ContentSearchOps,
+    DuOps,
     IsMountedOp,
     NativeReadOps,
     OperationFn,
@@ -71,6 +74,8 @@ from mirage.vfs.types import (
     StatOp,
     WriteOps,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BuilderFn(Protocol):
@@ -109,302 +114,6 @@ async def overlaid_stat(
         raise walk_refusal(path)
     _refuse_hidden(path, create=False)
     return overlay(path.virtual, await stat(path, index))
-
-
-def _refuse_hidden(path: PathSpec, create: bool) -> None:
-    """Refuse a hidden path the way nonexistence would.
-
-    ENOENT for anything acting on the path; a create answers as
-    :func:`hidden_refusal` says, EACCES only when the directory it
-    lands in is visible. Raised at the op boundary so each command
-    renders the refusal through its own missing-file wording,
-    indistinguishable from a real miss.
-
-    Args:
-        path (PathSpec): the operand being guarded.
-        create (bool): whether the op creates the path it names.
-    """
-    if path_allowed(path.virtual):
-        return
-    raise hidden_refusal(path.virtual, create)
-
-
-def _guarded_call(
-    fn: OperationFn, create: bool, *args: Any, **kwargs: Any
-) -> Any:
-    """Call a backend op after guarding its PathSpec positionals.
-
-    Sync on purpose: the guard raises at call time and the backend's
-    own return shape (coroutine, async iterator) passes through
-    untouched. The first path refuses as the op's subject (ENOENT, or
-    a create's refusal); any further path is a destination, which a
-    hidden target refuses as a create (rename/copy into hidden space
-    is one).
-
-    Args:
-        fn (OperationFn): the raw backend op.
-        create (bool): whether the op creates its first path.
-        *args: the call's positionals, PathSpecs among them.
-        **kwargs: forwarded untouched.
-    """
-    first = True
-    for arg in args:
-        if isinstance(arg, PathSpec):
-            _refuse_hidden(arg, create=create if first else True)
-            first = False
-    return fn(*args, **kwargs)
-
-
-async def _guarded_readdir(
-    fn: OperationFn, *args: Any, **kwargs: Any
-) -> list[str]:
-    """Readdir with hidden names dropped from the listing.
-
-    Args:
-        fn (OperationFn): the raw backend readdir.
-        *args: the call's positionals; the first PathSpec is the
-            directory being listed.
-        **kwargs: forwarded untouched.
-    """
-    parent = next(a for a in args if isinstance(a, PathSpec))
-    _refuse_hidden(parent, create=False)
-    entries = await fn(*args, **kwargs)
-    base = parent.virtual.rstrip("/")
-    return [
-        e
-        for e in entries
-        if path_allowed(f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
-    ]
-
-
-def _move_would_reveal(src: PathSpec, dst: PathSpec) -> bool:
-    """Whether the session's hides make this relocation a reveal.
-
-    Args:
-        src (PathSpec): the subtree being moved or copied.
-        dst (PathSpec): where it would land.
-    """
-    sess = get_current_session()
-    if sess is None:
-        return False
-    return move_reveals(
-        sess.hidden_paths, sess.shown_paths, src.virtual, dst.virtual
-    )
-
-
-def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
-    """Refuse a relocation that would surface a hidden path.
-
-    A rename or a native directory copy re-anchors everything below its
-    source, and a hide's coverage does not move with the content, so
-    hidden bytes would land at paths the session can see. EACCES on the
-    source, which mv and cp render in GNU's permission-denied voice.
-    Only a directory has anything below it to re-anchor, so callers
-    check this for a source they know is a directory and skip it for a
-    file.
-
-    Args:
-        src (PathSpec): the subtree being moved or copied.
-        dst (PathSpec): where it would land.
-    """
-    if _move_would_reveal(src, dst):
-        raise PermissionError(
-            errno.EACCES, os.strerror(errno.EACCES), src.virtual
-        )
-
-
-async def _pair_src_is_dir(stat: StatOp, accessor: Any, src: PathSpec) -> bool:
-    """Whether a pair op's source stats as a directory.
-
-    Args:
-        stat (StatOp): the backend stat, for classifying the source.
-        accessor (Any): the pair call's leading accessor.
-        src (PathSpec): the source being classified.
-    """
-    try:
-        row = await stat(accessor, src)
-    except (FileNotFoundError, NotADirectoryError):
-        # Nothing moves; the op itself reports the absence.
-        return False
-    except OSError:
-        # Unanswerable classification fails toward refusal.
-        return True
-    return row.type is FileType.DIRECTORY
-
-
-async def _guarded_pair(
-    fn: OperationFn, stat: StatOp, assume_dir: bool, *args: Any, **kwargs: Any
-) -> Any:
-    """Rename/dir-copy guard: ``_guarded_call``'s per-path checks, then
-    the subtree reveal check on the (src, dst) pair.
-
-    Only a directory source can carry hidden content into view, so a
-    rename whose source stats as a file passes; a dir-copy source is a
-    directory by contract and skips the probe.
-
-    Args:
-        fn (OperationFn): the raw backend op.
-        stat (StatOp): the raw backend stat, probed only when the
-            reveal check trips.
-        assume_dir (bool): the slot's contract already makes the source
-            a directory (dir_copy), so no probe is needed.
-        *args: the call's positionals, source then destination among
-            them.
-        **kwargs: forwarded untouched.
-    """
-    specs = [arg for arg in args if isinstance(arg, PathSpec)]
-    for position, spec in enumerate(specs):
-        _refuse_hidden(spec, create=position > 0)
-    reveal = len(specs) >= 2 and _move_would_reveal(specs[0], specs[1])
-    if reveal and (
-        assume_dir or await _pair_src_is_dir(stat, args[0], specs[0])
-    ):
-        raise PermissionError(
-            errno.EACCES, os.strerror(errno.EACCES), specs[0].virtual
-        )
-    return await fn(*args, **kwargs)
-
-
-@dataclass(frozen=True, slots=True)
-class _SlotChannel:
-    """The command plane's remnant channel: the refused rmdir's sibling
-    slots, still mode- and rule-guarded but below the visibility
-    filter, so the cascade can see what it must destroy while every
-    deletion still answers for its own path's mode.
-
-    Args:
-        lead (tuple): the call's leading positionals (the accessor).
-        index (IndexCacheStore): the invocation's cache index.
-        readdir_fn (OperationFn): the sibling readdir slot.
-        stat_fn (OperationFn): the sibling stat slot.
-        unlink_fn (OperationFn): the sibling unlink slot.
-        rmdir_fn (OperationFn): the raw rmdir the guard wraps.
-    """
-
-    lead: tuple[Any, ...]
-    index: IndexCacheStore
-    readdir_fn: OperationFn
-    stat_fn: OperationFn
-    unlink_fn: OperationFn
-    rmdir_fn: OperationFn
-
-    async def readdir(self, spec: PathSpec) -> list[str]:
-        entries: list[str] = await self.readdir_fn(
-            *self.lead, spec, index=self.index
-        )
-        return entries
-
-    async def stat(self, spec: PathSpec) -> FileStat:
-        row: FileStat = await self.stat_fn(*self.lead, spec, index=self.index)
-        return row
-
-    async def unlink(self, spec: PathSpec) -> None:
-        await self.unlink_fn(*self.lead, spec)
-
-    async def rmdir(self, spec: PathSpec) -> None:
-        await self.rmdir_fn(*self.lead, spec, index=self.index)
-
-
-async def _guarded_rmdir(
-    fn: OperationFn,
-    readdir: OperationFn,
-    stat: StatOp,
-    unlink: OperationFn | None,
-    children: ChildMounts | None,
-    *args: Any,
-    index: IndexCacheStore = NULL_INDEX,
-    **kwargs: Any,
-) -> Any:
-    """rmdir that removes a directory the session sees as empty.
-
-    The backend refuses a directory still holding entries, but when
-    every remaining entry is hidden the refusal would leak that
-    something invisible exists, so the remnants go with the directory:
-    a session's mutation may destroy what it cannot see, never learn of
-    it. Any visible child keeps the refusal, and a backend with no
-    unlink keeps it too, having no way to take the remnants. The
-    removal is the shared ``remove_remnants`` walk over the sibling
-    slots, which revalidates visibility before every deletion and
-    keeps the mode guard on each one; any cascade failure answers with
-    the backend's original refusal, exactly as the ops plane does.
-
-    Args:
-        fn (OperationFn): the raw backend rmdir.
-        readdir (OperationFn): the raw backend readdir, for the real
-            listing the visible/hidden split is judged on.
-        stat (StatOp): the raw backend stat, classifying walked entries.
-        unlink (OperationFn | None): the raw backend unlink.
-        children (ChildMounts | None): child names the namespace owes
-            the directory (nested mount roots and symlinks), captured
-            from ``glob_children`` at wrap time, which holds the
-            invocation's fact because the factory applies this guard
-            per invocation, after stamping it. The children join the
-            emptiness judgment, never the walk: a visible mounted
-            child keeps the refusal exactly as the ops plane's merged
-            listing does, while the cascade itself only ever removes
-            what the backend holds.
-        *args: the call's positionals; the first PathSpec is the
-            directory.
-        index (IndexCacheStore): the invocation's cache index, threaded
-            by the callers so the fallback listing resolves on an
-            indexed backend the way the command's own listings did.
-        **kwargs: forwarded untouched.
-    """
-    target: PathSpec | None = None
-    for arg in args:
-        if isinstance(arg, PathSpec):
-            _refuse_hidden(arg, create=False)
-            if target is None:
-                target = arg
-    try:
-        return await fn(*args, index=index, **kwargs)
-    except OSError as exc:
-        if (
-            target is None
-            or unlink is None
-            or exc.errno not in (errno.ENOTEMPTY, errno.EEXIST)
-            or not hidden_paths_intersect(target.virtual)
-        ):
-            raise
-        lead: list[Any] = []
-        for arg in args:
-            if isinstance(arg, PathSpec):
-                break
-            lead.append(arg)
-        # Both folds catch ``Exception``, not just ``OSError``: an API
-        # backend's failure is not always an errno (box raises its own
-        # error type), and a raw backend exception here would reveal
-        # exactly what the refusal exists to hide. Cancellation and
-        # system exits still propagate.
-        try:
-            entries = await readdir(*lead, target, index=index)
-        except Exception as listing:
-            raise exc from listing
-        merged = list(entries)
-        if children is not None:
-            merged.extend(children(target.virtual))
-        if not entries or visible_below(target.virtual, merged, path_allowed):
-            raise
-        channel = _SlotChannel(tuple(lead), index, readdir, stat, unlink, fn)
-        try:
-            await remove_remnants(channel, path_allowed, target)
-        except Exception as cascade:
-            raise exc from cascade
-        return None
-
-
-async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
-    """Exists that answers False for a hidden path, never a refusal.
-
-    Args:
-        fn (OperationFn): the raw backend exists.
-        *args: the call's positionals; the first PathSpec is probed.
-        **kwargs: forwarded untouched.
-    """
-    probed = next(a for a in args if isinstance(a, PathSpec))
-    if not path_allowed(probed.virtual):
-        return False
-    return bool(await fn(*args, **kwargs))
 
 
 @overload
@@ -463,6 +172,21 @@ class Builder:
 
 @dataclass(frozen=True)
 class CommandIO(ReadOps, NativeReadOps, WriteOps):
+    """Backend capabilities consumed by command algorithms.
+
+    Command admission guards these calls; POSIX policy hooks belong to
+    the filesystem dispatcher and are not part of this interface.
+
+    ``glob_children`` is the child names the namespace owes a directory
+    (nested mount roots and symlinks), and ``glob_target_stat`` what an
+    owed name points at, the namespace's own stat resolved through the
+    workspace. The factory stamps both per invocation from ``opts.ns``,
+    because they are session-scoped state and the adapter is built once
+    per backend; the target stat lets a trailing-slash glob follow a link
+    the way bash does instead of keeping every link it cannot see
+    through.
+    """
+
     read_stream: ReadStreamOp = field()
     is_mounted: IsMountedOp = field()
     streams_bytes: bool = False
@@ -471,15 +195,7 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
     max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
     search: SearchOps | None = None
     content_search: ContentSearchOps | None = None
-    # Child names the namespace owes a directory (nested mount roots and
-    # symlinks). Stamped per invocation from opts.ns.child_mounts by the
-    # factory, because it is session-scoped state and the adapter itself
-    # is built once per backend.
     glob_children: ChildMounts | None = None
-    # What an owed name points at, the namespace's own stat resolved
-    # through the workspace. Stamped beside glob_children from
-    # opts.ns.links, so a trailing-slash glob follows a link the way
-    # bash does instead of keeping every link it cannot see through.
     glob_target_stat: LinkTargetStat | None = None
 
     @property
@@ -541,802 +257,6 @@ async def _refuse_missing(
         op.value,
         specs[1] if access and access.first_source else specs[0],
     )
-
-
-@dataclass(frozen=True)
-class Mutation:
-    create: bool = False
-    first_source: bool = False
-    subtree: bool = False
-
-
-_MUTATIONS = {
-    "write": Mutation(create=True),
-    "mkdir": Mutation(create=True),
-    "append": Mutation(create=True),
-    "pwrite": Mutation(create=True),
-    "create": Mutation(create=True),
-    "truncate": Mutation(create=True),
-    "unlink": Mutation(),
-    "rmdir": Mutation(),
-    "set_attrs": Mutation(),
-    "rm_r": Mutation(subtree=True),
-    "rename": Mutation(subtree=True),
-    "copy": Mutation(first_source=True),
-    "dir_copy": Mutation(first_source=True, subtree=True),
-}
-
-_GUARD_ENOENT_SLOTS = (
-    "read_bytes",
-    "read_stream",
-    "stat",
-    "read_range",
-    "find",
-    *(
-        slot
-        for slot, access in _MUTATIONS.items()
-        if not access.create and slot not in ("rename", "dir_copy", "rmdir")
-    ),
-)
-_GUARD_EACCES_SLOTS = tuple(
-    slot for slot, access in _MUTATIONS.items() if access.create
-)
-
-
-def _with_operation_guards(fn: OperationFn, slot: str) -> OperationFn:
-    """Guard bare writes and capability failures with the slot contract.
-
-    Args:
-        fn (OperationFn): a bare op or missing-capability fallback.
-        slot (str): operation name in the shared contract.
-    """
-    access = _MUTATIONS.get(slot)
-    if access is None:
-        return functools.partial(
-            _walked_call,
-            None,
-            slot == "mkdir",
-            functools.partial(_guarded_call, fn, False),
-        )
-    fn = functools.partial(_mode_call, fn, access.first_source, access.subtree)
-    fn = functools.partial(_rule_call, fn)
-    fn = functools.partial(_guarded_call, fn, access.create)
-    fn = functools.partial(_walked_call, None, slot == "mkdir", fn)
-    return functools.partial(
-        _policy_call, _op_policy_scope(), fn, slot, True, access.first_source
-    )
-
-
-def with_hidden_guard(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose slots refuse hidden paths like missing ones.
-
-    The commands factory applies this to every generic command, per
-    invocation and after stamping ``glob_children``, so a guard that
-    consumes a namespace fact captures the invocation's value at wrap
-    time (the rmdir guard's emptiness judgment does); enforcement
-    still lands once for the whole command tier (resolve_glob derives
-    from the wrapped readdir). The module-level IO constants stay raw:
-    the ops tables built from them serve the dispatcher, which
-    enforces hiding itself at the door, and their tests introspect
-    slot identity. The guards read the current session at call time.
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    changes: dict[str, Any] = {
-        "readdir": functools.partial(_guarded_readdir, ops.readdir)
-    }
-    for slot in _GUARD_ENOENT_SLOTS:
-        fn = getattr(ops, slot)
-        if fn is not None:
-            changes[slot] = functools.partial(_guarded_call, fn, False)
-    for slot in _GUARD_EACCES_SLOTS:
-        fn = getattr(ops, slot)
-        if fn is not None:
-            changes[slot] = functools.partial(_guarded_call, fn, True)
-    for slot, assume_dir in (("rename", False), ("dir_copy", True)):
-        fn = getattr(ops, slot)
-        if fn is not None:
-            changes[slot] = functools.partial(
-                _guarded_pair, fn, ops.stat, assume_dir
-            )
-    if ops.rmdir is not None:
-        changes["rmdir"] = functools.partial(
-            _guarded_rmdir,
-            ops.rmdir,
-            ops.readdir,
-            ops.stat,
-            ops.unlink,
-            ops.glob_children,
-        )
-    if ops.exists is not None:
-        changes["exists"] = functools.partial(_guarded_exists, ops.exists)
-    return replace(ops, **changes)
-
-
-# Every op slot that takes a path: the kernel resolves a path before
-# the op sees it, whatever the op then does, so presence facts (stat,
-# exists, the native find) are walked too. `du` is a bundle of ops a
-# du generic reaches only after it has stat-ed its operand.
-_WALK_SLOTS = (
-    "read_bytes",
-    "read_stream",
-    "read_range",
-    "stat",
-    "exists",
-    "readdir",
-    "find",
-    "write",
-    "append",
-    "pwrite",
-    "create",
-    "truncate",
-    "set_attrs",
-    "mkdir",
-    "unlink",
-    "rmdir",
-    "rm_r",
-    "rename",
-    "copy",
-    "dir_copy",
-)
-
-
-async def _walk_admit(
-    probe: WalkProbe, specs: list[PathSpec], creates: bool
-) -> None:
-    """Raise what the first unwalkable operand's dots answer.
-
-    Args:
-        probe (WalkProbe): the workspace stat and link follow the walk
-            reads.
-        specs (list[PathSpec]): the call's PathSpec positionals that
-            carry a dotted spelling.
-        creates (bool): the op creates the name it is handed (mkdir).
-    """
-    for spec in specs:
-        refusal = await dot_refusal(probe.stat, spec, probe.follow, creates)
-        if refusal is not None:
-            raise refusal
-
-
-async def _walked_await(
-    admit: Callable[[], Awaitable[None]], pending: Awaitable[Any]
-) -> Any:
-    """Await an op once its operands walk; close it unstarted if not.
-
-    Args:
-        admit (Callable[[], Awaitable[None]]): the bound operand walk.
-        pending (Awaitable[Any]): the op's not-yet-awaited result.
-    """
-    try:
-        await admit()
-    except BaseException:
-        close = getattr(pending, "close", None)
-        if close is not None:
-            close()
-        raise
-    return await pending
-
-
-async def _walked_stream(
-    admit: Callable[[], Awaitable[None]], source: AsyncIterator[bytes]
-) -> AsyncIterator[bytes]:
-    """Drain a stream once its operands walk; close it if they do not.
-
-    Args:
-        admit (Callable[[], Awaitable[None]]): the bound operand walk.
-        source (AsyncIterator[bytes]): the not-yet-started stream.
-    """
-    try:
-        await admit()
-    except BaseException:
-        close = getattr(source, "aclose", None)
-        if close is not None:
-            await close()
-        raise
-    async for chunk in source:
-        yield chunk
-
-
-def _walked_call(
-    walk: WalkProbe | None,
-    creates: bool,
-    fn: OperationFn,
-    *args: Any,
-    **kwargs: Any,
-) -> Any:
-    """Call a backend op once the dots of its PathSpec positionals walk.
-
-    A plain def, as ``_guarded_call`` is one: the op's own return shape
-    passes through, an awaitable awaited after the walk and a stream
-    drained after it, so a refused walk never starts the op. An operand
-    with no dotted spelling, the common case, costs one attribute read.
-    One the walk already refused (``walk_error``) raises at call time,
-    before anything else reads it.
-
-    Args:
-        walk (WalkProbe | None): the wrap-time probe, else the one bound
-            to the running command is read at call time.
-        creates (bool): the op creates the name it is handed (mkdir).
-        fn (OperationFn): the guarded backend op.
-        *args: the call's positionals, PathSpecs among them.
-        **kwargs: forwarded untouched.
-    """
-    for arg in args:
-        if isinstance(arg, PathSpec) and arg.walk_error is not None:
-            raise walk_refusal(arg)
-    specs = [
-        arg
-        for arg in args
-        if isinstance(arg, PathSpec) and arg.dotted is not None
-    ]
-    probe = walk if walk is not None else get_walk_probe()
-    if not specs or probe is None:
-        return fn(*args, **kwargs)
-    admit = functools.partial(_walk_admit, probe, specs, creates)
-    result = fn(*args, **kwargs)
-    if hasattr(result, "__aiter__") and not hasattr(result, "__await__"):
-        return _walked_stream(admit, result)
-    return _walked_await(admit, result)
-
-
-def with_walk_guard(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose slots walk an operand's ``.`` and ``..``.
-
-    ``virtual`` simplifies the dots away, so ``cat nope/../f`` would
-    read ``f`` past a missing ``nope``; the typed spelling rides
-    ``PathSpec.dotted`` and :func:`dot_refusal` proves every name in
-    front of a dot a directory, raising ENOENT or ENOTDIR at the op
-    boundary so each command words the refusal as its own miss. Judged
-    at op time, not before the command runs, because a command can make
-    the directory itself (``mkdir -p nope/../m``, ``mkdir d d/../x``).
-    The probe is the door's stat and link follow, bound by
-    ``Mount.execute_cmd``: captured at wrap time inside a command's
-    window (a lazily drained reader still walks after dispatch
-    returned), read at call time otherwise.
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    walk = get_walk_probe()
-    changes: dict[str, Any] = {}
-    for slot in _WALK_SLOTS:
-        fn = getattr(ops, slot)
-        if fn is not None:
-            changes[slot] = functools.partial(
-                _walked_call, walk, slot == "mkdir", fn
-            )
-    return replace(ops, **changes)
-
-
-_RULE_SLOTS = ("read_bytes", "read_stream", "read_range", *_MUTATIONS)
-
-
-def _rule_call(fn: OperationFn, *args: Any, **kwargs: Any) -> Any:
-    """Call a backend op after asking the admitted command's gate about
-    each PathSpec positional (a rename or copy has two, and a refused
-    destination is as much a refusal as a refused source).
-
-    Sync on purpose, like ``_guarded_call``: the gate raises at call
-    time and the op's own return shape passes through untouched. With
-    no gate bound (no admitted command in this context) the op runs as
-    is.
-
-    Args:
-        fn (OperationFn): the raw backend op.
-        *args: the call's positionals, PathSpecs among them.
-        **kwargs: forwarded untouched.
-    """
-    gate = get_admission()
-    if gate is not None:
-        for arg in args:
-            if isinstance(arg, PathSpec):
-                gate.check(arg.virtual)
-    return fn(*args, **kwargs)
-
-
-def _mode_call(
-    fn: OperationFn, skip_first: bool, subtree: bool, *args: Any, **kwargs: Any
-) -> Any:
-    """Call a backend mutation op after holding each written path to
-    its region's effective mode.
-
-    The one place a path-guarded command's write is refused for its
-    mode: nothing refuses the command before it runs, so each
-    individual write answers for its own path, whether the mount is
-    read-only (``gzip f`` refuses the write of ``f.gz``, ``gzip -c f``
-    never writes) or only a region is (``mkdir /repo/private/x`` on a
-    mount whose only writable region is ``/repo/build``). A copy's
-    source is a read, so the first PathSpec is skipped for the copy
-    slots; a rename mutates both endpoints, so both are held. An op
-    that covers a whole subtree also answers for the regions below its
-    operand (``readonly_below``): a native ``rm -r`` would otherwise
-    delete a read-only carve-out in one backend call no per-path check
-    ever sees. Sync like ``_guarded_call``, and inert with no mount
-    bound (a generic invoked outside a mount's command).
-
-    Args:
-        fn (OperationFn): the raw backend op.
-        skip_first (bool): whether the first PathSpec is read-only
-            (the copy slots' source).
-        subtree (bool): whether the op mutates everything under its
-            written paths in one call.
-        *args: the call's positionals, PathSpecs among them.
-        **kwargs: forwarded untouched.
-    """
-    gate = get_mount_gate()
-    if gate is not None:
-        prefix, mode = gate
-        specs = [arg for arg in args if isinstance(arg, PathSpec)]
-        require_paths_writable(
-            specs[1:] if skip_first else specs, prefix, mode, subtree=subtree
-        )
-    return fn(*args, **kwargs)
-
-
-async def _mkdir_on_read_only(
-    stat: StatOp,
-    gate: tuple[str, MountMode],
-    accessor: Any,
-    path: PathSpec,
-    parents: bool,
-) -> None:
-    """Answer a mkdir on a read-only region the way the filesystem would.
-
-    A read-only filesystem refuses only a create it would really make,
-    so the answer is whatever the create runs into first, walking the
-    components from the mount root: a missing one is refused with EROFS,
-    a file in the chain is ENOTDIR, an existing leaf is EEXIST, and
-    ``mkdir -p`` of a directory that is already there succeeds. The
-    blamed path is the first component that would have been made, as
-    GNU's ``mkdir -p`` names it (``'/ro/n'`` for ``/ro/n/m``). Pinned
-    against GNU coreutils 9.7 on a read-only tmpfs. Mirrors TS
-    ``mkdirOnReadOnly``.
-
-    Args:
-        stat (StatOp): the backend stat, for walking the components.
-        gate (tuple[str, MountMode]): the mount prefix and its mode.
-        accessor (Any): the mkdir call's accessor.
-        path (PathSpec): the directory to make.
-        parents (bool): ``-p``.
-    """
-    prefix, mode = gate
-    base = prefix.rstrip("/")
-    leaf = path.virtual.rstrip("/") or "/"
-    if leaf != base and not leaf.startswith(base + "/"):
-        raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)
-    # Each component's backend key keeps the leaf's own key prefix,
-    # recovered from its (virtual, vfs_path) pair as PathSpec.dir does.
-    cut = len(leaf) - len(path.vfs_path.strip("/"))
-    parts = [part for part in leaf[len(base) :].split("/") if part]
-    chain = []
-    for depth in range(1, len(parts) + 1):
-        virtual = f"{base}/{'/'.join(parts[:depth])}"
-        chain.append(PathSpec.from_str_path(virtual, virtual[cut:].strip("/")))
-    for index, component in enumerate(chain):
-        try:
-            row = await stat(accessor, component)
-        except FileNotFoundError as exc:
-            if not parents and index < len(chain) - 1:
-                raise enoent(path) from exc
-            blame = next(
-                (
-                    spec
-                    for spec in chain[index:]
-                    if effective_path_mode(spec.virtual, prefix, mode)
-                    == MountMode.READ
-                ),
-                path,
-            )
-            raise ReadOnlyError(
-                errno.EROFS, "Read-only file system", blame.virtual
-            ) from exc
-        if row.type is not FileType.DIRECTORY:
-            if index == len(chain) - 1:
-                raise eexist(path)
-            raise enotdir(component if parents else path)
-    if not parents:
-        raise eexist(path)
-
-
-async def _mkdir_on_writable(
-    fn: OperationFn,
-    stat: StatOp,
-    accessor: Any,
-    path: Any,
-    parents: bool,
-    **options: Any,
-) -> Any:
-    """mkdir on a writable region: a taken name is refused before the
-    create, as mkdir(2) does (``refuse_taken``).
-
-    Args:
-        fn (OperationFn): the raw backend mkdir.
-        stat (StatOp): the backend stat.
-        accessor (Any): the call's accessor.
-        path (Any): the directory to make.
-        parents (bool): ``-p``.
-        **options: forwarded untouched.
-    """
-    if isinstance(path, PathSpec):
-        await refuse_taken(stat, accessor, path, parents)
-    return await fn(accessor, path, parents=parents, **options)
-
-
-def _mode_mkdir(
-    fn: OperationFn,
-    stat: StatOp,
-    accessor: Any,
-    path: Any,
-    parents: bool = False,
-    **options: Any,
-) -> Any:
-    """The mkdir slot of ``_mode_call``: a directory on a read-only
-    region answers what the create would run into instead of refusing
-    the operand outright (``_mkdir_on_read_only``), and one on a
-    writable region refuses a taken name (``_mkdir_on_writable``). Sync
-    like ``_mode_call``.
-
-    Args:
-        fn (OperationFn): the raw backend mkdir.
-        stat (StatOp): the backend stat.
-        accessor (Any): the call's accessor.
-        path (Any): the directory to make.
-        parents (bool): ``-p``.
-        **options: forwarded untouched.
-    """
-    gate = get_mount_gate()
-    if (
-        gate is not None
-        and isinstance(path, PathSpec)
-        and effective_path_mode(path.virtual, *gate) == MountMode.READ
-    ):
-        return _mkdir_on_read_only(stat, gate, accessor, path, parents)
-    return _mkdir_on_writable(fn, stat, accessor, path, parents, **options)
-
-
-def with_mode_guard(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose mutation slots hold each written path to
-    its region's effective mode.
-
-    The mount's write gate, innermost of the three guards: hides answer
-    ENOENT first, rules refuse next, and only a path both leave standing
-    is judged for its mode, the same order the op door applies. Reads
-    are never wrapped, because ``READ`` allows them everywhere the other
-    guards do.
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    changes: dict[str, Any] = {}
-    for slot, access in _MUTATIONS.items():
-        fn = getattr(ops, slot)
-        if fn is None:
-            continue
-        if slot == "mkdir":
-            changes[slot] = functools.partial(_mode_mkdir, fn, ops.stat)
-        else:
-            changes[slot] = functools.partial(
-                _mode_call, fn, access.first_source, access.subtree
-            )
-    return replace(ops, **changes)
-
-
-def with_rule_guard(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose content and mutation slots ask the admitted
-    command's gate before touching a path.
-
-    The rule arms' counterpart of ``with_hidden_guard``, wrapped inside
-    it so a hidden path still answers ENOENT before any rule can name
-    it. The gate judged the line's operands; this is how a walk (``grep
-    -r``, ``find``, ``du``, ``cp -r``, ``tar``) is held to the same rules
-    on the entries it reaches below them. ``stat`` and ``exists`` stay
-    unguarded, because deny means present and refused, not absent: a
-    listing shows a refused entry's name and size, and the read of it
-    is what fails, as GNU reports an unreadable file. ``readdir`` asks
-    about the directory being listed, never filters its names. A
-    backend's native ``find``/``du`` are not wrapped: the builders
-    route to the readdir walk while a path rule scopes the command
-    (``path_rules_active``), so every entry passes through here.
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    changes: dict[str, Any] = {
-        "readdir": functools.partial(_rule_call, ops.readdir)
-    }
-    for slot in _RULE_SLOTS:
-        fn = getattr(ops, slot)
-        if fn is not None:
-            changes[slot] = functools.partial(_rule_call, fn)
-    return replace(ops, **changes)
-
-
-def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
-    """Return ``dispatch`` marking each op with the admitted command's
-    gate as ``rule_gate``, which the door judges on the paths the op
-    reaches: the command's dispatcher skips its guarded slots, and the
-    door cannot tell which command issued an op. A metadata op passes
-    unmarked, as ``with_rule_guard`` lets ``stat`` pass.
-
-    Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
-    """
-
-    async def guarded(
-        op: str, path: PathSpec, **options: Any
-    ) -> tuple[Any, IOResult]:
-        gate = get_admission()
-        if gate is not None and op not in METADATA_OPS:
-            options = {**options, "rule_gate": gate}
-        return await dispatch(op, path, **options)
-
-    return guarded
-
-
-def with_path_guards(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` under the whole path axis: the typed dots walk
-    first, hides answer ENOENT next, rules refuse, the mode speaks last.
-
-    The one spelling of the guard chain, used by the commands factory
-    for every generic command and by a bespoke command family that
-    consumes a ``CommandIO`` directly (the object-store overrides), so
-    an override enforces the session's path axis exactly like the
-    generic it replaces.
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    return with_walk_guard(
-        with_hidden_guard(with_rule_guard(with_mode_guard(ops)))
-    )
-
-
-def with_write_guards(fn: OperationFn) -> OperationFn:
-    """Guard one bare backend write the way the adapter guards a slot.
-
-    For a bespoke command wired from loose functions rather than a
-    ``CommandIO`` (the google ``rm`` family binds an index-threaded
-    unlink): the same chain in the same order, judging the call's
-    PathSpec positionals. A hidden path answers ENOENT, the flavor of
-    the flat mutation slots. The policy arm rides outermost, as it does
-    on the slot chain.
-
-    Args:
-        fn (OperationFn): the raw backend write.
-    """
-    return _with_operation_guards(fn, "unlink")
-
-
-# (policies, mount prefix, session id); the unbound spelling for a
-# registration-time wrap, which reads the live context per call.
-_PolicyScope = tuple[Policies | None, str, str]
-_UNBOUND_SCOPE: _PolicyScope = (None, "", "")
-
-
-def _op_policy_scope() -> _PolicyScope:
-    """The policies to consult for this op call, the mount prefix, and
-    the session the command runs under.
-
-    None is the fast path: no dispatched command bound policies, or
-    none of them override pre_ops, at the cost of two contextvar reads
-    and one O(1) probe per slot call.
-    """
-    policies = get_op_policies()
-    if policies is None or not policies.wants("pre_ops"):
-        return _UNBOUND_SCOPE
-    gate = get_mount_gate()
-    sess = get_current_session()
-    return (
-        policies,
-        gate[0] if gate is not None else "",
-        sess.session_id if sess is not None else "",
-    )
-
-
-def _live_policy_scope(scope: _PolicyScope) -> _PolicyScope:
-    """The wrap-time scope when it caught a bound command, else the
-    call-time context.
-
-    The factory applies the guard inside the command's window, so its
-    wrap-time capture also covers a reader the output pipeline drains
-    after dispatch has reset the context (head/tail/wc bind lazy
-    readers), with the prefix and session identity the drained op
-    belongs to; a registration-time wrap (the object-store overrides,
-    the loose-write chain) has no window when applied and reads the
-    live context instead, which its eager handlers are inside.
-
-    Args:
-        scope (_PolicyScope): the wrap-time capture.
-    """
-    if scope[0] is not None:
-        return scope
-    return _op_policy_scope()
-
-
-async def _policy_admit(
-    policies: Policies,
-    prefix: str,
-    session_id: str,
-    op: str,
-    write: bool,
-    first_source: bool,
-    args: tuple[Any, ...],
-) -> None:
-    """Fire pre_ops for each PathSpec positional of one slot call.
-
-    Args:
-        policies (Policies): the bound admission policies.
-        prefix (str): the executing mount's prefix, "" outside one.
-        session_id (str): the session the command runs under.
-        op (str): the slot name, which is the op name policies see.
-        write (bool): whether the op mutates its paths.
-        first_source (bool): whether the leading PathSpec is a
-            read-only source (the copy slots).
-        args: the call's positionals, PathSpecs among them.
-    """
-    first = True
-    for arg in args:
-        if isinstance(arg, PathSpec):
-            mutates = write and not (first and first_source)
-            await pre_ops_gate(policies, op, arg, mutates, prefix, session_id)
-            first = False
-
-
-async def _policy_call(
-    scope: _PolicyScope,
-    fn: OperationFn,
-    op: str,
-    write: bool,
-    first_source: bool,
-    *args: Any,
-    **kwargs: Any,
-) -> Any:
-    """Call a backend op after admitting its paths through pre_ops.
-
-    Async, unlike the sync guards it wraps: the hooks are user
-    coroutines. Every slot this wraps returns an awaitable, so the
-    shape is preserved; read_stream and readdir have their own
-    wrappers.
-
-    Args:
-        scope (_PolicyScope): the wrap-time capture.
-        fn (OperationFn): the guarded backend op.
-        op (str): the slot name.
-        write (bool): whether the op mutates its paths.
-        first_source (bool): whether the leading PathSpec is a
-            read-only source.
-        *args: the call's positionals, PathSpecs among them.
-        **kwargs: forwarded untouched.
-    """
-    policies, prefix, session_id = _live_policy_scope(scope)
-    if policies is not None:
-        await _policy_admit(
-            policies, prefix, session_id, op, write, first_source, args
-        )
-    return await fn(*args, **kwargs)
-
-
-async def _policy_readdir(
-    scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
-) -> list[str]:
-    """Readdir admitted through pre_ops for the directory it lists.
-
-    Args:
-        scope (_PolicyScope): the wrap-time capture.
-        fn (OperationFn): the guarded backend readdir.
-        *args: the call's positionals; the first PathSpec is the
-            directory being listed.
-        **kwargs: forwarded untouched.
-    """
-    policies, prefix, session_id = _live_policy_scope(scope)
-    if policies is not None:
-        parent_spec = next(a for a in args if isinstance(a, PathSpec))
-        await pre_ops_gate(
-            policies, "readdir", parent_spec, False, prefix, session_id
-        )
-    entries: list[str] = await fn(*args, **kwargs)
-    return entries
-
-
-def _policy_stream(
-    scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
-) -> Any:
-    """Read-stream admitted through pre_ops before the first chunk.
-
-    A plain def for the reason ``_guarded_read_stream`` is one: the
-    inner op captures per-call scope eagerly (the read-through cache
-    reads the active manager here), so it is built now, which runs no
-    I/O; the admission itself is async, so it rides the returned
-    generator, before any byte is pulled.
-
-    Args:
-        scope (_PolicyScope): the wrap-time capture.
-        fn (OperationFn): the guarded backend read_stream.
-        *args: the call's positionals; the first PathSpec is the file
-            being read.
-        **kwargs: forwarded untouched.
-    """
-    policies, prefix, session_id = _live_policy_scope(scope)
-    spec = next((a for a in args if isinstance(a, PathSpec)), None)
-    if policies is None or spec is None:
-        return fn(*args, **kwargs)
-    return _policy_stream_drain(
-        policies, prefix, session_id, spec, fn(*args, **kwargs)
-    )
-
-
-async def _policy_stream_drain(
-    policies: Policies,
-    prefix: str,
-    session_id: str,
-    path: PathSpec,
-    source: AsyncIterator[bytes],
-) -> AsyncIterator[bytes]:
-    """Drain ``source`` once the read is admitted; close it if refused.
-
-    Args:
-        policies (Policies): the bound admission policies.
-        prefix (str): the executing mount's prefix.
-        session_id (str): the session the command runs under.
-        path (PathSpec): the file being read.
-        source (AsyncIterator[bytes]): the not-yet-started inner stream.
-    """
-    try:
-        await pre_ops_gate(
-            policies, "read_stream", path, False, prefix, session_id
-        )
-    except BaseException:
-        close = getattr(source, "aclose", None)
-        if close is not None:
-            await close()
-        raise
-    async for chunk in source:
-        yield chunk
-
-
-def with_policy_guard(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose content and mutation slots admit each
-    PathSpec through the workspace's coded pre_ops hooks.
-
-    The coded-policy arm of the guard chain, applied outside the cache
-    wraps so admission fires before a warm serve, the dispatcher's own
-    order. The surface is the rule guard's plus readdir: content reads
-    (read_bytes, read_stream, read_range), every mutation slot, and
-    the directory a readdir lists. stat/exists and the native find/du
-    slots stay unguarded as presence facts, the mode-000 shape the
-    rule guard already states, so a denied entry still lists and stats
-    while the read of it is what fails. Ops are named by slot; a
-    policy portable across the tiers keys on ``write`` and ``path``.
-    Inert unless a dispatched command bound policies overriding
-    pre_ops (``_op_policy_scope``, with the mount prefix and session
-    identity captured at wrap time so a lazily drained reader still
-    answers as the command that bound it, see ``_live_policy_scope``).
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    scope = _op_policy_scope()
-    changes: dict[str, Any] = {
-        "readdir": functools.partial(_policy_readdir, scope, ops.readdir),
-        "read_stream": functools.partial(
-            _policy_stream, scope, ops.read_stream
-        ),
-    }
-    for slot in ("read_bytes", "read_range", *_MUTATIONS):
-        access = _MUTATIONS.get(slot)
-        fn = getattr(ops, slot)
-        if fn is not None:
-            changes[slot] = functools.partial(
-                _policy_call,
-                scope,
-                fn,
-                slot,
-                access is not None,
-                access.first_source if access else False,
-            )
-    return replace(ops, **changes)
 
 
 async def _is_implicit_dir(
@@ -1473,20 +393,21 @@ async def _read_hit_a_dir(
         return False
     try:
         st: FileStat | None = await ops.stat(accessor, path, index)
-    except Exception:
+    except Exception as probe:
         # A probe that fails is a negative probe, never an error to
         # surface: `exc` is what the user gets, and it is still live.
+        logger.debug("read probe: stat %s failed: %s", path.virtual, probe)
         st = None
     if st is not None:
         return getattr(st, "type", None) == FileType.DIRECTORY
     try:
         if await _is_implicit_dir(ops, accessor, path, index):
             return True
-    except Exception:
+    except Exception as probe:
         # Negative probe, as above. `_is_implicit_dir` narrows to
         # MISS_ERRORS for its other caller, where the stat is the
         # operation rather than a probe.
-        pass
+        logger.debug("read probe: listing %s failed: %s", path.virtual, probe)
     # The same fact `_is_namespace_dir` reads, reached from the adapter
     # rather than from the bag: this guard wraps a slot and never sees a
     # CommandOpts, and the factory stamps the very callable
@@ -1556,7 +477,7 @@ async def _guarded_read(
 def with_dir_guard(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose reads refuse a directory with GNU's EISDIR.
 
-    The read family's counterpart of ``with_hidden_guard`` and
+    The read family's counterpart of ``with_command_guards`` and
     ``with_slash_guard``: reading a directory is never a legitimate call,
     so the refusal belongs to the slot rather than to each builder's
     wiring. It used to belong to the wiring, and 23 of the read builders
@@ -1689,3 +610,1020 @@ async def resolve_or_empty(
     if paths and ops.is_mounted(accessor):
         return await ops.resolve_glob(accessor, paths, index)
     return []
+
+
+def _refuse_hidden(path: PathSpec, create: bool) -> None:
+    """Refuse a hidden path the way nonexistence would.
+
+    ENOENT for anything acting on the path; a create answers as
+    :func:`hidden_refusal` says, EACCES only when the directory it
+    lands in is visible. Raised at the command guard so each command
+    renders the refusal through its own missing-file wording,
+    indistinguishable from a real miss.
+
+    Args:
+        path (PathSpec): the operand being guarded.
+        create (bool): whether the op creates the path it names.
+    """
+    if path_allowed(path.virtual):
+        return
+    raise hidden_refusal(path.virtual, create)
+
+
+async def _guarded_readdir(
+    fn: OperationFn, *args: Any, **kwargs: Any
+) -> list[str]:
+    """Readdir with hidden names dropped from the listing.
+
+    Args:
+        fn (OperationFn): the raw backend readdir.
+        *args: the call's positionals; the first PathSpec is the
+            directory being listed.
+        **kwargs: forwarded untouched.
+    """
+    parent = next(a for a in args if isinstance(a, PathSpec))
+    _refuse_hidden(parent, create=False)
+    entries = await fn(*args, **kwargs)
+    base = parent.virtual.rstrip("/")
+    return [
+        e
+        for e in entries
+        if path_allowed(f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
+    ]
+
+
+def _move_would_reveal(src: PathSpec, dst: PathSpec) -> bool:
+    """Whether the session's hides make this relocation a reveal.
+
+    Args:
+        src (PathSpec): the subtree being moved or copied.
+        dst (PathSpec): where it would land.
+    """
+    sess = get_current_session()
+    if sess is None:
+        return False
+    return move_reveals(
+        sess.hidden_paths, sess.shown_paths, src.virtual, dst.virtual
+    )
+
+
+def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
+    """Refuse a relocation that would surface a hidden path.
+
+    A rename or a native directory copy re-anchors everything below its
+    source, and a hide's coverage does not move with the content, so
+    hidden bytes would land at paths the session can see. EACCES on the
+    source, which mv and cp render in GNU's permission-denied voice.
+    Only a directory has anything below it to re-anchor, so callers
+    check this for a source they know is a directory and skip it for a
+    file.
+
+    Args:
+        src (PathSpec): the subtree being moved or copied.
+        dst (PathSpec): where it would land.
+    """
+    if _move_would_reveal(src, dst):
+        raise PermissionError(
+            errno.EACCES, os.strerror(errno.EACCES), src.virtual
+        )
+
+
+async def _pair_src_is_dir(stat: StatOp, accessor: Any, src: PathSpec) -> bool:
+    """Whether a pair op's source stats as a directory.
+
+    Args:
+        stat (StatOp): the backend stat, for classifying the source.
+        accessor (Any): the pair call's leading accessor.
+        src (PathSpec): the source being classified.
+    """
+    try:
+        row = await stat(accessor, src)
+    except (FileNotFoundError, NotADirectoryError):
+        # Nothing moves; the op itself reports the absence.
+        return False
+    except OSError:
+        # Unanswerable classification fails toward refusal.
+        return True
+    return row.type is FileType.DIRECTORY
+
+
+async def _guarded_pair(
+    fn: OperationFn, stat: StatOp, assume_dir: bool, *args: Any, **kwargs: Any
+) -> Any:
+    """Rename/dir-copy guard: per-path visibility checks, then
+    the subtree reveal check on the (src, dst) pair.
+
+    Only a directory source can carry hidden content into view, so a
+    rename whose source stats as a file passes; a dir-copy source is a
+    directory by contract and skips the probe.
+
+    Args:
+        fn (OperationFn): the raw backend op.
+        stat (StatOp): the raw backend stat, probed only when the
+            reveal check trips.
+        assume_dir (bool): the slot's contract already makes the source
+            a directory (dir_copy), so no probe is needed.
+        *args: the call's positionals, source then destination among
+            them.
+        **kwargs: forwarded untouched.
+    """
+    specs = [arg for arg in args if isinstance(arg, PathSpec)]
+    for position, spec in enumerate(specs):
+        _refuse_hidden(spec, create=position > 0)
+    reveal = len(specs) >= 2 and _move_would_reveal(specs[0], specs[1])
+    if reveal and (
+        assume_dir or await _pair_src_is_dir(stat, args[0], specs[0])
+    ):
+        raise PermissionError(
+            errno.EACCES, os.strerror(errno.EACCES), specs[0].virtual
+        )
+    return await fn(*args, **kwargs)
+
+
+@dataclass(frozen=True, slots=True)
+class _SlotChannel:
+    """The command plane's remnant channel: the refused rmdir's sibling
+    slots, still mode- and rule-guarded but below the visibility
+    filter, so the cascade can see what it must destroy while every
+    deletion still answers for its own path's mode.
+
+    Args:
+        lead (tuple): the call's leading positionals (the accessor).
+        index (IndexCacheStore): the invocation's cache index.
+        readdir_fn (OperationFn): the sibling readdir slot.
+        stat_fn (OperationFn): the sibling stat slot.
+        unlink_fn (OperationFn): the sibling unlink slot.
+        rmdir_fn (OperationFn): the raw rmdir the guard wraps.
+    """
+
+    lead: tuple[Any, ...]
+    index: IndexCacheStore
+    readdir_fn: OperationFn
+    stat_fn: OperationFn
+    unlink_fn: OperationFn
+    rmdir_fn: OperationFn
+
+    async def readdir(self, spec: PathSpec) -> list[str]:
+        entries: list[str] = await self.readdir_fn(
+            *self.lead, spec, index=self.index
+        )
+        return entries
+
+    async def stat(self, spec: PathSpec) -> FileStat:
+        row: FileStat = await self.stat_fn(*self.lead, spec, index=self.index)
+        return row
+
+    async def unlink(self, spec: PathSpec) -> None:
+        _check_command_paths([spec], "unlink", check_hidden=False)
+        await self.unlink_fn(*self.lead, spec)
+
+    async def rmdir(self, spec: PathSpec) -> None:
+        _check_command_paths([spec], "rmdir", check_hidden=False)
+        await self.rmdir_fn(*self.lead, spec, index=self.index)
+
+
+async def _guarded_rmdir(
+    fn: OperationFn,
+    readdir: OperationFn,
+    stat: StatOp,
+    unlink: OperationFn | None,
+    children: ChildMounts | None,
+    *args: Any,
+    index: IndexCacheStore = NULL_INDEX,
+    **kwargs: Any,
+) -> Any:
+    """rmdir that removes a directory the session sees as empty.
+
+    The backend refuses a directory still holding entries, but when
+    every remaining entry is hidden the refusal would leak that
+    something invisible exists, so the remnants go with the directory:
+    a session's mutation may destroy what it cannot see, never learn of
+    it. Any visible child keeps the refusal, and a backend with no
+    unlink keeps it too, having no way to take the remnants. The
+    removal is the shared ``remove_remnants`` walk over the sibling
+    slots, which revalidates visibility before every deletion and
+    keeps the mode guard on each one; any cascade failure answers with
+    the backend's original refusal, exactly as the ops plane does.
+
+    Args:
+        fn (OperationFn): the raw backend rmdir.
+        readdir (OperationFn): the raw backend readdir, for the real
+            listing the visible/hidden split is judged on.
+        stat (StatOp): the raw backend stat, classifying walked entries.
+        unlink (OperationFn | None): the raw backend unlink.
+        children (ChildMounts | None): child names the namespace owes
+            the directory (nested mount roots and symlinks), captured
+            from ``glob_children`` at wrap time, which holds the
+            invocation's fact because the factory applies this guard
+            per invocation, after stamping it. The children join the
+            emptiness judgment, never the walk: a visible mounted
+            child keeps the refusal exactly as the ops plane's merged
+            listing does, while the cascade itself only ever removes
+            what the backend holds.
+        *args: the call's positionals; the first PathSpec is the
+            directory.
+        index (IndexCacheStore): the invocation's cache index, threaded
+            by the callers so the fallback listing resolves on an
+            indexed backend the way the command's own listings did.
+        **kwargs: forwarded untouched.
+    """
+    target: PathSpec | None = None
+    for arg in args:
+        if isinstance(arg, PathSpec):
+            _refuse_hidden(arg, create=False)
+            if target is None:
+                target = arg
+    try:
+        return await fn(*args, index=index, **kwargs)
+    except OSError as exc:
+        if (
+            target is None
+            or unlink is None
+            or exc.errno not in (errno.ENOTEMPTY, errno.EEXIST)
+            or not hidden_paths_intersect(target.virtual)
+        ):
+            raise
+        lead: list[Any] = []
+        for arg in args:
+            if isinstance(arg, PathSpec):
+                break
+            lead.append(arg)
+        # Both folds catch ``Exception``, not just ``OSError``: an API
+        # backend's failure is not always an errno (box raises its own
+        # error type), and a raw backend exception here would reveal
+        # exactly what the refusal exists to hide. Cancellation and
+        # system exits still propagate.
+        try:
+            entries = await readdir(*lead, target, index=index)
+        except Exception as listing:
+            raise exc from listing
+        merged = list(entries)
+        if children is not None:
+            merged.extend(children(target.virtual))
+        if not entries or visible_below(target.virtual, merged, path_allowed):
+            raise
+        channel = _SlotChannel(tuple(lead), index, readdir, stat, unlink, fn)
+        try:
+            await remove_remnants(channel, path_allowed, target)
+        except Exception as cascade:
+            raise exc from cascade
+        return None
+
+
+async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
+    """Exists that answers False for a hidden path, never a refusal.
+
+    Args:
+        fn (OperationFn): the raw backend exists.
+        *args: the call's positionals; the first PathSpec is probed.
+        **kwargs: forwarded untouched.
+    """
+    probed = next(a for a in args if isinstance(a, PathSpec))
+    if not path_allowed(probed.virtual):
+        return False
+    return bool(await fn(*args, **kwargs))
+
+
+@dataclass(frozen=True)
+class Mutation:
+    create: bool = False
+    first_source: bool = False
+    subtree: bool = False
+
+
+_MUTATIONS = {
+    "write": Mutation(create=True),
+    "mkdir": Mutation(create=True),
+    "append": Mutation(create=True),
+    "pwrite": Mutation(create=True),
+    "create": Mutation(create=True),
+    "truncate": Mutation(create=True),
+    "unlink": Mutation(),
+    "rmdir": Mutation(),
+    "set_attrs": Mutation(),
+    "rm_r": Mutation(subtree=True),
+    "rename": Mutation(subtree=True),
+    "copy": Mutation(first_source=True),
+    "dir_copy": Mutation(first_source=True, subtree=True),
+}
+
+
+def _check_command_paths(
+    paths: list[PathSpec],
+    slot: str,
+    check_hidden: bool = True,
+    check_mode: bool = True,
+) -> None:
+    """Enforce the admitted command's paths and mount capabilities.
+
+    Args:
+        paths (list[PathSpec]): backend call endpoints.
+        slot (str): command adapter capability being used.
+        check_hidden (bool): false only for private remnant deletion.
+    """
+    access = _MUTATIONS.get(slot)
+    admission = get_admission()
+    for position, path in enumerate(paths):
+        if check_hidden:
+            _refuse_hidden(
+                path, create=position > 0 or bool(access and access.create)
+            )
+        if admission is not None and slot not in ("stat", "exists"):
+            admission.check(path.virtual)
+    mount = get_mount_gate()
+    if access is not None and check_mode and mount is not None:
+        require_paths_writable(
+            paths[1:] if access.first_source else paths,
+            *mount,
+            subtree=access.subtree,
+        )
+
+
+def _command_call(
+    fn: OperationFn,
+    slot: str,
+    *args: Any,
+    check_mode: bool = True,
+    **kwargs: Any,
+) -> Any:
+    paths = [
+        path
+        for arg in args
+        for path in (arg if isinstance(arg, (list, tuple)) else (arg,))
+        if isinstance(path, PathSpec)
+    ]
+    _check_command_paths(paths, slot, check_mode=check_mode)
+    return fn(*args, **kwargs)
+
+
+def _with_operation_guards(fn: OperationFn, slot: str) -> OperationFn:
+    access = _MUTATIONS.get(slot)
+    policed = functools.partial(
+        _policy_call,
+        _op_policy_scope(),
+        fn,
+        slot,
+        access is not None,
+        access.first_source if access else False,
+    )
+    guarded = functools.partial(_command_call, policed, slot)
+    return functools.partial(
+        _walked_call, get_walk_probe(), slot == "mkdir", guarded
+    )
+
+
+# Every op slot that takes a path: the kernel resolves a path before
+# the op sees it, whatever the op then does, so presence facts (stat,
+# exists, the native find) are walked too. `du` is a bundle of ops a
+# du generic reaches only after it has stat-ed its operand.
+_WALK_SLOTS = (
+    "read_bytes",
+    "read_stream",
+    "read_range",
+    "stat",
+    "exists",
+    "readdir",
+    "find",
+    "write",
+    "append",
+    "pwrite",
+    "create",
+    "truncate",
+    "set_attrs",
+    "mkdir",
+    "unlink",
+    "rmdir",
+    "rm_r",
+    "rename",
+    "copy",
+    "dir_copy",
+)
+
+
+async def _walk_admit(
+    probe: WalkProbe, specs: list[PathSpec], creates: bool
+) -> None:
+    """Raise what the first unwalkable operand's dots answer.
+
+    Args:
+        probe (WalkProbe): the workspace stat and link follow the walk
+            reads.
+        specs (list[PathSpec]): the call's PathSpec positionals that
+            carry a dotted spelling.
+        creates (bool): the op creates the name it is handed (mkdir).
+    """
+    for spec in specs:
+        refusal = await dot_refusal(probe.stat, spec, probe.follow, creates)
+        if refusal is not None:
+            raise refusal
+
+
+async def _walked_await(
+    admit: Callable[[], Awaitable[None]], pending: Awaitable[Any]
+) -> Any:
+    """Await an op once its operands walk; close it unstarted if not.
+
+    Args:
+        admit (Callable[[], Awaitable[None]]): the bound operand walk.
+        pending (Awaitable[Any]): the op's not-yet-awaited result.
+    """
+    try:
+        await admit()
+    except BaseException:
+        close = getattr(pending, "close", None)
+        if close is not None:
+            close()
+        raise
+    return await pending
+
+
+async def _walked_stream(
+    admit: Callable[[], Awaitable[None]], source: AsyncIterator[bytes]
+) -> AsyncIterator[bytes]:
+    """Drain a stream once its operands walk; close it if they do not.
+
+    Args:
+        admit (Callable[[], Awaitable[None]]): the bound operand walk.
+        source (AsyncIterator[bytes]): the not-yet-started stream.
+    """
+    try:
+        await admit()
+    except BaseException:
+        close = getattr(source, "aclose", None)
+        if close is not None:
+            await close()
+        raise
+    async for chunk in source:
+        yield chunk
+
+
+def _walked_call(
+    walk: WalkProbe | None,
+    creates: bool,
+    fn: OperationFn,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Call a backend op once the dots of its PathSpec positionals walk.
+
+    A plain def, as ``_guarded_call`` is one: the op's own return shape
+    passes through, an awaitable awaited after the walk and a stream
+    drained after it, so a refused walk never starts the op. An operand
+    with no dotted spelling, the common case, costs one attribute read.
+    One the walk already refused (``walk_error``) raises at call time,
+    before anything else reads it.
+
+    Args:
+        walk (WalkProbe | None): the wrap-time probe, else the one bound
+            to the running command is read at call time.
+        creates (bool): the op creates the name it is handed (mkdir).
+        fn (OperationFn): the guarded backend op.
+        *args: the call's positionals, PathSpecs among them.
+        **kwargs: forwarded untouched.
+    """
+    for arg in args:
+        if isinstance(arg, PathSpec) and arg.walk_error is not None:
+            raise walk_refusal(arg)
+    specs = [
+        arg
+        for arg in args
+        if isinstance(arg, PathSpec) and arg.dotted is not None
+    ]
+    probe = walk if walk is not None else get_walk_probe()
+    if not specs or probe is None:
+        return fn(*args, **kwargs)
+    admit = functools.partial(_walk_admit, probe, specs, creates)
+    result = fn(*args, **kwargs)
+    if hasattr(result, "__aiter__") and not hasattr(result, "__await__"):
+        return _walked_stream(admit, result)
+    return _walked_await(admit, result)
+
+
+async def _mkdir_on_read_only(
+    stat: StatOp,
+    gate: tuple[str, MountMode],
+    accessor: Any,
+    path: PathSpec,
+    parents: bool,
+) -> None:
+    """Answer a mkdir on a read-only region the way the filesystem would.
+
+    A read-only filesystem refuses only a create it would really make,
+    so the answer is whatever the create runs into first, walking the
+    components from the mount root: a missing one is refused with EROFS,
+    a file in the chain is ENOTDIR, an existing leaf is EEXIST, and
+    ``mkdir -p`` of a directory that is already there succeeds. The
+    blamed path is the first component that would have been made, as
+    GNU's ``mkdir -p`` names it (``'/ro/n'`` for ``/ro/n/m``). Pinned
+    against GNU coreutils 9.7 on a read-only tmpfs. Mirrors TS
+    ``mkdirOnReadOnly``.
+
+    Args:
+        stat (StatOp): the backend stat, for walking the components.
+        gate (tuple[str, MountMode]): the mount prefix and its mode.
+        accessor (Any): the mkdir call's accessor.
+        path (PathSpec): the directory to make.
+        parents (bool): ``-p``.
+    """
+    prefix, mode = gate
+    base = prefix.rstrip("/")
+    leaf = path.virtual.rstrip("/") or "/"
+    if leaf != base and not leaf.startswith(base + "/"):
+        raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)
+    # Each component's backend key keeps the leaf's own key prefix,
+    # recovered from its (virtual, vfs_path) pair as PathSpec.dir does.
+    cut = len(leaf) - len(path.vfs_path.strip("/"))
+    parts = [part for part in leaf[len(base) :].split("/") if part]
+    chain = []
+    for depth in range(1, len(parts) + 1):
+        virtual = f"{base}/{'/'.join(parts[:depth])}"
+        chain.append(PathSpec.from_str_path(virtual, virtual[cut:].strip("/")))
+    for index, component in enumerate(chain):
+        try:
+            row = await stat(accessor, component)
+        except FileNotFoundError as exc:
+            if not parents and index < len(chain) - 1:
+                raise enoent(path) from exc
+            blame = next(
+                (
+                    spec
+                    for spec in chain[index:]
+                    if effective_path_mode(spec.virtual, prefix, mode)
+                    == MountMode.READ
+                ),
+                path,
+            )
+            raise ReadOnlyError(
+                errno.EROFS, "Read-only file system", blame.virtual
+            ) from exc
+        if row.type is not FileType.DIRECTORY:
+            if index == len(chain) - 1:
+                raise eexist(path)
+            raise enotdir(component if parents else path)
+    if not parents:
+        raise eexist(path)
+
+
+async def _mkdir_on_writable(
+    fn: OperationFn,
+    stat: StatOp,
+    accessor: Any,
+    path: Any,
+    parents: bool,
+    **options: Any,
+) -> Any:
+    """mkdir on a writable region: a taken name is refused before the
+    create, as mkdir(2) does (``refuse_taken``).
+
+    Args:
+        fn (OperationFn): the raw backend mkdir.
+        stat (StatOp): the backend stat.
+        accessor (Any): the call's accessor.
+        path (Any): the directory to make.
+        parents (bool): ``-p``.
+        **options: forwarded untouched.
+    """
+    if isinstance(path, PathSpec):
+        await refuse_taken(stat, accessor, path, parents)
+    return await fn(accessor, path, parents=parents, **options)
+
+
+def _mode_mkdir(
+    fn: OperationFn,
+    stat: StatOp,
+    accessor: Any,
+    path: Any,
+    parents: bool = False,
+    **options: Any,
+) -> Any:
+    """The mkdir slot of ``_mode_call``: a directory on a read-only
+    region answers what the create would run into instead of refusing
+    the operand outright (``_mkdir_on_read_only``), and one on a
+    writable region refuses a taken name (``_mkdir_on_writable``). Sync
+    like ``_mode_call``.
+
+    Args:
+        fn (OperationFn): the raw backend mkdir.
+        stat (StatOp): the backend stat.
+        accessor (Any): the call's accessor.
+        path (Any): the directory to make.
+        parents (bool): ``-p``.
+        **options: forwarded untouched.
+    """
+    gate = get_mount_gate()
+    if (
+        gate is not None
+        and isinstance(path, PathSpec)
+        and effective_path_mode(path.virtual, *gate) == MountMode.READ
+    ):
+        return _mkdir_on_read_only(stat, gate, accessor, path, parents)
+    return _mkdir_on_writable(fn, stat, accessor, path, parents, **options)
+
+
+def with_write_guards(fn: OperationFn) -> OperationFn:
+    """Guard one bare backend write the way the adapter guards a slot.
+
+    For a bespoke command wired from loose functions rather than a
+    ``CommandIO`` (the google ``rm`` family binds an index-threaded
+    unlink): the same chain in the same order, judging the call's
+    PathSpec positionals. A hidden path answers ENOENT, the flavor of
+    the flat mutation slots; the command's path restrictions speak
+    before the coded pre_ops hooks, as ``with_policy_guard`` orders
+    them for a ``CommandIO``.
+
+    Args:
+        fn (OperationFn): the raw backend write.
+    """
+    return _with_operation_guards(fn, "unlink")
+
+
+def with_command_guards(ops: CommandIO) -> CommandIO:
+    """Bind command path restrictions around backend capabilities.
+
+    Args:
+        ops (CommandIO): backend operations, including cache handling.
+    """
+    walk = get_walk_probe()
+    special: dict[str, OperationFn] = {
+        "readdir": functools.partial(_guarded_readdir, ops.readdir),
+    }
+    for slot, assume_dir in (("rename", False), ("dir_copy", True)):
+        fn = getattr(ops, slot)
+        if fn is not None:
+            special[slot] = functools.partial(
+                _guarded_pair, fn, ops.stat, assume_dir
+            )
+    if ops.rmdir is not None:
+        special["rmdir"] = functools.partial(
+            _guarded_rmdir,
+            ops.rmdir,
+            ops.readdir,
+            ops.stat,
+            ops.unlink,
+            ops.glob_children,
+        )
+    if ops.mkdir is not None:
+        special["mkdir"] = functools.partial(_mode_mkdir, ops.mkdir, ops.stat)
+    read_stream = ops.read_stream
+
+    def guarded_stream(
+        accessor: Accessor, path: PathSpec, *args: Any, **kwargs: Any
+    ) -> AsyncIterator[bytes]:
+        # The path restrictions now, the walk at the first pull, as
+        # TypeScript's walkedStream does: a reader that turns a failed
+        # open into its own words (awk's `cannot open`) relays the stream
+        # through its own handler, so a walk that already failed (a link
+        # loop) must surface where it drains.
+        _check_command_paths([path], "read_stream")
+
+        async def admit() -> None:
+            if path.walk_error is not None:
+                raise walk_refusal(path)
+            probe = walk if walk is not None else get_walk_probe()
+            if path.dotted is not None and probe is not None:
+                await _walk_admit(probe, [path], False)
+
+        return _walked_stream(
+            admit, read_stream(accessor, path, *args, **kwargs)
+        )
+
+    changes: dict[str, Any] = {"read_stream": guarded_stream}
+    for slot in _WALK_SLOTS:
+        fn = special.get(slot, getattr(ops, slot))
+        if fn is None or slot == "read_stream":
+            continue
+        guarded = functools.partial(
+            _command_call, fn, slot, check_mode=slot != "mkdir"
+        )
+        if slot == "exists":
+            guarded = functools.partial(_guarded_exists, guarded)
+        changes[slot] = functools.partial(
+            _walked_call, walk, slot == "mkdir", guarded
+        )
+    if ops.du is not None:
+        changes["du"] = DuOps(
+            functools.partial(_command_call, ops.du.size, "du"),
+            functools.partial(_command_call, ops.du.entries, "du"),
+        )
+    if ops.search is not None:
+        changes["search"] = replace(
+            ops.search,
+            search=functools.partial(
+                _command_call, ops.search.search, "search"
+            ),
+        )
+    return replace(ops, **changes)
+
+
+def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
+    """Return ``dispatch`` marking each op with the admitted command's
+    gate as ``rule_gate``, which the door judges on the paths the op
+    reaches: the command's dispatcher skips its guarded slots, and the
+    door cannot tell which command issued an op. A metadata op passes
+    unmarked, as ``with_command_guards`` lets ``stat`` pass.
+
+    Args:
+        dispatch (DispatchFn): the workspace op dispatcher.
+    """
+
+    async def guarded(
+        op: str, path: PathSpec, **options: Any
+    ) -> tuple[Any, IOResult]:
+        gate = get_admission()
+        if gate is not None and op not in METADATA_OPS:
+            options = {**options, "rule_gate": gate}
+        return await dispatch(op, path, **options)
+
+    return guarded
+
+
+# (policies, mount prefix, session id); the unbound spelling for a
+# registration-time wrap, which reads the live context per call.
+_PolicyScope = tuple[Policies | None, str, str]
+_UNBOUND_SCOPE: _PolicyScope = (None, "", "")
+
+
+def _op_policy_scope() -> _PolicyScope:
+    """The policies to consult for this op call, the mount prefix, and
+    the session the command runs under.
+
+    None is the fast path: no dispatched command bound policies, or
+    none of them override pre_ops, at the cost of two contextvar reads
+    and one O(1) probe per slot call.
+    """
+    policies = get_op_policies()
+    if policies is None or not policies.wants("pre_ops"):
+        return _UNBOUND_SCOPE
+    gate = get_mount_gate()
+    sess = get_current_session()
+    return (
+        policies,
+        gate[0] if gate is not None else "",
+        sess.session_id if sess is not None else "",
+    )
+
+
+def _live_policy_scope(scope: _PolicyScope) -> _PolicyScope:
+    """The wrap-time scope when it caught a bound command, else the
+    call-time context.
+
+    The factory applies the guard inside the command's window, so its
+    wrap-time capture also covers a reader the output pipeline drains
+    after dispatch has reset the context (head/tail/wc bind lazy
+    readers), with the prefix and session identity the drained op
+    belongs to; a registration-time wrap (the object-store overrides,
+    the loose-write chain) has no window when applied and reads the
+    live context instead, which its eager handlers are inside.
+
+    Args:
+        scope (_PolicyScope): the wrap-time capture.
+    """
+    if scope[0] is not None:
+        return scope
+    return _op_policy_scope()
+
+
+async def _policy_admit(
+    policies: Policies,
+    prefix: str,
+    session_id: str,
+    op: str,
+    write: bool,
+    first_source: bool,
+    args: tuple[Any, ...],
+) -> None:
+    """Fire pre_ops for each PathSpec positional of one slot call.
+
+    The hides are not judged here: the command guards wrapped around
+    this one answer them first, and the remnant cascade reaches below
+    them on purpose to remove what the session cannot see.
+
+    Args:
+        policies (Policies): the bound admission policies.
+        prefix (str): the executing mount's prefix, "" outside one.
+        session_id (str): the session the command runs under.
+        op (str): the slot name, which is the op name policies see.
+        write (bool): whether the op mutates its paths.
+        first_source (bool): whether the leading PathSpec is a
+            read-only source (the copy slots).
+        args: the call's positionals, PathSpecs among them.
+    """
+    first = True
+    for arg in args:
+        if isinstance(arg, PathSpec):
+            mutates = write and not (first and first_source)
+            await pre_ops_gate(
+                policies,
+                op,
+                arg,
+                mutates,
+                prefix,
+                session_id,
+                check_hidden=False,
+            )
+            first = False
+
+
+async def _policy_call(
+    scope: _PolicyScope,
+    fn: OperationFn,
+    op: str,
+    write: bool,
+    first_source: bool,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Call a backend op after admitting its paths through pre_ops.
+
+    Async, unlike the sync guards it wraps: the hooks are user
+    coroutines. Every slot this wraps returns an awaitable, so the
+    shape is preserved; read_stream and readdir have their own
+    wrappers.
+
+    Args:
+        scope (_PolicyScope): the wrap-time capture.
+        fn (OperationFn): the guarded backend op.
+        op (str): the slot name.
+        write (bool): whether the op mutates its paths.
+        first_source (bool): whether the leading PathSpec is a
+            read-only source.
+        *args: the call's positionals, PathSpecs among them.
+        **kwargs: forwarded untouched.
+    """
+    policies, prefix, session_id = _live_policy_scope(scope)
+    if policies is not None:
+        await _policy_admit(
+            policies, prefix, session_id, op, write, first_source, args
+        )
+    return await fn(*args, **kwargs)
+
+
+async def _policy_readdir(
+    scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
+) -> list[str]:
+    """Readdir admitted through pre_ops for the directory it lists.
+
+    Args:
+        scope (_PolicyScope): the wrap-time capture.
+        fn (OperationFn): the guarded backend readdir.
+        *args: the call's positionals; the first PathSpec is the
+            directory being listed.
+        **kwargs: forwarded untouched.
+    """
+    policies, prefix, session_id = _live_policy_scope(scope)
+    if policies is not None:
+        parent_spec = next(a for a in args if isinstance(a, PathSpec))
+        await pre_ops_gate(
+            policies,
+            "readdir",
+            parent_spec,
+            False,
+            prefix,
+            session_id,
+            check_hidden=False,
+        )
+    entries: list[str] = await fn(*args, **kwargs)
+    return entries
+
+
+def _policy_stream(
+    scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
+) -> Any:
+    """Read-stream admitted through pre_ops before the first chunk.
+
+    A plain def for the reason ``_guarded_read_stream`` is one: the
+    inner op captures per-call scope eagerly (the read-through cache
+    reads the active manager here), so it is built now, which runs no
+    I/O; the admission itself is async, so it rides the returned
+    generator, before any byte is pulled.
+
+    Args:
+        scope (_PolicyScope): the wrap-time capture.
+        fn (OperationFn): the guarded backend read_stream.
+        *args: the call's positionals; the first PathSpec is the file
+            being read.
+        **kwargs: forwarded untouched.
+    """
+    policies, prefix, session_id = _live_policy_scope(scope)
+    spec = next((a for a in args if isinstance(a, PathSpec)), None)
+    if policies is None or spec is None:
+        return fn(*args, **kwargs)
+    return _policy_stream_drain(
+        policies, prefix, session_id, spec, fn(*args, **kwargs)
+    )
+
+
+async def _policy_stream_drain(
+    policies: Policies,
+    prefix: str,
+    session_id: str,
+    path: PathSpec,
+    source: AsyncIterator[bytes],
+) -> AsyncIterator[bytes]:
+    """Drain ``source`` once the read is admitted; close it if refused.
+
+    Args:
+        policies (Policies): the bound admission policies.
+        prefix (str): the executing mount's prefix.
+        session_id (str): the session the command runs under.
+        path (PathSpec): the file being read.
+        source (AsyncIterator[bytes]): the not-yet-started inner stream.
+    """
+    try:
+        await pre_ops_gate(
+            policies,
+            "read_stream",
+            path,
+            False,
+            prefix,
+            session_id,
+            check_hidden=False,
+        )
+    except BaseException:
+        close = getattr(source, "aclose", None)
+        if close is not None:
+            await close()
+        raise
+    async for chunk in source:
+        yield chunk
+
+
+def with_policy_guard(ops: CommandIO) -> CommandIO:
+    """Return ``ops`` whose content and mutation slots admit each
+    PathSpec through the workspace's coded pre_ops hooks.
+
+    The coded-policy arm of the guard chain, applied outside the cache
+    wraps so admission fires before a warm serve, the dispatcher's own
+    order. The surface is the path rules' plus readdir: content reads
+    (read_bytes, read_stream, read_range), every mutation slot, and
+    the directory a readdir lists. stat/exists stay unguarded as
+    presence facts, the mode-000 shape the path rules already take, so
+    a denied entry still lists and stats while the read of it is what
+    fails; ``scoped_io`` drops the native find/du slots, so the walk
+    meets the guarded readdir. Ops are named by slot; a
+    policy portable across the tiers keys on ``write`` and ``path``.
+    Inert unless a dispatched command bound policies overriding
+    pre_ops (``_op_policy_scope``, with the mount prefix and session
+    identity captured at wrap time so a lazily drained reader still
+    answers as the command that bound it, see ``_live_policy_scope``).
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+    """
+    scope = _op_policy_scope()
+    changes: dict[str, Any] = {
+        "readdir": functools.partial(_policy_readdir, scope, ops.readdir),
+        "read_stream": functools.partial(
+            _policy_stream, scope, ops.read_stream
+        ),
+    }
+    for slot in ("read_bytes", "read_range", *_MUTATIONS):
+        access = _MUTATIONS.get(slot)
+        fn = getattr(ops, slot)
+        if fn is not None:
+            changes[slot] = functools.partial(
+                _policy_call,
+                scope,
+                fn,
+                slot,
+                access is not None,
+                access.first_source if access else False,
+            )
+    return replace(ops, **changes)
+
+
+def command_paths_scoped(paths: list[PathSpec], prefix: str) -> bool:
+    """Whether command path restrictions require a checked traversal.
+
+    Args:
+        paths (list[PathSpec]): invocation roots, including a default cwd.
+        prefix (str): mount root, used conservatively for globs.
+    """
+    return path_rules_active() or any(
+        hidden_paths_intersect(
+            prefix or "/" if path.pattern is not None else path.virtual
+        )
+        for path in paths
+    )
+
+
+def scoped_io(ops: CommandIO, paths: list[PathSpec], prefix: str) -> CommandIO:
+    """Drop the native walks when a hide, a path rule or a coded
+    pre_ops policy judges the command's paths.
+
+    Args:
+        ops (CommandIO): command-guarded backend capabilities.
+        paths (list[PathSpec]): invocation roots, including a default cwd.
+        prefix (str): owning mount prefix.
+    """
+    if not command_paths_scoped(paths, prefix):
+        return ops
+    return replace(
+        ops,
+        find=None,
+        du=None,
+        search=None,
+        content_search=None,
+        copy=None,
+        dir_copy=None,
+    )

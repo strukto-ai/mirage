@@ -15,6 +15,8 @@
 import { operandExitCode } from '../commands/spec/usage.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
+import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
+import { MountModePolicy } from './builtin/mount_mode.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
 import { PolicyDenied, PolicyError } from './errors.ts'
 import { isSessionScoped } from './mixin.ts'
@@ -123,10 +125,14 @@ function denyOnly(hook: Hook, action: Deny | Ask | null): Deny | null {
 }
 
 /**
- * Fire preOps at the op door; a Deny becomes a PolicyDenied (EACCES).
+ * Fire preOps at the op door; a Deny becomes a PolicyDenied (EACCES),
+ * or the built-in's own error (ENOENT for a hide, EROFS for a mode).
  * The one seam helper the dispatcher calls, so a refusal is identical
  * however the mount is reached: shell internals, programmatic access,
- * FUSE, and the warm cache all pass through it.
+ * FUSE, and the warm cache all pass through it. `access` carries the
+ * owning mount's mode (unset at a door that judges it itself), whether
+ * the op creates the path or mutates below it, and `checkHidden` false
+ * only for a door that has already answered the hides itself.
  */
 export async function preOpsGate(
   policies: Policies,
@@ -136,17 +142,26 @@ export async function preOpsGate(
   prefix: string,
   sessionId = '',
   issuer?: symbol,
+  access: Pick<OpsContext, 'mode' | 'create' | 'subtree'> & { checkHidden?: boolean } = {},
 ): Promise<void> {
-  if (!policies.wants('preOps')) return
-  const deny = await policies.preOps({
-    op,
-    path,
-    write,
-    prefix,
-    sessionId,
-    ...(issuer !== undefined ? { issuer } : {}),
-  })
+  const { checkHidden = true, ...context } = access
+  if (!(policies.wants('preOps') || checkHidden || (write && context.mode !== undefined))) {
+    return
+  }
+  const deny = await policies.preOps(
+    {
+      op,
+      path,
+      write,
+      prefix,
+      sessionId,
+      ...(issuer !== undefined ? { issuer } : {}),
+      ...context,
+    },
+    checkHidden,
+  )
   if (deny !== null) {
+    if (deny.error !== undefined) throw deny.error
     throw new PolicyDenied(deny.reason, path.virtual)
   }
 }
@@ -168,6 +183,7 @@ export async function postOpsGate(
   if (!policies.wants('postOps')) return null
   const [deny, bound] = await policies.postOps({ op, path, write, prefix, result })
   if (deny !== null) {
+    if (deny.error !== undefined) throw deny.error
     throw new PolicyDenied(deny.reason, path.virtual)
   }
   return bound
@@ -222,6 +238,8 @@ export async function preSessionGate(
  */
 export class Policies {
   private readonly policies: Policy[]
+  private readonly hidden: Policy = new HiddenPathsPolicy()
+  private readonly mode: Policy = new MountModePolicy()
   private wanted: ReadonlySet<Hook> = new Set()
 
   constructor(policies?: readonly Policy[]) {
@@ -293,12 +311,20 @@ export class Policies {
   private async fire(
     hook: Hook,
     ctx: CommandContext | OpsContext | OpsResultContext | ExecuteResultContext | SessionContext,
+    checkHidden = true,
   ): Promise<[Deny | Ask | null, Limit | null]> {
     const limits: Limit[] = []
     let asked: Ask | null = null
     // Keep this gate's order stable if the host edits registrations
     // while a hook awaits. Changes take effect at the next gate.
-    for (const policy of [...this.policies]) {
+    let chain = [...this.policies]
+    if (hook === 'preOps') {
+      // Hides answer first, so a refusal never tells a session a hidden
+      // name exists; the mode answers last, after every policy that
+      // could explain the refusal in its own words.
+      chain = [...(checkHidden ? [this.hidden] : []), ...chain, this.mode]
+    }
+    for (const policy of chain) {
       const fn = policy[hook]
       if (fn === undefined) continue
       const name = policy.constructor.name || 'policy'
@@ -351,8 +377,8 @@ export class Policies {
   }
 
   /** Fire preOps across the policies; the first Deny wins. */
-  async preOps(ctx: OpsContext): Promise<Deny | null> {
-    const [action] = await this.fire('preOps', ctx)
+  async preOps(ctx: OpsContext, checkHidden = true): Promise<Deny | null> {
+    const [action] = await this.fire('preOps', ctx, checkHidden)
     return denyOnly('preOps', action)
   }
 

@@ -1711,6 +1711,7 @@
               {
                 "reason": "unreadable cache subtree",
                 "paths": [
+                  "/repo/src/cache",
                   "/trunc/src/cache"
                 ]
               }
@@ -3243,7 +3244,7 @@
           "policy": {
             "script": {
               "language": "python",
-              "source": "def pre_command(ctx):\n    for p in ctx['command']['paths']:\n        if 'marker' in contents(p):\n            return {'deny': 'marked by ' + ctx['profile']}\n    return None\n\ndef pre_ops(ctx):\n    op = ctx['op']\n    if op['write'] and op['path'].startswith('/scratch/cold/'):\n        return {'deny': 'cold by ' + ctx['profile']}\n    if op['name'] in READS and op['path'].startswith('/scratch/drop/'):\n        return {'deny': 'drop box by ' + ctx['profile']}\n    return None\n\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\n\ndef pre_session(ctx):\n    if ctx['write']['key'].startswith('AWS_'):\n        return {'deny': 'credentials are set by the operator'}\n    return None\n\ndef contents(path):\n    try:\n        return open(path).read()\n    except OSError:\n        return ''\n"
+              "source": "def pre_command(ctx):\n    for p in ctx['command']['paths']:\n        if 'marker' in contents(p):\n            return {'deny': 'marked by ' + ctx['profile']}\n    return None\n\ndef pre_ops(ctx):\n    op = ctx['op']\n    if op['write'] and op['path'].startswith('/scratch/cold/'):\n        return {'deny': 'cold by ' + ctx['profile']}\n    if op['name'] in READS and op['path'].startswith('/scratch/drop/'):\n        return {'deny': 'drop box by ' + ctx['profile']}\n    if op['name'] == 'readdir' and op['path'].startswith('/scratch/vault'):\n        return {'deny': 'vault by ' + ctx['profile']}\n    return None\n\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\n\ndef pre_session(ctx):\n    if ctx['write']['key'].startswith('AWS_'):\n        return {'deny': 'credentials are set by the operator'}\n    return None\n\ndef contents(path):\n    try:\n        return open(path).read()\n    except OSError:\n        return ''\n"
             },
             "runtime": "monty"
           }
@@ -3334,7 +3335,7 @@
           "policy": {
             "script": {
               "language": "js",
-              "source": "function preOps(ctx) {\n  const op = ctx.op\n  if (op.write && op.path.startsWith('/scratch/cold/')) return {deny: 'cold by ' + ctx.profile}\n  const reads = ['read', 'read_bytes', 'read_stream', 'read_range']\n  return reads.includes(op.name) && op.path.startsWith('/scratch/drop/') ? {deny: 'drop box by ' + ctx.profile} : null\n}\nfunction preSession(ctx) {\n  return ctx.write.key.startsWith('AWS_') ? {deny: 'credentials are set by the operator'} : null\n}\n"
+              "source": "function preOps(ctx) {\n  const op = ctx.op\n  if (op.write && op.path.startsWith('/scratch/cold/')) return {deny: 'cold by ' + ctx.profile}\n  if (op.name === 'readdir' && op.path.startsWith('/scratch/vault')) return {deny: 'vault by ' + ctx.profile}\n  const reads = ['read', 'read_bytes', 'read_stream', 'read_range']\n  return reads.includes(op.name) && op.path.startsWith('/scratch/drop/') ? {deny: 'drop box by ' + ctx.profile} : null\n}\nfunction preSession(ctx) {\n  return ctx.write.key.startsWith('AWS_') ? {deny: 'credentials are set by the operator'} : null\n}\n"
             },
             "runtime": "quickjs"
           }

@@ -35,7 +35,7 @@ import { parseFindExpression, type FindExpr } from '../find_parse.ts'
 import { findGeneric } from '../generic/find.ts'
 import {
   resolveGlobOf,
-  withPathGuards,
+  withCommandGuards,
   withPolicyGuard,
   type CommandIO,
 } from '../generic_bind/adapter.ts'
@@ -113,8 +113,8 @@ export function makeFind<A extends Accessor>(
     stat: statLight,
     walk: tree.walk,
   })
-  const walkFull = withPolicyGuard(withPathGuards(io))
-  const walkLight = withPolicyGuard(withPathGuards({ ...io, stat: statLight }))
+  const walkFull = withCommandGuards(withPolicyGuard(io))
+  const walkLight = withCommandGuards(withPolicyGuard({ ...io, stat: statLight }))
   return command({
     name: 'find',
     vfs,

@@ -26,7 +26,6 @@ from typing import Any
 from mirage.cache.file import io as cache_io
 from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.builtin.utils.paths import dot_refusal, walk_spelling
 from mirage.commands.resolve import get_extension
 from mirage.context import (
@@ -38,13 +37,13 @@ from mirage.context import (
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
+from mirage.ops.boundary import OpBoundary
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.ops.namespace_view import (
     merge_readdir,
     namespace_listing,
     namespace_stat,
 )
-from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -55,6 +54,7 @@ from mirage.types import (
     EntryGate,
     FileStat,
     FileType,
+    MountMode,
     PathSpec,
     VFSName,
 )
@@ -86,7 +86,6 @@ from mirage.workspace.dispatcher.constants import (
     SETATTR_KEYS,
     XATTR_OPS,
 )
-from mirage.workspace.dispatcher.lineage import require_turf_writable
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
@@ -224,14 +223,16 @@ class _MountChannel:
 
     Args:
         mount (MountEntry): the mount owning the subtree.
-        admit (Callable): the dispatcher's pre-ops gate, bound to that
-            mount; raises to refuse a deletion.
+        boundary (OpBoundary): the dispatcher's op boundary for that
+            mount; its admit raises to refuse a deletion. A deletion is
+            not completed through post_ops, which could only refuse
+            after the entry is gone and strand the cascade.
         invalidate (Callable): the dispatcher's write invalidation,
             bound to that mount.
     """
 
     mount: MountEntry
-    admit: Callable[[str, PathSpec], Awaitable[None]]
+    boundary: OpBoundary
     invalidate: Callable[[PathSpec], Awaitable[None]]
 
     async def readdir(self, spec: PathSpec) -> list[str]:
@@ -241,14 +242,14 @@ class _MountChannel:
         return await self.mount.execute_op("stat", spec.virtual)
 
     async def unlink(self, spec: PathSpec) -> None:
-        await self.admit("unlink", spec)
+        await self.boundary.admit("unlink", spec, True, check_hidden=False)
         try:
             await self.mount.execute_op("unlink", spec.virtual)
         finally:
             await self.invalidate(spec)
 
     async def rmdir(self, spec: PathSpec) -> None:
-        await self.admit("rmdir", spec)
+        await self.boundary.admit("rmdir", spec, True, check_hidden=False)
         try:
             await self.mount.execute_op("rmdir", spec.virtual)
         finally:
@@ -300,6 +301,24 @@ class Dispatcher:
         self._admit_write = admit_write
         self._writers = KeyLock()
 
+    def _boundary(self, mount: MountEntry | None) -> OpBoundary:
+        """The policy boundary for an op on a path ``mount`` owns.
+
+        The mount's prefix and mode, or for a path above every mount an
+        empty prefix and full write, governed by ``/``
+        (``MountModePolicy``).
+
+        Args:
+            mount (MountEntry | None): the mount owning the path, None
+                when no mount does.
+        """
+        return OpBoundary(
+            self._namespace.registry.policies,
+            mount.prefix if mount is not None else "",
+            mount.mode if mount is not None else MountMode.WRITE,
+            _session_id(),
+        )
+
     @property
     def reconciler(self) -> Reconciler:
         return self._reconciler
@@ -345,18 +364,15 @@ class Dispatcher:
             report (OpReport | None): the caller's report, stamped when
                 the answer is in hand.
         """
-        policies = self._namespace.registry.policies
+        boundary = self._boundary(None)
         write = op in POLICY_WRITE_OPS
         # A pre gate refuses before the answer exists, so it is not a
         # completed op and stays before the stamp.
-        await pre_ops_gate(policies, op, path, write, "", _session_id())
+        await boundary.admit(op, path, write)
         _memory_answered(report)
         if op == "readdir" and isinstance(fallback, list):
             fallback = _visible_entries(fallback, path.virtual)
-        bound = await post_ops_gate(policies, op, path, write, "", fallback)
-        if bound is not None:
-            return await apply_op_limit(fallback, bound)
-        return fallback
+        return await boundary.complete(op, path, write, fallback)
 
     async def dispatch(
         self,
@@ -511,12 +527,11 @@ class Dispatcher:
             # overlay (a link above every mount still takes chown -h),
             # gated exactly like the mounted overlay write.
             if op == "setattr":
-                policies = self._namespace.registry.policies
-                await pre_ops_gate(policies, op, path, True, "", _session_id())
-                require_turf_writable(None, path)
+                boundary = self._boundary(None)
+                await boundary.admit(op, path, True)
                 applied = await self._overlay_setattr(path, kwargs)
                 _memory_answered(report)
-                await post_ops_gate(policies, op, path, True, "", applied)
+                await boundary.complete(op, path, True, applied)
                 return applied, IOResult()
             fallback = self._namespace_result(op, path.virtual)
             if fallback is None:
@@ -542,25 +557,24 @@ class Dispatcher:
         # Admission policies fire at the door, before the warm-cache
         # early return below: a cached read must be refused exactly
         # like a cold one, or the cache becomes a policy bypass.
-        policies = self._namespace.registry.policies
         write = op in POLICY_WRITE_OPS
-        await pre_ops_gate(
-            policies, op, path, write, mount.prefix, _session_id()
+        boundary = self._boundary(mount)
+        await boundary.admit(
+            op,
+            path,
+            write,
+            create=op in HIDDEN_CREATE_OPS,
+            subtree=op == "rename",
         )
         # A rename's destination is a create there: it passes the same
         # gate as the source, so a path rule holds against moving into
         # a protected scope (or onto the directory that holds one) the
-        # way it holds against writing there.
+        # way it holds against writing there, under the mode of the
+        # mount that owns it.
         if op == "rename" and isinstance(dst, PathSpec):
-            await pre_ops_gate(
-                policies, op, dst, True, mount.prefix, _session_id()
-            )
-        if write:
-            require_turf_writable(mount, path)
-            if op == "rename" and isinstance(dst, PathSpec):
-                require_turf_writable(
-                    self._namespace.try_mount_for(dst.virtual), dst
-                )
+            await self._boundary(
+                self._namespace.try_mount_for(dst.virtual)
+            ).admit(op, dst, True, create=True, subtree=True)
         if op == "rmdir" and any(
             path_allowed(link)
             for link, _ in self._namespace.link_stats_below(path.virtual)
@@ -614,11 +628,7 @@ class Dispatcher:
                 # stamp a refused warm read is recorded against the
                 # backend and counted as traffic that never happened.
                 _memory_answered(report, len(served))
-                bound = await post_ops_gate(
-                    policies, op, path, write, mount.prefix, served
-                )
-                if bound is not None:
-                    served = await apply_op_limit(served, bound)
+                served = await boundary.complete(op, path, write, served)
                 return served, IOResult(reads={path.virtual: served})
 
         # A cold read keeps the whole file it fetched for the next reader,
@@ -734,14 +744,7 @@ class Dispatcher:
             )
         if op in DISPATCH_WRITE_OPS and op not in SERIAL_WRITE_OPS:
             await self._settle_write(mount, op, path, kwargs)
-        bound = await post_ops_gate(
-            policies, op, path, write, mount.prefix, result
-        )
-        if bound is not None:
-            # The transfer already happened, so the limit changes what
-            # the caller receives, not what the backend moved; the
-            # report above already carries the moved count.
-            result = await apply_op_limit(result, bound)
+        result = await boundary.complete(op, path, write, result)
         return result, IOResult()
 
     async def _settle_write(
@@ -884,7 +887,7 @@ class Dispatcher:
             raise refusal
         channel = _MountChannel(
             mount,
-            functools.partial(self._admit_cascade, mount),
+            self._boundary(mount),
             functools.partial(self.invalidate_after_write, mount),
         )
         try:
@@ -909,31 +912,6 @@ class Dispatcher:
         if any(path_allowed(p) for p in links_below):
             raise refusal
         await self._namespace.purge_under(path.virtual)
-
-    async def _admit_cascade(
-        self, mount: MountEntry, op: str, path: PathSpec
-    ) -> None:
-        """Hold one cascade deletion to the pre-ops admission a
-        dispatched op answers.
-
-        The gate that admitted the rmdir judged the directory; each
-        deletion below it names its own path here, so a policy that
-        denies ``unlink`` of a protected file refuses it even when the
-        rmdir above was allowed.
-
-        Args:
-            mount (MountEntry): the mount owning the subtree.
-            op (str): the deletion op ("unlink" or "rmdir").
-            path (PathSpec): the child being removed.
-        """
-        await pre_ops_gate(
-            self._namespace.registry.policies,
-            op,
-            path,
-            True,
-            mount.prefix,
-            _session_id(),
-        )
 
     async def _walk_stat(self, path: PathSpec) -> FileStat:
         """The door's own stat in the shape a chain walk reads.
@@ -1023,10 +1001,10 @@ class Dispatcher:
         reads for), session grants and both gates run, and the write
         leaves an OpRecord — a scoped kernel mount refuses exactly like
         a scoped shell. The turf's mode gates the write too
-        (``require_turf_writable``), so a read-only mount or grant
-        answers EROFS for a link exactly as for a file; a link above
-        every mount is bare namespace structure, gated with an empty
-        prefix and governed by ``/`` (see ``lineage``). A rename's
+        (``MountModePolicy`` at the ``OpBoundary``), so a read-only
+        mount or grant answers EROFS for a link exactly as for a file;
+        a link above every mount is bare namespace structure, gated
+        with an empty prefix and governed by ``/``. A rename's
         destination is judged on its own turf, since the endpoints need
         not share one.
 
@@ -1042,14 +1020,9 @@ class Dispatcher:
         """
         timer = start_op()
         mount = self._namespace.try_mount_for(path.virtual)
-        owner = mount.prefix if mount is not None else None
-        policies = self._namespace.registry.policies
+        boundary = self._boundary(mount)
         write = op in POLICY_WRITE_OPS
-        await pre_ops_gate(
-            policies, op, path, write, owner or "", _session_id()
-        )
-        if write:
-            require_turf_writable(mount, path)
+        await boundary.admit(op, path, write, create=op in HIDDEN_CREATE_OPS)
         result: str | FileStat | None = None
         if op == "unlink":
             target = self._namespace.readlink(path.virtual) or ""
@@ -1063,11 +1036,7 @@ class Dispatcher:
             # replaces it: any node the table holds at that name (a
             # link, an attr overlay) goes.
             dst_mount = self._namespace.try_mount_for(dst.virtual)
-            dst_owner = dst_mount.prefix if dst_mount is not None else ""
-            await pre_ops_gate(
-                policies, op, dst, True, dst_owner, _session_id()
-            )
-            require_turf_writable(dst_mount, dst)
+            await self._boundary(dst_mount).admit(op, dst, True, create=True)
             # The name the link moves to must have a directory above it,
             # as for a new link: the table alone would file it under an
             # absent parent and synthesize the directories above it.
@@ -1120,12 +1089,7 @@ class Dispatcher:
             timer,
         )
         _memory_answered(report)
-        bound = await post_ops_gate(
-            policies, op, path, write, owner or "", result
-        )
-        if bound is not None:
-            return await apply_op_limit(result, bound)
-        return result
+        return await boundary.complete(op, path, write, result)
 
     async def _readlink_miss(self, path: PathSpec) -> OSError:
         """The error a readlink of something that is not a link answers.
@@ -1332,16 +1296,11 @@ class Dispatcher:
         """
         if not mount.supports_op(op, path.virtual):
             return None
-        await pre_ops_gate(
-            self._namespace.registry.policies,
-            op,
-            path,
-            False,
-            mount.prefix,
-            _session_id(),
-        )
+        boundary = self._boundary(mount)
+        await boundary.admit(op, path, False)
         try:
-            return await mount.execute_op(op, path.virtual)
+            result = await mount.execute_op(op, path.virtual)
+            return await boundary.complete(op, path, False, result)
         except NotADirectoryError:
             # Final on every channel: a plain file above the path means
             # nothing can be at it or under it, and symlink(2) and
@@ -1380,12 +1339,9 @@ class Dispatcher:
         """
         timer = start_op()
         mount = self._namespace.try_mount_for(path.virtual)
-        owner = mount.prefix if mount is not None else ""
-        policies = self._namespace.registry.policies
+        boundary = self._boundary(mount)
         write = op in POLICY_WRITE_OPS
-        await pre_ops_gate(policies, op, path, write, owner, _session_id())
-        if write:
-            require_turf_writable(mount, path)
+        await boundary.admit(op, path, write)
         await self._xattr_target(mount, path)
         stored = self._namespace.xattrs(path.virtual)
         name = str(kwargs.get("name", ""))
@@ -1420,10 +1376,7 @@ class Dispatcher:
         )
         if report is not None:
             report.served(None, None)
-        bound = await post_ops_gate(policies, op, path, write, owner, result)
-        if bound is not None:
-            return await apply_op_limit(result, bound)
-        return result
+        return await boundary.complete(op, path, write, result)
 
     async def _statfs(self, path: PathSpec) -> tuple[str, CapacityResult]:
         """Answer statfs(2) for a path: the type name and the capacity of
@@ -1437,11 +1390,8 @@ class Dispatcher:
             path (PathSpec): the path, already followed.
         """
         mount = self._namespace.try_mount_for(path.virtual)
-        owner = mount.prefix if mount is not None else ""
-        policies = self._namespace.registry.policies
-        await pre_ops_gate(
-            policies, "statfs", path, False, owner, _session_id()
-        )
+        boundary = self._boundary(mount)
+        await boundary.admit("statfs", path, False)
         await self._xattr_target(mount, path)
         answer: tuple[str, CapacityResult]
         if mount is None:
@@ -1451,7 +1401,7 @@ class Dispatcher:
                 answer = mount.vfs.name, await mount.vfs.capacity()
         # A policy may deny the reply as it may any op's; a capacity is
         # no bytes, so a bound has nothing to cap.
-        await post_ops_gate(policies, "statfs", path, False, owner, answer)
+        await boundary.complete("statfs", path, False, answer)
         return answer
 
     async def _xattr_target(

@@ -420,12 +420,15 @@ def get_walk_probe() -> WalkProbe | None:
 
 
 def path_rules_active() -> bool:
-    """Whether a path rule in force reads the running command's paths.
+    """Whether a path rule or a coded pre_ops policy judges the running
+    command's paths.
 
     The twin of ``hidden_paths_active`` for the deny rules: a backend's
     native find or du classifies the raw tree, so an entry a rule
     refuses would be listed or summed past the gate; the readdir walk
-    passes every entry through it instead. False when no admitted
+    passes every entry through it instead. A coded or scripted
+    ``pre_ops`` hook judges every path the same way, so admission sets
+    the flag for a session one speaks for too. False when no admitted
     command is bound.
 
     Args:

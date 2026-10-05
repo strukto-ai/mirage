@@ -323,6 +323,7 @@ Build the standard set with `makeGenericCommands(VFSName.X, X_IO, { overrides })
 
 - Declare native text search in `new VFSAdapter({ read, search })`. Generic grep/rg builders consume it only when `search.meta.grep` opts in; semantic search does not opt in. The hierarchy kit supplies `makeSearchOp` for scope-based core functions; unsupported requests fall back to scanning. Existing wrappers may call `runSearch(X_IO, name, ...)` when preserving a custom registration.
 - A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(opts.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
+- A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
 
 ## 5. VFS Class
 
