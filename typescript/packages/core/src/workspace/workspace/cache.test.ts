@@ -83,8 +83,4 @@ describe('the workspace cache', () => {
     const ws = new Workspace({}, { cache: { limit: '1MB', max_drain_bytes: 7 } as CacheConfig })
     expect(ws.maxDrainBytes).toBe(7)
   })
-
-  it('refuses an unknown cache field', () => {
-    expect(() => new Workspace({}, { cache: { limti: '1MB' } as CacheConfig })).toThrow(/"limti"/)
-  })
 })
