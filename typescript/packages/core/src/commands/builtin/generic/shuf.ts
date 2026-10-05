@@ -268,10 +268,7 @@ export interface ShufFlags {
   readonly zeroTerminated: boolean
   readonly withReplacement: boolean
   readonly inputRange: string | null
-  // The raw `-o` word. The python executor promotes a PATH-typed flag to a
-  // PathSpec and reads it with as_paths; this bag carries the resolved
-  // virtual-path string, so asStr is the twin and the PathSpec is built at
-  // the call site.
+  // The last `-o`, a PathSpec as every PATH-typed flag arrives.
   readonly output: PathSpec | null
 }
 
@@ -309,11 +306,9 @@ export function parseFlags(bag: Record<string, FlagValue>): ShufFlags | string {
   let inputRangeRaw: string | null = null
   let outputRaw: string | null = null
   // -o is PATH-typed, so its values are the words as typed, read off the
-  // PathSpecs, which is what GNU compares two -o by. A line parsed for a
-  // cross-mount strategy carries resolved strings, compared as they are.
+  // PathSpecs, which is what GNU compares two -o by.
   const typed = fl.typedOrder('head_count', 'input_range', 'output').flatMap((dest) => {
-    const specs = dest === 'output' ? fl.asPaths(dest) : []
-    const words = specs.length > 0 ? specs.map((p) => p.rawPath) : fl.asList(dest)
+    const words = dest === 'output' ? fl.asPaths(dest).map((p) => p.rawPath) : fl.asList(dest)
     return words.map((raw): [string, string] => [dest, raw])
   })
   for (const [dest, raw] of typed) {
@@ -333,10 +328,7 @@ export function parseFlags(bag: Record<string, FlagValue>): ShufFlags | string {
   if (fl.asBool('echo') && inputRangeRaw !== null) return `${ECHO_WITH_RANGE}\n`
   const countValue = fl.asList('head_count').at(-1)
   const count = countValue === undefined ? null : BigInt(countValue)
-  const outputWord = fl.asList('output').at(-1)
-  const output =
-    fl.asPaths('output').at(-1) ??
-    (outputWord === undefined ? null : PathSpec.fromStrPath(outputWord))
+  const output = fl.asPaths('output').at(-1) ?? null
   return {
     count: count === null || count <= SIZE_MAX ? count : SIZE_MAX,
     echo: fl.asBool('echo'),

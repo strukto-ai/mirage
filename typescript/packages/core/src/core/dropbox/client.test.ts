@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DropboxTokenManager, dropboxDownload } from './client.ts'
+import {
+  DropboxTokenManager,
+  dropboxDownload,
+  dropboxDownloadStream,
+  dropboxRpc,
+} from './client.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 
 const BODY = '0123456789'
@@ -27,11 +32,16 @@ function tokenManager(): DropboxTokenManager {
   })
 }
 
-function respond(status: number, body: string): typeof globalThis.fetch {
+function respond(
+  status: number,
+  body: string,
+  headers: Record<string, string> = {},
+): typeof globalThis.fetch {
   return vi.fn(() =>
     Promise.resolve({
       ok: status < 400,
       status,
+      headers: new Headers(headers),
       arrayBuffer: () => Promise.resolve(new TextEncoder().encode(body).buffer),
       text: () => Promise.resolve(''),
     }),
@@ -45,7 +55,7 @@ async function download(
 ): Promise<{ out: Uint8Array; sent: Record<string, string> }> {
   const fetch = respond(status, body)
   vi.stubGlobal('fetch', fetch)
-  const out = await dropboxDownload(tokenManager(), '/a.txt', window)
+  const [out] = await dropboxDownload(tokenManager(), '/a.txt', window)
   const init = vi.mocked(fetch).mock.calls[0]?.[1]
   return { out, sent: (init?.headers ?? {}) as Record<string, string> }
 }
@@ -77,5 +87,57 @@ describe('dropboxDownload', () => {
     const { out, sent } = await download(200, BODY)
     expect(new TextDecoder().decode(out)).toBe(BODY)
     expect(sent.Range).toBeUndefined()
+  })
+})
+
+const RESULT = JSON.stringify({ name: 'a.txt', content_hash: 'abc123' })
+
+describe('dropboxDownload result header', () => {
+  it.each([
+    ['whole', 200, undefined, { 'Dropbox-API-Result': RESULT }, RESULT],
+    ['ranged', 206, { offset: 2, size: 3 }, { 'Dropbox-API-Result': RESULT }, RESULT],
+    ['absent', 200, undefined, {}, null],
+  ] as const)(
+    'hands back its Dropbox-API-Result (%s)',
+    async (_id, status, window, headers, want) => {
+      vi.stubGlobal('fetch', respond(status, '234', headers))
+      const [, result] = await dropboxDownload(tokenManager(), '/a.txt', window)
+      expect(result).toBe(want)
+    },
+  )
+})
+
+describe('dropboxDownloadStream', () => {
+  // A plain lower-cased record, as bytes_response hands its own, before the
+  // first chunk, so a consumer that stops early still leaves the read stamped.
+  it('hands its response headers to onResponse', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(new Response('hello', { headers: { 'Dropbox-API-Result': RESULT } })),
+      ),
+    )
+    const events: (Record<string, string> | string)[] = []
+    for await (const c of dropboxDownloadStream(tokenManager(), '/a.txt', (h) => events.push(h))) {
+      events.push(new TextDecoder().decode(c))
+    }
+    expect(events[0] instanceof Headers).toBe(false)
+    expect((events[0] as Record<string, string>)['dropbox-api-result']).toBe(RESULT)
+    expect(events.slice(1)).toEqual(['hello'])
+  })
+})
+
+describe('dropboxRpc', () => {
+  it.each([
+    ['null', 'null'],
+    ['number', '{"error_summary":5}'],
+    ['not-object', '["path/not_found/.."]'],
+    ['not-json', 'oops'],
+  ])('leaves the summary empty for a 409 body without one (%s)', async (_id, body) => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(body, { status: 409 })))
+    await expect(dropboxRpc(tokenManager(), '/files/get_metadata', {})).rejects.toMatchObject({
+      status: 409,
+      summary: '',
+    })
   })
 })

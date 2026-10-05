@@ -443,10 +443,13 @@ export class CacheManager {
    * The fill half of `readThrough`, for a door that probed the cache
    * itself (the dispatcher's). A write that lands while the fetch runs
    * retires the generation, so the bytes it read are not kept; an answer
-   * that is not bytes is returned and kept nowhere. Mirrors Python's
-   * `CacheManager.fill`.
+   * that is not bytes is returned and kept nowhere. `keep`, when given, is
+   * asked after the fetch with the cache's mutation lock held and has the
+   * last say over whether the bytes are kept; the dispatcher passes "no
+   * renderer resolves for the read". It must be synchronous; omitted, the
+   * bytes are kept. Mirrors Python's `CacheManager.fill`.
    */
-  async fill<T>(path: PathSpec, fetch: () => Promise<T>): Promise<T> {
+  async fill<T>(path: PathSpec, fetch: () => Promise<T>, keep?: () => boolean): Promise<T> {
     const generation = this.readGeneration
     const records = activeRecords()
     const start = records?.length ?? 0
@@ -456,7 +459,11 @@ export class CacheManager {
     const cache = this.readableCache(key)
     if (cache !== null) {
       await withCacheMutation(cache, async () => {
-        if (this.ownsPath(key) && generation === this.readGeneration) {
+        if (
+          this.ownsPath(key) &&
+          generation === this.readGeneration &&
+          (keep === undefined || keep())
+        ) {
           const fingerprint = latestFingerprint(
             records?.slice(start),
             key,

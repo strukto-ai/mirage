@@ -17,77 +17,79 @@ import { extraOperandError } from '../../../spec/usage.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
-import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const unlink: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  if (paths.length === 0) {
+    throw new UsageError("unlink: missing operand\nTry 'unlink --help' for more information.", 1)
+  }
+  const idx = opts.index ?? undefined
+  const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
+  if (resolved.length > 1) {
+    const extra = resolved[1]
+    throw extraOperandError('unlink', extra === undefined ? '' : extra.rawPath)
+  }
+  const p = resolved[0]
+  if (p === undefined) return [null, new IOResult()]
+  const unlinkOp = requireOp(ops.unlink, 'unlink')
+  const enc = new TextEncoder()
+  const links = opts.ns?.links ?? null
+  // unlink(2) never follows, so a trailing slash on a link operand is
+  // refused rather than resolved: GNU answers `unlink dlink/` and
+  // `unlink flink/` alike with ENOTDIR, where a real directory under a
+  // slash is EISDIR. A bare link operand never reaches here at all --
+  // the dispatcher removes the link entry, which no backend can see.
+  if (links !== null && p.rawPath.endsWith('/') && links.statAt(p.virtual) !== null) {
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': Not a directory\n`),
+      }),
+    ]
+  }
+  let isDir = false
+  try {
+    const st = await ops.stat(accessor, p, idx)
+    isDir = st.type === FileType.DIRECTORY
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: enc.encode(
+          `unlink: cannot unlink '${p.rawPath}': ${fsStrerror(err) ?? String(err)}\n`,
+        ),
+      }),
+    ]
+  }
+  if (isDir) {
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': Is a directory\n`),
+      }),
+    ]
+  }
+  try {
+    await unlinkOp(accessor, p)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': ${String(fsStrerror(err))}\n`),
+      }),
+    ]
+  }
+  return [null, new IOResult()]
+}
 
 export const BUILDER: Builder = {
   name: 'unlink',
   write: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    if (paths.length === 0) {
-      throw new UsageError("unlink: missing operand\nTry 'unlink --help' for more information.", 1)
-    }
-    const idx = opts.index ?? undefined
-    const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    if (resolved.length > 1) {
-      const extra = resolved[1]
-      throw extraOperandError('unlink', extra === undefined ? '' : extra.rawPath)
-    }
-    const p = resolved[0]
-    if (p === undefined) return [null, new IOResult()]
-    const unlink = requireOp(ops.unlink, 'unlink')
-    const enc = new TextEncoder()
-    const links = opts.ns?.links ?? null
-    // unlink(2) never follows, so a trailing slash on a link operand is
-    // refused rather than resolved: GNU answers `unlink dlink/` and
-    // `unlink flink/` alike with ENOTDIR, where a real directory under a
-    // slash is EISDIR. A bare link operand never reaches here at all --
-    // the dispatcher removes the link entry, which no backend can see.
-    if (links !== null && p.rawPath.endsWith('/') && links.statAt(p.virtual) !== null) {
-      return [
-        null,
-        new IOResult({
-          exitCode: 1,
-          stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': Not a directory\n`),
-        }),
-      ]
-    }
-    let isDir = false
-    try {
-      const st = await ops.stat(accessor, p, idx)
-      isDir = st.type === FileType.DIRECTORY
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      return [
-        null,
-        new IOResult({
-          exitCode: 1,
-          stderr: enc.encode(
-            `unlink: cannot unlink '${p.rawPath}': ${fsStrerror(err) ?? String(err)}\n`,
-          ),
-        }),
-      ]
-    }
-    if (isDir) {
-      return [
-        null,
-        new IOResult({
-          exitCode: 1,
-          stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': Is a directory\n`),
-        }),
-      ]
-    }
-    try {
-      await unlink(accessor, p)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      return [
-        null,
-        new IOResult({
-          exitCode: 1,
-          stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': ${String(fsStrerror(err))}\n`),
-        }),
-      ]
-    }
-    return [null, new IOResult()]
-  },
+  fn: unlink,
 }

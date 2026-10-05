@@ -16,7 +16,7 @@ import { VFSAdapter } from '../../../vfs/adapter.ts'
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
-import { read as githubRead, stream as githubStream } from '../../../core/github/read.ts'
+import { read as githubRead, readStream as githubStream } from '../../../core/github/read.ts'
 import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
 import { stat as githubStat } from '../../../core/github/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'

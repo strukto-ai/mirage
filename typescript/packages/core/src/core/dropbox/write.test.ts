@@ -95,9 +95,12 @@ describe('dropbox mkdir', () => {
     expect(api.createFolder).toHaveBeenCalledWith(STUB_TM, '/docs')
   })
 
-  it('rejects an existing path with EEXIST', async () => {
-    vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/docs'))
+  it('reads a conflict on the create as EEXIST, with no lookup first', async () => {
+    vi.mocked(api.createFolder).mockRejectedValue(
+      new DropboxApiError('conflict', 409, 'path/conflict/folder/...'),
+    )
     await expect(mkdir(makeAccessor(), spec('/docs'))).rejects.toMatchObject({ code: 'EEXIST' })
+    expect(api.getMetadata).not.toHaveBeenCalled()
   })
 
   it('is idempotent for an existing dir with parents', async () => {

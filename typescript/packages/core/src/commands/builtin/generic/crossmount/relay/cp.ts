@@ -91,7 +91,7 @@ export async function runCp(
     await dispatch('mkdir', p)
   }
   const strategy = { readBytes, write, mkdir, readdir }
-  return cpGeneric(
+  const [out, io] = await cpGeneric(
     flat,
     stat,
     strategy,
@@ -103,4 +103,10 @@ export async function runCp(
     links === undefined ? undefined : { links, dispatch, cwd, relay: strategy, relayStat: stat },
     stdin,
   )
+  // Every read went through the dispatcher, whose cold read keeps what the
+  // file cache may hold; listing a read path again would keep a filetype
+  // renderer's output there, which cat would then print. A written path
+  // stays listed. Mirrors Python's run_cp.
+  io.cache = io.cache.filter((p) => !(p in io.reads))
+  return [out, io]
 }

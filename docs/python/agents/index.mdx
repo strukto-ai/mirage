@@ -29,7 +29,7 @@ Your program holds the workspace and hands it to the framework.
 | [OpenAI Agents](/python/agents/openai-agents) | `MirageShellExecutor(ws)`, `MirageEditor(ws)`, `MirageSandboxClient(ws)` | its shell, patch and sandbox tools, run in Mirage |
 | [LangChain Deep Agents](/python/agents/langchain) | `LangchainWorkspace(ws)` | its file and shell tools, run in Mirage |
 | [OpenHands](/python/agents/openhands) | `MirageWorkspace(workspace=ws)` | its workspace and terminal, run in Mirage |
-| [Pydantic AI](/python/agents/pydantic-ai) | `PydanticAIWorkspace(ws)` | its file and shell tools, run in Mirage |
+| [Pydantic AI](/python/agents/pydantic-ai) | `MirageWorkspace(ws)` | its workspace, so every file and shell tool runs in Mirage |
 | [Haystack](/python/agents/haystack) | `MirageShellTool(...)` | a bash tool |
 
 Mirage's seven tools are the session's [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`.

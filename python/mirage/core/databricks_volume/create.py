@@ -14,7 +14,7 @@
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.databricks_volume.write import write_bytes
+from mirage.core.databricks_volume.write import write
 from mirage.types import PathSpec
 
 
@@ -23,4 +23,4 @@ async def create(
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> None:
-    await write_bytes(accessor, path, b"", index)
+    await write(accessor, path, b"", index)

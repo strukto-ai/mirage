@@ -5,7 +5,7 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.adapter import (
     CommandIO,
-    with_path_guards,
+    with_command_guards,
 )
 from mirage.commands.builtin.object_store.rm import make_rm
 from mirage.commands.config import CommandOpts
@@ -32,7 +32,7 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
 ):
     stat = AsyncMock(return_value=FileStat(name="ok", type=FileType.FILE))
     unlink = AsyncMock()
-    io = with_path_guards(
+    io = with_command_guards(
         CommandIO(
             readdir=AsyncMock(return_value=[]),
             read_bytes=AsyncMock(),

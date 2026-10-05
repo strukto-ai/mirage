@@ -15,7 +15,7 @@
 import asyncio
 import json
 
-from mirage.core.ram.read import read_bytes
+from mirage.core.ram.read import read
 from mirage.observe.context import RecordingScope
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk.disk import DiskVFS
@@ -169,9 +169,7 @@ class TestJqStreamingVerification:
         scope = RecordingScope()
         records = scope.records
         accessor = mem.accessor
-        asyncio.run(
-            read_bytes(accessor, PathSpec.from_str_path("/data.jsonl"))
-        )
+        asyncio.run(read(accessor, PathSpec.from_str_path("/data.jsonl")))
         scope.close()
         assert len(records) == 1
         assert records[0].bytes == len(data)
@@ -183,7 +181,7 @@ class TestJqStreamingVerification:
         scope = RecordingScope()
         records = scope.records
         accessor = mem.accessor
-        asyncio.run(read_bytes(accessor, PathSpec.from_str_path("/f.json")))
+        asyncio.run(read(accessor, PathSpec.from_str_path("/f.json")))
         scope.close()
         assert len(records) == 1
         assert records[0].bytes == len(data)

@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.commands.builtin.ssh import COMMANDS as SSH_COMMANDS
+from mirage.commands.builtin.ssh.io import IO
 from mirage.commands.config import RegisteredCommand, registered_commands
 from mirage.core.ssh.watch import build_delta_hook
 from mirage.ops.registry import RegisteredOp
@@ -34,6 +35,7 @@ class SSHVFS(BaseVFS):
     # SFTP stat/readdir report the remote inode's exact byte size for
     # every file; reads are the same raw bytes.
     sizes_always_known: bool = True
+    max_du_entries: int | None = IO.max_du_entries
     # A remote filesystem: short-lived index, long enough to spare a
     # re-walk inside one command pipeline. Mirrors the TypeScript VFS.
     index_ttl: float = 60

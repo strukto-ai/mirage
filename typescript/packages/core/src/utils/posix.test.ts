@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classCharacters, compilePosixRegex, translateBracket } from './posix.ts'
+import { classCharacters, compilePosixRegex, skipRawBytes, translateBracket } from './posix.ts'
 
 function bracket(pattern: string): string {
   const out: string[] = []
@@ -109,4 +109,30 @@ it.each(['', 'i'])('keeps C-locale whitespace with flags %s', (flags) => {
   }
   expect(compilePosixRegex(String.raw`\S`, flags).test('\u00a0')).toBe(true)
   expect(compilePosixRegex(String.raw`\\s`, flags).test(String.raw`\s`)).toBe(true)
+})
+
+it('guards dots and negated brackets only', () => {
+  const guard = '(?![\\udc80-\\udcff])'
+  expect(skipRawBytes(String.raw`a.b\.[.][^x]`)).toBe(`a(?:${guard}.)b\\.[.](?:${guard}[^x])`)
+})
+
+it.each([
+  ['^a.b$', 'aéb', true],
+  ['^a.b$', 'a\udcffb', false],
+  ['^a[^x]b$', 'a规b', true],
+  ['^a[^x]b$', 'a\udcffb', false],
+  ['^a\\udcffb$', 'a\udcffb', true],
+  ['^..$', '规定', true],
+  ['^.$', '😀', true],
+  ['^.$', '\ud800\udc80', true],
+  [String.raw`^\S$`, '😀', true],
+])('matches characters, not raw bytes, in a UTF-8 subject: %s on %j', (source, text, expected) => {
+  expect(compilePosixRegex(source, '', true).test(text)).toBe(expected)
+})
+
+it('keeps dotAll and ASCII classes in a UTF-8 subject', () => {
+  expect(compilePosixRegex('a.b', 's', true).test('a\nb')).toBe(true)
+  expect(compilePosixRegex('a.b', '', true).test('a\nb')).toBe(false)
+  expect(compilePosixRegex(String.raw`\w`, '', true).test('é')).toBe(false)
+  expect(compilePosixRegex('é', 'i', true).test('É')).toBe(false)
 })

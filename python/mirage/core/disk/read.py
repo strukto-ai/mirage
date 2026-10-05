@@ -22,7 +22,7 @@ from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
-async def read_bytes(
+async def read(
     accessor: DiskAccessor,
     path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

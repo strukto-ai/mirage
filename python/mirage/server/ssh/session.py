@@ -43,9 +43,12 @@ logger = logging.getLogger(__name__)
 
 AGENT_ID = "ssh"
 INTERRUPTED = 130
-PROMPT = "mirage:{cwd}$ "
 FALLBACK_PROMPT = "mirage$ "
 LOGIN_HOME = "/"
+
+
+def prompt(cwd: str) -> str:
+    return f"mirage:{cwd}$ "
 
 
 def new_session_id() -> str:
@@ -127,16 +130,46 @@ def key_profile(conn: SSHConnection) -> str | None:
     return _key_option(conn, PROFILE_OPTION, "profile")
 
 
-def key_account(conn: SSHConnection) -> str | None:
-    """The account the login's authorized key belongs to, if any.
+class TunnelSSHServer(asyncssh.SSHServer):
+    """Admits a login the HTTPS route already authenticated.
 
-    The key's line in authorized_keys names it with
+    The route checked the caller's token and that its account may use
+    the workspace its URL names, so the login needs no key. It may only
+    name that workspace: another username is asked for a method this
+    server offers none of, and is refused.
+
+    Args:
+        workspace_id (str): the workspace the route admitted.
+        account (str | None): the caller's account; None when the
+            server's auth mode names none.
+    """
+
+    def __init__(self, workspace_id: str, account: str | None) -> None:
+        self.workspace_id = workspace_id
+        self.account = account
+
+    def begin_auth(self, username: str) -> bool:
+        return username != self.workspace_id
+
+    def password_auth_supported(self) -> bool:
+        return False
+
+
+def key_account(conn: SSHConnection) -> str | None:
+    """The account the login belongs to, if any.
+
+    A login the HTTPS route carried runs as the account its token
+    named. Otherwise the key's line in authorized_keys names it with
     ``mirage-account="<name>"``; the account may open only the
     workspaces it owns. A key without the option has no account.
 
     Args:
         conn (SSHConnection): the authenticated login's connection.
     """
+    if isinstance(conn, asyncssh.SSHServerConnection):
+        owner = conn.get_owner()
+        if isinstance(owner, TunnelSSHServer):
+            return owner.account
     return _key_option(conn, ACCOUNT_OPTION, "account")
 
 
@@ -303,7 +336,7 @@ class ShellChannel:
         if not self._live():
             return FALLBACK_PROMPT
         cwd = self._entry.runner.ws.get_session(self._session_id).cwd
-        return PROMPT.format(cwd=cwd)
+        return prompt(cwd)
 
     async def serve(self) -> int:
         """Run the channel to its end.

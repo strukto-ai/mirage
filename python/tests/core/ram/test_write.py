@@ -16,7 +16,7 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.append import append_bytes
-from mirage.core.ram.write import write_bytes
+from mirage.core.ram.write import write
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
 
@@ -32,7 +32,7 @@ def store():
 
 @pytest.mark.asyncio
 async def test_write_bytes(store):
-    await write_bytes(
+    await write(
         store,
         PathSpec(
             vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"
@@ -47,14 +47,14 @@ async def test_write_bytes(store):
 
 @pytest.mark.asyncio
 async def test_write_bytes_overwrite(store):
-    await write_bytes(
+    await write(
         store,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"
         ),
         b"first",
     )
-    await write_bytes(
+    await write(
         store,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"
@@ -72,7 +72,7 @@ async def test_write_bytes_parent_not_found():
     # The operand is what a GNU stderr line names, so the error carries the
     # virtual path, not the internal "parent does not exist" phrasing.
     with pytest.raises(FileNotFoundError, match="/no/parent/file.txt"):
-        await write_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="no/parent/file.txt",
@@ -91,7 +91,7 @@ async def test_write_bytes_under_a_plain_file_is_not_a_directory():
 
     a = RAMAccessor(s)
     with pytest.raises(NotADirectoryError):
-        await write_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="plain/file.txt",
@@ -110,7 +110,7 @@ async def test_write_bytes_deep_under_a_plain_file_is_not_a_directory():
 
     a = RAMAccessor(s)
     with pytest.raises(NotADirectoryError):
-        await write_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="plain/sub/file.txt",
@@ -124,7 +124,7 @@ async def test_write_bytes_deep_under_a_plain_file_is_not_a_directory():
 @pytest.mark.asyncio
 async def test_write_bytes_onto_a_directory_is_a_directory(store):
     with pytest.raises(IsADirectoryError):
-        await write_bytes(store, PathSpec.from_str_path("/sub"), b"data")
+        await write(store, PathSpec.from_str_path("/sub"), b"data")
     assert "/sub" not in store.store.files
     assert "/sub" in store.store.dirs
 
@@ -138,7 +138,7 @@ async def test_append_bytes_onto_a_directory_is_a_directory(store):
 
 @pytest.mark.asyncio
 async def test_write_bytes_to_subdir(store):
-    await write_bytes(
+    await write(
         store,
         PathSpec(
             vfs_path="sub/file.txt",
@@ -155,7 +155,7 @@ async def test_write_bytes_root_parent():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await write_bytes(
+    await write(
         a,
         PathSpec(
             vfs_path="root_file.txt",
@@ -169,7 +169,7 @@ async def test_write_bytes_root_parent():
 
 @pytest.mark.asyncio
 async def test_write_bytes_sets_modified(store):
-    await write_bytes(
+    await write(
         store,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"

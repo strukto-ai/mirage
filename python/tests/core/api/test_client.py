@@ -504,11 +504,19 @@ async def _final_hop(request: web.Request) -> web.Response:
     )
 
 
+async def _two_etags(_request: web.Request) -> web.Response:
+    response = web.json_response({"ok": True})
+    response.headers.add("ETag", '"one"')
+    response.headers.add("ETag", '"two"')
+    return response
+
+
 @pytest_asyncio.fixture()
 async def redirecting_url():
     app = web.Application()
     app.router.add_get("/start", _first_hop)
     app.router.add_get("/final", _final_hop)
+    app.router.add_get("/two-etags", _two_etags)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -535,3 +543,20 @@ async def test_bytes_response_returns_the_window_and_the_final_headers(
     # a content token needs the one that came with the bytes.
     assert response.headers["etag"] == '"final-hop"'
     assert response.headers["x-mixed-case"] == "kept"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("read", ["bytes_response", "response"])
+async def test_a_repeated_header_reads_joined_the_way_fetch_joins_it(
+    redirecting_url,
+    read,
+):
+    # Two ETags name no single version; joined, the value matches no
+    # token, which is what TypeScript's fetch hands its caller too.
+    response = await api_request(
+        "GET",
+        redirecting_url + "/two-etags",
+        error_of=_error_of,
+        read=read,
+    )
+    assert response.headers["etag"] == '"one", "two"'

@@ -620,6 +620,124 @@ async function pageMoves(at: string): Promise<void> {
   await move(PAGE_B, { type: 'workspace' }, 400)
 }
 
+// A page write names only properties its parent has: a column of its data
+// source, by name or id, or `title` outside one. Any other key is refused in
+// live's words and changes nothing: no row, no block, no value, no minted
+// option, no trash bit.
+async function pagePropertyWrites(at: string): Promise<void> {
+  await request(at, 'POST', '/reset', { tenants: [TENANT], fixture: 'v1' })
+  const title = { title: [{ text: { content: 'Kickoff' } }] }
+  const rows = async (): Promise<JsonValue[]> =>
+    results(await request(at, 'POST', `/v1/data_sources/${DS}/query`, {})).map((row) => row.id!)
+  const children = async (): Promise<JsonValue[]> =>
+    results(await request(at, 'GET', `/v1/blocks/${PAGE}/children`)).map((block) => block.id!)
+  const options = async (): Promise<JsonValue> =>
+    (
+      (await request(at, 'GET', `/v1/data_sources/${DS}`)).properties as Record<
+        string,
+        Record<string, JsonValue>
+      >
+    ).Stage!.select!
+
+  const seeded = await rows()
+  const unknown = await request(
+    at,
+    'POST',
+    '/v1/pages',
+    { parent: { data_source_id: DS }, properties: { Name: title, 'Net PnL %': { number: 1 } } },
+    400,
+  )
+  eq(
+    'a create names the unknown column',
+    unknown.message,
+    'Net PnL % is not a property that exists.',
+  )
+  eq('a refused create makes no row', await rows(), seeded)
+
+  const row = await request(at, 'GET', `/v1/pages/${ROW}`)
+  const stage = await options()
+  const second = await request(
+    at,
+    'PATCH',
+    `/v1/pages/${ROW}`,
+    {
+      properties: { Stage: { select: { name: 'Trade' } }, Month: title, Type: { number: 1 } },
+      in_trash: true,
+    },
+    400,
+  )
+  eq('a second title is an unknown column', second.message, 'Month is not a property that exists.')
+  const kept = await request(at, 'GET', `/v1/pages/${ROW}`)
+  eq(
+    'a refused update writes nothing',
+    [kept.properties!, kept.in_trash!],
+    [row.properties!, false],
+  )
+  eq('a refused update mints no option', await options(), stage)
+
+  const byId = await request(at, 'POST', '/v1/pages', {
+    parent: { data_source_id: DS },
+    properties: { title, pri: { number: 5 } },
+  })
+  eq(
+    'a column named by its id lands under its name',
+    [keys(byId.properties).includes('title'), titles({ results: [byId] })],
+    [false, ['Kickoff']],
+  )
+  eq(
+    'a number written by id reads back by name',
+    (byId.properties as Record<string, Record<string, JsonValue>>).Priority!.number,
+    5,
+  )
+  const twice = await request(
+    at,
+    'PATCH',
+    `/v1/pages/${ROW}`,
+    { properties: { Stage: { select: { name: 'One' } }, st: { select: { name: 'Two' } } } },
+    400,
+  )
+  eq('a column named twice is refused', twice.message, 'Stage and st both name the property Stage.')
+  eq('a column named twice mints no option', await options(), stage)
+  const added = await request(at, 'PATCH', `/v1/data_sources/${DS}`, {
+    properties: { Score: { number: {} } },
+  })
+  const score = String((added.properties as Record<string, Record<string, JsonValue>>).Score!.id)
+  check('an added column has a percent-encoded id', score.startsWith('%3A'), score)
+  for (const [ref, number] of [
+    [score, 1],
+    [decodeURIComponent(score), 2],
+  ] as const) {
+    const written = await request(at, 'PATCH', `/v1/pages/${ROW}`, {
+      properties: { [ref]: { number } },
+    })
+    eq(
+      `a column written by its id ${ref} reads back by name`,
+      (written.properties as Record<string, Record<string, JsonValue>>).Score!.number,
+      number,
+    )
+  }
+
+  const listed = await children()
+  for (const parent of [{ page_id: PAGE }, { workspace: true }]) {
+    const extra = await request(
+      at,
+      'POST',
+      '/v1/pages',
+      { parent, properties: { title, 'AIME (8x)': { number: 0.1 } } },
+      400,
+    )
+    eq(
+      'outside a data source only title exists',
+      extra.message,
+      'AIME (8x) is not a property that exists.',
+    )
+  }
+  eq('a refused child page makes no block', await children(), listed)
+  await request(at, 'PATCH', `/v1/pages/${PAGE_C}`, { properties: { Name: title } }, 400)
+  const renamed = await request(at, 'PATCH', `/v1/pages/${PAGE_C}`, { properties: { title } })
+  eq('a page under a page keeps one property', keys(renamed.properties), ['title'])
+}
+
 // Every operation @notionhq/notion-mcp-server exposes at the two versions this
 // fake is pinned to, from each one's scripts/notion-openapi.json, sent with the
 // Notion-Version that version sends: 1.9.0 is what vfs-bench drives, 2.5.2 is
@@ -981,6 +1099,7 @@ async function main(): Promise<void> {
     await databaseWrites(at)
     await dataSourceWrites(at)
     await pageMoves(at)
+    await pagePropertyWrites(at)
     await mcpSurface(at)
     process.stdout.write(`notion selftest: ${String(checks)} checks passed\n`)
   } finally {

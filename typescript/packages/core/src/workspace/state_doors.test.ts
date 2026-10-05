@@ -37,7 +37,7 @@ import type { RunResult } from '../runtime/types.ts'
 import { MountMode, PathSpec, VFSName } from '../types.ts'
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
-import { getTestParser, stdoutStr, voicedStderr } from './fixtures/workspace_fixture.ts'
+import { getTestParser, stderrStr, stdoutStr, voicedStderr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -2804,5 +2804,64 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
     expect(await handle.vfs.cat('/data/real/secret')).toBe('s\n')
     await expect(handle.vfs.read('/data/real/walled')).rejects.toThrow()
     expect((await handle.shell('cat /data/real/secret')).exitCode).toBe(1)
+  })
+})
+
+describe('admitted path rules on recursive commands', () => {
+  it.each([
+    ['find /data/src', 1],
+    ['du -a /data/src', 1],
+    ['du -s /data/src', 1],
+    ['grep -r PRIVATE_SENTINEL /data/src', 2],
+    ['rg PRIVATE_SENTINEL /data/src', 2],
+  ])('recursive commands enforce admitted path rules: %s', async (command, exitCode) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    await ws.shell('mkdir -p /data/src/cache')
+    await ws.vfs.write('/data/src/cache/private.txt', ENC.encode('PRIVATE_SENTINEL\n'))
+    await ws.vfs.write('/data/src/public.txt', ENC.encode('public\n'))
+    ws.createSession('restricted', {
+      profile: { commands: { deny: [{ paths: ['/data/src/cache'], reason: 'sealed' }] } },
+    })
+
+    const result = await ws.shell(command, { sessionId: 'restricted' })
+
+    expect(result.exitCode).toBe(exitCode)
+    expect(stdoutStr(result)).not.toContain('private.txt')
+    expect(stdoutStr(result)).not.toContain('PRIVATE_SENTINEL')
+    expect(voicedStderr(result)).toContain('/data/src/cache')
+    expect(voicedStderr(result)).toContain('Permission denied')
+  })
+})
+
+describe('coded preOps on native walks', () => {
+  // Refuses listing /data/sec, as a mode 0300 directory does.
+  const sealedSubtree: Policy = {
+    preOps: (ctx: OpsContext) =>
+      ctx.op === 'readdir' && ctx.path.virtual.startsWith('/data/sec')
+        ? { kind: 'deny', reason: 'sealed' }
+        : null,
+  }
+
+  it.each([
+    ['find /data', "find: '/data/sec': Permission denied\n"],
+    ['find /data/sec', "find: '/data/sec': Permission denied\n"],
+    ['du -a /data', "du: cannot read directory '/data/sec': Permission denied\n"],
+    ['du -a /data/sec', "du: cannot read directory '/data/sec': Permission denied\n"],
+  ])('%s walks through the deny', async (command, refusal) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    await ws.shell('mkdir -p /data/sec && echo SECRET > /data/sec/k.txt')
+    ws.policies.add(sealedSubtree)
+    const result = await ws.shell(command)
+    expect(result.exitCode).toBe(1)
+    expect(stdoutStr(result)).not.toContain('/data/sec/k.txt')
+    expect(stderrStr(result)).toBe(refusal)
   })
 })

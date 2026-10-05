@@ -57,8 +57,8 @@ async function put<A extends Accessor, C>(
 }
 
 /** Build the whole-object write over one driver. */
-export function makeWriteBytes<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): WriteFn<A> {
-  return async function writeBytes(accessor, path, data) {
+export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): WriteFn<A> {
+  return async function write(accessor, path, data) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
@@ -209,6 +209,10 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
     if (pfx === '') return
     const { conn, close } = await driver.connect(accessor)
     try {
+      // `-p` on a directory that holds its marker leaves the marker as it
+      // is: a rewrite replaces its metadata and, in a versioned bucket, adds
+      // a version. A directory only a key below implies still gets one.
+      if (row !== null && (await driver.head(conn, pfx)) !== null) return
       await driver.put(conn, pfx, new Uint8Array(0))
     } finally {
       await close()

@@ -37,9 +37,12 @@ async def _metadata_tag(
 async def mkdir(
     accessor: DropboxAccessor, path: PathSpec, parents: bool = False
 ) -> None:
-    """create_folder_v2 auto-creates missing parents and rejects existing
-    paths, so the GNU semantics (EEXIST without -p on an existing dir,
-    ENOENT on a missing parent without -p) live here.
+    """Create a folder; the doors have refused a taken name already.
+
+    create_folder_v2 auto-creates missing parents, so ENOENT on a missing
+    parent without -p lives here, and its path conflict answers a name
+    taken after the doors looked. Under -p an existing folder is skipped,
+    since the create would conflict on it.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -52,11 +55,8 @@ async def mkdir(
         if parents:
             return
         raise FileExistsError(path.virtual)
-    existing = await _metadata_tag(accessor, api_path)
-    if existing is not None:
-        if parents and existing == "folder":
-            return
-        raise FileExistsError(path.virtual)
+    if parents and await _metadata_tag(accessor, api_path) == "folder":
+        return
     if not parents:
         parent = api_path.rsplit("/", 1)[0]
         if (

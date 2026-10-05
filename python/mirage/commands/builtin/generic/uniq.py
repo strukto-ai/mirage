@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import split_readable
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     resolve_source,
     stdin_stat,
     stdin_stream,
@@ -220,7 +219,7 @@ async def _uniq_stream(
         yield _format_record(group[0], count, flags, separator)
 
 
-async def uniq(
+async def uniq_generic(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
@@ -268,10 +267,8 @@ async def uniq(
         _, err = await split_readable(paths[:1], stdin_stat(stat), "uniq")
         if err:
             return None, IOResult(exit_code=1, stderr=err)
-    cache: list[str] = []
     if paths:
         source = read_stream(paths[0])
-        cache = [] if is_stdin(paths[0]) else [paths[0].mount_path]
     else:
         source = resolve_source(stdin)
     output: ByteSource = _uniq_stream(source, parsed)
@@ -284,9 +281,9 @@ async def uniq(
         await write_bytes(paths[1], data)
         return b"", IOResult(
             writes={paths[1].mount_path: data},
-            cache=cache + [paths[1].mount_path],
+            cache=[paths[1].mount_path],
         )
-    return output, IOResult(cache=cache)
+    return output, IOResult()
 
 
-__all__ = ["uniq"]
+__all__ = ["uniq_generic"]

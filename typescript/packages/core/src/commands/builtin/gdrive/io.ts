@@ -21,7 +21,7 @@ import { size as gdriveDu, entries as gdriveDuAll } from '../../../core/gdrive/d
 import { find as gdriveFind } from '../../../core/gdrive/find.ts'
 import { exists as gdriveExists } from '../../../core/gdrive/exists.ts'
 import { mkdir as gdriveMkdir } from '../../../core/gdrive/mkdir.ts'
-import { read as gdriveRead, stream as gdriveStream } from '../../../core/gdrive/read.ts'
+import { read as gdriveRead, readStream as gdriveStream } from '../../../core/gdrive/read.ts'
 import { readdir as gdriveReaddir } from '../../../core/gdrive/readdir.ts'
 import { rename as gdriveRename } from '../../../core/gdrive/rename.ts'
 import { rmR as gdriveRmR } from '../../../core/gdrive/rm.ts'

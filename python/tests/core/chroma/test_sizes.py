@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.core.chroma.read import read_bytes
+from mirage.core.chroma.read import read
 from mirage.core.chroma.stat import stat, stat_light
 from mirage.core.chroma.tree import CHROMA_TREE
 
@@ -10,7 +10,7 @@ async def test_stat_size_matches_read(
     chroma_accessor, chroma_index, quickstart_path
 ):
     result = await stat(chroma_accessor, quickstart_path, chroma_index)
-    body = await read_bytes(chroma_accessor, quickstart_path, chroma_index)
+    body = await read(chroma_accessor, quickstart_path, chroma_index)
 
     assert result.size == len(body)
     # The producer's own number stays visible, but never as the size.

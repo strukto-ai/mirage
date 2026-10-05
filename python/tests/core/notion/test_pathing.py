@@ -16,15 +16,18 @@ import json
 
 import pytest
 
-from mirage.core.notion.normalize import normalize_page, to_json_bytes
+from mirage.core.notion.normalize import (
+    data_source_segment_name,
+    database_segment_name,
+    normalize_page,
+    page_segment_name,
+    to_json_bytes,
+)
 from mirage.core.notion.pathing import (
-    data_source_dirname,
-    database_dirname,
     format_segment,
-    page_dirname,
     split_suffix_id,
 )
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 
 
 class TestSplitSuffixId:
@@ -58,13 +61,13 @@ class TestPageDirname:
                 },
             },
         }
-        result = page_dirname(page)
+        result = page_segment_name(page)
         assert result.endswith("__abc-123")
         assert "hello" in result.lower()
 
     def test_untitled(self):
         page = {"id": "xyz", "properties": {}}
-        result = page_dirname(page)
+        result = page_segment_name(page)
         assert result == "untitled__xyz"
 
 
@@ -151,7 +154,7 @@ OBJ_ID = "a1b2c3d4-e5f6-7890-abcd-ef0123456789"
 def test_a_long_title_fits_name_max_and_still_addresses_the_id():
     name = format_segment(CJK_TITLE, OBJ_ID)
 
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert split_suffix_id(name)[1] == OBJ_ID
     assert "\ufffd" not in name
 
@@ -160,7 +163,7 @@ def test_a_long_title_fits_name_max_and_still_addresses_the_id():
     "build,record",
     [
         (
-            page_dirname,
+            page_segment_name,
             {
                 "id": OBJ_ID,
                 "properties": {
@@ -172,10 +175,10 @@ def test_a_long_title_fits_name_max_and_still_addresses_the_id():
             },
         ),
         (
-            database_dirname,
+            database_segment_name,
             {"id": OBJ_ID, "title": [{"plain_text": CJK_TITLE}]},
         ),
-        (data_source_dirname, {"id": OBJ_ID, "name": CJK_TITLE}),
+        (data_source_segment_name, {"id": OBJ_ID, "name": CJK_TITLE}),
     ],
 )
 def test_every_dirname_routes_through_the_budgeted_segment(build, record):

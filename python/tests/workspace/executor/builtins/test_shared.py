@@ -38,7 +38,6 @@ from mirage.workspace.executor.builtins.shared import (
     record_delimiter,
     refusal,
     require_view,
-    split_flags,
     split_value_flags,
 )
 from mirage.workspace.session import SessionState
@@ -89,24 +88,6 @@ def test_abs_path():
     spec = PathSpec.from_str_path("/data/f.txt")
     assert abs_path(spec, "/tmp") == "/data/f.txt"
     assert abs_path("f.txt", "/data") == "/data/f.txt"
-
-
-def test_split_flags_collects_known():
-    flags, operands = split_flags(["-sf", "a", "b"], "sfnv")
-    assert flags == {"s", "f"}
-    assert operands == ["a", "b"]
-
-
-def test_split_flags_unknown_becomes_operand():
-    flags, operands = split_flags(["-q", "a"], "sfnv")
-    assert flags == set()
-    assert operands == ["-q", "a"]
-
-
-def test_split_flags_double_dash_ends_parsing():
-    flags, operands = split_flags(["-s", "--", "-f"], "sfnv")
-    assert flags == {"s"}
-    assert operands == ["-f"]
 
 
 def test_split_value_flags_detached_value():

@@ -19,7 +19,7 @@ import uuid
 import boto3
 import pytest
 
-from mirage.core.s3.write import write_bytes
+from mirage.core.s3.write import write
 from mirage.types import DriftPolicy, MountMode, PathSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
@@ -312,7 +312,7 @@ def test_live_stat_populates_revision_when_versioned(tmp_path):
     client.put_object(Bucket=LIVE_BUCKET, Key=key, Body=b"x\n")
     try:
         vfs = S3VFS(_config())
-        asyncio.run(write_bytes(vfs.accessor, _spec(key, probe), b"x\n"))
+        asyncio.run(write(vfs.accessor, _spec(key, probe), b"x\n"))
         stat = asyncio.run(ops(vfs).stat(_spec(key, probe)))
         assert stat.fingerprint is not None
         assert stat.revision is not None, (

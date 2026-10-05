@@ -118,7 +118,7 @@ async def _tr_stream(
         yield from_byte_view(result)
 
 
-async def tr(
+async def tr_generic(
     paths: list[PathSpec],
     texts: list[str],
     *,
@@ -164,10 +164,8 @@ async def tr(
             "Two strings must be given when translating." + _TRY_HELP
         )
 
-    cache: list[str] = []
     if paths:
         source: AsyncIterator[bytes] = read_stream(paths[0])
-        cache = [paths[0].mount_path]
     else:
         source = resolve_source(stdin)
 
@@ -178,7 +176,7 @@ async def tr(
         delete=parsed.delete,
         squeeze=parsed.squeeze,
         table=table,
-    ), IOResult(cache=cache)
+    ), IOResult()
 
 
-__all__ = ["tr"]
+__all__ = ["tr_generic"]

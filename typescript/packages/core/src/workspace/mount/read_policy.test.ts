@@ -42,6 +42,7 @@ const REVALIDATABLE = [
   'backblaze',
   'ceph',
   'digitalocean',
+  'dropbox',
   'gcs',
   'gdocs',
   'gdrive',

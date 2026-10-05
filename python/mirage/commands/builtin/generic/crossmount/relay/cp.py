@@ -18,7 +18,7 @@ from functools import partial
 from typing import Any, Callable
 
 from mirage.commands.builtin.generic.cp import TransferLinks, parse_flags
-from mirage.commands.builtin.generic.cp import cp as generic_cp
+from mirage.commands.builtin.generic.cp import cp_generic as generic_cp
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
@@ -126,7 +126,7 @@ async def run_cp(
         mkdir=primitives["mkdir"],
         readdir=primitives["readdir"],
     )
-    return await generic_cp(
+    out, io = await generic_cp(
         flat_scopes(scopes),
         stat=primitives["stat"],
         strategy=strategy,
@@ -145,3 +145,9 @@ async def run_cp(
         ),
         stdin=stdin,
     )
+    # Every read went through the dispatcher, whose cold read keeps what
+    # the file cache may hold; listing a read path again would keep a
+    # filetype renderer's output there, which cat would then print. A
+    # written path stays listed.
+    io.cache = [p for p in io.cache if p not in io.reads]
+    return out, io

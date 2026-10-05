@@ -296,7 +296,7 @@ def _info(member: Member, size: int) -> tarfile.TarInfo:
     return info
 
 
-async def _create_archive(
+async def _write_archive(
     plan: CreateResult,
     archive_path: PathSpec,
     mode_suffix: CompressionSuffix,
@@ -731,7 +731,7 @@ async def tar(
             return None, IOResult(
                 exit_code=plan.exit_code, stderr=_stderr_of(list(plan.notices))
             )
-        return await _create_archive(
+        return await _write_archive(
             plan, archive, mode_suffix, v, read_bytes, write_bytes
         )
     if t:

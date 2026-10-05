@@ -29,7 +29,7 @@ import {
   getDataSource,
   getDatabase,
   searchDataSources,
-  searchTopLevelPages,
+  searchPages,
 } from './pages.ts'
 import { formatSegment } from './pathing.ts'
 import { detectScope } from './scope.ts'
@@ -54,8 +54,9 @@ async function listPagesRoot(
   accessor: NotionAccessor,
   _match: ScopeMatch,
 ): Promise<[string, IndexEntry][]> {
-  const pages = await searchTopLevelPages(accessor.transport)
-  return pages.map((page): [string, IndexEntry] => {
+  const pages = await searchPages(accessor.transport)
+  const topLevel = pages.filter((page) => asRecord(page.parent).type === 'workspace')
+  return topLevel.map((page): [string, IndexEntry] => {
     const dirname = pageSegmentName(page)
     return [
       dirname,

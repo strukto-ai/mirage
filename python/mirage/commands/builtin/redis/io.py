@@ -31,7 +31,7 @@ from mirage.core.redis.stat import stat as _stat
 from mirage.core.redis.stream import read_stream as _read_stream
 from mirage.core.redis.truncate import truncate as _truncate
 from mirage.core.redis.unlink import unlink as _unlink
-from mirage.core.redis.write import write_bytes as _write
+from mirage.core.redis.write import write as _write
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import DuOps, NativeReadOps, ReadOps, WriteOps
 

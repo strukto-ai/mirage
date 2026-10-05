@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readBytes, readStream } from '../../../core/chroma/read.ts'
+import { read, readStream } from '../../../core/chroma/read.ts'
 import { searchMany, searchResource } from '../../../core/chroma/search.ts'
 import { stat } from '../../../core/chroma/stat.ts'
 import { CHROMA_TREE } from '../../../core/chroma/tree.ts'
@@ -22,7 +22,7 @@ import type { CommandIO } from '../generic_bind/index.ts'
 
 export const IO: CommandIO<ChromaAccessor> = new VFSAdapter<ChromaAccessor>({
   search: { search: searchResource, searchMany },
-  read: { readdir: CHROMA_TREE.readdir, readBytes, stat },
+  read: { readdir: CHROMA_TREE.readdir, readBytes: read, stat },
   native: { readStream },
   isMounted: () => true,
   local: false,

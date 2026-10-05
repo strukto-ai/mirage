@@ -6,7 +6,7 @@ import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { DEFAULT_CHUNK_SIZE } from './constants.ts'
 import { isNotFound, nextcloudKey } from './util.ts'
 
-export async function* stream(
+export async function* readStream(
   accessor: NextcloudAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,

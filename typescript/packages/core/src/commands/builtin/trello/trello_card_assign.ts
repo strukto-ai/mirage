@@ -32,7 +32,7 @@ const SPEC = new CommandSpec({
   ],
 })
 
-async function trelloCardAssignCommand(
+async function trelloCardAssign(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
@@ -55,6 +55,6 @@ export const TRELLO_CARD_ASSIGN = command({
   name: 'trello card assign',
   vfs: VFSName.TRELLO,
   spec: SPEC,
-  fn: trelloCardAssignCommand,
+  fn: trelloCardAssign,
   write: true,
 })

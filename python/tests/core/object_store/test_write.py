@@ -22,7 +22,7 @@ from mirage.core.object_store.write import (
     make_create,
     make_mkdir,
     make_truncate,
-    make_write_bytes,
+    make_write,
 )
 from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (
@@ -46,9 +46,7 @@ def _managed(coro):
 def test_write_puts_and_invalidates_every_ancestor_listing(accessor):
     store = FakeStore()
     manager = _managed(
-        make_write_bytes(make_driver(store))(
-            accessor, spec("/a/b/c.txt"), b"hi"
-        )
+        make_write(make_driver(store))(accessor, spec("/a/b/c.txt"), b"hi")
     )
     assert store.objects == {"a/b/c.txt": b"hi"}
     assert manager.writes == ["/a/b/c.txt"]
@@ -58,7 +56,7 @@ def test_write_puts_and_invalidates_every_ancestor_listing(accessor):
 def test_write_at_mount_root_invalidates_only_itself(accessor):
     store = FakeStore()
     manager = _managed(
-        make_write_bytes(make_driver(store))(accessor, spec("/c.txt"), b"x")
+        make_write(make_driver(store))(accessor, spec("/c.txt"), b"x")
     )
     assert manager.writes == ["/c.txt"]
 
@@ -116,6 +114,17 @@ def test_mkdir_refuses_a_name_that_exists(accessor):
         with pytest.raises(FileExistsError):
             _managed(mkdir(accessor, spec(path), parents=parents))
     assert store.puts == []
+
+
+def test_mkdir_parents_keeps_an_existing_marker(accessor):
+    # A rewrite replaces the marker's metadata and, in a versioned bucket,
+    # adds a version; a directory only a key implies still gets a marker.
+    store = FakeStore({"a/": b"", "imp/x.txt": b"x"})
+    mkdir = make_mkdir(make_driver(store))
+    _managed(mkdir(accessor, spec("/a"), parents=True))
+    assert store.puts == []
+    _managed(mkdir(accessor, spec("/imp"), parents=True))
+    assert store.puts == [("imp/", b"")]
 
 
 def test_mkdir_refuses_a_missing_parent_without_parents(accessor):
@@ -178,7 +187,7 @@ def test_write_names_the_path_not_the_key_when_the_container_is_gone(accessor):
     # "a/b/c.txt"; only the factory can restate it as the path the user
     # typed, which is the only spelling allowed in a message.
     exc = _enoent_from(
-        lambda d, s: make_write_bytes(d)(accessor, s, b"hi"), "/a/b/c.txt"
+        lambda d, s: make_write(d)(accessor, s, b"hi"), "/a/b/c.txt"
     )
     assert str(exc) == "/mnt/a/b/c.txt"
 
@@ -203,7 +212,7 @@ def test_a_store_error_that_is_not_a_missing_container_propagates(accessor):
 
     driver = replace(make_driver(store), put=boom)
     try:
-        _managed(make_write_bytes(driver)(accessor, spec("/a.txt"), b"hi"))
+        _managed(make_write(driver)(accessor, spec("/a.txt"), b"hi"))
     except RuntimeError as exc:
         assert str(exc) == "bucket on fire"
     else:
@@ -230,9 +239,7 @@ def _recorded(coro):
 def test_write_records_the_token_the_put_returned(accessor):
     store = FakeStore()
     records = _recorded(
-        make_write_bytes(make_driver(store))(
-            accessor, spec("/a/b/c.txt"), b"hi"
-        )
+        make_write(make_driver(store))(accessor, spec("/a/b/c.txt"), b"hi")
     )
     assert [(r.op, r.path, r.fingerprint) for r in records] == [
         ("write", "/mnt/a/b/c.txt", "fp-a/b/c.txt")
@@ -263,9 +270,7 @@ def test_write_records_no_token_when_the_store_reports_none(accessor):
     """A driver whose put answers None (hf, whose opendal write reports
     nothing) records the same absence it does today."""
     driver = replace(make_driver(FakeStore()), put=_put_silently)
-    records = _recorded(
-        make_write_bytes(driver)(accessor, spec("/a/c.txt"), b"hi")
-    )
+    records = _recorded(make_write(driver)(accessor, spec("/a/c.txt"), b"hi"))
     assert [r.fingerprint for r in records] == [None]
 
 

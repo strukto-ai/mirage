@@ -39,7 +39,7 @@ from mirage.commands.spec.constants import (
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.standard import has_injected_version
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context import (
     effective_mount_mode,
     require_paths_writable,
@@ -116,11 +116,11 @@ async def _command_output(
         io.exit_code = (
             exc.exit_code
             if isinstance(exc, UsageError)
-            else read_fail_exit(command, exc)
+            else read_fail_exit_code(command, exc)
         )
 
 
-def _wrap_cmd_streams(
+def _wrap_mount_streams(
     result: tuple[ByteSource | None, IOResult],
     revisions: dict[str, str] | None,
     mount_id: str | None = None,
@@ -178,7 +178,7 @@ def _wrap_op_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
     An op that returns an async iterator has not run its body yet: the
     backend opens the file on the first ``__anext__``, after the frame
     that called it (and its ``host_io`` scope) is gone. Same reason
-    ``_wrap_cmd_streams`` re-establishes the recorder state.
+    ``_wrap_mount_streams`` re-establishes the recorder state.
 
     Args:
         result (Any): whatever the op returned.
@@ -285,7 +285,6 @@ class MountEntry:
         self._prefix_index: dict[str, list[int]] | None = None
         self.command_limits: dict[str, Limit] = {}
         self._ops: dict[tuple[Any, ...], RegisteredOp] = {}
-        self._general_ops: dict[str, RegisteredOp] = {}
         # key: (cmd_name, target_resource_type)
 
     @asynccontextmanager
@@ -305,9 +304,7 @@ class MountEntry:
         Args:
             name (str): the op name.
         """
-        return bool(
-            self._resolve_cascade(name, None, self._ops, self._general_ops)
-        )
+        return bool(self._resolve_cascade(name, None, self._ops))
 
     async def expand_glob(
         self, paths: list[PathSpec], prefix: str
@@ -323,9 +320,7 @@ class MountEntry:
             paths (list[PathSpec]): the words, pattern specs among them.
             prefix (str): the mount prefix without its trailing slash.
         """
-        levels = self._resolve_cascade(
-            "glob", None, self._ops, self._general_ops
-        )
+        levels = self._resolve_cascade("glob", None, self._ops)
         if not levels:
             return list(paths)
         async with self.use():
@@ -595,7 +590,6 @@ class MountEntry:
             op_keys = [k for k in self._ops if k[0] == name]
             for k in op_keys:
                 del self._ops[k]
-            self._general_ops.pop(name, None)
 
     def commands(self) -> dict[str, list[str | None]]:
         """List registered commands grouped by filetype variants.
@@ -623,8 +617,6 @@ class MountEntry:
         result: dict[str, list[str | None]] = {}
         for name, filetype in self._ops:
             result.setdefault(name, []).append(filetype)
-        for name in self._general_ops:
-            result.setdefault(name, [])
         for name in result:
             result[name] = sorted(
                 result[name], key=lambda x: (x is not None, x or "")
@@ -638,12 +630,21 @@ class MountEntry:
         key = (op.name, op.filetype)
         self._ops[key] = op
 
+    def has_filetype_op(self, name: str, filetype: str) -> bool:
+        """Whether an op named ``name`` is registered for ``filetype``.
+
+        Args:
+            name (str): the op name.
+            filetype (str): the extension the op is scoped to.
+        """
+        return (name, filetype) in self._ops
+
     def _resolve_cascade(
         self,
         name: str,
         extension: str | None,
         table: dict[tuple[Any, ...], Any],
-        general: dict[str, Any],
+        general: dict[str, Any] | None = None,
     ) -> list[Any]:
         """Resolve with cascade: try filetype, VFS, general.
 
@@ -658,7 +659,7 @@ class MountEntry:
         entry = table.get((name, None))
         if entry is not None:
             levels.append(entry)
-        entry = general.get(name)
+        entry = general.get(name) if general is not None else None
         if entry is not None:
             levels.append(entry)
         return levels
@@ -673,9 +674,7 @@ class MountEntry:
         Args:
             path (str): virtual path.
         """
-        levels = self._resolve_cascade(
-            "read", get_extension(path), self._ops, self._general_ops
-        )
+        levels = self._resolve_cascade("read", get_extension(path), self._ops)
         return bool(levels) and levels[0].ranges
 
     # ── execution ─────────────────────────────────────
@@ -906,7 +905,7 @@ class MountEntry:
                             cmd_name,
                         )
                     if result is not None:
-                        stream, io = _wrap_cmd_streams(
+                        stream, io = _wrap_mount_streams(
                             result,
                             self.revisions or None,
                             self.mount_id,
@@ -941,11 +940,7 @@ class MountEntry:
             path (str): virtual path (drives filetype-specific lookup).
         """
         filetype = get_extension(path)
-        return bool(
-            self._resolve_cascade(
-                op_name, filetype, self._ops, self._general_ops
-            )
-        )
+        return bool(self._resolve_cascade(op_name, filetype, self._ops))
 
     async def execute_op(
         self,
@@ -977,9 +972,7 @@ class MountEntry:
                 if "filetype" in kwargs
                 else get_extension(path)
             )
-            levels = self._resolve_cascade(
-                op_name, filetype, self._ops, self._general_ops
-            )
+            levels = self._resolve_cascade(op_name, filetype, self._ops)
             if not levels:
                 raise enotsup(str(self.vfs.name), op_name, path)
 

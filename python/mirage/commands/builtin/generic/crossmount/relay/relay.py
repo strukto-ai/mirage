@@ -14,17 +14,15 @@
 
 from typing import Callable
 
+from mirage.commands.builtin.generic.crossmount.constants import (
+    DISPATCH_BUILDERS,
+    RELAY_COMMANDS,
+)
 from mirage.commands.builtin.generic.crossmount.relay.awk import run_awk
-from mirage.commands.builtin.generic.crossmount.relay.cmp import run_cmp
-from mirage.commands.builtin.generic.crossmount.relay.comm import run_comm
 from mirage.commands.builtin.generic.crossmount.relay.cp import run_cp
-from mirage.commands.builtin.generic.crossmount.relay.diff import run_diff
-from mirage.commands.builtin.generic.crossmount.relay.join import run_join
 from mirage.commands.builtin.generic.crossmount.relay.ls import run_ls
 from mirage.commands.builtin.generic.crossmount.relay.mv import run_mv
-from mirage.commands.builtin.generic.crossmount.relay.paste import run_paste
 from mirage.commands.builtin.generic.crossmount.relay.sed import run_sed
-from mirage.commands.builtin.generic.crossmount.relay.sort import run_sort
 from mirage.commands.builtin.generic.crossmount.relay.tar import run_tar
 from mirage.commands.builtin.generic.crossmount.relay.tee import run_tee
 from mirage.commands.builtin.generic.crossmount.relay.unzip import run_unzip
@@ -35,28 +33,12 @@ from mirage.commands.builtin.generic.crossmount.types import (
     CrossResult,
     RunSingle,
 )
-from mirage.commands.builtin.generic_bind.adapter import Builder
-from mirage.commands.builtin.generic_bind.builders.grep import (
-    BUILDER as GREP_BUILDER,
-)
-from mirage.commands.builtin.generic_bind.builders.realpath import (
-    BUILDER as REALPATH_BUILDER,
-)
-from mirage.commands.builtin.generic_bind.builders.rg import (
-    BUILDER as RG_BUILDER,
-)
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-
-DISPATCH_BUILDERS: dict[str, Builder] = {
-    Cmd.GREP: GREP_BUILDER,
-    Cmd.RG: RG_BUILDER,
-    Cmd.REALPATH: REALPATH_BUILDER,
-}
 
 
 async def run_relay(
@@ -108,16 +90,25 @@ async def run_relay(
             typed link source against.
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
     """
+    if cmd_name not in RELAY_COMMANDS:
+        raise ValueError(f"Unsupported cross-mount relay command: {cmd_name}")
     if cmd_name == Cmd.AWK:
         return await run_awk(scopes, text_args, flag_kwargs, run_single, stdin)
     if cmd_name == Cmd.SED:
         return await run_sed(
-            scopes, text_args, flag_kwargs, dispatch, stdin, cwd, argv
+            scopes,
+            text_args,
+            flag_kwargs,
+            dispatch,
+            stdin,
+            cwd,
+            argv,
+            session_view.snapshot() if session_view is not None else None,
         )
     if cmd_name == Cmd.WC:
-        return await run_wc(scopes, flag_kwargs, dispatch, run_single)
-    if cmd_name == Cmd.SORT:
-        return await run_sort(scopes, flag_kwargs, dispatch, stdin)
+        return await run_wc(
+            scopes, flag_kwargs, dispatch, run_single, cwd, ns, stdin
+        )
     if cmd_name == Cmd.LS:
         return await run_ls(scopes, flag_kwargs, dispatch, ns, session_view)
     if cmd_name == Cmd.CP:
@@ -128,14 +119,6 @@ async def run_relay(
         return await run_mv(
             scopes, flag_kwargs, dispatch, storage_key, ns, stdin
         )
-    if cmd_name == Cmd.DIFF:
-        return await run_diff(scopes, flag_kwargs, dispatch, stdin, argv)
-    if cmd_name == Cmd.PASTE:
-        return await run_paste(scopes, flag_kwargs, dispatch, stdin)
-    if cmd_name == Cmd.COMM:
-        return await run_comm(scopes, flag_kwargs, dispatch, stdin)
-    if cmd_name == Cmd.JOIN:
-        return await run_join(scopes, flag_kwargs, dispatch, stdin)
     if cmd_name == Cmd.TAR:
         return await run_tar(
             scopes, text_args, flag_kwargs, dispatch, ns, stdin
@@ -156,5 +139,6 @@ async def run_relay(
             cwd,
             ns,
             stdin,
+            argv,
         )
-    return await run_cmp(scopes, text_args, flag_kwargs, dispatch, stdin)
+    raise ValueError(f"No cross-mount composition for {cmd_name}")

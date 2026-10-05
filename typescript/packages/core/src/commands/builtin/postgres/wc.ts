@@ -52,7 +52,7 @@ async function allExist(accessor: PostgresAccessor, paths: readonly PathSpec[]):
   return true
 }
 
-async function wcCommand(
+async function wc(
   accessor: PostgresAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -85,7 +85,7 @@ async function wcCommand(
       total += count
     }
     const out: ByteSource | null = formatCountRows(rows, [total], resolved.length, parsed.total)
-    return [out, new IOResult()]
+    return [out, new IOResult({ countedRuns: rows })]
   }
   return wcGeneric(resolved, texts, opts, (p) => readStream(accessor, p, opts.index ?? undefined))
 }
@@ -94,5 +94,5 @@ export const POSTGRES_WC = command({
   name: 'wc',
   vfs: VFSName.POSTGRES,
   spec: specOf('wc'),
-  fn: wcCommand,
+  fn: wc,
 })

@@ -28,9 +28,7 @@ from mirage.utils.errors import eisdir
 
 
 @eacces_on_denied
-async def write_bytes(
-    accessor: GDriveAccessor, path: PathSpec, data: bytes
-) -> None:
+async def write(accessor: GDriveAccessor, path: PathSpec, data: bytes) -> None:
     virtual = path.virtual
     key = path.vfs_path
     if not key:

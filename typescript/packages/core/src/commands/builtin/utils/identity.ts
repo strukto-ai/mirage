@@ -32,8 +32,6 @@ export interface Identity {
   readonly profile: string | null
 }
 
-export const NO_IDENTITY: Identity = { user: null, profile: null }
-
 /** The identity two planes' views describe; either view may be absent outside a workspace. */
 export function identityFrom(
   ns: NamespaceView | undefined,

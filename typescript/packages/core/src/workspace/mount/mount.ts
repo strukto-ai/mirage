@@ -868,7 +868,7 @@ export function wrapOpStream(result: unknown, mountId: string, activity: VFSActi
 // handed back, so a deferred backend read attributes its record the same
 // way an eager one does. Dedup by identity: a stream that appears both as the
 // primary stdout and in IOResult.reads/writes is wrapped once.
-// Mirrors python's _wrap_cmd_streams.
+// Mirrors python's _wrap_mount_streams.
 function wrapMountStreams(
   result: [ByteSource | null, IOResult],
   mountId: string,

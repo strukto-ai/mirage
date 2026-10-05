@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from mirage.commands.builtin.generic.awk import awk
+from mirage.commands.builtin.generic.awk import awk_generic
 from mirage.commands.errors import UsageError
 from mirage.types import PathSpec
 
@@ -73,7 +73,7 @@ async def _drain(stdout) -> bytes:
 @pytest.mark.asyncio
 async def test_awk_runs_the_program_files(f, files, data, expected):
     rb, rs = _make_backend(files)
-    output, io = await awk(
+    output, _ = await awk_generic(
         [_spec(path) for path in data],
         (),
         {"f": f},
@@ -81,13 +81,12 @@ async def test_awk_runs_the_program_files(f, files, data, expected):
         read_stream=rs,
     )
     assert (await _drain(output)).decode() == expected
-    assert io.cache == data
 
 
 @pytest.mark.asyncio
 async def test_awk_empty_fs_splits_characters():
     rb, rs = _make_backend({})
-    output, _ = await awk(
+    output, _ = await awk_generic(
         [],
         ("{print $2}",),
         {"F": ""},
@@ -106,7 +105,7 @@ async def test_awk_processes_all_files_with_continuous_nr():
             "/b.txt": b"three\n",
         }
     )
-    output, io = await awk(
+    output, _ = await awk_generic(
         [_spec("/a.txt"), _spec("/b.txt")],
         ("{print NR, $1}",),
         None,
@@ -114,14 +113,13 @@ async def test_awk_processes_all_files_with_continuous_nr():
         read_stream=rs,
     )
     assert (await _drain(output)).decode() == "1 one\n2 two\n3 three\n"
-    assert io.cache == ["/a.txt", "/b.txt"]
 
 
 @pytest.mark.asyncio
 async def test_awk_program_file_missing_raises_usage_error():
     rb, rs = _make_backend({"/data.txt": b"x\n"})
     with pytest.raises(UsageError, match="No such file"):
-        await awk(
+        await awk_generic(
             [_spec("/data.txt")],
             (),
             {"f": _spec("/missing.awk")},
@@ -132,7 +130,7 @@ async def test_awk_program_file_missing_raises_usage_error():
 
 async def _run_stdin(program: str, stdin: bytes, flags=None) -> str:
     rb, rs = _make_backend({})
-    output, _ = await awk(
+    output, _ = await awk_generic(
         [],
         (program,),
         flags,
@@ -159,7 +157,9 @@ async def test_awk_runs_a_program_on_stdin(program, stdin, expected):
 async def test_awk_without_a_program_raises_usage():
     rb, rs = _make_backend({})
     with pytest.raises(UsageError, match="usage"):
-        await awk([], (), None, read_bytes=rb, read_stream=rs, stdin=b"a\n")
+        await awk_generic(
+            [], (), None, read_bytes=rb, read_stream=rs, stdin=b"a\n"
+        )
 
 
 @pytest.mark.parametrize(
@@ -190,7 +190,7 @@ async def test_awk_syntax_errors_exit_2_naming_the_program_bytes(
 
 async def _run_io(program: str, stdin: bytes) -> tuple[str, int, bytes]:
     rb, rs = _make_backend({})
-    output, io = await awk(
+    output, io = await awk_generic(
         [],
         (program,),
         None,
@@ -235,7 +235,7 @@ async def _chunked(parts: tuple[bytes, ...]) -> AsyncIterator[bytes]:
 @pytest.mark.asyncio
 async def test_awk_rs_holds_a_record_across_chunks(parts, rs, expected):
     rb, read_stream = _make_backend({})
-    output, _ = await awk(
+    output, _ = await awk_generic(
         [],
         ('{printf "%s|", $0}',),
         {"v": [f"RS={rs}"]},
@@ -249,7 +249,7 @@ async def test_awk_rs_holds_a_record_across_chunks(parts, rs, expected):
 @pytest.mark.asyncio
 async def test_awk_rs_paragraph_separator_is_the_whole_newline_run():
     rb, read_stream = _make_backend({})
-    output, _ = await awk(
+    output, _ = await awk_generic(
         [],
         ('{printf "%s|", $0; RS="\\n"}',),
         {"v": ["RS="]},

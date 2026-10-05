@@ -16,7 +16,7 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.shuf import NO_WRITE_OP, parse_flags
-from mirage.commands.builtin.generic.shuf import shuf as generic_shuf
+from mirage.commands.builtin.generic.shuf import shuf_generic as generic_shuf
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,

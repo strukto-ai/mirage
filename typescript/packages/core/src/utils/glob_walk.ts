@@ -20,6 +20,8 @@ import { fnmatch } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
+import type { Accessor } from '../accessor/base.ts'
+import type { ReaddirOp, ResolveGlobOp, StatOp } from '../vfs/types.ts'
 
 export const GLOB_CHARS = ['*', '?', '[']
 
@@ -563,4 +565,15 @@ export async function expandPattern<A, I>(
         rawPath: spellMatch(raw, m.virtual, walked),
       }),
   )
+}
+
+export function makeResolveGlob<A extends Accessor = Accessor>(
+  readdir: ReaddirOp<A>,
+  maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
+  children?: ChildMounts,
+  stat?: StatOp<A>,
+  targetStat?: TargetStat,
+): ResolveGlobOp<A> {
+  return async (accessor, paths, index) =>
+    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches, children, stat, targetStat)
 }

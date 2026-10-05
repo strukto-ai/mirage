@@ -568,7 +568,8 @@ class EntryGate(Protocol):
 
     Args:
         scoped (bool): whether a path rule in force reads this command's
-            paths at all; a native walk (a backend's own find or du)
+            paths at all, or a coded or scripted pre_ops policy speaks
+            for its session; a native walk (a backend's own find or du)
             yields to the guarded readdir walk while it is set, so each
             entry passes the gate.
         granted (tuple[CommandRule, ...]): the ask rules this line runs

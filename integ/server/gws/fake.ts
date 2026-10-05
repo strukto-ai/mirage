@@ -132,6 +132,7 @@ function tokenRoutes(issued: Set<string>, runTokenPattern: string): KitRoute<C>[
 // responses:
 //   - ids and timestamps are counters over a fixed clock, not random
 //   - `fields` masks are ignored (full resources are returned), except on
+//     spreadsheets.get, whose response is trimmed to the mask, and on
 //     updateCells, where the mask decides whether values are touched at all
 //   - sheets formulas support literals, A1 cell/range references, + - * /,
 //     SUM/AVERAGE/MIN/MAX/COUNT; other syntax reports an explicit error.

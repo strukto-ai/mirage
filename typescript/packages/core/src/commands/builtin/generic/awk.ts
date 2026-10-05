@@ -28,7 +28,6 @@ import {
   ExitProgram,
   Interpreter,
   parse,
-  splitAssignment,
   text,
   unescape,
   type AwkHost,
@@ -314,15 +313,6 @@ export async function awkGeneric(
   )
   if (f.fieldSeparator !== null) interp.setVar('FS', text(unescape(byteView(f.fieldSeparator))))
 
-  const cache = paths
-    .filter(
-      (p) =>
-        p.rawPath !== '' &&
-        !isStdin(p) &&
-        splitAssignment(p.rawPath) === null &&
-        servedHere(opts, p),
-    )
-    .map((p) => p.mountPath)
-  const io = new IOResult({ cache })
+  const io = new IOResult()
   return [awkStream(interp, io), io]
 }

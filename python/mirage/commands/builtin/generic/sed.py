@@ -28,7 +28,6 @@ from mirage.commands.builtin.sed_script import (
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, typed_spec
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     read_stdin_async,
     stdin_bytes,
 )
@@ -36,7 +35,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import (
@@ -44,6 +43,7 @@ from mirage.shell.bytes import (
     decode_text,
     encode_text,
     from_byte_view,
+    utf8_locale,
 )
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line, fs_strerror
@@ -147,7 +147,7 @@ async def _open_write_files(names: Sequence[str], doors: _Doors) -> str | None:
 
 
 async def _read_script_files(
-    names: Sequence[str], doors: _Doors
+    names: Sequence[str], doors: _Doors, utf8: bool = False
 ) -> dict[str, SedFileContent]:
     """Read the files ``r`` or ``R`` names.
 
@@ -158,11 +158,12 @@ async def _read_script_files(
     Args:
         names (Sequence[str]): the file names.
         doors (_Doors): the file doors.
+        utf8 (bool): read them as text, under a UTF-8 locale.
     """
     files: dict[str, SedFileContent] = {}
     for name in names:
         try:
-            files[name] = SedFileText(byte_view(await doors.read(name)))
+            files[name] = SedFileText(byte_view(await doors.read(name), utf8))
         except IsADirectoryError:
             files[name] = SedFileError(
                 f"sed: read error on {name}: Is a directory\n"
@@ -190,7 +191,9 @@ async def _flush_write_files(
         if not out.chunks or doors.spec(name).virtual in edited:
             continue
         try:
-            await doors.write(name, from_byte_view("".join(out.chunks)))
+            await doors.write(
+                name, from_byte_view("".join(out.chunks), machine.opts.utf8)
+            )
         except FS_ERRORS as exc:
             err += _open_failure(name, exc)
     return err
@@ -215,6 +218,7 @@ async def sed(
     dispatch: DispatchFn | None = None,
     cwd: str = "/",
     prefix: str = "",
+    utf8: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     """Compile a script and run it over the operands, as GNU sed 4.9.
 
@@ -236,6 +240,8 @@ async def sed(
         cwd (str): the directory those names resolve against.
         prefix (str): this mount's prefix, for a name without a
             dispatcher.
+        utf8 (bool): a UTF-8 locale: the script and the input are
+            characters rather than bytes.
     """
     if not in_place:
         read_bytes = stdin_bytes(read_bytes, stdin)
@@ -244,7 +250,7 @@ async def sed(
     )
     doors = _Doors(read_bytes, write_bytes, dispatch, cwd, prefix)
     try:
-        program = compile_script(pieces, extended)
+        program = compile_script(pieces, extended, utf8)
     except SedError as exc:
         refused = await _open_write_files(exc.wfiles, doors)
         if refused is not None:
@@ -259,8 +265,11 @@ async def sed(
             suppress=suppress,
             separate=in_place or separate,
             line_length=line_length,
-            files=await _read_script_files(program.rfiles, doors),
-            reader_files=await _read_script_files(program.reader_files, doors),
+            files=await _read_script_files(program.rfiles, doors, utf8),
+            reader_files=await _read_script_files(
+                program.reader_files, doors, utf8
+            ),
+            utf8=utf8,
         ),
     )
     if in_place:
@@ -269,10 +278,9 @@ async def sed(
         )
 
     inputs: list[SedInput] = []
-    read_ok: list[PathSpec] = []
     if not paths:
         raw = await read_stdin_async(stdin) or b""
-        inputs.append(SedInput("-", byte_view(raw)))
+        inputs.append(SedInput("-", byte_view(raw, utf8)))
     # sed owns its exit code rather than letting the executor's
     # chokepoint pick it, because GNU sed splits a failed operand two
     # ways (GNU sed 4.9). An OPEN error (a missing file) is exit 2,
@@ -299,18 +307,16 @@ async def sed(
                 SedInput(
                     p.raw_path,
                     error=fs_error_line("sed", p, exc),
-                    code=read_fail_exit("sed", exc),
+                    code=read_fail_exit_code("sed", exc),
                     fatal=fatal,
                 )
             )
             continue
-        inputs.append(SedInput(p.raw_path, byte_view(data)))
-        read_ok.append(p)
+        inputs.append(SedInput(p.raw_path, byte_view(data, utf8)))
     machine.process(inputs, True)
     write_err = await _flush_write_files(machine, doors)
     stderr = machine.stderr() + write_err
-    return from_byte_view("".join(machine.stdout.chunks)), IOResult(
-        cache=[p.mount_path for p in read_ok if not is_stdin(p)],
+    return from_byte_view("".join(machine.stdout.chunks), utf8), IOResult(
         exit_code=machine.exit_code() if not write_err else 4,
         stderr=encode_text(stderr) if stderr else None,
     )
@@ -340,6 +346,7 @@ async def _run_in_place(
         read_bytes (ReadBytes): bound whole-file reader.
         write_bytes (WriteBytes | None): bound writer.
     """
+    utf8 = machine.opts.utf8
     if not paths:
         return _failed(f"{SED_NO_INPUT_FILES}\n", SED_NO_INPUT_EXIT)
     if write_bytes is None:
@@ -357,18 +364,22 @@ async def _run_in_place(
             data = await read_bytes(p)
         except FS_ERRORS as exc:
             err += fs_error_line("sed", p, exc)
-            code = max(code, read_fail_exit("sed", exc))
+            code = max(code, read_fail_exit_code("sed", exc))
             if isinstance(exc, IsADirectoryError):
                 break
             continue
         if edited:
             # An `r` file edited by an earlier file of this command reads
             # with its new content.
-            machine.set_files(await _read_script_files(program.rfiles, doors))
-        out = machine.process([SedInput(p.raw_path, byte_view(data))], False)
+            machine.set_files(
+                await _read_script_files(program.rfiles, doors, utf8)
+            )
+        out = machine.process(
+            [SedInput(p.raw_path, byte_view(data, utf8))], False
+        )
         if machine.panic_code is not None:
             break
-        new_data = from_byte_view(out)
+        new_data = from_byte_view(out, utf8)
         await write_bytes(p, new_data)
         writes[p.mount_path] = new_data
         edited.append(p)
@@ -383,7 +394,7 @@ async def _run_in_place(
     else:
         exit_code = code or machine.exit_code()
     stdout = "".join(machine.stdout.chunks)
-    return from_byte_view(stdout) if stdout else None, IOResult(
+    return from_byte_view(stdout, utf8) if stdout else None, IOResult(
         writes=writes,
         cache=[p.mount_path for p in edited],
         exit_code=exit_code,
@@ -586,4 +597,5 @@ async def sed_generic(
         dispatch=opts.dispatch,
         cwd=cwd,
         prefix=opts.mount_prefix.rstrip("/"),
+        utf8=utf8_locale(opts.env),
     )

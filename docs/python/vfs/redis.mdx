@@ -57,7 +57,9 @@ Example:
 
 ## Cache
 
-Index TTL is `0` - always reads fresh state from Redis.
+Index TTL is `0`, so listings are read from Redis every time. A
+workspace `index:` block still applies its `ttl` to this mount; see
+[index TTL](/home/cache#index-ttl).
 
 ## Example
 

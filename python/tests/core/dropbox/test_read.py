@@ -18,12 +18,14 @@ import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.dropbox.client import DropboxTokenManager
-from mirage.core.dropbox.read import read
+from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
+from mirage.core.dropbox.read import read, read_stream
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.dropbox.config import DropboxConfig
+from tests.fixtures.dropbox_api import FakeDropbox, content_hash, serve
 
 
 def make_accessor(root_path: str = "/") -> DropboxAccessor:
@@ -62,7 +64,7 @@ async def test_read_strips_mount_prefix(index):
         with patch(
             "mirage.core.dropbox.read.dropbox_download",
             new_callable=AsyncMock,
-            return_value=b"hi!",
+            return_value=(b"hi!", None),
         ) as download:
             data = await read(
                 make_accessor(),
@@ -87,7 +89,7 @@ async def test_a_ranged_read_asks_dropbox_for_the_range(index):
         with patch(
             "mirage.core.dropbox.read.dropbox_download",
             new_callable=AsyncMock,
-            return_value=b"i!",
+            return_value=(b"i!", None),
         ) as download:
             data = await read(
                 make_accessor(),
@@ -109,7 +111,7 @@ async def test_an_index_less_ranged_read_still_carries_the_range(index):
     with patch(
         "mirage.core.dropbox.read.dropbox_download",
         new_callable=AsyncMock,
-        return_value=b"i!",
+        return_value=(b"i!", None),
     ) as download:
         await read(
             make_accessor(),
@@ -130,7 +132,7 @@ async def test_read_downloads_through_subfolder_root(index):
         with patch(
             "mirage.core.dropbox.read.dropbox_download",
             new_callable=AsyncMock,
-            return_value=b"hi",
+            return_value=(b"hi", None),
         ) as download:
             data = await read(
                 make_accessor("Team/data"),
@@ -185,3 +187,83 @@ async def test_read_missing_raises_enoent(index):
                 ),
                 index,
             )
+
+
+DATA = b"0123456789"
+# A listing that lags the bytes: a read's token must come from its own
+# download, never from the row that resolved the entry.
+LAGGING = {"/a.txt": "stale"}
+A = PathSpec(virtual="/a.txt", directory="/", vfs_path="a.txt")
+
+
+def served_accessor(url: str) -> DropboxAccessor:
+    config = DropboxConfig(
+        client_id="c", client_secret="s", refresh_token="r", endpoint=url
+    )
+    return DropboxAccessor(config, DropboxTokenManager(config))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("indexed", [True, False], ids=["indexed", "bare"])
+@pytest.mark.parametrize(
+    "offset, size, expected",
+    [(0, None, DATA), (2, 3, b"234")],
+    ids=["full", "ranged"],
+)
+async def test_every_byte_read_records_the_content_hash(
+    indexed, offset, size, expected
+):
+    # A ranged read is answered 206 and still carries Dropbox-API-Result.
+    with serve(FakeDropbox(files={"/a.txt": DATA}, listed=LAGGING)) as fake:
+        accessor = served_accessor(fake.url)
+        args = (RAMIndexCacheStore(),) if indexed else ()
+        scope = RecordingScope()
+        try:
+            data = await read(accessor, A, *args, offset=offset, size=size)
+        finally:
+            scope.close()
+            await accessor.close()
+    assert data == expected
+    assert [(r.op, r.bytes, r.fingerprint) for r in scope.records] == [
+        ("read", len(expected), content_hash(DATA))
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recorded", [True, False], ids=["line", "bare"])
+async def test_a_stream_records_the_content_hash(recorded):
+    # Outside a shell line (FUSE, a programmatic read) there is no
+    # recorder, and the stream must still stream.
+    with serve(FakeDropbox(files={"/a.txt": DATA}, listed=LAGGING)) as fake:
+        accessor = served_accessor(fake.url)
+        scope = RecordingScope() if recorded else None
+        try:
+            chunks = [
+                c async for c in read_stream(accessor, A, RAMIndexCacheStore())
+            ]
+        finally:
+            if scope is not None:
+                scope.close()
+            await accessor.close()
+    assert b"".join(chunks) == DATA
+    if scope is not None:
+        assert [(r.op, r.bytes, r.fingerprint) for r in scope.records] == [
+            ("read", len(DATA), content_hash(DATA))
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status, raised",
+    [(409, FileNotFoundError), (500, DropboxApiError)],
+    ids=["missing", "server-error"],
+)
+async def test_an_index_less_read_maps_only_a_409_to_enoent(status, raised):
+    # The ops factory's emulated truncate reads with no index.
+    with patch(
+        "mirage.core.dropbox.read.dropbox_download",
+        new_callable=AsyncMock,
+        side_effect=DropboxApiError("refused", status),
+    ):
+        with pytest.raises(raised):
+            await read(make_accessor(), A)

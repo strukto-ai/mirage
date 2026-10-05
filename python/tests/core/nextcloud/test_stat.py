@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.nextcloud.read import read_bytes
+from mirage.core.nextcloud.read import read
 from mirage.core.nextcloud.readdir import readdir
 from mirage.core.nextcloud.stat import stat
 from mirage.types import FileType, PathSpec
@@ -103,9 +103,7 @@ async def test_stat_size_matches_read_for_every_file(make_acc):
                 stack.append(trimmed)
                 continue
             assert info.size is not None, trimmed
-            body = await read_bytes(
-                acc, PathSpec.from_str_path(trimmed), index
-            )
+            body = await read(acc, PathSpec.from_str_path(trimmed), index)
             assert info.size == len(body), trimmed
             files.append(trimmed)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]

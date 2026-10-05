@@ -13,14 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from pydantic_ai import Agent
-from pydantic_ai_backends import create_console_toolset
+from pydantic_ai_backends import PERMISSIVE_RULESET, ConsoleCapability
 
 from mirage import MountMode, Workspace
-from mirage.agents.pydantic_ai import PydanticAIWorkspace, build_system_prompt
+from mirage.agents.pydantic_ai import MirageWorkspace, build_system_prompt
 from mirage.vfs.s3 import S3VFS, S3Config
 
 load_dotenv(".env.development")
@@ -36,27 +35,24 @@ s3 = S3VFS(config)
 ws = Workspace({"/s3/": s3}, mode=MountMode.READ)
 
 
-@dataclass
-class Deps:
-    backend: PydanticAIWorkspace
-
-
-backend = PydanticAIWorkspace(ws)
-
 agent = Agent(
     "anthropic:claude-sonnet-4-6",
     system_prompt=build_system_prompt(
         mount_info={"/s3/": "S3 bucket with PDF documents"}
     ),
-    deps_type=Deps,
-    toolsets=[create_console_toolset(document_support=True)],
+    capabilities=[
+        MirageWorkspace(ws),
+        ConsoleCapability(
+            document_support=True, permissions=PERMISSIVE_RULESET
+        ),
+    ],
 )
 
 task = (
     "Read the PDF at /s3/data/example.pdf."
     " Summarize the first 5 pages of the paper."
 )
-result = agent.run_sync(task, deps=Deps(backend=backend))
+result = agent.run_sync(task)
 print(result.output)
 
 records = ws.vfs.records

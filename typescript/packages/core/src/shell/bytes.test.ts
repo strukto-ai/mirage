@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { byteChar, byteView, decodeText, encodeText, fromByteView, textView } from './bytes.ts'
+import {
+  byteChar,
+  byteView,
+  decodeText,
+  encodeText,
+  fromByteView,
+  textView,
+  utf8Locale,
+} from './bytes.ts'
 
 describe('byteChar / encodeText', () => {
   it('stands for an ASCII byte as itself', () => {
@@ -131,4 +139,34 @@ it('decodes a large malformed line with bounded native decoder calls', () => {
   } finally {
     decode.mockRestore()
   }
+})
+
+describe('utf8Locale', () => {
+  it.each([
+    [undefined, false],
+    [{}, false],
+    [{ LANG: 'C.UTF-8' }, true],
+    [{ LANG: 'C.UTF-8', LC_ALL: 'C' }, false],
+    [{ LANG: 'C.UTF-8', LC_ALL: '' }, true],
+    [{ LANG: 'C', LC_CTYPE: 'en_US.utf8' }, true],
+    [{ LC_CTYPE: 'C.UTF-8', LC_ALL: 'POSIX' }, false],
+    [{ LC_ALL: 'de_DE.UTF-8@euro' }, true],
+    [{ LC_ALL: 'en_US.ISO-8859-1' }, false],
+    [{ LC_ALL: 'UTF-8' }, false],
+  ])('follows setlocale precedence for %j', (env, expected) => {
+    expect(utf8Locale(env)).toBe(expected)
+  })
+})
+
+describe('a UTF-8 view', () => {
+  it('is the text itself', () => {
+    const raw = new Uint8Array([...encodeText('规定é'), 0xff])
+    const view = byteView(raw, true)
+    expect(view).toBe('规定é\udcff')
+    expect(view.length).toBe(4)
+    expect(byteView('规定', true)).toBe('规定')
+    expect([...fromByteView(view, true)]).toEqual([...raw])
+    expect(textView(view, true)).toBe(view)
+    expect(byteView(raw).length).toBe(raw.length)
+  })
 })

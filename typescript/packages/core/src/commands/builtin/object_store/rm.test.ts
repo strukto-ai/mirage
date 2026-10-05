@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { withPathGuards, type CommandIO } from '../generic_bind/adapter.ts'
+import { withCommandGuards, type CommandIO } from '../generic_bind/adapter.ts'
 import { makeRm } from './rm.ts'
 
 it.each([
@@ -31,7 +31,7 @@ it.each([
       rmR: unlink,
       isMounted: () => true,
     }
-    const command = makeRm('s3', withPathGuards(io))[0]
+    const command = makeRm('s3', withCommandGuards(io))[0]
     if (command === undefined) throw new Error('rm was not registered')
     const refused = new PathSpec({
       virtual: '/data',

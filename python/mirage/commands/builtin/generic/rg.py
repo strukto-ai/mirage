@@ -915,7 +915,7 @@ async def rg_generic(
     # A mount below the operand shadows whatever the backend holds there;
     # the fan-out that would search the mount itself is off too.
     boundary = mounts if f.one_file_system else None
-    found = _haystacks(
+    found = haystacks(
         paths, rd, st, cwd, walk, f, warnings, boundary, link_door(opts)
     )
     if f.sort not in (None, "none") and not (
@@ -1131,7 +1131,7 @@ def between_files(f: RgFlags) -> bytes:
     return b""
 
 
-async def _haystacks(
+async def haystacks(
     paths: list[PathSpec],
     rd: Callable[[str], Awaitable[list[str]]],
     st: Callable[[str], Awaitable[FileStat]],

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { readBytes } from './read.ts'
+import { read } from './read.ts'
 import { makeAccessor, notFoundResponse, routedFetch, spec } from './_test_util.ts'
 
 afterEach(() => {
@@ -24,7 +24,7 @@ describe('readBytes', () => {
   it('downloads whole files without a Range header', async () => {
     const { fetch, calls } = routedFetch(() => new Response('hello', { status: 200 }))
     vi.stubGlobal('fetch', fetch)
-    const data = await readBytes(makeAccessor(), spec('/volume/a.txt'))
+    const data = await read(makeAccessor(), spec('/volume/a.txt'))
     expect(new TextDecoder().decode(data)).toBe('hello')
     expect(calls[0]?.headers.Range).toBeUndefined()
   })
@@ -32,7 +32,7 @@ describe('readBytes', () => {
   it('sends Range for offset/size reads', async () => {
     const { fetch, calls } = routedFetch(() => new Response('ell', { status: 206 }))
     vi.stubGlobal('fetch', fetch)
-    const data = await readBytes(makeAccessor(), spec('/volume/a.txt'), undefined, {
+    const data = await read(makeAccessor(), spec('/volume/a.txt'), undefined, {
       offset: 1,
       size: 3,
     })
@@ -46,7 +46,7 @@ describe('readBytes', () => {
   it('slices locally when the server ignores the range', async () => {
     const { fetch } = routedFetch(() => new Response('hello', { status: 200 }))
     vi.stubGlobal('fetch', fetch)
-    const data = await readBytes(makeAccessor(), spec('/volume/a.txt'), undefined, {
+    const data = await read(makeAccessor(), spec('/volume/a.txt'), undefined, {
       offset: 1,
       size: 3,
     })
@@ -56,7 +56,7 @@ describe('readBytes', () => {
   it('short-circuits size=0 reads without a request', async () => {
     const { fetch, calls } = routedFetch(() => new Response('x', { status: 200 }))
     vi.stubGlobal('fetch', fetch)
-    const data = await readBytes(makeAccessor(), spec('/volume/a.txt'), undefined, { size: 0 })
+    const data = await read(makeAccessor(), spec('/volume/a.txt'), undefined, { size: 0 })
     expect(data.byteLength).toBe(0)
     expect(calls).toHaveLength(0)
   })
@@ -64,7 +64,7 @@ describe('readBytes', () => {
   it('raises ENOENT for missing files', async () => {
     const { fetch } = routedFetch(() => notFoundResponse())
     vi.stubGlobal('fetch', fetch)
-    const err = (await readBytes(makeAccessor(), spec('/volume/gone.txt')).catch(
+    const err = (await read(makeAccessor(), spec('/volume/gone.txt')).catch(
       (e: unknown) => e,
     )) as Error & { code?: string }
     expect(err.code).toBe('ENOENT')

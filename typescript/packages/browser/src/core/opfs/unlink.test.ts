@@ -16,12 +16,12 @@ import { describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { exists } from './exists.ts'
 import { unlink } from './unlink.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/unlink', () => {
   it('removes an existing file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/x'), new Uint8Array([1]))
+    await write(accessor, spec('/x'), new Uint8Array([1]))
     await unlink(accessor, spec('/x'))
     expect(await exists(accessor, spec('/x'))).toBe(false)
   })
@@ -31,7 +31,7 @@ describe('opfs/unlink', () => {
   })
   it('answers ENOTDIR for a name under a plain file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/f'), new Uint8Array([1]))
+    await write(accessor, spec('/f'), new Uint8Array([1]))
     await expect(unlink(accessor, spec('/f/x'))).rejects.toMatchObject({ code: 'ENOTDIR' })
     expect(await exists(accessor, spec('/f'))).toBe(true)
   })

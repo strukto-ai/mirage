@@ -20,6 +20,8 @@ from typing import Any
 
 from mirage.commands.spec.usage import operand_exit_code
 from mirage.policy.base import Policy
+from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
+from mirage.policy.builtin.mount_mode import MountModePolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.mixin import SessionScopedMixin
@@ -35,7 +37,7 @@ from mirage.policy.types import (
     Pending,
     SessionContext,
 )
-from mirage.types import Limit, PathSpec, Refusal
+from mirage.types import Limit, MountMode, PathSpec, Refusal
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +148,11 @@ async def pre_ops_gate(
     write: bool,
     prefix: str,
     session_id: str = "",
+    *,
+    mode: MountMode | None = None,
+    create: bool = False,
+    subtree: bool = False,
+    check_hidden: bool = True,
 ) -> None:
     """Fire pre_ops at an op door; a Deny becomes EACCES.
 
@@ -163,15 +170,35 @@ async def pre_ops_gate(
         prefix (str): the owning mount's prefix.
         session_id (str): the session the door serves, empty for the
             unbound host view.
+        mode (MountMode | None): the owning mount's mode, judged by the
+            mount-mode built-in; None at a door that judges it itself.
+        create (bool): the op creates the path.
+        subtree (bool): the op mutates the path's descendants too.
+        check_hidden (bool): False only for a door that has already
+            answered the hides itself.
     """
-    if not policies.wants("pre_ops"):
+    if not (
+        policies.wants("pre_ops")
+        or check_hidden
+        or (write and mode is not None)
+    ):
         return
     deny = await policies.pre_ops(
         OpsContext(
-            op=op, path=path, write=write, prefix=prefix, session_id=session_id
-        )
+            op=op,
+            path=path,
+            write=write,
+            prefix=prefix,
+            session_id=session_id,
+            mode=mode,
+            create=create,
+            subtree=subtree,
+        ),
+        check_hidden=check_hidden,
     )
     if deny is not None:
+        if deny.error is not None:
+            raise deny.error
         raise PolicyDenied(errno.EACCES, deny.reason, path.virtual)
 
 
@@ -205,6 +232,8 @@ async def post_ops_gate(
         )
     )
     if deny is not None:
+        if deny.error is not None:
+            raise deny.error
         raise PolicyDenied(errno.EACCES, deny.reason, path.virtual)
     return bound
 
@@ -296,6 +325,8 @@ class Policies:
         self._policies: list[Policy] = list(policies or [])
         self._wanted: frozenset[str] = frozenset()
         self._rescan()
+        self._hidden = HiddenPathsPolicy()
+        self._mode = MountModePolicy()
 
     def add(self, policy: Policy) -> None:
         """Register a policy after the existing ones.
@@ -371,7 +402,7 @@ class Policies:
         self._wanted = frozenset(wanted)
 
     async def _fire(
-        self, hook: str, ctx: HookContext
+        self, hook: str, ctx: HookContext, *, check_hidden: bool = True
     ) -> tuple[Deny | Ask | None, Limit | None]:
         """One loop for every hook: first Deny wins, Limits merge.
 
@@ -387,7 +418,17 @@ class Policies:
         asked: Ask | None = None
         # Keep this gate's order stable if the host edits registrations
         # while a hook awaits. Changes take effect at the next gate.
-        for policy in tuple(self._policies):
+        chain: tuple[Policy, ...] = tuple(self._policies)
+        if hook == "pre_ops":
+            # Hides answer first, so a refusal never tells a session a
+            # hidden name exists; the mode answers last, after every
+            # policy that could explain the refusal in its own words.
+            chain = (
+                *((self._hidden,) if check_hidden else ()),
+                *chain,
+                self._mode,
+            )
+        for policy in chain:
             if getattr(type(policy), hook) is base:
                 continue
             name = type(policy).__name__
@@ -431,13 +472,21 @@ class Policies:
         action, _ = await self._fire("pre_command", ctx)
         return action
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_ops(
+        self, ctx: OpsContext, *, check_hidden: bool = True
+    ) -> Deny | None:
         """Fire pre_ops across the policies; first Deny wins.
+
+        The built-in hides answer before every policy and the built-in
+        mount mode after them, whether or not any policy overrides the
+        hook.
 
         Args:
             ctx (OpsContext): the op about to run.
+            check_hidden (bool): False only for a door that has already
+                answered the hides itself.
         """
-        action, _ = await self._fire("pre_ops", ctx)
+        action, _ = await self._fire("pre_ops", ctx, check_hidden=check_hidden)
         return _deny_only("pre_ops", action)
 
     async def pre_session(self, ctx: SessionContext) -> Deny | None:

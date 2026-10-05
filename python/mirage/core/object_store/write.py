@@ -73,16 +73,14 @@ async def _put(
         raise
 
 
-def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
+def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
     """Build the whole-object write over one driver.
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def write_bytes(
-        accessor: A, path_spec: PathSpec, data: bytes
-    ) -> None:
+    async def write(accessor: A, path_spec: PathSpec, data: bytes) -> None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
         timer = start_op()
@@ -101,7 +99,7 @@ def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
         # the listings above the immediate parent gained entries too.
         await invalidate_ancestors(path_spec)
 
-    return write_bytes
+    return write
 
 
 def make_create(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
@@ -257,6 +255,15 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
         pfx = kp.apply_dir(driver.key_prefix_of(accessor), path)
         if pfx:
             async with driver.connect(accessor) as conn:
+                if (
+                    row is not None
+                    and await driver.head(conn, pfx) is not None
+                ):
+                    # `-p` on a directory that holds its marker leaves the
+                    # marker as it is: a rewrite replaces its metadata and,
+                    # in a versioned bucket, adds a version. A directory
+                    # only a key below implies still gets one.
+                    return
                 await driver.put(conn, pfx, b"")
             await invalidate_after_write(path_spec)
             if parents:

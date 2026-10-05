@@ -16,7 +16,7 @@ from mirage.core.databricks_volume.copy import copy as _copy
 from mirage.core.databricks_volume.create import create as _create
 from mirage.core.databricks_volume.exists import exists as _exists
 from mirage.core.databricks_volume.mkdir import mkdir as _mkdir
-from mirage.core.databricks_volume.read import read_bytes as _read
+from mirage.core.databricks_volume.read import read as _read
 from mirage.core.databricks_volume.readdir import readdir as _readdir
 from mirage.core.databricks_volume.rename import rename as _rename
 from mirage.core.databricks_volume.rm import rm_recursive as _rm_r
@@ -24,7 +24,7 @@ from mirage.core.databricks_volume.rmdir import rmdir as _rmdir
 from mirage.core.databricks_volume.stat import stat as _stat
 from mirage.core.databricks_volume.stream import read_stream as _read_stream
 from mirage.core.databricks_volume.unlink import unlink as _unlink
-from mirage.core.databricks_volume.write import write_bytes as _write
+from mirage.core.databricks_volume.write import write as _write
 from mirage.vfs.adapter import VFSAdapter, append_from_read
 from mirage.vfs.types import NativeReadOps, ReadOps, WriteOps
 

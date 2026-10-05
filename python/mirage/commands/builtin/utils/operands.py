@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.ops.types import LinkView, MountView, StatPath
@@ -190,7 +190,7 @@ async def split_readable_coded(
         # backend raises EISDIR from the stat where an explicit directory
         # returns a row.
         if code == 0 or not isinstance(failure, IsADirectoryError):
-            code = read_fail_exit(cmd_name, failure)
+            code = read_fail_exit_code(cmd_name, failure)
     return readable, err, code
 
 
@@ -321,9 +321,7 @@ async def read_operands(
     return ok, err
 
 
-def operands_io(
-    err: bytes, cache: list[str] | None = None, exit_code: int = 1
-) -> IOResult:
+def operands_io(err: bytes, exit_code: int = 1) -> IOResult:
     """IOResult carrying operand-split stderr lines.
 
     Exit ``exit_code`` when any operand failed, exit 0 otherwise; mirrors
@@ -333,13 +331,11 @@ def operands_io(
 
     Args:
         err (bytes): Concatenated stderr lines, ``b""`` for none.
-        cache (list[str] | None): Paths worth caching, if any.
         exit_code (int): The code to report when ``err`` is non-empty.
     """
     return IOResult(
         exit_code=0 if not err else exit_code,
         stderr=err or None,
-        cache=cache if cache is not None else [],
     )
 
 

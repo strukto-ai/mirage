@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.core.redis.read import read_bytes
+from mirage.core.redis.read import read
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
 
@@ -42,7 +42,7 @@ async def accessor(redis_prefix):
 
 @pytest.mark.asyncio
 async def test_read_bytes(accessor):
-    result = await read_bytes(
+    result = await read(
         accessor,
         PathSpec(
             vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"
@@ -53,7 +53,7 @@ async def test_read_bytes(accessor):
 
 @pytest.mark.asyncio
 async def test_read_bytes_nested(accessor):
-    result = await read_bytes(
+    result = await read(
         accessor,
         PathSpec(
             vfs_path="sub/nested.txt",
@@ -67,7 +67,7 @@ async def test_read_bytes_nested(accessor):
 @pytest.mark.asyncio
 async def test_read_bytes_not_found(accessor):
     with pytest.raises(FileNotFoundError):
-        await read_bytes(
+        await read(
             accessor,
             PathSpec(
                 vfs_path="nope.txt", virtual="/nope.txt", directory="/nope.txt"
@@ -81,7 +81,7 @@ async def test_read_bytes_empty_file(redis_prefix):
     await s.clear()
     await s.set_file("/empty", b"")
     a = RedisAccessor(s)
-    result = await read_bytes(
+    result = await read(
         a, PathSpec(vfs_path="empty", virtual="/empty", directory="/empty")
     )
     assert result == b""
@@ -96,7 +96,7 @@ async def test_read_bytes_binary_data(redis_prefix):
     data = bytes(range(256))
     await s.set_file("/bin", data)
     a = RedisAccessor(s)
-    result = await read_bytes(
+    result = await read(
         a, PathSpec(vfs_path="bin", virtual="/bin", directory="/bin")
     )
     assert result == data
@@ -110,7 +110,7 @@ async def test_read_bytes_normalizes_path(redis_prefix):
     await s.clear()
     await s.set_file("/file.txt", b"data")
     a = RedisAccessor(s)
-    result = await read_bytes(
+    result = await read(
         a,
         PathSpec(
             vfs_path="file.txt", virtual="file.txt", directory="file.txt"
@@ -127,18 +127,11 @@ async def test_read_bytes_window_uses_getrange(accessor):
     spec = PathSpec(
         vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"
     )
+    assert await read(accessor, offset=6, size=5, path_spec=spec) == b"world"
     assert (
-        await read_bytes(accessor, offset=6, size=5, path_spec=spec)
-        == b"world"
+        await read(accessor, offset=6, size=None, path_spec=spec) == b"world"
     )
-    assert (
-        await read_bytes(accessor, offset=6, size=None, path_spec=spec)
-        == b"world"
-    )
-    assert (
-        await read_bytes(accessor, offset=0, size=5, path_spec=spec)
-        == b"hello"
-    )
+    assert await read(accessor, offset=0, size=5, path_spec=spec) == b"hello"
 
 
 @pytest.mark.asyncio
@@ -146,7 +139,7 @@ async def test_read_bytes_window_past_eof_is_empty(accessor):
     spec = PathSpec(
         vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"
     )
-    assert await read_bytes(accessor, offset=99, size=5, path_spec=spec) == b""
+    assert await read(accessor, offset=99, size=5, path_spec=spec) == b""
 
 
 @pytest.mark.asyncio
@@ -165,14 +158,14 @@ async def test_read_bytes_zero_length_is_empty_and_preserves_missing(
         missing = PathSpec(
             vfs_path="missing", virtual="/missing", directory="/missing"
         )
-        assert await read_bytes(accessor, data, offset=0, size=0) == b""
-        assert await read_bytes(accessor, data, offset=4, size=0) == b""
-        assert await read_bytes(accessor, empty, offset=0, size=0) == b""
-        assert await read_bytes(accessor, empty, offset=4, size=0) == b""
+        assert await read(accessor, data, offset=0, size=0) == b""
+        assert await read(accessor, data, offset=4, size=0) == b""
+        assert await read(accessor, empty, offset=0, size=0) == b""
+        assert await read(accessor, empty, offset=4, size=0) == b""
         with pytest.raises(FileNotFoundError):
-            await read_bytes(accessor, missing, offset=0, size=0)
+            await read(accessor, missing, offset=0, size=0)
         with pytest.raises(FileNotFoundError):
-            await read_bytes(accessor, missing, offset=4, size=0)
+            await read(accessor, missing, offset=4, size=0)
     finally:
         await store.clear()
         await store.close()
@@ -182,7 +175,7 @@ async def test_read_bytes_zero_length_is_empty_and_preserves_missing(
 async def test_read_bytes_window_on_a_missing_key_still_raises(accessor):
     """GETRANGE answers "" for a missing key, so EXISTS decides absence."""
     with pytest.raises(FileNotFoundError):
-        await read_bytes(
+        await read(
             accessor,
             PathSpec(
                 vfs_path="nope.txt", virtual="/nope.txt", directory="/nope.txt"
@@ -190,3 +183,9 @@ async def test_read_bytes_window_on_a_missing_key_still_raises(accessor):
             offset=1,
             size=2,
         )
+
+
+@pytest.mark.asyncio
+async def test_read_bytes_directory_is_eisdir(accessor):
+    with pytest.raises(IsADirectoryError):
+        await read(accessor, PathSpec.from_str_path("/sub"))

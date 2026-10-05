@@ -405,7 +405,7 @@ def _to_base(value: int, alphabet: str, width: int) -> str:
     return "".join(reversed(chars))
 
 
-def _suffix_name(
+def _suffix_namer(
     index: int, alphabet: str, auto: bool, width: int, start: int
 ) -> str:
     """One output-file suffix, GNU next_file_name style.
@@ -443,7 +443,7 @@ def _suffix_name(
     return _to_base(value, alphabet, width)
 
 
-def _prefix_virtual(prefix: PathSpec) -> str:
+def _prefix_virtual_of(prefix: PathSpec) -> str:
     """Where a PREFIX operand's pieces go, as the string they extend.
 
     The prefix is glued to each suffix, not walked: an empty one, or one
@@ -461,7 +461,7 @@ def _prefix_virtual(prefix: PathSpec) -> str:
     return prefix.virtual
 
 
-async def split(
+async def split_generic(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
@@ -490,7 +490,7 @@ async def split(
     # cwd, names it as it formed it (`split: xaa`, `split: /ro/preaa`),
     # and stops at the first one it cannot create.
     prefix_virtual = (
-        _prefix_virtual(paths[1])
+        _prefix_virtual_of(paths[1])
         if len(paths) >= 2
         else resolve_path("x", cwd)
     )
@@ -498,7 +498,7 @@ async def split(
     if lines_per_file == 0 and byte_limit == 0 and chunks is None:
         lines_per_file = 1000
     suffix_fn = partial(
-        _suffix_name,
+        _suffix_namer,
         alphabet=(
             _HEX_SUFFIXES
             if hex_suffix
@@ -607,4 +607,4 @@ async def _record_iterator(
         yield record
 
 
-__all__ = ["ChunkKind", "ChunkSpec", "chunk_parts", "split"]
+__all__ = ["ChunkKind", "ChunkSpec", "chunk_parts", "split_generic"]

@@ -72,11 +72,10 @@ describe('awkGeneric', () => {
     expect(out).toBe('b\n')
   })
 
-  it('processes all files with continuous NR and caches each', async () => {
+  it('processes all files with continuous NR', async () => {
     const files = { '/a.txt': 'one\ntwo\n', '/b.txt': 'three\n' }
-    const [out, io] = await run([spec('/a.txt'), spec('/b.txt')], ['{print NR, $1}'], opts(), files)
+    const [out] = await run([spec('/a.txt'), spec('/b.txt')], ['{print NR, $1}'], opts(), files)
     expect(out).toBe('1 one\n2 two\n3 three\n')
-    expect(io.cache).toEqual(['/a.txt', '/b.txt'])
   })
 
   it.each<[string | string[], Record<string, string>, string[], string]>([
@@ -99,9 +98,8 @@ describe('awkGeneric', () => {
       '6\n',
     ],
   ])('runs the -f program %j over the data paths', async (f, files, data, expected) => {
-    const [out, io] = await run(data.map(spec), [], opts({ f }), files)
+    const [out] = await run(data.map(spec), [], opts({ f }), files)
     expect(out).toBe(expected)
-    expect(io.cache).toEqual(data)
   })
 
   it('returns exit 2 when the -f program file is unreadable', async () => {

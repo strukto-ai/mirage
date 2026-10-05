@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { pathRulesActive } from '../../../../context/session_context.ts'
 import { isEacces, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
 import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
@@ -25,7 +24,8 @@ import {
   duGeneric,
 } from '../../generic/du.ts'
 import { type DuEntries } from '../../../../vfs/types.ts'
-import { type Builder, type CommandIO, resolveGlobOf } from '../adapter.ts'
+import type { MountView } from '../../../../ops/types.ts'
+import { type Builder, type CommandIO, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /**
@@ -39,6 +39,13 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
  */
 export class WalkBudget {
   private remaining: number | null
+  // A walk with no cap of its own (the dispatcher's, which spans mounts)
+  // defers to the mounts it crosses: each entry is charged to the mount
+  // serving it, at that mount's own cap, so a disk tree below a capped root
+  // is not cut short and a service below an uncapped one is not walked
+  // without its bound.
+  private readonly mounts: MountView | undefined
+  private readonly spent = new Map<string, number>()
   hit = false
   // Paths the walk was refused (a rule denied them below the operand), in
   // the order it met them; the generic reports them after the walks the
@@ -49,18 +56,32 @@ export class WalkBudget {
   // GNU's row.
   readonly directories: string[] = []
 
-  constructor(remaining: number | null) {
+  constructor(remaining: number | null, mounts?: MountView) {
     this.remaining = remaining
+    this.mounts = mounts
   }
 
-  /** Charge one entry; false once the cap is exhausted. */
-  spend(): boolean {
-    if (this.remaining === null) return true
-    if (this.remaining <= 0) {
+  /** Charge one entry named by the listing of directory `path` (so a mount
+   * root is charged to its parent, as the parent's own walk would count it);
+   * false once the cap is exhausted. */
+  spend(path: string): boolean {
+    if (this.remaining !== null) {
+      if (this.remaining <= 0) {
+        this.hit = true
+        return false
+      }
+      this.remaining -= 1
+      return true
+    }
+    const cap = this.mounts?.maxDuEntries?.(path) ?? null
+    if (this.mounts === undefined || cap === null) return true
+    const owner = this.mounts.rootOf(path)
+    const used = this.spent.get(owner) ?? 0
+    if (used >= cap) {
       this.hit = true
       return false
     }
-    this.remaining -= 1
+    this.spent.set(owner, used + 1)
     return true
   }
 }
@@ -130,7 +151,7 @@ async function duWalk<A extends Accessor>(
   }
   let total = 0
   for (const child of children) {
-    if (!budget.spend()) break
+    if (!budget.spend(path.virtual)) break
     total += await duWalk(
       ops,
       accessor,
@@ -166,35 +187,38 @@ export async function walkEntries<A extends Accessor>(
   return [entries, total]
 }
 
+const du: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  // Hides and path rules turn the native du off upstream (scopedIo),
+  // so the walk is what reports a directory a rule refuses to open.
+  const native = ops.du
+  const budget = new WalkBudget(
+    ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
+    opts.ns?.mounts,
+  )
+  const computeSize: ComputeSize =
+    native === undefined
+      ? (p) => walkSize(ops, accessor, idx, budget, p)
+      : (p) => native.size(accessor, p, idx)
+  const computeEntries: ComputeEntries =
+    native === undefined
+      ? (p) => walkEntries(ops, accessor, idx, budget, p)
+      : (p) => native.entries(accessor, p, idx)
+
+  return duGeneric(
+    paths,
+    opts,
+    (targets) => resolveGlobOf(ops)(accessor, targets, idx),
+    (p) => ops.stat(accessor, p, idx),
+    computeSize,
+    computeEntries,
+    () => budget.hit,
+    () => budget.unreadable,
+    () => budget.directories,
+  )
+}
+
 export const BUILDER: Builder = {
   name: 'du',
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    // A native du sums the raw tree; under a path rule the walk is what
-    // reports a directory the rule refuses to open, where GNU does.
-    const native = pathRulesActive() ? undefined : ops.du
-    const budget = new WalkBudget(
-      ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
-    )
-    const computeSize: ComputeSize =
-      native === undefined
-        ? (p) => walkSize(ops, accessor, idx, budget, p)
-        : (p) => native.size(accessor, p, idx)
-    const computeEntries: ComputeEntries =
-      native === undefined
-        ? (p) => walkEntries(ops, accessor, idx, budget, p)
-        : (p) => native.entries(accessor, p, idx)
-
-    return duGeneric(
-      paths,
-      opts,
-      (targets) => resolveGlobOf(ops)(accessor, targets, idx),
-      (p) => ops.stat(accessor, p, idx),
-      computeSize,
-      computeEntries,
-      () => budget.hit,
-      () => budget.unreadable,
-      () => budget.directories,
-    )
-  },
+  fn: du,
 }

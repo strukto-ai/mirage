@@ -17,11 +17,11 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
+from mirage.utils.errors import eisdir
 from mirage.utils.path import norm
 
 
-async def read_bytes(
+async def read(
     accessor: RedisAccessor,
     path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
@@ -47,19 +47,8 @@ async def read_bytes(
     else:
         data = await store.get_file(key)
     if data is None:
+        if await store.has_dir(key):
+            raise eisdir(path_spec)
         raise await lookup_error(store, path_spec, key)
     record("read", virtual, "redis", len(data), timer)
     return data
-
-
-async def read(
-    accessor: RedisAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-    offset: int = 0,
-    size: int | None = None,
-) -> bytes:
-    try:
-        return await read_bytes(accessor, path, index, offset, size)
-    except FileNotFoundError as exc:
-        raise enoent(path.virtual) from exc

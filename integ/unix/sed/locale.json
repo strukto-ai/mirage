@@ -1,0 +1,68 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "sed_locale_utf8_bracket_replaces_whole_characters",
+      "seq": 14480200,
+      "command": "( export LC_ALL=C.UTF-8; printf '%s\\n' '依据《合同法》：“无效”；其后。' | sed 's/[；。]/|/g' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "依据《合同法》：“无效”|其后|\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_locale_utf8_dot_and_y",
+      "seq": 14480201,
+      "command": "( printf 'é\\n' | sed 's/./X/' | od -An -tx1; export LC_ALL=C.UTF-8; printf 'é\\n' | sed 's/./X/'; printf 'é\\n' | sed 'y/é/e/'; printf 'éa\\n' | sed 's/\\(.\\)\\(.\\)/\\2\\1/' )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 58 a9 0a\nX\ne\naé\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_locale_utf8_invalid_byte",
+      "seq": 14480202,
+      "command": "( export LC_ALL=C.UTF-8; printf 'a\\377b\\n' | sed 's/a.b/X/' | od -An -tx1; printf 'a\\377b\\n' | sed 's/a[^x]b/X/' | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 ff 62 0a\n 61 ff 62 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_locale_utf8_escapes_spell_one_character",
+      "seq": 14480203,
+      "command": "( export LC_ALL=C.UTF-8; printf 'é\\n' | sed 's/\\xc3\\xa9/e/'; printf 'x\\n' | sed 's/x/\\xc3\\xa9/'; printf 'é\\n' | sed -n l )",
+      "expect": {
+        "exit": 0,
+        "stdout": "e\né\n\\303\\251$\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

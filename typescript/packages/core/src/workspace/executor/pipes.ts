@@ -18,7 +18,7 @@ import { PathSpec } from '../../types.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { IOResult, materialize } from '../../io/types.ts'
+import { IOResult, materialize, settled } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { divertStatement } from './builtins/exec/index.ts'
 import {
@@ -40,7 +40,8 @@ import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import type { SessionState } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
-import { type ExecuteNodeFn, handleBackground, pump } from './jobs.ts'
+import { handleBackground, pump } from './jobs.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
 import { endShell, inheritExitTrap, runExitTrap } from './traps.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { Decisions } from '../../policy/decisions.ts'
@@ -240,9 +241,9 @@ export async function handlePipe(
     if (rightmostFailure !== 0) lastIo.exitCode = rightmostFailure
   }
   const mergedStderrParts: Uint8Array[] = []
-  const mergedReads: Record<string, ByteSource> = {}
+  let mergedReads: Record<string, ByteSource> = {}
   const mergedWrites: Record<string, ByteSource> = {}
-  const mergedCache: string[] = []
+  let mergedCache: string[] = []
 
   for (let i = 0; i < ios.length; i++) {
     const io = ios[i]
@@ -251,9 +252,14 @@ export async function handlePipe(
     child.exitCode = io.exitCode
     const stderrBytes = await materialize(io.stderr)
     if (stderrBytes.byteLength > 0) mergedStderrParts.push(stderrBytes)
-    Object.assign(mergedReads, io.reads)
+    mergedReads = {
+      ...Object.fromEntries(
+        Object.entries(mergedReads).filter(([p, v]) => !(p in io.writes) || !settled(v)),
+      ),
+      ...io.reads,
+    }
     Object.assign(mergedWrites, io.writes)
-    mergedCache.push(...io.cache)
+    mergedCache = [...mergedCache.filter((p) => !(p in io.writes)), ...io.cache]
   }
 
   if (mergedStderrParts.length > 0) {

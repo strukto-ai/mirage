@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.core.onedrive.read import read_bytes
+from mirage.core.onedrive.read import read
 from mirage.core.onedrive.stream import read_stream
 from mirage.observe.context import (
     RecordingScope,
@@ -92,7 +92,7 @@ async def test_an_unrecorded_read_fetches_the_bare_item_then_its_bytes():
     with serve(FakeGraph(drives={ME: {"a.txt": OLD}})) as graph:
         vfs = _vfs(graph)
         try:
-            data = await read_bytes(vfs.accessor, _spec("a.txt"))
+            data = await read(vfs.accessor, _spec("a.txt"))
         finally:
             await vfs.accessor.close()
     assert data == OLD
@@ -110,7 +110,7 @@ async def test_a_recorded_read_keeps_the_revision_snapshots_pin(slot):
         scope = RecordingScope()
         try:
             if slot == "bytes":
-                data = await read_bytes(vfs.accessor, _spec("a.txt"))
+                data = await read(vfs.accessor, _spec("a.txt"))
             else:
                 data = b"".join(
                     [
@@ -140,10 +140,10 @@ async def test_a_pinned_read_gets_that_versions_bytes(pin, expected):
         try:
             if expected is None:
                 with pytest.raises(FileNotFoundError):
-                    await read_bytes(vfs.accessor, _spec("a.txt"))
+                    await read(vfs.accessor, _spec("a.txt"))
                 data = None
             else:
-                data = await read_bytes(vfs.accessor, _spec("a.txt"))
+                data = await read(vfs.accessor, _spec("a.txt"))
         finally:
             reset_revisions(token)
             await vfs.accessor.close()
@@ -192,9 +192,7 @@ async def test_a_ranged_read_stamps_the_whole_items_ctag():
         vfs = _vfs(graph)
         scope = RecordingScope()
         try:
-            data = await read_bytes(
-                vfs.accessor, _spec("a.txt"), offset=2, size=3
-            )
+            data = await read(vfs.accessor, _spec("a.txt"), offset=2, size=3)
         finally:
             scope.close()
             await vfs.accessor.close()

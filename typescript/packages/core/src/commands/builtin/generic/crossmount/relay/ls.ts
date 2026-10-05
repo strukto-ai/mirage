@@ -16,6 +16,7 @@ import { IOResult } from '../../../../../io/types.ts'
 import type { NamespaceView, SessionView } from '../../../../../ops/types.ts'
 import type { FileStat, PathSpec } from '../../../../../types.ts'
 import { gnuBasename } from '../../../../../utils/path.ts'
+import { rstripSlash } from '../../../../../utils/slash.ts'
 import type { CommandOpts } from '../../../../config.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { overlaidStat } from '../../../generic_bind/adapter.ts'
@@ -81,10 +82,17 @@ export async function runLs(
     ...(ns !== undefined ? { ns: crossingNs(ns) } : {}),
     ...(sessionView !== undefined ? { sessionView } : {}),
   }
+  // A backend's listing never holds a link: ls merges them from `links` and
+  // renders them unfollowed, where a listed one would be statted through to
+  // its target. Mirrors Python's relayed_readdir.
+  const readdir = readdirOp(dispatch)
+  const links = ns?.links
   const result = await lsGeneric(
     flatten(scopes),
     opts,
-    readdirOp(dispatch),
+    links === undefined
+      ? readdir
+      : async (p) => (await readdir(p)).filter((e) => links.statAt(rstripSlash(e)) === null),
     overlaidStat(namedByPath(statOp(dispatch)), ns?.statOverlay),
   )
   return result ?? [null, new IOResult()]

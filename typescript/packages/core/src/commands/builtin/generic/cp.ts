@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { pathAllowed } from '../../../context/session_context.ts'
-import { mountedPath, rekey, respelled } from '../../../utils/key_prefix.ts'
+import { mountedPath, respelled } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -76,7 +76,7 @@ export interface CpFlags {
   update: string | null
   backup: string | null
   suffix: string
-  targetDir: PathSpec | string | null
+  targetDir: PathSpec | null
   noTargetDir: boolean
   dereference: CopyDeref
 }
@@ -209,13 +209,10 @@ export function backupRaw(fl: FlagView): string | boolean | undefined {
   return undefined
 }
 
-// -t arrives as the PathSpec of the word that spelled it on the
-// single-mount path, and as its resolved virtual-path string on the relay
-// path, which parses for a cross-mount strategy. Mirrors Python.
-export function targetFlags(cmdName: string, fl: FlagView): [PathSpec | string | null, boolean] {
+// -t arrives as the PathSpec of the word that spelled it. Mirrors Python.
+export function targetFlags(cmdName: string, fl: FlagView): [PathSpec | null, boolean] {
   const raw: unknown = fl.raw('target_directory')
-  const targetDir: PathSpec | string | null =
-    raw instanceof PathSpec || typeof raw === 'string' ? raw : null
+  const targetDir = raw instanceof PathSpec ? raw : null
   const noTarget = fl.asBool('no_target_directory')
   if (targetDir !== null && noTarget) {
     throw new UsageError(
@@ -465,21 +462,20 @@ export async function copyTreeLinks(
 }
 
 // Split operands into sources and destination, GNU arity errors. With -t
-// every operand is a source and the returned destination is null (the
-// caller wraps the target-directory string itself). -T requires exactly
-// two operands.
+// every operand is a source and the target directory is the destination.
+// -T requires exactly two operands.
 export function splitOperands(
   cmdName: string,
   paths: PathSpec[],
-  targetDir: PathSpec | string | null,
+  targetDir: PathSpec | null,
   noTargetDir: boolean,
-): [PathSpec[], PathSpec | null] {
+): [PathSpec[], PathSpec] {
   const hint = `Try '${cmdName} --help' for more information.`
   const first = paths[0]
   if (first === undefined) {
     throw new UsageError(`${cmdName}: missing file operand\n${hint}`, 1)
   }
-  if (targetDir !== null) return [[...paths], null]
+  if (targetDir !== null) return [[...paths], targetDir]
   if (paths.length === 1) {
     throw new UsageError(
       `${cmdName}: missing destination file operand after '${first.rawPath}'\n${hint}`,
@@ -489,13 +485,7 @@ export function splitOperands(
   if (noTargetDir && paths.length > 2) {
     throw extraOperandError(cmdName, paths[2]?.rawPath ?? '')
   }
-  const dst = paths[paths.length - 1]
-  return [paths.slice(0, -1), dst ?? null]
-}
-
-// Build the -t directory PathSpec from a same-mount reference operand.
-export function wrapTargetDir(ref: PathSpec, virtual: string): PathSpec {
-  return PathSpec.fromStrPath(virtual, rekey(ref.virtual, ref.vfsPath, virtual))
+  return [paths.slice(0, -1), paths[paths.length - 1] ?? first]
 }
 
 // GNU error line when a -t operand is missing or not a directory.
@@ -1073,7 +1063,7 @@ export async function copyEntries(
       continue
     }
     wroteAny = true
-    if (opts.reads !== undefined) opts.reads[entrySpec.virtual] = data
+    if (opts.reads !== undefined) opts.reads[entrySpec.mountPath] = data
     if (opts.writes !== undefined) opts.writes[entryDstSpec.mountPath] = new Uint8Array()
     if (opts.lines !== undefined) opts.lines.push(transferLine(entrySpec, entryDstSpec, backup))
   }
@@ -1108,18 +1098,11 @@ export async function cpGeneric(
   stdin?: ByteSource | null,
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
-  const [sources, dstOperand] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
-  let dst: PathSpec
+  const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
   let dstIsDir: boolean
   let dstExists: boolean
   let dstErr: string | null = null
-  if (dstOperand === null) {
-    const firstSource = sources[0]
-    if (firstSource === undefined) return [null, new IOResult()]
-    dst =
-      flags.targetDir instanceof PathSpec
-        ? flags.targetDir
-        : wrapTargetDir(firstSource, String(flags.targetDir))
+  if (flags.targetDir !== null) {
     const err = await targetDirError('cp', stat, dst)
     if (err !== null) {
       return [null, new IOResult({ stderr: ENC.encode(`${err}\n`), exitCode: 1 })]
@@ -1127,11 +1110,9 @@ export async function cpGeneric(
     dstIsDir = true
     dstExists = true
   } else if (flags.noTargetDir) {
-    dst = dstOperand
     dstIsDir = false
     dstExists = true
   } else {
-    dst = dstOperand
     const probe = await destKind(stat, dst)
     dstExists = probe.exists
     dstIsDir = probe.isDir
@@ -1424,7 +1405,7 @@ export async function cpGeneric(
         )
         continue
       }
-      reads[src.virtual] = data
+      reads[src.mountPath] = data
     } else {
       try {
         await strategy.copy(src, target)

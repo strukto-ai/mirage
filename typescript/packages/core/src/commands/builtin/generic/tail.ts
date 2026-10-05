@@ -17,6 +17,7 @@ import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
@@ -24,8 +25,6 @@ import { argmatchError } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
-  countNewlines,
-  normalizeCounts,
   numberFlagError,
   parseCounts,
   parseSeconds,
@@ -394,16 +393,6 @@ async function unfollowable(
   return pending
 }
 
-// Whether this operand's whole content is what tail emits, which is what
-// makes it worth handing to the file cache. Counting from the start is
-// never treated as a full read, matching what `-n +N` has always done.
-function readsEverything(rawCounts: TailCounts, raw: Uint8Array): boolean {
-  const counts = normalizeCounts(rawCounts)
-  if (counts.fromByte !== null || counts.fromLine !== null) return false
-  if (counts.byteCount !== null) return counts.byteCount >= raw.byteLength
-  return (counts.lines ?? 10) >= countNewlines(raw)
-}
-
 const RETRY_IGNORED = 'tail: warning: --retry ignored; --retry is useful only when following\n'
 const RETRY_INITIAL = 'tail: warning: --retry only effective for the initial open\n'
 // A name is what -F follows, and standard input has none.
@@ -412,6 +401,32 @@ const STDIN_BY_NAME = "tail: cannot follow '-' by name\n"
 // has appeared, an untailable one (a directory) has become accessible.
 const APPEARED = 'has appeared;  following new file'
 const ACCESSIBLE = 'has become accessible'
+
+// The tail flag bag, parsed once; a refused value is its message.
+interface TailFlags {
+  readonly counts: TailCounts
+  readonly quiet: boolean
+  readonly verbose: boolean
+  readonly following: FollowFlags
+}
+
+function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
+  const fl = new FlagView(bag, specOf('tail'))
+  const nRaw = fl.asStr('n') ?? null
+  const cRaw = fl.asStr('c') ?? null
+  const numErr = numberFlagError('tail', nRaw, cRaw)
+  if (numErr !== null) return numErr
+  const following = followFlags(fl)
+  if (typeof following === 'string') return following
+  // The last of -q and -v decides, as in GNU tail.
+  const headers = fl.typedOrder('q', 'v').at(-1)
+  return {
+    counts: parseCounts(nRaw, cRaw),
+    quiet: headers === 'q',
+    verbose: headers === 'v',
+    following,
+  }
+}
 
 export async function tailGeneric(
   paths: PathSpec[],
@@ -422,24 +437,15 @@ export async function tailGeneric(
   readRange: ReadRange | null = null,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const fl = new FlagView(opts.flags, specOf('tail'))
+  const parsed = parseFlags(opts.flags)
   // A follow reads the backend itself, never the read-through cache:
   // what it is polling for is exactly the change the cached body does
   // not have yet.
   const backend = stream
   stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
-  const nRaw = fl.asStr('n') ?? null
-  const cRaw = fl.asStr('c') ?? null
-  const numErr = numberFlagError('tail', nRaw, cRaw)
-  if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: encodeText(numErr) })]
-  const following = followFlags(fl)
-  if (typeof following === 'string')
-    return [null, new IOResult({ exitCode: 1, stderr: encodeText(following) })]
-  // The last of -q and -v decides, as in GNU tail.
-  const headers = fl.typedOrder('q', 'v').at(-1)
-  const qFlag = headers === 'q'
-  const vFlag = headers === 'v'
-  const counts = parseCounts(nRaw, cRaw)
+  if (typeof parsed === 'string')
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
+  const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
   if (
     following.follow &&
     following.byName &&
@@ -496,7 +502,6 @@ export async function tailGeneric(
 
   if (paths.length > 0) {
     const chunks: Uint8Array[] = []
-    const cache: string[] = []
     const showHeaders = (vFlag || paths.length > 1) && !qFlag
     let err = ''
     let printed = 0
@@ -527,10 +532,8 @@ export async function tailGeneric(
       }
       printed += 1
       chunks.push(tailBytes(raw, counts))
-      if (!isStdin(p) && readsEverything(counts, raw)) cache.push(p.virtual)
     }
     const io = new IOResult({
-      cache,
       exitCode: err === '' ? 0 : 1,
       stderr: retryWarning + err === '' ? null : encodeText(retryWarning + err),
     })

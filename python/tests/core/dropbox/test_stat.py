@@ -16,7 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index import NULL_INDEX
+from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.read import read
 from mirage.core.dropbox.readdir import readdir
@@ -41,6 +42,7 @@ FILE_ENTRY = {
     "path_display": "/a.txt",
     "size": 5,
     "server_modified": "2026-04-01T00:00:00Z",
+    "content_hash": "hash-a",
 }
 
 FOLDER_ENTRY = {
@@ -109,7 +111,7 @@ async def test_stat_null_index_file_from_api(dropbox_accessor):
     assert out.size == 5
     assert out.content == ContentType.TEXT
     assert out.modified == "2026-04-01T00:00:00Z"
-    assert out.fingerprint == "2026-04-01T00:00:00Z"
+    assert out.fingerprint == "hash-a"
     assert out.extra["dropbox_id"] == "id:a"
     assert out.extra["resource_type"] == "dropbox/file"
 
@@ -156,7 +158,7 @@ _FALLBACK_CASES = [
         "id:x",
         3,
         "2026-01-02T00:00:00Z",
-        "2026-01-02T00:00:00Z",
+        None,
     ),
     (
         {
@@ -227,7 +229,8 @@ async def test_stat_entry_field_fallbacks(
     dropbox_accessor, entry, dropbox_id, size, modified, fingerprint
 ):
     # _stat_from_entry's fallbacks: server_modified→client_modified→"",
-    # id→path_display→name, and a non-int/absent size renders as None
+    # id→path_display→name, no content_hash is no token, and a
+    # non-int/absent size renders as None
     # (the unknown-size machinery, never a fabricated number).
     rpc = FakeDropboxRpc(metadata=entry)
     with patch(RPC, new=rpc):
@@ -252,10 +255,11 @@ async def test_stat_populates_from_parent_listing(dropbox_accessor, index):
     assert out.size == 5
     assert out.content == ContentType.TEXT
     assert out.modified == "2026-04-01T00:00:00Z"
-    assert out.fingerprint == "2026-04-01T00:00:00Z"
+    assert out.fingerprint == "hash-a"
     assert out.extra["dropbox_id"] == "id:a"
     assert out.extra["resource_type"] == "dropbox/file"
     assert rpc.list_requests == 1
+    assert rpc.metadata_paths == []
 
 
 @pytest.mark.asyncio
@@ -441,7 +445,7 @@ async def test_stat_size_matches_read_for_every_file(dropbox_accessor, index):
         raise AssertionError(f"unexpected endpoint {endpoint}")
 
     async def _download(_tm, path, _range=None):
-        return contents[path]
+        return contents[path], None
 
     files: list[str] = []
     with (
@@ -471,3 +475,59 @@ async def test_stat_size_matches_read_for_every_file(dropbox_accessor, index):
                 assert info.size == len(body), trimmed
                 files.append(trimmed)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]
+
+
+@pytest.mark.asyncio
+async def test_stat_through_a_check_store_asks_one_lookup(dropbox_accessor):
+    # A fresh check stats through a throwaway store: one get_metadata, not
+    # a listing of the parent into a store dropped right after.
+    rpc = FakeDropboxRpc(entries=[FILE_ENTRY], metadata=FILE_ENTRY)
+    with patch(RPC, new=rpc):
+        out = await stat(
+            dropbox_accessor,
+            PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+            ListingCheckStore(),
+        )
+    assert out.fingerprint == "hash-a"
+    assert rpc.list_requests == 0
+    assert rpc.metadata_paths == ["/a.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("check", [False, True], ids=["null", "check"])
+@pytest.mark.parametrize(
+    "status, summary, raised",
+    [
+        (409, "path/not_found/..", FileNotFoundError),
+        (409, "path/not_folder/..", FileNotFoundError),
+        (409, "path/restricted_content/..", DropboxApiError),
+        (502, "path/not_found/..", DropboxApiError),
+    ],
+    ids=["not-found", "not-folder", "restricted", "5xx"],
+)
+async def test_stat_from_api_reads_only_a_miss_as_enoent(
+    dropbox_accessor, check, status, summary, raised
+):
+    # A restricted file exists, so a fresh probe must not hear ENOENT and
+    # drop its overlay; a 5xx body naming not_found is a relay's.
+    async def refuse(_tm, _endpoint, _body):
+        raise DropboxApiError("refused", status, summary)
+
+    with patch(RPC, new=refuse):
+        with pytest.raises(raised):
+            await stat(
+                dropbox_accessor,
+                PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+                ListingCheckStore() if check else NULL_INDEX,
+            )
+
+
+@pytest.mark.asyncio
+async def test_stat_from_api_answer_in_another_case_is_enoent(
+    dropbox_accessor,
+):
+    # get_metadata matches case-insensitively where a listing is exact.
+    rpc = FakeDropboxRpc(metadata=FILE_ENTRY)
+    with patch(RPC, new=rpc):
+        with pytest.raises(FileNotFoundError):
+            await stat(dropbox_accessor, PathSpec.from_str_path("/A.TXT"))

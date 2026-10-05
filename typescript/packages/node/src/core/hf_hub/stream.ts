@@ -21,7 +21,7 @@ import { REFUSED_STATUSES } from './constants.ts'
 import { asRefusal } from './lookup.ts'
 import { resolveEntry, rowToken } from './read.ts'
 
-export async function* stream(
+export async function* readStream(
   accessor: HfHubAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

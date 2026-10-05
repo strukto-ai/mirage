@@ -16,12 +16,39 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ResourceType(str, Enum):
     FILE = "file"
     FOLDER = "folder"
+
+
+def is_folder_kind(resource_type: str) -> bool:
+    """Whether a row's type names a folder: ``folder`` or ``<backend>/folder``.
+
+    A backend may spell its kinds under its own prefix (``dropbox/folder``);
+    a type outside that convention (``wandb/directory``) is neither kind.
+
+    Args:
+        resource_type (str): the row's ``resource_type``.
+    """
+    return _is_kind(resource_type, ResourceType.FOLDER)
+
+
+def is_file_kind(resource_type: str) -> bool:
+    """Whether a row's type names a file: ``file`` or ``<backend>/file``.
+
+    Args:
+        resource_type (str): the row's ``resource_type``.
+    """
+    return _is_kind(resource_type, ResourceType.FILE)
+
+
+def _is_kind(resource_type: str, kind: ResourceType) -> bool:
+    return resource_type == kind.value or resource_type.endswith(
+        "/" + kind.value
+    )
 
 
 class IndexType(str, Enum):
@@ -90,6 +117,8 @@ class IndexDirectory(BaseModel):
 
 
 class IndexConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     type: IndexType = IndexType.RAM
     ttl: float = 600
 

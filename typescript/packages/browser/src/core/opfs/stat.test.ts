@@ -17,12 +17,12 @@ import { FileType } from '@struktoai/mirage-core/types'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { stat } from './stat.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/stat', () => {
   it('returns FileStat with size for files', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/x'), new TextEncoder().encode('abc'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('abc'))
     const s = await stat(accessor, spec('/x'))
     expect(s.size).toBe(3)
     expect(s.type).not.toBe(FileType.DIRECTORY)
@@ -36,7 +36,7 @@ describe('opfs/stat', () => {
   it('derives directory mtime from the newest file child', async () => {
     const accessor = makeMockAccessor()
     await mkdir(accessor, spec('/d'))
-    await writeBytes(accessor, spec('/d/a'), new TextEncoder().encode('a'))
+    await write(accessor, spec('/d/a'), new TextEncoder().encode('a'))
     const child = await stat(accessor, spec('/d/a'))
     const dir = await stat(accessor, spec('/d'))
     expect(dir.type).toBe(FileType.DIRECTORY)

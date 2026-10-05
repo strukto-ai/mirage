@@ -14,7 +14,7 @@
 
 from mirage.core.email.readdir import _msg_filename
 from mirage.core.email.search import _build_vfs_path, build_search_criteria
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 
 CJK_SUBJECT = "会議の記録" * 40
 
@@ -40,7 +40,7 @@ def test_a_hits_filename_fits_name_max():
         "date": "Mon, 5 Jan 2026 10:00:00 +0000",
     }
     name = _build_vfs_path("/mail", "INBOX", msg).rsplit("/", 1)[-1]
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert "\ufffd" not in name
 
 

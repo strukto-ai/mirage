@@ -20,7 +20,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
 from mirage.io.cooperative import chunks
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, CountedRun, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line
@@ -366,7 +366,7 @@ async def format_multi(
     chars: bool = False,
     max_line_length: bool = False,
     total: str = "auto",
-) -> tuple[bytes, bytes]:
+) -> tuple[bytes, bytes, list[CountedRun]]:
     """Format wc output for multiple already-resolved paths.
 
     Globs are expanded by the caller (``resolve_glob``) before this runs, so
@@ -383,8 +383,9 @@ async def format_multi(
             returns bytes, an awaitable of bytes, or an async byte iterator.
 
     Returns:
-        tuple[bytes, bytes]: Encoded wc output (``b""`` when nothing prints)
-        and concatenated stderr lines for failed operands (``b""`` if none).
+        tuple[bytes, bytes, list[CountedRun]]: Encoded wc output (``b""``
+        when nothing prints), concatenated stderr lines for failed
+        operands (``b""`` if none), and each printed row's counts.
     """
     flags = WCFlags(
         lines=lines,
@@ -419,7 +420,24 @@ async def format_multi(
         sizes.append(None if is_stdin(path) else counts.bytes_)
         totals.merge(counts)
     width = number_width(sizes, len(paths), shown_counts(flags))
-    return format_count_rows(rows, totals, len(paths), flags, width), err
+    runs = [
+        CountedRun(
+            tuple(
+                _selected_values(
+                    counts,
+                    lines=lines,
+                    words=words,
+                    bytes_=bytes_,
+                    chars=chars,
+                    max_line_length=max_line_length,
+                )
+            ),
+            label,
+        )
+        for counts, label in rows
+    ]
+    body = format_count_rows(rows, totals, len(paths), flags, width)
+    return body, err, runs
 
 
 async def wc_generic(
@@ -454,7 +472,7 @@ async def wc_generic(
         return None, IOResult(exit_code=1, stderr=encode_text(str(exc) + "\n"))
     stream = stdin_stream(stream, opts.stdin)
     if paths:
-        body, err = await format_multi(
+        body, err, runs = await format_multi(
             paths,
             read=stream,
             lines=parsed.lines,
@@ -464,7 +482,9 @@ async def wc_generic(
             max_line_length=parsed.max_line_length,
             total=parsed.total,
         )
-        return body, operands_io(err)
+        io = operands_io(err)
+        io.counted_runs = runs
+        return body, io
     source = resolve_source(opts.stdin)
     counts = await wc(source, flags=parsed)
     return format_stdin(counts, parsed), IOResult()

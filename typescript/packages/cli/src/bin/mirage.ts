@@ -15,6 +15,7 @@
 
 import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
 import { DaemonUnreachable } from '../client.ts'
+import { LoginError } from '../credentials.ts'
 import { buildProgram } from '../main.ts'
 
 const ALIASES: Record<string, string> = {
@@ -40,7 +41,7 @@ buildProgram()
       console.error(err.message)
       process.exit(2)
     }
-    if (err instanceof DaemonUnreachable) {
+    if (err instanceof DaemonUnreachable || err instanceof LoginError) {
       console.error(err.message)
       process.exit(1)
     }

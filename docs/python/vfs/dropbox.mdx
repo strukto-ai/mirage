@@ -107,6 +107,12 @@ reduce repeated API calls during traversal; listings live for the
 mount's `ttl` (600 s by default), at most 24 hours. File reads go
 through the standard read cache (`caches_reads = True`).
 
+Under `read: fresh`, a cached file is checked against its `content_hash`
+before it is served: one `get_metadata` per warm read, never a folder
+listing. A download names the hash in its `Dropbox-API-Result` header, full
+or ranged, so a read stamps it with no extra request. `server_modified` is
+not used: Dropbox repeats it across same-size rewrites.
+
 ## Example
 
 ```python

@@ -186,23 +186,13 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
     output: PathSpec | None = None
     # Each -o is the next word typed, and GNU compares two by that word
     # (STREQ), so `-o ./out -o out` names two outputs even though they
-    # are one file. A line parsed for a cross-mount strategy keeps the
-    # resolved strings, compared as they are.
+    # are one file.
     typed = iter(fl.as_paths("output"))
     for dest, value in fl.occurrences("key", "output", "c", "C", "check"):
         if dest == "key" and isinstance(value, str):
             parse_keydef(value, KeyMods(), False)
         elif dest == "output":
-            spelled = next(typed, None)
-            path = (
-                spelled
-                if spelled is not None
-                else (
-                    value
-                    if isinstance(value, PathSpec)
-                    else PathSpec.from_str_path(str(value))
-                )
-            )
+            path = next(typed)
             if output is not None and path.raw_path != output.raw_path:
                 raise UsageError(MULTIPLE_OUTPUTS)
             output = path
@@ -253,7 +243,7 @@ def _config(parsed: SortFlags) -> SortConfig:
     )
 
 
-def _refusal(exc: ValueError) -> IOResult:
+def _refusal_of(exc: ValueError) -> IOResult:
     if isinstance(exc, UsageError):
         # Already GNU-worded and carrying its own code: gnulib's argmatch
         # dies with EXIT_FAILURE, so `--check=x` is 1 where sort's other
@@ -357,7 +347,7 @@ async def _read_runs(
     return runs
 
 
-async def sort(
+async def sort_generic(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -416,7 +406,7 @@ async def sort(
         )
         cfg = _config(parsed)
     except (UsageError, SortKeyError, ValueError) as exc:
-        return b"", _refusal(exc)
+        return b"", _refusal_of(exc)
 
     refusal = operand_refusal(paths, parsed)
     if refusal is not None:
@@ -470,4 +460,4 @@ async def sort(
     return output, IOResult()
 
 
-__all__ = ["sort"]
+__all__ = ["sort_generic"]

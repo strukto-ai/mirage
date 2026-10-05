@@ -33,7 +33,7 @@ import type {
 } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { classify } from '@struktoai/mirage-core/errors/classify'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/types'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { Channel, JobConsole } from '@struktoai/mirage-core/shell/console/index'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'

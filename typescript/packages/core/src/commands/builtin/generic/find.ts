@@ -15,6 +15,7 @@
 import { activeCacheManager } from '../../../cache/context.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
 import { fsStrerror, isEnoent, isEnotdir, isMissError, walkRefusal } from '../../../utils/errors.ts'
 import { dotRefusal, linkFollow, statOrEnoent } from '../utils/paths.ts'
@@ -34,19 +35,16 @@ import {
   dropPruned,
   emitStartPath,
   hasLinkChildren,
-  keep,
   optionsTree,
   settlePendingPrunes,
   startBasename,
   unrespellRaw,
-  type FindEntry,
   type PredNode,
 } from '../find_eval.ts'
 import { printfKind } from '../find_printf.ts'
-import type { LinkView } from '../../../ops/types.ts'
 import { pathAllowed } from '../../../context/session_context.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { contentSize } from '../../../utils/stat_view.ts'
+import { linkResults } from '../../../core/generic/find.ts'
 
 const ENC = new TextEncoder()
 
@@ -149,91 +147,6 @@ function extractOrNames(name: string | null, texts: readonly string[]): string[]
     }
   }
   return names
-}
-
-// Namespace symlinks under the search root that match the expression.
-//
-// Symlinks live in the namespace, not in any backend, so a backend's
-// find never sees them. Merging them here, above every backend, is what
-// keeps a mount's symlink behavior from depending on its backend.
-//
-// GNU find without -L reports the link itself and never walks through
-// it, so a link is kind 'l'. Its size is the target string's length,
-// which is what -size compares, and it carries the link's own mtime.
-//
-// Under -L a link is classified by what it points at instead: a link to
-// a file tests as 'f', a link to a directory as 'd', and only a dangling
-// link stays 'l' (GNU reports the link itself when the target cannot be
-// stat'd). -size and -mtime then compare the target's stat, since that
-// is the file being reported.
-export async function linkResults(
-  links: LinkView | null,
-  searchRoot: string,
-  prefix: string,
-  searchKey: string,
-  tree: PredNode,
-  minDepth: number | null,
-  maxDepth: number | null,
-  minSize: number | null,
-  maxSize: number | null,
-  mtimeMin: number | null,
-  mtimeMax: number | null,
-  follow: boolean,
-): Promise<string[]> {
-  if (links === null) return []
-  const out: string[] = []
-  // GNU find's default is -P: a start point that is itself a symlink is
-  // reported as the link and never walked through. The backend cannot
-  // see it at all, so the subtree scan (which only covers entries
-  // *under* the root) would miss it.
-  const entries = [...links.subtree(searchRoot)]
-  const own = links.statAt(searchRoot)
-  if (own !== null) entries.push([searchRoot, own])
-  for (const [path, ownStat] of entries) {
-    let st = ownStat
-    let kind: FindEntry['kind'] = 'l'
-    if (follow) {
-      const target = await links.targetStat(path)
-      if (target !== null) {
-        kind = printfKind(target)
-        st = target
-      }
-    }
-    const key = prefix !== '' && path.startsWith(prefix) ? path.slice(prefix.length) : path
-    const rel = stripSlash(key)
-    const depth =
-      searchKey !== ''
-        ? rel === searchKey
-          ? 0
-          : rel.split('/').length - searchKey.split('/').length
-        : rel === ''
-          ? 0
-          : rel.split('/').length
-    if (maxDepth !== null && depth > maxDepth) continue
-    const entry: FindEntry = {
-      key,
-      name: path.split('/').pop() ?? path,
-      kind,
-      depth,
-      mtime: modifiedTs(st.modified),
-    }
-    if (!keep(entry, tree, minDepth)) continue
-    const size = contentSize(st)
-    if (minSize !== null && size < minSize) continue
-    if (maxSize !== null && size > maxSize) continue
-    if (mtimeMin !== null || mtimeMax !== null) {
-      // `modifiedTs` is the helper the rest of this file uses. A bare
-      // Date.parse gives NaN for a date-only or malformed stamp, which the
-      // `=== null` guard below does not catch, so every comparison came out
-      // false and the entry was kept -- where Python drops it.
-      const ts = modifiedTs(st.modified)
-      if (ts === null) continue
-      if (mtimeMin !== null && ts < mtimeMin) continue
-      if (mtimeMax !== null && ts > mtimeMax) continue
-    }
-    out.push(path)
-  }
-  return out
 }
 
 // Results for a start point that is not a directory.
@@ -347,6 +260,35 @@ async function missingStartDetail(
   return 'No such file or directory'
 }
 
+interface FindFlags {
+  readonly name: string | null
+  readonly type: string | null
+  readonly size: string | null
+  readonly mtime: string | null
+  readonly maxdepth: string | null
+  readonly iname: string | null
+  readonly path: string | null
+  readonly mindepth: string | null
+  readonly empty: boolean
+  readonly follow: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): FindFlags {
+  const fl = new FlagView(bag, specOf('find'))
+  return {
+    name: fl.asStr('name') ?? null,
+    type: fl.asStr('type') ?? null,
+    size: fl.asStr('size') ?? null,
+    mtime: fl.asStr('mtime') ?? null,
+    maxdepth: fl.asStr('maxdepth') ?? null,
+    iname: fl.asStr('iname') ?? null,
+    path: fl.asStr('path') ?? null,
+    mindepth: fl.asStr('mindepth') ?? null,
+    empty: fl.asBool('empty'),
+    follow: fl.asBool('L'),
+  }
+}
+
 export function findGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -360,15 +302,15 @@ export function findGeneric(
   // needed only to distinguish ENOTDIR from ENOENT at a missing start point.
   missingStat?: (spec: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('find'))
-  const nameFlag = fl.asStr('name') ?? null
-  const inameFlag = fl.asStr('iname') ?? null
-  const typeFlag = fl.asStr('type') ?? null
-  const pathFlag = fl.asStr('path') ?? null
-  const maxDepthFlag = fl.asStr('maxdepth') ?? null
-  const minDepthFlag = fl.asStr('mindepth') ?? null
-  const sizeFlag = fl.asStr('size') ?? null
-  const mtimeFlag = fl.asStr('mtime') ?? null
+  const parsed = parseFlags(opts.flags)
+  const nameFlag = parsed.name
+  const inameFlag = parsed.iname
+  const typeFlag = parsed.type
+  const pathFlag = parsed.path
+  const maxDepthFlag = parsed.maxdepth
+  const minDepthFlag = parsed.mindepth
+  const sizeFlag = parsed.size
+  const mtimeFlag = parsed.mtime
   const targets =
     paths.length > 0
       ? paths
@@ -401,7 +343,7 @@ export function findGeneric(
   }
   const nameExclude = extractNotName(texts)
   const orNames = extractOrNames(nameFlag, texts)
-  const emptyFlag = fl.asBool('empty')
+  const emptyFlag = parsed.empty
   const expr = texts.length > 0 ? parseFindExpression(texts) : null
   // With a stat wired, the mtime window is applied by the overlay-
   // aware post-filter below, not pushed into the core: backend cores
@@ -625,7 +567,7 @@ export function findGeneric(
           expr !== null ? expr.maxSize : maxSize,
           effMtimeMin,
           effMtimeMax,
-          fl.asBool('L'),
+          parsed.follow,
         ),
       )
       withLinks.sort(compareCodePoints)

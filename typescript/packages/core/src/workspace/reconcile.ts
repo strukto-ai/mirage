@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Evicted } from '../cache/index/config.ts'
-import { ListingCheckStore, RAMIndexCacheStore } from '../cache/index/ram.ts'
+import { ListingCheckStore } from '../cache/index/ram.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import type { BaseVFS } from '../vfs/base.ts'
@@ -99,7 +99,7 @@ export class Reconciler {
       const generation = manager?.generation
       try {
         remoteStat = await this.opsRegistry.call('stat', vfs, vfs.accessor, scope, [], {
-          index: new RAMIndexCacheStore(),
+          index: new ListingCheckStore(),
         })
       } catch (err) {
         if (isEnoent(err) || isEnotdir(err)) {

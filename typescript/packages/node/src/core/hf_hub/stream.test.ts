@@ -17,7 +17,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
-import { stream } from './stream.ts'
+import { readStream } from './stream.ts'
 import { parseEntry } from './tree.ts'
 
 function loaded(): HfHubAccessor {
@@ -46,7 +46,7 @@ describe('hf_hub stream record path', () => {
     })
     const [text, records] = await runWithRecording(async () => {
       let out = ''
-      for await (const chunk of stream(loaded(), PATH)) out += new TextDecoder().decode(chunk)
+      for await (const chunk of readStream(loaded(), PATH)) out += new TextDecoder().decode(chunk)
       return out
     })
     expect(text).toBe('hello')
@@ -75,7 +75,7 @@ describe('hf_hub stream stamp', () => {
     // arrived, so a reader that stops after one chunk (head -c 1) still
     // leaves a token behind.
     const [, records] = await runWithRecording(async () => {
-      await stream(loaded(), PATH)[Symbol.asyncIterator]().next()
+      await readStream(loaded(), PATH)[Symbol.asyncIterator]().next()
     })
     expect(records.map((r) => r.fingerprint)).toEqual(['oid-k'])
   })
@@ -83,7 +83,7 @@ describe('hf_hub stream stamp', () => {
   it('stamps nothing when the bytes are another version', async () => {
     vi.spyOn(client, 'hubStream').mockImplementation(answering('"another-version"', 'newr'))
     const [, records] = await runWithRecording(async () => {
-      for await (const chunk of stream(loaded(), PATH)) void chunk
+      for await (const chunk of readStream(loaded(), PATH)) void chunk
     })
     expect(records.map((r) => r.fingerprint)).toEqual([null])
   })
@@ -91,7 +91,8 @@ describe('hf_hub stream stamp', () => {
   it('reads with no recorder bound', async () => {
     vi.spyOn(client, 'hubStream').mockImplementation(answering('"oid-k"', 'ab'))
     const parts: string[] = []
-    for await (const chunk of stream(loaded(), PATH)) parts.push(new TextDecoder().decode(chunk))
+    for await (const chunk of readStream(loaded(), PATH))
+      parts.push(new TextDecoder().decode(chunk))
     expect(parts).toEqual(['ab'])
   })
 })
@@ -104,7 +105,7 @@ describe('a stream the Hub refuses', () => {
       yield new Uint8Array()
     })
     const err = await (async () => {
-      for await (const chunk of stream(loaded(), PATH)) void chunk
+      for await (const chunk of readStream(loaded(), PATH)) void chunk
     })().catch((e: unknown) => e)
     expect((err as { code?: string }).code).toBe('EACCES')
   })

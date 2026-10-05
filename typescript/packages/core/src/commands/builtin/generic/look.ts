@@ -19,11 +19,20 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
+
+interface LookFlags {
+  readonly foldCase: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): LookFlags {
+  const fl = new FlagView(bag, specOf('look'))
+  return { foldCase: fl.asBool('f') }
+}
 
 export async function lookGeneric(
   paths: PathSpec[],
@@ -36,8 +45,7 @@ export async function lookGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('look: missing prefix\n') })]
   }
   const prefix = texts[0] ?? ''
-  const fl = new FlagView(opts.flags, specOf('look'))
-  const caseInsensitive = fl.asBool('f')
+  const caseInsensitive = parseFlags(opts.flags).foldCase
   let raw: Uint8Array
   if (paths.length > 0) {
     const first = paths[0]

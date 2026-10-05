@@ -130,8 +130,9 @@ so `rm` and `touch` are refused, as is any command asked to write into it.
 
 ## Cache
 
-Uses `IndexCacheStore` with `index_ttl = 86_400` (one day). Directory
-listings are cached and populate file-size/type entries for `stat`'s fast
+Uses `IndexCacheStore` with `index_ttl = 86_400` (one day), capped by the
+mount's `ttl:` (600 seconds unless raised; see
+[index TTL](/home/cache#index-ttl)). Directory listings are cached and populate file-size/type entries for `stat`'s fast
 path. The first listing fills the index for the whole mount: one revision
 request for the commit, then the recursive tree walked at that commit, so a
 `readdir` + per-entry `stat` (which `ls`, FUSE `getattr`, and most shell

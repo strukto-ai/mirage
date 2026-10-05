@@ -64,6 +64,7 @@ async def unzip(
         bound_op(ops.read_bytes, accessor, opts.index),
         partial(ops.require(Operation.WRITE), accessor),
         partial(ops.require(Operation.MKDIR), accessor),
+        stat=bound_op(ops.stat, accessor, opts.index),
     )
 
 

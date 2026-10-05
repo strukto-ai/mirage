@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BUILDER } from './du.ts'
+import { BUILDER, WalkBudget } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
@@ -20,7 +20,8 @@ import { eacces, enoent } from '../../../../utils/errors.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { EntryGate } from '../../../../types.ts'
-import type { CommandIO } from '../adapter.ts'
+import { scopedIo, type CommandIO } from '../adapter.ts'
+import type { MountView } from '../../../../ops/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -91,9 +92,9 @@ describe('du walk fallback (no native du op)', () => {
 })
 
 // A gate that scopes the line but refuses nothing, which is what a `du`
-// run under any path rule looks like: `pathRulesActive()` is true, so the
-// builder sets the native du op aside and walks through the guarded
-// readdir instead (adapter.ts's `withRuleGuard` doc states that trade).
+// run under any path rule looks like: the gate is scoped, so `scopedIo`
+// sets the native du op aside and the builder walks through the guarded
+// readdir instead.
 const SCOPED_GATE: EntryGate = {
   scoped: true,
   granted: [],
@@ -120,7 +121,7 @@ async function runScoped(
   paths: PathSpec[],
 ): Promise<[Uint8Array, { exitCode: number; stderr: Uint8Array | null }]> {
   const result = await runWithAdmission(SCOPED_GATE, async () =>
-    BUILDER.fn(ops, ACCESSOR, paths, [], {
+    BUILDER.fn(scopedIo(ops, paths, ''), ACCESSOR, paths, [], {
       stdin: null,
       flags: {},
       filetypeFns: null,
@@ -261,5 +262,35 @@ describe('du rows for directories no file points at', () => {
       1,
       notes,
     ])
+  })
+})
+
+describe('WalkBudget', () => {
+  it('stops once spent', () => {
+    const budget = new WalkBudget(2)
+    expect([0, 1, 2].map(() => budget.spend('/d'))).toEqual([true, true, false])
+    expect(budget.hit).toBe(true)
+    const unbounded = new WalkBudget(null)
+    expect(Array.from({ length: 100 }, () => unbounded.spend('/d')).every(Boolean)).toBe(true)
+    expect(unbounded.hit).toBe(false)
+  })
+
+  it('with no cap of its own charges each mount its own', () => {
+    const ownerOf = (p: string): string => (p.startsWith('/a/b') ? '/a/b/' : '/a/')
+    const caps = new Map<string, number | null>([
+      ['/a/', null],
+      ['/a/b/', 1],
+    ])
+    const mounts: MountView = {
+      descendants: () => [],
+      visibleDescendants: () => [],
+      isRoot: (p) => caps.has(p.replace(/\/?$/, '/')),
+      rootOf: ownerOf,
+      maxDuEntries: (p) => caps.get(ownerOf(p)) ?? null,
+    }
+    const budget = new WalkBudget(null, mounts)
+    expect(Array.from({ length: 100 }, () => budget.spend('/a')).every(Boolean)).toBe(true)
+    expect([0, 1].map(() => budget.spend('/a/b'))).toEqual([true, false])
+    expect(budget.hit).toBe(true)
   })
 })

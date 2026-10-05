@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
-import { isMissingPath } from '../../../../utils/errors.ts'
+import { isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -349,7 +349,8 @@ async function apply(
   try {
     await renamePath(dispatch, source, destination)
   } catch (err) {
-    if (isMissingPath(err)) throw new RenameFailedError(move.source)
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err))
+      throw new RenameFailedError(move.source)
     throw err
   }
 }

@@ -18,7 +18,7 @@ import hashlib
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import push_cache_manager
 from mirage.core.s3 import driver as s3_driver
-from mirage.core.s3.write import write_bytes
+from mirage.core.s3.write import write
 from mirage.types import PathSpec
 from mirage.vfs.s3.config import S3Config
 
@@ -90,7 +90,7 @@ async def _write(
     manager = _FakeManager()
     prev = push_cache_manager(manager)
     try:
-        await write_bytes(
+        await write(
             S3Accessor(
                 S3Config(bucket="b", default_content_type=content_type)
             ),

@@ -35,7 +35,7 @@ const SPEC = new CommandSpec({
   ],
 })
 
-async function trelloCardCommentUpdateCommand(
+async function trelloCardCommentUpdate(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
@@ -69,6 +69,6 @@ export const TRELLO_CARD_COMMENT_UPDATE = command({
   name: 'trello card comment-update',
   vfs: VFSName.TRELLO,
   spec: SPEC,
-  fn: trelloCardCommentUpdateCommand,
+  fn: trelloCardCommentUpdate,
   write: true,
 })

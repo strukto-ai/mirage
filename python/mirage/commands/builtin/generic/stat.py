@@ -1,13 +1,13 @@
-import math
-import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from functools import partial
 from itertools import groupby
 from typing import cast
 
-from mirage.commands.builtin.utils.formatting import ls_mode_string
+from mirage.commands.builtin.utils.formatting import (
+    full_iso_time,
+    ls_mode_string,
+)
 from mirage.commands.builtin.utils.identity import (
     Identity,
     group_name,
@@ -60,10 +60,6 @@ _KNOWN = frozenset("aAbBCdDfFgGhimnNorRstTuUwWxXyYzZ%") | {
 # The placeholders for a value that is not known, which a 0 flag pads
 # with spaces rather than zeros.
 _PLACEHOLDERS = frozenset({"-", "?"})
-
-# The fraction of a second as the backend spelled it, so both hosts print
-# the digits the stamp carries rather than what their clock type keeps.
-_FRACTION = re.compile(r"\d\d:\d\d:\d\d\.(\d+)")
 
 _FORMAT_FLAGS = frozenset("'-+ #0I")
 
@@ -544,13 +540,9 @@ def _stat_time(value: str | None) -> str:
     Args:
         value (str | None): backend ISO timestamp; a naive one is UTC.
     """
-    seconds = iso_timestamp(value)
-    if seconds is None or value is None:
+    if iso_timestamp(value) is None:
         return "-"
-    whole = datetime.fromtimestamp(math.floor(seconds), timezone.utc)
-    match = _FRACTION.search(value)
-    fraction = (match.group(1) if match else "").ljust(9, "0")[:9]
-    return f"{whole:%Y-%m-%d %H:%M:%S}.{fraction} +0000"
+    return full_iso_time(value)
 
 
 def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:

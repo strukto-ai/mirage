@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import IndexCacheStore
 from mirage.core.discord.files import download_file
 from mirage.core.discord.history import get_history_jsonl
 from mirage.core.discord.members import list_members
@@ -23,23 +23,9 @@ from mirage.core.discord.scope import detect_scope
 from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read, make_read_range
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.time_range import guard_day
+from mirage.core.time_range import day_channel_id, guard_day
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
-
-
-async def _ancestor_entry(
-    accessor: DiscordAccessor, path: PathSpec, index: IndexCacheStore, up: int
-) -> IndexEntry | None:
-    virtual = path.virtual.rstrip("/")
-    for _ in range(up):
-        virtual = virtual.rsplit("/", 1)[0]
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    spec = PathSpec(
-        virtual=virtual, directory=virtual, vfs_path=mount_key(virtual, prefix)
-    )
-    return await resolve_entry(readdir, accessor, spec, index)
 
 
 async def _read_chat(
@@ -48,29 +34,8 @@ async def _read_chat(
     path: PathSpec,
     index: IndexCacheStore,
 ) -> bytes:
-    """Render one day's history; the channel id comes from the listing.
-
-    The typed ``name__id`` dirname is only trusted once the listing
-    proves it, so a fabricated channel id is ENOENT rather than a raw
-    API error.
-
-    Args:
-        accessor (DiscordAccessor): discord accessor.
-        match (ScopeMatch): a match holding the day chain.
-        path (PathSpec): the chat.jsonl path.
-        index (IndexCacheStore): index cache.
-    """
     await guard_day(accessor, match, path.virtual)
-    entry = await resolve_entry(readdir, accessor, path, index)
-    if entry is not None:
-        channel_id = entry.id.split(":", 1)[0]
-    else:
-        # A sealed day lists nothing but the file still reads through
-        # the channel, reproducing the API's own answer for the fetch.
-        channel = await _ancestor_entry(accessor, path, index, up=2)
-        if channel is None:
-            raise enoent(path.virtual)
-        channel_id = channel.id
+    channel_id = await day_channel_id(readdir, accessor, path, index)
     return await get_history_jsonl(
         accessor.config,
         channel_id,

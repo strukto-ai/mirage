@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 from mirage.vfs.gslides.slide_entry import (
     SlideEntry,
     make_filename,
@@ -62,7 +62,7 @@ def test_make_filename_fits_name_max_for_a_cjk_title():
     # untouched: with the date, the id and the suffix the name came to 367
     # bytes and ext4/APFS reject it with ENAMETOOLONG.
     name = make_filename("会議の記録" * 40, DOC_ID, "2026-08-20T12:00:00Z")
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert name.startswith("2026-08-20_")
     assert name.endswith(f"__{DOC_ID}.gslide.json")
     # The cut lands on a character boundary, never mid-sequence.
@@ -71,7 +71,7 @@ def test_make_filename_fits_name_max_for_a_cjk_title():
 
 def test_make_filename_leaves_an_ascii_title_on_the_char_budget():
     name = make_filename("a" * 400, DOC_ID, "")
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert name == f"{'a' * 97}...__{DOC_ID}.gslide.json"
 
 

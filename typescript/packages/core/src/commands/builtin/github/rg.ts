@@ -13,10 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
+import { hiddenPathsIntersect, pathRulesActive } from '../../../context/session_context.ts'
+import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
+import { IO } from './io.ts'
 import { SCOPE_ERROR } from '../../../core/github/constants.ts'
 import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
 import { stat as githubStat } from '../../../core/github/stat.ts'
-import { stream as githubStream } from '../../../core/github/read.ts'
+import { readStream as githubStream } from '../../../core/github/read.ts'
 import { IOResult } from '../../../io/types.ts'
 import { type FileStat, VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -36,7 +39,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 
 const ENC = new TextEncoder()
 
-async function rgCommand(
+async function rg(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -49,6 +52,11 @@ async function rgCommand(
   const f = parseFlags(fl)
   const refused = refuseMissingPattern(pattern, fl, f)
   if (refused !== null) return refused
+  // Code search and the core ops answer from the raw repository, so under a
+  // hide or a path rule the scan sets search aside and reads through the
+  // command guards, which report a refused directory where ripgrep does and
+  // never open a sealed file.
+  const scoped = pathRulesActive() || paths.some((p) => hiddenPathsIntersect(p.virtual))
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
@@ -63,7 +71,7 @@ async function rgCommand(
       // A narrowing holds only files matching the searched literal: -v and
       // --files-without-match print from the rest, and -f adds patterns code
       // search never saw.
-      needsEveryFile(fl, f),
+      scoped || needsEveryFile(fl, f),
     )
     resolved = narrowed.resolved
     if (narrowed.usedSearch) {
@@ -86,11 +94,14 @@ async function rgCommand(
       ]
     }
   }
-  const stat = (p: PathSpec): Promise<FileStat> => githubStat(accessor, p, opts.index ?? undefined)
+  const idx = opts.index ?? undefined
+  const io = scoped ? withCommandGuards(withPolicyGuard(IO)) : null
+  const stat = (p: PathSpec): Promise<FileStat> =>
+    io !== null ? io.stat(accessor, p, idx) : githubStat(accessor, p, idx)
   const readdir = (p: PathSpec): Promise<string[]> =>
-    githubReaddir(accessor, p, opts.index ?? undefined)
+    io !== null ? io.readdir(accessor, p, idx) : githubReaddir(accessor, p, idx)
   const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
-    githubStream(accessor, p, opts.index ?? undefined)
+    io !== null ? io.readStream(accessor, p, idx) : githubStream(accessor, p, idx)
   return rgGeneric(resolved, texts, runOpts, stat, readdir, stream)
 }
 
@@ -98,5 +109,5 @@ export const GITHUB_RG = command({
   name: 'rg',
   vfs: VFSName.GITHUB,
   spec: specOf('rg'),
-  fn: rgCommand,
+  fn: rg,
 })

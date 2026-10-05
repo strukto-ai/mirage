@@ -8,14 +8,14 @@ from mirage.core.nextcloud.rename import rename
 from mirage.core.nextcloud.rm import rm_r
 from mirage.core.nextcloud.truncate import truncate
 from mirage.core.nextcloud.unlink import unlink
-from mirage.core.nextcloud.write import write_bytes
+from mirage.core.nextcloud.write import write
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
 async def test_write_bytes_uploads(make_acc):
     acc = make_acc({})
-    await write_bytes(acc, PathSpec.from_str_path("/hello.txt"), b"hi there")
+    await write(acc, PathSpec.from_str_path("/hello.txt"), b"hi there")
     assert acc._fake.files == {"hello.txt": b"hi there"}
 
 

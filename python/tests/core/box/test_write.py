@@ -23,7 +23,7 @@ from mirage.core.box.mkdir import mkdir
 from mirage.core.box.rename import rename
 from mirage.core.box.rmdir import rm_r, rmdir
 from mirage.core.box.unlink import unlink
-from mirage.core.box.write import write_bytes
+from mirage.core.box.write import write
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
@@ -69,7 +69,7 @@ async def test_write_new_file_uploads_under_parent(root_accessor):
             new_callable=AsyncMock,
         ),
     ):
-        await write_bytes(root_accessor, _spec("/data/new.txt"), b"hello")
+        await write(root_accessor, _spec("/data/new.txt"), b"hello")
     up.assert_awaited_once_with(
         root_accessor.token_manager, "100", "new.txt", b"hello"
     )
@@ -87,7 +87,7 @@ async def test_write_existing_file_uploads_version(root_accessor):
             new_callable=AsyncMock,
         ),
     ):
-        await write_bytes(root_accessor, _spec("/data/a.txt"), b"OVER")
+        await write(root_accessor, _spec("/data/a.txt"), b"OVER")
     ver.assert_awaited_once_with(
         root_accessor.token_manager, "200", "a.txt", b"OVER"
     )
@@ -103,7 +103,7 @@ async def test_write_missing_parent_raises(root_accessor):
         ),
     ):
         with pytest.raises(FileNotFoundError):
-            await write_bytes(root_accessor, _spec("/data/ghost/x.txt"), b"x")
+            await write(root_accessor, _spec("/data/ghost/x.txt"), b"x")
 
 
 @pytest.mark.asyncio
@@ -560,7 +560,7 @@ async def test_write_records_the_virtual_path(root_accessor):
                 new_callable=AsyncMock,
             ),
         ):
-            await write_bytes(root_accessor, spec, b"hello")
+            await write(root_accessor, spec, b"hello")
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]

@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic.crossmount.types import (
     RunSingle,
 )
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit_line
+from mirage.commands.spec.usage import read_fail_exit_code_from_line
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
@@ -111,7 +111,8 @@ async def run_stream(
                     rendered = _respell_fetch_stderr(rendered, cmd_name, scope)
                     io.stderr = rendered
                 fail_code = max(
-                    fail_code, read_fail_exit_line(cmd_name, rendered)
+                    fail_code,
+                    read_fail_exit_code_from_line(cmd_name, rendered),
                 )
             # The fetch ran as cat, so its exit code is cat's whatever
             # went wrong. fail_code already carries the real command's,

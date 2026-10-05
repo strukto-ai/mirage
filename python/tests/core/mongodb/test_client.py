@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.core.mongodb.client import (
-    get_index_stats,
     get_indexes,
     get_validator,
     is_view,
@@ -205,29 +204,6 @@ def _build_indexstats_client(rows):
     client = MagicMock()
     client.__getitem__.return_value = db
     return client, col
-
-
-@pytest.mark.asyncio
-async def test_get_index_stats_returns_map_keyed_by_name():
-    rows = [
-        {"name": "_id_", "accesses": {"ops": 1234, "since": "2026-01-01"}},
-        {
-            "name": "title_text",
-            "accesses": {"ops": 5678, "since": "2026-02-01"},
-        },
-    ]
-    client, col = _build_indexstats_client(rows)
-    out = await get_index_stats(client, "db1", "coll1")
-    assert out["title_text"] == {"ops": 5678, "since": "2026-02-01"}
-    assert out["_id_"] == {"ops": 1234, "since": "2026-01-01"}
-    col.aggregate.assert_awaited_once_with([{"$indexStats": {}}])
-
-
-@pytest.mark.asyncio
-async def test_get_index_stats_empty_when_view():
-    client, _ = _build_indexstats_client([])
-    out = await get_index_stats(client, "db1", "myview")
-    assert out == {}
 
 
 @pytest.mark.asyncio

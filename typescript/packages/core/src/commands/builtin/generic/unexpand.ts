@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -68,16 +69,31 @@ function unexpandLine(line: string, tabsize: number, allSpaces: boolean): string
   return line
 }
 
+interface UnexpandFlags {
+  readonly tabsize: number
+  readonly allSpaces: boolean
+  readonly firstOnly: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): UnexpandFlags {
+  const fl = new FlagView(bag, specOf('unexpand'))
+  const tabsValue = fl.asStr('tabs')
+  return {
+    tabsize: tabsValue === undefined ? 8 : Number.parseInt(tabsValue, 10),
+    allSpaces: fl.asBool('all'),
+    firstOnly: fl.asBool('first_only'),
+  }
+}
+
 export async function unexpandGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
-  const fl = new FlagView(opts.flags, specOf('unexpand'))
-  const tabsValue = fl.asStr('tabs')
-  const tabsize = tabsValue === undefined ? 8 : Number.parseInt(tabsValue, 10)
-  const allSpaces = fl.asBool('all') && !fl.asBool('first_only')
+  const parsed = parseFlags(opts.flags)
+  const tabsize = parsed.tabsize
+  const allSpaces = parsed.allSpaces && !parsed.firstOnly
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still unexpand (GNU unexpand).

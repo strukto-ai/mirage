@@ -19,7 +19,7 @@ import pytest
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.ssh.read import read_bytes
+from mirage.core.ssh.read import read
 from mirage.core.ssh.readdir import readdir
 from mirage.core.ssh.stat import stat
 from mirage.types import FileType, PathSpec
@@ -172,9 +172,7 @@ async def test_stat_size_matches_read_for_every_file(index):
                 stack.append(child)
                 continue
             assert info.size is not None, child
-            body = await read_bytes(
-                accessor, PathSpec.from_str_path(child), index
-            )
+            body = await read(accessor, PathSpec.from_str_path(child), index)
             assert info.size == len(body), child
             files.append(child)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]

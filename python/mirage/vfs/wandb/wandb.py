@@ -2,6 +2,7 @@ from typing import Any
 
 from mirage.accessor.wandb import WandbAccessor
 from mirage.commands.builtin.wandb import COMMANDS
+from mirage.commands.builtin.wandb.io import IO
 from mirage.commands.config import RegisteredCommand, registered_commands
 from mirage.core.wandb.config import WandbConfig
 from mirage.ops.registry import RegisteredOp
@@ -14,6 +15,7 @@ from mirage.vfs.wandb.prompt import PROMPT
 class WandbVFS(BaseVFS):
     name: str = VFSName.WANDB
     prompt: str = PROMPT
+    max_du_entries: int | None = IO.max_du_entries
 
     def __init__(self, config: WandbConfig) -> None:
         super().__init__()

@@ -51,7 +51,8 @@ import {
   TO_STDIN as EXEC_TO_STDIN,
   TO_STDOUT as EXEC_TO_STDOUT,
 } from './builtins/exec/constants.ts'
-import { drained, type ExecuteNodeFn, pump } from './jobs.ts'
+import { drained, pump } from './jobs.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
@@ -492,7 +493,10 @@ export async function handleRedirect(
             else file.opened = true
             if (unique) {
               consumed.add(file)
-              if (data.byteLength > 0) io.writes[file.scope.virtual] = data
+              if (data.byteLength > 0) {
+                io.writes[file.scope.virtual] = data
+                io.cache = io.cache.filter((p) => p !== file.scope.virtual)
+              }
             }
           }
         for (const [key, data] of chunks) {
@@ -504,6 +508,7 @@ export async function handleRedirect(
             failedScope = target.scope
             await writeDescription(dispatch, session, target, data)
             io.writes[target.scope.virtual] = data
+            io.cache = io.cache.filter((p) => p !== target.scope.virtual)
           }
         }
       } catch (error) {

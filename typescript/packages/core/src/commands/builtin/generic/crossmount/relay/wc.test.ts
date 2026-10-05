@@ -15,24 +15,30 @@
 // Mirrors python/tests/commands/builtin/generic/crossmount/relay/test_wc.py.
 
 import { expect, it } from 'vitest'
+import { command, type CommandFn } from '../../../../config.ts'
+import { SPECS } from '../../../../spec/index.ts'
 import { IOResult, materialize } from '../../../../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { enoent } from '../../../../../utils/errors.ts'
+import { RAMVFS } from '../../../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../../../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../../../../workspace/fixtures/workspace_fixture.ts'
 import type { CrossResult } from '../types.ts'
-import { parseRow, runWc } from './wc.ts'
+import { runWc } from './wc.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-// What each operand's own mount answers for `wc -l`, and what stat says.
-const ROWS: Record<string, [string, string | null]> = {
-  '/a/dir': ['0 /a/dir\n', 'wc: /a/dir: Is a directory\n'],
-  '/b/name with spaces': ['1 /b/name with spaces\n', null],
-  '/b/x': ['1 /b/x\n', null],
-  '/pg/rows': ['5 /pg/rows\n', null],
-  '/pg2/rows': ['3 /pg2/rows\n', null],
-  '/gone': ['4 /gone\n', null],
+// What each operand's own mount counts for `wc -l`, and what stat says. The
+// printed text is never read back, so every run prints the same noise.
+const ROWS: Record<string, [number[], string | null]> = {
+  '/a/dir': [[0], 'wc: /a/dir: Is a directory\n'],
+  '/b/name with spaces': [[1], null],
+  '/b/x': [[1], null],
+  '/pg/rows': [[5], null],
+  '/pg2/rows': [[3], null],
+  '/gone': [[4], null],
 }
 const SIZES: Record<string, number | null> = {
   '/b/name with spaces': 6,
@@ -50,12 +56,13 @@ class Mounts {
     flags: Record<string, FlagValue>,
   ): Promise<CrossResult> => {
     this.runs.push([name, paths.map((p) => p.virtual), flags])
-    const [out, err] = ROWS[paths[0]?.virtual ?? ''] ?? ['', null]
+    const [values, err] = ROWS[paths[0]?.virtual ?? ''] ?? [[], null]
     return Promise.resolve([
-      ENC.encode(out),
+      ENC.encode('9 9 9 rendered\n'),
       new IOResult({
         exitCode: err === null ? 0 : 1,
         stderr: err === null ? null : ENC.encode(err),
+        countedRuns: [{ values, label: paths[0]?.rawPath ?? null }],
       }),
     ])
   }
@@ -139,13 +146,39 @@ it('rejects an invalid total before any mount runs', async () => {
   expect(mounts.ops).toEqual([])
 })
 
-it.each([
-  ['5   x', 1, { values: [5], label: '  x' }],
-  ['  5  57 447 /m/d', 3, { values: [5, 57, 447], label: '/m/d' }],
-  ['      8', 1, { values: [8], label: null }],
-] as [string, number, { values: number[]; label: string | null }][])(
-  'parseRow keeps the label whole: %j',
-  (line, counts, expected) => {
-    expect(parseRow(line, counts)).toEqual(expected)
-  },
-)
+const uncounted: CommandFn = (_accessor, paths) => [
+  ENC.encode(`777 ${paths[0]?.rawPath ?? ''}\n`),
+  new IOResult(),
+]
+
+const rowCount: CommandFn = (_accessor, paths) => [
+  new Uint8Array(0),
+  new IOResult({ countedRuns: [{ values: [42], label: paths[0]?.rawPath ?? null }] }),
+]
+
+it('recounts a wc without counts alone', async () => {
+  // /b's wc renders text only, so its operand is recounted through the
+  // dispatcher; /a's own count (a row count it never read for) stays.
+  // Mirrors Python's test_a_wc_without_counts_is_recounted_alone.
+  const first = new RAMVFS()
+  const second = new RAMVFS()
+  first.loadState({ type: 'ram', files: { '/x': ENC.encode('a\nb\n') } })
+  second.loadState({ type: 'ram', files: { '/y': ENC.encode('c\n') } })
+  const ws = new Workspace(
+    { '/a': first, '/b': second },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const spec = SPECS.wc
+  if (spec === undefined) throw new Error('Missing spec: wc')
+  for (const cmd of command({ name: 'wc', vfs: 'ram', spec, fn: rowCount }))
+    ws.registry.mountFor('/a/x').register(cmd)
+  for (const cmd of command({ name: 'wc', vfs: 'ram', spec, fn: uncounted }))
+    ws.registry.mountFor('/b/y').register(cmd)
+  try {
+    const result = await ws.shell('wc -l /a/x /b/y')
+    expect(DEC.decode(result.stdout)).toBe('42 /a/x\n1 /b/y\n43 total\n')
+    expect(result.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+})

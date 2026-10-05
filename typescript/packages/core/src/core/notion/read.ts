@@ -25,7 +25,7 @@ import {
   normalizeRow,
   toJsonBytes,
 } from './normalize.ts'
-import { getBlockTree, getDataSource, getDatabase, getPage, queryDataSource } from './pages.ts'
+import { listBlockTree, getDataSource, getDatabase, getPage, queryDataSource } from './pages.ts'
 import { stat } from './stat.ts'
 import { detectScope } from './scope.ts'
 
@@ -36,14 +36,14 @@ async function readPageJson(
 ): Promise<Uint8Array> {
   if (match.kind === 'row_json') {
     const page = await resolveRow(accessor, match, path.virtual)
-    const blocks = await getBlockTree(accessor.transport, match.slots.row_id ?? '')
+    const blocks = await listBlockTree(accessor.transport, match.slots.row_id ?? '')
     return toJsonBytes(normalizePage(page, blocks))
   }
   await guardRow(accessor, match, path.virtual)
   const pageId = match.slots.page_id ?? ''
   const [page, blocks] = await Promise.all([
     getPage(accessor.transport, pageId),
-    getBlockTree(accessor.transport, pageId),
+    listBlockTree(accessor.transport, pageId),
   ])
   return toJsonBytes(normalizePage(page, blocks))
 }

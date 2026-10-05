@@ -26,16 +26,26 @@ from mirage.types import PathSpec
 from mirage.vfs.gsheets.sheet_entry import make_filename
 
 GRID_DATA_PARAM = "true"
+# The fields vfs/gsheets/prompt.py documents. Without a mask every cell
+# also carries userEnteredFormat and effectiveFormat and every grid its
+# row and column metadata, which outweigh the values many times over.
+SPREADSHEET_FIELDS = (
+    "spreadsheetId,spreadsheetUrl,properties,namedRanges,"
+    "sheets(properties,data(startRow,startColumn,"
+    "rowData(values(formattedValue,userEnteredValue,effectiveValue))))"
+)
 
 
 async def read_spreadsheet(
     token_manager: TokenManager, spreadsheet_id: str
 ) -> bytes:
-    """Fetch full spreadsheet JSON, cell values included.
+    """Fetch spreadsheet JSON, cell values included and formats left out.
 
     `spreadsheets.get` returns no grid data unless asked, so without
     `includeGridData` the rendered `.gsheet.json` is tab metadata and
-    nothing an agent can read a cell from.
+    nothing an agent can read a cell from. The `fields` mask then keeps
+    the structure the VFS prompt documents; formatting stays reachable
+    through `gws sheets spreadsheets get`.
 
     Args:
         token_manager (TokenManager): manages OAuth2 tokens.
@@ -46,7 +56,9 @@ async def read_spreadsheet(
     """
     url = f"{sheets_base(token_manager)}/spreadsheets/{spreadsheet_id}"
     data = await google_get(
-        token_manager, url, {"includeGridData": GRID_DATA_PARAM}
+        token_manager,
+        url,
+        {"includeGridData": GRID_DATA_PARAM, "fields": SPREADSHEET_FIELDS},
     )
     return compact_json_bytes(data)
 

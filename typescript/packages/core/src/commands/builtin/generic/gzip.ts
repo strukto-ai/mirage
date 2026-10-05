@@ -14,6 +14,8 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { flagKwargName } from '../../spec/constants.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import type { StatFn } from './archive/walk.ts'
 import { mountedPath } from '../../../utils/key_prefix.ts'
@@ -36,6 +38,41 @@ import {
 } from './decompress.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 
+interface GzipFlags {
+  readonly decompress: boolean
+  readonly keep: boolean
+  readonly force: boolean
+  readonly toStdout: boolean
+  readonly quiet: boolean
+  readonly suffix: string
+  readonly level: number | null
+}
+
+// -1..-9, the last one typed, as GNU's option loop keeps it; -1 parses to
+// args_1 (AMBIGUOUS_NAMES). Read off the flag tape: an object lists its
+// integer-like keys first and in numeric order, so typedOrder cannot rank
+// the digits.
+function extractLevel(fl: FlagView): number | null {
+  const names = new Map<string, number>()
+  for (let n = 1; n <= 9; n++) names.set(flagKwargName(String(n)), n)
+  const typed = fl.occurrences(...names.keys()).filter(([, value]) => value === true)
+  const last = typed.at(-1)
+  return last === undefined ? null : (names.get(last[0]) ?? null)
+}
+
+function parseFlags(bag: Record<string, FlagValue>): GzipFlags {
+  const fl = new FlagView(bag, specOf('gzip'))
+  return {
+    decompress: fl.asBool('d'),
+    keep: fl.asBool('k'),
+    force: fl.asBool('f'),
+    toStdout: fl.asBool('c'),
+    quiet: fl.asBool('q'),
+    suffix: fl.asStr('S') ?? GZIP_SUFFIX,
+    level: extractLevel(fl),
+  }
+}
+
 export async function gzipGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -44,13 +81,15 @@ export async function gzipGeneric(
   unlink: (p: PathSpec) => Promise<void>,
   stat?: StatFn,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('gzip'))
-  const decompress = fl.asBool('d')
-  const keep = fl.asBool('k')
-  const force = fl.asBool('f')
-  const stdoutMode = fl.asBool('c')
-  const quiet = fl.asBool('q')
-  const suffix = fl.asStr('S') ?? GZIP_SUFFIX
+  const {
+    decompress,
+    keep,
+    force,
+    toStdout: stdoutMode,
+    quiet,
+    suffix,
+    level,
+  } = parseFlags(opts.flags)
 
   const door = linkDoor(opts)
 
@@ -70,7 +109,7 @@ export async function gzipGeneric(
       door,
     })
   if (paths.length === 0) {
-    const result: ByteSource = await gzip(await materialize(resolveSource(opts.stdin)))
+    const result: ByteSource = await gzip(await materialize(resolveSource(opts.stdin)), '', level)
     return [result, new IOResult()]
   }
   const read = stdinStream(stream, opts.stdin)
@@ -125,7 +164,7 @@ export async function gzipGeneric(
       }
       link = found.link
     }
-    const data = await gzip(raw, p.rawPath === '-' ? '' : gnuBasename(p.rawPath))
+    const data = await gzip(raw, p.rawPath === '-' ? '' : gnuBasename(p.rawPath), level)
     if (!inPlace) {
       stdout.push(data)
       continue

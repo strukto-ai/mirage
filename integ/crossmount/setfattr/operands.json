@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "id": "xm_setfattr_both_mounts",
+      "seq": 9900022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf a > /data/xm_attr && printf b > /data2/xm_attr && setfattr -n user.tag -v blue /data/xm_attr /data2/xm_attr && getfattr -n user.tag --only-values /data/xm_attr /data2/xm_attr",
+      "expect": {
+        "exit": 0,
+        "stdout": "blueblue",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_setfattr_remove_both_mounts",
+      "seq": 9900024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr -x user.tag /data/xm_attr /data2/xm_attr && getfattr -d /data/xm_attr /data2/xm_attr",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_setfattr_continues_after_missing",
+      "seq": 9900025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr -n user.tag -v green /data/xm_attr_missing /data2/xm_attr; echo status:$?; getfattr -n user.tag --only-values /data2/xm_attr",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:1\ngreen",
+        "stderr": "setfattr: /data/xm_attr_missing: No such file or directory\n"
+      }
+    }
+  ]
+}

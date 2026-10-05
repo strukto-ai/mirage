@@ -26,6 +26,8 @@ import { CapacityState, ListingVersion, PathSpec, VFSName } from '@struktoai/mir
 import type { CapacityResult } from '@struktoai/mirage-core/types'
 
 import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
+import { IO } from '../../commands/builtin/disk/io.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '@struktoai/mirage-core/commands/builtin/generic/du'
 
 import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
@@ -70,6 +72,8 @@ export class DiskVFS extends BaseVFS {
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
+  override readonly maxDuEntries: number | null =
+    IO.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : IO.maxDuEntries
   override readonly indexTtl: number = 60
   override readonly prompt = PROMPT
   // Each folder's listing is stored at the folder's own version (inode and

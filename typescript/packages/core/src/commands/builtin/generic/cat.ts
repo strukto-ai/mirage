@@ -38,16 +38,16 @@ function formatLineNo(n: number): string {
   return String(n).padStart(6, ' ')
 }
 
-interface CatDisplay {
-  numberLines: boolean
-  numberNonblank: boolean
-  showEnds: boolean
-  showTabs: boolean
-  showNonprinting: boolean
-  squeezeBlank: boolean
+interface CatFlags {
+  readonly numberLines: boolean
+  readonly numberNonblank: boolean
+  readonly showEnds: boolean
+  readonly showTabs: boolean
+  readonly showNonprinting: boolean
+  readonly squeezeBlank: boolean
 }
 
-function parseFlags(bag: Record<string, FlagValue>): CatDisplay {
+function parseFlags(bag: Record<string, FlagValue>): CatFlags {
   const fl = new FlagView(bag, specOf('cat'))
   const showAll = fl.asBool('show_all')
   return {
@@ -113,7 +113,7 @@ async function* reported(
 /** Line-process a stream for GNU cat's display flags (-n -E -T -v -s). */
 async function* displayLines(
   source: AsyncIterable<Uint8Array>,
-  display: CatDisplay,
+  display: CatFlags,
 ): AsyncIterable<Uint8Array> {
   let lineNo = 0
   let buf = new Uint8Array(0)
@@ -163,7 +163,6 @@ export async function catGeneric(
   stat = stdinStat(stat)
   stream = stdinStream(stream, opts.stdin)
   const display = parseFlags(opts.flags)
-  if (display.numberNonblank) display.numberLines = false
   const wantsDisplay = Object.values(display).some(Boolean)
   if (paths.length > 0) {
     const stats = new Map<string, FileStat>()

@@ -17,12 +17,12 @@ import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { appendBytes } from './append.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 describe('opfs/append', () => {
   it('appends to existing file', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/x'), new TextEncoder().encode('A'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('A'))
     await appendBytes(accessor, spec('/x'), new TextEncoder().encode('B'))
     expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('AB')
   })

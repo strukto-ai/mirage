@@ -298,12 +298,15 @@ export function getAdmission(): EntryGate | null {
 }
 
 /**
- * Whether a path rule in force reads the running command's paths.
+ * Whether a path rule or a coded preOps policy judges the running
+ * command's paths.
  *
  * The twin of `hiddenPathsActive` for the rule arms: a backend's native
  * find or du classifies the raw tree, so an entry a rule refuses would be
  * listed or summed past the gate; the readdir walk passes every entry
- * through it instead. False when no admitted command is bound.
+ * through it instead. A coded or scripted `preOps` hook judges every
+ * path the same way, so admission sets the flag for a session one speaks
+ * for too. False when no admitted command is bound.
  */
 export function pathRulesActive(): boolean {
   return getAdmission()?.scoped ?? false
@@ -323,19 +326,6 @@ const opPoliciesStorage = createAsyncContext<Policies | null>()
  */
 export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {
   return Promise.resolve(opPoliciesStorage.run(policies, fn))
-}
-
-/**
- * Unbind the op policies for the duration of `fn`: a delegated
- * sub-command whose door the caller has already cleared.
- *
- * find's `-delete` admits each removal itself, in find's own refusal
- * voice, and then delegates the mutation to `rm`; without the
- * suspension the delegated slot would admit the same deletion a second
- * time, so a counting or budget policy would see one removal twice.
- */
-export function runWithSuspendedOpPolicies<T>(fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(opPoliciesStorage.run(null, fn))
 }
 
 /**

@@ -481,16 +481,6 @@ def limited(
     }
 
 
-def tree_output(
-    repo: BaseRepo,
-    before: bytes | None,
-    after: bytes,
-    flags: DiffFlags,
-    recursive: bool = True,
-) -> bytes:
-    return _block(repo, before, after, flags, recursive) or b""
-
-
 def _block(
     repo: BaseRepo,
     before: bytes | None,

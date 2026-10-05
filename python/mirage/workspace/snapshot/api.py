@@ -25,8 +25,8 @@ from mirage.workspace.snapshot.tar_io import read_tar, write_tar
 
 try:
     from mirage.accessor.s3 import S3Accessor
-    from mirage.core.s3.read import read_bytes
-    from mirage.core.s3.write import write_bytes
+    from mirage.core.s3.read import read
+    from mirage.core.s3.write import write
 except ImportError:
     S3Accessor = None  # type: ignore[assignment,misc]
 
@@ -147,7 +147,7 @@ async def snapshot(
         )
     accessor = _s3_accessor(s3)
     try:
-        await write_bytes(accessor, _key_path(target), buffer.getvalue())
+        await write(accessor, _key_path(target), buffer.getvalue())
     finally:
         await accessor.close()
     return buffer.tell()
@@ -172,7 +172,7 @@ async def read_snapshot(
     if s3 is not None:
         accessor = _s3_accessor(s3)
         try:
-            source = io.BytesIO(await read_bytes(accessor, _key_path(source)))
+            source = io.BytesIO(await read(accessor, _key_path(source)))
         finally:
             await accessor.close()
     return await run_blocking(read_tar, source, staging)

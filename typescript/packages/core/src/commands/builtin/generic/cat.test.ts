@@ -80,6 +80,30 @@ describe('catGeneric multi-file streaming', () => {
   })
 })
 
+describe('catGeneric without display flags', () => {
+  it('hands out the first chunk before the source is asked for the next', async () => {
+    const pulled: string[] = []
+    async function* chunks(): AsyncIterable<Uint8Array> {
+      for (const chunk of ['hel', 'lo\nwo', 'rld\n']) {
+        await Promise.resolve()
+        pulled.push(chunk)
+        yield ENC.encode(chunk)
+      }
+    }
+    const result = await catGeneric([spec('/a.txt')], [], opts(), statFn, () => chunks())
+    const [stdout] = result ?? [null]
+    const iter = (stdout as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const first = await iter.next()
+    expect(DEC.decode(first.value as Uint8Array)).toBe('hel')
+    expect(pulled).toEqual(['hel'])
+    let rest = ''
+    for (let next = await iter.next(); next.done !== true; next = await iter.next()) {
+      rest += DEC.decode(next.value)
+    }
+    expect(rest).toBe('lo\nworld\n')
+  })
+})
+
 describe('catGeneric per-operand read failure', () => {
   it('reports a read refused past the stat and prints the next file', async () => {
     // A table past its mount's read cap stats fine and refuses the read; GNU

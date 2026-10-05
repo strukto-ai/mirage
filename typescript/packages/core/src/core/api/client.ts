@@ -78,6 +78,18 @@ export type ReadMode =
   | 'location'
   | 'response'
 
+/**
+ * A response's headers as a plain record, names lower-cased; fetch already
+ * joins a repeated header, as python's lowered_headers does.
+ */
+export function loweredHeaders(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {}
+  headers.forEach((value, name) => {
+    out[name.toLowerCase()] = value
+  })
+  return out
+}
+
 /** Decoded body plus the wire metadata cursor pagination reads. Mirrors
  * python's `ApiResponse`; a caller asking for `read: 'response'` gets this
  * rather than the bare body, because a `Link` header is the only thing that
@@ -142,7 +154,7 @@ export function headerDelay(response: Response, attempt: number, retry: RetryPol
   return Math.min(2 ** attempt, retry.maxBackoff)
 }
 
-function textDelay(text: string, retry: RetryPolicy): number {
+export function bodyDelay(text: string, retry: RetryPolicy): number {
   let data: unknown = {}
   try {
     data = JSON.parse(text) as unknown
@@ -160,10 +172,6 @@ function textDelay(text: string, retry: RetryPolicy): number {
     : Math.min(1, retry.maxBackoff)
 }
 
-export async function bodyDelay(response: Response, retry: RetryPolicy): Promise<number> {
-  return textDelay(await response.text(), retry)
-}
-
 /** Raise a wait to the policy's floor for this status, then cap it. */
 export function flooredDelay(delay: number, status: number, retry: RetryPolicy): number {
   const floor = retry.minDelays?.[status]
@@ -173,7 +181,7 @@ export function flooredDelay(delay: number, status: number, retry: RetryPolicy):
 
 function retryDelay(response: Response, text: string, attempt: number, retry: RetryPolicy): number {
   const delay =
-    retry.delaySource === 'body' ? textDelay(text, retry) : headerDelay(response, attempt, retry)
+    retry.delaySource === 'body' ? bodyDelay(text, retry) : headerDelay(response, attempt, retry)
   return flooredDelay(delay, response.status, retry)
 }
 
@@ -249,10 +257,7 @@ export async function apiRequest(
       return windowOf(data, response.status, options.window)
     }
     if (read === 'bytes_response') {
-      const headers: Record<string, string> = {}
-      response.headers.forEach((value, name) => {
-        headers[name.toLowerCase()] = value
-      })
+      const headers = loweredHeaders(response.headers)
       const data = windowOf(
         new Uint8Array(await response.arrayBuffer()),
         response.status,
@@ -263,10 +268,7 @@ export async function apiRequest(
     const text = await response.text()
     if (read === 'text') return text
     if (read === 'response') {
-      const headers: Record<string, string> = {}
-      response.headers.forEach((value, name) => {
-        headers[name.toLowerCase()] = value
-      })
+      const headers = loweredHeaders(response.headers)
       let data: unknown = null
       if (text !== '') {
         try {

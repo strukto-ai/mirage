@@ -112,7 +112,7 @@ async def test_wc_format_multi_serves_cache_without_backend():
     manager = await _warm_manager()
     prev = push_cache_manager(manager)
     try:
-        out, err = await format_multi([_spec()], read=reader, lines=True)
+        out, err, _ = await format_multi([_spec()], read=reader, lines=True)
     finally:
         push_cache_manager(prev)
     assert b"2" in out

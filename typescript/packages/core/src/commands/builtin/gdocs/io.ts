@@ -15,7 +15,7 @@
 import { VFSAdapter } from '../../../vfs/adapter.ts'
 
 import type { GDocsAccessor } from '../../../accessor/gdocs.ts'
-import { read as gdocsRead, stream as gdocsStream } from '../../../core/gdocs/read.ts'
+import { read as gdocsRead, readStream as gdocsStream } from '../../../core/gdocs/read.ts'
 import { readdir as gdocsReaddir } from '../../../core/gdocs/readdir.ts'
 import { stat as gdocsStat } from '../../../core/gdocs/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'

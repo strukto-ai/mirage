@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_auto_split_destination",
+      "seq": 963007,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf \"a\\nb\\n\" > /data/xm_split; split -l1 /data/xm_split /data2/xm_part; cat /data2/xm_partaa /data2/xm_partab",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

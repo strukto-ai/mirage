@@ -18,7 +18,7 @@ from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.client import (
     _client_kwargs,
     _key,
-    _strip_prefix,
+    _strip_key_prefix,
     async_session,
 )
 from mirage.types import PathSpec, WalkEntry
@@ -73,7 +73,7 @@ class S3Walk:
                 okey = obj["Key"]
                 if not (okey == stem or okey.startswith(base)):
                     continue
-                relative = _strip_prefix(okey, config)
+                relative = _strip_key_prefix(okey, config)
                 virtual = (
                     prefix.rstrip("/") + "/" + relative.lstrip("/")
                     if prefix

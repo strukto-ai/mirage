@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.tsort import tsort as generic_tsort
+from mirage.commands.builtin.generic.tsort import (
+    tsort_generic as generic_tsort,
+)
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,

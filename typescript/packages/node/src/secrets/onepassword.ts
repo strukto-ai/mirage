@@ -77,7 +77,7 @@ export function parseOpRef(ref: string): OpRef {
  * Throws SecretsError when neither the config nor the env carries a
  * service account token.
  */
-export async function onePasswordClient(config: OnePasswordConfig): Promise<Client> {
+export async function onepasswordClient(config: OnePasswordConfig): Promise<Client> {
   const token = config.token ?? process.env[TOKEN_VAR] ?? ''
   if (token === '') {
     throw new SecretsError(
@@ -152,12 +152,12 @@ export function fieldsFromItem(item: Item): Record<string, string> {
  * one AWS item fill four variables on one await. 1Password does not
  * expire an item, so `expiresAt` stays absent.
  */
-export async function fetchOnePassword(
+export async function fetchOnepassword(
   config: OnePasswordConfig,
   ref: string,
 ): Promise<ResolvedSecret> {
   const { vault, item, field } = parseOpRef(ref)
-  const client = await onePasswordClient(config)
+  const client = await onepasswordClient(config)
   if (field !== '') return { fields: { [field]: await client.secrets.resolve(ref) } }
   const vaultId = await findVaultId(client, vault)
   const itemId = await findItemId(client, vaultId, item)

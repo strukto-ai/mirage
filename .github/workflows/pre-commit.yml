@@ -210,6 +210,9 @@ jobs:
       # a case is normally just deleted from its `targets`, which turns a
       # divergence into an omission nobody can see. This fails when a case
       # file drops a target its siblings still exercise.
+      - name: Cross-mount command coverage
+        run: ./python/.venv/bin/python integ/runners/tools/check_crossmount_coverage.py --selftest
+
       - name: Case target coverage
         run: ./python/.venv/bin/python integ/runners/tools/check_case_targets.py --strict
 

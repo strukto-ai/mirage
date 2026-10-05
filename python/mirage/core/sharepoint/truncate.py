@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.msgraph.drive import make_truncate
-from mirage.core.sharepoint.read import read_bytes
-from mirage.core.sharepoint.write import write_bytes
+from mirage.core.sharepoint.read import read
+from mirage.core.sharepoint.write import write
 
-truncate = make_truncate(read_bytes, write_bytes)
+truncate = make_truncate(read, write)

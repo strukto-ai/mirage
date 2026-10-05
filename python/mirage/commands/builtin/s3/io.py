@@ -20,7 +20,7 @@ from mirage.core.s3.du import size as _du_size
 from mirage.core.s3.exists import exists as _exists
 from mirage.core.s3.find import find as _find
 from mirage.core.s3.mkdir import mkdir as _mkdir
-from mirage.core.s3.read import read_bytes as _read
+from mirage.core.s3.read import read as _read
 from mirage.core.s3.readdir import readdir as _readdir
 from mirage.core.s3.rename import rename as _rename
 from mirage.core.s3.rm import rm_r as _rm_r
@@ -29,7 +29,7 @@ from mirage.core.s3.stat import stat as _stat
 from mirage.core.s3.stream import read_stream as _read_stream
 from mirage.core.s3.truncate import truncate as _truncate
 from mirage.core.s3.unlink import unlink as _unlink
-from mirage.core.s3.write import write_bytes as _write
+from mirage.core.s3.write import write as _write
 from mirage.vfs.adapter import VFSAdapter, append_from_read
 from mirage.vfs.types import DuOps, NativeReadOps, ReadOps, WriteOps
 
