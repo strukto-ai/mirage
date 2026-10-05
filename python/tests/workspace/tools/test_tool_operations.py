@@ -1,3 +1,5 @@
+import errno
+
 import pytest
 
 from mirage import RAMVFS, Deny, MountMode, Policy, Session, Workspace
@@ -5,6 +7,7 @@ from mirage.context.session_context import (
     reset_current_session,
     set_current_session,
 )
+from mirage.ops.ops import Ops
 from mirage.policy import OpsContext
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 from mirage.workspace.tools.tool_operations import number_lines
@@ -370,6 +373,31 @@ async def test_a_file_refused_down_to_its_stat_is_a_tool_error():
     assert written.is_error and written.text.startswith("Error: ")
     assert globbed.text == "/d/open.txt\n"
     assert literal.text == "" and not literal.is_error
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_fails_leaves_the_tool_error(monkeypatch):
+    # A backend that cannot answer the existence probe proves nothing, so
+    # the tool reports the failure as its result instead of raising it.
+    real = Ops.exists
+
+    async def flaky(self, path, *, session_id=None):
+        if path == "/d/flaky.txt":
+            raise OSError(errno.EIO, "Input/output error", path)
+        return await real(self, path, session_id=session_id)
+
+    monkeypatch.setattr(Ops, "exists", flaky)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /d")
+    try:
+        read = await ws.tools.call("read", {"path": "/d/flaky.txt"})
+        written = await ws.tools.call(
+            "write", {"path": "/d/flaky.txt", "content": "x"}
+        )
+    finally:
+        await ws.close()
+    assert read.is_error and "not found" not in read.text
+    assert written.is_error and "Input/output error" in written.text
 
 
 @pytest.mark.asyncio

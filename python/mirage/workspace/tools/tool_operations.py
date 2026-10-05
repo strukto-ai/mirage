@@ -111,8 +111,9 @@ async def missing(vfs: Ops, path: str) -> bool:
     failure's wording.
 
     A probe the workspace refuses means the path is there: a hidden one
-    answers absent, never refused. The read's own error then stands
-    rather than the probe's.
+    answers absent, never refused. A probe that fails for any other
+    filesystem reason proves nothing either way. In both cases the
+    read's own error stands rather than the probe's.
 
     Args:
         vfs (Ops): The op facade the read went through.
@@ -120,8 +121,8 @@ async def missing(vfs: Ops, path: str) -> bool:
     """
     try:
         return not await vfs.exists(path)
-    except PermissionError as exc:
-        logger.debug("exists probe refused for %s: %s", path, exc)
+    except OSError as exc:
+        logger.debug("exists probe failed for %s: %s", path, exc)
         return False
 
 
@@ -215,7 +216,7 @@ class MirageToolOperations:
         versions = await self._versions()
         try:
             present = await versions.vfs.exists(path)
-        except PermissionError as exc:
+        except OSError as exc:
             return ToolResult(f"Error: {exc}", True)
         if present and not versions.has_read(path):
             return ToolResult(

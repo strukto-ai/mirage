@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Ops } from '../../ops/ops.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -270,6 +271,25 @@ describe('a session', () => {
     expect(textOf(globbed)).toBe('/d/open.txt\n')
     expect(textOf(literal)).toBe('')
     expect(literal.isError).not.toBe(true)
+  })
+
+  it('answers a probe that fails with the tool error', async () => {
+    // A backend that cannot answer the existence probe proves nothing, so
+    // the tool reports the failure as its result instead of raising it.
+    await ws.shell('mkdir /d')
+    const spy = vi
+      .spyOn(Ops.prototype, 'exists')
+      .mockRejectedValue(Object.assign(new Error('Input/output error'), { code: 'EIO' }))
+    try {
+      const read = await ops.call('read', { path: '/d/flaky.txt' })
+      const written = await ops.call('write', { path: '/d/flaky.txt', content: 'x' })
+      expect(read.isError).toBe(true)
+      expect(textOf(read)).not.toContain('not found')
+      expect(written.isError).toBe(true)
+      expect(textOf(written)).toContain('Input/output error')
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('keeps a session already bound rather than widening it', async () => {
