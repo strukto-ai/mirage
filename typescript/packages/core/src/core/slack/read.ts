@@ -15,7 +15,7 @@
 import { dayChannelId, guardDay } from '../time_range.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, makeReadRange } from '../hierarchy/read.ts'

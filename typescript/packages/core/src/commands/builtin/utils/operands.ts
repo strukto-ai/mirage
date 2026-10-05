@@ -14,7 +14,8 @@
 
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import type { FileStat, PathSpec } from '../../../types.ts'
+import { FileType } from '../../../types.ts'
 import {
   eisdir,
   fsErrorLine,
