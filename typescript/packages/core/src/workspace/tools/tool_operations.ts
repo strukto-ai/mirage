@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Ops } from '../../ops/ops.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
 import { isEacces } from '../../utils/errors.ts'
 import { gnuDirname } from '../../utils/path.ts'
 import type { Session, SessionExecuteOptions } from '../workspace/handle.ts'
@@ -81,9 +82,11 @@ async function missing(vfs: Ops, path: string): Promise<boolean> {
     // An errno-stamped error is the TypeScript shape of Python's OSError;
     // anything else (an unknown session) is not a probe answer.
     if (typeof (err as { code?: unknown } | null)?.code !== 'string') throw err
-    // A refusal is routine (the policy that refused the read refuses the
-    // probe too); only an unexpected failure is worth a warning.
-    if (!isEacces(err)) console.warn(`exists probe failed for ${path}: ${String(err)}`)
+    // A policy refusal is routine (the policy that refused the read refuses
+    // the probe too); any other failure, a backend EACCES included, warns.
+    if (!(err instanceof PolicyDenied)) {
+      console.warn(`exists probe failed for ${path}: ${String(err)}`)
+    }
     return false
   }
 }
