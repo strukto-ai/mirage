@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.shell.bytes import encode_text
 from mirage.shell.console.ram import RAMConsoleStore
 from mirage.shell.console.store import ConsoleStore
 from mirage.shell.console.types import (
@@ -107,7 +108,7 @@ class JobConsole:
         self._finished = True
         if self._store.closed:
             return
-        await self._store.append(Channel.CONTROL, outcome.encode())
+        await self._store.append(Channel.CONTROL, encode_text(outcome))
 
     async def read_from(
         self, seq: int, limit: int | None = None

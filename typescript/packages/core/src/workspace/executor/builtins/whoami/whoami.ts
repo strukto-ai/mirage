@@ -16,6 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 
 export function handleWhoami(namespace: Namespace): Result {
   // GNU whoami reports the effective user and never consults $USER; the
@@ -23,14 +24,14 @@ export function handleWhoami(namespace: Namespace): Result {
   // the effective identity here. With no claimed identity it fails like
   // GNU does for a uid with no passwd entry.
   if (namespace.user === null) {
-    const err = new TextEncoder().encode('whoami: cannot find name for user ID\n')
+    const err = encodeText('whoami: cannot find name for user ID\n')
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
       new ExecutionNode({ command: 'whoami', exitCode: 1, stderr: err }),
     ]
   }
-  const out = new TextEncoder().encode(`${namespace.user}\n`)
+  const out = encodeText(`${namespace.user}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'whoami', exitCode: 0 })]
 }
 

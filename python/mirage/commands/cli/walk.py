@@ -30,6 +30,7 @@ from mirage.commands.spec.help import (
     render_help,
 )
 from mirage.commands.spec.types import UsageStyle
+from mirage.shell.bytes import encode_text
 from mirage.utils.path import resolve_path
 
 
@@ -384,21 +385,21 @@ def _usage_error(
         path = name.partition(" ")[2]
         # `git -h` is git's own help, as `git --help` is, and exits 0.
         if not path and token == HELP_SWITCH:
-            return WalkResult(output=node_help(name, node, style).encode())
+            return WalkResult(output=encode_text(node_help(name, node, style)))
         if not path:
             text = f"unknown option: {token}\nusage: {GIT_SYNOPSES[''][0]}\n"
             return WalkResult(
-                output=text.encode(), stream="stderr", exit_code=USAGE_EXIT
+                output=encode_text(text), stream="stderr", exit_code=USAGE_EXIT
             )
         shown, refused = git_option_refusal(token, path, node)
         return WalkResult(
-            output=(shown or refused).encode(),
+            output=encode_text(shown or refused),
             stream="stdout" if shown else "stderr",
             exit_code=USAGE_EXIT,
         )
     text = f"{message}\n\n{node_help(name, node, style)}"
     return WalkResult(
-        output=text.encode(), stream="stderr", exit_code=USAGE_EXIT
+        output=encode_text(text), stream="stderr", exit_code=USAGE_EXIT
     )
 
 
@@ -411,7 +412,7 @@ def _unknown_verb(head: str, name: str, word: str) -> WalkResult:
         word (str): the word that matched no subcommand.
     """
     text = f"{head}: '{word}' is not a {name} command. See '{name} --help'.\n"
-    return WalkResult(output=text.encode(), stream="stderr", exit_code=1)
+    return WalkResult(output=encode_text(text), stream="stderr", exit_code=1)
 
 
 def _record_bool(flags: WalkFlagBag, cs: CompiledSpec, spelling: str) -> None:
@@ -797,7 +798,7 @@ def walk(
                             style,
                         )
                     return WalkResult(
-                        output=node_help(name, node, style).encode()
+                        output=encode_text(node_help(name, node, style))
                     )
                 else:
                     return _usage_error(
@@ -878,7 +879,7 @@ def walk(
         if refused is not None:
             return refused
         return WalkResult(
-            output=node_help(name, node, style).encode(),
+            output=encode_text(node_help(name, node, style)),
             stream="stdout",
             exit_code=1,
         )

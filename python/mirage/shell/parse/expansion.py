@@ -1,3 +1,4 @@
+from mirage.shell.bytes import decode_text
 from mirage.shell.parameter import bad_substitution
 from mirage.shell.parse.heredoc.line import construct_end
 from mirage.shell.types import TSNodeLike
@@ -41,7 +42,7 @@ def expansion_source(data: bytes, root: TSNodeLike) -> bytes:
         end = construct_end(data, start, ord("}"))
         if start < covered or end is None:
             continue
-        if bad_substitution(data[start:end].decode(errors="replace")):
+        if bad_substitution(decode_text(data[start:end])):
             out[start + 2 : end - 1] = b"a" * (end - start - 3)
             covered = end
             continue

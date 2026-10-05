@@ -16,6 +16,7 @@ from mirage.commands.builtin.utils.links import LinkDoor
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.compress import gunzip_stream
 from mirage.utils.errors import (
@@ -66,10 +67,10 @@ def suffix_refusal(suffix: str) -> IOResult | None:
     Args:
         suffix (str): the -S suffix, ``.gz`` by default.
     """
-    if 0 < len(suffix.encode()) <= GZIP_MAX_SUFFIX:
+    if 0 < len(encode_text(suffix)) <= GZIP_MAX_SUFFIX:
         return None
     return IOResult(
-        exit_code=1, stderr=f"gzip: invalid suffix '{suffix}'\n".encode()
+        exit_code=1, stderr=encode_text(f"gzip: invalid suffix '{suffix}'\n")
     )
 
 
@@ -332,7 +333,7 @@ async def decompress_inputs(
 
     def report(line: str, code: int, warning: bool = False) -> None:
         if not (warning and quiet):
-            errors.append(line.encode())
+            errors.append(encode_text(line))
             io.stderr = b"".join(errors)
         if io.exit_code != 1:
             io.exit_code = code

@@ -15,6 +15,7 @@
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import { UsageError } from '../../commands/errors.ts'
 import { ContentDriftError } from '../snapshot/drift.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * True for the errors that are the caller's problem, not the line's:
@@ -34,16 +35,15 @@ export function isControlFlowError(err: unknown): boolean {
  * `isControlFlowError`) before reaching this.
  */
 export function failureResult(err: unknown): { stderr: Uint8Array; exitCode: number } {
-  const enc = new TextEncoder()
   if (err instanceof DOMException && err.name === 'AbortError') {
-    return { stderr: enc.encode(`${err.message}\n`), exitCode: 130 }
+    return { stderr: encodeText(`${err.message}\n`), exitCode: 130 }
   }
   if (err instanceof CommandTimeoutError) {
-    return { stderr: enc.encode(`${err.message}\n`), exitCode: 124 }
+    return { stderr: encodeText(`${err.message}\n`), exitCode: 124 }
   }
   if (err instanceof UsageError) {
-    return { stderr: enc.encode(`${err.message}\n`), exitCode: err.exitCode }
+    return { stderr: encodeText(`${err.message}\n`), exitCode: err.exitCode }
   }
   const msg = err instanceof Error ? err.message : String(err)
-  return { stderr: enc.encode(`${msg}\n`), exitCode: 1 }
+  return { stderr: encodeText(`${msg}\n`), exitCode: 1 }
 }

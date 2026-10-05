@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.ops.types import StatPath
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import iso_timestamp, timestamp_iso
 from mirage.utils.path import CycleError
@@ -31,7 +32,7 @@ def missing_reference_line(ref: str) -> bytes:
     Args:
         ref (str): the reference as typed.
     """
-    return f"find: '{ref}': No such file or directory\n".encode()
+    return encode_text(f"find: '{ref}': No such file or directory\n")
 
 
 def loop_reference_line(ref: str) -> bytes:
@@ -41,7 +42,7 @@ def loop_reference_line(ref: str) -> bytes:
     Args:
         ref (str): the reference as typed.
     """
-    return f"find: '{ref}': Too many levels of symbolic links\n".encode()
+    return encode_text(f"find: '{ref}': Too many levels of symbolic links\n")
 
 
 async def reference_stat(

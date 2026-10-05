@@ -78,6 +78,7 @@ import {
 import { dispatchStat, linkFollow } from '../../commands/builtin/utils/paths.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 type CmdKey = string
 type OpKey = string
@@ -575,7 +576,7 @@ export class MountEntry {
           null,
           new IOResult({
             exitCode: 127,
-            stderr: new TextEncoder().encode(`${cmdName}: command not found`),
+            stderr: encodeText(`${cmdName}: command not found`),
           }),
         ]
       }
@@ -697,9 +698,7 @@ export class MountEntry {
                           null,
                           new IOResult({
                             exitCode: 1,
-                            stderr: new TextEncoder().encode(
-                              `${cmdName}: read-only mount at ${this.prefix}\n`,
-                            ),
+                            stderr: encodeText(`${cmdName}: read-only mount at ${this.prefix}\n`),
                           }),
                         ]
                       }

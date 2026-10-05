@@ -25,9 +25,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
 
 interface UniqFlags {
   count: boolean
@@ -135,7 +133,7 @@ function skipFields(text: string, count: number): string {
 }
 
 function comparisonKey(line: Uint8Array, flags: UniqFlags): string {
-  let characters = Array.from(skipFields(DEC.decode(line), flags.skipFields))
+  let characters = Array.from(skipFields(decodeText(line), flags.skipFields))
   if (flags.skipChars > 0) characters = characters.slice(flags.skipChars)
   if (flags.checkChars !== null) characters = characters.slice(0, flags.checkChars)
   const text = characters.join('')
@@ -170,7 +168,7 @@ function formatRecord(
   flags: UniqFlags,
   separator: number,
 ): Uint8Array {
-  const prefix = flags.count ? ENC.encode(`${padLeft(String(count), 7)} `) : new Uint8Array()
+  const prefix = flags.count ? encodeText(`${padLeft(String(count), 7)} `) : new Uint8Array()
   const output = new Uint8Array(prefix.byteLength + line.byteLength + 1)
   output.set(prefix)
   output.set(line, prefix.byteLength)
@@ -256,14 +254,14 @@ export async function uniqGeneric(
     parsed = parseFlags(opts.flags)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${message}\n`) })]
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })]
   }
   if (paths.length > 0 && stat !== undefined) {
     // The input is stat'ed before the lazy stream starts, so a missing or
     // unreadable one is reported in uniq's own words rather than
     // surfacing mid-drain.
     const [, err] = await splitReadable(paths.slice(0, 1), stdinStat(stat), 'uniq')
-    if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err) })]
+    if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: encodeText(err) })]
   }
   let source: AsyncIterable<Uint8Array>
   const cache: string[] = []
@@ -277,7 +275,7 @@ export async function uniqGeneric(
       source = resolveSource(opts.stdin)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${message}\n`) })]
+      return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })]
     }
   }
   const output = uniqStream(source, parsed)
@@ -286,7 +284,7 @@ export async function uniqGeneric(
     if (write === undefined) {
       return [
         null,
-        new IOResult({ exitCode: 1, stderr: ENC.encode('uniq: output is not writable\n') }),
+        new IOResult({ exitCode: 1, stderr: encodeText('uniq: output is not writable\n') }),
       ]
     }
     const data = await materialize(output)

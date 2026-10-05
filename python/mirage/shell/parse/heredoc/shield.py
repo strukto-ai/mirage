@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.heredoc.body import heredoc_bodies
 from mirage.shell.parse.heredoc.constants import (
     ALTERNATE_FILLER,
@@ -45,7 +45,7 @@ def heredoc_operators(root: TSNodeLike) -> list[HeredocOperator]:
         stack.extend(node.children)
         if node.type != HEREDOC_START:
             continue
-        delimiter = clean_delimiter((node.text or b"").decode())
+        delimiter = clean_delimiter(decode_text(node.text or b""))
         previous = node.prev_sibling
         found.append(
             HeredocOperator(

@@ -15,6 +15,7 @@
 from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.dirs.constants import (
     PWD_OPTIONS,
@@ -45,14 +46,16 @@ async def handle_pwd(
     )
     if bad_opt is not None:
         voice = "" if program_invocation(session) else "bash: "
-        err = f"{voice}pwd: -{bad_opt}: invalid option\n{PWD_USAGE}".encode()
+        err = encode_text(
+            f"{voice}pwd: -{bad_opt}: invalid option\n{PWD_USAGE}"
+        )
         return (
             None,
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="pwd", exit_code=2, stderr=err),
         )
     cwd = session.cwd if physical else logical_cwd(session)
-    out = (cwd + "\n").encode()
+    out = encode_text(cwd + "\n")
     return out, IOResult(), ExecutionNode(command="pwd", exit_code=0)
 
 

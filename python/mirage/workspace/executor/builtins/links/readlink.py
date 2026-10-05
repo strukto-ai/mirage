@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.paths import (
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.errors import fs_error_line, fs_strerror, walk_refusal
 from mirage.workspace.executor.builtins.links.ln import operand_abs
@@ -151,9 +152,9 @@ async def handle_readlink(
         lines.append(target)
     end = ("\0" if fl.as_bool("zero") else "\n") if newline else ""
     text = "".join(line + end for line in lines)
-    err = "".join(errors).encode()
+    err = encode_text("".join(errors))
     return (
-        text.encode() if text else None,
+        encode_text(text) if text else None,
         IOResult(exit_code=exit_code, stderr=err),
         ExecutionNode(command="readlink", exit_code=exit_code, stderr=err),
     )

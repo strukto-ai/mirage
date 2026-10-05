@@ -61,6 +61,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileType, PathSpec, Producer
 from mirage.utils.dates import in_mtime_window, iso_timestamp
 from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
@@ -147,7 +148,7 @@ async def _empty_dirs(
         return [], []
     rows: list[str] = []
     for data in blocks:
-        for line in data.decode(errors="replace").splitlines():
+        for line in decode_text(data).splitlines():
             size, _, label = line.partition("\t")
             if size == "0" and label:
                 rows.append(label)
@@ -529,10 +530,10 @@ async def _filter_under_prefixes(
     start with `/` are passed through.
     """
     data = await materialize(stdout)
-    text = data.decode("utf-8", errors="replace")
+    text = decode_text(data)
     if cmd_name == "ls":
         grouped = _drop_shadowed_ls_groups(text, descendant_prefixes)
-        return ("\n".join(grouped) + "\n").encode("utf-8") if grouped else b""
+        return encode_text("\n".join(grouped) + "\n") if grouped else b""
     out_lines: list[str] = []
     for line in text.split("\n"):
         if line == "":
@@ -555,7 +556,7 @@ async def _filter_under_prefixes(
             if shadowed:
                 continue
         out_lines.append(line)
-    return ("\n".join(out_lines) + "\n").encode("utf-8") if out_lines else b""
+    return encode_text("\n".join(out_lines) + "\n") if out_lines else b""
 
 
 async def _fan_out_traversal(
@@ -612,7 +613,9 @@ async def _fan_out_traversal(
             )
         except UsageError as exc:
             stdout = None
-            io = IOResult(exit_code=exc.exit_code, stderr=f"{exc}\n".encode())
+            io = IOResult(
+                exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
+            )
         io.producer = Producer(
             command=cmd_name,
             prefixes=tuple(
@@ -832,7 +835,7 @@ async def _fan_out_traversal(
             # A usage error belongs to the line, not to one mount: the
             # single-mount path reports it once as the command's result
             # (#452), and so does the walk, rather than aborting the line.
-            usage = f"{exc}\n".encode()
+            usage = encode_text(f"{exc}\n")
             return (
                 None,
                 IOResult(exit_code=exc.exit_code, stderr=usage),
@@ -922,9 +925,9 @@ async def _fan_out_traversal(
         all_rows = [p for run in find_matches for p in run]
         if not find_matches_complete and all_rows:
             all_stdout.append(
-                (
+                encode_text(
                     "\n".join(p.raw_path or p.virtual for p in all_rows) + "\n"
-                ).encode()
+                )
             )
 
     combined: ByteSource | None
@@ -941,7 +944,7 @@ async def _fan_out_traversal(
                     for row, exc in refused
                 )
                 merged_io = await merged_io.merge(
-                    IOResult(exit_code=1, stderr=notes.encode())
+                    IOResult(exit_code=1, stderr=encode_text(notes))
                 )
                 exit_codes.append(1)
                 errored.append(True)
@@ -962,9 +965,9 @@ async def _fan_out_traversal(
             unique = {p.virtual: p for p in all_rows}
             find_matches = [sorted(unique.values(), key=lambda p: p.raw_path)]
             all_rows = find_matches[0]
-        combined = (
+        combined = encode_text(
             "\n".join(p.raw_path or p.virtual for p in all_rows) + "\n"
-        ).encode("utf-8")
+        )
     elif all_stdout:
         # `ls -R` separates directory groups with a blank line, and a
         # per-mount block is one more group; grep and rg put `--` between

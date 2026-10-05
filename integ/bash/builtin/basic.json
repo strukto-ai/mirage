@@ -1087,6 +1087,40 @@
         "stdout": "pb 2\n0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "eval_keeps_raw_bytes",
+      "seq": 502717,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=$'\\xff'; eval \"echo a${x}b\" | od -An -tx1; eval \"f() { echo \\\"\\$1$x\\\"; }\"; f c | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 ff 62 0a\n 63 ff 0a\n",
+        "stderr": ""
+      }
     }
   ]
 }

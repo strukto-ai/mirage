@@ -24,6 +24,7 @@ from mirage.policy import Policies, PolicyDenied
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
@@ -319,7 +320,7 @@ async def handle_for(
     # rule, checked up front so the loop never starts, exactly as bash
     # refuses `for x` on a readonly x before the first iteration.
     if view.is_readonly(variable):
-        err = f"bash: {variable}: readonly variable\n".encode()
+        err = encode_text(f"bash: {variable}: readonly variable\n")
         return _collect_loop_result(
             [], IOResult(exit_code=1, stderr=err), "for"
         )
@@ -336,7 +337,7 @@ async def handle_for(
             await view.set(variable, text_val)
         except PolicyDenied as exc:
             merged_io = await merged_io.merge(
-                IOResult(exit_code=1, stderr=f"{exc.strerror}\n".encode())
+                IOResult(exit_code=1, stderr=encode_text(f"{exc.strerror}\n"))
             )
             break
         try:
@@ -431,9 +432,9 @@ async def _condition_loop(
         merged_io = await merged_io.merge(io)
         all_stdout.append(stdout)
     if hit_limit:
-        warn = (
+        warn = encode_text(
             f"warning: {label} loop terminated after {_MAX_WHILE} iterations\n"
-        ).encode()
+        )
         existing = merged_io.stderr
         if isinstance(existing, bytes) and existing:
             merged_io.stderr = existing + warn
@@ -519,18 +520,18 @@ async def handle_cfor(
         # expression assigning a hidden name, refused by the same
         # door as any denied assignment.
         if isinstance(exc, ReadonlyError):
-            err = f"bash: {exc}\n".encode()
+            err = encode_text(f"bash: {exc}\n")
         elif isinstance(exc, PolicyDenied):
-            err = f"bash: {exc.strerror}\n".encode()
+            err = encode_text(f"bash: {exc.strerror}\n")
         else:
-            err = f"bash: ((: {exc}\n".encode()
+            err = encode_text(f"bash: ((: {exc}\n")
         merged_io = await merged_io.merge(IOResult(exit_code=1, stderr=err))
         merged_io.exit_code = 1
         return _collect_loop_result(all_stdout, merged_io, "for")
     if hit_limit:
-        warn = (
+        warn = encode_text(
             f"warning: for loop terminated after {_MAX_WHILE} iterations\n"
-        ).encode()
+        )
         existing = merged_io.stderr
         if isinstance(existing, bytes) and existing:
             merged_io.stderr = existing + warn
@@ -742,7 +743,7 @@ async def handle_select(
         env = visible_env(session)
         menu = _select_menu(words, env.get("COLUMNS", "")) if show_menu else ""
         merged_io = await merged_io.merge(
-            IOResult(stderr=(menu + env.get("PS3", "#? ")).encode() or None)
+            IOResult(stderr=encode_text(menu + env.get("PS3", "#? ")) or None)
         )
         reply = await read_reply(lines) if lines is not None else None
         # A failed choice read (end of input, a readonly REPLY) ends the
@@ -760,7 +761,7 @@ async def handle_select(
         if reply is None or frozen is not None:
             err = f"bash: {frozen}: readonly variable\n" if frozen else ""
             merged_io = await merged_io.merge(
-                IOResult(exit_code=1, stderr=err.encode() or None)
+                IOResult(exit_code=1, stderr=encode_text(err) or None)
             )
             break
         number = re.fullmatch(r"\s*([+-]?\d+)[ \t]*", reply)
@@ -775,7 +776,7 @@ async def handle_select(
             )
         except PolicyDenied as exc:
             merged_io = await merged_io.merge(
-                IOResult(exit_code=1, stderr=f"{exc.strerror}\n".encode())
+                IOResult(exit_code=1, stderr=encode_text(f"{exc.strerror}\n"))
             )
             break
         try:

@@ -23,6 +23,7 @@ import {
 import { operandSlot, optionMetavar } from '../spec/help.ts'
 import { type CommandSpec, UsageStyle } from '../spec/types.ts'
 import type { ParsedCommand } from '../../workspace/executor/command/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 
 export const ARGPARSE_EXIT = 2
 const LONG_PREFIX = '--'
@@ -240,20 +241,20 @@ export function leafRefusal(
   if (kind === 'ambiguous' && ambiguous !== undefined) {
     const [token, [first = '', second = '']] = ambiguous
     const line = `error: ambiguous option: ${token.slice(2)} (could be ${first} or ${second})\n`
-    return [ENC.encode(line), USAGE_EXIT, ENC.encode(gitUsage(path, spec))]
+    return [encodeText(line), USAGE_EXIT, encodeText(gitUsage(path, spec))]
   }
   const needy = parsed.needsValueOptions[0]
   if (kind === 'needs_value' && needy !== undefined) {
     const named = needy.startsWith(LONG_PREFIX)
       ? `option \`${needy.slice(2)}'`
       : `switch \`${needy.replace(/^-+/, '')}'`
-    return [ENC.encode(`error: ${named} requires a value\n`), USAGE_EXIT, null]
+    return [encodeText(`error: ${named} requires a value\n`), USAGE_EXIT, null]
   }
   const token = parsed.invalidOptions[0]
   if ((kind === 'invalid' || kind === 'unexpected_value') && token !== undefined) {
     const word = token.startsWith('-') ? token : `-${token}`
     const [shown, refused] = gitOptionRefusal(word, path, spec)
-    return [ENC.encode(refused), USAGE_EXIT, shown !== '' ? ENC.encode(shown) : null]
+    return [encodeText(refused), USAGE_EXIT, shown !== '' ? encodeText(shown) : null]
   }
   return [argparseMessage, USAGE_EXIT, null]
 }

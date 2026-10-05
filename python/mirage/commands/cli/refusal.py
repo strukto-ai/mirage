@@ -25,6 +25,7 @@ from mirage.commands.cli.constants import (
 )
 from mirage.commands.spec.help import operand_slot, option_metavar
 from mirage.commands.spec.types import CommandSpec, UsageStyle
+from mirage.shell.bytes import encode_text
 
 if TYPE_CHECKING:
     from mirage.workspace.executor.command.types import ParsedCommand
@@ -216,11 +217,11 @@ def clap_missing_operands(
     named = "\n".join(f"  <{name}>" for name in missing)
     bits = [prog, *clap_supplied(spec, typed, env), *clap_operands(spec)]
     usage = " ".join(bits)
-    return (
+    return encode_text(
         "error: the following required arguments were not provided:\n"
         f"{named}\n\nUsage: {usage}\n\n"
         "For more information, try '--help'.\n"
-    ).encode()
+    )
 
 
 def leaf_refusal(
@@ -272,7 +273,11 @@ def leaf_refusal(
             f"error: ambiguous option: {token[2:]} "
             f"(could be {first} or {second})\n"
         )
-        return line.encode(), USAGE_EXIT, git_usage(path, spec).encode()
+        return (
+            encode_text(line),
+            USAGE_EXIT,
+            encode_text(git_usage(path, spec)),
+        )
     if kind == "needs_value" and parsed.needs_value_options:
         needy = parsed.needs_value_options[0]
         named = (
@@ -280,10 +285,14 @@ def leaf_refusal(
             if needy.startswith(LONG_PREFIX)
             else f"switch `{needy.lstrip('-')}'"
         )
-        return f"error: {named} requires a value\n".encode(), USAGE_EXIT, None
+        return (
+            encode_text(f"error: {named} requires a value\n"),
+            USAGE_EXIT,
+            None,
+        )
     if kind in ("invalid", "unexpected_value") and parsed.invalid_options:
         token = parsed.invalid_options[0]
         word = token if token.startswith("-") else f"-{token}"
         shown, refused = git_option_refusal(word, path, spec)
-        return refused.encode(), USAGE_EXIT, shown.encode() or None
+        return encode_text(refused), USAGE_EXIT, encode_text(shown) or None
     return argparse_message, USAGE_EXIT, None

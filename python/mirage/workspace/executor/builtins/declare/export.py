@@ -16,6 +16,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
+from mirage.shell.bytes import encode_text
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.declare.constants import (
     EXPORT_FLAGS,
@@ -89,9 +90,9 @@ async def handle_export(
     """
     flags, names, bad = split_decl_flags(assignments, EXPORT_FLAGS)
     if bad is not None:
-        err = (
+        err = encode_text(
             f"bash: export: -{bad}: invalid option\n{EXPORT_USAGE}"
-        ).encode()
+        )
         return (
             None,
             IOResult(exit_code=2, stderr=err),
@@ -100,7 +101,7 @@ async def handle_export(
     # -p with names is ignored for display; bare / -p alone print.
     if not names and not arrays:
         lines = _export_lines(session, flags)
-        out = (("\n".join(lines) + "\n") if lines else "").encode()
+        out = encode_text(("\n".join(lines) + "\n") if lines else "")
         return out, IOResult(), ExecutionNode(command="export", exit_code=0)
     # -f is accepted and marks nothing: mirage carries no export
     # attribute on functions. -n is the off direction, and applies to

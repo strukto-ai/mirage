@@ -15,6 +15,7 @@
 from mirage.commands.config import ExecContext
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ExitSignal
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -32,7 +33,7 @@ _OPTION_CHARS = "cdanrwsp"
 
 
 def _usage_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
-    err = (message + _USAGE).encode()
+    err = encode_text(message + _USAGE)
     io = IOResult(exit_code=2, stderr=err)
     return None, io, ExecutionNode(command="history", exit_code=2, stderr=err)
 

@@ -17,6 +17,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_unset
+from mirage.shell.bytes import encode_text
 from mirage.shell.constants import FUNCNAME
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.workspace.executor.builtins.constants import TARGET_RE
@@ -66,7 +67,7 @@ async def _fatal_index(
         return await subscript_index(session, subscript, view)
     except ArithError as exc:
         raise ExitSignal(
-            1, stderr=f"bash: {exc}\n".encode(), contained_code=1
+            1, stderr=encode_text(f"bash: {exc}\n"), contained_code=1
         ) from exc
 
 
@@ -172,7 +173,7 @@ async def handle_unset(
                 mode = "v"
             i += 1
             continue
-        err = f"bash: unset: {tok}: invalid option\n".encode()
+        err = encode_text(f"bash: unset: {tok}: invalid option\n")
         return (
             None,
             IOResult(exit_code=2, stderr=err),
@@ -190,9 +191,9 @@ async def handle_unset(
             continue
         if mode == "f":
             if name in session.readonly_functions:
-                err = (
+                err = encode_text(
                     f"bash: unset: {name}: cannot unset: readonly function\n"
-                ).encode()
+                )
                 return (
                     None,
                     IOResult(exit_code=1, stderr=err),
@@ -208,9 +209,9 @@ async def handle_unset(
         # the base, not the element, in the error).
         base = target.group(1) if target is not None else name
         if base in session.readonly_vars:
-            err = (
+            err = encode_text(
                 f"bash: unset: {base}: cannot unset: readonly variable\n"
-            ).encode()
+            )
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -245,7 +246,7 @@ async def handle_unset(
                 if status == "notarray"
                 else f"unset: {name[len(base) :]}: bad array subscript"
             )
-            err = f"bash: {detail}\n".encode()
+            err = encode_text(f"bash: {detail}\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -253,9 +254,9 @@ async def handle_unset(
             )
         if mode == "auto" and not existed and name in session.functions:
             if name in session.readonly_functions:
-                err = (
+                err = encode_text(
                     f"bash: unset: {name}: cannot unset: readonly function\n"
-                ).encode()
+                )
                 return (
                     None,
                     IOResult(exit_code=1, stderr=err),

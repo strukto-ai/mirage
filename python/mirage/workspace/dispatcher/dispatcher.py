@@ -46,6 +46,7 @@ from mirage.ops.namespace_view import (
 )
 from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.policy.errors import PolicyDenied, PolicyError
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     DEFAULT_READ_TTL,
     CacheFacts,
@@ -1064,7 +1065,7 @@ class Dispatcher:
             op,
             path.virtual,
             VFSName.RAM.value,
-            len(target.encode("utf-8")),
+            len(encode_text(target)),
             timer,
         )
         _memory_answered(report)

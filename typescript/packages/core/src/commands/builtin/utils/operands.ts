@@ -29,8 +29,7 @@ import { readFailExitCode } from '../../spec/usage.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-
-const ENC = new TextEncoder()
+import { encodeText } from '../../../shell/bytes.ts'
 
 type Stat = (p: PathSpec) => Promise<FileStat>
 
@@ -353,7 +352,7 @@ export function operandsIo(err: string, init?: { cache?: string[]; exitCode?: nu
   return new IOResult({
     ...(init?.cache !== undefined ? { cache: init.cache } : {}),
     exitCode: err === '' ? 0 : (init?.exitCode ?? 1),
-    stderr: err === '' ? null : ENC.encode(err),
+    stderr: err === '' ? null : encodeText(err),
   })
 }
 

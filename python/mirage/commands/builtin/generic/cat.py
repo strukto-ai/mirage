@@ -21,6 +21,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain, chain_cachables, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
     FileType,
@@ -169,7 +170,7 @@ async def cat_generic(
                     # A read the backend refuses once the stat passed (a
                     # table past its read cap) is reported like a missing
                     # operand, and the next operand still prints.
-                    err += fs_error_line("cat", p, exc).encode()
+                    err += encode_text(fs_error_line("cat", p, exc))
                     continue
                 if not is_stdin(p):
                     reads[p.mount_path] = data
@@ -265,7 +266,7 @@ async def cat(
             should_number = number_lines or (number_nonblank and bool(line))
             if should_number:
                 line_no += 1
-            prefix = f"{line_no:6d}\t".encode() if should_number else b""
+            prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
             suffix = b"$\n" if show_ends else b"\n"
             if show_tabs or show_nonprinting:
                 line = _visible(line, show_tabs, show_nonprinting)
@@ -275,7 +276,7 @@ async def cat(
         should_number = number_lines or number_nonblank
         if should_number:
             line_no += 1
-        prefix = f"{line_no:6d}\t".encode() if should_number else b""
+        prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
         if show_tabs or show_nonprinting:
             buf = _visible(buf, show_tabs, show_nonprinting)
         yield prefix + buf
