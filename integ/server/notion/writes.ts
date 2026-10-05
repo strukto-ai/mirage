@@ -113,7 +113,9 @@ async function createPage(
   }
   const schema = schemaOf(owner)
   const schemaBefore = JSON.stringify(schema)
-  const properties = normalizeProperties(asObject(body.properties), schema)
+  const written = normalizeProperties(asObject(body.properties), schema)
+  if (!Array.isArray(written)) return written
+  const properties = Object.fromEntries(written)
   // `ntn pages create --content` sends Markdown rather than properties; the
   // first heading becomes the title, exactly as the official CLI documents.
   const markdown = typeof body.markdown === 'string' ? body.markdown : ''
@@ -442,10 +444,6 @@ async function updatePage(
   const row = (await db.notionPage.findFirst({ where: { tenant, id } })) as PageRow | null
   if (row === null) return notFound('page', id)
   const data: Record<string, unknown> = {}
-  // Two spellings of one bit, so `ntn pages trash` (in_trash) and an API or
-  // MCP client (archived) reach the same state rather than half of it.
-  const trash = typeof body.in_trash === 'boolean' ? body.in_trash : body.archived
-  if (typeof trash === 'boolean') await setTrashed(db, tenant, id, trash)
   if (body.properties !== undefined) {
     const owner =
       row.parentType === 'database_id' && row.parentId !== null
@@ -456,11 +454,16 @@ async function updatePage(
     const schema = schemaOf(owner)
     const schemaBefore = JSON.stringify(schema)
     const patch = normalizeProperties(asObject(body.properties), schema)
+    if (!Array.isArray(patch)) return patch
     await persistSchema(db, tenant, owner, schema, schemaBefore)
-    const merged = { ...(JSON.parse(row.propertiesJson) as Json), ...patch }
+    const merged = { ...(JSON.parse(row.propertiesJson) as Json), ...Object.fromEntries(patch) }
     data.propertiesJson = JSON.stringify(merged)
     data.titleText = titleOfProperties(merged)
   }
+  // Two spellings of one bit, so `ntn pages trash` (in_trash) and an API or
+  // MCP client (archived) reach the same state rather than half of it.
+  const trash = typeof body.in_trash === 'boolean' ? body.in_trash : body.archived
+  if (typeof trash === 'boolean') await setTrashed(db, tenant, id, trash)
   if (body.icon !== undefined) data.iconJson = JSON.stringify(body.icon)
   if (body.cover !== undefined) data.coverJson = JSON.stringify(body.cover)
   await db.notionPage.update({ where: { tenant_id: { tenant, id } }, data })
