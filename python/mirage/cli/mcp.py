@@ -14,13 +14,15 @@
 
 import asyncio
 from collections.abc import Callable, Coroutine
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import typer
 
-from mirage.cli.client import DaemonUnreachable, make_client
+from mirage.cli.client import DaemonClient, DaemonUnreachable, make_client
+from mirage.cli.credentials import LoginError
 from mirage.cli.output import fail, handle_response
 from mirage.cli.workspace import resolve_config
 from mirage.server.workspace_config import resolve_workspace_config
@@ -124,9 +126,9 @@ def relay_workspace(
 
     The workspace is created from ``path``, or ``workspace_id`` names one
     the daemon holds; a created workspace with no ``workspace_id`` in its
-    config is deleted when the relay ends, with the last token the relay
-    sent, so a login that ended or changed meanwhile still removes it. A
-    named session must exist.
+    config is deleted on the same server when the relay ends, with a
+    fresh token from its login, or the last token the relay sent when
+    that login ended or changed meanwhile. A named session must exist.
 
     Args:
         path (Path | None): the config to create the workspace from.
@@ -173,7 +175,17 @@ def relay_workspace(
         asyncio.run(relay(url, token))
     finally:
         if minted:
-            with make_client() as cleanup:
-                if client.held:
-                    cleanup.settings.auth_token = client.held
-                cleanup.request("DELETE", workspace_path)
+            try:
+                bearer = client.token()
+            except LoginError:
+                bearer = client.held
+            with DaemonClient(
+                replace(client.settings, auth_token=bearer, login=None)
+            ) as cleanup:
+                done = cleanup.request("DELETE", workspace_path)
+            if done.status_code >= 400:
+                typer.echo(
+                    f"could not delete workspace {workspace_id}: "
+                    f"daemon error {done.status_code}",
+                    err=True,
+                )

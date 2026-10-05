@@ -15,6 +15,7 @@
 import { resolveWorkspaceConfig } from '@struktoai/mirage-server/workspace_config'
 import type { Command } from 'commander'
 import { makeClient, type DaemonClient } from './client.ts'
+import { LoginError } from './credentials.ts'
 import { fail, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
 
@@ -92,9 +93,9 @@ async function runMcp(config: string | undefined, options: McpCommandOptions): P
  * Relay this process's stdio to one of a workspace's endpoints. The
  * workspace is created from `path`, or `workspace` names one the daemon
  * holds; a created workspace with no `workspace_id` in its config is
- * deleted when the relay ends, with the last token the relay sent, so a
- * login that ended or changed meanwhile still removes it. A named session
- * must exist.
+ * deleted on the same server when the relay ends, with a fresh token from
+ * its login, or the last token the relay sent when that login ended or
+ * changed meanwhile. A named session must exist.
  */
 export async function relayWorkspace(
   path: string | undefined,
@@ -138,9 +139,18 @@ export async function relayWorkspace(
     if (refusal === undefined) await relay(url, () => client.token())
   } finally {
     if (minted) {
-      const cleanup =
-        client.held !== '' ? makeClient({ ...client.settings, authToken: client.held }) : client
-      await cleanup.request('DELETE', workspacePath)
+      const bearer = await client.token().catch((error: unknown) => {
+        if (error instanceof LoginError) return client.held
+        throw error
+      })
+      const { url: server, idleGraceSeconds } = client.settings
+      const cleanup = makeClient({ url: server, idleGraceSeconds, authToken: bearer })
+      const done = await cleanup.request('DELETE', workspacePath)
+      if (!done.ok) {
+        process.stderr.write(
+          `could not delete workspace ${workspaceId}: daemon error ${String(done.status)}\n`,
+        )
+      }
     }
   }
   if (refusal !== undefined) fail(refusal, 2)
