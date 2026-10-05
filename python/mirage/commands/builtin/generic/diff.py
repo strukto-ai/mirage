@@ -2,8 +2,10 @@ import difflib
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone, tzinfo
 
 from mirage.commands.builtin.diff_format import ed_script, normal_diff
+from mirage.commands.builtin.utils.formatting import full_iso_time
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -20,12 +22,14 @@ from mirage.commands.spec.usage import (
     missing_operand_error,
 )
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import StatPath
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
 from mirage.utils.quote import shell_quote
+from mirage.utils.timezone import zone_from_env
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,11 +59,27 @@ class _Walk:
     flags: DiffFlags
     excluded: tuple[str, ...]
     switches: str
+    stat_path: StatPath | None = None
+    zone: tzinfo | None = None
 
 
 Absent = tuple[bool, bool]
 
 PRESENT: Absent = (False, False)
+
+# diffutils' c_escape_char: the characters a header name spells as a C
+# escape. Any other control character is three octal digits.
+C_ESCAPES = {
+    "\a": "a",
+    "\b": "b",
+    "\t": "t",
+    "\n": "n",
+    "\v": "v",
+    "\f": "f",
+    "\r": "r",
+    '"': '"',
+    "\\": "\\",
+}
 
 
 def _child_spec(parent: PathSpec, name: str) -> PathSpec:
@@ -74,6 +94,61 @@ def _child_spec(parent: PathSpec, name: str) -> PathSpec:
 
 def _name(path: PathSpec) -> str:
     return path.raw_path or path.virtual
+
+
+def c_escape(name: str) -> str:
+    """A file name as GNU diff writes it in a header line.
+
+    diffutils' ``c_escape`` double-quotes a name holding a space, a
+    double quote, a backslash or a control character, and writes each of
+    those but the space as a C escape (``"sp ace"``, ``"t\\tab"``); any
+    other name, bytes above ASCII included, is written as it is. The
+    ``---`` and ``+++`` lines and the ``diff -r`` line use it; the
+    ``Only in`` and ``Files ... differ`` lines do not.
+
+    Args:
+        name (str): the name as typed or walked.
+    """
+    if not any(ch == " " or ch in C_ESCAPES or ch < " " for ch in name):
+        return name
+    out: list[str] = []
+    for ch in name:
+        if ch in C_ESCAPES:
+            out.append("\\" + C_ESCAPES[ch])
+        elif ch < " ":
+            out.append(f"\\{ord(ch):03o}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
+async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
+    """The time a unified header gives one side, as GNU diff prints it.
+
+    The modification time as ``%Y-%m-%d %H:%M:%S.%N %z`` in the zone
+    ``TZ`` names, read through the dispatcher as ``stat`` reads it, so
+    a time ``touch`` keeps in the namespace shows; the epoch for a side
+    -N reads as absent; and the present moment for standard input, as
+    POSIX asks and diffutils does.
+
+    Args:
+        walk (_Walk): the reads and the parsed line.
+        path (PathSpec): the side.
+        absent (bool): whether -N reads it as absent.
+    """
+    if absent:
+        return full_iso_time(None, walk.zone)
+    if is_stdin(path):
+        now = datetime.now(timezone.utc).isoformat()
+        return full_iso_time(now, walk.zone)
+    info = (
+        await walk.stat_path(path.virtual)
+        if walk.stat_path is not None
+        else None
+    )
+    if info is None:
+        info = await walk.stat_fn(path)
+    return full_iso_time(info.modified, walk.zone)
 
 
 def _takes_value(option: Option) -> bool:
@@ -171,7 +246,13 @@ async def _diff_pair(
     elif flags.unified:
         result = list(
             difflib.unified_diff(
-                a_lines, b_lines, fromfile=name1, tofile=name2, n=flags.context
+                a_lines,
+                b_lines,
+                fromfile=c_escape(name1),
+                tofile=c_escape(name2),
+                fromfiledate=await _header_time(walk, path1, absent[0]),
+                tofiledate=await _header_time(walk, path2, absent[1]),
+                n=flags.context,
             )
         )
     else:
@@ -252,7 +333,8 @@ async def _diff_dirs(
                 parts.append(body)
             else:
                 header = (
-                    f"diff{walk.switches} {_name(child_a)} {_name(child_b)}\n"
+                    f"diff{walk.switches} {c_escape(_name(child_a))} "
+                    f"{c_escape(_name(child_b))}\n"
                 )
                 parts.append(header.encode() + body)
         elif a_dir:
@@ -305,6 +387,8 @@ async def diff(
     flags: DiffFlags,
     stdin: ByteSource | None = None,
     argv: Sequence[str] = (),
+    stat_path: StatPath | None = None,
+    zone: tzinfo | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
@@ -326,6 +410,8 @@ async def diff(
             flags=flags,
             excluded=await _excluded_patterns(flags, read_bytes),
             switches="".join(f" {shell_quote(w)}" for w in switch_words(argv)),
+            stat_path=stat_path,
+            zone=zone,
         )
         if any(dashes) and not all(dashes):
             other = paths[1] if dashes[0] else paths[0]
@@ -429,4 +515,6 @@ async def diff_generic(
         flags=parse_flags(opts.flags),
         stdin=opts.stdin,
         argv=opts.argv,
+        stat_path=opts.stat_path,
+        zone=zone_from_env(opts.env),
     )

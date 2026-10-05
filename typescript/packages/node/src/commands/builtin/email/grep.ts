@@ -33,7 +33,7 @@ import { FlagView, specOf } from '@struktoai/mirage-core/commands/spec/index'
 import { command } from '@struktoai/mirage-core/commands/config'
 import type { CommandFnResult, CommandOpts } from '@struktoai/mirage-core/commands/config'
 import { IOResult } from '@struktoai/mirage-core/io/types'
-import { byteView, textView } from '@struktoai/mirage-core/shell/bytes'
+import { byteView, textView, utf8Locale } from '@struktoai/mirage-core/shell/bytes'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
@@ -126,15 +126,17 @@ async function grepCommand(
       )
       if (textSearchResults(pairs.map(([, text]) => text))) {
         // The same dialect the literal was read off: a basic expression
-        // compiled as an extended one matches a different language. grep
-        // runs in the C locale, so the pattern and each line meet as byte
-        // views, as they do in the generic scan.
+        // compiled as an extended one matches a different language. The
+        // pattern and each line meet as byte views in the C locale and as
+        // text under a UTF-8 one, as they do in the generic scan.
+        const utf8 = utf8Locale(opts.env)
         const pat = compilePattern(
-          byteView(pattern),
+          byteView(pattern, utf8),
           fl.asBool('i'),
           fl.asBool('F'),
           fl.asBool('w'),
           syntax,
+          utf8,
         )
         const lineOpts: GrepLinesOptions = {
           invert: false,
@@ -146,13 +148,18 @@ async function grepCommand(
         }
         const lines: string[] = []
         for (const [vfsPath, msgText] of pairs) {
-          const matched = grepLines(vfsPath, messageLines(msgText).map(byteView), pat, lineOpts)
+          const matched = grepLines(
+            vfsPath,
+            messageLines(msgText).map((line) => byteView(line, utf8)),
+            pat,
+            lineOpts,
+          )
           if (matched.length === 0) continue
           if (lineOpts.filesOnly) {
             lines.push(vfsPath)
             continue
           }
-          for (const line of matched) lines.push(`${vfsPath}:${textView(line)}`)
+          for (const line of matched) lines.push(`${vfsPath}:${textView(line, utf8)}`)
         }
         if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
         return [formatRecords(lines), new IOResult()]

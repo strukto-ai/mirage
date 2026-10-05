@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JsonValue } from '../../kit/typescript/index.ts'
 import { isObj } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
 import { COLOR, isMessage } from './fields.ts'
@@ -22,8 +23,11 @@ import type { Field, Fields } from './fields.ts'
 export type MaskPath = readonly string[]
 
 // `a.b(c,d.e),f` read the way the live API reads it: a parenthesized list
-// distributes over the path before it, so this is a.b.c, a.b.d.e and f.
-export function parseMask(text: string): MaskPath[] {
+// distributes over the path before it, so this is a.b.c, a.b.d.e and f. In
+// a `read` mask (the `fields` of a GET) a partial-response `/` separates
+// segments as `.` does (`sheets/properties`); a write mask is a FieldMask,
+// where `/` is no separator, so it stays in the name and fails the check.
+export function parseMask(text: string, read = false): MaskPath[] {
   let at = 0
   const items = (prefix: readonly string[]): MaskPath[] => {
     const out: MaskPath[] = []
@@ -33,7 +37,7 @@ export function parseMask(text: string): MaskPath[] {
       while (at < text.length && !',()'.includes(text.charAt(at))) {
         const ch = text.charAt(at)
         at += 1
-        if (ch !== '.') name += ch
+        if (ch !== '.' && !(read && ch === '/')) name += ch
         else {
           path.push(name.trim())
           name = ''
@@ -56,16 +60,45 @@ export function isWhole(paths: readonly MaskPath[]): boolean {
   return paths.some((path) => path.length === 1 && path[0] === '*')
 }
 
+// A read under a `fields` mask, trimmed the way the live API trims it: each
+// path keeps what the resource holds there, through every element of a
+// repeated field, `*` keeps the message whole, and the fields that stay keep
+// the resource's own order.
+export function pickMask(value: JsonValue, paths: readonly MaskPath[]): JsonValue {
+  if (isWhole(paths)) return value
+  if (Array.isArray(value)) return value.map((item) => pickMask(item, paths))
+  if (!isObj(value)) return value
+  const tails = new Map<string, MaskPath[]>()
+  for (const [head = '', ...rest] of paths) tails.set(head, [...(tails.get(head) ?? []), rest])
+  const out: JsonObj = {}
+  for (const [key, field] of Object.entries(value)) {
+    const under = tails.get(key)
+    if (under === undefined) continue
+    out[key] = under.some((rest) => rest.length === 0) ? field : pickMask(field, under)
+  }
+  return out
+}
+
 // The path live Sheets names when a mask reaches a field the message does
 // not have: the valid part as typed, then the first bad segment in
 // snake_case, and nothing after it (`textFormatX.bold` is `text_format_x`).
-export function badField(paths: readonly MaskPath[], fields: Fields): string | null {
+// A `read` mask (the `fields` of a GET) reaches through a repeated field to
+// its elements, keeps a whole message at a `*`, and takes any path below a
+// scalar or a message the tree leaves out.
+export function badField(paths: readonly MaskPath[], fields: Fields, read = false): string | null {
   for (const path of paths) {
     if (path.length === 1 && path[0] === '*') continue
     let node: Field = fields
     for (let i = 0; i < path.length; i += 1) {
       const seg = path[i] ?? ''
-      const child: Field | undefined = isMessage(node) ? fieldOf(node, seg) : undefined
+      if (read && (node === null || seg === '*')) break
+      const found: Field | undefined = isMessage(node) ? fieldOf(node, seg) : undefined
+      const child: Field | undefined =
+        read && found != null && !isMessage(found)
+          ? 'list' in found
+            ? found.list
+            : found.map
+          : found
       if (child === undefined) {
         const snake = seg.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
         return [...path.slice(0, i), snake].join('.')

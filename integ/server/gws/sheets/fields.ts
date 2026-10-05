@@ -225,6 +225,45 @@ export const CONDITIONAL_RULE: Fields = [
   ['gradientRule', null],
 ]
 
+// What a `fields` mask on spreadsheets.get may name, down to the cells the
+// fake renders. A null child here is a scalar or a message the fake keeps no
+// tree for (`properties`, `charts`), and a read mask may name anything below
+// it.
+const GRID_DATA: Fields = [
+  ['startRow', null],
+  ['startColumn', null],
+  ['rowData', { list: [['values', { list: CELL_DATA }]] }],
+  ['rowMetadata', { list: DIMENSION_PROPERTIES }],
+  ['columnMetadata', { list: DIMENSION_PROPERTIES }],
+]
+
+const SHEET: Fields = [
+  ['properties', null],
+  ['data', { list: GRID_DATA }],
+  ['merges', { list: GRID_RANGE }],
+  ['conditionalFormats', { list: CONDITIONAL_RULE }],
+  ['filterViews', null],
+  ['protectedRanges', null],
+  ['basicFilter', BASIC_FILTER],
+  ['charts', null],
+  ['bandedRanges', { list: BANDED_RANGE }],
+  ['developerMetadata', null],
+  ['rowGroups', null],
+  ['columnGroups', null],
+  ['slicers', null],
+]
+
+export const SPREADSHEET: Fields = [
+  ['spreadsheetId', null],
+  ['properties', null],
+  ['sheets', { list: SHEET }],
+  ['namedRanges', null],
+  ['spreadsheetUrl', null],
+  ['developerMetadata', null],
+  ['dataSources', null],
+  ['dataSourceSchedules', null],
+]
+
 // Width follows the style on the live API, whatever width the caller sent.
 const BORDER_WIDTH: Record<string, number> = {
   DOTTED: 1,

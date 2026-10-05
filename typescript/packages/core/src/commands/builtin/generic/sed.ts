@@ -35,7 +35,7 @@ import {
   type SedScriptPiece,
 } from '../sed_script.ts'
 import { SED_LINE_LENGTH, SedMachine, type SedFileContent, type SedInput } from '../sed_exec.ts'
-import { byteView, decodeText, encodeText, fromByteView } from '../../../shell/bytes.ts'
+import { byteView, decodeText, encodeText, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Write = (p: PathSpec, data: Uint8Array) => Promise<void>
@@ -118,15 +118,17 @@ async function openWriteFiles(names: readonly string[], doors: SedDoors): Promis
 
 // Read the files `r` or `R` names: a file that cannot be opened reads as
 // empty, as POSIX asks, and a directory opens and then fails to read,
-// which GNU reports and exits 4 on when it gets there.
+// which GNU reports and exits 4 on when it gets there. `utf8` reads them as
+// text, under a UTF-8 locale.
 async function readScriptFiles(
   names: readonly string[],
   doors: SedDoors,
+  utf8: boolean,
 ): Promise<Map<string, SedFileContent>> {
   const files = new Map<string, SedFileContent>()
   for (const name of names) {
     try {
-      files.set(name, { text: byteView(await doors.read(name)) })
+      files.set(name, { text: byteView(await doors.read(name), utf8) })
     } catch (err) {
       if (!isFsError(err)) throw err
       const code = (err as { code?: string }).code
@@ -144,13 +146,14 @@ async function readScriptFiles(
 async function flushWriteFiles(
   machine: SedMachine,
   doors: SedDoors,
+  utf8: boolean,
   edited: ReadonlySet<string> = new Set(),
 ): Promise<string> {
   let err = ''
   for (const [name, out] of machine.wfiles) {
     if (out.chunks.length === 0 || edited.has(doors.virtual(name))) continue
     try {
-      await doors.write(name, fromByteView(out.chunks.join('')))
+      await doors.write(name, fromByteView(out.chunks.join(''), utf8))
     } catch (e) {
       if (!isFsError(e)) throw e
       err += openFailure(name, e)
@@ -240,10 +243,11 @@ export async function sedGeneric(
   if (pieces.length === 0) return failed(`${SED_MISSING_SCRIPT}\n`, 1)
 
   const doors = sedDoors(opts, stream, write)
+  const utf8 = utf8Locale(opts.env)
   let program: SedProgram
   try {
     // -E / -r select Extended Regular Expressions; without them sed is BRE.
-    program = compileScript(pieces, fl.asBool('E') || fl.asBool('r'))
+    program = compileScript(pieces, fl.asBool('E') || fl.asBool('r'), utf8)
   } catch (err) {
     if (!(err instanceof SedError)) throw err
     const refused = await openWriteFiles(err.wfiles, doors)
@@ -255,16 +259,17 @@ export async function sedGeneric(
     suppress: fl.asBool('n'),
     separate: inPlace || fl.asBool('separate'),
     lineLength: lineLength(fl.asStr('line_length')),
-    files: await readScriptFiles(program.rfiles, doors),
-    readerFiles: await readScriptFiles(program.readerFiles, doors),
+    files: await readScriptFiles(program.rfiles, doors, utf8),
+    readerFiles: await readScriptFiles(program.readerFiles, doors, utf8),
+    utf8,
   })
 
-  if (inPlace) return runInPlace(paths, program, machine, doors, stream, write)
+  if (inPlace) return runInPlace(paths, program, machine, doors, stream, write, utf8)
 
   const inputs: SedInput[] = []
   if (paths.length === 0) {
     const raw = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
-    inputs.push({ name: '-', text: byteView(raw) })
+    inputs.push({ name: '-', text: byteView(raw, utf8) })
   }
   // sed owns its exit code rather than letting the executor's chokepoint
   // pick it, because GNU sed splits a failed operand two ways (GNU sed
@@ -284,7 +289,7 @@ export async function sedGeneric(
     const last = inputs.at(-1)
     if (last !== undefined && 'fatal' in last && last.fatal && !lookAhead) break
     try {
-      inputs.push({ name: p.rawPath, text: byteView(await materialize(stream(p))) })
+      inputs.push({ name: p.rawPath, text: byteView(await materialize(stream(p)), utf8) })
     } catch (e) {
       if (!isFsError(e)) throw e
       const fatal = (e as { code?: string }).code === 'EISDIR'
@@ -297,10 +302,10 @@ export async function sedGeneric(
     }
   }
   machine.process(inputs, true)
-  const writeErr = await flushWriteFiles(machine, doors)
+  const writeErr = await flushWriteFiles(machine, doors, utf8)
   const stderr = machine.stderr() + writeErr
   return [
-    fromByteView(machine.stdout.chunks.join('')),
+    fromByteView(machine.stdout.chunks.join(''), utf8),
     new IOResult({
       exitCode: writeErr === '' ? machine.exitCode() : 4,
       stderr: stderr === '' ? null : encodeText(stderr),
@@ -320,6 +325,7 @@ async function runInPlace(
   doors: SedDoors,
   stream: Stream,
   write: Write,
+  utf8: boolean,
 ): Promise<CommandFnResult> {
   if (paths.length === 0) return failed(`${SED_NO_INPUT_FILES}\n`, SED_NO_INPUT_EXIT)
   const writes: Record<string, Uint8Array> = {}
@@ -340,22 +346,22 @@ async function runInPlace(
       continue
     }
     // An `r` file edited by an earlier file of this command reads new.
-    if (edited.length > 0) machine.setFiles(await readScriptFiles(program.rfiles, doors))
-    const out = machine.process([{ name: p.rawPath, text: byteView(data) }], false)
+    if (edited.length > 0) machine.setFiles(await readScriptFiles(program.rfiles, doors, utf8))
+    const out = machine.process([{ name: p.rawPath, text: byteView(data, utf8) }], false)
     if (machine.panicCode !== null) break
-    const newData = fromByteView(out)
+    const newData = fromByteView(out, utf8)
     await write(p, newData)
     writes[p.mountPath] = newData
     edited.push(p.mountPath)
     editedVirtual.add(p.virtual)
   }
-  const writeErr = await flushWriteFiles(machine, doors, editedVirtual)
+  const writeErr = await flushWriteFiles(machine, doors, utf8, editedVirtual)
   const stderr = err + machine.stderr() + writeErr
   const exitCode =
     machine.panicCode ?? (writeErr !== '' ? 4 : code === 4 ? 4 : code || machine.exitCode())
   const stdout = machine.stdout.chunks.join('')
   return [
-    stdout === '' ? null : fromByteView(stdout),
+    stdout === '' ? null : fromByteView(stdout, utf8),
     new IOResult({
       writes,
       cache: edited,

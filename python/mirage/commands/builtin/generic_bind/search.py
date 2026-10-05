@@ -44,6 +44,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import utf8_locale
 from mirage.types import FileType, JsonValue, PathSpec
 from mirage.utils.errors import FileTooLargeError
 from mirage.vfs.types import SearchQuery
@@ -54,7 +55,7 @@ _GENERICS = {"grep": grep_generic, "rg": rg_generic}
 
 
 def search_options(
-    name: str, fl: FlagView, pattern: str
+    name: str, fl: FlagView, pattern: str, utf8: bool = False
 ) -> dict[str, JsonValue]:
     """How a native search matches the pushed-down pattern.
 
@@ -62,6 +63,8 @@ def search_options(
         name (str): grep or rg.
         fl (FlagView): the invocation's flags.
         pattern (str): the pattern pushed down.
+        utf8 (bool): grep runs under a UTF-8 locale; ripgrep matches
+            text under any.
     """
     if name == "rg":
         f = parse_rg_flags(fl)
@@ -76,6 +79,7 @@ def search_options(
         "fixed_string": fl.as_bool("F"),
         "whole_word": fl.as_bool("w"),
         "syntax": matcher_syntax(fl).value,
+        "utf8": utf8,
     }
 
 
@@ -152,7 +156,12 @@ async def run_search(
         and not path_rules_active()
     ):
         query = SearchQuery(
-            query=pattern, options={"grep": search_options(name, fl, pattern)}
+            query=pattern,
+            options={
+                "grep": search_options(
+                    name, fl, pattern, utf8_locale(opts.env)
+                )
+            },
         )
         try:
             lines = await capability.search(

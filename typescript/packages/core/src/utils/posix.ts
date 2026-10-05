@@ -73,25 +73,85 @@ export function classCharacters(name: string): string | null {
     .join('')
 }
 
-/** Compile translated POSIX regex source with deterministic C-locale case folding. */
-export function compilePosixRegex(source: string, flags = ''): RegExp {
-  const normalized = asciiSpaceEscapes(source)
-  return flags.includes('i')
-    ? new AsciiIgnoreCaseRegex(normalized, flags)
-    : new RegExp(normalized, flags)
+// What each `.` and negated bracket checks first under a UTF-8 locale: a byte
+// that is no part of a character rides the text as its surrogate escape, and
+// glibc matches it with neither.
+const RAW_BYTE_GUARD = '(?![\\udc80-\\udcff])'
+
+/** The index past the `]` closing the bracket opened at `start`. */
+function bracketEnd(source: string, start: number): number {
+  let idx = start + 1
+  if (source.charAt(idx) === '^') idx += 1
+  while (idx < source.length) {
+    const ch = source.charAt(idx)
+    if (ch === '\\') idx += 2
+    else if (ch === ']') return idx + 1
+    else idx += 1
+  }
+  return source.length
+}
+
+/**
+ * Keep `.` and a negated bracket off a byte that is no character. glibc's
+ * matcher in a UTF-8 locale reads an invalid byte as no character at all, so
+ * neither `.` nor `[^x]` matches it (`printf 'a\377b\n' | grep -c 'a.b'` is
+ * 0). The text carries such a byte as its surrogate escape, which both would
+ * otherwise match; a lookahead before each keeps it out and leaves what `.`
+ * means for a newline to the flags. Mirrors Python's `skip_raw_bytes`.
+ */
+export function skipRawBytes(source: string): string {
+  const out: string[] = []
+  let idx = 0
+  while (idx < source.length) {
+    const ch = source.charAt(idx)
+    if (ch === '\\') {
+      out.push(source.slice(idx, idx + 2))
+      idx += 2
+    } else if (ch === '[') {
+      const end = bracketEnd(source, idx)
+      const bracket = source.slice(idx, end)
+      out.push(bracket.startsWith('[^') ? `(?:${RAW_BYTE_GUARD}${bracket})` : bracket)
+      idx = end
+    } else {
+      out.push(ch === '.' ? `(?:${RAW_BYTE_GUARD}.)` : ch)
+      idx += 1
+    }
+  }
+  return out.join('')
+}
+
+/**
+ * Compile translated POSIX regex source with deterministic C-locale case
+ * folding. Classes, word boundaries and case folding stay the C locale's ASCII
+ * ones under a UTF-8 locale (`utf8`) too; what changes there is the subject,
+ * which is text, so the source compiles with `u` (a character past U+FFFF is
+ * one match, not two halves) and `.` and a negated bracket never match a byte
+ * that is no part of a character.
+ */
+export function compilePosixRegex(source: string, flags = '', utf8 = false): RegExp {
+  const hostFlags = utf8 && !flags.includes('u') ? flags + 'u' : flags
+  const normalized = asciiSpaceEscapes(source, hostFlags.includes('u'))
+  const subject = utf8 ? skipRawBytes(normalized) : normalized
+  return hostFlags.includes('i')
+    ? new AsciiIgnoreCaseRegex(subject, hostFlags)
+    : new RegExp(subject, hostFlags)
 }
 
 // JavaScript's \s stays Unicode-aware even without u; Python re.ASCII does not.
-const SPACE_ESCAPES: Readonly<Record<string, string>> = {
-  '\\s': '\\x09-\\x0d\\x20',
-  '\\S': '\\x00-\\x08\\x0e-\\x1f\\x21-\\uffff',
+// Under u, `\S` reaches every code point rather than stopping at U+FFFF.
+function spaceEscapes(unicode: boolean): Readonly<Record<string, string>> {
+  return {
+    '\\s': '\\x09-\\x0d\\x20',
+    '\\S': `\\x00-\\x08\\x0e-\\x1f\\x21-${unicode ? '\\u{10ffff}' : '\\uffff'}`,
+  }
 }
 
-function asciiSpaceEscapes(source: string): string {
+function asciiSpaceEscapes(source: string, unicode: boolean): string {
+  const escapes = spaceEscapes(unicode)
   return source.replace(/\\[\s\S]|\[(?:\\[\s\S]|[^\]\\])*\]/g, (token) => {
     if (token.startsWith('['))
-      return token.replace(/\\[\s\S]/g, (escape) => SPACE_ESCAPES[escape] ?? escape)
-    const expansion = SPACE_ESCAPES[token]
+      return token.replace(/\\[\s\S]/g, (escape) => escapes[escape] ?? escape)
+    const expansion = escapes[token]
     return expansion === undefined ? token : `[${expansion}]`
   })
 }

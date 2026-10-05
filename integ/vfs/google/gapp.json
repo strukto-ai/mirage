@@ -338,6 +338,19 @@
         "stdout": "[[\"1\",\"2\",\"3\",\"10\"]]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gapp_sheets_render_keeps_the_documented_fields",
+      "seq": 520025,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*__sheet0001.gsheet.json | jq -c '[keys, (.sheets[0] | keys), (.sheets[0].data[0] | keys), ([.sheets[0].data[0].rowData[].values[] | keys[]] | unique)]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"properties\",\"sheets\",\"spreadsheetId\",\"spreadsheetUrl\"],[\"data\",\"properties\"],[\"rowData\"],[\"effectiveValue\",\"formattedValue\",\"userEnteredValue\"]]\n",
+        "stderr": ""
+      }
     }
   ]
 }
