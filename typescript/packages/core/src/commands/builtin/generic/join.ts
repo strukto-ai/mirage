@@ -313,7 +313,7 @@ class Options {
  * as after `--`. `operands` null reads the options alone.
  * Mirrors parse_flags in join.py.
  */
-export function parseJoinFlags(
+export function parseFlags(
   flags: CommandOpts['flags'],
   operands: readonly string[] | null = null,
   argv: readonly string[] = [],
@@ -618,7 +618,7 @@ export async function joinGeneric(
   return join(resolved, {
     read,
     stdin: opts.stdin,
-    flags: parseJoinFlags(
+    flags: parseFlags(
       flags,
       resolved.map((path) => path.rawPath),
       opts.argv ?? [],

@@ -39,7 +39,7 @@ from mirage.commands.spec.constants import (
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.standard import has_injected_version
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context import (
     effective_mount_mode,
     require_paths_writable,
@@ -116,11 +116,11 @@ async def _command_output(
         io.exit_code = (
             exc.exit_code
             if isinstance(exc, UsageError)
-            else read_fail_exit(command, exc)
+            else read_fail_exit_code(command, exc)
         )
 
 
-def _wrap_cmd_streams(
+def _wrap_mount_streams(
     result: tuple[ByteSource | None, IOResult],
     revisions: dict[str, str] | None,
     mount_id: str | None = None,
@@ -178,7 +178,7 @@ def _wrap_op_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
     An op that returns an async iterator has not run its body yet: the
     backend opens the file on the first ``__anext__``, after the frame
     that called it (and its ``host_io`` scope) is gone. Same reason
-    ``_wrap_cmd_streams`` re-establishes the recorder state.
+    ``_wrap_mount_streams`` re-establishes the recorder state.
 
     Args:
         result (Any): whatever the op returned.
@@ -906,7 +906,7 @@ class MountEntry:
                             cmd_name,
                         )
                     if result is not None:
-                        stream, io = _wrap_cmd_streams(
+                        stream, io = _wrap_mount_streams(
                             result,
                             self.revisions or None,
                             self.mount_id,

@@ -29,7 +29,7 @@ import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
 import { snowflakeToDate } from './entry.ts'
 
-const SOFT_STATUSES = new Set([403, 404, 429])
+const SOFT_HTTP_STATUSES = new Set([403, 404, 429])
 
 const CONTAINER_TYPE = 'discord/container'
 
@@ -77,7 +77,7 @@ function todayUtc(): string {
 }
 
 function isSoftError(err: unknown): boolean {
-  return err instanceof DiscordApiError && SOFT_STATUSES.has(err.status)
+  return err instanceof DiscordApiError && SOFT_HTTP_STATUSES.has(err.status)
 }
 
 function containerEntry(name: string, guildId: string): IndexEntry {

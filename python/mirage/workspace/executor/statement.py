@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize
@@ -224,7 +224,7 @@ async def failed_read(
     paths = exec_node.paths if exec_node is not None else []
     existing = await materialize(io.stderr) or b""
     io.stderr = existing + format_fs_error(cmd_name, exc, paths)
-    io.exit_code = read_fail_exit(cmd_name, exc)
+    io.exit_code = read_fail_exit_code(cmd_name, exc)
 
 
 def fd0_binding(session: SessionState) -> tuple[SharedInput | None, bool]:

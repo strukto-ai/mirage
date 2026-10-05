@@ -22,7 +22,7 @@ from mirage.vfs.s3.config import S3Config
 from mirage.workspace.record.types import generation_of
 
 
-def _is_condition_lost(exc: Exception) -> bool:
+def _is_condition_lost_error(exc: Exception) -> bool:
     """True when a conditional write lost: the object changed since the
     read (412) or a concurrent conditional write is in flight (409)."""
     if hasattr(exc, "response"):
@@ -115,7 +115,7 @@ class S3RecordClient:
                 **condition,
             )
         except Exception as exc:
-            if _is_condition_lost(exc):
+            if _is_condition_lost_error(exc):
                 return False
             raise
         return True

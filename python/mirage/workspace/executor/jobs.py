@@ -400,7 +400,7 @@ async def run_statement(
 
 _WAIT_USAGE = "wait: usage: wait [-fn] [-p var] [id ...]"
 _DISOWN_USAGE = "disown: usage: disown [-h] [-ar] [jobspec ... | pid ...]"
-_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_JOB_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _job_result(
@@ -593,7 +593,7 @@ async def handle_wait(
             j += 1
         i += 1
     if var is not None:
-        if _IDENTIFIER.fullmatch(var) is None:
+        if _JOB_IDENTIFIER.fullmatch(var) is None:
             return _job_result(
                 cmd_str, f"bash: wait: `{var}': not a valid identifier\n", 1
             )

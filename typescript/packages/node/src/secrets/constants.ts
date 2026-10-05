@@ -61,7 +61,7 @@ registerSecrets('aws-sm', AWSSMConfig, async (config, ref) =>
 registerSecrets(
   '1password',
   OnePasswordConfig,
-  async (config, ref) => (await import('./onepassword.ts')).fetchOnePassword(config, ref),
+  async (config, ref) => (await import('./onepassword.ts')).fetchOnepassword(config, ref),
   // The SDK still loads lazily; this only asks the resolver whether it
   // is installed, so a workspace that declares the source learns at
   // construction and one that does not pays nothing. Python's own

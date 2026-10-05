@@ -53,20 +53,6 @@ NO_EOCD = (
     " archive.  In the\n  latter case the central directory and zipfile"
     " comment will be found on\n  the last disk(s) of this archive.\n"
 )
-UNZIP_NO_DIRECTORY = (
-    "unzip:  cannot find zipfile directory in one of {0} or"
-    "\n        {0}.zip, and cannot find {0}.ZIP, period.\n"
-)
-ZIPINFO_NO_DIRECTORY = (
-    "zipinfo:  cannot find zipfile directory in one of {0} or"
-    "\n          {0}.zip, and cannot find {0}.ZIP, period.\n"
-)
-CORRUPT_CDIR = (
-    "error [{0}]:  start of central directory not found;\n"
-    "  zipfile corrupt.\n"
-    "  (please check that you have transferred or created the zipfile in the"
-    "\n  appropriate BINARY mode and that you have compiled UnZip properly)\n"
-)
 NO_ARCHIVE_EXIT = 9
 CORRUPT_EXIT = 3
 # Info-ZIP's refusals of a create: a member it cannot write (exit 50,
@@ -75,18 +61,6 @@ CORRUPT_EXIT = 3
 # extraction directory it cannot make (exit 2, before any member). The
 # strerror line hangs under the text after the label, as UnZip 6.00
 # indents it.
-CREATE_ERROR = "error:  cannot {0} {1}\n        {2}\n"
-CHECKDIR_ERROR = (
-    "checkdir error:  cannot create {0}\n                 {1}\n"
-    "                 unable to process {2}.\n"
-)
-CHECKDIR_FILE = (
-    "checkdir error:  {0} exists but is not directory\n"
-    "                 unable to process {1}.\n"
-)
-CHECKDIR_DEST = (
-    "checkdir:  cannot create extraction directory: {0}\n           {1}\n"
-)
 CREATE_EXIT = 50
 CHECKDIR_EXIT = 2
 DEST_EXIT = 2
@@ -119,6 +93,56 @@ MISSING_EXIT = 2
 # exit 10; -1, -2 and -h are zipinfo's letters and mean nothing to unzip
 # proper (Info-ZIP's `unzip -h` is its help screen).
 USAGE_EXIT = 10
+
+
+def unzip_no_directory(archive: str) -> str:
+    return (
+        f"unzip:  cannot find zipfile directory in one of {archive} or"
+        f"\n        {archive}.zip, and cannot find {archive}.ZIP, period.\n"
+    )
+
+
+def zipinfo_no_directory(archive: str) -> str:
+    return (
+        f"zipinfo:  cannot find zipfile directory in one of {archive} or"
+        f"\n          {archive}.zip, and cannot find {archive}.ZIP, period.\n"
+    )
+
+
+def corrupt_cdir(archive: str) -> str:
+    return (
+        f"error [{archive}]:  start of central directory not found;\n"
+        "  zipfile corrupt.\n"
+        "  (please check that you have transferred or created the zipfile"
+        " in the\n  appropriate BINARY mode and that you have compiled UnZip"
+        " properly)\n"
+    )
+
+
+def create_error(verb: str, name: str, strerror: str | None) -> str:
+    return f"error:  cannot {verb} {name}\n        {strerror}\n"
+
+
+def checkdir_error(directory: str, strerror: str | None, member: str) -> str:
+    return (
+        f"checkdir error:  cannot create {directory}\n"
+        f"                 {strerror}\n"
+        f"                 unable to process {member}.\n"
+    )
+
+
+def checkdir_file(directory: str, member: str) -> str:
+    return (
+        f"checkdir error:  {directory} exists but is not directory\n"
+        f"                 unable to process {member}.\n"
+    )
+
+
+def checkdir_dest(directory: str, strerror: str | None) -> str:
+    return (
+        f"checkdir:  cannot create extraction directory: {directory}\n"
+        f"           {strerror}\n"
+    )
 
 
 def _spec_index(name: bytes, members: tuple[bytes, ...]) -> int | None:
@@ -269,14 +293,14 @@ def _refusal(
         if pipe:
             tail = ""
         elif zipinfo:
-            tail = ZIPINFO_NO_DIRECTORY.format(archive)
+            tail = zipinfo_no_directory(archive)
         else:
-            tail = UNZIP_NO_DIRECTORY.format(archive)
+            tail = unzip_no_directory(archive)
         return IOResult(
             exit_code=NO_ARCHIVE_EXIT, stderr=(head + NO_EOCD + tail).encode()
         )
     return IOResult(
-        exit_code=CORRUPT_EXIT, stderr=CORRUPT_CDIR.format(archive).encode()
+        exit_code=CORRUPT_EXIT, stderr=corrupt_cdir(archive).encode()
     )
 
 
@@ -706,9 +730,7 @@ async def _run(
             )
             return output, IOResult(
                 exit_code=DEST_EXIT,
-                stderr=CHECKDIR_DEST.format(
-                    typed_dest, fs_strerror(exc)
-                ).encode(),
+                stderr=checkdir_dest(typed_dest, fs_strerror(exc)).encode(),
             )
     checkdir_failed = False
     create_failed = False
@@ -735,9 +757,9 @@ async def _run(
                 except FS_ERRORS as probe:
                     logger.debug("unzip: probing %s failed: %s", chain, probe)
             errors.append(
-                CHECKDIR_FILE.format(shown(blocker), info.filename)
+                checkdir_file(shown(blocker), info.filename)
                 if blocker is not None
-                else CHECKDIR_ERROR.format(
+                else checkdir_error(
                     shown(error_path(exc)), fs_strerror(exc), info.filename
                 )
             )
@@ -757,7 +779,7 @@ async def _run(
             )
             create_failed = True
             errors.append(
-                CREATE_ERROR.format(
+                create_error(
                     "delete old" if existed else "create",
                     shown(out_path),
                     fs_strerror(exc),

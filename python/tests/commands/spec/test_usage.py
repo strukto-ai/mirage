@@ -14,7 +14,7 @@ from mirage.commands.spec.usage import (
     missing_required_error,
     missing_value_error,
     old_option_error,
-    read_fail_exit,
+    read_fail_exit_code,
     read_fail_exit_line,
     rg_unknown_flag,
     similar_rg_flags,
@@ -209,13 +209,13 @@ def test_old_option_error_matches_gnu_tar_wording():
 
 def test_read_fail_exit_reads_the_code_off_the_command():
     # GNU's code for a failed read belongs to the command, not the errno.
-    assert read_fail_exit("cat", FileNotFoundError("/x")) == 1
-    assert read_fail_exit("sort", FileNotFoundError("/x")) == 2
-    assert read_fail_exit("sort", IsADirectoryError("/x")) == 2
-    assert read_fail_exit("unzip", FileNotFoundError("/x")) == 9
+    assert read_fail_exit_code("cat", FileNotFoundError("/x")) == 1
+    assert read_fail_exit_code("sort", FileNotFoundError("/x")) == 2
+    assert read_fail_exit_code("sort", IsADirectoryError("/x")) == 2
+    assert read_fail_exit_code("unzip", FileNotFoundError("/x")) == 9
     # A read the mount refuses to render whole (EFBIG) is a failed read too.
-    assert read_fail_exit("rg", efbig("/x")) == 2
-    assert read_fail_exit("cat", efbig("/x")) == 1
+    assert read_fail_exit_code("rg", efbig("/x")) == 2
+    assert read_fail_exit_code("cat", efbig("/x")) == 1
 
 
 def test_read_fail_exit_splits_by_errno_for_the_ones_that_do():
@@ -223,12 +223,12 @@ def test_read_fail_exit_splits_by_errno_for_the_ones_that_do():
     # file fails at open (2); the gzip family calls a directory a warning
     # (2) and a missing file an error (1). zgrep opens its operands
     # itself, so a failed read that reaches here is grep's trouble, 2.
-    assert read_fail_exit("sed", IsADirectoryError("/d")) == 4
-    assert read_fail_exit("sed", FileNotFoundError("/x")) == 2
-    assert read_fail_exit("zcat", IsADirectoryError("/d")) == 2
-    assert read_fail_exit("zcat", FileNotFoundError("/x")) == 1
-    assert read_fail_exit("zgrep", IsADirectoryError("/d")) == 2
-    assert read_fail_exit("zgrep", FileNotFoundError("/x")) == 2
+    assert read_fail_exit_code("sed", IsADirectoryError("/d")) == 4
+    assert read_fail_exit_code("sed", FileNotFoundError("/x")) == 2
+    assert read_fail_exit_code("zcat", IsADirectoryError("/d")) == 2
+    assert read_fail_exit_code("zcat", FileNotFoundError("/x")) == 1
+    assert read_fail_exit_code("zgrep", IsADirectoryError("/d")) == 2
+    assert read_fail_exit_code("zgrep", FileNotFoundError("/x")) == 2
 
 
 def test_read_fail_exit_ignores_anything_that_is_not_a_failed_read():
@@ -238,10 +238,10 @@ def test_read_fail_exit_ignores_anything_that_is_not_a_failed_read():
     # often a write refusal as a read one: `sed -i` on a backend with no
     # write op raises PermissionError and must stay 1, which is what
     # integ's lancedb_sed_i_readonly and notion_sed_i_readonly pin.
-    assert read_fail_exit("sed", PermissionError("-i not supported")) == 1
-    assert read_fail_exit("sed", ValueError("bad script")) == 1
-    assert read_fail_exit("sort", PermissionError("/locked")) == 1
-    assert read_fail_exit("sort", RuntimeError("transport")) == 1
+    assert read_fail_exit_code("sed", PermissionError("-i not supported")) == 1
+    assert read_fail_exit_code("sed", ValueError("bad script")) == 1
+    assert read_fail_exit_code("sort", PermissionError("/locked")) == 1
+    assert read_fail_exit_code("sort", RuntimeError("transport")) == 1
 
 
 def test_read_fail_exit_line_reads_the_terminal_errno():

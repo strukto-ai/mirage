@@ -80,7 +80,7 @@ def _read_fail_code(cmd_name: str, is_dir: bool) -> int:
     return READ_FAIL_EXIT.get(cmd_name, 1)
 
 
-def read_fail_exit(cmd_name: str, exc: BaseException) -> int:
+def read_fail_exit_code(cmd_name: str, exc: BaseException) -> int:
     """The exit code for a command that could not read an operand.
 
     Read off the command, not off the errno, because that is how GNU's

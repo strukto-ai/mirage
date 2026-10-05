@@ -35,7 +35,7 @@ from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.ops.types import LinkView
@@ -130,7 +130,7 @@ async def run_operands(
             # a lazy operand that fails here is the same failure the
             # single-mount run reports eagerly, and it must answer the
             # same number.
-            io.exit_code = read_fail_exit(cmd_name, exc)
+            io.exit_code = read_fail_exit_code(cmd_name, exc)
             data = b""
         results.append(OperandRun(scope, data, io))
         if stop_at_success and io.exit_code == 0:
@@ -212,7 +212,7 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
     )
 
 
-def transfer_links(
+def transfer_links_of(
     links: LinkView, dispatch: DispatchFn, cwd: str
 ) -> TransferLinks:
     """Namespace links with the dispatcher primitives shared by cp and mv.

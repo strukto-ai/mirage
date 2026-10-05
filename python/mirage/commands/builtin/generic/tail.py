@@ -40,7 +40,7 @@ DEFAULT_SLEEP_INTERVAL = 1.0
 # GNU's `follow_mode_string`, in declaration order.
 FOLLOW_ARGS = ("descriptor", "name")
 # A bound byte-window reader, called as ``read_range(path, offset=, size=)``.
-ReadRangeFn = Callable[..., Awaitable[bytes]]
+ReadRange = Callable[..., Awaitable[bytes]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,7 +339,7 @@ async def _counted(source: Any, box: list[int]) -> AsyncIterator[bytes]:
 
 async def _window(
     read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadRange | None,
     path: PathSpec,
     offset: int,
     size: int,
@@ -348,7 +348,7 @@ async def _window(
 
     Args:
         read (Callable[..., Any]): whole-file reader, the fallback.
-        read_range (ReadRangeFn | None): the backend's byte window, if
+        read_range (ReadRange | None): the backend's byte window, if
             it has one.
         path (PathSpec): the file.
         offset (int): where the last poll ended.
@@ -374,7 +374,7 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
 
 async def _catch_up(
     read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadRange | None,
     io: IOResult,
     p: PathSpec,
     size: int | None,
@@ -387,7 +387,7 @@ async def _catch_up(
 
     Args:
         read (Callable[..., Any]): bound whole-file reader.
-        read_range (ReadRangeFn | None): the backend's byte window, if
+        read_range (ReadRange | None): the backend's byte window, if
             it has one.
         io (IOResult): the result a truncation notice lands on.
         p (PathSpec): the file.
@@ -416,7 +416,7 @@ async def _follow(
     pending: list[tuple[PathSpec, str]],
     *,
     read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadRange | None,
     stat: StatFn,
     counts: TailCounts,
     show_headers: bool,
@@ -475,7 +475,7 @@ async def _follow(
         pending (list[tuple[PathSpec, str]]): the ones ``--retry`` waits
             for, each with the notice that announces it.
         read (Callable[..., Any]): bound whole-file reader.
-        read_range (ReadRangeFn | None): bound byte-window reader.
+        read_range (ReadRange | None): bound byte-window reader.
         stat (StatFn): bound stat.
         counts (TailCounts): what the first print shows.
         show_headers (bool): the ``==> name <==`` rule.
@@ -666,7 +666,7 @@ async def tail_generic(
     opts: CommandOpts,
     stat: StatFn,
     stream: PolymorphicReadFn,
-    read_range: ReadRangeFn | None = None,
+    read_range: ReadRange | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run tail over resolved operands, GNU semantics; mirrors tailGeneric.
 
@@ -682,7 +682,7 @@ async def tail_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
-        read_range (ReadRangeFn | None): Bound byte-window reader
+        read_range (ReadRange | None): Bound byte-window reader
             called as ``read_range(path, offset, size)``, for a follow
             that only wants what the file gained; None reads whole.
     """

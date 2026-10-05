@@ -269,7 +269,7 @@ async function refillUnlessLive(
  * index is not read again. A truncated tree keeps readdir's per-directory
  * fallback instead.
  */
-export async function ensureLiveTree(
+export async function ensureTree(
   accessor: GitHubAccessor,
   index: IndexCacheStore | undefined,
   prefix: string,

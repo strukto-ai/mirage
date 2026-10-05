@@ -18,7 +18,7 @@ import { IOResult } from '../../../io/types.ts'
 import { parseDateExpr, parsePosixTime } from '../../../utils/dates.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { strftime } from '../utils/strftime.ts'
+import { gnuStrftime } from '../utils/strftime.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError, usageExitCode, usageHint } from '../../spec/usage.ts'
 import { UsageError } from '../../errors.ts'
@@ -135,7 +135,7 @@ function dateCommand(
     // with no time", which is today at midnight. Measured on coreutils
     // 9.4: `date -d ''` and `date -d '   '` both print today 00:00:00 in
     // the command's zone.
-    const midnight = parseDateExpr(strftime(new Date(), '%Y-%m-%d', zone), zone)
+    const midnight = parseDateExpr(gnuStrftime(new Date(), '%Y-%m-%d', zone), zone)
     // Today's own ISO date always parses; the fallback is for the type.
     dt = midnight ?? new Date()
   } else if (d !== null) {
@@ -148,7 +148,7 @@ function dateCommand(
     dt = new Date()
   }
   const fmt = formats[0] ?? DEFAULT_FORMAT
-  const out = ENC.encode(strftime(dt, fmt, zone) + '\n')
+  const out = ENC.encode(gnuStrftime(dt, fmt, zone) + '\n')
   if (setting !== null) return [out, new IOResult({ exitCode: 1, stderr: ENC.encode(CANNOT_SET) })]
   return [out, new IOResult()]
 }

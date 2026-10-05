@@ -1,5 +1,5 @@
 {
- "baseline": 4758,
+ "baseline": 4496,
  "modules": {
   "ops/generic/factory": {
    "python_only": {
@@ -9,15 +9,7 @@
   },
   "core/github/tree": {
    "python_only": {
-    "fetch_head": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "_head_of": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureLiveTree."
-   }
-  },
-  "core/github/client": {
-   "typescript_only": {
-    "fetchHead": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts.",
-    "headOf": "The head fetch sits beside each host's tree fetch: fetch_tree is in core/github/tree.py, fetchTree in core/github/client.ts."
+    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureTree."
    }
   },
   "core/hf_hub/client": {

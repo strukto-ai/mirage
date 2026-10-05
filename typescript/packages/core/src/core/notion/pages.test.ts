@@ -17,7 +17,7 @@ import type { NotionTransport } from './client.ts'
 import {
   createComment,
   createPage,
-  getChildBlocks,
+  listBlockChildren,
   getChildPages,
   getDatabase,
   getPage,
@@ -112,7 +112,7 @@ describe('getPage', () => {
   })
 })
 
-describe('getChildBlocks', () => {
+describe('listBlockChildren', () => {
   it('paginates API-retrieve-block-children using start_cursor', async () => {
     const transport = new FakeTransport()
     transport.responses.push({
@@ -125,7 +125,7 @@ describe('getChildBlocks', () => {
       has_more: false,
       next_cursor: null,
     })
-    const blocks = await getChildBlocks(transport, 'block-root')
+    const blocks = await listBlockChildren(transport, 'block-root')
     expect(transport.invocations).toHaveLength(2)
     expect(transport.invocations[0]).toEqual({
       name: 'API-retrieve-block-children',

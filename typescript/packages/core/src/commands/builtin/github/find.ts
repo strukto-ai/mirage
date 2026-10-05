@@ -23,7 +23,7 @@ import { withPathGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { IO } from './io.ts'
-import { ensureLiveTree } from '../../../core/github/tree.ts'
+import { ensureTree } from '../../../core/github/tree.ts'
 
 const resolveGlob = resolveGlobOf(IO)
 const WALK_IO = withPolicyGuard(withPathGuards(IO))
@@ -34,7 +34,7 @@ async function findCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  await ensureLiveTree(accessor, opts.index ?? undefined, opts.mountPrefix ?? '')
+  await ensureTree(accessor, opts.index ?? undefined, opts.mountPrefix ?? '')
   // The dispatcher hands a pattern over whole; the wrapper resolves it,
   // as python's does, before the walk names anything.
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)

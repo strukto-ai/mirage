@@ -15,7 +15,7 @@
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len, sanitize_label
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, sanitize_label
 
 TITLE_MAX_CHARS = 100
 SUFFIX = ".gdoc.json"
@@ -61,6 +61,6 @@ def make_filename(title: str, doc_id: str, modified_time: str = "") -> str:
         if len(modified_time) >= DATE_LEN
         else ""
     )
-    fixed = byte_len(lead) + len("__") + byte_len(doc_id) + len(SUFFIX)
+    fixed = byte_length(lead) + len("__") + byte_length(doc_id) + len(SUFFIX)
     label = sanitize_title(title, max_bytes=NAME_MAX_BYTES - fixed)
     return f"{lead}{label}__{doc_id}{SUFFIX}"

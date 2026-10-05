@@ -19,7 +19,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.cp import parse_flags
-from mirage.commands.builtin.generic.crossmount.utils import transfer_links
+from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
@@ -162,7 +162,7 @@ async def cp(
             partial(typed_link, links, cwd=cwd) if links is not None else None
         ),
         copies=(
-            transfer_links(links, opts.dispatch, cwd)
+            transfer_links_of(links, opts.dispatch, cwd)
             if links is not None and opts.dispatch is not None
             else None
         ),

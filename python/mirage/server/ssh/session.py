@@ -43,9 +43,12 @@ logger = logging.getLogger(__name__)
 
 AGENT_ID = "ssh"
 INTERRUPTED = 130
-PROMPT = "mirage:{cwd}$ "
 FALLBACK_PROMPT = "mirage$ "
 LOGIN_HOME = "/"
+
+
+def prompt(cwd: str) -> str:
+    return f"mirage:{cwd}$ "
 
 
 def new_session_id() -> str:
@@ -257,7 +260,7 @@ class ShellChannel:
         if not self._live():
             return FALLBACK_PROMPT
         cwd = self._entry.runner.ws.get_session(self._session_id).cwd
-        return PROMPT.format(cwd=cwd)
+        return prompt(cwd)
 
     async def serve(self) -> int:
         """Run the channel to its end.

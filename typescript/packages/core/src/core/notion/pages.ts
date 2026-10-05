@@ -121,7 +121,10 @@ export async function queryDataSourcePage(
   )
 }
 
-export async function getChildBlocks(transport: NotionTransport, blockId: string): Promise<Json[]> {
+export async function listBlockChildren(
+  transport: NotionTransport,
+  blockId: string,
+): Promise<Json[]> {
   return paginateTool(transport, 'API-retrieve-block-children', {
     block_id: blockId,
     page_size: 100,
@@ -130,18 +133,18 @@ export async function getChildBlocks(transport: NotionTransport, blockId: string
 
 const MAX_BLOCK_DEPTH = 10
 
-export async function getBlockTree(
+export async function listBlockTree(
   transport: NotionTransport,
   blockId: string,
   depth = 0,
 ): Promise<Json[]> {
-  const blocks = await getChildBlocks(transport, blockId)
+  const blocks = await listBlockChildren(transport, blockId)
   if (depth >= MAX_BLOCK_DEPTH) return blocks
   for (const block of blocks) {
     const btype = block.type
     if (btype === 'child_page' || btype === 'child_database') continue
     if (block.has_children === true && typeof block.id === 'string') {
-      block.children = await getBlockTree(transport, block.id, depth + 1)
+      block.children = await listBlockTree(transport, block.id, depth + 1)
     }
   }
   return blocks
@@ -157,7 +160,7 @@ export async function getChildPages(
   transport: NotionTransport,
   parentBlockId: string,
 ): Promise<ChildPageRef[]> {
-  const blocks = await getChildBlocks(transport, parentBlockId)
+  const blocks = await listBlockChildren(transport, parentBlockId)
   const refs: ChildPageRef[] = []
   for (const block of blocks) {
     if (block.type !== 'child_page') continue

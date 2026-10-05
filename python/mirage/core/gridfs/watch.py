@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.core.gridfs.client import (
     _prefix,
-    _strip_prefix,
+    _strip_key_prefix,
     iter_latest,
     prefix_query,
 )
@@ -63,7 +63,7 @@ class GridFSWalk:
         markers: list[str] = []
         async for doc in iter_latest(self._accessor, prefix_query(pfx)):
             filename = doc["filename"]
-            relative = _strip_prefix(filename, config)
+            relative = _strip_key_prefix(filename, config)
             virtual = (
                 prefix.rstrip("/") + "/" + relative.lstrip("/")
                 if prefix

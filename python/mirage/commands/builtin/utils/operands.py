@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.ops.types import LinkView, MountView, StatPath
@@ -190,7 +190,7 @@ async def split_readable_coded(
         # backend raises EISDIR from the stat where an explicit directory
         # returns a row.
         if code == 0 or not isinstance(failure, IsADirectoryError):
-            code = read_fail_exit(cmd_name, failure)
+            code = read_fail_exit_code(cmd_name, failure)
     return readable, err, code
 
 

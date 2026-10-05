@@ -27,7 +27,7 @@ from mirage.core.notion.pathing import (
     format_segment,
     split_suffix_id,
 )
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 
 
 class TestSplitSuffixId:
@@ -154,7 +154,7 @@ OBJ_ID = "a1b2c3d4-e5f6-7890-abcd-ef0123456789"
 def test_a_long_title_fits_name_max_and_still_addresses_the_id():
     name = format_segment(CJK_TITLE, OBJ_ID)
 
-    assert byte_len(name) <= NAME_MAX_BYTES
+    assert byte_length(name) <= NAME_MAX_BYTES
     assert split_suffix_id(name)[1] == OBJ_ID
     assert "\ufffd" not in name
 

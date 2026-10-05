@@ -14,7 +14,7 @@
 
 import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { join, parseJoinFlags } from '../../join.ts'
+import { join, parseFlags } from '../../join.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, streamOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
@@ -32,7 +32,7 @@ export async function runJoin(
   return join(paths, {
     read: streamOp(dispatch),
     stdin,
-    flags: parseJoinFlags(
+    flags: parseFlags(
       flagKwargs,
       paths.map((path) => path.rawPath),
     ),

@@ -355,7 +355,7 @@ def _anchored(entries: tuple[str, ...], root: str) -> tuple[str, ...]:
     )
 
 
-def _scoped_rules(
+def _scope_rules(
     rules: tuple[CommandRule, ...], root: str
 ) -> tuple[CommandRule, ...]:
     """A mount entry's rules, stamped with the mount they belong to and
@@ -396,8 +396,8 @@ def compile_commands(profile: SessionProfile) -> AdmissionRules | None:
     deny: list[CommandRule] = []
     for prefix, entry in (profile.mounts or {}).items():
         root = _root_of(prefix)
-        ask.extend(_scoped_rules(_rules_of(entry.commands, "ask"), root))
-        deny.extend(_scoped_rules(_rules_of(entry.commands, "deny"), root))
+        ask.extend(_scope_rules(_rules_of(entry.commands, "ask"), root))
+        deny.extend(_scope_rules(_rules_of(entry.commands, "deny"), root))
     block = profile.commands
     allow = block.allow if block is not None else None
     if block is not None:
@@ -443,7 +443,7 @@ def _shown(profile: SessionProfile) -> ShownPaths | None:
     return classify_shows(entries)
 
 
-def _hide_reasons(profile: SessionProfile) -> tuple[HideReason, ...]:
+def _hide_reasons_of(profile: SessionProfile) -> tuple[HideReason, ...]:
     """The operator's reasons for grouped hides, a mount section's
     anchored to its mount exactly like the hide entries they describe,
     so the side table names what the compiled spec matches.
@@ -552,7 +552,7 @@ def compile_profile(
         script=compile_script(effective, name),
         command_limits=effective.command_limits,
         shown_paths=_shown(effective),
-        hide_reasons=_hide_reasons(effective),
+        hide_reasons=_hide_reasons_of(effective),
         profile=name or None,
     )
 

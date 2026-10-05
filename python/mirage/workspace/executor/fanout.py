@@ -54,7 +54,7 @@ from mirage.commands.errors import (
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit
+from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context import path_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -852,7 +852,7 @@ async def _fan_out_traversal(
             logger.debug("%s traversal failed", cmd_name, exc_info=True)
             stdout = None
             io = IOResult(
-                exit_code=read_fail_exit(cmd_name, exc),
+                exit_code=read_fail_exit_code(cmd_name, exc),
                 stderr=format_fs_error(cmd_name, exc, sub_paths),
             )
 
