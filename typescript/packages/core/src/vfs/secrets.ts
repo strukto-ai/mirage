@@ -111,10 +111,9 @@ export function parseConfigWithSchema<T extends ZodRawShape>(
  * `unrecognized_keys` issue per key: the summary then reads
  * `<vfs>: team_idz: unrecognized_keys` where python's reads
  * `<vfs>: team_idz: extra_forbidden`, the same field named the same way.
- * Exported for the configs that take their options without a schema (the
- * `ram`, `disk`, `redis` and `opfs` backends, and the workspace cache and
- * index), which python builds from constructor keywords or a model that
- * forbids extra fields and refuses the same way.
+ * Exported for the backends that take their options without a schema
+ * (`ram`, `disk`, `redis`, `opfs`), which python builds from constructor
+ * keywords and refuses the same way.
  */
 export function refuseUnknownKeys(
   input: Record<string, unknown>,

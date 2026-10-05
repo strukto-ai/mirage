@@ -263,18 +263,16 @@
   },
   "cache/file/config": {
    "typescript_only": {
-    "CACHE_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
-    "CacheTypeField": "Python checks the type through the model's enum field; a TypeScript config is a plain object, so the code door parses its type with this schema.",
-    "REDIS_CACHE_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
-    "normalizeCacheConfig": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables."
+    "CacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "RedisCacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "normalizeCacheConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
    }
   },
   "cache/index/config": {
    "typescript_only": {
-    "INDEX_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
-    "IndexTypeField": "Python checks the type through the model's enum field; a TypeScript config is a plain object, so the code door parses its type with this schema.",
-    "REDIS_INDEX_FIELDS": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables.",
-    "normalizeIndexConfig": "Python refuses unknown fields with pydantic extra=\"forbid\" on the model; a TypeScript config is a plain object, so the code door checks and normalizes its keys against these tables."
+    "IndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "RedisIndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code door parses it with this schema through parseConfigWithSchema.",
+    "normalizeIndexConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
    }
   },
   "vfs/secrets": {
