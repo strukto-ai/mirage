@@ -19,7 +19,7 @@ import struct
 from mirage import MountMode, Workspace
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS
-from mirage.core.ram.read import read_bytes
+from mirage.core.ram.read import read
 from mirage.io.types import IOResult
 from mirage.vfs.ram import RAMVFS
 
@@ -40,7 +40,7 @@ async def tally_cat(accessor, paths, *texts, **kwargs):
         texts (str): positional text operands, unused here.
     """
     path = paths[0]
-    raw = await read_bytes(accessor, path)
+    raw = await read(accessor, path)
     if not raw.startswith(MAGIC):
         return None, IOResult(exit_code=1, stderr=b"cat: not a tally file\n")
     size = struct.unpack("<I", raw[len(MAGIC) : len(MAGIC) + 4])[0]

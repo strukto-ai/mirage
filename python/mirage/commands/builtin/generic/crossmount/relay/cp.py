@@ -18,7 +18,7 @@ from functools import partial
 from typing import Any, Callable
 
 from mirage.commands.builtin.generic.cp import TransferLinks, parse_flags
-from mirage.commands.builtin.generic.cp import cp as generic_cp
+from mirage.commands.builtin.generic.cp import cp_generic as generic_cp
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,

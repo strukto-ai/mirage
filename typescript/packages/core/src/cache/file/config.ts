@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
+
+import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
+
 export const CacheType = Object.freeze({
   RAM: 'ram',
   REDIS: 'redis',
@@ -19,17 +23,43 @@ export const CacheType = Object.freeze({
 
 export type CacheType = (typeof CacheType)[keyof typeof CacheType]
 
+// The type is any registered one: `registerFileCacheStore` takes names
+// this module does not list, and the registry names a missing factory.
+const CacheConfigSchema = z.object({
+  type: z.custom<CacheType>((value) => typeof value === 'string').optional(),
+  limit: z.union([z.string(), z.number()]).optional(),
+  maxDrainBytes: z.number().nullable().optional(),
+})
+
+const RedisCacheConfigSchema = CacheConfigSchema.extend({
+  url: z.string().optional(),
+  keyPrefix: z.string().optional(),
+})
+
 /**
  * Declarative description of the workspace's file cache, the twin of
  * {@link IndexConfig} for the byte cache. Mirrors Python `CacheConfig`.
  */
-export interface CacheConfig {
-  type?: CacheType
-  limit?: string | number
-  maxDrainBytes?: number | null
-}
+export type CacheConfig = ConfigOf<typeof CacheConfigSchema>
 
-export interface RedisCacheConfig extends CacheConfig {
-  url?: string
-  keyPrefix?: string
+export type RedisCacheConfig = ConfigOf<typeof RedisCacheConfigSchema>
+
+/**
+ * Check a cache config the way python's `CacheConfig` checks one on
+ * construction, and camelize its keys.
+ *
+ * The fields are picked by `type`, where python picks them by class: a
+ * RAM cache takes no connection fields, and any other type takes the
+ * redis set its registered factory receives. One field named in both
+ * spellings is refused, as python refuses the camelCase one.
+ *
+ * @param config the cache config as the caller passed it.
+ * @returns the checked config with every key in its camelCase spelling.
+ */
+export function normalizeCacheConfig(config: CacheConfig): CacheConfig {
+  const input = config as Record<string, unknown>
+  refuseRepeatedFields(input)
+  return (input.type ?? CacheType.RAM) === CacheType.RAM
+    ? parseConfigWithSchema(CacheConfigSchema, input)
+    : parseConfigWithSchema(RedisCacheConfigSchema, input)
 }

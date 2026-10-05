@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CacheType } from '../../cache/file/config.ts'
+import { type CacheConfig, CacheType, type RedisCacheConfig } from '../../cache/file/config.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { Workspace } from './workspace.ts'
 import { buildFileCache, registerFileCacheStore } from './cache.ts'
@@ -43,6 +43,16 @@ describe('buildFileCache', () => {
     registerFileCacheStore('probe' as CacheType, () => store)
     expect(buildFileCache({ type: 'probe' as CacheType })).toBe(store)
   })
+
+  it('hands a registered factory the camelCase config', () => {
+    const seen: RedisCacheConfig[] = []
+    registerFileCacheStore('probe-seen' as CacheType, (config) => {
+      seen.push(config)
+      return new RAMFileCacheStore({ limit: 7 })
+    })
+    buildFileCache({ type: 'probe-seen', key_prefix: 'p:' } as unknown as CacheConfig)
+    expect(seen).toEqual([{ type: 'probe-seen', keyPrefix: 'p:' }])
+  })
 })
 
 describe('the workspace cache', () => {
@@ -67,5 +77,10 @@ describe('the workspace cache', () => {
     const ws = new Workspace({}, { cache: { type: 'probe-close' as CacheType } })
     await ws.close()
     expect(builtClosed).toBe(1)
+  })
+
+  it('takes max_drain_bytes as maxDrainBytes', () => {
+    const ws = new Workspace({}, { cache: { limit: '1MB', max_drain_bytes: 7 } as CacheConfig })
+    expect(ws.maxDrainBytes).toBe(7)
   })
 })

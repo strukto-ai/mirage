@@ -59,7 +59,7 @@ def _upload_bytes_sync(
     accessor.files.upload(remote_path, BytesIO(data), overwrite=True)
 
 
-async def write_bytes(
+async def write(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
     data: bytes,

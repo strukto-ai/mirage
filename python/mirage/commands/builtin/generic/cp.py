@@ -1379,7 +1379,7 @@ async def copy_entries(
     return copied_all, wrote_any
 
 
-async def cp(
+async def cp_generic(
     paths: list[PathSpec],
     *,
     stat: StatFn,

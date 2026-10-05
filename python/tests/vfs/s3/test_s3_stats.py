@@ -38,7 +38,7 @@ def s3_backend(s3_config):
 
 @pytest.mark.asyncio
 async def test_get_bytes(s3_accessor):
-    from mirage.core.s3.read import read_bytes
+    from mirage.core.s3.read import read
 
     with patch("mirage.core.s3.read.async_session") as mock_session:
         mock_client = AsyncMock()
@@ -48,7 +48,7 @@ async def test_get_bytes(s3_accessor):
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_client
         mock_session.return_value.client.return_value = mock_ctx
-        data = await read_bytes(
+        data = await read(
             s3_accessor,
             PathSpec(
                 vfs_path="data/file.txt",
@@ -61,7 +61,7 @@ async def test_get_bytes(s3_accessor):
 
 @pytest.mark.asyncio
 async def test_range_get(s3_accessor):
-    from mirage.core.s3.read import read_bytes
+    from mirage.core.s3.read import read
 
     with patch("mirage.core.s3.read.async_session") as mock_session:
         mock_client = AsyncMock()
@@ -71,7 +71,7 @@ async def test_range_get(s3_accessor):
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_client
         mock_session.return_value.client.return_value = mock_ctx
-        data = await read_bytes(
+        data = await read(
             s3_accessor,
             PathSpec(
                 vfs_path="data/file.txt",
@@ -90,7 +90,7 @@ async def test_range_get(s3_accessor):
 
 @pytest.mark.asyncio
 async def test_put_bytes(s3_accessor):
-    from mirage.core.s3.write import write_bytes
+    from mirage.core.s3.write import write
 
     with patch("mirage.core.s3.driver.async_session") as mock_session:
         mock_client = AsyncMock()
@@ -100,7 +100,7 @@ async def test_put_bytes(s3_accessor):
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_client
         mock_session.return_value.client.return_value = mock_ctx
-        await write_bytes(
+        await write(
             s3_accessor,
             PathSpec(
                 vfs_path="data/out.txt",

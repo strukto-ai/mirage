@@ -14,12 +14,12 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.numfmt import numfmt
+from mirage.commands.builtin.generic.numfmt import numfmt_generic
 from mirage.commands.errors import UsageError
 
 
 async def run(value: str, **kwargs: str | bool) -> str:
-    out, io = await numfmt(value, **kwargs)
+    out, io = await numfmt_generic(value, **kwargs)
     if io.exit_code != 0:
         raise UsageError(bytes(io.stderr).decode().rstrip("\n"), io.exit_code)
     assert out is not None

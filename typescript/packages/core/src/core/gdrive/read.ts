@@ -137,7 +137,7 @@ export async function read(
   return sliced
 }
 
-export async function* stream(
+export async function* readStream(
   accessor: GDriveAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

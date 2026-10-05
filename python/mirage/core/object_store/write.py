@@ -73,16 +73,14 @@ async def _put(
         raise
 
 
-def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
+def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
     """Build the whole-object write over one driver.
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def write_bytes(
-        accessor: A, path_spec: PathSpec, data: bytes
-    ) -> None:
+    async def write(accessor: A, path_spec: PathSpec, data: bytes) -> None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
         timer = start_op()
@@ -101,7 +99,7 @@ def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
         # the listings above the immediate parent gained entries too.
         await invalidate_ancestors(path_spec)
 
-    return write_bytes
+    return write
 
 
 def make_create(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:

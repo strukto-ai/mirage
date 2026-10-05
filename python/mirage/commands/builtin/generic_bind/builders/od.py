@@ -1,5 +1,5 @@
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.od import od as generic_od
+from mirage.commands.builtin.generic.od import od_generic as generic_od
 from mirage.commands.builtin.generic.od import parse_count
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,

@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe('core/disk/write', () => {
   it('writes bytes to disk', async () => {
-    await writeBytes(accessor, spec('/x.txt'), new TextEncoder().encode('hi'))
+    await write(accessor, spec('/x.txt'), new TextEncoder().encode('hi'))
     const out = await readFile(join(root, 'x.txt'), 'utf-8')
     expect(out).toBe('hi')
   })
@@ -43,7 +43,7 @@ describe('core/disk/write', () => {
       await writeFile(join(outside, 'target.txt'), 'original')
       await symlink(join(outside, 'target.txt'), join(root, 'link'))
       await expect(
-        writeBytes(accessor, spec('/link'), new TextEncoder().encode('pwned')),
+        write(accessor, spec('/link'), new TextEncoder().encode('pwned')),
       ).rejects.toMatchObject({ code: 'ENOENT' })
       expect(await readFile(join(outside, 'target.txt'), 'utf8')).toBe('original')
     } finally {
@@ -54,14 +54,14 @@ describe('core/disk/write', () => {
   it('does not create parent directories', async () => {
     // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent.
     await expect(
-      writeBytes(accessor, spec('/a/b/c.txt'), new TextEncoder().encode('deep')),
+      write(accessor, spec('/a/b/c.txt'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('a parent that is a plain file is ENOTDIR', async () => {
     await writeFile(join(root, 'plain'), 'y')
     await expect(
-      writeBytes(accessor, spec('/plain/c.txt'), new TextEncoder().encode('deep')),
+      write(accessor, spec('/plain/c.txt'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 })

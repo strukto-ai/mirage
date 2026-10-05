@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.errors import SortKeyError
-from mirage.commands.builtin.generic.sort import sort
+from mirage.commands.builtin.generic.sort import sort_generic
 from mirage.commands.builtin.sort_keys import (
     KeyMods,
     _compute_fields,
@@ -407,7 +407,7 @@ async def _rb(_path):
 
 
 async def _run_sort(data: bytes, **kwargs) -> list[str]:
-    output, _ = await sort([], read_bytes=_rb, stdin=data, **kwargs)
+    output, _ = await sort_generic([], read_bytes=_rb, stdin=data, **kwargs)
     return output.decode().splitlines()
 
 

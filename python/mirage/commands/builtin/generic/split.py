@@ -461,7 +461,7 @@ def _prefix_virtual_of(prefix: PathSpec) -> str:
     return prefix.virtual
 
 
-async def split(
+async def split_generic(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
@@ -607,4 +607,4 @@ async def _record_iterator(
         yield record
 
 
-__all__ = ["ChunkKind", "ChunkSpec", "chunk_parts", "split"]
+__all__ = ["ChunkKind", "ChunkSpec", "chunk_parts", "split_generic"]

@@ -22,7 +22,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { eexist, fsStrerror, isEnoent, isFsError } from '../../../utils/errors.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEFAULT_TEMPLATE = 'tmp.XXXXXXXXXX'
@@ -118,6 +118,29 @@ export function planTemplate(
  * is left alone, and -u names only a free one; `exists` asks the mount that
  * owns the name. Mirrors Python's mktemp.
  */
+interface MktempFlags {
+  readonly directory: boolean
+  readonly tmpdir: PathSpec | null
+  readonly useDestDir: boolean
+  readonly templateMode: boolean
+  readonly dryRun: boolean
+  readonly suffix: string | null
+  readonly quiet: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): MktempFlags {
+  const fl = new FlagView(bag, specOf('mktemp'))
+  return {
+    directory: fl.asBool('directory'),
+    tmpdir: fl.asPaths('tmpdir')[0] ?? fl.asPaths('p')[0] ?? null,
+    useDestDir: fl.raw('tmpdir') !== undefined || fl.raw('p') !== undefined,
+    templateMode: fl.asBool('t'),
+    dryRun: fl.asBool('dry_run'),
+    suffix: fl.asStr('suffix') ?? null,
+    quiet: fl.asBool('quiet'),
+  }
+}
+
 export async function mktempGeneric(
   texts: string[],
   opts: CommandOpts,
@@ -125,16 +148,14 @@ export async function mktempGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   exists?: (p: PathSpec) => Promise<boolean>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('mktemp'))
+  const parsed = parseFlags(opts.flags)
   if (texts.length > 1) throw extraOperandError(CommandName.MKTEMP, texts[1] ?? '')
-  const directory = fl.asBool('directory')
-  const destDir = (fl.asPaths('tmpdir')[0] ?? fl.asPaths('p')[0])?.rawPath ?? ''
-  const useDestDir = fl.raw('tmpdir') !== undefined || fl.raw('p') !== undefined
-  const t = fl.asBool('t')
+  const { directory, tmpdir, useDestDir, templateMode: t } = parsed
+  const destDir = tmpdir?.rawPath ?? ''
   const envTmpdir = opts.env?.TMPDIR ?? ''
   const [template, xCount, suffixLen] = planTemplate(
     texts[0],
-    fl.asStr('suffix'),
+    parsed.suffix ?? undefined,
     destDir,
     useDestDir,
     t,
@@ -156,7 +177,7 @@ export async function mktempGeneric(
       name = draw()
       path = PathSpec.fromStrPath(resolvePath(name, opts.cwd))
     }
-    if (!fl.asBool('dry_run')) {
+    if (!parsed.dryRun) {
       try {
         await create(path)
       } catch (error) {
@@ -169,7 +190,7 @@ export async function mktempGeneric(
     if (!isFsError(error)) throw error
     // -q suppresses the diagnostic about the create only (GNU); a bad
     // template still says so.
-    if (fl.asBool('quiet')) return [null, new IOResult({ exitCode: 1 })]
+    if (parsed.quiet) return [null, new IOResult({ exitCode: 1 })]
     const kind = directory ? 'directory' : 'file'
     return [
       null,

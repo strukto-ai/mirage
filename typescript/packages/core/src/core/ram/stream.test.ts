@@ -18,7 +18,7 @@ import { runWithRecording } from '../../observe/context.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
-import { stream } from './stream.ts'
+import { readStream } from './stream.ts'
 
 function encode(text: string): Uint8Array {
   return new TextEncoder().encode(text)
@@ -38,7 +38,7 @@ describe('stream (RAM)', () => {
     const store = new RAMStore()
     store.files.set('/hello.txt', encode('hi'))
     const chunks: string[] = []
-    for await (const c of stream(new RAMAccessor(store), mkPath('/hello.txt'))) {
+    for await (const c of readStream(new RAMAccessor(store), mkPath('/hello.txt'))) {
       chunks.push(new TextDecoder().decode(c))
     }
     expect(chunks).toEqual(['hi'])
@@ -46,7 +46,7 @@ describe('stream (RAM)', () => {
 
   it('throws for missing file', async () => {
     const store = new RAMStore()
-    const it = stream(new RAMAccessor(store), mkPath('/nope.txt'))
+    const it = readStream(new RAMAccessor(store), mkPath('/nope.txt'))
     await expect(async () => {
       for await (const _ of it) void _
     }).rejects.toMatchObject({ code: 'ENOENT' })
@@ -56,7 +56,7 @@ describe('stream (RAM)', () => {
     const store = new RAMStore()
     store.files.set('/a.txt', encode('abcd'))
     const [, records] = await runWithRecording(async () => {
-      for await (const _ of stream(new RAMAccessor(store), mkPath('/a.txt'))) void _
+      for await (const _ of readStream(new RAMAccessor(store), mkPath('/a.txt'))) void _
     })
     expect(records).toHaveLength(1)
     const rec = records[0]

@@ -5,12 +5,12 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy
 from mirage.core.s3.exists import exists
-from mirage.core.s3.read import read_bytes
+from mirage.core.s3.read import read
 from mirage.core.s3.readdir import readdir
 from mirage.core.s3.rename import rename
 from mirage.core.s3.stat import stat
 from mirage.core.s3.unlink import unlink
-from mirage.core.s3.write import write_bytes
+from mirage.core.s3.write import write
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.vfs.s3 import S3Config
@@ -62,7 +62,7 @@ def test_write_with_prefix():
     store = {BUCKET: {}}
     with patch_s3_multi(store):
         accessor = _accessor(PREFIX)
-        asyncio.run(write_bytes(accessor, _path("/a.txt"), b"hello"))
+        asyncio.run(write(accessor, _path("/a.txt"), b"hello"))
     assert store[BUCKET].get("users/abc/a.txt") == b"hello"
 
 
@@ -70,7 +70,7 @@ def test_read_baseline_no_prefix():
     store = {BUCKET: {"a.txt": b"baseline"}}
     with patch_s3_multi(store):
         accessor = _accessor(None)
-        data = asyncio.run(read_bytes(accessor, _path("/a.txt")))
+        data = asyncio.run(read(accessor, _path("/a.txt")))
     assert data == b"baseline"
 
 

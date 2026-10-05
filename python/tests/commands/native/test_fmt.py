@@ -12,17 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import sys
+import shutil
+import subprocess
 
 import pytest
 
-skip_linux = pytest.mark.skipif(
-    sys.platform == "linux",
-    reason="fmt behavior differs between macOS and Linux",
+
+def _native_fmt_is_gnu() -> bool:
+    if shutil.which("fmt") is None:
+        return False
+    version = subprocess.run(
+        ["fmt", "--version"], capture_output=True, text=True, check=False
+    )
+    return "GNU" in version.stdout
+
+
+gnu_fmt = pytest.mark.skipif(
+    not _native_fmt_is_gnu(),
+    reason="mirage follows GNU fmt; macOS ships BSD fmt's greedy fill",
 )
 
 
-@skip_linux
+@gnu_fmt
 def test_fmt_w(env):
     data = b"this is a long line that should be wrapped\n"
     assert env.mirage("fmt -w 20", stdin=data) == env.native(
@@ -30,7 +41,7 @@ def test_fmt_w(env):
     )
 
 
-@skip_linux
+@gnu_fmt
 def test_fmt_file(env):
     env.create_file("f.txt", b"short words in a line\n")
     assert env.mirage("fmt -w 15 /data/f.txt") == env.native("fmt -w 15 f.txt")

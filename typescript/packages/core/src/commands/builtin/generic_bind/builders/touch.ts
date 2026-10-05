@@ -16,41 +16,43 @@ import { IOResult } from '../../../../io/types.ts'
 import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 import { UsageError } from '../../../errors.ts'
 import { usageHint } from '../../../spec/usage.ts'
 
 const ENC = new TextEncoder()
 
+const touch: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  if (paths.length === 0) {
+    throw new UsageError(`touch: missing file operand\n${usageHint('touch')}`, 1)
+  }
+  const idx = opts.index ?? undefined
+  const write = requireOp(ops.write, 'write')
+  const exists = requireOp(ops.exists, 'exists')
+  const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
+  const createOnly = new FlagView(opts.flags, specOf('touch')).asBool('no_create')
+  const writes: Record<string, Uint8Array> = {}
+  const errors: string[] = []
+  for (const p of resolved) {
+    if (createOnly) continue
+    if (await exists(accessor, p)) continue
+    try {
+      await write(accessor, p, new Uint8Array(0))
+    } catch (err) {
+      // One unusable operand is not an aborted command: GNU reports it
+      // and still touches the remaining ones.
+      if (!isFsError(err)) throw err
+      errors.push(`touch: cannot touch '${p.virtual}': ${String(fsStrerror(err))}`)
+      continue
+    }
+    writes[p.mountPath] = new Uint8Array(0)
+  }
+  const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
+  return [null, new IOResult({ writes, stderr, exitCode: errors.length > 0 ? 1 : 0 })]
+}
+
 export const BUILDER: Builder = {
   name: 'touch',
   write: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    if (paths.length === 0) {
-      throw new UsageError(`touch: missing file operand\n${usageHint('touch')}`, 1)
-    }
-    const idx = opts.index ?? undefined
-    const write = requireOp(ops.write, 'write')
-    const exists = requireOp(ops.exists, 'exists')
-    const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    const createOnly = new FlagView(opts.flags, specOf('touch')).asBool('no_create')
-    const writes: Record<string, Uint8Array> = {}
-    const errors: string[] = []
-    for (const p of resolved) {
-      if (createOnly) continue
-      if (await exists(accessor, p)) continue
-      try {
-        await write(accessor, p, new Uint8Array(0))
-      } catch (err) {
-        // One unusable operand is not an aborted command: GNU reports it
-        // and still touches the remaining ones.
-        if (!isFsError(err)) throw err
-        errors.push(`touch: cannot touch '${p.virtual}': ${String(fsStrerror(err))}`)
-        continue
-      }
-      writes[p.mountPath] = new Uint8Array(0)
-    }
-    const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
-    return [null, new IOResult({ writes, stderr, exitCode: errors.length > 0 ? 1 : 0 })]
-  },
+  fn: touch,
 }

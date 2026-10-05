@@ -15,14 +15,14 @@
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.write import write_bytes
+from mirage.core.disk.write import write
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
 async def test_write_new_file(tmp_path):
     accessor = DiskAccessor(tmp_path)
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(vfs_path="new.txt", virtual="/new.txt", directory="/new.txt"),
         b"content",
@@ -34,7 +34,7 @@ async def test_write_new_file(tmp_path):
 async def test_overwrite_existing_file(tmp_path):
     (tmp_path / "exist.txt").write_bytes(b"old")
     accessor = DiskAccessor(tmp_path)
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="exist.txt", virtual="/exist.txt", directory="/exist.txt"
@@ -51,7 +51,7 @@ async def test_write_does_not_create_parents(tmp_path):
     # refuse the same way.
     accessor = DiskAccessor(tmp_path)
     with pytest.raises(FileNotFoundError):
-        await write_bytes(
+        await write(
             accessor,
             PathSpec(
                 vfs_path="a/b/c/file.txt",
@@ -67,7 +67,7 @@ async def test_write_does_not_create_parents(tmp_path):
 async def test_write_into_an_existing_dir(tmp_path):
     (tmp_path / "d").mkdir()
     accessor = DiskAccessor(tmp_path)
-    await write_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="d/file.txt",
@@ -84,7 +84,7 @@ async def test_write_under_a_plain_file_is_not_a_directory(tmp_path):
     (tmp_path / "plain").write_bytes(b"x")
     accessor = DiskAccessor(tmp_path)
     with pytest.raises(NotADirectoryError):
-        await write_bytes(
+        await write(
             accessor,
             PathSpec(
                 vfs_path="plain/file.txt",
@@ -101,7 +101,7 @@ async def test_write_error_reports_the_virtual_path(tmp_path):
     # virtual path may reach a user-facing stderr line.
     accessor = DiskAccessor(tmp_path)
     with pytest.raises(FileNotFoundError) as excinfo:
-        await write_bytes(
+        await write(
             accessor,
             PathSpec(
                 vfs_path="nodir/file.txt",
@@ -123,7 +123,7 @@ async def test_never_writes_through_a_host_symlink_out_of_the_root(tmp_path):
     (root / "link").symlink_to(target)
     accessor = DiskAccessor(root)
     with pytest.raises(FileNotFoundError):
-        await write_bytes(
+        await write(
             accessor,
             PathSpec(vfs_path="link", virtual="/link", directory="/link"),
             b"pwned",

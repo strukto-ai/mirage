@@ -35,7 +35,7 @@ const SPEC = new CommandSpec({
   ],
 })
 
-async function trelloCardCreateCommand(
+async function trelloCardCreate(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
@@ -78,6 +78,6 @@ export const TRELLO_CARD_CREATE = command({
   name: 'trello card create',
   vfs: VFSName.TRELLO,
   spec: SPEC,
-  fn: trelloCardCreateCommand,
+  fn: trelloCardCreate,
   write: true,
 })

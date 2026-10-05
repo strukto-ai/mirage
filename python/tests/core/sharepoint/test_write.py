@@ -3,7 +3,7 @@ from aioresponses import CallbackResult, aioresponses
 
 import mirage.core.msgraph.drive as drive_ops
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
-from mirage.core.sharepoint.write import write_bytes
+from mirage.core.sharepoint.write import write
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -36,7 +36,7 @@ async def test_write_small_file():
             virtual="/sp/Engineering/Documents/a.txt",
             directory="/sp/Engineering/Documents/a.txt",
         )
-        await write_bytes(_accessor(), path, b"hello")
+        await write(_accessor(), path, b"hello")
     assert captured["body"] == b"hello"
 
 
@@ -67,7 +67,7 @@ async def test_write_large_file_uses_upload_session(monkeypatch):
             virtual="/sp/Engineering/Documents/big.bin",
             directory="/sp/Engineering/Documents/big.bin",
         )
-        await write_bytes(_accessor(), path, b"abcdef")
+        await write(_accessor(), path, b"abcdef")
     assert ranges == ["bytes 0-3/6", "bytes 4-5/6"]
 
 
@@ -93,7 +93,7 @@ async def test_upload_session_requests_replace(monkeypatch):
             virtual="/sp/Engineering/Documents/big.bin",
             directory="/sp/Engineering/Documents/big.bin",
         )
-        await write_bytes(_accessor(), path, b"abcdef")
+        await write(_accessor(), path, b"abcdef")
     behavior = captured["item"]["@microsoft.graph.conflictBehavior"]
     assert behavior == "replace"
 
@@ -117,7 +117,7 @@ async def test_write_records_the_virtual_path():
                 status=201,
                 payload={"id": "X"},
             )
-            await write_bytes(accessor, spec, b"hello")
+            await write(accessor, spec, b"hello")
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/Documents/k.txt"]

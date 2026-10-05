@@ -21,6 +21,7 @@ import {
   zlibInflate,
   zlibInflateInit2,
   zlibInflateEnd,
+  gzip as pakoGzip,
 } from 'pako'
 import { yieldBytes } from '../io/stream.ts'
 import { concat } from '../io/cachable_iterator.ts'
@@ -87,8 +88,17 @@ async function runThrough(
   return new Uint8Array(buf)
 }
 
-export async function gzip(bytes: Uint8Array, name = ''): Promise<Uint8Array> {
-  const compressed = await runThrough(bytes, new CompressionStream('gzip'))
+// `level` is gzip's -1..-9; CompressionStream takes none, so a level asked
+// for deflates through pako, zlib's port, and the default keeps the platform's.
+export async function gzip(
+  bytes: Uint8Array,
+  name = '',
+  level: number | null = null,
+): Promise<Uint8Array> {
+  const compressed =
+    level === null
+      ? await runThrough(bytes, new CompressionStream('gzip'))
+      : pakoGzip(bytes, { level: level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 })
   if (name === '') return compressed
   const header = compressed.slice(0, GZIP_FIXED_HEADER)
   header[3] = (header[3] ?? 0) | GZIP_ORIG_NAME

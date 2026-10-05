@@ -47,7 +47,7 @@ def _join_fields(
     return result
 
 
-async def paste(
+async def paste_generic(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -106,4 +106,4 @@ async def paste(
     return output, IOResult()
 
 
-__all__ = ["paste"]
+__all__ = ["paste_generic"]

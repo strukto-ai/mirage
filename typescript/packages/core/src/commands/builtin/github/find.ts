@@ -28,7 +28,7 @@ import { ensureTree } from '../../../core/github/tree.ts'
 const resolveGlob = resolveGlobOf(IO)
 const WALK_IO = withPolicyGuard(withPathGuards(IO))
 
-async function findCommand(
+async function find(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -57,5 +57,5 @@ export const GITHUB_FIND = command({
   name: 'find',
   vfs: VFSName.GITHUB,
   spec: specOf('find'),
-  fn: findCommand,
+  fn: find,
 })

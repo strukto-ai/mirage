@@ -27,7 +27,7 @@ export interface DbxReadOptions {
   size?: number
 }
 
-export async function readBytes(
+export async function read(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,

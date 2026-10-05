@@ -19,11 +19,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { joinRoot, stripPrefix } from './utils.ts'
 
-export async function writeBytes(
-  accessor: SSHAccessor,
-  p: PathSpec,
-  data: Uint8Array,
-): Promise<void> {
+export async function write(accessor: SSHAccessor, p: PathSpec, data: Uint8Array): Promise<void> {
   const timer = startOp()
   const sftp = await accessor.sftp()
   const key = stripPrefix(p)

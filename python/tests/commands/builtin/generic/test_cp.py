@@ -17,7 +17,7 @@ import pytest
 from mirage.commands.builtin.generic.cp import (
     CpFlags,
     TransferLinks,
-    cp,
+    cp_generic,
     parse_flags,
     update_mode,
 )
@@ -87,7 +87,7 @@ async def _run(files, dirs, paths, *, mtimes=None, readdir=None, **kw):
         no_clobber=kw.get("no_clobber", False),
         verbose=kw.get("verbose", False),
     )
-    return await cp(
+    return await cp_generic(
         [_spec(p) for p in paths],
         strategy=NativeCopy(copy=copy, find=find),
         stat=stat,
@@ -160,7 +160,7 @@ async def test_primitive_copy_records_source_reads():
     async def write(p, data: bytes) -> None:
         files[_key(p)] = data
 
-    _, io = await cp(
+    _, io = await cp_generic(
         [_spec("/a.txt"), _spec("/copy.txt")],
         stat=stat,
         strategy=PrimitiveCopy(
@@ -228,7 +228,7 @@ async def _run_primitive(
     files, dirs, paths, *, recursive=False, flags=None, **fail_kw
 ):
     stat, strategy = _make_primitive(files, dirs, **fail_kw)
-    return await cp(
+    return await cp_generic(
         [_spec(p) for p in paths],
         strategy=strategy,
         stat=stat,
@@ -446,7 +446,7 @@ async def test_recursive_empty_tree_still_creates_destination():
     files: dict[str, bytes] = {}
     dirs = {"/t", "/t/a", "/t/a/b"}
     stat, copy, find, mkdir = _typed_backend(files, dirs)
-    _, io = await cp(
+    _, io = await cp_generic(
         [_spec(p) for p in ["/t", "/c"]],
         strategy=NativeCopy(copy=copy, find=find, mkdir=mkdir),
         stat=stat,
@@ -473,7 +473,7 @@ async def test_no_op_policy_modes_keep_the_native_dir_copy():
             used["dir_copy"] = True
             dirs.add(_key(dst))
 
-        _, io = await cp(
+        _, io = await cp_generic(
             [_spec(p) for p in ["/t", "/c"]],
             strategy=NativeCopy(
                 copy=copy, find=find, dir_copy=dir_copy, mkdir=mkdir
@@ -592,14 +592,14 @@ async def test_many_sources_to_a_slashed_file_report_not_a_directory():
     files = {"/a.txt": b"AAA", "/b.txt": b"BBB", "/reg": b"R"}
     stat, copy, find = _make_backend(files, set())
     with pytest.raises(NotADirectoryError, match="target '/reg/'"):
-        await cp(
+        await cp_generic(
             [_spec("/a.txt"), _spec("/b.txt"), _slashed("/reg")],
             strategy=NativeCopy(copy=copy, find=find),
             stat=stat,
             flags=CpFlags(),
         )
     with pytest.raises(FileNotFoundError, match="target '/missing/'"):
-        await cp(
+        await cp_generic(
             [_spec("/a.txt"), _spec("/b.txt"), _slashed("/missing")],
             strategy=NativeCopy(copy=copy, find=find),
             stat=stat,
@@ -719,7 +719,7 @@ async def test_failed_backup_restores_existing_link(native, failure, referent):
         read_bytes=read, write=write, mkdir=readdir, readdir=readdir
     )
     strategy = NativeCopy(copy=copy, find=find) if native else primitive
-    _, io = await cp(
+    _, io = await cp_generic(
         [_spec("/src"), _spec("/dst")],
         stat=stat,
         strategy=strategy,

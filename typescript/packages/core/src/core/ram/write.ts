@@ -20,7 +20,7 @@ import { norm } from '../../utils/path.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import { checkDestParents, checkWriteTarget } from './dest.ts'
 
-export async function writeBytes(
+export async function write(
   accessor: RAMAccessor,
   path: PathSpec,
   data: Uint8Array,

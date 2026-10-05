@@ -13,6 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.gridfs.driver import DRIVER
-from mirage.core.object_store.write import make_write_bytes
+from mirage.core.object_store.write import make_write
 
-write_bytes = make_write_bytes(DRIVER)
+write = make_write(DRIVER)

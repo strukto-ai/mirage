@@ -20,7 +20,7 @@ import { lookupError } from './dest.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from '../../utils/path.ts'
 
-export async function* stream(
+export async function* readStream(
   accessor: RedisAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,

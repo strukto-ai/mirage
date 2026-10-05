@@ -102,7 +102,7 @@ function lacksPlusError(operand: string): UsageError {
 // the clock, GNU's `MMDDhhmm[[CC]YY][.ss]`: mirage has no clock to set, so it
 // prints the date it names and refuses the setting, as GNU does for a user
 // without the privilege. Beside `-d` it is a usage error.
-function dateCommand(
+function date(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -157,5 +157,5 @@ export const GENERAL_DATE = command({
   name: 'date',
   vfs: null,
   spec: specOf('date'),
-  fn: dateCommand,
+  fn: date,
 })

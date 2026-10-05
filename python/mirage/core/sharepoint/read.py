@@ -19,7 +19,7 @@ from mirage.core.sharepoint.resolve import drive_loc, resolve_item
 from mirage.types import PathSpec
 
 
-async def read_bytes(
+async def read(
     accessor: SharePointAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,

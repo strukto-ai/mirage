@@ -38,16 +38,15 @@ def extract_level(fl: FlagView) -> int:
 
     The digits are short-only options, so each is its own dest -- except
     ``-1``, which the parser disambiguates to ``args_1``
-    (``AMBIGUOUS_NAMES``). Reading the bag by the bare digit therefore
-    missed ``gzip -1`` entirely.
+    (``AMBIGUOUS_NAMES``). GNU's option loop keeps the last digit typed,
+    so ``gzip -9 -1`` compresses at level 1.
 
     Args:
         fl (FlagView): Flag view constructed with the gzip spec.
     """
-    for n in range(9, 0, -1):
-        if fl.as_bool(flag_kwarg_name(str(n))):
-            return n
-    return zlib.Z_DEFAULT_COMPRESSION
+    names = {flag_kwarg_name(str(n)): n for n in range(1, 10)}
+    typed = [name for name in fl.typed_order(*names) if fl.as_bool(name)]
+    return names[typed[-1]] if typed else zlib.Z_DEFAULT_COMPRESSION
 
 
 async def gzip(

@@ -119,7 +119,7 @@ def _split_by_patterns(
     return parts, None
 
 
-async def csplit(
+async def csplit_generic(
     paths: list[PathSpec],
     patterns: list[str],
     *,
@@ -208,4 +208,4 @@ async def csplit(
     )
 
 
-__all__ = ["csplit"]
+__all__ = ["csplit_generic"]

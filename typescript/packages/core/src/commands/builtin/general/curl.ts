@@ -321,7 +321,7 @@ function writeFailure(shown: string, err: unknown): string {
   return `curl: (${String(EXIT_WRITE)}) ${shown}: ${detail}\n`
 }
 
-async function curlCommand(
+async function curl(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -612,5 +612,5 @@ export const GENERAL_CURL = command({
   name: 'curl',
   vfs: null,
   spec: specOf('curl'),
-  fn: curlCommand,
+  fn: curl,
 })

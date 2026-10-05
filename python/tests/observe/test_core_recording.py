@@ -14,7 +14,7 @@
 
 import asyncio
 
-from mirage.core.ram.read import read_bytes
+from mirage.core.ram.read import read
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -30,7 +30,7 @@ def test_memory_read_records_bytes():
     mem._store.files["/hello.txt"] = b"hello world"
     scope = RecordingScope()
     records = scope.records
-    data = _run(read_bytes(mem.accessor, PathSpec.from_str_path("/hello.txt")))
+    data = _run(read(mem.accessor, PathSpec.from_str_path("/hello.txt")))
     scope.close()
     assert data == b"hello world"
     assert len(records) == 1
@@ -54,5 +54,5 @@ def test_memory_write_records_bytes():
 def test_no_recording_context_is_noop():
     mem = RAMVFS()
     mem._store.files["/hello.txt"] = b"hello"
-    data = _run(read_bytes(mem.accessor, PathSpec.from_str_path("/hello.txt")))
+    data = _run(read(mem.accessor, PathSpec.from_str_path("/hello.txt")))
     assert data == b"hello"

@@ -13,23 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { gzipGeneric } from '../../generic/gzip.ts'
-import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const gzip: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
+  const idx = opts.index ?? undefined
+  const write = requireOp(ops.write, 'write')
+  const unlink = requireOp(ops.unlink, 'unlink')
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return gzipGeneric(
+    resolved,
+    opts,
+    (p) => ops.readStream(accessor, p, idx),
+    (p, d) => write(accessor, p, d),
+    (p) => unlink(accessor, p),
+    (p) => ops.stat(accessor, p),
+  )
+}
 
 export const BUILDER: Builder = {
   name: 'gzip',
   write: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
-    const idx = opts.index ?? undefined
-    const write = requireOp(ops.write, 'write')
-    const unlink = requireOp(ops.unlink, 'unlink')
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return gzipGeneric(
-      resolved,
-      opts,
-      (p) => ops.readStream(accessor, p, idx),
-      (p, d) => write(accessor, p, d),
-      (p) => unlink(accessor, p),
-      (p) => ops.stat(accessor, p),
-    )
-  },
+  fn: gzip,
 }

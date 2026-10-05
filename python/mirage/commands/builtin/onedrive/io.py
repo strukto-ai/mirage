@@ -18,7 +18,7 @@ from mirage.core.onedrive.create import create as _create
 from mirage.core.onedrive.exists import exists as _exists
 from mirage.core.onedrive.find import find as _find
 from mirage.core.onedrive.mkdir import mkdir as _mkdir
-from mirage.core.onedrive.read import read_bytes as _read
+from mirage.core.onedrive.read import read as _read
 from mirage.core.onedrive.readdir import readdir as _readdir
 from mirage.core.onedrive.rename import rename as _rename
 from mirage.core.onedrive.rm import rm_r as _rm_r
@@ -27,7 +27,7 @@ from mirage.core.onedrive.stat import stat as _stat
 from mirage.core.onedrive.stream import read_stream as _read_stream
 from mirage.core.onedrive.truncate import truncate as _truncate
 from mirage.core.onedrive.unlink import unlink as _unlink
-from mirage.core.onedrive.write import write_bytes as _write
+from mirage.core.onedrive.write import write as _write
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import NativeReadOps, ReadOps, WriteOps
 

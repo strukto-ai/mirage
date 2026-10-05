@@ -30,10 +30,10 @@ import { rename as opfsRename } from '../../../core/opfs/rename.ts'
 import { rmR as opfsRmR } from '../../../core/opfs/rm.ts'
 import { rmdir as opfsRmdir } from '../../../core/opfs/rmdir.ts'
 import { stat as opfsStat } from '../../../core/opfs/stat.ts'
-import { stream as opfsStream } from '../../../core/opfs/stream.ts'
+import { readStream as opfsStream } from '../../../core/opfs/stream.ts'
 import { truncate as opfsTruncate } from '../../../core/opfs/truncate.ts'
 import { unlink as opfsUnlink } from '../../../core/opfs/unlink.ts'
-import { writeBytes as opfsWrite } from '../../../core/opfs/write.ts'
+import { write as opfsWrite } from '../../../core/opfs/write.ts'
 
 export const IO: CommandIO<OPFSAccessor> = new VFSAdapter<OPFSAccessor>({
   read: { readdir: opfsReaddir, readBytes: opfsRead, stat: opfsStat },

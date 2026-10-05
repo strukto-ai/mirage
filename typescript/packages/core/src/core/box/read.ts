@@ -60,7 +60,7 @@ export async function read(
   return downloadFile(accessor.tokenManager, entry.id, window)
 }
 
-export async function* stream(
+export async function* readStream(
   accessor: BoxAccessor,
   path: PathSpec,
   index?: IndexCacheStore,

@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { read } from './read.ts'
 import { mkdir } from './mkdir.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 let accessor: ReturnType<typeof makeMockAccessor>
 beforeEach(() => {
@@ -26,14 +26,14 @@ afterEach(() => undefined)
 
 describe('opfs/read', () => {
   it('returns file bytes', async () => {
-    await writeBytes(accessor, spec('/x'), new TextEncoder().encode('hello'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('hello'))
     expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('hello')
   })
   it('throws "file not found" on missing', async () => {
     await expect(read(accessor, spec('/nope'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
   it('slices the window off the File rather than reading the whole thing', async () => {
-    await writeBytes(accessor, spec('/w'), new TextEncoder().encode('0123456789'))
+    await write(accessor, spec('/w'), new TextEncoder().encode('0123456789'))
     const dec = new TextDecoder()
     expect(dec.decode(await read(accessor, spec('/w'), undefined, { offset: 2, size: 3 }))).toBe(
       '234',
@@ -42,7 +42,7 @@ describe('opfs/read', () => {
     expect(dec.decode(await read(accessor, spec('/w'), undefined, { size: 4 }))).toBe('0123')
   })
   it('clamps a window past EOF instead of throwing', async () => {
-    await writeBytes(accessor, spec('/s'), new TextEncoder().encode('abc'))
+    await write(accessor, spec('/s'), new TextEncoder().encode('abc'))
     const dec = new TextDecoder()
     expect(dec.decode(await read(accessor, spec('/s'), undefined, { size: 100 }))).toBe('abc')
     expect((await read(accessor, spec('/s'), undefined, { offset: 99, size: 5 })).byteLength).toBe(
@@ -56,7 +56,7 @@ describe('opfs/read', () => {
 describe('opfs/read tells a file in the chain from a directory leaf', () => {
   it('is ENOTDIR under a plain file and EISDIR for a directory', async () => {
     const accessor = makeMockAccessor()
-    await writeBytes(accessor, spec('/plain'), new TextEncoder().encode('p'))
+    await write(accessor, spec('/plain'), new TextEncoder().encode('p'))
     await mkdir(accessor, spec('/d'))
     const codeOf = async (p: string): Promise<unknown> =>
       read(accessor, spec(p)).then(

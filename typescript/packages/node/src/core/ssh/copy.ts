@@ -15,9 +15,9 @@
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { read } from './read.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 export async function copy(accessor: SSHAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const data = await read(accessor, src)
-  await writeBytes(accessor, dst, data)
+  await write(accessor, dst, data)
 }

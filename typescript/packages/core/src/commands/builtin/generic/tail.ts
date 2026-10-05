@@ -17,6 +17,7 @@ import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
@@ -401,6 +402,32 @@ const STDIN_BY_NAME = "tail: cannot follow '-' by name\n"
 const APPEARED = 'has appeared;  following new file'
 const ACCESSIBLE = 'has become accessible'
 
+// The tail flag bag, parsed once; a refused value is its message.
+interface TailFlags {
+  readonly counts: TailCounts
+  readonly quiet: boolean
+  readonly verbose: boolean
+  readonly following: FollowFlags
+}
+
+function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
+  const fl = new FlagView(bag, specOf('tail'))
+  const nRaw = fl.asStr('n') ?? null
+  const cRaw = fl.asStr('c') ?? null
+  const numErr = numberFlagError('tail', nRaw, cRaw)
+  if (numErr !== null) return numErr
+  const following = followFlags(fl)
+  if (typeof following === 'string') return following
+  // The last of -q and -v decides, as in GNU tail.
+  const headers = fl.typedOrder('q', 'v').at(-1)
+  return {
+    counts: parseCounts(nRaw, cRaw),
+    quiet: headers === 'q',
+    verbose: headers === 'v',
+    following,
+  }
+}
+
 export async function tailGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -410,24 +437,15 @@ export async function tailGeneric(
   readRange: ReadRange | null = null,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const fl = new FlagView(opts.flags, specOf('tail'))
+  const parsed = parseFlags(opts.flags)
   // A follow reads the backend itself, never the read-through cache:
   // what it is polling for is exactly the change the cached body does
   // not have yet.
   const backend = stream
   stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
-  const nRaw = fl.asStr('n') ?? null
-  const cRaw = fl.asStr('c') ?? null
-  const numErr = numberFlagError('tail', nRaw, cRaw)
-  if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: encodeText(numErr) })]
-  const following = followFlags(fl)
-  if (typeof following === 'string')
-    return [null, new IOResult({ exitCode: 1, stderr: encodeText(following) })]
-  // The last of -q and -v decides, as in GNU tail.
-  const headers = fl.typedOrder('q', 'v').at(-1)
-  const qFlag = headers === 'q'
-  const vFlag = headers === 'v'
-  const counts = parseCounts(nRaw, cRaw)
+  if (typeof parsed === 'string')
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
+  const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
   if (
     following.follow &&
     following.byName &&

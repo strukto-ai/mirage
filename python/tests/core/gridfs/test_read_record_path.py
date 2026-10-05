@@ -15,7 +15,7 @@
 import pytest
 from bson import ObjectId
 
-from mirage.core.gridfs.read import read_bytes
+from mirage.core.gridfs.read import read
 from mirage.core.gridfs.stream import read_stream
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
@@ -66,10 +66,10 @@ def _patch(monkeypatch, fn) -> None:
 
 @pytest.mark.asyncio
 async def test_read_records_the_virtual_path(monkeypatch):
-    _patch(monkeypatch, read_bytes)
+    _patch(monkeypatch, read)
     scope = RecordingScope()
     try:
-        data = await read_bytes(_accessor(), SPEC)
+        data = await read(_accessor(), SPEC)
     finally:
         scope.close()
     assert data == b"hello"

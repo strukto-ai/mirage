@@ -5,7 +5,7 @@ from aioresponses import CallbackResult, aioresponses
 from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.core.onedrive.read import read_bytes
+from mirage.core.onedrive.read import read
 from mirage.observe.context import (
     RecordingScope,
     push_revisions,
@@ -41,9 +41,7 @@ async def test_read_returns_current_content():
     with aioresponses() as m:
         m.get(_ITEM, payload=_item())
         m.get(_BYTES, body=b"current bytes")
-        data = await read_bytes(
-            _accessor(), PathSpec.from_str_path("/Docs/a.txt")
-        )
+        data = await read(_accessor(), PathSpec.from_str_path("/Docs/a.txt"))
         assert (_calls(m, _ITEM), _calls(m, _BYTES)) == (1, 1)
     assert data == b"current bytes"
 
@@ -63,9 +61,7 @@ async def test_an_unrecorded_read_fetches_the_item_then_its_download_url():
     with aioresponses() as m:
         m.get(_ITEM, callback=item)
         m.get(_BYTES, callback=download)
-        data = await read_bytes(
-            _accessor(), PathSpec.from_str_path("/Docs/a.txt")
-        )
+        data = await read(_accessor(), PathSpec.from_str_path("/Docs/a.txt"))
     assert data == b"current bytes"
     # The token comes first, so a write between the two requests can only
     # make the cached bytes look stale. The download URL is pre-signed and
@@ -84,9 +80,7 @@ async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url():
     with aioresponses() as m:
         m.get(_ITEM, payload=_item(download=None))
         m.get(_CONTENT, callback=content)
-        data = await read_bytes(
-            _accessor(), PathSpec.from_str_path("/Docs/a.txt")
-        )
+        data = await read(_accessor(), PathSpec.from_str_path("/Docs/a.txt"))
         assert _calls(m, _ITEM) == 1
     assert data == b"current bytes"
     assert seen == ["Bearer tok"]
@@ -99,7 +93,7 @@ async def test_read_pinned_revision_hits_version_content():
     try:
         with aioresponses() as m:
             m.get(version_url, body=b"old version bytes")
-            data = await read_bytes(
+            data = await read(
                 _accessor(), PathSpec.from_str_path("/Docs/a.txt")
             )
     finally:
@@ -118,7 +112,7 @@ async def test_read_range_sends_range_header():
     with aioresponses() as m:
         m.get(_ITEM, payload=_item())
         m.get(_BYTES, callback=_cb)
-        data = await read_bytes(
+        data = await read(
             _accessor(),
             PathSpec.from_str_path("/Docs/a.txt"),
             offset=2,
@@ -136,7 +130,7 @@ async def test_a_200_answer_to_a_range_request_is_sliced_locally():
     with aioresponses() as m:
         m.get(_ITEM, payload=_item())
         m.get(_BYTES, body=b"hello", status=200)
-        data = await read_bytes(
+        data = await read(
             _accessor(),
             PathSpec.from_str_path("/Docs/a.txt"),
             offset=2,
@@ -169,7 +163,7 @@ async def test_read_captures_fingerprint_and_revision_when_recording():
         with aioresponses() as m:
             m.get(_META, payload=_meta_payload())
             m.get(_DOWNLOAD, body=b"old version bytes")
-            data = await read_bytes(
+            data = await read(
                 _accessor(), PathSpec.from_str_path("/Docs/a.txt")
             )
     finally:
@@ -189,7 +183,7 @@ async def test_capture_reads_pinned_download_url_not_live_content():
             m.get(_META, payload=_meta_payload())
             m.get(_DOWNLOAD, body=b"snapshot bytes")
             m.get(_CONTENT, body=b"live mutated bytes")
-            data = await read_bytes(
+            data = await read(
                 _accessor(), PathSpec.from_str_path("/Docs/a.txt")
             )
     finally:
@@ -207,7 +201,7 @@ async def test_read_missing_raises_file_not_found():
             payload={"error": {"code": "itemNotFound", "message": "no"}},
         )
         with pytest.raises(FileNotFoundError) as exc:
-            await read_bytes(
+            await read(
                 _accessor(),
                 PathSpec.from_str_path(
                     "/od/Docs/a.txt", mount_key("/od/Docs/a.txt", "/od")
@@ -231,7 +225,7 @@ async def test_recorded_read_names_the_virtual_path():
         with aioresponses() as m:
             m.get(_MM_META, payload={"id": "01", "cTag": "c1", "versions": []})
             m.get(_MM_CONTENT, body=b"bytes")
-            data = await read_bytes(_accessor(), _MM_SPEC)
+            data = await read(_accessor(), _MM_SPEC)
     finally:
         scope.close()
     assert data == b"bytes"

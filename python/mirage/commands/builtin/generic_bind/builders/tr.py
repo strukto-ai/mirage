@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.tr import tr as generic_tr
+from mirage.commands.builtin.generic.tr import tr_generic as generic_tr
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,

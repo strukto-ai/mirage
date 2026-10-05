@@ -20,9 +20,9 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.context import invalidate_after_unlink, invalidate_ancestors
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.path import backend_path
-from mirage.core.databricks_volume.read import read_bytes
+from mirage.core.databricks_volume.read import read
 from mirage.core.databricks_volume.stat import stat
-from mirage.core.databricks_volume.write import write_bytes
+from mirage.core.databricks_volume.write import write
 from mirage.types import FileType, PathSpec
 
 
@@ -117,5 +117,5 @@ async def copy(
     if same_path:
         # Copying a file onto itself would re-upload it; skip.
         return
-    data = await read_bytes(accessor, src, index)
-    await write_bytes(accessor, dst, data, index)
+    data = await read(accessor, src, index)
+    await write(accessor, dst, data, index)

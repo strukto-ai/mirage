@@ -44,7 +44,7 @@ async function* gmailStream(
   yield await gmailRead(accessor, p, index)
 }
 
-async function rgCommand(
+async function rg(
   accessor: GmailAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -90,5 +90,5 @@ export const GMAIL_RG = command({
   name: 'rg',
   vfs: VFSName.GMAIL,
   spec: specOf('rg'),
-  fn: rgCommand,
+  fn: rg,
 })

@@ -18,7 +18,7 @@ import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
 import { mkdir } from './mkdir.ts'
 import { rmdir } from './rmdir.ts'
-import { writeBytes } from './write.ts'
+import { write } from './write.ts'
 
 const ENC = new TextEncoder()
 
@@ -41,7 +41,7 @@ describe('ram rmdir', () => {
   it('refuses a directory holding a file, leaving the file reachable', async () => {
     const acc = accessor()
     await mkdir(acc, spec('/dir'))
-    await writeBytes(acc, spec('/dir/f.txt'), ENC.encode('keep'))
+    await write(acc, spec('/dir/f.txt'), ENC.encode('keep'))
     await expect(rmdir(acc, spec('/dir'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
     // The directory has to survive too: dropping it while its children
     // stay keyed is what left them addressable but unreachable.

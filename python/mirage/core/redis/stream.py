@@ -19,13 +19,14 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 
 
-async def stream(
-    accessor: RedisAccessor, path: PathSpec
+async def read_stream(
+    accessor: RedisAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.vfs_path)
@@ -43,15 +44,3 @@ async def stream(
     if rec is not None:
         rec.bytes = len(data)
     yield data
-
-
-async def read_stream(
-    accessor: RedisAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> AsyncIterator[bytes]:
-    try:
-        async for chunk in stream(accessor, path):
-            yield chunk
-    except FileNotFoundError as exc:
-        raise enoent(path.virtual) from exc

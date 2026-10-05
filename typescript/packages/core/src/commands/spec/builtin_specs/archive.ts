@@ -86,6 +86,7 @@ export const SPECS: Record<string, CommandSpec> = {
   unzip: new CommandSpec({
     options: [
       new Option({ short: '-o' }),
+      new Option({ short: '-n' }),
       new Option({ short: '-l' }),
       new Option({ short: '-d', type: 'path' }),
       new Option({ short: '-q' }),

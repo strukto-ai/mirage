@@ -13,14 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { wcGeneric } from '../../generic/wc.ts'
-import { type Builder, dirAwareStream, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStream, resolveGlobOf, type BuilderFn } from '../adapter.ts'
+
+const wc: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  return wcGeneric(resolved, texts, opts, dirAwareStream(ops, accessor, opts))
+}
 
 export const BUILDER: Builder = {
   name: 'wc',
   read: true,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return wcGeneric(resolved, texts, opts, dirAwareStream(ops, accessor, opts))
-  },
+  fn: wc,
 }

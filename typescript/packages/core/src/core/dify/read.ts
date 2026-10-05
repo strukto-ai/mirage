@@ -40,7 +40,7 @@ export function segmentText(segment: Record<string, unknown>): string {
  *   index: listing cache, consulted for the entry.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
-export async function readBytes(
+export async function read(
   accessor: DifyAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
