@@ -30,7 +30,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 
 const ENC = new TextEncoder()
 
-async function grepCommand(
+async function grep(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -81,6 +81,6 @@ export const GITHUB_GREP = command({
   name: 'grep',
   vfs: VFSName.GITHUB,
   spec: specOf('grep'),
-  fn: grepCommand,
+  fn: grep,
   aggregate: prefixAggregate,
 })

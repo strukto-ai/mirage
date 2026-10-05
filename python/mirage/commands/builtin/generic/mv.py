@@ -339,7 +339,7 @@ async def _exchange_pair(
         lines.append(f"exchanged '{src.raw_path}' <-> '{target.raw_path}'")
 
 
-async def mv(
+async def mv_generic(
     paths: list[PathSpec],
     *,
     stat: StatFn,

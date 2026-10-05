@@ -16,7 +16,7 @@ import { awkGeneric, servedHere } from '../../generic/awk.ts'
 import type { CommandOpts } from '../../../config.ts'
 import { splitAssignment } from '../../../../core/awk/index.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, resolveGlobOf, type BuilderFn } from '../adapter.ts'
 
 /**
  * Expand awk's file operands, keeping `var=value` ones in place: an
@@ -45,13 +45,15 @@ async function resolveOperands(
   return out
 }
 
+const awk: BuilderFn = async (ops, accessor, paths, texts, opts) => {
+  const idx = opts.index ?? undefined
+  const resolve = (run: PathSpec[]): Promise<PathSpec[]> => resolveGlobOf(ops)(accessor, run, idx)
+  const resolved = await resolveOperands(resolve, paths, opts)
+  return awkGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
+}
+
 export const BUILDER: Builder = {
   name: 'awk',
   read: true,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
-    const resolve = (run: PathSpec[]): Promise<PathSpec[]> => resolveGlobOf(ops)(accessor, run, idx)
-    const resolved = await resolveOperands(resolve, paths, opts)
-    return awkGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
-  },
+  fn: awk,
 }

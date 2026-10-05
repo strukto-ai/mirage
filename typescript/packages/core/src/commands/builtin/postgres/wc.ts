@@ -52,7 +52,7 @@ async function allExist(accessor: PostgresAccessor, paths: readonly PathSpec[]):
   return true
 }
 
-async function wcCommand(
+async function wc(
   accessor: PostgresAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -94,5 +94,5 @@ export const POSTGRES_WC = command({
   name: 'wc',
   vfs: VFSName.POSTGRES,
   spec: specOf('wc'),
-  fn: wcCommand,
+  fn: wc,
 })

@@ -17,7 +17,7 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.cp import cp as generic_cp
+from mirage.commands.builtin.generic.cp import cp_generic as generic_cp
 from mirage.commands.builtin.generic.cp import parse_flags
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.find import parse_find_args

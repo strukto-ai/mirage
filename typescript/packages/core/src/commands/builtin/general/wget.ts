@@ -35,7 +35,7 @@ const EXIT_SERVER_ERROR = 8
 const USAGE =
   "wget: missing URL\nUsage: wget [OPTION]... [URL]...\n\nTry `wget --help' for more options."
 
-async function wgetCommand(
+async function wget(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
@@ -149,5 +149,5 @@ export const GENERAL_WGET = command({
   name: 'wget',
   vfs: null,
   spec: specOf('wget'),
-  fn: wgetCommand,
+  fn: wget,
 })

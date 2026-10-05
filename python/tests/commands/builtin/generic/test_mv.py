@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.mv import MvFlags, mv
+from mirage.commands.builtin.generic.mv import MvFlags, mv_generic
 from mirage.types import (
     ContentType,
     FileStat,
@@ -69,7 +69,7 @@ async def _run(files, dirs, paths, *, readdir=None, **kw):
         no_clobber=kw.get("no_clobber", False),
         verbose=kw.get("verbose", False),
     )
-    return await mv(
+    return await mv_generic(
         [_spec(p) for p in paths],
         strategy=NativeMove(rename=rename),
         stat=stat,
@@ -96,7 +96,7 @@ async def test_many_sources_need_a_directory_target(target, error, match):
     before = dict(files)
     stat, rename = _make_backend(files, set())
     with pytest.raises(error, match=match):
-        await mv(
+        await mv_generic(
             [_spec("/a.txt"), _spec("/b.txt"), target],
             strategy=NativeMove(rename=rename),
             stat=stat,
@@ -113,7 +113,7 @@ async def test_rename_onto_nondir_parent_reports_not_a_directory():
     async def rename(src, dst) -> None:
         raise enotdir(dst)
 
-    _, io = await mv(
+    _, io = await mv_generic(
         [_spec(p) for p in ["/a.txt", "/plain/c.txt"]],
         strategy=NativeMove(rename=rename),
         stat=stat,
@@ -135,7 +135,7 @@ async def test_rename_failure_keeps_moving_remaining_sources():
             raise enoent(dst)
         await real_rename(src, dst)
 
-    _, io = await mv(
+    _, io = await mv_generic(
         [_spec(p) for p in ["/a.txt", "/b.txt", "/d"]],
         strategy=NativeMove(rename=rename),
         stat=stat,
@@ -218,7 +218,7 @@ async def _run_primitive(
     files, dirs, paths, *, verbose=False, flags=None, **fail_kw
 ):
     stat, strategy = _make_primitive(files, dirs, **fail_kw)
-    return await mv(
+    return await mv_generic(
         [_spec(p) for p in paths],
         strategy=strategy,
         stat=stat,
@@ -557,7 +557,7 @@ async def test_exchange_failure_rolls_back_or_reports_leftover(
             raise PermissionError("boom")
         await rename(src, dst)
 
-    _, io = await mv(
+    _, io = await mv_generic(
         [_spec(p) for p in ["/a.txt", "/b.txt"]],
         strategy=NativeMove(rename=flaky_rename),
         stat=stat,

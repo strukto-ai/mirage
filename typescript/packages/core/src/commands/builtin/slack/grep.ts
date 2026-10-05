@@ -66,7 +66,7 @@ async function* slackStream(
   yield await slackRead(accessor, p, index)
 }
 
-async function grepCommand(
+async function grep(
   accessor: SlackAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -134,5 +134,5 @@ export const SLACK_GREP = command({
   name: 'grep',
   vfs: VFSName.SLACK,
   spec: specOf('grep'),
-  fn: grepCommand,
+  fn: grep,
 })

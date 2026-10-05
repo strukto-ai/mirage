@@ -52,7 +52,7 @@ async function allExist(accessor: MongoDBAccessor, paths: readonly PathSpec[]): 
   return true
 }
 
-async function wcCommand(
+async function wc(
   accessor: MongoDBAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -94,5 +94,5 @@ export const MONGODB_WC = command({
   name: 'wc',
   vfs: VFSName.MONGODB,
   spec: specOf('wc'),
-  fn: wcCommand,
+  fn: wc,
 })

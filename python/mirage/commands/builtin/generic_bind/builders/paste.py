@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.paste import paste as generic_paste
+from mirage.commands.builtin.generic.paste import (
+    paste_generic as generic_paste,
+)
 from mirage.commands.builtin.generic_bind.adapter import (
     Builder,
     CommandIO,

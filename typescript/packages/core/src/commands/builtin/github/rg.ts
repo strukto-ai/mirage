@@ -36,7 +36,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 
 const ENC = new TextEncoder()
 
-async function rgCommand(
+async function rg(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   texts: string[],
@@ -98,5 +98,5 @@ export const GITHUB_RG = command({
   name: 'rg',
   vfs: VFSName.GITHUB,
   spec: specOf('rg'),
-  fn: rgCommand,
+  fn: rg,
 })

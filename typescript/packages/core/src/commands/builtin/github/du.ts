@@ -57,7 +57,7 @@ function subtree(accessor: GitHubAccessor, path: PathSpec): [DuEntries, string[]
   return [[blobs, total], directories]
 }
 
-async function duCommand(
+async function du(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   _texts: string[],
@@ -108,5 +108,5 @@ export const GITHUB_DU = command({
   name: 'du',
   vfs: VFSName.GITHUB,
   spec: specOf('du'),
-  fn: duCommand,
+  fn: du,
 })

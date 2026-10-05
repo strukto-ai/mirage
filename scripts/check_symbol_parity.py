@@ -56,6 +56,13 @@ TS_DESTRUCTURE = re.compile(
 )
 
 
+# A TypeScript command module registers its handler as a const built by
+# command(); Python's @command decorates the handler itself, so the
+# registration has no name of its own there.
+TS_REGISTRATION = re.compile(
+    r"^export\s+const\s+([A-Z][A-Z0-9_]*)\b[^=\n]*=\s*command\b", re.M
+)
+
 ALL_CAPS = re.compile(r"[A-Z0-9_]+")
 
 
@@ -146,6 +153,7 @@ def typescript_names(paths: list[Path]) -> dict[str, str]:
                 name = part.split(":")[-1].split("=")[0].strip(" .\n")
                 if name:
                     found.add(name)
+        found -= set(TS_REGISTRATION.findall(text))
         for name in sorted(found - TS_CODECS):
             names[fold(name)] = name
     return names
