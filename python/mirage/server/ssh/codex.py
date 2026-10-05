@@ -48,6 +48,7 @@ from mirage.server.ssh import constants
 from mirage.server.ssh.errors import CodexRPCError
 from mirage.server.ssh.session import (
     key_profile,
+    login_entry,
     login_env,
     new_session_id,
     open_session,
@@ -1096,11 +1097,13 @@ async def serve_codex(
         process (asyncssh.SSHServerProcess[str]): the channel's process.
     """
     workspace_id = process.get_extra_info("username")
-    if workspace_id not in registry:
+    entry = login_entry(
+        registry, process.channel.get_connection(), workspace_id
+    )
+    if entry is None:
         process.stderr.write(f"mirage: no such workspace: {workspace_id}\n")
         process.exit(1)
         return
-    entry = registry.get(workspace_id)
     session_id = new_session_id()
     runner = entry.runner
     try:

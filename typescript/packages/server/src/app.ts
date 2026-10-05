@@ -14,10 +14,11 @@
 
 import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
-import { WorkspaceRegistry } from './registry.ts'
+import { DiskRecordClient } from '@struktoai/mirage-node'
+import { OWNERS_PREFIX, WorkspaceRegistry } from './registry.ts'
 import { JobTable } from './jobs.ts'
 import type { AuthConfig } from './auth/index.ts'
-import { registerAuth, resolveAuthConfig } from './auth/index.ts'
+import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
 import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
 import { registerMcpRoutes } from './mcp/http.ts'
 import { registerRpcRoutes } from './rpc/http.ts'
@@ -66,14 +67,17 @@ export function buildApp(options: BuildAppOptions = {}) {
   validateDaemonTable(readDaemonTable(mirageHome()))
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
+  const authConfig = options.authConfig ?? resolveAuthConfig()
+  const stateRoot = stateRootPath(options.stateRoot)
   const registry = new WorkspaceRegistry({
     ...(options.idleGraceSeconds !== undefined
       ? { idleGraceSeconds: options.idleGraceSeconds }
       : {}),
     onIdleExit: exitFn,
+    accountsRequired: authConfig.mode === AuthMode.Jwt,
+    owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
   })
   const jobs = new JobTable()
-  const stateRoot = stateRootPath(options.stateRoot)
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })
   void app.register(rateLimit, {
@@ -94,7 +98,6 @@ export function buildApp(options: BuildAppOptions = {}) {
       done()
     })
   }
-  const authConfig = options.authConfig ?? resolveAuthConfig()
   registerAuth(app, authConfig)
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
@@ -104,7 +107,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerSessionsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
   registerShellRoutes(app, { registry, jobs })
-  registerJobsRoutes(app, { jobs })
+  registerJobsRoutes(app, { jobs, registry })
   const mcp = registerMcpRoutes(app, registry, jobs)
   registerRpcRoutes(app, registry, jobs, mcp)
   registerToolsRoutes(app, { mcp })

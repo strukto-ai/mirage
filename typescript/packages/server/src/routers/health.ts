@@ -27,7 +27,11 @@ export function registerHealthRoutes(app: FastifyInstance, deps: HealthDeps): vo
     workspaces: deps.registry.size(),
     uptime_s: Math.round((Date.now() / 1000 - deps.startedAt) * 1000) / 1000,
   }))
-  app.post('/v1/shutdown', () => {
+  // The daemon serves every account, so an account may not stop it.
+  app.post('/v1/shutdown', async (req, reply) => {
+    if (req.account !== null) {
+      return reply.status(403).send({ detail: 'an account may not shut the daemon down' })
+    }
     deps.exit()
     return { status: 'shutting_down', pid: process.pid }
   })

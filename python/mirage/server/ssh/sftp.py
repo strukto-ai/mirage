@@ -41,7 +41,12 @@ from mirage.fuse.core import MountCore
 from mirage.fuse.errors import classify_error
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.constants import LISTING_CONCURRENCY
-from mirage.server.ssh.session import key_profile, new_session_id, open_session
+from mirage.server.ssh.session import (
+    key_profile,
+    login_entry,
+    new_session_id,
+    open_session,
+)
 from mirage.server.ssh.stream import ENCODING, ERRORS
 from mirage.utils.errors import NoMountError
 
@@ -328,11 +333,11 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     async def _mount(self) -> MountCore:
         if self._core is not None:
             return self._core
-        if self._workspace_id not in self._registry:
+        entry = login_entry(self._registry, self._conn, self._workspace_id)
+        if entry is None:
             raise asyncssh.SFTPNoSuchFile(
                 f"no such workspace: {self._workspace_id}"
             )
-        entry = self._registry.get(self._workspace_id)
         ws = entry.runner.ws
         profile = key_profile(self._conn)
         await entry.runner.call(

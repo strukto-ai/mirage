@@ -331,9 +331,14 @@ export class MirageSandboxSession implements SandboxSession<MirageSandboxSession
   }
 
   async persistWorkspace(): Promise<Uint8Array> {
-    const state = await toStateDict(this.workspace)
-    const [manifest, blobs] = splitManifestAndBlobs(state as unknown as Record<string, unknown>)
-    return writeSnapshotTar(manifest, blobs)
+    // The SDK stores a snapshot as one buffer, so the tar is built in
+    // memory; it is captured while new lines wait, so the disk files it
+    // reads are the ones the lines left.
+    return this.workspace.quiesced(async () => {
+      const state = await toStateDict(this.workspace)
+      const [manifest, blobs] = splitManifestAndBlobs(state as unknown as Record<string, unknown>)
+      return writeSnapshotTar(manifest, blobs)
+    })
   }
 
   async hydrateWorkspace(data: WorkspaceArchiveData): Promise<void> {

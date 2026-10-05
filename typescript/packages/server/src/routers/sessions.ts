@@ -14,6 +14,7 @@
 
 import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { MountMode } from '@struktoai/mirage-core/types'
 
@@ -51,7 +52,7 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
     '/v1/workspaces/:wsId/sessions',
     async (req, reply) => {
       const { wsId } = req.params
-      if (!deps.registry.has(wsId)) {
+      if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
       const sid = req.body.session_id ?? `sess_${randomBytes(6).toString('hex')}`
@@ -78,7 +79,7 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
 
   app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/sessions', async (req, reply) => {
     const { wsId } = req.params
-    if (!deps.registry.has(wsId)) {
+    if (deps.registry.visible(wsId, req.account) === null) {
       return reply.status(404).send({ detail: 'workspace not found' })
     }
     const ws = deps.registry.get(wsId).runner.ws
@@ -89,16 +90,48 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
   app.delete<{ Params: WsSessionParams }>(
     '/v1/workspaces/:wsId/sessions/:sessionId',
     async (req, reply) => {
-      const { wsId, sessionId } = req.params
-      if (!deps.registry.has(wsId)) {
-        return reply.status(404).send({ detail: 'workspace not found' })
-      }
-      const ws = deps.registry.get(wsId).runner.ws
-      if (!ws.listSessions().some((s) => s.sessionId === sessionId)) {
-        return reply.status(404).send({ detail: 'session not found' })
-      }
-      await ws.closeSession(sessionId)
-      return { session_id: sessionId }
+      const ws = await sessionWorkspace(req.params, req.account)
+      if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
+      await ws.closeSession(req.params.sessionId)
+      return { session_id: req.params.sessionId }
     },
   )
+
+  /**
+   * Cancel the session's running and queued lines, from every door. The
+   * session stays open; answers once those lines have ended.
+   */
+  app.post<{ Params: WsSessionParams }>(
+    '/v1/workspaces/:wsId/sessions/:sessionId/cancel',
+    async (req, reply) => {
+      const ws = await sessionWorkspace(req.params, req.account)
+      if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
+      return { canceled: await ws.cancel(req.params.sessionId) }
+    },
+  )
+
+  /** Kill the session's background jobs and runners; it stays open. */
+  app.post<{ Params: WsSessionParams }>(
+    '/v1/workspaces/:wsId/sessions/:sessionId/kill',
+    async (req, reply) => {
+      const ws = await sessionWorkspace(req.params, req.account)
+      if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
+      return { killed: await ws.kill(req.params.sessionId) }
+    },
+  )
+
+  /** The workspace holding the session, or what is missing. */
+  async function sessionWorkspace(
+    params: WsSessionParams,
+    account: string | null,
+  ): Promise<Workspace | string> {
+    const entry = deps.registry.visible(params.wsId, account)
+    if (entry === null) return 'workspace not found'
+    const ws = entry.runner.ws
+    await ws.ensureSessionsLoaded()
+    if (!ws.listSessions().some((s) => s.sessionId === params.sessionId)) {
+      return 'session not found'
+    }
+    return ws
+  }
 }

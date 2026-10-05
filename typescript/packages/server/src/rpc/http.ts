@@ -99,8 +99,12 @@ class RpcDoor {
   ) {}
 
   /** The RPC server for a workspace session, or why there is none. */
-  async server(workspaceId: string, sessionId?: string | null): Promise<DaemonRpcServer | string> {
-    const operations = await this.mcp.tools(workspaceId, sessionId)
+  async server(
+    workspaceId: string,
+    sessionId: string | null,
+    account: string | null,
+  ): Promise<DaemonRpcServer | string> {
+    const operations = await this.mcp.tools(workspaceId, sessionId, account)
     if (typeof operations === 'string') return operations
     const entry = this.registry.get(workspaceId)
     return new DaemonRpcServer(
@@ -116,7 +120,7 @@ class RpcDoor {
     reply: FastifyReply,
   ): Promise<FastifyReply> {
     const workspaceId = req.params.workspaceId
-    const server = await this.server(workspaceId, req.query.session_id ?? null)
+    const server = await this.server(workspaceId, req.query.session_id ?? null, req.account)
     if (typeof server === 'string') return reply.status(404).send({ detail: server })
     const parsed: unknown = req.body
     const batch = Array.isArray(parsed)

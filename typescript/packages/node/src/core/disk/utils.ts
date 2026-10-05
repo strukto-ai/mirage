@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Dirent } from 'node:fs'
-import { lstat, realpath, readdir } from 'node:fs/promises'
+import { constants, lstat, open, realpath, readdir, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
@@ -97,6 +97,22 @@ export async function resolveInside(
     if (info.isSymbolicLink()) throw enoent(spec)
   }
   return full
+}
+
+/**
+ * Open a host file a state named, without following a link. A captured
+ * file read later (a copy, a restore) is refused when a link or anything
+ * but a regular file has replaced it since.
+ */
+export async function openRegular(file: string): Promise<FileHandle> {
+  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    if (!(await handle.stat()).isFile()) throw new Error(`not a regular file: ${file}`)
+  } catch (err) {
+    await handle.close()
+    throw err
+  }
+  return handle
 }
 
 /** List visible entries without following host symlinks. All disk walks use this policy. */

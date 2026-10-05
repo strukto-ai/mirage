@@ -18,6 +18,7 @@ import os
 import stat
 from collections.abc import Iterator
 from pathlib import Path
+from typing import BinaryIO
 
 from mirage.core.disk.errors import disk_error
 from mirage.types import PathSpec
@@ -89,6 +90,26 @@ async def resolve_inside(
         path (str | None): alternate mount-relative key.
     """
     return await asyncio.to_thread(resolve_inside_sync, root, spec, path)
+
+
+def open_regular(path: Path) -> BinaryIO:
+    """Open a host file a state named, without following a link.
+
+    A captured file read later (a snapshot's tar, a copy) is refused
+    when a link or anything but a regular file has replaced it since.
+
+    Args:
+        path (Path): the host file.
+
+    Raises:
+        ValueError: the path no longer names a regular file.
+    """
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    f = os.fdopen(fd, "rb")
+    if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+        f.close()
+        raise ValueError(f"not a regular file: {path}")
+    return f
 
 
 def read_entries(directory: Path) -> list[os.DirEntry[str]]:

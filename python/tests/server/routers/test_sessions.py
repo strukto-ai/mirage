@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -203,3 +205,78 @@ async def test_session_isolated_per_workspace():
         r = await client.get(f"/v1/workspaces/{wid_b}/sessions")
         ids = {s["session_id"] for s in r.json()}
         assert "only_in_a" not in ids
+
+
+async def _wait_status(client, job_id: str, status: str) -> dict:
+    for _ in range(500):
+        job = (await client.get(f"/v1/jobs/{job_id}")).json()
+        if job["status"] == status:
+            return job
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"job {job_id} never reached {status}: {job}")
+
+
+@pytest.mark.asyncio
+async def test_session_cancel_stops_its_jobs_and_spares_the_others():
+    app = build_app(idle_grace_seconds=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/v1/workspaces",
+            json={
+                "config": {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}}
+            },
+        )
+        wid = r.json()["id"]
+        for sid in ("a", "b"):
+            await client.post(
+                f"/v1/workspaces/{wid}/sessions", json={"session_id": sid}
+            )
+        jobs = {}
+        for sid in ("a", "b"):
+            r = await client.post(
+                f"/v1/workspaces/{wid}/shell?background=true",
+                json={"command": "sleep 30", "session_id": sid},
+            )
+            jobs[sid] = r.json()["job_id"]
+            await _wait_status(client, jobs[sid], "running")
+        r = await client.post(f"/v1/workspaces/{wid}/sessions/a/cancel")
+        assert r.status_code == 200
+        assert r.json() == {"canceled": 1}
+        await _wait_status(client, jobs["a"], "canceled")
+        b = (await client.get(f"/v1/jobs/{jobs['b']}")).json()
+        assert b["status"] == "running"
+        r = await client.post(f"/v1/workspaces/{wid}/sessions/nope/cancel")
+        assert r.status_code == 404
+        await client.delete(f"/v1/workspaces/{wid}")
+
+
+@pytest.mark.asyncio
+async def test_session_kill_stops_background_jobs_and_keeps_the_session():
+    app = build_app(idle_grace_seconds=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/v1/workspaces",
+            json={
+                "config": {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}}
+            },
+        )
+        wid = r.json()["id"]
+        await client.post(
+            f"/v1/workspaces/{wid}/sessions", json={"session_id": "a"}
+        )
+        await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            json={"command": "sleep 30 &", "session_id": "a"},
+        )
+        r = await client.post(f"/v1/workspaces/{wid}/sessions/a/kill")
+        assert r.json() == {"killed": 1}
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            json={"command": "jobs; echo alive", "session_id": "a"},
+        )
+        assert "alive" in r.json()["stdout"]
+        await client.delete(f"/v1/workspaces/{wid}")
