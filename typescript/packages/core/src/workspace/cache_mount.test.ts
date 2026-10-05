@@ -360,4 +360,43 @@ describe('a renderer registered beside the VFS', () => {
       await ws.close()
     }
   })
+
+  // A relay reads through the dispatcher, so it reads the rendering; kept
+  // under the path, it is what cat would print.
+  it.each([
+    ['cp', 'cp /data/books.tally /other/copy && cat /other/copy'],
+    ['sed', 'sed -n p /data/books.tally /other/notes'],
+    ['diff', 'diff /data/books.tally /other/notes'],
+  ])('a cross-mount %s never keeps the rendering', async (_name, line) => {
+    const ram = new RAMVFS()
+    Object.assign(ram, { cachesReads: true })
+    const other = new RAMVFS()
+    const registry = new OpsRegistry()
+    registry.registerVfs(ram)
+    registry.registerVfs(other)
+    const ws = new Workspace(
+      { '/data': ram, '/other': other },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+    registry.register({
+      name: 'read',
+      vfs: ram.name,
+      filetype: '.tally',
+      write: false,
+      fn: () => Promise.resolve(ENC.encode('RENDERED')),
+    })
+    try {
+      await ops(ram).write(PathSpec.fromStrPath('/books.tally'), ENC.encode('STORED\n'))
+      await ops(other).write(PathSpec.fromStrPath('/notes'), ENC.encode('N\n'))
+      expect(DEC.decode((await ws.shell(line)).stdout)).toContain('RENDERED')
+      expect(await ws.cache.exists('/data/books.tally')).toBe(false)
+      expect(DEC.decode((await ws.shell('cat /data/books.tally')).stdout)).toBe('STORED\n')
+    } finally {
+      await ws.close()
+    }
+  })
 })

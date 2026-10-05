@@ -1204,18 +1204,20 @@ describe('the read-token contract', () => {
         if (row === 'bytes') first = await line(ws, 'cat /r/a.txt')
         expect(first).toEqual(row === 'drain' ? data.slice(0, 1) : data)
 
+        // A cp of a rendered Google file reads through the dispatcher, where a
+        // filetype read op always renders and keeps nothing, so its second cp
+        // fetches again. Every other read left an entry reconcile calls
+        // FRESH, and the warm read made no content fetch.
+        const renders = row === 'bytes' && name in GAPPS
         const stat = await reconcileStat(ws, fake, virtual)
         expect(stat.fingerprint).not.toBeNull()
-        expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(true)
+        expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(!renders)
 
         // The drain row's second run reads the whole entry back, so a drain
         // that cached a truncated buffer cannot pass.
         let second = await line(ws, command)
         if (row === 'bytes') second = await line(ws, 'cat /r/a.txt')
-        // Reconcile answered FRESH: the warm read made no content fetch,
-        // except that a cp of a rendered Google file reads through the
-        // dispatcher, where a filetype read op always renders.
-        expect(fake.fetches()).toBe(row === 'bytes' && name in GAPPS ? 2 : 1)
+        expect(fake.fetches()).toBe(renders ? 2 : 1)
         expect(second).toEqual(data)
         expect(H.reach).toEqual([])
       } finally {

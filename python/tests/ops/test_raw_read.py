@@ -114,6 +114,32 @@ async def test_a_user_renderer_renders_after_a_shell_command(line):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cp /data/books.tally /other/copy && cat /other/copy",
+        "sed -n p /data/books.tally /other/notes",
+        "diff /data/books.tally /other/notes",
+    ],
+    ids=["cp", "sed", "diff"],
+)
+async def test_a_cross_mount_relay_never_keeps_a_render(line):
+    # A relay reads through the dispatcher, so it reads the rendering; kept
+    # under the path, it is what cat would print.
+    ws = Workspace(
+        {"/data/": _CachingRAM(), "/other/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    ws.mount("/data/").register_fns([_read_tally])
+    await ws.vfs.write("/data/books.tally", b"STORED\n")
+    await ws.vfs.write("/other/notes", b"N\n")
+    result = await ws.shell(line)
+    assert "RENDERED" in await result.stdout_str()
+    assert not await ws.cache.exists("/data/books.tally")
+    out = await ws.shell("cat /data/books.tally")
+    assert await out.stdout_str() == "STORED\n"
+
+
+@pytest.mark.asyncio
 async def test_a_renderer_named_by_filetype_is_never_served_warm():
     ws = _workspace(_CachingRAM())
     await _seed(ws, "/data/notes.txt")

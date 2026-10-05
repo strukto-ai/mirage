@@ -509,13 +509,10 @@ export class Dispatcher {
     // Mirrors Python's Dispatcher.dispatch.
     await mount.ensureReady()
     const raw = kwargs?.filetype === null
+    const filetype = getExtension(p.virtual)
     const requested = kwargs?.filetype
     const readType =
-      requested === undefined
-        ? getExtension(p.virtual)
-        : typeof requested === 'string'
-          ? requested
-          : null
+      requested === undefined ? filetype : typeof requested === 'string' ? requested : null
     const rendersRead = (): boolean =>
       readType !== null && this.opsRegistry.find('read', vfs, readType) !== null
     const [readOffset, readSize] = readWindow(kwargs)
@@ -562,7 +559,7 @@ export class Dispatcher {
       !raw &&
       DISPATCH_READ_OPS.has(opName) &&
       readSize !== 0 &&
-      (whole || !this.opsRegistry.readsRanges(vfs, getExtension(p.virtual))) &&
+      (whole || !this.opsRegistry.readsRanges(vfs, filetype)) &&
       !rendersRead()
         ? mount.cacheManager
         : null
@@ -580,7 +577,6 @@ export class Dispatcher {
     // gmail reads) resolve by the path's extension; Python reaches them
     // because its dispatcher routes through Mount.execute_op, which
     // stamps the filetype. Stamp it here the same way.
-    const filetype = getExtension(p.virtual)
     const fullKwargs: OpKwargs = {
       ...(kwargs ?? {}),
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),

@@ -216,4 +216,10 @@ async def run_dispatch(
         return None, IOResult()
     stdout, io = result
     body = await materialize(stdout)
-    return body, await reads.merge(io)
+    merged = await reads.merge(io)
+    # Every read went through the dispatcher, whose cold read keeps what
+    # the file cache may hold; listing a read path again would keep a
+    # filetype renderer's output there, which cat would then print. A
+    # written path stays listed.
+    merged.cache = [p for p in merged.cache if p not in merged.reads]
+    return body, merged
