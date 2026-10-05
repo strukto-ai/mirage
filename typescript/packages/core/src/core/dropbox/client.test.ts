@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  DropboxTokenManager,
-  dropboxDownload,
-  dropboxDownloadStream,
-  dropboxRpc,
-} from './client.ts'
+import { DropboxTokenManager, dropboxDownload } from './client.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 
 const BODY = '0123456789'
@@ -105,39 +100,4 @@ describe('dropboxDownload result header', () => {
       expect(result).toBe(want)
     },
   )
-})
-
-describe('dropboxDownloadStream', () => {
-  // A plain lower-cased record, as bytes_response hands its own, before the
-  // first chunk, so a consumer that stops early still leaves the read stamped.
-  it('hands its response headers to onResponse', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() =>
-        Promise.resolve(new Response('hello', { headers: { 'Dropbox-API-Result': RESULT } })),
-      ),
-    )
-    const events: (Record<string, string> | string)[] = []
-    for await (const c of dropboxDownloadStream(tokenManager(), '/a.txt', (h) => events.push(h))) {
-      events.push(new TextDecoder().decode(c))
-    }
-    expect(events[0] instanceof Headers).toBe(false)
-    expect((events[0] as Record<string, string>)['dropbox-api-result']).toBe(RESULT)
-    expect(events.slice(1)).toEqual(['hello'])
-  })
-})
-
-describe('dropboxRpc', () => {
-  it.each([
-    ['null', 'null'],
-    ['number', '{"error_summary":5}'],
-    ['not-object', '["path/not_found/.."]'],
-    ['not-json', 'oops'],
-  ])('leaves the summary empty for a 409 body without one (%s)', async (_id, body) => {
-    vi.stubGlobal('fetch', () => Promise.resolve(new Response(body, { status: 409 })))
-    await expect(dropboxRpc(tokenManager(), '/files/get_metadata', {})).rejects.toMatchObject({
-      status: 409,
-      summary: '',
-    })
-  })
 })

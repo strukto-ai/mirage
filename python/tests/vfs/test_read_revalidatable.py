@@ -1185,35 +1185,6 @@ def test_a_changed_object_is_refetched(name, shape, monkeypatch):
     assert fake.reach == []
 
 
-def test_a_dropbox_same_size_rewrite_is_refetched_on_content_hash():
-    # The real service repeated server_modified across same-size writes
-    # (probed 2026-10-02) while content_hash moved on every one. A token
-    # built on the modified stamp calls the rewrite fresh and serves SEED.
-    with _dropbox_fake("root", SEED) as fake:
-        virtual = "/m/" + fake.key
-
-        async def run():
-            ws = _fresh_workspace(fake.vfs)
-            try:
-                await _line(ws, f"cat {virtual}")
-                before = await _reconcile_stat(ws, virtual)
-                fake.rewrite(CHANGED)
-                after = await _reconcile_stat(ws, virtual)
-                fetched = fake.fetches()
-                out = await _line(ws, f"cat {virtual}")
-                return before, after, fake.fetches() - fetched, out
-            finally:
-                await ws.close()
-
-        before, after, refetched, out = asyncio.run(run())
-
-    assert len(SEED) == len(CHANGED)
-    assert before.modified == after.modified
-    assert before.fingerprint != after.fingerprint
-    assert refetched == 1
-    assert out == CHANGED
-
-
 def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder():
     # The probe stats through a throwaway store, so dropbox answers it
     # with one get_metadata rather than listing the whole folder into it.

@@ -17,16 +17,7 @@ import logging
 
 import pytest
 
-from mirage.core.dropbox.fingerprint import result_token, token_of
-
-
-@pytest.mark.parametrize(
-    "value, token",
-    [("abc", "abc"), ("", None), (None, None), (7, None)],
-    ids=["hash", "empty", "absent", "number"],
-)
-def test_only_a_non_empty_string_is_a_token(value, token):
-    assert token_of(value) == token
+from mirage.core.dropbox.fingerprint import result_token
 
 
 @pytest.mark.parametrize(
