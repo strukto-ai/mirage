@@ -31,7 +31,7 @@ from mirage.cache.index.config import (
     LookupStatus,
     RedisIndexConfig,
 )
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
@@ -260,6 +260,9 @@ def _owns_none(_key: str) -> bool:
 
 
 _FENCED = {
+    "replace_if_unchanged": lambda view: view.replace_if_unchanged(
+        "/data/a", _row().model_dump_json(), _row("new")
+    ),
     "get": lambda view: view.get("/data/a"),
     "list_dir": lambda view: view.list_dir("/data"),
     "put": lambda view: view.put("/data/a", _row()),
@@ -828,3 +831,31 @@ async def test_a_view_answers_holds_subtree_from_its_store(owns):
     )
     empty = IndexView(RAMIndexCacheStore(), cache, "/data", owns)
     assert not await empty.holds_subtree("/data/dir")
+
+
+@pytest.mark.asyncio
+async def test_a_scratch_store_hints_only_what_its_view_owns():
+    # The probe hints through mount.index, the view, not its raw store: a
+    # row the view does not own is no lead.
+    raw = RAMIndexCacheStore()
+    await raw.set_dir("/data", [("a", _row())])
+    owned = IndexView(raw, RAMFileCacheStore(), "/data", _owns_all)
+    foreign = IndexView(raw, RAMFileCacheStore(), "/data", _owns_none)
+    assert await ListingCheckStore(hints=owned).hint("/data/a")
+    assert await ListingCheckStore(hints=foreign).hint("/data/a") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owned", [False, True])
+async def test_conditional_replacement_keeps_ownership(owned):
+    store = RAMIndexCacheStore()
+    await store.put("/data/a", _row())
+    old = (await store.get("/data/a")).entry
+    view = IndexView(store, RAMFileCacheStore(), "/data", lambda _: owned)
+    assert (
+        await view.replace_if_unchanged(
+            "/data/a", old.model_dump_json(), _row("new")
+        )
+        is owned
+    )
+    assert (await store.get("/data/a")).entry.id == ("new" if owned else "a")

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { IndexEntry, LookupStatus } from './config.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
-import type { IndexCacheStore } from './store.ts'
+import { IndexCacheStore } from './store.ts'
 import { IndexView } from './view.ts'
 import { RAMFileCacheStore } from '../file/ram.ts'
 
@@ -43,6 +43,65 @@ for (const backend of ['ram', 'redis']) {
       afterEach(async () => {
         await store.clear()
         await store.close()
+      })
+
+      it.each([false, true])(
+        'conditional replacement preserves listing and stamps: expired=%s',
+        async (expired) => {
+          const deadline = new Date(Date.now() + (expired ? -1000 : 3600000))
+          await store.setDir('/dir', [['a', entry()]], deadline, { version: 'v1' })
+          const listing = await store.listDir('/dir')
+          expect(listing.status).toBe(expired ? LookupStatus.EXPIRED : undefined)
+          const old = (await store.get('/dir/a')).entry
+
+          if (old == null) throw new Error('missing seeded row')
+          const replacement = entry('confirmed')
+          expect(await store.replaceIfUnchanged('/dir/a', JSON.stringify(old), replacement)).toBe(
+            true,
+          )
+          const current = (await store.get('/dir/a')).entry
+
+          if (current == null) throw new Error('missing seeded row')
+          expect(current.id).toBe('confirmed')
+          expect(current.indexTime).not.toBe('')
+          expect(await store.listDir('/dir')).toEqual(listing)
+          const pinned = replacement.copyWith({ indexTime: 'pinned' })
+          expect(await store.replaceIfUnchanged('/dir/a', JSON.stringify(current), pinned)).toBe(
+            true,
+          )
+          expect((await store.get('/dir/a')).entry).toEqual(pinned)
+          expect(await store.listDir('/dir')).toEqual(listing)
+          expect(await store.replaceIfUnchanged('/dir/a', JSON.stringify(old), replacement)).toBe(
+            false,
+          )
+          expect(await store.replaceIfUnchanged('/missing', JSON.stringify(old), replacement)).toBe(
+            false,
+          )
+          expect(
+            await IndexCacheStore.prototype.replaceIfUnchanged.call(
+              store,
+              '/dir/a',
+              JSON.stringify(pinned),
+              old,
+            ),
+          ).toBe(false)
+          expect((await store.get('/dir/a')).entry).toEqual(pinned)
+        },
+      )
+
+      it('conditional replacement observes pending seed', async () => {
+        const old = entry().copyWith({ indexTime: 'old' })
+        await store.put('/dir/a', old)
+        const seeded = old.copyWith({ extra: { nested: { tags: ['changed'] } } })
+        store.seed(
+          new Map([['/dir/a', seeded]]),
+          new Map([['/dir', ['/dir/a']]]),
+          new Date(Date.now() + 3600000),
+        )
+        expect(
+          await store.replaceIfUnchanged('/dir/a', JSON.stringify(old), entry('confirmed')),
+        ).toBe(false)
+        expect((await store.get('/dir/a')).entry).toEqual(seeded)
       })
 
       // A backend may spell its kinds with its own prefix; a folder replaced

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IndexEntry } from '../cache/index/config.ts'
+import { ListingCheckStore } from '../cache/index/ram.ts'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -251,6 +252,58 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
       await loaded.close()
     },
   )
+
+  // A restored index's ids are no lead for drift: each drift door stats
+  // through a plain index, not a hinting ListingCheckStore.
+  it.each(['shell', 'dispatch'])('a drift check via %s offers no hints', async (surface) => {
+    const accessor = new FakeRemoteAccessor()
+    accessor.put('/remote/a.txt', new TextEncoder().encode('v1'))
+    const ws = build(accessor)
+    await recordedDispatch(ws, 'read', '/remote/a.txt')
+    const state = await toStateDict(ws)
+    state.fingerprints = (state.fingerprints ?? []).map((e) => ({
+      path: e.path,
+      mount_prefix: e.mount_prefix,
+      fingerprint: e.fingerprint ?? null,
+    }))
+    const snap = join(tempDir, `hint-${surface}.tar`)
+    const [manifest, blobs] = splitManifestAndBlobs(state as unknown as Record<string, unknown>)
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(snap, await writeSnapshotTar(manifest, blobs))
+
+    const seen: boolean[] = []
+    const hintingStat: RegisteredOp = {
+      ...statOp,
+      fn: (accessor, scope, args, kwargs) => {
+        const index = kwargs.index
+        if (index === undefined) throw new Error('the drift check passed no index')
+        seen.push(index instanceof ListingCheckStore)
+        return statOp.fn(accessor, scope, args, kwargs)
+      },
+    }
+    const ops = new OpsRegistry()
+    ops.register(readOp)
+    ops.register(hintingStat)
+    const loaded = await Workspace.load(
+      snap,
+      { mode: MountMode.WRITE, ops, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+      { '/remote/': new FakeRemoteVFS(accessor) },
+    )
+    try {
+      const index = loaded.namespace.mountFor('/remote/a.txt').index
+      await index.put(
+        '/remote/a.txt',
+        new IndexEntry({ id: 'a', name: 'a.txt', resourceType: 'file', size: 2 }),
+      )
+      expect((await index.get('/remote/a.txt')).entry).toBeDefined()
+      if (surface === 'shell') await loaded.shell('cat /remote/a.txt')
+      else await loaded.dispatch('read', '/remote/a.txt')
+      expect(seen[0]).toBe(false)
+    } finally {
+      await ws.close()
+      await loaded.close()
+    }
+  })
 
   it('STRICT load checks drift on the op facade too, not only Workspace.dispatch', async () => {
     // The op facade (the FUSE path) reaches the dispatcher without

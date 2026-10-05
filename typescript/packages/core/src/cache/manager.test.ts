@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { activeRecords } from '../observe/context.ts'
+import { publishRead } from './context.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -759,4 +761,124 @@ describe('what a probe saw this command', () => {
       return Promise.resolve()
     })
   })
+})
+
+it.each(['none', 'write', 'replace', 'unmount'])(
+  'retained fallback row is fenced: %s',
+  async (interference) => {
+    const cache = new RAMFileCacheStore()
+    const index = new RAMIndexCacheStore()
+    let owns = true
+    const manager = new CacheManager(cache, index, '/data/', true, () => owns)
+    let old = new IndexEntry({ id: 'old', name: 'a', resourceType: 'file' })
+    const confirmed = old.copyWith({ id: 'confirmed' })
+    await index.setDir('/data', [['a', old]])
+    const listing = await index.listDir('/data')
+    old = (await index.get('/data/a')).entry ?? old
+    const generation = manager.generation
+    let pending: Promise<void> | undefined
+    await manager.withMutation(async () => {
+      pending = manager.retainResolvedEntry(
+        PathSpec.fromStrPath('/data/a'),
+        generation,
+        JSON.stringify(old),
+        confirmed,
+      )
+      await Promise.resolve()
+      if (interference === 'write') await manager.invalidateAfterWrite('/data/a')
+      else if (interference === 'replace') await index.put('/data/a', old.copyWith({ id: 'newer' }))
+      else if (interference === 'unmount') owns = false
+    })
+    await pending
+    const row = (await index.get('/data/a')).entry
+    if (interference === 'none') {
+      expect(row?.id).toBe(confirmed.id)
+      expect(await index.listDir('/data')).toEqual(listing)
+    } else if (interference === 'replace') expect(row?.id).toBe('newer')
+    else expect(row == null || row.id === 'old').toBe(true)
+  },
+)
+
+it.each(['replace', 'delete'])(
+  'retention cannot overwrite a peer workspace: %s',
+  async (interference) => {
+    const index = new RAMIndexCacheStore()
+    const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+    const peer = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+    const path = PathSpec.fromStrPath('/data/a')
+    const old = new IndexEntry({ id: 'old', name: 'a', resourceType: 'file', indexTime: 'old' })
+    const latest = old.copyWith({ size: 9 })
+    await index.put(path.virtual, old)
+    const originalGet = index.get.bind(index)
+    let interferences = 0
+    const originalReplace = index.replaceIfUnchanged.bind(index)
+    const interfere = () =>
+      peer.withMutation(async () => {
+        interferences++
+        const view = peer.scopeIndexLocked(index)
+        if (interference === 'replace') await view.put(path.virtual, latest)
+        else await view.invalidateEntry(path.virtual)
+      })
+    const lookup = vi.spyOn(index, 'get').mockImplementation(async (key) => {
+      const result = await originalGet(key)
+      await interfere()
+      return result
+    })
+    const replace = vi
+      .spyOn(index, 'replaceIfUnchanged')
+      .mockImplementation(async (key, predecessor, replacement) => {
+        await interfere()
+        return originalReplace(key, predecessor, replacement)
+      })
+    try {
+      await manager.retainResolvedEntry(
+        path,
+        manager.generation,
+        JSON.stringify(old),
+        old.copyWith({ id: 'confirmed' }),
+      )
+      expect(interferences).toBe(1)
+      expect((await originalGet(path.virtual)).entry ?? null).toEqual(
+        interference === 'replace' ? latest : null,
+      )
+    } finally {
+      lookup.mockRestore()
+      replace.mockRestore()
+    }
+  },
+)
+
+it.each(['verified', null])(
+  'fill keeps exact read fact without observing: %s',
+  async (fingerprint) => {
+    const cache = new RAMFileCacheStore()
+    const manager = new CacheManager(cache, null, '/s3/', true)
+    const data = new TextEncoder().encode('payload')
+    expect(
+      await manager.fill(PathSpec.fromStrPath('/s3/a.txt', 'a.txt'), () => {
+        expect(activeRecords()).toBeUndefined()
+        publishRead('/s3/a.txt', data, fingerprint)
+        publishRead('/s3/a.txt', new TextEncoder().encode('foreign'), 'wrong')
+        return Promise.resolve(data)
+      }),
+    ).toBe(data)
+    expect(await cache.isFresh('/s3/a.txt', 'verified')).toBe(fingerprint !== null)
+    expect(await cache.isFresh('/s3/a.txt', 'wrong')).toBe(false)
+    expect(activeRecords()).toBeUndefined()
+  },
+)
+
+it('failed fact capture does not leak into the next fill', async () => {
+  const cache = new RAMFileCacheStore()
+  const manager = new CacheManager(cache, null, '/s3/', true)
+  const data = new TextEncoder().encode('payload')
+  await expect(
+    manager.fill(PathSpec.fromStrPath('/s3/a.txt', 'a.txt'), () => {
+      publishRead('/s3/a.txt', data, 'orphan')
+      return Promise.reject(new Error('failed fetch'))
+    }),
+  ).rejects.toThrow('failed fetch')
+  expect(await cache.exists('/s3/a.txt')).toBe(false)
+  await manager.fill(PathSpec.fromStrPath('/s3/a.txt', 'a.txt'), () => Promise.resolve(data))
+  expect(await cache.isFresh('/s3/a.txt', 'orphan')).toBe(false)
 })

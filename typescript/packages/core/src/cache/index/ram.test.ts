@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IndexEntry, LookupStatus, ResourceType } from './config.ts'
-import { RAMIndexCacheStore } from './ram.ts'
+import { ListingCheckStore, RAMIndexCacheStore } from './ram.ts'
 
 function mkEntry(id: string, name: string, type: string = ResourceType.FILE): IndexEntry {
   return new IndexEntry({ id, name, resourceType: type })
@@ -156,5 +156,40 @@ describe('RAMIndexCacheStore', () => {
     await store.setDir('/', [['a', mkEntry('1', 'a')]])
     const result = await store.listDir('/')
     expect(result.entries).toEqual(['/a'])
+  })
+
+  it('a scratch store hints the row its source holds', async () => {
+    const src = new RAMIndexCacheStore()
+    await src.setDir('/m/a', [['c.txt', mkEntry('F1', 'c.txt', 'box/file')]])
+    const scratch = new ListingCheckStore({ hints: src })
+    const row = (await src.get('/m/a/c.txt')).entry
+    expect(row).toBeDefined()
+    expect(await scratch.hint('/m/a/c.txt')).toBe(row)
+    expect(await scratch.hint('/m/a/missing.txt')).toBeNull()
+  })
+
+  // Seeding the scratch store with the mount's rows would hand every
+  // backend cached metadata as truth -- the #1040 bug.
+  it('a hint is never an answer', async () => {
+    const src = new RAMIndexCacheStore()
+    await src.setDir('/m/a', [['c.txt', mkEntry('F1', 'c.txt', 'box/file')]])
+    const scratch = new ListingCheckStore({ hints: src })
+    expect((await scratch.get('/m/a/c.txt')).entry).toBeUndefined()
+    expect((await scratch.listDir('/m/a')).entries).toBeUndefined()
+    expect(await scratch.hint('/m/a/c.txt')).not.toBeNull()
+  })
+
+  // The id is confirmed by the backend before anything trusts it, so an
+  // expired listing is still a usable address.
+  it('an expired row still hints', async () => {
+    const src = new RAMIndexCacheStore({ ttl: 60 })
+    await src.setDir(
+      '/m/a',
+      [['c.txt', mkEntry('F1', 'c.txt', 'box/file')]],
+      new Date('2000-01-01T00:00:00Z'),
+    )
+    expect((await src.listDir('/m/a')).status).toBe(LookupStatus.EXPIRED)
+    const scratch = new ListingCheckStore({ hints: src })
+    expect(await scratch.hint('/m/a/c.txt')).not.toBeNull()
   })
 })

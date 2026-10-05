@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fakeredis.aioredis import FakeRedis
 
+from mirage.cache.context import publish_read
 from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import NULL_INDEX
@@ -28,6 +29,7 @@ from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.view import IndexView
 from mirage.cache.manager import CacheManager
+from mirage.observe.context import active_recorder
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -959,3 +961,172 @@ async def test_one_large_command_does_not_rescan_its_probes_on_every_insert(
             )
         assert len(manager._probed) == 64
     assert len(scans) <= 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "interference", ["none", "write", "replace", "unmount"]
+)
+async def test_retained_fallback_row_is_fenced(interference):
+    cache, index = _stores()
+    owns = [True]
+    manager = CacheManager(
+        cache, index, "/data/", True, owns_path=lambda _: owns[0]
+    )
+    old = IndexEntry(id="old", name="a", resource_type="file")
+    new = old.model_copy(update={"id": "confirmed"})
+    await index.set_dir("/data", [("a", old)])
+    listing = await index.list_dir("/data")
+    old = (await index.get("/data/a")).entry
+    generation = manager.generation
+    async with manager.mutation():
+        pending = asyncio.create_task(
+            manager.retain_resolved_entry(
+                PathSpec.from_str_path("/data/a"),
+                generation,
+                old.model_dump_json(),
+                new,
+            )
+        )
+        await asyncio.sleep(0)
+        assert not pending.done()
+        if interference == "write":
+            await manager.invalidate_after_write(
+                PathSpec.from_str_path("/data/a")
+            )
+        elif interference == "replace":
+            await index.put("/data/a", old.model_copy(update={"id": "newer"}))
+        elif interference == "unmount":
+            owns[0] = False
+    await pending
+    row = (await index.get("/data/a")).entry
+    if interference == "none":
+        assert row.id == new.id
+        assert await index.list_dir("/data") == listing
+    elif interference == "replace":
+        assert row.id == "newer"
+    else:
+        assert row is None or row.id == "old"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interference", ["replace", "delete"])
+async def test_retention_cannot_overwrite_a_peer_workspace(
+    monkeypatch, interference
+):
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    peer = CacheManager(RAMFileCacheStore(), index, "/data/", True)
+    path = PathSpec.from_str_path("/data/a")
+    old = IndexEntry(
+        id="old", name="a", resource_type="file", index_time="old"
+    )
+    latest = old.model_copy(update={"size": 9})
+    await index.put(path.virtual, old)
+    original_get = index.get
+    original_replace = index.replace_if_unchanged
+    interferences = 0
+
+    async def interfere():
+        nonlocal interferences
+        interferences += 1
+        async with peer.mutation():
+            view = peer.scope_index_locked(index)
+            if interference == "replace":
+                await view.put(path.virtual, latest)
+            else:
+                await view.invalidate_entry(path.virtual)
+
+    async def stale_get(key):
+        result = await original_get(key)
+        await interfere()
+        return result
+
+    async def raced_replace(key, predecessor, replacement):
+        await interfere()
+        return await original_replace(key, predecessor, replacement)
+
+    monkeypatch.setattr(index, "get", stale_get)
+    monkeypatch.setattr(index, "replace_if_unchanged", raced_replace)
+    await manager.retain_resolved_entry(
+        path,
+        manager.generation,
+        old.model_dump_json(),
+        old.model_copy(update={"id": "confirmed"}),
+    )
+    assert interferences == 1
+    result = (await original_get(path.virtual)).entry
+    assert result == (latest if interference == "replace" else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fingerprint", ["verified", None])
+async def test_fill_keeps_exact_read_fact_without_observing(fingerprint):
+    cache = RAMFileCacheStore()
+    manager = CacheManager(cache, None, "/s3/", True)
+    data = b"payload"
+
+    async def fetch():
+        assert active_recorder() is None
+        publish_read("/s3/a.txt", data, fingerprint)
+        publish_read("/s3/a.txt", b"foreign", "wrong")
+        return data
+
+    assert (
+        await manager.fill(PathSpec.from_str_path("/s3/a.txt", "a.txt"), fetch)
+        is data
+    )
+    assert await cache.is_fresh("/s3/a.txt", "verified") is (
+        fingerprint is not None
+    )
+    assert not await cache.is_fresh("/s3/a.txt", "wrong")
+    assert active_recorder() is None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_fills_cannot_borrow_a_same_path_token():
+    caches = [RAMFileCacheStore(), RAMFileCacheStore()]
+    managers = [CacheManager(cache, None, "/s3/", True) for cache in caches]
+    first_ready, release = asyncio.Event(), asyncio.Event()
+    data = [b"first", b"other"]
+
+    async def first():
+        publish_read("/s3/a.txt", data[0], "first-token")
+        first_ready.set()
+        await release.wait()
+        return data[0]
+
+    async def second():
+        await first_ready.wait()
+        publish_read("/s3/a.txt", data[1], "other-token")
+        release.set()
+        return data[1]
+
+    await asyncio.gather(
+        managers[0].fill(PathSpec.from_str_path("/s3/a.txt", "a.txt"), first),
+        managers[1].fill(PathSpec.from_str_path("/s3/a.txt", "a.txt"), second),
+    )
+    assert await caches[0].is_fresh("/s3/a.txt", "first-token")
+    assert await caches[1].is_fresh("/s3/a.txt", "other-token")
+
+
+@pytest.mark.asyncio
+async def test_failed_fact_capture_does_not_leak_into_next_fill():
+    cache = RAMFileCacheStore()
+    manager = CacheManager(cache, None, "/s3/", True)
+    data = b"payload"
+
+    async def failing():
+        publish_read("/s3/a.txt", data, "orphan")
+        raise ValueError("failed fetch")
+
+    with pytest.raises(ValueError, match="failed fetch"):
+        await manager.fill(
+            PathSpec.from_str_path("/s3/a.txt", "a.txt"), failing
+        )
+    assert not await cache.exists("/s3/a.txt")
+    await manager.fill(
+        PathSpec.from_str_path("/s3/a.txt", "a.txt"),
+        AsyncMock(return_value=data),
+    )
+    assert not await cache.is_fresh("/s3/a.txt", "orphan")

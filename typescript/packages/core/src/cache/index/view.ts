@@ -184,6 +184,18 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
+  override replaceIfUnchanged(
+    path: string,
+    predecessor: string,
+    entry: IndexEntry,
+  ): Promise<boolean> {
+    return this.fence(() =>
+      this.owns(path)
+        ? this.inner.replaceIfUnchanged(path, predecessor, entry)
+        : Promise.resolve(false),
+    )
+  }
+
   setDir(
     path: string,
     entries: readonly [string, IndexEntry][],

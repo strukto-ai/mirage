@@ -19,7 +19,7 @@ import { stat as githubStat } from '../core/github/stat.ts'
 import { IndexEntry } from '../cache/index/config.ts'
 import { LISTING_TRUST_WINDOW } from '../cache/index/constants.ts'
 import { shiftPerformanceNow } from '../cache/_test_util.ts'
-import { RAMIndexCacheStore } from '../cache/index/ram.ts'
+import { ListingCheckStore, RAMIndexCacheStore } from '../cache/index/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import {
@@ -1032,4 +1032,42 @@ describe('the listing version gate', () => {
       expect(vfs.stats).toEqual(['/m', '/m'])
     })
   })
+})
+
+// The probe stats through a scratch store whose only lead is the mount's own
+// row: a backend with no path lookup (box) may address that id once, and
+// must confirm what comes back.
+it('the probe hints the mount index row', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  try {
+    await ws.namespace.ensureLoaded()
+    const path = '/data/f.txt'
+    const mount = withFresh(mountOf(ws, path))
+    const row = new IndexEntry({ id: 'F1', name: 'f.txt', resourceType: 'file' })
+    await mount.indexStore.setDir('/data', [['f.txt', row]])
+    await mount.indexStore.setDir('/elsewhere', [['g.txt', row]])
+    const held = (await mount.index.get(path)).entry
+    expect(held).toBeDefined()
+    expect((await mount.indexStore.get('/elsewhere/g.txt')).entry).toBeDefined()
+    const seen: (IndexEntry | null)[] = []
+    vi.spyOn(ws.opsRegistry, 'call').mockImplementation(
+      async (_op, _vfs, _accessor, _p, _args, kwargs) => {
+        const index = kwargs?.index
+        if (!(index instanceof ListingCheckStore))
+          throw new Error('the probe passed no scratch index')
+        // Hints come through the mount's view, whose ownership check keeps
+        // a row outside the mount from passing as a lead.
+        expect(await index.hint('/elsewhere/g.txt')).toBeNull()
+        seen.push(await index.hint(path))
+        return new FileStat({ name: 'f.txt', type: FileType.FILE, fingerprint: 'fp1' })
+      },
+    )
+    await ws.cache.set(path, new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
+    const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry)
+    expect(await rec.mayServeCached(mount, path)).toBe(true)
+    expect(seen).toEqual([held])
+  } finally {
+    vi.restoreAllMocks()
+    await ws.close()
+  }
 })

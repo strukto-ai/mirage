@@ -42,6 +42,10 @@ export abstract class IndexCacheStore {
   abstract entries(): Promise<Map<string, IndexEntry>>
   abstract get(vfsPath: string): Promise<LookupResult>
   abstract put(vfsPath: string, entry: IndexEntry): Promise<void>
+  /** Atomically replace an existing row without renewing its listing; custom stores may decline. */
+  replaceIfUnchanged(_path: string, _predecessor: string, _entry: IndexEntry): Promise<boolean> {
+    return Promise.resolve(false)
+  }
   abstract listDir(vfsPath: string): Promise<ListResult>
   /**
    * Cache a complete directory listing. A complete listing names every
