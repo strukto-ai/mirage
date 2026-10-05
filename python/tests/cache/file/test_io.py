@@ -82,15 +82,17 @@ async def test_apply_io_caches_writes(cache):
 
 
 @pytest.mark.asyncio
-async def test_apply_io_reads_preferred_over_writes(cache):
-    """When both reads and writes exist for same path, read data wins."""
+async def test_apply_io_drops_a_path_read_and_written(cache):
+    """`cat f; printf z >> f` reads f before appending to it: neither
+    side is the file, so the entry the line started with goes too."""
+    await cache.set("/f.txt", b"stale")
     io = IOResult(
         reads={"/f.txt": b"read-data"},
-        writes={"/f.txt": b"write-data"},
+        writes={"/f.txt": b"z"},
         cache=["/f.txt"],
     )
     await cache_io.apply_io(cache, io)
-    assert await cache.get("/f.txt") == b"read-data"
+    assert await cache.get("/f.txt") is None
 
 
 @pytest.mark.asyncio
@@ -517,15 +519,10 @@ async def test_a_write_token_for_other_bytes_leaves_the_entry_tokenless(cache):
 
 @pytest.mark.asyncio
 async def test_apply_io_read_bytes_take_the_read_token_not_the_write(cache):
-    """A line that reads and writes one path caches the read's bytes --
-    apply_io prefers io.reads -- so the entry must carry the read's
-    token. Stamping the write's would make is_fresh call stale bytes
-    fresh for as long as the entry lives."""
-    io = IOResult(
-        reads={"/s3/f.txt": b"old"},
-        writes={"/s3/f.txt": b"new"},
-        cache=["/s3/f.txt"],
-    )
+    """Read bytes carry the read's token even when a write record of the
+    path comes later. Stamping the write's would make is_fresh call
+    stale bytes fresh for as long as the entry lives."""
+    io = IOResult(reads={"/s3/f.txt": b"old"}, cache=["/s3/f.txt"])
     await cache_io.apply_io(
         cache,
         io,
@@ -561,11 +558,7 @@ async def test_apply_io_streamed_read_takes_the_read_token(cache):
     """The stream branch is the same fork, so it answers the same way."""
     stream = CachableAsyncIterator(_one_chunk(b"old"))
     assert await stream.drain() == b"old"
-    io = IOResult(
-        reads={"/s3/f.txt": stream},
-        writes={"/s3/f.txt": b"new"},
-        cache=["/s3/f.txt"],
-    )
+    io = IOResult(reads={"/s3/f.txt": stream}, cache=["/s3/f.txt"])
     await cache_io.apply_io(
         cache,
         io,

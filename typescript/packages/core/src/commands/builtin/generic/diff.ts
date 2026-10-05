@@ -396,11 +396,5 @@ export async function diffGeneric(
     return [null, new IOResult({ exitCode: 2, stderr: formatFsError('diff', err, errorPaths) })]
   }
   const out: ByteSource = output
-  return [
-    out,
-    new IOResult({
-      exitCode: differ ? 1 : 0,
-      cache: paths.filter((p) => !isStdin(p)).map((p) => p.mountPath),
-    }),
-  ]
+  return [out, new IOResult({ exitCode: differ ? 1 : 0 })]
 }

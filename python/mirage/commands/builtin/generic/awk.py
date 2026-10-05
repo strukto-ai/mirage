@@ -28,7 +28,7 @@ from mirage.core.awk import (
     Interpreter,
     parse,
 )
-from mirage.core.awk.builtins import split_assignment, unescape
+from mirage.core.awk.builtins import unescape
 from mirage.core.awk.value import text as text_value
 from mirage.io.cooperative import chunks
 from mirage.io.stream import materialize
@@ -403,14 +403,7 @@ async def awk(
             "FS", text_value(unescape(byte_view(f.field_separator)))
         )
 
-    cache = [
-        p.mount_path
-        for p in paths
-        if p.raw_path != ""
-        and not is_stdin(p)
-        and split_assignment(p.raw_path) is None
-    ]
-    io = IOResult(cache=cache)
+    io = IOResult()
     return _awk_stream(interp, io), io
 
 

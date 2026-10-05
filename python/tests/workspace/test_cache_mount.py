@@ -215,3 +215,28 @@ async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
     assert served == "v1\n", (
         "the guarded walk overwrote the entry it read past"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "stored"),
+    [
+        ("cat /data/f; printf 'z\\n' >> /data/f", b"a\nb\nz\n"),
+        ("awk 1 /data/f | tee -a /data/f > /dev/null", b"a\nb\na\nb\n"),
+        ("tac /data/f >> /data/f", b"a\nb\nb\na\n"),
+    ],
+)
+async def test_a_line_that_reads_and_appends_leaves_no_stale_entry(
+    line, stored
+):
+    """A line that reads a file and appends to it holds neither the file
+    nor its append whole, so the next read reaches the store."""
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ws = Workspace({"/data": ram}, mode=MountMode.WRITE)
+    await ws.shell("printf 'a\\nb\\n' > /data/f")
+    await (await ws.shell("cat /data/f")).materialize_stdout()
+    await (await ws.shell(line)).materialize_stdout()
+    out = await (await ws.shell("cat /data/f")).materialize_stdout()
+    await ws.close()
+    assert out == stored

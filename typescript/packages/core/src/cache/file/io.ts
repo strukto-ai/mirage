@@ -140,8 +140,11 @@ export async function applyIo(
   cacheFacts?: (path: string) => CacheFacts,
   records?: readonly OpRecord[],
 ): Promise<void> {
-  const cacheSet = new Set(io.cache)
-  for (const path of io.cache) {
+  // A path the line both read and wrote is dropped: what was read predates
+  // the write, and the write may be an append or a patch.
+  const kept = io.cache.filter((p) => !(p in io.reads) || !(p in io.writes))
+  const cacheSet = new Set(kept)
+  for (const path of kept) {
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
     // The token has to describe the bytes actually stored, so the lookup
     // asks about the side this branch took. Set in the branch rather

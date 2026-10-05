@@ -171,8 +171,11 @@ async def apply_io(
     cache_facts: Callable[[str], CacheFacts] | None = None,
     records: list[OpRecord] | None = None,
 ) -> None:
-    cache_set = set(io.cache)
-    for path in io.cache:
+    # A path the line both read and wrote is dropped: what was read
+    # predates the write, and the write may be an append or a patch.
+    kept = [p for p in io.cache if p not in io.reads or p not in io.writes]
+    cache_set = set(kept)
+    for path in kept:
         if cache_facts is not None and not cache_facts(path).cacheable:
             continue
         data = io.reads.get(path)

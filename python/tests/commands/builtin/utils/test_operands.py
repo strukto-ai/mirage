@@ -132,8 +132,6 @@ def test_operands_io_exit_codes():
     failed = operands_io(b"cat: /x: No such file or directory\n")
     assert failed.exit_code == 1
     assert failed.stderr == b"cat: /x: No such file or directory\n"
-    cached = operands_io(b"", cache=["/a"])
-    assert cached.cache == ["/a"]
 
 
 @pytest.mark.asyncio

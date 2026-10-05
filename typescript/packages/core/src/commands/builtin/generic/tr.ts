@@ -193,15 +193,13 @@ export async function trGeneric(
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
   }
-  const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     source = stream(first)
-    cache.push(first.virtual)
   } else {
     source = resolveSource(opts.stdin)
   }
-  return [trStream(source, trOpts), new IOResult({ cache })]
+  return [trStream(source, trOpts), new IOResult()]
 }

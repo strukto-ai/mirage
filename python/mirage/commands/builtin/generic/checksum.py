@@ -489,7 +489,7 @@ async def checksum(
     if paths:
         return _hash_multi(
             paths, read_stream, factory, algorithm, binary, tag, zero
-        ), IOResult(cache=[p.mount_path for p in paths if not is_stdin(p)])
+        ), IOResult()
     source = resolve_source(stdin)
     return _hash_stream(
         source, "-", factory, algorithm, binary, tag, zero

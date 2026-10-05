@@ -8,7 +8,6 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     resolve_source,
     stdin_stat,
     stdin_stream,
@@ -67,13 +66,12 @@ async def tac(
     regex: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        cache = [p.mount_path for p in paths if not is_stdin(p)]
         parts: list[bytes] = []
         for p in paths:
             parts.append(
                 await _reverse_source(read_stream(p), separator, before, regex)
             )
-        return b"".join(parts), IOResult(cache=cache)
+        return b"".join(parts), IOResult()
 
     source = resolve_source(stdin)
     return await _reverse_source(source, separator, before, regex), IOResult()

@@ -31,8 +31,7 @@ async def test_tac_file_reverses_lines():
     path = PathSpec(
         vfs_path="a.txt", virtual="/a.txt", directory="/a.txt", resolved=True
     )
-    output, io = await tac(
+    output, _ = await tac(
         [path], read_stream=_read_stream({"/a.txt": b"a\nb\nc\n"})
     )
     assert await _drain(output) == ["c", "b", "a"]
-    assert io.cache == ["/a.txt"]

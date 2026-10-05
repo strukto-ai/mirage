@@ -265,7 +265,6 @@ void padLeft
 async function writeOutput(
   paths: PathSpec[],
   source: AsyncIterable<Uint8Array>,
-  cache: string[],
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null,
   writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
@@ -297,10 +296,8 @@ async function writeOutput(
       if (!isFsError(err)) throw err
       return failed(target, err, OPEN_OUTPUT_EXIT)
     }
-    // The stretches are not the file, so the cache drops what it holds, even
-    // when OUTFILE is INFILE too.
-    const kept = cache.filter((path) => path !== target.mountPath)
-    return [null, new IOResult({ writes: { [target.mountPath]: new Uint8Array(0) }, cache: kept })]
+    // The stretches are not the file, so the cache drops what it holds.
+    return [null, new IOResult({ writes: { [target.mountPath]: new Uint8Array(0) } })]
   }
   if (dump === null) {
     let existing: Uint8Array = new Uint8Array(0)
@@ -327,10 +324,7 @@ async function writeOutput(
     if (!isFsError(err)) throw err
     return failed(target, err, OPEN_OUTPUT_EXIT)
   }
-  return [
-    null,
-    new IOResult({ writes: { [target.mountPath]: data }, cache: [...cache, target.mountPath] }),
-  ]
+  return [null, new IOResult({ writes: { [target.mountPath]: data }, cache: [target.mountPath] })]
 }
 
 /**
@@ -354,13 +348,11 @@ export async function xxdGeneric(
   stream = stdinStream(stream, opts.stdin)
   const fl = new FlagView(opts.flags, specOf('xxd'))
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
-  const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     source = stream(first)
-    if (!isStdin(first)) cache.push(first.mountPath)
   } else {
     source = resolveSource(opts.stdin)
   }
@@ -382,8 +374,8 @@ export async function xxdGeneric(
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {
-    return writeOutput(paths, source, cache, readBytes, writeBytes, pwriteBytes, render)
+    return writeOutput(paths, source, readBytes, writeBytes, pwriteBytes, render)
   }
-  const io = new IOResult({ cache })
+  const io = new IOResult()
   return [render() ?? xxdReverseStream(source, io), io]
 }

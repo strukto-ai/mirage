@@ -67,15 +67,19 @@ describe('cache population via applyIo', () => {
     expect(DEC.decode((await cache.get('/data/out.txt')) ?? undefined)).toBe('output')
   })
 
-  it('prefers reads over writes for the same path', async () => {
+  it('drops a path read and written', async () => {
+    // `cat f; printf z >> f` reads f before appending to it: neither side
+    // is the file, so the entry the line started with goes too. Mirrors
+    // Python's test_apply_io_drops_a_path_read_and_written.
     const cache = new RAMFileCacheStore()
+    await cache.set('/f.txt', ENC.encode('stale'))
     const io = new IOResult({
       reads: { '/f.txt': ENC.encode('read-data') },
-      writes: { '/f.txt': ENC.encode('write-data') },
+      writes: { '/f.txt': ENC.encode('z') },
       cache: ['/f.txt'],
     })
     await applyIo(cache, io)
-    expect(DEC.decode((await cache.get('/f.txt')) ?? undefined)).toBe('read-data')
+    expect(await cache.get('/f.txt')).toBeNull()
   })
 
   it('stores all paths in the cache list', async () => {
@@ -473,16 +477,11 @@ describe('the token describes the bytes stored', () => {
   })
 
   it('read bytes take the read token, not the write', async () => {
-    // A line that reads and writes one path caches the read's bytes --
-    // applyIo prefers io.reads -- so the entry must carry the read's
-    // token. Stamping the write's would make isFresh call stale bytes
-    // fresh for as long as the entry lives.
+    // Read bytes carry the read's token even when a write record of the
+    // path comes later. Stamping the write's would make isFresh call stale
+    // bytes fresh for as long as the entry lives.
     const cache = new RAMFileCacheStore()
-    const io = new IOResult({
-      reads: { '/s3/f.txt': ENC.encode('old') },
-      writes: { '/s3/f.txt': ENC.encode('new') },
-      cache: ['/s3/f.txt'],
-    })
+    const io = new IOResult({ reads: { '/s3/f.txt': ENC.encode('old') }, cache: ['/s3/f.txt'] })
     await applyIo(cache, io, undefined, [
       opRecord('read', '/s3/f.txt', 'etag-old-2', 3),
       opRecord('write', '/s3/f.txt', 'etag-new-2', 3),
@@ -509,11 +508,7 @@ describe('the token describes the bytes stored', () => {
     const cache = new RAMFileCacheStore()
     const stream = makeStream('old')
     expect(DEC.decode(await stream.drain())).toBe('old')
-    const io = new IOResult({
-      reads: { '/s3/f.txt': stream },
-      writes: { '/s3/f.txt': ENC.encode('new') },
-      cache: ['/s3/f.txt'],
-    })
+    const io = new IOResult({ reads: { '/s3/f.txt': stream }, cache: ['/s3/f.txt'] })
     await applyIo(cache, io, undefined, [
       opRecord('read', '/s3/f.txt', 'etag-old-2', 3),
       opRecord('write', '/s3/f.txt', 'etag-new-2', 3),

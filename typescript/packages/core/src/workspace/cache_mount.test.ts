@@ -400,3 +400,32 @@ describe('a renderer registered beside the VFS', () => {
     }
   })
 })
+
+describe('a line that reads and appends to one file', () => {
+  it.each([
+    ["cat /data/f; printf 'z\\n' >> /data/f", 'a\nb\nz\n'],
+    ['awk 1 /data/f | tee -a /data/f > /dev/null', 'a\nb\na\nb\n'],
+    ['tac /data/f >> /data/f', 'a\nb\nb\na\n'],
+  ])('%s leaves no stale entry', async (line, stored) => {
+    // The line holds neither the file nor its append whole, so the next read
+    // reaches the store. Mirrors Python's
+    // test_a_line_that_reads_and_appends_leaves_no_stale_entry.
+    const ram = new RAMVFS()
+    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.WRITE,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+    try {
+      await ws.shell("printf 'a\\nb\\n' > /data/f")
+      await ws.shell('cat /data/f')
+      await ws.shell(line)
+      expect(DEC.decode((await ws.shell('cat /data/f')).stdout)).toBe(stored)
+    } finally {
+      await ws.close()
+    }
+  })
+})

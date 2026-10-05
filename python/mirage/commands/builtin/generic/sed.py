@@ -28,7 +28,6 @@ from mirage.commands.builtin.sed_script import (
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, typed_spec
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     read_stdin_async,
     stdin_bytes,
 )
@@ -269,7 +268,6 @@ async def sed(
         )
 
     inputs: list[SedInput] = []
-    read_ok: list[PathSpec] = []
     if not paths:
         raw = await read_stdin_async(stdin) or b""
         inputs.append(SedInput("-", byte_view(raw)))
@@ -305,12 +303,10 @@ async def sed(
             )
             continue
         inputs.append(SedInput(p.raw_path, byte_view(data)))
-        read_ok.append(p)
     machine.process(inputs, True)
     write_err = await _flush_write_files(machine, doors)
     stderr = machine.stderr() + write_err
     return from_byte_view("".join(machine.stdout.chunks)), IOResult(
-        cache=[p.mount_path for p in read_ok if not is_stdin(p)],
         exit_code=machine.exit_code() if not write_err else 4,
         stderr=encode_text(stderr) if stderr else None,
     )

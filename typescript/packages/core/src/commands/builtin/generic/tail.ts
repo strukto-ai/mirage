@@ -24,8 +24,6 @@ import { argmatchError } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
-  countNewlines,
-  normalizeCounts,
   numberFlagError,
   parseCounts,
   parseSeconds,
@@ -394,16 +392,6 @@ async function unfollowable(
   return pending
 }
 
-// Whether this operand's whole content is what tail emits, which is what
-// makes it worth handing to the file cache. Counting from the start is
-// never treated as a full read, matching what `-n +N` has always done.
-function readsEverything(rawCounts: TailCounts, raw: Uint8Array): boolean {
-  const counts = normalizeCounts(rawCounts)
-  if (counts.fromByte !== null || counts.fromLine !== null) return false
-  if (counts.byteCount !== null) return counts.byteCount >= raw.byteLength
-  return (counts.lines ?? 10) >= countNewlines(raw)
-}
-
 const RETRY_IGNORED = 'tail: warning: --retry ignored; --retry is useful only when following\n'
 const RETRY_INITIAL = 'tail: warning: --retry only effective for the initial open\n'
 // A name is what -F follows, and standard input has none.
@@ -496,7 +484,6 @@ export async function tailGeneric(
 
   if (paths.length > 0) {
     const chunks: Uint8Array[] = []
-    const cache: string[] = []
     const showHeaders = (vFlag || paths.length > 1) && !qFlag
     let err = ''
     let printed = 0
@@ -527,10 +514,8 @@ export async function tailGeneric(
       }
       printed += 1
       chunks.push(tailBytes(raw, counts))
-      if (!isStdin(p) && readsEverything(counts, raw)) cache.push(p.virtual)
     }
     const io = new IOResult({
-      cache,
       exitCode: err === '' ? 0 : 1,
       stderr: retryWarning + err === '' ? null : encodeText(retryWarning + err),
     })
