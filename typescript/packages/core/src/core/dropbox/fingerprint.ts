@@ -12,43 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '../../cache/index/config.ts'
 import { CONTENT_HASH, RESULT_HEADER } from './constants.ts'
 
 /**
- * A file's content token: its content_hash, or null. The one rule stat,
- * readdir and read all stamp by, so the two sides of a `read: fresh` check
- * are always the same kind. server_modified is no content token: the real
- * service repeats it across same-size rewrites.
+ * A file's content token: its content_hash, or null. stat, readdir and read
+ * all stamp by this, so both sides of a `read: fresh` check are the same kind.
+ * server_modified is no token: Dropbox repeats it across same-size rewrites.
  */
 export function tokenOf(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null
 }
 
-/** The content token a listing row carries. */
-export function entryToken(entry: IndexEntry): string | null {
-  return tokenOf(entry.extra[CONTENT_HASH])
-}
-
 /**
- * The content token a download's `Dropbox-API-Result` names. The header
- * carries the file's metadata on a full and on a ranged (206) download
- * alike, so a read stamps the token stat answers with no request of its
- * own. A missing or unreadable header is no token; an unreadable one (not
- * JSON, or not an object) warns, since Dropbox always sends a JSON object
- * there and every fresh read of the file then goes cold.
+ * The content token a download's `Dropbox-API-Result` names. Dropbox sends the
+ * file's metadata there on a full and on a ranged (206) download, so a read
+ * stamps the token with no extra request.
  */
 export function resultToken(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined || raw === '') return null
   let result: unknown
   try {
     result = JSON.parse(raw)
-  } catch (err) {
-    console.warn(`unreadable ${RESULT_HEADER} header: ${String(err)}`)
-    return null
+  } catch {
+    result = null
   }
   if (typeof result !== 'object' || result === null || Array.isArray(result)) {
-    console.warn(`unreadable ${RESULT_HEADER} header: not an object`)
+    console.warn(`unreadable ${RESULT_HEADER} header: ${raw}`)
     return null
   }
   return tokenOf((result as Record<string, unknown>)[CONTENT_HASH])

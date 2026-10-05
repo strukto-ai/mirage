@@ -27,11 +27,8 @@ class ResourceType(str, Enum):
 def is_folder_kind(resource_type: str) -> bool:
     """Whether a row's type names a folder: ``folder`` or ``<backend>/folder``.
 
-    A backend may spell its kinds under its own prefix (``dropbox/folder``,
-    ``box/folder``); a type outside that convention (``wandb/directory``)
-    is no evidence either way. A caller holding no row checks for that
-    first; the TypeScript twin takes ``undefined`` for it instead, the
-    shape an optional-chained map lookup gives.
+    A backend may spell its kinds under its own prefix (``dropbox/folder``);
+    a type outside that convention (``wandb/directory``) is neither kind.
 
     Args:
         resource_type (str): the row's ``resource_type``.

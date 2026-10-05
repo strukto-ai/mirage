@@ -29,13 +29,10 @@ function isKind(resourceType: string | undefined, kind: ResourceType): boolean {
 }
 
 /**
- * Whether a row's type names a folder: `folder` or `<backend>/folder`.
- *
- * A backend may spell its kinds under its own prefix (`dropbox/folder`,
- * `box/folder`); a type outside that convention (`wandb/directory`) is no
- * evidence either way. `undefined`, the type of a row a map lookup did not
- * find, is neither kind, so a caller can pass `map.get(key)?.resourceType`;
- * the python twin takes a `str` and its callers check for a missing row.
+ * Whether a row's type names a folder: `folder` or `<backend>/folder`. A
+ * backend may spell its kinds under its own prefix (`dropbox/folder`); a type
+ * outside that convention (`wandb/directory`) is neither kind, nor is
+ * `undefined`, a row a map lookup did not find.
  */
 export function isFolderKind(resourceType: string | undefined): boolean {
   return isKind(resourceType, ResourceType.FOLDER)

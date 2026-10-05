@@ -41,13 +41,6 @@ def dropbox_path_from_key(root: str, key: str) -> str:
 async def _metadata_or_none(
     accessor: DropboxAccessor, key: str
 ) -> dict[str, Any] | None:
-    """One path's get_metadata answer, or None when the API 409s on it.
-
-    Args:
-        accessor (DropboxAccessor): Dropbox accessor; its root_path is
-            prepended.
-        key (str): mount-local path, slashes at either end ignored.
-    """
     path = dropbox_path_from_key(accessor.root_path, key.strip("/"))
     try:
         return await get_metadata(accessor.token_manager, path)
@@ -58,23 +51,11 @@ async def _metadata_or_none(
 
 
 async def _is_file(accessor: DropboxAccessor, key: str) -> bool:
-    """Whether a mount-local path exists as a file.
-
-    Args:
-        accessor (DropboxAccessor): Dropbox accessor.
-        key (str): mount-local path.
-    """
     entry = await _metadata_or_none(accessor, key)
     return entry is not None and entry.get(".tag") != "folder"
 
 
 async def _is_dir(accessor: DropboxAccessor, key: str) -> bool:
-    """Whether a mount-local path exists as a folder.
-
-    Args:
-        accessor (DropboxAccessor): Dropbox accessor.
-        key (str): mount-local path.
-    """
     entry = await _metadata_or_none(accessor, key)
     return entry is not None and entry.get(".tag") == "folder"
 
@@ -114,21 +95,21 @@ async def readdir(
 
     entries: list[tuple[str, IndexEntry, bool]] = []
     for f in files:
-        folder = f.get(".tag") == "folder"
+        is_dir = f.get(".tag") == "folder"
         filename = f["name"]
         modified = f.get("server_modified") or f.get("client_modified") or ""
         size = f.get("size")
-        token = None if folder else token_of(f.get(CONTENT_HASH))
+        token = None if is_dir else token_of(f.get(CONTENT_HASH))
         entry = IndexEntry(
             id=f.get("id") or f.get("path_display") or filename,
             name=filename,
             resource_type=_resource_type_for(f),
             remote_time=modified,
             vfs_name=filename,
-            size=size if not folder and isinstance(size, int) else None,
+            size=size if not is_dir and isinstance(size, int) else None,
             extra={} if token is None else {CONTENT_HASH: token},
         )
-        entries.append((filename, entry, folder))
+        entries.append((filename, entry, is_dir))
 
     await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
     path_prefix = f"/{key}/" if key else "/"

@@ -93,8 +93,8 @@ async def read(
     """
     window = window_for(offset, size)
     if index is NULL_INDEX:
-        # Index-less callers (the ops factory's emulated truncate) download
-        # directly; the API 409s on missing paths and folders.
+        # Index-less callers (the ops factory's emulated truncate)
+        # download directly; the API 409s on missing paths and folders.
         prefix = mount_prefix_of(path.virtual, path.vfs_path)
         virtual_key = path.virtual
     else:

@@ -34,7 +34,6 @@ function dropboxPathFromKey(root: string, key: string): string {
   return `${root}/${key}`
 }
 
-/** One path's get_metadata answer, or null when the API 409s on it. */
 async function metadataOrNull(
   accessor: DropboxAccessor,
   key: string,
@@ -50,13 +49,11 @@ async function metadataOrNull(
   }
 }
 
-/** Whether a mount-local path exists as a file. */
 async function isFile(accessor: DropboxAccessor, key: string): Promise<boolean> {
   const entry = await metadataOrNull(accessor, key)
   return entry !== null && entry['.tag'] !== 'folder'
 }
 
-/** Whether a mount-local path exists as a folder. */
 async function isDir(accessor: DropboxAccessor, key: string): Promise<boolean> {
   const entry = await metadataOrNull(accessor, key)
   return entry !== null && entry['.tag'] === 'folder'
@@ -100,21 +97,21 @@ export async function readdir(
 
   const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
   for (const f of files) {
-    const folder = f['.tag'] === 'folder'
+    const isDir = f['.tag'] === 'folder'
     const filename = f.name
     const modified = f.server_modified ?? f.client_modified ?? ''
     const size = typeof f.size === 'number' ? f.size : null
-    const token = folder ? null : tokenOf(f[CONTENT_HASH])
+    const token = isDir ? null : tokenOf(f[CONTENT_HASH])
     const entry = new IndexEntry({
       id: f.id ?? f.path_display ?? filename,
       name: filename,
       resourceType: resourceTypeFor(f),
       remoteTime: modified,
       vfsName: filename,
-      size: !folder ? size : null,
+      size: !isDir ? size : null,
       extra: token === null ? {} : { [CONTENT_HASH]: token },
     })
-    entries.push({ name: filename, entry, isDir: folder })
+    entries.push({ name: filename, entry, isDir })
   }
 
   if (index !== undefined) {

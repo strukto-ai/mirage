@@ -39,17 +39,6 @@ class IndexCacheStore:
         """Seconds a listing lives when its writer names no expiry."""
         raise NotImplementedError
 
-    @property
-    def scratch(self) -> bool:
-        """Whether this store is a throwaway built for one freshness check.
-
-        The reconcile probe and the snapshot drift check stat through an
-        empty store dropped right after, so a backend that would list a
-        whole folder to answer a miss can ask for the one path instead. A
-        mount's own index is never scratch.
-        """
-        return False
-
     def scope_snapshot(self, snapshot: IndexSnapshot) -> IndexSnapshot:
         """Apply this index's ownership rules to a refill snapshot.
 

@@ -25,14 +25,6 @@ export abstract class IndexCacheStore {
   /** Seconds a listing lives when its writer names no expiry. */
   abstract readonly ttl: number
   /**
-   * Whether this store is a throwaway built for one freshness check. The
-   * reconcile probe and the snapshot drift check stat through an empty store
-   * dropped right after, so a backend that would list a whole folder to
-   * answer a miss can ask for the one path instead. A mount's own index is
-   * never scratch.
-   */
-  readonly scratch: boolean = false
-  /**
    * Merge snapshots by path; deferred stores flush before operations or
    * close. Clear discards them. `version` replaces the version of every
    * listed folder, and null clears it.

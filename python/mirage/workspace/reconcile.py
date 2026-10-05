@@ -18,7 +18,7 @@ from functools import partial
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.config import Evicted
-from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.types import FileStat, ListingVersion, PathSpec, ReadPolicy
 from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.path import ancestors
@@ -92,7 +92,7 @@ class Reconciler:
             # Resolve backend IDs without reusing cached metadata.
             try:
                 remote_stat = await mount.execute_op(
-                    "stat", path, index=RAMIndexCacheStore(scratch=True)
+                    "stat", path, index=ListingCheckStore()
                 )
             except (FileNotFoundError, NotADirectoryError):
                 await self.on_missing(path)

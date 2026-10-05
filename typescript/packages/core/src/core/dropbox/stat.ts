@@ -15,13 +15,14 @@
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
 import { getMetadata, type DropboxEntry } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
 import { CONTENT_HASH, MISS_SUMMARIES } from './constants.ts'
-import { entryToken, tokenOf } from './fingerprint.ts'
+import { tokenOf } from './fingerprint.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { enoent, isEnoent } from '../../utils/errors.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
@@ -51,33 +52,12 @@ function statFromEntry(entry: DropboxEntry): FileStat {
 }
 
 // API-truthful stat for index-less callers (unlink/rmdir classification,
-// the wired find core): get_metadata resolves the entry directly. Every 409
-// is ENOENT here; only the fresh probe's point stat narrows it, since only
-// there does ENOENT drop an overlay.
+// the wired find core) and the fresh checks' throwaway store: one
+// get_metadata. Only a not_found or not_folder 409 is a miss; any other
+// (restricted_content, ...) names a path that may exist, so a fresh probe must
+// not call it gone. get_metadata matches names case-insensitively where a
+// listing is exact.
 async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
-  let entry: DropboxEntry
-  try {
-    entry = await getMetadata(accessor.tokenManager, dropboxPathOf(accessor, path))
-  } catch (err) {
-    if (err instanceof DropboxApiError && err.status === 409) {
-      throw enoent(path.virtual)
-    }
-    throw err
-  }
-  return statFromEntry(entry)
-}
-
-// Stat one path with one get_metadata, writing nothing to the index. Only a
-// scratch store asks this way. The reconcile probe and the snapshot drift check
-// build one, and both treat ENOENT and ENOTDIR alike, so a miss is ENOENT with
-// no further lookup; the drift check skips a mount without snapshot support,
-// which dropbox is, so today only the probe gets here. Only a not_found or
-// not_folder 409 is a miss: the probe calls ENOENT gone and drops the path's
-// overlay, so a 409 for a file that exists (restricted_content, ...)
-// propagates and the probe reads it as unverifiable. get_metadata matches
-// case-insensitively where a listing's names are exact, so an answer naming
-// the last component in another case is not this path.
-async function pointStat(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
   let entry: DropboxEntry
   try {
     entry = await getMetadata(accessor.tokenManager, dropboxPathOf(accessor, path))
@@ -105,16 +85,13 @@ export async function stat(
   const key = path.vfsPath
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
 
-  if (index === undefined) return statFromApi(accessor, path)
+  if (index === undefined || index instanceof ListingCheckStore) return statFromApi(accessor, path)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
-    // The throwaway store a fresh probe or the drift check stats through is
-    // dropped right after: ask for this one path rather than list a whole
-    // folder into it. A mount's own index lists the parent and keeps it, so
-    // siblings and repeats cost nothing.
-    if (index.scratch) return pointStat(accessor, path)
-    const parentVirtual = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
+    const parentVirtual = virtualKey.includes('/')
+      ? virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
+      : '/'
     try {
       await coreReaddir(
         accessor,
@@ -128,12 +105,15 @@ export async function stat(
       )
     } catch (err) {
       // readdir already maps a genuinely missing path to ENOENT; a listing
-      // that fails any other way (ENOTDIR under a file, or a 5xx/429 from
-      // the API) is not absence and must surface.
+      // that fails any other way — ENOTDIR under a file, or a 5xx/429 from
+      // the API — is not absence and must surface, never read back as a
+      // (destructively actionable) false ENOENT.
       if (!isEnoent(err)) throw err
     }
     result = await index.get(virtualKey)
-    if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
+    if (result.entry === undefined || result.entry === null) {
+      throw enoent(path.virtual)
+    }
   }
   if (result.entry.resourceType === 'dropbox/folder') {
     return new FileStat({
@@ -149,7 +129,7 @@ export async function stat(
     type: FileType.FILE,
     content: contentTypeForPath(result.entry.vfsName),
     modified: result.entry.remoteTime,
-    fingerprint: entryToken(result.entry),
+    fingerprint: tokenOf(result.entry.extra[CONTENT_HASH]),
     extra: {
       dropbox_id: result.entry.id,
       resource_type: result.entry.resourceType,

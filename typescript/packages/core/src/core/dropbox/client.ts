@@ -26,8 +26,8 @@ import { type ByteWindow } from '../../utils/ranges.ts'
 
 // The Dropbox-API-Arg header carries JSON, and a header is a ByteString:
 // a path with a character past U+00FF makes fetch refuse the request.
-// Dropbox reads JSON escapes there, so every character from U+007F (DEL) up
-// goes as \uXXXX, which is what python's json.dumps sends by default.
+// Dropbox reads JSON escapes there, so every non-ASCII character goes as
+// \uXXXX, which is what python's json.dumps sends by default.
 function headerJson(arg: Record<string, string | boolean>): string {
   return JSON.stringify(arg).replace(
     /[\u007f-\uffff]/g,

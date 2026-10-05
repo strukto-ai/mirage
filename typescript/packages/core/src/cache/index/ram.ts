@@ -37,12 +37,9 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private readonly versions = new Map<string, string>()
   private readonly lock = new KeyLock()
 
-  override readonly scratch: boolean
-
-  constructor(options: { ttl?: number; scratch?: boolean } = {}) {
+  constructor(options: { ttl?: number } = {}) {
     super()
     this.ttl = options.ttl ?? 600
-    this.scratch = options.scratch ?? false
   }
 
   seed(
@@ -283,12 +280,14 @@ export class RAMIndexCacheStore extends IndexCacheStore {
 }
 
 /**
- * The empty, throwaway store the listing gate stats a version through.
+ * The empty, throwaway store a `read: fresh` check stats through.
  *
- * A root stat asks the backend for its head only through this store. Through
- * any other index it names no version and reads nothing, so a getattr of the
- * root never sends a request or reads the index; the gate passes this store
- * to say a request is what it wants.
+ * The listing gate and the read probe pass it to say a request is what they
+ * want. A root stat asks the backend for its head only through this store.
+ * Through any other index it names no version and reads nothing, so a getattr
+ * of the root never sends a request or reads the index. A backend that lists
+ * a parent to answer a miss may ask for the one path instead, since the store
+ * is dropped right after.
  *
  * Mirrors Python's `ListingCheckStore`.
  */

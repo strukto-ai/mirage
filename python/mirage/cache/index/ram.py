@@ -32,10 +32,9 @@ from mirage.utils.key_prefix import under_path
 class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     """In-memory index cache using plain dicts + asyncio locks."""
 
-    def __init__(self, ttl: float = 600, scratch: bool = False) -> None:
+    def __init__(self, ttl: float = 600) -> None:
         super().__init__()
         self._ttl = ttl
-        self._scratch = scratch
         self._entries: dict[str, IndexEntry] = {}
         self._children: dict[str, list[str]] = {}
         self._expiry: dict[str, datetime] = {}
@@ -78,10 +77,6 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
     async def entries(self) -> dict[str, IndexEntry]:
         return dict(self._entries)
-
-    @property
-    def scratch(self) -> bool:
-        return self._scratch
 
     @property
     def ttl(self) -> float:
@@ -333,10 +328,12 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
 
 class ListingCheckStore(RAMIndexCacheStore):
-    """The empty, throwaway store the listing gate stats a version through.
+    """The empty, throwaway store a ``read: fresh`` check stats through.
 
-    A root stat asks the backend for its head only through this store.
-    Through any other index it names no version and reads nothing, so a
-    getattr of the root never sends a request or reads the index; the gate
-    passes this store to say a request is what it wants.
+    The listing gate and the read probe pass it to say a request is what
+    they want. A root stat asks the backend for its head only through this
+    store. Through any other index it names no version and reads nothing,
+    so a getattr of the root never sends a request or reads the index. A
+    backend that lists a parent to answer a miss may ask for the one path
+    instead, since the store is dropped right after.
     """
