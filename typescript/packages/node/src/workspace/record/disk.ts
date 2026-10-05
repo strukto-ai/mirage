@@ -28,7 +28,7 @@ let tmpCounter = 0
 // Match Python's urllib quote(safe=""): percent-encode everything
 // outside the unreserved set, so both runtimes produce byte-identical
 // filenames over one shared state directory.
-function quoteName(name: string): string {
+export function quoteName(name: string): string {
   return encodeURIComponent(name).replace(
     /[!'()*]/g,
     (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,

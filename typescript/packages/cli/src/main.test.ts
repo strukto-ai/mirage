@@ -47,11 +47,14 @@ describe('mirage CLI program', () => {
     expect(sub).toEqual(
       [
         'allow',
+        'cancel',
         'clone',
+        'close',
         'create',
         'delete',
         'deny',
         'get',
+        'kill',
         'list',
         'list-asks',
         'load',

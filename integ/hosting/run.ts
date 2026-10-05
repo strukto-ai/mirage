@@ -320,6 +320,31 @@ async function run(
       'keep\n',
     )
     console.log(`ok ${host}/snapshot_roundtrip`)
+
+    // Lifecycle: cancel and kill by session, then close.
+    const background = await request<Job>(
+      'POST',
+      '/v1/workspaces/a/shell?background=true',
+      { command: 'sleep 30', sessionId: 'other' },
+      202,
+    )
+    await poll(async () =>
+      (await request<Job>('GET', `/v1/jobs/${background.jobId}`)).status === 'running'
+        ? true
+        : undefined,
+    )
+    assert.deepEqual(await request('POST', '/v1/workspaces/a/sessions/other/cancel'), {
+      canceled: 1,
+    })
+    assert.equal(
+      (await request<Job>('POST', `/v1/jobs/${background.jobId}/wait`, {})).status,
+      'canceled',
+    )
+    await request('POST', '/v1/workspaces/a/shell', { command: 'sleep 30 &', sessionId: 'other' })
+    assert.deepEqual(await request('POST', '/v1/workspaces/a/sessions/other/kill'), { killed: 1 })
+    await request('POST', '/v1/workspaces/loaded/close')
+    await request('GET', '/v1/workspaces/loaded', undefined, 404)
+    console.log(`ok ${host}/lifecycle: session cancel, kill, close`)
   } catch (error) {
     console.error(errors)
     throw error

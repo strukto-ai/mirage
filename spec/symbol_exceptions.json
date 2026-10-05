@@ -1,5 +1,5 @@
 {
- "baseline": 4758,
+ "baseline": 4756,
  "modules": {
   "ops/generic/factory": {
    "python_only": {
@@ -140,6 +140,67 @@
   "workspace/executor/jobs": {
    "typescript_only": {
     "JobCopy": "A JS promise cannot be cancelled, so a TypeScript job races each write it passes on against its kill signal; Python's cancelled job task unwinds at the same await on its own."
+   }
+  },
+  "cli/session": {
+   "python_only": {
+    "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
+    "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands."
+   }
+  },
+  "cli/workspace": {
+   "python_only": {
+    "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "close_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands."
+   }
+  },
+  "server/auth/middleware": {
+   "python_only": {
+    "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline."
+   }
+  },
+  "server/routers/sessions": {
+   "python_only": {
+    "_require_session": "The session lookup the delete, cancel and kill routes share; TypeScript's is sessionWorkspace, declared inside registerSessionsRoutes.",
+    "cancel_session_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes.",
+    "kill_session_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSessionsRoutes."
+   }
+  },
+  "server/routers/workspaces": {
+   "python_only": {
+    "_require_entry": "The account check every workspace route shares, raising 404; TypeScript calls registry.visible inline and answers 404 in each route.",
+    "cancel_workspace_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "close_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
+    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy."
+   },
+   "typescript_only": {
+    "isBusy": "TypeScript awaits a capture inline and asks isBusy for the EBUSY that answers 409; Python's run_capture does both."
+   }
+  },
+  "server/schemas": {
+   "python_only": {
+    "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
+    "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal."
+   }
+  },
+  "workspace/snapshot/state": {
+   "typescript_only": {
+    "diskStateAsRam": "Only TypeScript restores a disk mount into a fresh RAM mount (restoresAsFreshRAM, where no disk root can be rebuilt), so only it converts a disk state to RAM's shape."
+   }
+  },
+  "workspace/snapshot/tar_io": {
+   "python_only": {
+    "_stage_disk_files": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+   },
+   "typescript_only": {
+    "diskFileRefs": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
+   }
+  },
+  "workspace/dispatcher/dispatcher": {
+   "typescript_only": {
+    "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable."
    }
   }
  }

@@ -150,8 +150,14 @@ export class JobTable {
       control.controller.signal.throwIfAborted()
       result = await factory(control.controller.signal, new ExecutionScope(() => this.started(id)))
     } catch (err) {
-      status = JobStatus.FAILED
-      error = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      // The job's own cancel aborts its controller; the workspace's (a
+      // session or workspace cancel) rejects the line with the abort error.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        status = JobStatus.CANCELED
+      } else {
+        status = JobStatus.FAILED
+        error = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      }
     }
     try {
       await this.change(id, (r) => ({

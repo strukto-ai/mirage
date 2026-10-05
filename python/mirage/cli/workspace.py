@@ -208,6 +208,39 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
     emit(handle_response(r), human=lambda d: f"Deleted workspace {d['id']}.")
 
 
+@app.command("close")
+def close_cmd(workspace_id: str = typer.Argument(...)) -> None:
+    """Stop a workspace and keep its state for the same id."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/close"
+        )
+    emit(handle_response(r), human=lambda d: f"Closed workspace {d['id']}.")
+
+
+@app.command("cancel")
+def cancel_cmd(workspace_id: str = typer.Argument(...)) -> None:
+    """Cancel the running and queued commands of every session."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/cancel"
+        )
+    emit(handle_response(r))
+
+
+@app.command("kill")
+def kill_cmd(workspace_id: str = typer.Argument(...)) -> None:
+    """Kill the background jobs of every session."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/kill"
+        )
+    emit(handle_response(r))
+
+
 @app.command("clone")
 def clone_cmd(
     source_id: str = typer.Argument(..., help="Source workspace id."),

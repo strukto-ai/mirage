@@ -1,6 +1,6 @@
 ---
 title: SSH
-description: Reach a workspace with ssh, sftp and scp.
+description: Reach a workspace with ssh, sftp, scp and sshfs.
 icon: square-terminal
 ---
 
@@ -12,6 +12,7 @@ ssh -p 2222 demo@127.0.0.1 'ls /data | wc -l'  # one line
 ssh -T -p 2222 demo@127.0.0.1 < setup.sh       # a script
 sftp -P 2222 demo@127.0.0.1                    # file transfer
 scp -P 2222 notes.txt demo@127.0.0.1:/data/    # copy in
+sshfs -p 2222 -o direct_io demo@127.0.0.1:/ ~/mnt/demo  # a folder, see FUSE
 ```
 
 Only public keys log in: no passwords. Nothing is forwarded: no ports, no agent, no X11.
@@ -75,6 +76,17 @@ ssh-ed25519 AAAA... me
 
 The server reads the option, not the client, so a key cannot pick looser rules. Give each agent's sandbox its own key, bound to that agent's profile.
 
+## Bind a key to an account
+
+The `mirage-account` option makes the key belong to that [account](/home/access/http#accounts): it opens only the workspaces the account created. Shell, exec, `sftp` and `scp` are all held to it.
+
+```text ~/.mirage/ssh/authorized_keys
+mirage-account="alice" ssh-ed25519 AAAA... alice-laptop
+mirage-account="alice",mirage-profile="guarded" ssh-ed25519 AAAA... alice-agent
+```
+
+Another account's workspace answers like a missing one. In `jwt` mode a key without the option opens nothing; in `local` and `token` mode it opens every workspace. An option that is empty or given twice opens nothing.
+
 ## Sessions
 
-Each channel (one `ssh`, `sftp` or `scp` run) gets a fresh session, closed when it ends, so a `cd` or `export` never leaks between them. The session's profile and the mount modes apply as in any shell: a read-only mount refuses `sftp put`. Ctrl-C cancels the running line and sets `$?` to 130, a dropped connection cancels it too, and `ssh host cmd` exits with the line's status.
+Each channel (one `ssh`, `sftp` or `scp` run) gets a fresh session, closed when it ends, so a `cd` or `export` never leaks between them. The session's profile and the mount modes apply as in any shell: a read-only mount refuses `sftp put`. Ctrl-C cancels the running line and sets `$?` to 130, a dropped connection cancels it too, and `ssh host cmd` exits with the line's status. The server sends a keepalive every 15 seconds and closes a connection that misses three, so a half-open one cancels its line as well.

@@ -289,7 +289,7 @@ describe('cancelling an MCP shell call', () => {
   it('cancels a job whose call was cancelled while it was submitted', async () => {
     const { base, app } = await daemon()
     const id = await createWorkspace(base)
-    const operations = await app.mcp.tools(id)
+    const operations = await app.mcp.tools(id, null, null)
     if (typeof operations === 'string') throw new Error(operations)
     const result = await operations.shell('sleep 20', AbortSignal.abort())
     expect(result.isError).toBe(true)

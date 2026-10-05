@@ -20,7 +20,7 @@ import { EACCES, ENOENT, EROFS, errnoError } from '@struktoai/mirage-node/fuse/e
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { SFTPStatusError } from './errors.ts'
-import { keyProfile, newSessionId, openSession } from './session.ts'
+import { keyProfile, loginEntry, newSessionId, openSession } from './session.ts'
 
 // SFTP v3 open flags and status codes, fixed by the protocol draft.
 const OPEN = {
@@ -164,6 +164,7 @@ class MirageSFTPServer {
     private readonly registry: WorkspaceRegistry,
     private readonly workspaceId: string,
     private readonly profile: readonly string[],
+    private readonly account: readonly string[],
     private readonly sftp: SFTPWrapper,
   ) {}
 
@@ -249,10 +250,10 @@ class MirageSFTPServer {
 
   private async mount(): Promise<MountCore> {
     if (this.core !== null) return this.core
-    if (!this.registry.has(this.workspaceId)) {
+    const entry = loginEntry(this.registry, this.workspaceId, this.account)
+    if (entry === null) {
       throw new SFTPStatusError(STATUS.NO_SUCH_FILE, `no such workspace: ${this.workspaceId}`)
     }
-    const entry = this.registry.get(this.workspaceId)
     const ws = entry.runner.ws
     await openSession(ws, this.sessionId, {}, keyProfile(this.profile))
     this.entry = entry
@@ -448,7 +449,8 @@ export function serveSFTP(
   registry: WorkspaceRegistry,
   workspaceId: string,
   profile: readonly string[],
+  account: readonly string[],
   sftp: SFTPWrapper,
 ): void {
-  new MirageSFTPServer(registry, workspaceId, profile, sftp).attach()
+  new MirageSFTPServer(registry, workspaceId, profile, account, sftp).attach()
 }

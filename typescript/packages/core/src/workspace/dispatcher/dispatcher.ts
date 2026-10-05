@@ -218,6 +218,9 @@ function followOrLoop(
   }
 }
 
+/** Runs a write once the workspace admits it. */
+type AdmitWrite = <T>(write: () => Promise<T>) => Promise<T>
+
 export class Dispatcher {
   private readonly namespace: Namespace
   private readonly cache: FileCache & BaseVFS
@@ -228,6 +231,9 @@ export class Dispatcher {
   // op can touch a mount, and FUSE and the op facade reach here
   // without passing Workspace.dispatch.
   private readonly drift: DriftQueue | null
+  // So does the workspace's write admission, which holds a write while a
+  // capture reads.
+  private readonly admitWrite: AdmitWrite | null
   private readonly writers = new KeyLock()
   private readonly stores = new WeakMap<BaseVFS, number>()
   private storeCount = 0
@@ -239,12 +245,14 @@ export class Dispatcher {
     opsRegistry: OpsRegistry,
     policies?: Policies,
     drift?: DriftQueue,
+    admitWrite?: AdmitWrite,
   ) {
     this.namespace = namespace
     this.cache = cache
     this.opsRegistry = opsRegistry
     this.policies = policies ?? new Policies()
     this.drift = drift ?? null
+    this.admitWrite = admitWrite ?? null
     this.reconciler = new Reconciler(cache, namespace, opsRegistry)
   }
 
@@ -266,7 +274,14 @@ export class Dispatcher {
     return null
   }
 
-  dispatch: DispatchFn = async (opName, path, args, kwargs, report) => {
+  dispatch: DispatchFn = (opName, path, args, kwargs, report) => {
+    const run = (): ReturnType<DispatchFn> =>
+      this.dispatchAdmitted(opName, path, args, kwargs, report)
+    if (this.admitWrite === null || !POLICY_WRITE_OPS.has(opName)) return run()
+    return this.admitWrite(run)
+  }
+
+  private dispatchAdmitted: DispatchFn = async (opName, path, args, kwargs, report) => {
     // The caller's own mark on the op, lifted before any gate fires so
     // each one is told whose op it judges.
     const [issuer, stripped] = takeIssuer(kwargs)
