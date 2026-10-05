@@ -83,7 +83,7 @@ const ws = new Workspace(
 
 </CodeGroup>
 
-Both configs refuse a field they do not take, in code as in YAML: `CacheConfig(limti="1MB")` raises rather than building the defaults, and so does a Redis-only field (`url`, `key_prefix` / `keyPrefix`) on a RAM config. Python refuses when the config is built; TypeScript, whose options are plain objects, refuses when the `Workspace` is built, and at runtime takes a field under either spelling (`keyPrefix` or `key_prefix`), as its VFS configs do, but refuses a field given in both; the TypeScript interfaces declare the camelCase one.
+Both configs refuse a field they do not take, or a value of the wrong type, in code as in YAML: `CacheConfig(limti="1MB")` raises rather than building the defaults, and so does a Redis-only field such as `url` on a RAM config. Python refuses when the config is built, TypeScript when the `Workspace` is built. TypeScript also takes a field's snake_case spelling (`key_prefix` for `keyPrefix`), as its VFS configs do, but not both at once.
 
 ### Index TTL
 
