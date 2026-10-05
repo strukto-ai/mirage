@@ -602,6 +602,26 @@
       ]
     },
     {
+      "id": "ram-redis-cache",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "redis",
+      "cache": {
+        "type": "redis"
+      },
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "ram",
+          "backend": "memory",
+          "fixture": "files/v1",
+          "caches_reads": true
+        }
+      ]
+    },
+    {
       "id": "opfs",
       "exclusive": true,
       "hosts": [

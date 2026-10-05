@@ -40,6 +40,8 @@ export interface Mount {
   // allocating fresh storage, so cp/mv can be exercised against two
   // prefixes that address the same bytes.
   alias_of?: string
+  // A ram mount caches its reads, so a target's file cache sees them.
+  caches_reads?: boolean
   // Fixture seeded by the adapter (over the backend API) instead of the
   // harness tee path -- used by read-only backends like box.
   seed?: string
@@ -115,6 +117,10 @@ export interface Target {
   // job's console on its own Redis stream (REDIS_URL). Only the ram
   // opener consults it; main.ts refuses it on any other VFS.
   console?: { type?: string }
+  // Where the file cache lives: { type: 'redis' } puts it on REDIS_URL
+  // under each open's own key prefix. Only the ram opener consults it;
+  // main.ts refuses it on any other VFS.
+  cache?: { type?: string }
   // The env plane fixture this target declares: 'healthy' registers the
   // counting fake source and builds the managed env block, 'dead' a
   // source whose every fetch fails. Only the ram opener consults it;
