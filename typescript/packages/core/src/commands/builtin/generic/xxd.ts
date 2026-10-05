@@ -305,7 +305,6 @@ async function writeOutput(
  * leaves an empty OUTFILE behind; this reads first and writes once. Mirrors
  * Python's xxd.
  */
- 
 export async function xxdGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
