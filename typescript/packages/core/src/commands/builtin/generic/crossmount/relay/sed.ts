@@ -18,6 +18,8 @@ export async function runSed(
   stdin: ByteSource | null,
   cwd: string,
   argv: readonly string[],
+  // The session's environment, whose locale decides bytes or characters.
+  env?: Record<string, string>,
 ): Promise<CrossResult> {
   const reads = new IOResult()
   const write = async (path: PathSpec, data: Uint8Array): Promise<void> => {
@@ -27,7 +29,7 @@ export async function runSed(
   const [body, io] = (await sedGeneric(
     flatten(scopes),
     texts,
-    { ...crossOpts(bag), stdin, cwd, dispatch, argv },
+    { ...crossOpts(bag), stdin, cwd, dispatch, argv, ...(env !== undefined ? { env } : {}) },
     fileStreamOp(dispatch, reads),
     write,
   )) ?? [null, new IOResult()]
