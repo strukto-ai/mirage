@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_fmt_across_mounts",
+      "seq": 963205,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf 'one\\ntwo\\n' > /data/xm_rt_fmt; printf 'three\\n' > /data2/xm_rt_fmt; fmt /data/xm_rt_fmt /data2/xm_rt_fmt; rm /data/xm_rt_fmt /data2/xm_rt_fmt",
+      "expect": {
+        "exit": 0,
+        "stdout": "one two\nthree\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

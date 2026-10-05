@@ -46,6 +46,34 @@ same image: when `LC_ALL`, `LC_CTYPE` or `LANG` names a UTF-8 codeset, those
 commands match and count whole characters, and neither `.` nor a negated
 bracket matches an invalid byte.
 
+## Cross-mount commands
+
+`crossmount/<command>/<behavior>.json` owns one command's scenarios; a
+checksum folder takes the executable's name (`sha256sum/`). `alias/`,
+`nested/`, `readonly/`, `service/` and `program/` own the topology, policy,
+command-service and program scenarios that span commands, and `seed/` the
+fixtures later cases read. Keep a case's ID, `seq` and targets when moving
+it: both runners sort the whole corpus by `seq`.
+
+Routing lives in the mirrored `crossmount/types` and `crossmount/constants`
+modules. Every routed command belongs to exactly one strategy, and a command
+outside them fails explicitly rather than falling into one:
+
+| Strategy  | Commands                                                                                              | Contract                                                                      |
+| --------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Stream    | cat, nl, cut                                                                                          | One command stream over the operands in order.                                |
+| Fanout    | rev, head, tail, file, md5, the `sha*sum`s, stat, strings, tac, find, rm, rmdir, unlink, touch, mkdir | Each operand runs on its own mount; diagnostics and status combine.           |
+| Relay     | cp, mv, tee, tar, unzip, zip, ls, sed, and every other generic builder (`DISPATCH_BUILDERS`)          | One generic sees every operand and reaches each mount through the dispatcher. |
+| Namespace | chmod, chown, chgrp, getfattr, setfattr, ln, readlink                                                 | Answered above the backends, with no cross-mount implementation of its own.   |
+
+`runners/tools/check_crossmount_coverage.py --selftest` requires, for every
+command the routing table names (`CROSS_MOUNT_COMMANDS`, every generic
+builder included) plus the namespace commands, a success case in that
+command's folder whose run of it names paths on both `/data` and `/data2`
+(directly, or through a symlink the line makes), asserts all three result
+channels, and targets RAM and disk; it also rejects duplicate IDs. It is a registration floor, not proof of every option or
+backend.
+
 ## Runs and tenants
 
 A run is an isolated world; a tenant is an account inside it. The runner mints
@@ -111,7 +139,7 @@ of waiting for it.
 flowchart LR
     PY["python/**"] --> core & data
     TSX["typescript/**"] --> ts & data & database
-    IN["integ/**"] --> core & ts & data
+    IN["integ/**<br/>command JSON + crossmount coverage gate"] --> core & ts & data
     D["data/**"] --> core
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, integ/vfs/&lt;name&gt;,<br/>integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
@@ -198,10 +226,9 @@ errors, an existing custom aggregate registration, and one CLI invocation
 through dispatch doors. A barrier proves native read preparation is bounded to
 four invocations; stream cases check partial failures, timeout cleanup and early
 pipe closure. Mutation commands and shared stdin retain serial execution.
-The program cases cover automatically wired generics and output paths across
-mounts, including compression, truncation and splitting. Both core shards
-discover this target from the manifest; the shared parity job also compares it
-and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
+The program cases cover program files read across mounts (`grep -f`, `sed -f`,
+`awk -f`, `jq --rawfile`). Both core shards discover this target from the
+manifest; the shared parity job also compares it and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
 filters cover these modules and cases.
 
 ## Running locally

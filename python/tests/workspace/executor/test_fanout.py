@@ -78,3 +78,32 @@ async def test_a_hidden_mount_does_not_bound_the_walk(line):
         assert result.producer.prefixes == ("/base/", "/base/seen/")
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("find /base -type f", b"/base/inner/g\n/base/top\n"),
+        ("du -s /base", b"5\t/base\n"),
+        ("du -s /base/inner /other", b"3\t/base/inner\n1\t/other\n"),
+    ],
+)
+async def test_a_mount_without_its_own_walk_is_walked_through_the_ops(
+    line, expected
+):
+    ws = Workspace(
+        {"/base": RAMVFS(), "/base/inner": RAMVFS(), "/other": RAMVFS()},
+        mode=MountMode.WRITE,
+    )
+    try:
+        await ws.shell(
+            "printf ab > /base/top; printf abc > /base/inner/g;"
+            " printf a > /other/h"
+        )
+        ws.mount("/base/inner").unregister(["find", "du"])
+        result = await ws.shell(line)
+        assert await result.materialize_stdout() == expected
+        assert result.exit_code == 0
+    finally:
+        await ws.close()

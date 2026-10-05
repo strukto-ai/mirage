@@ -649,6 +649,9 @@ jobs:
       # another, and the Airtable replay pages every table through its fake.
       # Neither binds a fixed port. Each is collected, output and status, by
       # the step that bears its name at the end of the job.
+      - name: Check cross-mount command coverage
+        run: ./python/.venv/bin/python integ/runners/tools/check_crossmount_coverage.py --selftest
+
       - name: Start the runner gates and the Airtable replay (background)
         run: |
           integ/scripts/background.sh start gates \

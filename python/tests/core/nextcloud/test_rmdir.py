@@ -36,6 +36,6 @@ async def test_rmdir_refuses_a_collection_holding_only_a_subtree(make_acc):
 @pytest.mark.asyncio
 async def test_mkdir_then_rmdir_of_a_nested_chain(make_acc):
     acc = make_acc({})
-    await mkdir(acc, PathSpec.from_str_path("/a/b/c"))
+    await mkdir(acc, PathSpec.from_str_path("/a/b/c"), parents=True)
     await rmdir(acc, PathSpec.from_str_path("/a/b/c"))
     assert "a/b/c/" not in acc._fake.dirs

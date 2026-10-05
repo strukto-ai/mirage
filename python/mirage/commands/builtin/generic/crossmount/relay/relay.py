@@ -16,6 +16,7 @@ from typing import Callable
 
 from mirage.commands.builtin.generic.crossmount.constants import (
     DISPATCH_BUILDERS,
+    RELAY_COMMANDS,
 )
 from mirage.commands.builtin.generic.crossmount.relay.awk import run_awk
 from mirage.commands.builtin.generic.crossmount.relay.cp import run_cp
@@ -89,6 +90,8 @@ async def run_relay(
             typed link source against.
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
     """
+    if cmd_name not in RELAY_COMMANDS:
+        raise ValueError(f"Unsupported cross-mount relay command: {cmd_name}")
     if cmd_name == Cmd.AWK:
         return await run_awk(scopes, text_args, flag_kwargs, run_single, stdin)
     if cmd_name == Cmd.SED:

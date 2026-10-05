@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "xm_expand_across_mounts",
+      "seq": 963204,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf 'a\\tb\\n' > /data/xm_rt_ex; printf '\\tc\\n' > /data2/xm_rt_ex; expand -t 4 /data/xm_rt_ex /data2/xm_rt_ex; rm /data/xm_rt_ex /data2/xm_rt_ex",
+      "expect": {
+        "exit": 0,
+        "stdout": "a   b\n    c\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

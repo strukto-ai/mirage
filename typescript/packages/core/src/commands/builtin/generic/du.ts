@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, type SizedRun } from '../../../io/types.ts'
 import {
   hiddenPathsIntersect,
   pathAllowed,
@@ -96,6 +96,11 @@ export interface DuOutput {
    * does for a tree it could not fully account for.
    */
   exitCode: number
+  /**
+   * Each readable operand's measurement; null when one was only summed (`-s`,
+   * or a backend that can only produce a size).
+   */
+  runs: SizedRun[] | null
 }
 
 const TRUNCATED_NOTE = 'du: walk stopped early: the reported sizes are incomplete'
@@ -473,7 +478,7 @@ async function duOne(
   links: LinkView | null,
   mounts: MountView | null,
   directories?: () => readonly string[],
-): Promise<[string[], number]> {
+): Promise<[string[], number, SizedRun | null]> {
   const label = path.rawPath
 
   const linkRow = links?.statAt(path.virtual) ?? null
@@ -481,7 +486,7 @@ async function duOne(
     // GNU du does not follow a symlink operand without -L; the operand
     // is the link, and it accounts for the link alone.
     const size = linkRow.size ?? 0
-    return [[line(size, flags.h, label)], size]
+    return [[line(size, flags.h, label)], size, { leaves: [[path.virtual, size]], directories: [] }]
   }
 
   const roots = mounts?.descendants(path.virtual) ?? []
@@ -501,7 +506,7 @@ async function duOne(
     // a total their names never justify, so that session takes the
     // entries walk below instead.
     const total = (await computeSize(path)) + linkTotal
-    return [[line(total, flags.h, label)], total]
+    return [[line(total, flags.h, label)], total, null]
   }
 
   const [raw, rawTotal] = await computeEntries(path)
@@ -518,7 +523,11 @@ async function duOne(
     // A backend that can only produce a size degrades to one total; it
     // cannot enumerate, so shadowed keys cannot be excluded either.
     const fallback = await computeSize(path)
-    return [[line(fallback, flags.h, label)], fallback]
+    return [
+      [line(fallback, flags.h, label)],
+      fallback,
+      fallback === 0 ? { leaves: [], directories: [] } : null,
+    ]
   }
 
   let entries = toVirtual(raw, path).concat(leaves)
@@ -535,19 +544,20 @@ async function duOne(
     entries = dropShadowed(entries, roots)
     total = entries.reduce((acc, [, size]) => acc + size, 0)
   }
+  const run: SizedRun = { leaves: entries, directories: dirs }
   // A file operand walks to itself. GNU prints it once, with or without -a,
   // never as a leaf line plus a roll-up line. GNU scopes -S to directories, so
   // a file operand keeps its own size in both its row and the grand total.
   const first = entries[0]
   if (entries.length === 1 && first !== undefined && norm(first[0]) === rootKey) {
-    return [[line(first[1], flags.h, label)], total]
+    return [[line(first[1], flags.h, label)], total, run]
   }
   // -S changes what the operand's own row counts, not what the operand
   // contributes to -c: GNU's grand total stays recursive (coreutils 9.7,
   // `du -bSc dir` prints `3 dir` then `6 total`).
   const own = flags.S ? separateTotal(entries, path.virtual) : total
   if (flags.s) {
-    return [[line(own, flags.h, label)], total]
+    return [[line(own, flags.h, label)], total, run]
   }
 
   const rows = rollup(entries, path.virtual, {
@@ -563,7 +573,7 @@ async function duOne(
   )
   const lines = rows.map(([, size], i) => line(size, flags.h, shown[i] ?? ''))
   lines.push(line(own, flags.h, label))
-  return [lines, total]
+  return [lines, total, run]
 }
 
 /**
@@ -596,8 +606,9 @@ export async function du(
 ): Promise<DuOutput> {
   const lines: string[] = []
   let grand = 0
+  let runs: SizedRun[] | null = []
   for (const root of paths) {
-    const [block, total] = await duOne(
+    const [block, total, run] = await duOne(
       root,
       computeSize,
       computeEntries,
@@ -608,6 +619,8 @@ export async function du(
     )
     lines.push(...block)
     grand += total
+    if (run === null) runs = null
+    else runs?.push(run)
   }
   // GNU still prints the grand total when every operand failed ("0 total"), so
   // this stays outside the loop guard.
@@ -630,7 +643,7 @@ export async function du(
   }
   const stderr =
     notes.length > 0 ? new TextEncoder().encode(`${notes.join('\n')}\n`) : new Uint8Array(0)
-  return { stdout: formatRecords(lines), stderr, exitCode }
+  return { stdout: formatRecords(lines), stderr, exitCode, runs }
 }
 
 /**
@@ -686,7 +699,10 @@ export async function duGeneric(
     unreadable,
     directories,
   )
-  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
+  return [
+    out.stdout,
+    new IOResult({ stderr: out.stderr, exitCode: out.exitCode, sizedRuns: out.runs }),
+  ]
 }
 
 // Spell a walked path as the operand it lies under was typed.

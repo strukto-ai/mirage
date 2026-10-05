@@ -536,7 +536,10 @@ class CacheManager:
         return await self.fill(path, fetch)
 
     async def fill(
-        self, path: PathSpec, fetch: Callable[[], Awaitable[T]]
+        self,
+        path: PathSpec,
+        fetch: Callable[[], Awaitable[T]],
+        keep: Callable[[], bool] | None = None,
     ) -> T:
         """Run a cold whole-file read and keep its bytes for the next one.
 
@@ -544,10 +547,16 @@ class CacheManager:
         cache itself (the dispatcher's). A write that lands while the
         fetch runs retires the generation, so the bytes it read are not
         kept; an answer that is not bytes is returned and kept nowhere.
+        ``keep``, when given, is asked after the fetch with the cache's
+        mutation lock held and has the last say over whether the bytes
+        are kept; the dispatcher passes "no renderer resolves for the
+        read". It must be synchronous.
 
         Args:
             path (PathSpec): file being read.
             fetch (Callable): cold whole-file reader.
+            keep (Callable[[], bool] | None): whether the bytes may still
+                be kept once fetched; None keeps them.
         """
         generation = self._read_generation
         recorder = active_recorder()
@@ -562,6 +571,7 @@ class CacheManager:
                 if (
                     self._owns_path(key)
                     and generation == self._read_generation
+                    and (keep is None or keep())
                 ):
                     records = (
                         recorder.sink[start:] if recorder is not None else None

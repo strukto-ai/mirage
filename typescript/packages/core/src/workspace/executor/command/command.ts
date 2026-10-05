@@ -38,9 +38,8 @@ import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
 import { abortable, mergeSignals } from '../../abort.ts'
 import { ExecutionNode } from '../../types.ts'
-import { aggregateFor, strategyFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
-import type { Cmd } from '../../../commands/builtin/generic/crossmount/types.ts'
-import { Strategy } from '../../../commands/builtin/generic/crossmount/types.ts'
+import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
+import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import {
@@ -454,10 +453,6 @@ export async function handleCommand(
         sharedSpec !== undefined ? registeredSpec(cmdName, sharedSpec) : null,
         cmdName,
         session.cwd,
-        undefined,
-        false,
-        undefined,
-        !['tar', 'diff'].includes(cmdName),
       )
     let csFlags = csParsed.flagKwargs
     const csTexts = findExprTokens ?? csParsed.texts
@@ -470,13 +465,14 @@ export async function handleCommand(
         new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
       ]
     }
-    // sort's output flag, cp/mv's -t and diff's -X own a mount for routing,
-    // but are not inputs. Parsed operands preserve aliases, order, and repeated path
-    // values.
-    let csScopes = ['sort', 'cp', 'mv', 'diff'].includes(cmdName) ? csParsed.paths : pathScopes
-    if (strategyFor(cmdName as Cmd) === Strategy.RELAY) {
-      // STREAM and FANOUT run each operand natively on its mount, which
-      // expands the operand's glob. RELAY sees every operand at once (wc's
+    // A path option's value (sort -o, cp -t, csplit -f) routes to its owning
+    // mount but is not an input. Parsed operands preserve aliases, order, and
+    // repeated path values. find's expression is not the spec's grammar, so
+    // its start points are the words classified as paths.
+    let csScopes = cmdName === 'find' ? pathScopes : csParsed.paths
+    if (RELAY_COMMANDS.has(cmdName)) {
+      // STREAM and FANOUT (and a custom command's reducer) run each operand
+      // natively on its mount, which expands the operand's glob. RELAY sees every operand at once (wc's
       // layout, cp's sources), so its glob operands must expand here; an
       // unmatched glob stays the literal word, like bash. One operand at a
       // time, so join's option loop sees each match where its glob was typed.

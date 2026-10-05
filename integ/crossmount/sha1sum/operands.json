@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_sha1sum_both_mounts",
+      "seq": 9900003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf abc > /data/xm_sha1sum && printf xyz > /data2/xm_sha1sum && sha1sum /data/xm_sha1sum /data2/xm_sha1sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "a9993e364706816aba3e25717850c26c9cd0d89d  /data/xm_sha1sum\n66b27417d37e024c46526c2f6d358a754fc552f3  /data2/xm_sha1sum\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_sha1sum_continues_after_missing",
+      "seq": 9900004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha1sum /data/xm_sha1sum_missing /data2/xm_sha1sum",
+      "expect": {
+        "exit": 1,
+        "stdout": "66b27417d37e024c46526c2f6d358a754fc552f3  /data2/xm_sha1sum\n",
+        "stderr": "sha1sum: /data/xm_sha1sum_missing: No such file or directory\n"
+      }
+    }
+  ]
+}

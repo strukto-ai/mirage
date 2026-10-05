@@ -44,8 +44,10 @@ async def mkdir(
         await invalidate_after_write(path)
         await invalidate_ancestors(path)
         return
-    parent = parent_path(path)
-    parent_stat = await stat(accessor, parent, index)
+    try:
+        parent_stat = await stat(accessor, parent_path(path), index)
+    except FileNotFoundError as exc:
+        raise enoent(path) from exc
     if parent_stat.type != FileType.DIRECTORY:
         raise enotdir(path)
     try:

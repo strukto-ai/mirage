@@ -99,9 +99,6 @@ export function parseFlags(
   // The program's own long-option table, when it resolves abbreviations
   // against it (git's parse-options), passed straight to parseCommand.
   abbreviations?: readonly string[],
-  // Keep PATH flag values as their resolved virtual-path strings instead of
-  // PathSpec. Cross-mount strategies read the string view.
-  strFlagPaths = false,
 ): ParsedCommand {
   const argv: string[] = parts.map((item) =>
     item instanceof PathSpec ? (item.rawPath === '-' ? '-' : item.virtual) : item,
@@ -149,44 +146,37 @@ export function parseFlags(
         if (name !== null) pathKeys.set(flagKwargName(name), shape)
       }
     }
-    if (!strFlagPaths) {
-      for (const [key, value] of Object.entries(flagKwargs)) {
-        const shape = pathKeys.get(key)
-        const raw = parsed.rawPathFlags[key]
-        const rawParts = Array.isArray(raw) ? raw : []
-        const parts: readonly (string | PathSpec)[] = Array.isArray(value) ? value : []
-        if (shape === 'pair' && Array.isArray(value)) {
-          flagKwargs[key] = parts.map((part, index) =>
-            index % 2 === 1 && typeof part === 'string'
-              ? takeSpelling(spellings, scopeMap, part, rawParts[index])
-              : part,
-          )
-        } else if (shape === 'multiple' && Array.isArray(value)) {
-          flagKwargs[key] = parts
-            .filter((part): part is string => typeof part === 'string')
-            .map((part, index) => takeSpelling(spellings, scopeMap, part, rawParts[index]))
-        } else if (shape === 'single' && typeof value === 'string') {
-          flagKwargs[key] = takeSpelling(
-            spellings,
-            scopeMap,
-            value,
-            typeof raw === 'string' ? raw : undefined,
-          )
-        }
+    for (const [key, value] of Object.entries(flagKwargs)) {
+      const shape = pathKeys.get(key)
+      const raw = parsed.rawPathFlags[key]
+      const rawParts = Array.isArray(raw) ? raw : []
+      const parts: readonly (string | PathSpec)[] = Array.isArray(value) ? value : []
+      if (shape === 'pair' && Array.isArray(value)) {
+        flagKwargs[key] = parts.map((part, index) =>
+          index % 2 === 1 && typeof part === 'string'
+            ? takeSpelling(spellings, scopeMap, part, rawParts[index])
+            : part,
+        )
+      } else if (shape === 'multiple' && Array.isArray(value)) {
+        flagKwargs[key] = parts
+          .filter((part): part is string => typeof part === 'string')
+          .map((part, index) => takeSpelling(spellings, scopeMap, part, rawParts[index]))
+      } else if (shape === 'single' && typeof value === 'string') {
+        flagKwargs[key] = takeSpelling(
+          spellings,
+          scopeMap,
+          value,
+          typeof raw === 'string' ? raw : undefined,
+        )
       }
     }
-    // Every value still a string is text (or a PATH value in the string
-    // view), with a classified word's path in place of its spelling; the
-    // string view still takes an option's word off the queue, so the
-    // operands get the same words on both dispatch paths.
+    // Every value still a string is text, with a classified word's path in
+    // place of its spelling.
     for (const [key, value] of Object.entries(flagKwargs)) {
       if (typeof value === 'string') {
         const match = scopeMap.get(value)
         if (match !== undefined) flagKwargs[key] = match.virtual
       }
-    }
-    if (strFlagPaths) {
-      for (const value of parsed.pathFlagValues) takeSpelling(spellings, scopeMap, value)
     }
 
     // Classify positional args: each operand takes its own word. The

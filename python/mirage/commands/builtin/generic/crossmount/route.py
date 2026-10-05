@@ -15,11 +15,13 @@
 from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
+from mirage.commands.builtin.generic.crossmount.du import run_du
 from mirage.commands.builtin.generic.crossmount.fanout import run_fanout
 from mirage.commands.builtin.generic.crossmount.relay import run_relay
 from mirage.commands.builtin.generic.crossmount.search import run_search
 from mirage.commands.builtin.generic.crossmount.stream import run_stream
 from mirage.commands.builtin.generic.crossmount.types import (
+    Cmd,
     CrossResult,
     RunSingle,
     Strategy,
@@ -65,7 +67,9 @@ async def handle_cross_mount(
     once per operand and combines the outputs, RELAY moves per-file data
     through the dispatcher into one shared generic. STREAM and FANOUT
     execute through ``run_single``, so each mount expands its own glob
-    operands and uses its own native command implementation.
+    operands and uses its own native command implementation. grep, rg
+    and du compose each mount's own command instead: a search from its
+    owned scopes (``run_search``), du from its measurement (``run_du``).
 
     Args:
         cmd_name (str): Command name, such as ``cp``, ``sort``, or ``grep``.
@@ -120,6 +124,17 @@ async def handle_cross_mount(
         if cmd_name in ("grep", "rg"):
             return await run_search(
                 cmd_name,
+                scopes,
+                text_args,
+                flag_kwargs,
+                dispatch,
+                run_single,
+                cwd,
+                ns,
+                input_source,
+            )
+        if cmd_name == Cmd.DU:
+            return await run_du(
                 scopes,
                 text_args,
                 flag_kwargs,

@@ -6,7 +6,7 @@ from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.types import PathSpec
-from mirage.utils.errors import eexist, enotdir
+from mirage.utils.errors import eexist, enoent, enotdir
 from mirage.utils.key_prefix import mounted_path
 
 
@@ -32,24 +32,31 @@ async def _file_level(op: AsyncOperator, key: str) -> str | None:
 async def mkdir(
     accessor: NextcloudAccessor, path: PathSpec, parents: bool = False
 ) -> None:
-    """Create a collection; opendal creates missing parents either way.
+    """Create a collection.
 
-    ``parents`` only picks the path a refusal names, because
-    ``create_dir`` is MKCOL over every missing level whatever it says.
-    That is also why the ancestor invalidation is unconditional: a bare
-    ``mkdir a/b/c`` materializes a whole chain here, and gating the walk
-    on ``parents`` (as the backends whose mkdir really does create one
-    level correctly do) left every ancestor above the parent serving a
-    cached listing that hid the new levels until the index TTL expired.
+    opendal's ``create_dir`` is MKCOL over every missing level, so a bare
+    mkdir looks its parent up first and refuses a missing one, as
+    mkdir(2) does; only ``-p`` materializes a chain, and only it walks
+    the ancestor listings.
 
     Args:
         accessor (NextcloudAccessor): Nextcloud accessor.
         path (PathSpec): collection to create.
-        parents (bool): opendal always creates parents; with it, a file
-            in the way is named rather than the operand.
+        parents (bool): create missing parents; a file in the way is
+            then named rather than the operand.
     """
     key = nextcloud_key(path).rstrip("/")
     op = accessor.operator()
+    parent = key.rpartition("/")[0]
+    if not parents and parent:
+        try:
+            parent_md = await op.stat(parent)
+        except NotFound as exc:
+            if await _file_level(op, parent) is None:
+                raise enoent(path) from exc
+            raise enotdir(path) from exc
+        if parent_md.mode != EntryMode.Dir:
+            raise enotdir(path)
     # MKCOL under a file is a 409 opendal leaves unnamed, and opendal reads
     # MKCOL's 405 on a taken name as done, a file holding the name
     # included: look the levels up to tell ENOTDIR from EEXIST.
@@ -67,7 +74,8 @@ async def mkdir(
             mounted_path(path, "/" + level) if parents else path
         ) from exc
     await invalidate_after_write(path)
-    await invalidate_ancestors(path)
+    if parents:
+        await invalidate_ancestors(path)
     try:
         md = await op.stat(key)
     except NotFound:
