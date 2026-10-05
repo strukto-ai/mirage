@@ -23,9 +23,11 @@ import type { Field, Fields } from './fields.ts'
 export type MaskPath = readonly string[]
 
 // `a.b(c,d.e),f` read the way the live API reads it: a parenthesized list
-// distributes over the path before it, so this is a.b.c, a.b.d.e and f. A
-// partial-response `/` separates segments as `.` does (`sheets/properties`).
-export function parseMask(text: string): MaskPath[] {
+// distributes over the path before it, so this is a.b.c, a.b.d.e and f. In
+// a `read` mask (the `fields` of a GET) a partial-response `/` separates
+// segments as `.` does (`sheets/properties`); a write mask is a FieldMask,
+// where `/` is no separator, so it stays in the name and fails the check.
+export function parseMask(text: string, read = false): MaskPath[] {
   let at = 0
   const items = (prefix: readonly string[]): MaskPath[] => {
     const out: MaskPath[] = []
@@ -35,7 +37,7 @@ export function parseMask(text: string): MaskPath[] {
       while (at < text.length && !',()'.includes(text.charAt(at))) {
         const ch = text.charAt(at)
         at += 1
-        if (ch !== '.' && ch !== '/') name += ch
+        if (ch !== '.' && !(read && ch === '/')) name += ch
         else {
           path.push(name.trim())
           name = ''

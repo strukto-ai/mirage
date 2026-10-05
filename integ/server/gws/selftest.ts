@@ -772,6 +772,15 @@ async function gridRangesHttp(at: string): Promise<void> {
     JSON.stringify(sheetsOf(masked.body)[0]?.properties),
     '{"title":"Sheet1"}',
   )
+  eq(
+    'fields: a read mask splits on /',
+    parseMask('sheets/properties', true).map((p) => [...p]),
+    [['sheets', 'properties']],
+  )
+  check(
+    'fields: a write mask keeps / in the name, so the check refuses it',
+    badField(parseMask('userEnteredFormat/textFormat/bold'), CELL_DATA) !== null,
+  )
   for (const whole of ['sheets/*', 'sheets(*)', 'sheets/data/rowData/*'])
     eq(
       `fields: ${whole} keeps the message whole`,

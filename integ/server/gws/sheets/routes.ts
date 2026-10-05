@@ -214,7 +214,7 @@ export function sheetsRoutes(): KitRoute<C>[] {
         const body = fmtSpreadsheet(sheet, id, ctx.query.get('includeGridData') === 'true', ranges)
         const fields = ctx.query.get('fields')
         if (fields === null) return ok(body)
-        const paths = parseMask(fields)
+        const paths = parseMask(fields, true)
         if (badField(paths, SPREADSHEET, true) !== null)
           return googleError(400, 'Request contains an invalid argument.', 'INVALID_ARGUMENT')
         return ok(pickMask(body, paths))
