@@ -95,5 +95,6 @@ export async function runRelay(
   if (builder !== undefined) {
     return runDispatch(builder, scopes, textArgs, flagKwargs, dispatch, cwd, ns, stdin)
   }
-  return runCmp(scopes, textArgs, flagKwargs, dispatch, stdin)
+  if (cmdName === Cmd.CMP) return runCmp(scopes, textArgs, flagKwargs, dispatch, stdin)
+  throw new Error(`Unsupported cross-mount relay command: ${cmdName}`)
 }

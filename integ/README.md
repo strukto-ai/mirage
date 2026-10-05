@@ -43,6 +43,59 @@ character or invalid UTF-8 byte survives output unchanged. These commands
 use this deterministic C-locale contract; `rg` retains its Unicode regex
 semantics.
 
+## Cross-mount commands
+
+`crossmount/<command>/<behavior>.json` owns command scenarios. Keep their
+IDs, `seq` values and targets when moving them: both runners sort the whole
+corpus by `seq`, so fixture setup can live in `seed/`. `alias/`, `nested/`,
+`readonly/` and `program/` own topology, policy and program scenarios that
+span several commands. A checksum directory uses the executable name
+(`sha256sum/`, for example). Avoid issue-number or catch-all command folders.
+
+The routing vocabulary lives in the mirrored `crossmount/types` and
+`crossmount/constants` modules. Every registered command belongs to exactly
+one strategy; an unknown strategy or relay command fails explicitly.
+
+| Owner     | Commands                                                                                                                                    | Execution contract                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Stream    | cat, nl, cut                                                                                                                                | Consume operands in order through one command stream.                                                    |
+| Fanout    | rev, head, tail, du, file, md5, md5sum, sha1sum, sha256sum, sha384sum, sha512sum, stat, strings, tac, find, rm, rmdir, unlink, touch, mkdir | Run each operand on its owning mount; combine diagnostics and status with command semantics.             |
+| Relay     | cp, mv, tee, diff, cmp, paste, comm, join, tar, unzip, zip, ls, sort, wc, awk, sed, realpath, grep, rg                                      | One operation sees all operands and dispatches filesystem primitives to their mounts.                    |
+| Namespace | chmod, chown, chgrp, getfattr, setfattr, ln, readlink                                                                                       | Resolve namespace metadata and links above the backends; do not add a second cross-mount implementation. |
+
+`unlink` takes one operand. Its cross-mount case follows an intermediate
+symlink and removes a final symlink without deleting its target. Recursive
+walks, nested mounts, same-store aliases and read-only mounts remain separate
+scenarios; two paths on two RAM mounts are not proof of all topologies.
+
+`runners/tools/check_crossmount_coverage.py --selftest` requires a named
+success case for every registered command plus the namespace commands above,
+with both mount prefixes, RAM/disk targets and exact result assertions. It
+also rejects duplicate cross-mount IDs. This is a minimum registration gate,
+not proof of every option or backend. Unit tests pin strategy membership;
+`check_case_targets.py --strict` separately guards backend omissions. Add a
+new command's JSON case with its registration, including failure continuation
+where meaningful. Both gates run in CI; `integ/runners/**` and the moved case
+paths are included by the existing `integ/**` core and TypeScript filters.
+
+The Google Drive parent resolver reports the requested destination on a missing
+parent, so `mkdir` and other create operations keep the full operand in their
+diagnostics. The multi-operand `mkdir` case also proves that a later operand on
+another mount still executes after that failure.
+
+The implementation remains async: await backend operations and preserve
+operand order for mutations. Mirrored relay tests cancel a move during an
+awaited read/write and assert that it never unlinks a source or starts the
+next transfer; a destination write failure also preserves the source.
+TypeScript additionally checks a late operation completion after abort.
+These checks do not promise rollback of a backend write already in flight.
+The transfer primitive still accepts whole-file bytes, so bounded-memory
+streaming/backpressure for large copies needs a separate primitive contract.
+
+The new checksum and operand-continuation goldens were checked against the
+same Debian image digest above. Metadata uses the namespace overlay; the
+existing xattr contract is shared across both hosts.
+
 ## Runs and tenants
 
 A run is an isolated world; a tenant is an account inside it. The runner mints
@@ -108,7 +161,7 @@ of waiting for it.
 flowchart LR
     PY["python/**"] --> core & data
     TSX["typescript/**"] --> ts & data & database
-    IN["integ/**"] --> core & ts & data
+    IN["integ/**<br/>command JSON + crossmount coverage gate"] --> core & ts & data
     D["data/**"] --> core
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, integ/vfs/&lt;name&gt;,<br/>integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability

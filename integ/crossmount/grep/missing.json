@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "xpr_wc",
-      "seq": 764,
+      "id": "xpr_grep",
+      "seq": 762,
       "targets": [
         "ram",
         "disk",
@@ -10,8 +10,10 @@
         "opfs",
         "s3",
         "databricks",
+        "gridfs",
         "s3-prefix",
         "databricks-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -22,13 +24,14 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
-      "command": "wc -l /data/a.txt /data2/xpr_nope.txt",
+      "command": "grep o /data/a.txt /data2/xpr_nope.txt",
       "expect": {
-        "exit": 1,
-        "stdout": " 5 /data/a.txt\n 5 total\n",
-        "stderr": "wc: /data2/xpr_nope.txt: No such file or directory\n"
+        "exit": 2,
+        "stdout": "/data/a.txt:hello\n/data/a.txt:world\n/data/a.txt:foo\n",
+        "stderr": "grep: /data2/xpr_nope.txt: No such file or directory\n"
       }
     }
   ]

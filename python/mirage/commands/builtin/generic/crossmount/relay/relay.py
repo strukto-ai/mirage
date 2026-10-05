@@ -157,4 +157,6 @@ async def run_relay(
             ns,
             stdin,
         )
-    return await run_cmp(scopes, text_args, flag_kwargs, dispatch, stdin)
+    if cmd_name == Cmd.CMP:
+        return await run_cmp(scopes, text_args, flag_kwargs, dispatch, stdin)
+    raise ValueError(f"Unsupported cross-mount relay command: {cmd_name}")

@@ -20,7 +20,7 @@ export const STREAM_COMMANDS: ReadonlySet<string> = new Set([Cmd.CAT, Cmd.NL, Cm
 // `cd` prints two lines), so the merged stream carries that newline. `cat` joins
 // the bytes as they are. Mirrors Python's LINE_STREAM_COMMANDS.
 export const LINE_STREAM_COMMANDS: ReadonlySet<string> = new Set([Cmd.NL, Cmd.CUT])
-const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
+export const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
   Cmd.REV,
   Cmd.HEAD,
   Cmd.TAIL,

@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "xpr_head",
-      "seq": 763,
+      "id": "xpr_sort",
+      "seq": 761,
       "targets": [
         "ram",
         "disk",
@@ -10,8 +10,10 @@
         "opfs",
         "s3",
         "databricks",
+        "gridfs",
         "s3-prefix",
         "databricks-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
@@ -22,13 +24,14 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
-      "command": "head -n 1 /data/a.txt /data2/xpr_nope.txt",
+      "command": "sort /data/numbers.txt /data2/xpr_nope.txt",
       "expect": {
-        "exit": 1,
-        "stdout": "==> /data/a.txt <==\nhello\n",
-        "stderr": "head: cannot open '/data2/xpr_nope.txt' for reading: No such file or directory\n"
+        "exit": 2,
+        "stdout": "",
+        "stderr": "sort: cannot read: /data2/xpr_nope.txt: No such file or directory\n"
       }
     }
   ]

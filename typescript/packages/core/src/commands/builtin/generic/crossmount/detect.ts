@@ -14,15 +14,20 @@
 
 import type { MountRegistry } from '../../../../workspace/mount/registry.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { CROSS_MOUNT_COMMANDS, RELAY_COMMANDS, STREAM_COMMANDS } from './constants.ts'
-import type { Cmd } from './types.ts'
+import {
+  CROSS_MOUNT_COMMANDS,
+  FANOUT_COMMANDS,
+  RELAY_COMMANDS,
+  STREAM_COMMANDS,
+} from './constants.ts'
 import { Strategy } from './types.ts'
 
 // Pick the combine strategy for one cross-mount command invocation.
-export function strategyFor(cmdName: Cmd): Strategy {
+export function strategyFor(cmdName: string): Strategy {
   if (RELAY_COMMANDS.has(cmdName)) return Strategy.RELAY
   if (STREAM_COMMANDS.has(cmdName)) return Strategy.STREAM
-  return Strategy.FANOUT
+  if (FANOUT_COMMANDS.has(cmdName)) return Strategy.FANOUT
+  throw new Error(`Unsupported cross-mount command: ${cmdName}`)
 }
 
 export function isCrossMount(

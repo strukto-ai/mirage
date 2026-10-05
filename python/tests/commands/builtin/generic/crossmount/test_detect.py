@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic.crossmount.detect import (
     is_cross_mount,
     strategy_for,
 )
-from mirage.commands.builtin.generic.crossmount.types import Strategy
+from mirage.commands.builtin.generic.crossmount.types import Cmd, Strategy
 from mirage.types import PathSpec
 
 
@@ -65,6 +65,7 @@ def test_sets_are_disjoint():
     assert not STREAM_COMMANDS & FANOUT_COMMANDS
     assert not STREAM_COMMANDS & RELAY_COMMANDS
     assert not FANOUT_COMMANDS & RELAY_COMMANDS
+    assert CROSS_MOUNT_COMMANDS == set(Cmd)
     assert CROSS_MOUNT_COMMANDS == (
         STREAM_COMMANDS | FANOUT_COMMANDS | RELAY_COMMANDS
     )
@@ -123,3 +124,10 @@ def test_cp_crosses_for_a_source_holding_a_mount_not_the_destination():
     assert not is_cross_mount("cp", [file, tree], registry)
     assert is_cross_mount("cp", [into, tree], registry, [into])
     assert not is_cross_mount("cp", [tree, file], registry, [tree])
+
+
+def test_strategy_rejects_unregistered_commands():
+    with pytest.raises(
+        ValueError, match="Unsupported cross-mount command: unknown"
+    ):
+        strategy_for("unknown")

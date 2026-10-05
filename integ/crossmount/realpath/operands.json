@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_realpath_both_mounts",
+      "seq": 9900020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf a > /data/xm_rp && printf b > /data2/xm_rp && ln -s /data2/xm_rp /data/xm_rp_link && realpath /data/xm_rp /data/xm_rp_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/xm_rp\n/data2/xm_rp\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_realpath_continues_after_missing",
+      "seq": 9900021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "realpath -e /data/xm_rp_missing /data2/xm_rp",
+      "expect": {
+        "exit": 1,
+        "stdout": "/data2/xm_rp\n",
+        "stderr": "realpath: /data/xm_rp_missing: No such file or directory\n"
+      }
+    }
+  ]
+}

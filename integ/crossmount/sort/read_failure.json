@@ -1,65 +1,65 @@
 {
   "cases": [
     {
-      "id": "xpr_cat",
-      "seq": 759,
+      "id": "xrf_sort",
+      "seq": 963101,
       "targets": [
         "ram",
         "disk",
         "redis",
         "opfs",
         "s3",
-        "databricks",
+        "gridfs",
         "s3-prefix",
-        "databricks-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
-        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
-      "command": "cat /data/a.txt /data2/xpr_nope.txt",
+      "command": "sort /data/xrf.txt /data2/xrf_nope.txt",
       "expect": {
-        "exit": 1,
-        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
-        "stderr": "cat: /data2/xpr_nope.txt: No such file or directory\n"
+        "exit": 2,
+        "stdout": "",
+        "stderr": "sort: cannot read: /data2/xrf_nope.txt: No such file or directory\n"
       }
     },
     {
-      "id": "xpr_cat_first",
-      "seq": 760,
+      "id": "xrf_sort_dir",
+      "seq": 963107,
       "targets": [
         "ram",
         "disk",
         "redis",
         "opfs",
         "s3",
-        "databricks",
+        "gridfs",
         "s3-prefix",
-        "databricks-prefix",
+        "gridfs-prefix",
         "hf",
         "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
         "sharepoint",
-        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder"
+        "gdrive-folder",
+        "box"
       ],
-      "command": "cat /data2/xpr_nope.txt /data/a.txt",
+      "command": "sort /data/xrf.txt /data2/xrf_dir",
       "expect": {
-        "exit": 1,
-        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
-        "stderr": "cat: /data2/xpr_nope.txt: No such file or directory\n"
+        "exit": 2,
+        "stdout": "",
+        "stderr": "sort: read failed: /data2/xrf_dir: Is a directory\n"
       }
     }
   ]

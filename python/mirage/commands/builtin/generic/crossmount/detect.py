@@ -16,6 +16,7 @@ from collections.abc import Sequence
 
 from mirage.commands.builtin.generic.crossmount.constants import (
     CROSS_MOUNT_COMMANDS,
+    FANOUT_COMMANDS,
     RELAY_COMMANDS,
     STREAM_COMMANDS,
 )
@@ -33,7 +34,9 @@ def strategy_for(cmd_name: str) -> Strategy:
         return Strategy.RELAY
     if cmd_name in STREAM_COMMANDS:
         return Strategy.STREAM
-    return Strategy.FANOUT
+    if cmd_name in FANOUT_COMMANDS:
+        return Strategy.FANOUT
+    raise ValueError(f"Unsupported cross-mount command: {cmd_name}")
 
 
 def is_cross_mount(

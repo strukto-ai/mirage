@@ -274,5 +274,5 @@ async def resolve_parent(
     """
     key = path.vfs_path
     parent_key = posixpath.dirname(key)
-    parent_virtual = posixpath.dirname(path.virtual.rstrip("/")) or "/"
-    return await resolve_dir(accessor, parent_key, parent_virtual)
+    # Resolve the parent key, but report the operand the caller tried to create.
+    return await resolve_dir(accessor, parent_key, path.virtual)
