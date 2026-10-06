@@ -225,13 +225,13 @@ class WorkTreeChdirError(GitError):
 
     Args:
         path (str): the value as the config spells it.
-        reason (str): the strerror git names, absence by default.
+        reason (FsCondition): the condition git names, absence by default.
     """
 
     def __init__(
-        self, path: str, reason: str = posix_phrase(FsCondition.ENOENT)
+        self, path: str, reason: FsCondition = FsCondition.ENOENT
     ) -> None:
-        super().__init__(f"cannot chdir to '{path}': {reason}")
+        super().__init__(f"cannot chdir to '{path}': {posix_phrase(reason)}")
 
 
 class NoWorkingDirectoryError(GitError):
@@ -245,13 +245,13 @@ class NoWorkingDirectoryError(GitError):
 
     Args:
         path (str): the path as the user spelled it.
-        reason (str): the strerror git names, absence by default.
+        reason (FsCondition): the condition git names, absence by default.
     """
 
     def __init__(
-        self, path: str, reason: str = posix_phrase(FsCondition.ENOENT)
+        self, path: str, reason: FsCondition = FsCondition.ENOENT
     ) -> None:
-        super().__init__(f"cannot change to '{path}': {reason}")
+        super().__init__(f"cannot change to '{path}': {posix_phrase(reason)}")
 
 
 class BadStartPointError(GitError):
@@ -967,16 +967,16 @@ class RemovePathError(GitError):
         path (str): the path, repository-relative.
         report (str): the ``rm`` lines already printed, empty under
             ``-q``.
-        reason (str): the strerror to name.
+        reason (FsCondition): the condition to name.
     """
 
     def __init__(
         self,
         path: str,
         report: str = "",
-        reason: str = posix_phrase(FsCondition.EISDIR),
+        reason: FsCondition = FsCondition.EISDIR,
     ) -> None:
-        super().__init__(f"git rm: '{path}': {reason}")
+        super().__init__(f"git rm: '{path}': {posix_phrase(reason)}")
         self.report = report
 
 
@@ -1068,13 +1068,13 @@ class RenameFailedError(GitError):
 
     Args:
         source (str): the source, repository-relative.
-        reason (str): the strerror to name.
+        reason (FsCondition): the condition to name.
     """
 
     def __init__(
-        self, source: str, reason: str = posix_phrase(FsCondition.ENOENT)
+        self, source: str, reason: FsCondition = FsCondition.ENOENT
     ) -> None:
-        super().__init__(f"renaming '{source}' failed: {reason}")
+        super().__init__(f"renaming '{source}' failed: {posix_phrase(reason)}")
 
 
 class NoRestorePathsError(GitError):
@@ -1769,14 +1769,15 @@ class ConfigLockError(GitError):
 
     Args:
         path (str): the config file.
-        reason (str): why the lock could not be made.
+        reason (FsCondition): why the lock could not be made.
     """
 
     prefix = None
 
-    def __init__(self, path: str, reason: str) -> None:
+    def __init__(self, path: str, reason: FsCondition) -> None:
         super().__init__(
-            f"error: could not lock config file {path}: {reason}\n"
+            f"error: could not lock config file {path}: "
+            f"{posix_phrase(reason)}\n"
             "fatal: could not set 'core.repositoryformatversion' to '0'"
         )
 

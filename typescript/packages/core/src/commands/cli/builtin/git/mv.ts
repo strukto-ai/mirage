@@ -35,7 +35,6 @@ import { opened } from './session.ts'
 import type { Dispatch, IndexEntry, RepoLocation } from './types.ts'
 import { checkSwitches, fatal, startPoint, verbUsage } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { posixPhrase } from '../../../../errors/posix.ts'
 
 const ENC = new TextEncoder()
 
@@ -309,7 +308,7 @@ export async function plan(
       // mirage's own boundary, so the refusal borrows the kernel's EBUSY for
       // a rename it will not perform.
       if (flags.skip) continue
-      throw new RenameFailedError(source, posixPhrase('EBUSY'))
+      throw new RenameFailedError(source, 'EBUSY')
     }
     if (reason !== null) {
       if (flags.skip) continue

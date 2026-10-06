@@ -169,7 +169,7 @@ async function follow(
   try {
     targetStat = await deps.stat(spec)
   } catch (err) {
-    return [[], [], isEnotdir(err) ? posixPhrase('ENOTDIR') : posixPhrase('ENOENT'), []]
+    return [[], [], posixPhrase(isEnotdir(err) ? 'ENOTDIR' : 'ENOENT'), []]
   }
   if (targetStat.type !== FileType.DIRECTORY) {
     return [[{ namePath: virtual, kind: 'file', read: spec }], [], '', []]
@@ -233,7 +233,7 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
         problems: [
           {
             path: base,
-            reason: isEnotdir(err) ? posixPhrase('ENOTDIR') : posixPhrase('ENOENT'),
+            reason: posixPhrase(isEnotdir(err) ? 'ENOTDIR' : 'ENOENT'),
             fatal: true,
           },
         ],

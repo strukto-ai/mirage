@@ -169,45 +169,29 @@ def says_why(text: str, refusal: Refusal) -> bool:
 
 
 def policy_denied(
-    deny: Deny, filename: str, strerror: str = posix_phrase(FsCondition.EACCES)
+    action: Deny | Pending,
+    filename: str,
+    strerror: str = posix_phrase(FsCondition.EACCES),
 ) -> PolicyDenied:
-    """The error a door raises for a policy's Deny, its record noted for
-    the line running it.
+    """The error a door raises for a policy's Deny, or for a question the
+    host has not answered, its record noted for the line running it.
 
     The error says what the terminal would, EACCES and ``strerror``;
-    the reason rides the record, on the error for a caller that catches
-    it and on the line's result for one that only reads what a command
-    printed.
+    the reason (or the ask id the agent quotes) rides the record, on the
+    error for a caller that catches it and on the line's result for one
+    that only reads what a command printed.
 
     Args:
-        deny (Deny): the policy's refusal.
+        action (Deny | Pending): the policy's refusal or the ledger's
+            answer.
         filename (str): the path or name refused.
         strerror (str): the terminal's words, ``Permission denied``
             unless the door words its own.
     """
-    refusal = refusal_of(deny)
+    refusal = refusal_of(action)
     note_refusal(refusal)
     return PolicyDenied(
         posix_errno(FsCondition.EACCES), strerror, filename, refusal=refusal
-    )
-
-
-def policy_pending(pending: Pending, filename: str) -> PolicyDenied:
-    """The error a door raises for a question the host has not answered:
-    a plain EACCES, as the terminal would print it, with the ask id the
-    agent quotes on the record.
-
-    Args:
-        pending (Pending): the ledger's answer.
-        filename (str): the path asked about.
-    """
-    refusal = refusal_of(pending)
-    note_refusal(refusal)
-    return PolicyDenied(
-        posix_errno(FsCondition.EACCES),
-        posix_phrase(FsCondition.EACCES),
-        filename,
-        refusal=refusal,
     )
 
 
@@ -317,7 +301,7 @@ async def pre_ops_gate(
         if settled is None:
             return
         if isinstance(settled, Pending):
-            raise policy_pending(settled, path.virtual)
+            raise policy_denied(settled, path.virtual)
         answer = settled
     if answer is not None:
         if answer.error is not None:

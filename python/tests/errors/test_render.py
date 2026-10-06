@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-
 import pytest
 
 from mirage.errors.fs import (
+    dot_walk_error,
+    ebadf,
     efbig,
     eisdir,
     enoent,
@@ -30,116 +30,127 @@ from mirage.errors.render import (
     fs_error_line,
     revoice_fs_error_line,
 )
-from mirage.errors.types import (
-    BadDescriptorError,
-)
+from mirage.errors.types import FsCondition
 from mirage.types import PathSpec
 from mirage.utils.path import CycleError
 
-
-def test_format_fs_error_appends_strerror():
-    err = format_fs_error("cat", enoent("/b/missing.txt"))
-    assert err == b"cat: /b/missing.txt: No such file or directory\n"
-
-
-def test_format_fs_error_rewrites_to_raw_path():
-    spec = PathSpec(
-        virtual="/a/missing.txt",
-        directory="/a/",
-        vfs_path="missing.txt",
-        raw_path="missing.txt",
-    )
-    err = format_fs_error("diff", enoent("/a/missing.txt"), [spec])
-    assert err == b"diff: missing.txt: No such file or directory\n"
-
-
-def test_format_fs_error_prefers_exc_filename():
-    exc = FileNotFoundError(2, "No such file or directory", "/a/gone.txt")
-    err = format_fs_error("cat", exc)
-    assert err == b"cat: /a/gone.txt: No such file or directory\n"
-
-
 _ENOENT = "No such file or directory"
+_NOPE = "/data/nope.txt"
+_SUB = "/data/sub"
+_FILE = "/data/a.txt/x"
+_QUOTED = PathSpec(
+    virtual="/data/it's.txt",
+    directory="/data/",
+    vfs_path="it's.txt",
+    raw_path="it's.txt",
+)
+_EMPTY = PathSpec(virtual="/data", directory="/", vfs_path="data", raw_path="")
 
 
 @pytest.mark.parametrize(
-    "cmd,line",
+    ("cmd", "operand", "make", "step"),
     [
-        (
-            "head",
-            f"head: cannot open '/data/nope.txt' for reading: {_ENOENT}\n",
-        ),
-        (
-            "tail",
-            f"tail: cannot open '/data/nope.txt' for reading: {_ENOENT}\n",
-        ),
-        ("fmt", f"fmt: cannot open '/data/nope.txt' for reading: {_ENOENT}\n"),
-        (
-            "split",
-            f"split: cannot open '/data/nope.txt' for reading: {_ENOENT}\n",
-        ),
-        (
-            "csplit",
-            f"csplit: cannot open '/data/nope.txt' for reading: {_ENOENT}\n",
-        ),
-        (
-            "tac",
-            f"tac: failed to open '/data/nope.txt' for reading: {_ENOENT}\n",
-        ),
-        (
-            "truncate",
-            f"truncate: cannot open '/data/nope.txt' for writing: {_ENOENT}\n",
-        ),
-        ("stat", f"stat: cannot statx '/data/nope.txt': {_ENOENT}\n"),
-        ("sed", f"sed: can't read /data/nope.txt: {_ENOENT}\n"),
-        ("uniq", f"uniq: /data/nope.txt: {_ENOENT}\n"),
+        ("head", _NOPE, enoent, f"cannot open '{_NOPE}' for reading"),
+        ("tail", _NOPE, enoent, f"cannot open '{_NOPE}' for reading"),
+        ("fmt", _NOPE, enoent, f"cannot open '{_NOPE}' for reading"),
+        ("split", _NOPE, enoent, f"cannot open '{_NOPE}' for reading"),
+        ("csplit", _NOPE, enoent, f"cannot open '{_NOPE}' for reading"),
+        ("tac", _NOPE, enoent, f"failed to open '{_NOPE}' for reading"),
+        ("truncate", _NOPE, enoent, f"cannot open '{_NOPE}' for writing"),
+        ("stat", _NOPE, enoent, f"cannot statx '{_NOPE}'"),
+        ("sed", _NOPE, enoent, f"can't read {_NOPE}"),
+        ("uniq", _NOPE, enoent, _NOPE),
+        ("head", _QUOTED, enoent, 'cannot open "it\'s.txt" for reading'),
+        ("stat", _QUOTED, enoent, 'cannot statx "it\'s.txt"'),
+        ("sed", _QUOTED, enoent, "can't read it's.txt"),
+        ("stat", "/data/a\tb", enoent, "cannot statx '/data/a'$'\\t''b'"),
+        ("tail", "", enoent, "cannot open '' for reading"),
+        ("tac", _EMPTY, enoent, "failed to open '' for reading"),
+        ("cat", _EMPTY, enoent, "''"),
+        ("head", _SUB, eisdir, f"error reading '{_SUB}'"),
+        ("tail", _SUB, eisdir, f"error reading '{_SUB}'"),
+        ("uniq", _SUB, eisdir, f"error reading '{_SUB}'"),
+        ("tac", _SUB, eisdir, f"{_SUB}: read error"),
+        ("tac", "/data/a b", eisdir, "'/data/a b': read error"),
+        ("tac", "/data/c:d", eisdir, "'/data/c:d': read error"),
+        ("tsort", _SUB, eisdir, f"{_SUB}: read error"),
+        ("sed", _SUB, eisdir, f"read error on {_SUB}"),
+        ("truncate", _SUB, eisdir, f"cannot open '{_SUB}' for writing"),
+        ("stat", _SUB, eisdir, f"cannot statx '{_SUB}'"),
+        ("fmt", _SUB, eisdir, _SUB),
+        ("base64", _SUB, eisdir, _SUB),
+        ("tac", _FILE, enotdir, f"failed to open '{_FILE}' for reading"),
+        ("stat", _FILE, enotdir, f"cannot statx '{_FILE}'"),
+        ("truncate", _FILE, enotdir, f"cannot open '{_FILE}' for writing"),
+        ("tail", "-", ebadf, "-"),
+        ("tac", "-", ebadf, "-"),
     ],
 )
-def test_open_failure_line_names_the_failed_open(cmd, line):
-    assert (
-        fs_error_line(cmd, "/data/nope.txt", enoent("/data/nope.txt")) == line
+def test_each_command_names_its_own_failed_step(cmd, operand, make, step):
+    # The errno is the backend's; the step and the quoting are the
+    # command's. The reference fmt and base64 read lines name no operand,
+    # so those keep the plain one; an empty raw_path is the operand as
+    # typed, not the path it resolved to.
+    exc = make(operand)
+    line = fs_error_line(cmd, operand, exc)
+    assert line == f"{cmd}: {step}: {exc.strerror}\n"
+
+
+@pytest.mark.parametrize("cmd", ["wc", "du"])
+def test_wc_and_du_vet_the_empty_name(cmd):
+    assert fs_error_line(cmd, "", enoent("")) == (
+        f"{cmd}: invalid zero-length file name\n"
     )
 
 
 @pytest.mark.parametrize(
-    "cmd,line",
+    ("cmd", "exc", "words"),
     [
-        ("head", "head: error reading '/data/sub': Is a directory\n"),
-        ("tail", "tail: error reading '/data/sub': Is a directory\n"),
-        ("uniq", "uniq: error reading '/data/sub': Is a directory\n"),
-        ("tac", "tac: /data/sub: read error: Is a directory\n"),
-        ("tsort", "tsort: /data/sub: read error: Is a directory\n"),
-        ("sed", "sed: read error on /data/sub: Is a directory\n"),
+        ("cat", enoent("/b/x"), f"/b/x: {_ENOENT}"),
+        ("ls", enoent("/b/x"), f"cannot access '/b/x': {_ENOENT}"),
+        ("head", enoent("/b/x"), f"cannot open '/b/x' for reading: {_ENOENT}"),
+        ("stat", enoent("/b/x"), f"cannot statx '/b/x': {_ENOENT}"),
+        ("cat", dot_walk_error("", FsCondition.ENOENT), f"'': {_ENOENT}"),
         (
-            "truncate",
-            "truncate: cannot open '/data/sub' for writing: Is a directory\n",
+            "mv",
+            enotsup("email", "unlink", "/m"),
+            "/m: Operation not supported",
         ),
-        ("fmt", "fmt: /data/sub: Is a directory\n"),
-        ("base64", "base64: /data/sub: Is a directory\n"),
+        ("cat", efbig("/r"), "/r: File too large"),
+        (
+            "rmdir",
+            enotempty("/d"),
+            "failed to remove '/d': Directory not empty",
+        ),
+        ("mv", exdev("/d"), "/d: Invalid cross-device link"),
+        ("cat", CycleError("/l"), "/l: Too many levels of symbolic links"),
+        ("slack", RuntimeError("API error"), "API error"),
+        (
+            "slack",
+            ValueError("--channel_id is required"),
+            "--channel_id is required",
+        ),
+        ("uniq", ValueError("uniq: invalid count: '2'"), "invalid count: '2'"),
     ],
 )
-def test_open_failure_line_names_a_directory_read(cmd, line):
-    # The reference fmt and base64 lines (`fmt: read error`, `base64: read
-    # error: Is a directory`) name no operand, so those keep the plain one.
-    assert fs_error_line(cmd, "/data/sub", eisdir("/data/sub")) == line
+def test_format_fs_error_says_the_line_the_command_would(cmd, exc, words):
+    # A filesystem error is the operand's line; anything else is the
+    # command's prefix and the error's own words, never doubled.
+    assert format_fs_error(cmd, exc) == f"{cmd}: {words}\n".encode()
 
 
-@pytest.mark.parametrize(
-    "cmd,line",
-    [
-        ("head", f'head: cannot open "it\'s.txt" for reading: {_ENOENT}\n'),
-        ("stat", f'stat: cannot statx "it\'s.txt": {_ENOENT}\n'),
-        ("sed", f"sed: can't read it's.txt: {_ENOENT}\n"),
-    ],
-)
-def test_open_failure_line_quotes_the_operand_as_typed(cmd, line):
-    spec = PathSpec(
-        virtual="/data/it's.txt",
-        directory="/data/",
-        vfs_path="it's.txt",
-        raw_path="it's.txt",
+def test_format_fs_error_spells_the_operand_the_caller_passes():
+    typed = PathSpec(
+        virtual="/a/x.txt", directory="/a/", vfs_path="x.txt", raw_path="x.txt"
     )
-    assert fs_error_line(cmd, spec, enoent(spec)) == line
+    assert format_fs_error("diff", enoent("/a/x.txt"), [typed]) == (
+        f"diff: x.txt: {_ENOENT}\n".encode()
+    )
+    records = PathSpec.from_str_path("/r")
+    for cmd in ("head", "tail"):
+        assert format_fs_error(cmd, efbig(records), [records]) == (
+            f"{cmd}: error reading '/r': File too large\n".encode()
+        )
 
 
 @pytest.mark.parametrize(
@@ -165,158 +176,3 @@ def test_revoice_says_a_fetch_line_in_the_real_command_voice(line, said):
     # strerror; one about another path only has its prefix swapped.
     operand = "/b/a b" if "a b" in line else "/b/nope"
     assert revoice_fs_error_line(line, "cat", "sed", operand) == said
-
-
-def test_open_failure_line_leaves_standard_input_bare():
-    exc = BadDescriptorError(errno.EBADF, "Bad file descriptor", "-")
-    assert fs_error_line("tail", "-", exc) == "tail: -: Bad file descriptor\n"
-
-
-def test_format_fs_error_words_a_head_open_failure():
-    exc = FileNotFoundError(2, "No such file or directory", "/a/gone.txt")
-    assert format_fs_error("head", exc) == (
-        b"head: cannot open '/a/gone.txt' for reading: "
-        b"No such file or directory\n"
-    )
-
-
-@pytest.mark.parametrize(
-    ("cmd", "step"),
-    [
-        ("tac", "failed to open '/data/a.txt/x' for reading"),
-        ("stat", "cannot statx '/data/a.txt/x'"),
-        ("truncate", "cannot open '/data/a.txt/x' for writing"),
-    ],
-)
-def test_each_command_names_its_own_failed_step(cmd, step):
-    # The errno is the backend's either way; only the step and the
-    # quoting are the command's.
-    for exc, strerror in (
-        (enoent("/data/a.txt/x"), "No such file or directory"),
-        (enotdir("/data/a.txt/x"), "Not a directory"),
-    ):
-        line = fs_error_line(cmd, "/data/a.txt/x", exc)
-        assert line == f"{cmd}: {step}: {strerror}\n"
-
-
-def test_tac_names_a_directory_read_first_and_quotes_it_when_needed():
-    # tac's read failure leads with the name, quoted only when it needs
-    # it, ':' included.
-    assert fs_error_line("tac", "/data/sub", eisdir("/data/sub")) == (
-        "tac: /data/sub: read error: Is a directory\n"
-    )
-    assert fs_error_line("tac", "/data/a b", eisdir("/data/a b")) == (
-        "tac: '/data/a b': read error: Is a directory\n"
-    )
-    assert fs_error_line("tac", "/data/c:d", eisdir("/data/c:d")) == (
-        "tac: '/data/c:d': read error: Is a directory\n"
-    )
-
-
-def test_stat_and_truncate_say_one_step_for_a_directory():
-    assert fs_error_line("truncate", "/data/sub", eisdir("/data/sub")) == (
-        "truncate: cannot open '/data/sub' for writing: Is a directory\n"
-    )
-    assert fs_error_line("stat", "/data/sub", eisdir("/data/sub")) == (
-        "stat: cannot statx '/data/sub': Is a directory\n"
-    )
-
-
-def test_a_step_line_escapes_a_control_character_in_the_name():
-    line = fs_error_line("stat", "/data/a\tb", enoent("/data/a\tb"))
-    assert line == (
-        "stat: cannot statx '/data/a'$'\\t''b': No such file or directory\n"
-    )
-
-
-def test_tac_leaves_standard_input_bare():
-    exc = BadDescriptorError(errno.EBADF, "Bad file descriptor", "-")
-    assert fs_error_line("tac", "-", exc) == "tac: -: Bad file descriptor\n"
-
-
-def test_an_empty_operand_is_named_as_typed():
-    # An empty raw_path is the operand as typed, not a missing one, so it
-    # is not replaced by the virtual path it resolved to; the TypeScript
-    # formatter reads it the same way.
-    spec = PathSpec(
-        virtual="/data", directory="/", vfs_path="data", raw_path=""
-    )
-    assert fs_error_line("tac", spec, enoent(spec)) == (
-        "tac: failed to open '' for reading: No such file or directory\n"
-    )
-    assert fs_error_line("cat", spec, enoent(spec)) == (
-        "cat: '': No such file or directory\n"
-    )
-
-
-def test_format_fs_error_words_a_stat_failure():
-    exc = FileNotFoundError(2, "No such file or directory", "/a/gone.txt")
-    assert format_fs_error("stat", exc) == (
-        b"stat: cannot statx '/a/gone.txt': No such file or directory\n"
-    )
-
-
-def test_format_fs_error_generic_prefixes_command():
-    err = format_fs_error(
-        "slack-add-reaction",
-        RuntimeError("Slack API error (reactions.add): message_not_found"),
-    )
-    assert err == (
-        b"slack-add-reaction: Slack API error "
-        b"(reactions.add): message_not_found\n"
-    )
-
-
-def test_format_fs_error_generic_value_error():
-    err = format_fs_error(
-        "slack-add-reaction", ValueError("--channel_id is required")
-    )
-    assert err == b"slack-add-reaction: --channel_id is required\n"
-
-
-def test_format_fs_error_generic_does_not_double_prefix():
-    # Many generic commands raise a fully formatted message already
-    # carrying the "<cmd>: " prefix; it must not be doubled (uniq: uniq: ...).
-    err = format_fs_error("uniq", ValueError("uniq: invalid count: '2junk'"))
-    assert err == b"uniq: invalid count: '2junk'\n"
-
-
-def test_format_fs_error_enotsup_reports_operand():
-    err = format_fs_error("mv", enotsup("email", "unlink", "/mail/a.txt"))
-    assert err == b"mv: /mail/a.txt: Operation not supported\n"
-
-
-@pytest.mark.parametrize("cmd", ["head", "tail"])
-def test_read_cap_failure_names_the_read_at_the_chokepoint(cmd):
-    spec = PathSpec.from_str_path("/records.jsonl")
-    assert format_fs_error(cmd, efbig(spec), [spec]) == (
-        f"{cmd}: error reading '/records.jsonl': File too large\n".encode()
-    )
-
-
-@pytest.mark.parametrize("cmd", ["wc", "du"])
-def test_wc_and_du_vet_the_empty_name(cmd):
-    assert fs_error_line(cmd, "", enoent("")) == (
-        f"{cmd}: invalid zero-length file name\n"
-    )
-
-
-def test_other_commands_name_the_empty_operand_quoted():
-    assert fs_error_line("tail", "", enoent("")) == (
-        "tail: cannot open '' for reading: No such file or directory\n"
-    )
-
-
-def test_format_fs_error_words_a_condition_without_a_class():
-    assert format_fs_error("rmdir", enotempty("/d")) == (
-        b"rmdir: failed to remove '/d': Directory not empty\n"
-    )
-    assert format_fs_error("mv", exdev("/d")) == (
-        b"mv: /d: Invalid cross-device link\n"
-    )
-
-
-def test_format_fs_error_names_a_link_loop_by_its_path():
-    assert format_fs_error("cat", CycleError("/data/l1")) == (
-        b"cat: /data/l1: Too many levels of symbolic links\n"
-    )

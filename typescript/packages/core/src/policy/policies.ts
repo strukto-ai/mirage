@@ -173,18 +173,19 @@ function denyOnly(hook: Hook, action: Deny | Ask | null): Deny | null {
 }
 
 /**
- * The error a door throws for a policy's Deny, its record noted for the
- * line running it. The message says what the terminal would
- * (`Permission denied` unless the door words its own); the reason rides
- * the record, on the error for a caller that catches it and on the
- * line's result for one that only reads what a command printed.
+ * The error a door throws for a policy's Deny, or for a question the host
+ * has not answered, its record noted for the line running it. The message
+ * says what the terminal would (`Permission denied` unless the door words
+ * its own); the reason (or the ask id the agent quotes) rides the record,
+ * on the error for a caller that catches it and on the line's result for
+ * one that only reads what a command printed.
  */
 export function policyDenied(
-  deny: Deny,
+  action: Deny | Pending,
   filename: string,
   message = posixPhrase('EACCES'),
 ): PolicyDenied {
-  const refusal = refusalOf(deny)
+  const refusal = refusalOf(action)
   noteRefusal(refusal)
   return new PolicyDenied(message, filename, refusal)
 }
@@ -313,22 +314,11 @@ export async function preOpsGate(
       ? await decisions.heldOp(ctx, answer)
       : await decisions.resolveOp(ctx, answer)
     if (settled === null) return
-    if (settled.kind === 'pending') throw policyPending(settled, path.virtual)
+    if (settled.kind === 'pending') throw policyDenied(settled, path.virtual)
     answer = settled
   }
   if (answer.error !== undefined) throw answer.error
   throw policyDenied(answer, path.virtual)
-}
-
-/**
- * The error a door throws for a question the host has not answered: a
- * plain EACCES, as the terminal would print it, with the ask id the agent
- * quotes on the record. Mirrors Python's `policy_pending`.
- */
-export function policyPending(pending: Pending, filename: string): PolicyDenied {
-  const refusal = refusalOf(pending)
-  noteRefusal(refusal)
-  return new PolicyDenied('Permission denied', filename, refusal)
 }
 
 /**

@@ -40,7 +40,6 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import MISS_ERRORS
-from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -389,7 +388,7 @@ async def plan(
             # perform.
             if flags.skip:
                 continue
-            raise RenameFailedError(source, posix_phrase(FsCondition.EBUSY))
+            raise RenameFailedError(source, FsCondition.EBUSY)
         if reason is not None:
             if flags.skip:
                 continue

@@ -7,6 +7,7 @@ from mirage.commands.builtin.generic.archive.types import (
     Scan,
     Walked,
 )
+from mirage.errors.classify import classify
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.ops.types import LinkView, MountView
@@ -285,11 +286,7 @@ async def scan_operand(
         try:
             root_stat = await stat(path)
         except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
-            reason = (
-                posix_phrase(FsCondition.ENOTDIR)
-                if isinstance(exc, NotADirectoryError)
-                else posix_phrase(FsCondition.ENOENT)
-            )
+            reason = posix_phrase(classify(exc) or FsCondition.ENOENT)
             return Scan(
                 problems=(Problem(path=base, reason=reason, fatal=True),),
                 missing=True,
