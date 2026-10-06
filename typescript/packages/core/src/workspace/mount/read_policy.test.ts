@@ -39,6 +39,7 @@ function stub(
 const REVALIDATABLE = [
   'aliyun',
   'backblaze',
+  'box',
   'ceph',
   'digitalocean',
   'dropbox',

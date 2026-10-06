@@ -387,6 +387,20 @@ The mount registers both tables when the driver is placed; a driver never regist
 
 Set `caches_reads=True` only for stable, read-mostly content. Implement `get_state()` with credentials redacted (`self.config_state(self.config)`) and close any network clients in `close()`.
 
+### Point lookups under `fresh`
+
+A `read: fresh` mount re-stats a cached file through a throwaway store that
+starts with none of the mount's rows (`ListingCheckStore`), so no cached
+row answers the check.
+A backend with a path lookup answers with one request for that path (Dropbox).
+A backend that addresses items only by id may, after checking that the index
+is a `ListingCheckStore`, read the mount's last row for
+the path with `await index.hint(key)` and address one request by its id (Box);
+it must then confirm from that answer alone that the item still sits at
+exactly this path, and otherwise resolve the path as it always does. The hint
+is a lead, never an answer: a stat built from its fields would let a stale row
+pass a freshness check.
+
 ### Listing versions
 
 Under `read: fresh`, a cached listing the running command did not write is listed again, unless the backend declares what to check it against. Declare `listing_version` (`mirage.types.ListingVersion`) as a class attribute, like `read_revalidatable`:

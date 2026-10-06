@@ -29,7 +29,123 @@ async function subtleHex(algo: AlgorithmIdentifier, bytes: Uint8Array): Promise<
 }
 
 export async function sha1Hex(bytes: Uint8Array): Promise<string> {
-  return subtleHex('SHA-1', bytes)
+  if (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined')
+    return subtleHex('SHA-1', bytes)
+  const hash = new Sha1()
+  // Match md5HexAsync's yielding budget on hosts without native hashing.
+  const step = 1024 * 1024
+  for (let offset = 0; offset < bytes.byteLength; offset += step) {
+    hash.update(bytes.subarray(offset, offset + step))
+    if (offset + step < bytes.byteLength)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+  return hash.digest()
+}
+
+/**
+ * The 8-byte SHA-1 length trailer: the message length in bits, big-endian
+ * across 64 bits. Split into high and low words, since the bit length passes
+ * 32 bits at 512 MiB and a 32-bit shift would wrap it. Exported so its test
+ * can cross that boundary without hashing 512 MiB.
+ */
+export function sha1LengthTrailer(byteLength: number): Uint8Array {
+  const out = new Uint8Array(8)
+  const view = new DataView(out.buffer)
+  view.setUint32(0, Math.floor(byteLength / 0x20000000) >>> 0)
+  view.setUint32(4, (byteLength * 8) >>> 0)
+  return out
+}
+
+/**
+ * Incremental SHA-1, for bytes that arrive in chunks. WebCrypto hashes only
+ * a whole buffer, and a stream cannot be buffered whole to hash at the end:
+ * drains are bounded, so the copy would be unbounded and never cached. The
+ * partial block a chunk leaves is carried into the next `update`; padding
+ * happens only in `digest`.
+ */
+export class Sha1 {
+  private readonly state = new Uint32Array([
+    0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0,
+  ])
+  private readonly block = new Uint8Array(64)
+  private readonly words = new Uint32Array(80)
+  private filled = 0
+  private length = 0
+
+  update(chunk: Uint8Array): void {
+    this.length += chunk.byteLength
+    let at = 0
+    if (this.filled > 0) {
+      const take = Math.min(64 - this.filled, chunk.byteLength)
+      this.block.set(chunk.subarray(0, take), this.filled)
+      this.filled += take
+      at = take
+      if (this.filled < 64) return
+      this.compress(this.block, 0)
+      this.filled = 0
+    }
+    for (; at + 64 <= chunk.byteLength; at += 64) this.compress(chunk, at)
+    if (at < chunk.byteLength) {
+      this.block.set(chunk.subarray(at))
+      this.filled = chunk.byteLength - at
+    }
+  }
+
+  digest(): string {
+    const pad = (this.filled < 56 ? 56 : 120) - this.filled
+    const tail = new Uint8Array(this.filled + pad + 8)
+    tail.set(this.block.subarray(0, this.filled))
+    tail[this.filled] = 0x80
+    tail.set(sha1LengthTrailer(this.length), tail.length - 8)
+    const state = Uint32Array.from(this.state)
+    for (let off = 0; off < tail.length; off += 64) this.compress(tail, off, state)
+    const out = new Uint8Array(20)
+    const view = new DataView(out.buffer)
+    for (let i = 0; i < 5; i++) view.setUint32(i * 4, state[i] ?? 0)
+    return toHex(out)
+  }
+
+  private compress(bytes: Uint8Array, off: number, state: Uint32Array = this.state): void {
+    const w = this.words
+    const view = new DataView(bytes.buffer, bytes.byteOffset + off, 64)
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(i * 4)
+    for (let i = 16; i < 80; i++) {
+      w[i] = rotl((w[i - 3] ?? 0) ^ (w[i - 8] ?? 0) ^ (w[i - 14] ?? 0) ^ (w[i - 16] ?? 0), 1)
+    }
+    let a = state[0] ?? 0
+    let b = state[1] ?? 0
+    let c = state[2] ?? 0
+    let d = state[3] ?? 0
+    let e = state[4] ?? 0
+    for (let i = 0; i < 80; i++) {
+      let f: number
+      let k: number
+      if (i < 20) {
+        f = (b & c) | (~b & d)
+        k = 0x5a827999
+      } else if (i < 40) {
+        f = b ^ c ^ d
+        k = 0x6ed9eba1
+      } else if (i < 60) {
+        f = (b & c) | (b & d) | (c & d)
+        k = 0x8f1bbcdc
+      } else {
+        f = b ^ c ^ d
+        k = 0xca62c1d6
+      }
+      const t = (rotl(a, 5) + f + e + k + (w[i] ?? 0)) >>> 0
+      e = d
+      d = c
+      c = rotl(b, 30)
+      b = a
+      a = t
+    }
+    state[0] = ((state[0] ?? 0) + a) >>> 0
+    state[1] = ((state[1] ?? 0) + b) >>> 0
+    state[2] = ((state[2] ?? 0) + c) >>> 0
+    state[3] = ((state[3] ?? 0) + d) >>> 0
+    state[4] = ((state[4] ?? 0) + e) >>> 0
+  }
 }
 
 export async function sha384Hex(bytes: Uint8Array): Promise<string> {

@@ -30,6 +30,7 @@ from bson import ObjectId
 from moto.server import ThreadedMotoServer
 
 import mirage.cache.file.io as cache_io
+import mirage.core.box.read as box_read
 import mirage.core.dropbox.read as dropbox_read
 import mirage.core.gdocs.read as gdocs_read
 import mirage.core.gdrive.read as gdrive_read
@@ -49,6 +50,7 @@ import mirage.core.msgraph.drive as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
+from mirage.commands.builtin.box.io import IO as BOX_IO
 from mirage.commands.builtin.dropbox.io import IO as DROPBOX_IO
 from mirage.commands.builtin.gdocs.io import IO as GDOCS_IO
 from mirage.commands.builtin.gdrive.io import IO as GDRIVE_IO
@@ -80,6 +82,8 @@ from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
+from tests.fixtures.box_api import FakeBox
+from tests.fixtures.box_api import serve as serve_box
 from tests.fixtures.dropbox_api import FakeDropbox
 from tests.fixtures.dropbox_api import serve as serve_dropbox
 from tests.fixtures.github_api import FakeGitHub, blob_sha
@@ -132,6 +136,7 @@ HARNESSES = {
     "gsheets": "gsheets",
     "gslides": "gslides",
     "dropbox": "dropbox",
+    "box": "box",
 }
 
 # The drive each Graph backend addresses in the fake: OneDrive the signed-in
@@ -657,11 +662,42 @@ def _dropbox_fake(shape: str, data: bytes) -> Iterator[Fake]:
 
 
 @contextmanager
+def _box_fake(shape: str, data: bytes) -> Iterator[Fake]:
+    # Box has no key_prefix; the prefixed shape mounts a root_folder_id
+    # instead, with a decoy at the same key outside it.
+    key = KEYS[shape]
+    stored = PREFIX + key if shape == "prefixed" else key
+    files = {stored: data}
+    if shape == "prefixed":
+        files[key] = DECOY
+    box = FakeBox(files=files)
+    with serve_box(box):
+        config = {"access_token": "t", "endpoint": box.url}
+        if shape == "prefixed":
+            config["root_folder_id"] = box.id_of(PREFIX)
+        yield Fake(
+            vfs=build_vfs("box", config),
+            key=key,
+            fetches=lambda: box.count("content"),
+            rewrite=lambda new: box.write(stored, new),
+            reach=[],
+            io=BOX_IO,
+            read_mod=box_read,
+            stream_mod=box_read,
+            index=RAMIndexCacheStore(),
+        )
+
+
+@contextmanager
 def _fake(
     name: str, shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[Fake]:
     if HARNESSES[name] == "dropbox":
         with _dropbox_fake(shape, data) as fake:
+            yield fake
+        return
+    if HARNESSES[name] == "box":
+        with _box_fake(shape, data) as fake:
             yield fake
         return
     if HARNESSES[name] == "hf_buckets":
@@ -858,6 +894,7 @@ def test_each_family_runs_exactly_its_rows():
                 "sharepoint",
                 "hf_buckets",
                 "dropbox",
+                "box",
             )
             for shape in shapes
             for row in rows
@@ -1565,3 +1602,370 @@ def test_partial_search_cannot_evict_live_app_bytes_or_overlay(
                 await ws.close()
 
         asyncio.run(run())
+
+
+DEEP = "a/b/c.txt"
+
+
+def _deep_box(root: str = "") -> FakeBox:
+    # Decoys at every level, so a folder listing reads differently from a
+    # point lookup by id.
+    files = {f"{root}{DEEP}": SEED}
+    for level in ("", "a/", "a/b/"):
+        files.update({f"{root}{level}d{i}.txt": DECOY for i in range(5)})
+    return FakeBox(files=files)
+
+
+def _box_vfs(box: FakeBox, root: str = "") -> BaseVFS:
+    config = {"access_token": "t", "endpoint": box.url}
+    if root:
+        config["root_folder_id"] = box.id_of(root)
+    return build_vfs("box", config)
+
+
+async def _run(ws: Workspace, line: str) -> tuple[int, bytes, str]:
+    result = await ws.shell(line)
+    out = await result.materialize_stdout()
+    return result.exit_code, out, await result.stderr_str()
+
+
+def _walk(box: FakeBox) -> list[str]:
+    return ["items:0", f"items:{box.id_of('a')}", f"items:{box.id_of('a/b')}"]
+
+
+def _box_case(scenario, root: str = ""):
+    box = _deep_box(root)
+    with serve_box(box):
+        vfs = _box_vfs(box, root)
+
+        async def run():
+            ws = _fresh_workspace(vfs)
+            try:
+                return await scenario(ws, box)
+            finally:
+                await ws.close()
+
+        return asyncio.run(run())
+
+
+def test_a_cold_fresh_box_read_lists_each_level_once_then_downloads():
+
+    out, log, walk, fid = _box_case(
+        _a_cold_fresh_box_read_lists_each_level_once_then_downloads_case
+    )
+    assert out == SEED
+    assert log == walk + [f"content:{fid}", f"dl:{fid}"]
+
+
+@pytest.mark.parametrize("root", ["", "r/"])
+def test_a_warm_fresh_box_read_is_one_request_by_id(root):
+    out, log, fid = _box_case(
+        functools.partial(
+            _a_warm_fresh_box_read_is_one_request_by_id_case, root=root
+        ),
+        root=root,
+    )
+    assert out == SEED
+    assert log == [f"info:{fid}"]
+
+
+async def _direct_box_read_case(ws, box):
+    assert await ws.vfs.read(f"/m/{DEEP}") == SEED
+    before = len(box.log)
+    assert await ws.vfs.read(f"/m/{DEEP}") == SEED
+    return box.log[before:], box.id_of(DEEP)
+
+
+def test_direct_warm_fresh_box_read_is_one_request_by_id():
+    log, fid = _box_case(_direct_box_read_case)
+    assert log == [f"info:{fid}"]
+
+
+def test_with_its_index_cleared_a_warm_box_read_walks_every_time():
+    # Every stale or unknown verdict on the mount clears its index, and a
+    # fresh verdict reached by the walk refills only the throwaway store:
+    # until a cold read or a listing refills it, each check walks.
+
+    logs, walk = _box_case(
+        _with_its_index_cleared_a_warm_box_read_walks_every_time_case
+    )
+    assert logs == [walk, walk]
+
+
+def test_a_same_size_box_rewrite_in_the_same_second_is_refetched():
+    # The fake keeps modified_at across writes, as the real service does
+    # within a second: only sha1 tells the two versions apart, and it must
+    # come from Box's live answer, not the cached row.
+
+    out, log, walk, fid = _box_case(
+        _a_same_size_box_rewrite_in_the_same_second_is_refetched_case
+    )
+    assert len(CHANGED) == len(SEED)
+    assert out == CHANGED
+    assert log == [f"info:{fid}"] + walk + [f"content:{fid}", f"dl:{fid}"]
+
+
+def test_a_box_file_moved_outside_is_gone_and_drops_its_overlay():
+
+    code, err, log, meta, moved, fid, walk = _box_case(
+        _a_box_file_moved_outside_is_gone_and_drops_its_overlay_case
+    )
+    assert code == 1
+    assert "No such file or directory" in err
+    assert meta is None
+    assert moved == SEED
+    # The probe: one info by the hinted id, which places the file elsewhere;
+    # its walk lists the old parent chain, misses, and resolve_item lists it
+    # again. GONE clears the mount index, so cat's own stat walks twice more.
+    assert log == [f"info:{fid}"] + walk + walk + walk + walk
+
+
+@pytest.mark.parametrize("mode", ["trash", "purge"])
+def test_a_box_file_deleted_and_recreated_is_read_anew(mode):
+    async def scenario(ws, box):
+        await _line(ws, f"cat /m/{DEEP}")
+        await _line(ws, f"chmod 600 /m/{DEEP}")
+        old = box.id_of(DEEP)
+        box.delete(DEEP, mode)
+        new = box.create(DEEP, CHANGED)
+        before = len(box.log)
+        out = await _line(ws, f"cat /m/{DEEP}")
+        log = box.log[before:]
+        mode_bits = await _line(ws, f"stat -c %a /m/{DEEP}")
+        return out, log, mode_bits, old, new, _walk(box)
+
+    out, log, mode_bits, old, new, walk = _box_case(scenario)
+    assert out == CHANGED
+    # The probe's walk fills only its throwaway store and STALE clears the
+    # mount's index, so the read resolves the new id by walking again.
+    assert log == [f"info:{old}"] + walk + walk + [
+        f"content:{new}",
+        f"dl:{new}",
+    ]
+    # STALE keeps the overlay; reading the purged id's 404 as gone would
+    # have dropped it while the walk still printed the new bytes.
+    assert mode_bits == b"600\n"
+
+
+def test_a_box_file_recreated_with_the_same_bytes_is_served_warm():
+
+    logs, old, new, walk = _box_case(
+        _a_box_file_recreated_with_the_same_bytes_is_served_warm_case
+    )
+    assert logs == [[f"info:{old}"] + walk, [f"info:{new}"]]
+
+
+def test_a_box_file_under_a_renamed_parent_is_gone():
+
+    code, err, renamed, log, fid, to_a = _box_case(
+        _a_box_file_under_a_renamed_parent_is_gone_case
+    )
+    assert code == 1
+    assert "No such file or directory" in err
+    assert renamed == SEED
+    # Each walk stops at a, which no longer holds b: the probe's populate
+    # pass and resolve_item, then cat's own stat over the cleared index.
+    assert log == [f"info:{fid}"] + to_a + to_a + to_a + to_a
+
+
+def test_a_box_file_under_a_trashed_mount_root_is_gone():
+    # Trashing the root makes metadata for its descendant return not_found.
+
+    code, out, err, log, root, fid = _box_case(
+        _a_box_file_under_a_trashed_mount_root_is_gone_case, root="r/"
+    )
+    assert code == 1
+    assert out == b""
+    assert "No such file or directory" in err
+    # The root's listing 404s each time: the probe's populate pass and
+    # resolve_item, cat's own stat (the same two), then the parent listing
+    # cat's missing-operand path asks for.
+    assert log == [f"info:{fid}"] + [f"items:{root}"] * 5
+
+
+def test_a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk():
+
+    out, log, again, mode_bits, fid, walk = _box_case(
+        _a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk_case
+    )
+    assert out == SEED
+    # Each check pays the refused GET and the walk again: an accepted cost.
+    assert log == again == [f"info:{fid}"] + walk
+    assert mode_bits == b"600\n"
+
+
+def test_a_box_file_with_no_sha1_is_refetched_on_every_fresh_read():
+    # Pinned on purpose: a file Box gives no sha1 cannot be verified, so
+    # each fresh read is UNKNOWN -- a cold download and a cleared mount
+    # index. That cost is the documented price of an unverifiable file.
+
+    out, log, fid, walk = _box_case(
+        _a_box_file_with_no_sha1_is_refetched_on_every_fresh_read_case
+    )
+    assert out == SEED
+    assert log == [f"info:{fid}"] + walk + [f"content:{fid}", f"dl:{fid}"]
+
+
+def test_a_warm_box_ls_shows_what_a_cold_one_does_from_one_request():
+    # The probe's stat is reused by the command's own stat, so the fields
+    # the probe asks for must carry everything ls prints.
+
+    cold, warm, log, fid = _box_case(
+        _a_warm_box_ls_shows_what_a_cold_one_does_from_one_request_case
+    )
+    assert warm == cold
+    assert log == [f"info:{fid}"]
+
+
+async def _replaced_box_folder_case(ws, box, root="", operand="/m/a/b"):
+
+    await _line(ws, f"ls {operand}")
+    box.rename_folder(f"{root}a/b", "old")
+    box.create(f"{root}a/b/new.txt", b"new listing")
+    box.create(f"{root}{DEEP}", CHANGED)
+    box.log.clear()
+    listing = await _line(ws, f"ls {operand}")
+    body = await _line(ws, f"cat /m/{DEEP}")
+    walk = [
+        f"items:{box.id_of(root) if root else '0'}",
+        f"items:{box.id_of(root + 'a')}",
+        f"items:{box.id_of(root + 'a/b')}",
+    ]
+    return listing, body, box.log, walk, box.id_of(root + DEEP)
+
+
+@pytest.mark.parametrize("root", ["", "sub/"])
+@pytest.mark.parametrize("operand", ["/m/a/b", "/m/a/b/"])
+def test_fresh_box_listing_resolves_replaced_parent_folder(root, operand):
+    async def scenario(ws, box):
+        return await _replaced_box_folder_case(ws, box, root, operand)
+
+    listing, body, log, walk, fid = _box_case(scenario, root)
+    assert listing == b"c.txt\nnew.txt\n"
+    assert body == CHANGED
+    assert log == walk + walk + [f"content:{fid}", f"dl:{fid}"]
+
+
+async def _a_cold_fresh_box_read_lists_each_level_once_then_downloads_case(
+    ws, box
+):
+    out = await _line(ws, f"cat /m/{DEEP}")
+    return out, list(box.log), _walk(box), box.id_of(DEEP)
+
+
+async def _a_warm_fresh_box_read_is_one_request_by_id_case(ws, box, root):
+    await _line(ws, f"cat /m/{DEEP}")
+    before = len(box.log)
+    out = await _line(ws, f"cat /m/{DEEP}")
+    return out, box.log[before:], box.id_of(root + DEEP)
+
+
+async def _with_its_index_cleared_a_warm_box_read_walks_every_time_case(
+    ws, box
+):
+    await _line(ws, f"cat /m/{DEEP}")
+    logs = []
+    for _ in range(2):
+        await ws.mount("/m").index.clear()
+        before = len(box.log)
+        assert await _line(ws, f"cat /m/{DEEP}") == SEED
+        logs.append(box.log[before:])
+    return logs, _walk(box)
+
+
+async def _a_same_size_box_rewrite_in_the_same_second_is_refetched_case(
+    ws, box
+):
+    await _line(ws, f"cat /m/{DEEP}")
+    box.write(DEEP, CHANGED)
+    before = len(box.log)
+    out = await _line(ws, f"cat /m/{DEEP}")
+    return out, box.log[before:], _walk(box), box.id_of(DEEP)
+
+
+async def _a_box_file_moved_outside_is_gone_and_drops_its_overlay_case(
+    ws, box
+):
+    await _line(ws, f"cat /m/{DEEP}")
+    await _line(ws, f"chmod 600 /m/{DEEP}")
+    fid = box.id_of(DEEP)
+    box.move(DEEP, "a/x/c.txt")
+    before = len(box.log)
+    code, _, err = await _run(ws, f"cat /m/{DEEP}")
+    log = box.log[before:]
+    meta = ws.namespace.meta_for(f"/m/{DEEP}")
+    moved = await _line(ws, "cat /m/a/x/c.txt")
+    return code, err, log, meta, moved, fid, _walk(box)
+
+
+async def _a_box_file_recreated_with_the_same_bytes_is_served_warm_case(
+    ws, box
+):
+    await _line(ws, f"cat /m/{DEEP}")
+    old = box.id_of(DEEP)
+    box.delete(DEEP, "purge")
+    new = box.create(DEEP, SEED)
+    logs = []
+    for _ in range(2):
+        before = len(box.log)
+        assert await _line(ws, f"cat /m/{DEEP}") == SEED
+        logs.append(box.log[before:])
+    return logs, old, new, _walk(box)
+
+
+async def _a_box_file_under_a_renamed_parent_is_gone_case(ws, box):
+    await _line(ws, f"cat /m/{DEEP}")
+    fid, to_a = box.id_of(DEEP), _walk(box)[:2]
+    box.rename_folder("a/b", "b2")
+    before = len(box.log)
+    code, _, err = await _run(ws, f"cat /m/{DEEP}")
+    log = box.log[before:]
+    renamed = await _line(ws, "cat /m/a/b2/c.txt")
+    return code, err, renamed, log, fid, to_a
+
+
+async def _a_box_file_under_a_trashed_mount_root_is_gone_case(ws, box):
+    await _line(ws, f"cat /m/{DEEP}")
+    root, fid = box.id_of("r"), box.id_of("r/" + DEEP)
+    box.delete("r", "trash_ancestor")
+    before = len(box.log)
+    code, out, err = await _run(ws, f"cat /m/{DEEP}")
+    return code, out, err, box.log[before:], root, fid
+
+
+async def _a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk_case(
+    ws, box
+):
+    await _line(ws, f"cat /m/{DEEP}")
+    await _line(ws, f"chmod 600 /m/{DEEP}")
+    fid = box.id_of(DEEP)
+    box.forbidden.add(fid)
+    before = len(box.log)
+    out = await _line(ws, f"cat /m/{DEEP}")
+    log = box.log[before:]
+    mode_bits = await _line(ws, f"stat -c %a /m/{DEEP}")
+    before = len(box.log)
+    assert await _line(ws, f"cat /m/{DEEP}") == SEED
+    again = box.log[before:]
+    return out, log, again, mode_bits, fid, _walk(box)
+
+
+async def _a_box_file_with_no_sha1_is_refetched_on_every_fresh_read_case(
+    ws, box
+):
+    fid = box.id_of(DEEP)
+    box.unhashed.add(fid)
+    await _line(ws, f"cat /m/{DEEP}")
+    before = len(box.log)
+    out = await _line(ws, f"cat /m/{DEEP}")
+    return out, box.log[before:], fid, _walk(box)
+
+
+async def _a_warm_box_ls_shows_what_a_cold_one_does_from_one_request_case(
+    ws, box
+):
+    cold = await _line(ws, f"ls -l /m/{DEEP}")
+    await _line(ws, f"cat /m/{DEEP}")
+    before = len(box.log)
+    warm = await _line(ws, f"ls -l /m/{DEEP}")
+    return cold, warm, box.log[before:], box.id_of(DEEP)

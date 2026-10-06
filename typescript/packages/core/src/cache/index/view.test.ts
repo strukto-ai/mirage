@@ -24,7 +24,7 @@ import {
 } from './config.ts'
 import { withCacheMutation } from '../file/io.ts'
 import { RAMFileCacheStore } from '../file/ram.ts'
-import { RAMIndexCacheStore } from './ram.ts'
+import { ListingCheckStore, RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import type { IndexCacheStore } from './store.ts'
 import { IndexView } from './view.ts'
@@ -315,6 +315,7 @@ function holdMutation(cache: RAMFileCacheStore): {
 }
 
 const FENCED: [string, (view: IndexView) => Promise<unknown>][] = [
+  ['replaceIfUnchanged', (view) => view.replaceIfUnchanged('/data/a', JSON.stringify(ROW), ROW)],
   ['get', (view) => view.get('/data/a')],
   ['listDir', (view) => view.listDir('/data')],
   ['put', (view) => view.put('/data/a', ROW)],
@@ -942,4 +943,30 @@ describe('a view probing for a subtree', () => {
     expect(await empty.holdsSubtree('/data/dir')).toBe(false)
     await cache.close()
   })
+})
+
+describe('hints through a view', () => {
+  // The probe hints through mount.index, the view, not its raw store: a row
+  // the view does not own is no lead.
+  it('a scratch store hints only what its view owns', async () => {
+    const raw = new RAMIndexCacheStore()
+    await raw.setDir('/data', [['a', ROW]])
+    const owned = new IndexView(raw, new RAMFileCacheStore(), '/data', () => true)
+    const foreign = new IndexView(raw, new RAMFileCacheStore(), '/data', () => false)
+    expect(await new ListingCheckStore({ hints: owned }).hint('/data/a')).not.toBeNull()
+    expect(await new ListingCheckStore({ hints: foreign }).hint('/data/a')).toBeNull()
+  })
+})
+
+it.each([false, true])('conditional replacement keeps ownership: %s', async (owned) => {
+  const store = new RAMIndexCacheStore()
+  await store.put('/data/a', ROW)
+  const old = (await store.get('/data/a')).entry
+
+  if (old == null) throw new Error('missing seeded row')
+  const view = new IndexView(store, new RAMFileCacheStore(), '/data', () => owned)
+  expect(
+    await view.replaceIfUnchanged('/data/a', JSON.stringify(old), old.copyWith({ id: 'new' })),
+  ).toBe(owned)
+  expect((await store.get('/data/a')).entry?.id).toBe(owned ? 'new' : old.id)
 })

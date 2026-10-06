@@ -236,16 +236,27 @@ async def test_cancel_running_job():
             f"/v1/workspaces/{wid}/shell?background=true",
             json={"command": "sleep 5.0"},
         )
+        assert r.status_code == 202, r.text
         job_id = r.json()["job_id"]
-        await asyncio.sleep(0.05)
+        async with asyncio.timeout(5):
+            while True:
+                rg = await client.get(f"/v1/jobs/{job_id}")
+                assert rg.status_code == 200, rg.text
+                status = rg.json()["status"]
+                if status == "running":
+                    break
+                assert status == "pending"
+                await asyncio.sleep(0.01)
 
         rd = await client.delete(f"/v1/jobs/{job_id}")
         assert rd.status_code == 200
-        await asyncio.sleep(0.1)
-
-        rg = await client.get(f"/v1/jobs/{job_id}")
-        status = rg.json()["status"]
-        assert status in ("canceled", "failed")
+        assert rd.json()["canceled"] is True
+        rw = await client.post(
+            f"/v1/jobs/{job_id}/wait", json={"timeout_s": 5.0}
+        )
+        assert rw.status_code == 200, rw.text
+        assert rw.json()["status"] == "canceled"
+        assert rw.json()["finished_at"] is not None
 
 
 @pytest.mark.asyncio

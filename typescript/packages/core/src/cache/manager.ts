@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { captureRead } from './context.ts'
 import { activeRecords } from '../observe/context.ts'
 import { READ_FINGERPRINT_OPS } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
@@ -19,7 +20,7 @@ import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import type { FileCache } from './file/mixin.ts'
 import type { IndexCacheStore } from './index/store.ts'
-import type { Evicted } from './index/config.ts'
+import type { Evicted, IndexEntry } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
 import { commandStarted, tick } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
@@ -340,6 +341,20 @@ export class CacheManager {
     return stat
   }
 
+  /** Retain a live fallback row only while its predecessor still owns the slot. */
+  retainResolvedEntry(
+    path: PathSpec,
+    generation: number,
+    predecessor: string,
+    entry: IndexEntry,
+  ): Promise<void> {
+    const key = this.cacheKey(path)
+    return this.withMutation(async () => {
+      if (generation !== this.readGeneration || !this.ownsPath(key) || this.index === null) return
+      await this.scopeIndexLocked(this.index).replaceIfUnchanged(key, predecessor, entry)
+    })
+  }
+
   /**
    * A view for a caller already inside `withMutation`.
    *
@@ -453,9 +468,9 @@ export class CacheManager {
     const generation = this.readGeneration
     const records = activeRecords()
     const start = records?.length ?? 0
-    const data = await fetch()
-    if (!(data instanceof Uint8Array)) return data
     const key = this.cacheKey(path)
+    const [data, facts] = await captureRead(key, fetch)
+    if (!(data instanceof Uint8Array)) return data
     const cache = this.readableCache(key)
     if (cache !== null) {
       await withCacheMutation(cache, async () => {
@@ -464,12 +479,15 @@ export class CacheManager {
           generation === this.readGeneration &&
           (keep === undefined || keep())
         ) {
-          const fingerprint = latestFingerprint(
+          let fingerprint = latestFingerprint(
             records?.slice(start),
             key,
             READ_FINGERPRINT_OPS,
             data.byteLength,
           )
+          if (facts.length > 0) {
+            fingerprint = facts.every((fp) => fp === facts[0]) ? (facts[0] ?? null) : null
+          }
           await cache.set(key, data, { fingerprint, ttl: this.readTtl })
         }
       })

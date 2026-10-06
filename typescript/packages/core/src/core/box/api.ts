@@ -63,6 +63,7 @@ interface ListItemsResponse {
 
 const LIST_FIELDS = 'id,name,type,size,modified_at,etag,sha1,parent'
 const SEARCH_FIELDS = 'id,name,type,path_collection'
+const ITEM_FIELDS = 'type,id,name,size,modified_at,sha1,path_collection,item_status'
 const SEARCH_PAGE = 200
 // Box search serves at most 10,000 matches across all pages; a result set
 // that reaches the ceiling may be incomplete and must not narrow a scan.
@@ -198,6 +199,19 @@ export async function realtimeServer(tm: BoxTokenManager): Promise<BoxRealtimeSe
 
 export async function getFolderInfo(tm: BoxTokenManager, folderId: string): Promise<BoxItem> {
   return (await boxGet(tm, `${tm.apiBase}/folders/${folderId}`)) as BoxItem
+}
+
+/** `GET /files/{id}`: a file's live metadata, with its ancestry and status. */
+export interface BoxFileInfo extends BoxItem {
+  path_collection?: { total_count: number; entries: BoxPathCollectionEntry[] }
+  item_status?: string
+}
+
+/** One file's live metadata: its sha1, name, ancestry and status. */
+export async function getFileInfo(tm: BoxTokenManager, fileId: string): Promise<BoxFileInfo> {
+  return (await boxGet(tm, `${tm.apiBase}/files/${fileId}`, {
+    fields: ITEM_FIELDS,
+  })) as BoxFileInfo
 }
 
 export async function downloadFile(

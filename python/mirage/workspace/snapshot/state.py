@@ -871,7 +871,11 @@ def reusable_mounts(
         norm_mount_prefix(HISTORY_PREFIX),
         norm_mount_prefix(BIN_PREFIX),
     }
-    live = {m.prefix: m.vfs for m in mounts if m.prefix not in auto}
+    live = {
+        m.prefix: Mount(vfs=m.vfs, read=m.read, vfs_ref=m.vfs_ref)
+        for m in mounts
+        if m.prefix not in auto
+    }
     return {
         m[MountKey.PREFIX]: live[m[MountKey.PREFIX]]
         for m in state[StateKey.MOUNTS]

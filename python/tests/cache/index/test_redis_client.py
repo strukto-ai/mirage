@@ -994,3 +994,64 @@ async def test_a_live_listing_at_the_end_of_a_full_page_is_found(
     child = IndexEntry(id="g", name="g", resource_type="file")
     await store.set_dir("/x/dir/z", [("g", child)])
     assert await store.holds_subtree("/x/dir") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("peer", ["none", "replace", "delete"])
+async def test_redis_conditional_replacement_is_atomic(
+    rolling_client, monkeypatch, peer
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    original = IndexEntry(
+        id="a",
+        name="a",
+        resource_type="file",
+        size=2,
+        remote_time="2026-09-05T10:55:39.123000Z",
+        extra={"nested": {"tags": ["x", "y"]}},
+    )
+    await store.set_dir("/dir", [("a", original)], version="v1")
+    old = (await store.get("/dir/a")).entry
+    key = store._entry_key("/dir/a")
+    sparse = old.model_dump(exclude_defaults=True)
+    await client.set(
+        key, json.dumps(dict(reversed(list(sparse.items()))), indent=2)
+    )
+    raw = await client.get(key)
+    listing_key = store._children_key("/dir")
+    listing_raw = await client.get(listing_key)
+    latest = old.model_copy(update={"size": 9})
+    evaluate = client.eval
+    calls = 0
+
+    async def raced_eval(script, numkeys, *args):
+        nonlocal calls
+        calls += 1
+        assert numkeys == 1 and args[0] == key and args[1] == raw
+        if peer == "replace":
+            await client.set(key, latest.model_dump_json())
+        elif peer == "delete":
+            await client.delete(key)
+        return await evaluate(script, numkeys, *args)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(client, "eval", raced_eval)
+        assert await store.replace_if_unchanged(
+            "/dir/a",
+            old.model_dump_json(),
+            old.model_copy(
+                update={
+                    "id": "confirmed",
+                    "name": "confirmed",
+                    "index_time": "",
+                }
+            ),
+        ) is (peer == "none")
+    assert calls == 1
+    current = (await store.get("/dir/a")).entry
+    if peer == "none":
+        assert current.id == "confirmed"
+    else:
+        assert current == (latest if peer == "replace" else None)
+    assert await client.get(listing_key) == listing_raw

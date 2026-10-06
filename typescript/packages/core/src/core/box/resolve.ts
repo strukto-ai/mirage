@@ -14,7 +14,8 @@
 
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { PathSpec } from '../../types.ts'
-import { listFolderItems, type BoxItem, type BoxSearchItem } from './api.ts'
+import { listFolderItems, type BoxFileInfo, type BoxItem, type BoxSearchItem } from './api.ts'
+import { ACTIVE, ALL_FILES_FOLDER_ID, TRASH_FOLDER_ID } from './constants.ts'
 
 export function pathParts(path: PathSpec): string[] {
   return path.vfsPath.split('/').filter((p) => p !== '')
@@ -87,4 +88,26 @@ export function mountRelativeKey(
   if (!collecting) return null
   names.push(item.name)
   return names.filter((n) => n !== '').join('/')
+}
+
+/**
+ * Whether a live `GET /files/{id}` answer is the active file at `path`.
+ *
+ * Box enforces unique names per folder, so a file whose live chain of names
+ * from the mount root equals the path is the very item walking the path would
+ * reach. Four checks: the item is a file, its `item_status` is active, its
+ * `path_collection` starts at All Files and passes no Trash folder, and its
+ * names below the mount root equal the path. The name comparison alone
+ * already rejects a trashed chain below the mount root; the All Files check
+ * also refuses a chain that does not start at All Files yet passes through
+ * the mount root with the right names below it, which the name comparison
+ * alone would accept, and with the Trash check catches the mount root itself
+ * in Trash.
+ */
+export function namesThisPath(accessor: BoxAccessor, item: BoxFileInfo, path: PathSpec): boolean {
+  if (item.type !== 'file' || item.item_status !== ACTIVE) return false
+  const chain = item.path_collection?.entries ?? []
+  if (chain.length === 0 || chain[0]?.id !== ALL_FILES_FOLDER_ID) return false
+  if (chain.some((anc) => anc.id === TRASH_FOLDER_ID)) return false
+  return mountRelativeKey(item, accessor.rootFolderId) === pathParts(path).join('/')
 }

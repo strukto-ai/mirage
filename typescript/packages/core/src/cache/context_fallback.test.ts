@@ -12,10 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CacheManager } from './manager.ts'
+import { RAMFileCacheStore } from './file/ram.ts'
 import { describe, expect, it, vi } from 'vitest'
 import {
   type CacheInvalidator,
   activeCacheManager,
+  captureRead,
+  publishRead,
   invalidateAfterUnlink,
   invalidateAfterWrite,
   invalidateAncestors,
@@ -25,6 +29,8 @@ import {
 import { PathSpec } from '../types.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
+const captureState = vi.hoisted(() => ({ enabled: false, value: undefined as unknown }))
+
 // The browser-runtime branch under node's test runner: the real
 // FallbackStorage, no task isolation.
 vi.mock('../utils/async_context.ts', async (importOriginal) => {
@@ -33,7 +39,13 @@ vi.mock('../utils/async_context.ts', async (importOriginal) => {
     ...real,
     asyncContextIsolatesTasks: false,
     createAsyncContext<T>() {
-      return new real.FallbackStorage<T>()
+      class TrackedStorage extends real.FallbackStorage<T> {
+        override run<R>(store: T, fn: () => R | Promise<R>): R | Promise<R> {
+          if (captureState.enabled) captureState.value = store
+          return super.run(store, fn)
+        }
+      }
+      return new TrackedStorage()
     },
   }
 })
@@ -156,4 +168,74 @@ describe('cache invalidation on the fallback storage', () => {
     expect(afterOtherSettled).toBe(managerA)
     expect(activeCacheManager()).toBeNull()
   })
+})
+
+it.each([false, true])(
+  'overlapping same-path fills keep their own tokens, reverse=%s',
+  async (reverse) => {
+    const caches = [new RAMFileCacheStore(), new RAMFileCacheStore()] as const
+    const managers = [
+      new CacheManager(caches[0], null, '/s3/', true),
+      new CacheManager(caches[1], null, '/s3/', true),
+    ] as const
+    const path = PathSpec.fromStrPath('/s3/a.txt', 'a.txt')
+    const data = [new TextEncoder().encode('first'), new TextEncoder().encode('other')] as const
+    const [heldA, releaseA] = gate()
+    const [heldB, releaseB] = gate()
+    const a = managers[0].fill(path, async () => {
+      await heldA
+      publishRead(path.virtual, data[0], 'first-token')
+      return data[0]
+    })
+    const b = managers[1].fill(path, async () => {
+      await heldB
+      publishRead(path.virtual, data[1], 'other-token')
+      return data[1]
+    })
+    // An unscoped backend read has no fill scope to detect as overlap.
+    publishRead(path.virtual, new TextEncoder().encode('third'), 'foreign-token')
+    if (reverse) {
+      releaseB()
+      await b
+      releaseA()
+    } else {
+      releaseA()
+      await a
+      releaseB()
+    }
+    await Promise.all([a, b])
+    expect(await caches[0].isFresh(path.virtual, 'first-token')).toBe(true)
+    expect(await caches[1].isFresh(path.virtual, 'other-token')).toBe(true)
+  },
+)
+
+it('a pending capture owns completed same-path bodies only weakly', async () => {
+  const [held, release] = gate()
+  captureState.enabled = true
+  const pending = captureRead('/m/x', async () => {
+    await held
+    const data = new Uint8Array([42])
+    publishRead('/m/x', data, 'held-token')
+    return data
+  })
+  captureState.enabled = false
+  try {
+    for (const path of ['/m/x', '/m/other']) {
+      for (let n = 0; n < 32; n++) {
+        await captureRead(path, () => {
+          const body = new Uint8Array(1024)
+          publishRead(path, body, 'short-token')
+          return Promise.resolve(body)
+        })
+      }
+    }
+    const state = captureState.value as Record<string, unknown>
+    expect(Object.keys(state).sort()).toEqual(['facts', 'path'])
+    expect(state.path).toBe('/m/x')
+    expect(state.facts).toBeInstanceOf(WeakMap)
+  } finally {
+    captureState.value = undefined
+    release()
+    expect((await pending)[1]).toEqual(['held-token'])
+  }
 })

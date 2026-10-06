@@ -24,12 +24,14 @@ from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.io import IOResult
 from mirage.runtime.types import ScriptSource
-from mirage.types import MountMode
+from mirage.types import MountMode, ReadPolicy, ReadSpec
+from mirage.vfs.box import BoxConfig, BoxVFS
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.secrets import REDACTED_SECRET
 from mirage.workspace import Workspace
+from mirage.workspace.mount import Mount
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.snapshot.keys import CLIKey, ScriptKey, StateKey
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
@@ -698,3 +700,32 @@ async def test_script_cli_runtime_pin_and_module_bit_round_trip():
     assert install.spec.script.language == "js"
     await ws.close()
     await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_copy_preserves_live_box_mount_policy_and_provenance():
+    vfs = BoxVFS(BoxConfig(access_token="fake"))
+    ws = Workspace(
+        {
+            "/box": Mount(
+                vfs=vfs,
+                mode=MountMode.READ,
+                read=ReadSpec(policy=ReadPolicy.FRESH, ttl=45),
+                vfs_ref="box",
+            ),
+            "/alias": Mount(vfs=vfs, read=ReadSpec(ttl=75), vfs_ref="box"),
+        }
+    )
+    clone = await ws.copy()
+    try:
+        for prefix in ("/box", "/alias"):
+            original, copied = ws.mount(prefix), clone.mount(prefix)
+            assert copied.read == original.read
+            assert copied.mode == original.mode
+            assert copied.vfs_ref == original.vfs_ref == "box"
+            assert copied.vfs is original.vfs
+            assert copied.index_store is not original.index_store
+            assert copied.cache_manager is not original.cache_manager
+    finally:
+        await clone.close()
+        await ws.close()

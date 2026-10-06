@@ -1,5 +1,5 @@
 {
- "baseline": 4074,
+ "baseline": 4072,
  "modules": {
   "ops/registry": {
    "typescript_only": {
@@ -301,6 +301,11 @@
     "DocumentQuery": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "DocumentsRoutesDeps": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "registerDocumentsRoutes": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
+   }
+  },
+  "core/box/api": {
+   "typescript_only": {
+    "BoxFileInfo": "The shape of GET /files/{id} with the fields the fresh check asks for (path_collection, item_status) beside BoxItem's; Python reads the same answer as a plain dict, as it does every Box item."
    }
   }
  }

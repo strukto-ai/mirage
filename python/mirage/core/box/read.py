@@ -12,15 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 import posixpath
 from collections.abc import AsyncIterator
 from functools import partial
 
 from mirage.accessor.box import BoxAccessor
+from mirage.cache.context import publish_read
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.cache.index.warm import entry_or_warm
 from mirage.core.box.api import download_file, download_file_stream
+from mirage.core.box.fingerprint import entry_token, read_token
 from mirage.core.box.readdir import readdir
+from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -72,9 +76,21 @@ async def read(
         size (int | None): how many bytes, or None for the rest.
     """
     entry = await _resolve_entry(accessor, path, index)
-    return await download_file(
-        accessor.token_manager, entry.id, window_for(offset, size)
+    timer = start_op()
+    window = window_for(offset, size)
+    data = await download_file(accessor.token_manager, entry.id, window)
+    fingerprint = None
+    # Only a whole read (no window) through a row with a sha1 can yield a
+    # token, so nothing else is hashed. The token never depends on a recorder
+    # being bound (tests/vfs/test_read_revalidatable.py holds each declarer
+    # to it).
+    if window is None and entry_token(entry) is not None:
+        fingerprint = read_token(entry, hashlib.sha1(data).hexdigest())
+    publish_read(path.virtual, data, fingerprint)
+    record(
+        "read", path.virtual, "box", len(data), timer, fingerprint=fingerprint
     )
+    return data
 
 
 async def read_stream(
@@ -82,6 +98,29 @@ async def read_stream(
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
+    """Stream a file, stamped with its sha1 once it has been read whole.
+
+    When a token can result (a recorder is bound and the row has a sha1),
+    each chunk feeds a running SHA-1; the token lands only after the last
+    chunk, so a stream abandoned part-way stamps nothing.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): the path to read.
+        index (IndexCacheStore): listing cache, consulted for the file id.
+    """
     entry = await _resolve_entry(accessor, path, index)
+    rec = record_stream("read", path.virtual, "box")
+    digest = (
+        hashlib.sha1()
+        if rec is not None and entry_token(entry) is not None
+        else None
+    )
     async for chunk in download_file_stream(accessor.token_manager, entry.id):
+        if digest is not None:
+            digest.update(chunk)
+        if rec is not None:
+            rec.bytes += len(chunk)
         yield chunk
+    if rec is not None and digest is not None:
+        rec.fingerprint = read_token(entry, digest.hexdigest())

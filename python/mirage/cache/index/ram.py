@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from datetime import datetime, timedelta, timezone
 
 from mirage.cache.index.config import (
@@ -95,6 +96,22 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                     update={"index_time": to_iso_z(datetime.now(timezone.utc))}
                 )
             self._entries[vfs_path] = entry
+
+    async def replace_if_unchanged(
+        self, vfs_path: str, predecessor: str, entry: IndexEntry
+    ) -> bool:
+        async with self._lock_for(vfs_path):
+            current = self._entries.get(vfs_path)
+            if current is None or current.model_dump() != json.loads(
+                predecessor
+            ):
+                return False
+            if not entry.index_time:
+                entry = entry.model_copy(
+                    update={"index_time": to_iso_z(datetime.now(timezone.utc))}
+                )
+            self._entries[vfs_path] = entry
+            return True
 
     async def list_dir(self, vfs_path: str) -> ListResult:
         exp = self._expiry.get(vfs_path)
@@ -340,3 +357,21 @@ class ListingCheckStore(RAMIndexCacheStore):
     backend that lists a parent to answer a miss may ask for the one path
     instead, since the store is dropped right after.
     """
+
+    def __init__(self, hints: IndexCacheStore | None = None) -> None:
+        super().__init__()
+        self._hints = hints
+        self.hinted_rows: dict[str, str] = {}
+
+    async def hint(self, vfs_path: str) -> IndexEntry | None:
+        """Offer the mount row as a lead the backend must confirm live.
+
+        Args:
+            vfs_path (str): mount-absolute key of the path being checked.
+        """
+        if self._hints is None:
+            return None
+        entry = (await self._hints.get(vfs_path)).entry
+        if entry is not None:
+            self.hinted_rows[vfs_path] = entry.model_dump_json()
+        return entry

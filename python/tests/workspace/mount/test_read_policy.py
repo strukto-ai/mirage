@@ -20,8 +20,6 @@ from mirage.types import DEFAULT_READ_TTL, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.aliyun.aliyun import AliyunVFS
 from mirage.vfs.backblaze.backblaze import BackblazeVFS
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.box.box import BoxVFS
-from mirage.vfs.box.config import BoxConfig
 from mirage.vfs.ceph.ceph import CephVFS
 from mirage.vfs.dev.dev import DevVFS
 from mirage.vfs.digitalocean.digitalocean import DigitalOceanVFS
@@ -38,6 +36,8 @@ from mirage.vfs.lancedb import LanceDBConfig, LanceDBVFS
 from mirage.vfs.loader import load_attr
 from mirage.vfs.minio.config import MinIOConfig
 from mirage.vfs.minio.minio import MinIOVFS
+from mirage.vfs.nextcloud.config import NextcloudConfig
+from mirage.vfs.nextcloud.nextcloud import NextcloudVFS
 from mirage.vfs.oci.oci import OCIVFS
 from mirage.vfs.qingstor.qingstor import QingStorVFS
 from mirage.vfs.r2.r2 import R2VFS
@@ -278,14 +278,13 @@ def test_fresh_is_allowed_on_a_listing_cache_without_a_file_cache(
 
 
 def test_fresh_is_refused_on_a_backend_that_caches_but_stamps_nothing():
-    # box reaches the gate -- it caches reads -- but its read record
-    # carries no fingerprint, so there is nothing to compare.
-    vfs = BoxVFS(
-        BoxConfig(client_id="i", client_secret="s", refresh_token="r")
-    )
+    # nextcloud reaches the gate -- it caches reads -- but its ETag is a
+    # function of a pinnable mtime and the size, no content token, so
+    # there is nothing honest to compare.
+    vfs = NextcloudVFS(NextcloudConfig(url="https://cloud.example"))
     assert vfs.caches_reads is True
     with pytest.raises(ValueError) as exc:
-        check_read_capability("/box/", vfs, FRESH)
+        check_read_capability("/nc/", vfs, FRESH)
     assert "comparable content token" in str(exc.value)
 
 
@@ -411,6 +410,7 @@ REVALIDATABLE = {
     "hf_buckets",
     "github",
     "dropbox",
+    "box",
 }
 
 FRESH_BY_LISTING = {"disk", "chroma", "qdrant", "airtable", "wandb"}

@@ -211,3 +211,39 @@ def listing_refreshed(folder: str) -> bool:
     """
     manager = active_cache_manager()
     return manager is not None and manager.listing_trusted(folder)
+
+
+_read_facts: ContextVar[tuple[str, list[tuple[bytes, str | None]]] | None] = (
+    ContextVar("_cache_read_facts", default=None)
+)
+
+
+async def capture_read(
+    path: str, fetch: Callable[[], Awaitable[T]]
+) -> tuple[T, list[str | None]]:
+    """Collect tokens belonging to the exact bytes returned by a fetch.
+
+    Args:
+        path (str): virtual cache key.
+        fetch (Callable): whole-file backend reader.
+    """
+    facts: list[tuple[bytes, str | None]] = []
+    token = _read_facts.set((path, facts))
+    try:
+        data = await fetch()
+        return data, [fp for body, fp in facts if body is data]
+    finally:
+        _read_facts.reset(token)
+
+
+def publish_read(path: str, data: bytes, fingerprint: str | None) -> None:
+    """Publish a backend-verified token without activating observation.
+
+    Args:
+        path (str): virtual file path.
+        data (bytes): the exact object the reader returns.
+        fingerprint (str | None): token proven by these bytes, or unknown.
+    """
+    capture = _read_facts.get()
+    if capture is not None and capture[0] == path:
+        capture[1].append((data, fingerprint))
