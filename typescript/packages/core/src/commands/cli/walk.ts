@@ -18,8 +18,7 @@ import { FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
 import { argparseHelp, clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
 import { UsageStyle, Option } from '../spec/types.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { CommandSpec } from '../spec/types.ts'
-import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
+import { CLISpec, WalkResult, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
@@ -261,8 +260,8 @@ export function nodeHelp(
 }
 
 // The node's child rows, as the renderer lists them. `visible` filters on
-// a child's canonical name; only `man` passes one, since it renders for a
-// session. Help, man and generated skills all filter child rows.
+// a child's canonical name for the reading session: help, man and
+// generated skills all pass one.
 function rowsOf(node: CLISpec, visible?: (verb: string) => boolean): [string, string][] {
   return node.subcommands
     .filter((child) => visible === undefined || visible(child.name))
@@ -275,19 +274,14 @@ function rowsOf(node: CLISpec, visible?: (verb: string) => boolean): [string, st
 // declares its own or answers the flag itself (ownsArgv), where advertising it
 // would promise a page mirage no longer renders. A refusal renders the same
 // node a help page would, or its usage line would disagree with `--help`'s.
-function listedNode(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): CommandSpec {
+export function listedNode(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): CLISpec {
   if (node.options.some((option) => option.long === '--help') || ownsArgv(node)) return node
-
-  return new CommandSpec({
-    // eslint-disable-next-line @typescript-eslint/no-misused-spread
-    ...node,
-    options: [
-      ...node.options,
-      style === UsageStyle.ARGPARSE && !node.options.some((o) => o.short === '-h')
-        ? new Option({ long: '--help', short: '-h', description: 'Show this help and exit' })
-        : HELP_OPTION,
-    ],
-  })
+  const help =
+    style === UsageStyle.ARGPARSE && !node.options.some((o) => o.short === '-h')
+      ? new Option({ long: '--help', short: '-h', description: 'Show this help and exit' })
+      : HELP_OPTION
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+  return new CLISpec({ ...node, options: [...node.options, help] })
 }
 
 /**
@@ -577,6 +571,7 @@ export function walk(
   let path: string[] = []
   const flags: WalkFlagBag = {}
   let i = 0
+  const shown = (child: string): boolean => visible?.([...path, child]) ?? true
   for (;;) {
     // A script node terminates the walk exactly like an fn leaf: its
     // remaining argv rides the ordinary spec machinery for validation,
@@ -606,9 +601,7 @@ export function walk(
       }
       if (!optionsEnded && token === '-h' && style === UsageStyle.ARGPARSE && !cs.dest.has('-h')) {
         return new WalkResult({
-          output: encodeText(
-            nodeHelp(name, node, style, (child) => visible?.([...path, child]) ?? true),
-          ),
+          output: encodeText(nodeHelp(name, node, style, shown)),
         })
       }
       if (!optionsEnded && token === '--') {
@@ -668,9 +661,7 @@ export function walk(
             return usageError(name, node, `error: option '${spelling}' takes no value`, style)
           }
           return new WalkResult({
-            output: encodeText(
-              nodeHelp(name, node, style, (child) => visible?.([...path, child]) ?? true),
-            ),
+            output: encodeText(nodeHelp(name, node, style, shown)),
           })
         } else {
           return usageError(
@@ -746,9 +737,7 @@ export function walk(
     const refused = finishNode(name, node, cs, flags, cwd, style, env)
     if (refused !== null) return refused
     return new WalkResult({
-      output: encodeText(
-        nodeHelp(name, node, style, (child) => visible?.([...path, child]) ?? true),
-      ),
+      output: encodeText(nodeHelp(name, node, style, shown)),
       stream: 'stdout',
       exitCode: 1,
     })

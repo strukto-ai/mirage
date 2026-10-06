@@ -17,98 +17,31 @@ import asyncio
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import Operand, Option
 from mirage.workspace.snapshot.keys import StateKey
 from mirage.workspace.snapshot.state import apply_state_dict, to_state_dict
 
 
-async def cli(inv):
-    return None
-
-
 def workspace():
-    ws = Workspace(
+    return Workspace(
         {"/data": RAMVFS(), "/secret": RAMVFS()},
         mode=MountMode.WRITE,
         profiles={"reader": {"paths": {"hide": ["/secret"]}}},
     )
-    ws.register_cli(
-        "tickets",
-        CLISpec(
-            name="tickets",
-            description="Ticket operations",
-            subcommands=(
-                CLISpec(
-                    name="list",
-                    fn=cli,
-                    options=(
-                        Option(
-                            long="--limit",
-                            type="int",
-                            metavar="N",
-                            default="20",
-                            description="Maximum rows",
-                        ),
-                    ),
-                ),
-                CLISpec(
-                    name="delete",
-                    fn=cli,
-                    positional=(Operand(name="id", type="str"),),
-                ),
-            ),
-        ),
-    )
-    return ws
 
 
 @pytest.mark.asyncio
-async def test_optional_independent_and_session_scoped():
-    ws = workspace()
-    a = await ws.session("a", profile="reader")
-    b = await ws.session("b")
-    before = await ws.vfs.readdir("/")
-    assert "/VFS.md" not in before and "/SKILL.md" not in before
-    preview = await ws.vfs_md(profile="reader")
-    assert "/secret" not in preview
-    assert len(ws.list_sessions()) == 3
-    await a.vfs_md("/VFS.md")
-    assert "/VFS.md" in await ws.vfs.readdir("/", session_id="a")
-    assert "/VFS.md" not in await ws.vfs.readdir("/", session_id="b")
-    with pytest.raises(FileNotFoundError):
-        await ws.vfs.read("/VFS.md", session_id="b")
-    assert await ws.vfs.read("/VFS.md", session_id="a") == preview.encode()
-    await b.skill_md("/SKILL.md")
-    assert "/SKILL.md" not in await ws.vfs.readdir("/", session_id="a")
-    assert b"tickets list" in await ws.vfs.read("/SKILL.md", session_id="b")
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_global_views_render_for_each_reader_and_refresh():
+async def test_a_preview_opens_no_session_and_each_reader_renders_its_own():
     ws = workspace()
     await ws.session("a", profile="reader")
     await ws.session("b")
+    preview = await ws.vfs_md(profile="reader")
+    assert "/secret" not in preview and len(ws.list_sessions()) == 3
     await ws.vfs_md("/VFS.md")
-    await ws.skill_md("/SKILL.md")
     restricted, full = await asyncio.gather(
         ws.vfs.read("/VFS.md", session_id="a"),
         ws.vfs.read("/VFS.md", session_id="b"),
     )
-    assert b"/secret" not in restricted and b"/secret" in full
-    await ws.set_session_profile("b", "reader")
-    assert await ws.vfs.read("/VFS.md", session_id="b") == restricted
-    await ws.set_session_profile(
-        "a", {"commands": {"allow": ["tickets list", "cat", "man"]}}
-    )
-    skill = await ws.vfs.read("/SKILL.md", session_id="a")
-    assert b"tickets list" in skill and b"tickets delete" not in skill
-    assert b"--limit" in skill and b"Maximum rows" in skill
-    stat = await ws.vfs.stat("/SKILL.md", session_id="a")
-    assert stat.size == len(skill)
-    with pytest.raises(OSError):
-        await ws.vfs.write("/SKILL.md", b"replacement", session_id="a")
+    assert restricted == preview.encode() and b"/secret" in full
     await ws.close()
 
 

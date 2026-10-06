@@ -47,8 +47,8 @@ export interface Handle {
   key: string
   data?: Uint8Array
   writeBuf?: [number, Uint8Array][]
-  /** A large file reads a chunk at a time rather than hydrating whole. */
   live?: boolean
+  /** A large file reads a chunk at a time rather than hydrating whole. */
   chunked?: ChunkedHandle
 }
 

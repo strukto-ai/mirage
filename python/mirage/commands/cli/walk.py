@@ -303,10 +303,12 @@ def node_help(
             generated skills use the reading session's visibility.
     """
     if style is UsageStyle.ARGPARSE:
-        return argparse_help(name, _listed(node, style), _rows(node, visible))
+        return argparse_help(
+            name, listed_node(node, style), _rows(node, visible)
+        )
     return render_help(
         name,
-        _listed(node, style),
+        listed_node(node, style),
         subcommands=_rows(node, visible),
         style=style,
     )
@@ -329,7 +331,9 @@ def _rows(
     ]
 
 
-def _listed(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE) -> CLISpec:
+def listed_node(
+    node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE
+) -> CLISpec:
     """The node as the renderer shows it, with `--help` filled in.
 
     --help is a registered option everywhere (argparse add_help, click
@@ -340,7 +344,8 @@ def _listed(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE) -> CLISpec:
     or its usage line would disagree with `--help`'s.
 
     Args:
-        node (CLISpec): the group node.
+        node (CLISpec): the node; a leaf parses against this form too.
+        style (UsageStyle): the root's voice; argparse also takes ``-h``.
     """
     if any(option.long == "--help" for option in node.options) or owns_argv(
         node
@@ -388,7 +393,7 @@ def _usage_error(
         )
         return WalkResult(
             output=clap_group_refusal(
-                name, _listed(node, style), _rows(node), first
+                name, listed_node(node, style), _rows(node), first
             ),
             stream="stderr",
             exit_code=CLAP_EXIT,
@@ -715,6 +720,10 @@ def walk(
     path: tuple[str, ...] = ()
     flags: WalkFlagBag = {}
     i = 0
+
+    def shown(child: str) -> bool:
+        return visible is None or visible((*path, child))
+
     while True:
         # A script node terminates the walk exactly like an fn leaf:
         # its remaining argv rides the ordinary spec machinery for
@@ -760,11 +769,7 @@ def walk(
                             name,
                             node,
                             style,
-                            visible=lambda child: (
-                                visible(path + (child,))
-                                if visible is not None
-                                else True
-                            ),
+                            visible=shown,
                         )
                     )
                 )
@@ -838,11 +843,7 @@ def walk(
                                 name,
                                 node,
                                 style,
-                                visible=lambda child: (
-                                    visible(path + (child,))
-                                    if visible is not None
-                                    else True
-                                ),
+                                visible=shown,
                             )
                         )
                     )
@@ -930,11 +931,7 @@ def walk(
                     name,
                     node,
                     style,
-                    visible=lambda child: (
-                        visible(path + (child,))
-                        if visible is not None
-                        else True
-                    ),
+                    visible=shown,
                 )
             ),
             stream="stdout",

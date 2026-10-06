@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FastifyInstance } from 'fastify'
-import { PolicyError } from '@struktoai/mirage-core/policy/errors'
 import { isFsError } from '@struktoai/mirage-core/utils/errors'
 import type { WorkspaceRegistry } from '../registry.ts'
 
@@ -79,15 +78,9 @@ export function registerDocumentsRoutes(app: FastifyInstance, deps: DocumentsRou
               )[code]
               if (status !== undefined) return reply.status(status).send({ detail: String(error) })
               if (isFsError(error)) throw error
-              if (
-                error instanceof PolicyError ||
-                (error instanceof Error &&
-                  (error.message.startsWith('profile is only') ||
-                    error.message.startsWith('document path must')))
-              ) {
-                return reply.status(422).send({ detail: error.message })
-              }
-              throw error
+              return reply
+                .status(422)
+                .send({ detail: error instanceof Error ? error.message : String(error) })
             }
           },
         })

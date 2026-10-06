@@ -11,7 +11,7 @@
         "redis",
         "opfs"
       ],
-      "command": "test ! -e /VFS.md && test ! -e /SKILL.md && echo absent",
+      "command": "test ! -e /VFS.md && test ! -e /SKILL.md && echo absent; mkdir -p /data/mirage-guides",
       "expect": {
         "exit": 0,
         "stdout": "absent\n",
@@ -29,10 +29,10 @@
         "redis",
         "opfs"
       ],
-      "command": "grep -c '^# Virtual filesystem' /VFS.md; test ! -e /SKILL.md && echo independent",
+      "command": "grep -c '^# Virtual filesystem' /VFS.md; test ! -e /SKILL.md && echo independent; grep -c '/data2' /VFS.md",
       "expect": {
-        "exit": 0,
-        "stdout": "1\nindependent\n",
+        "exit": 1,
+        "stdout": "1\nindependent\n0\n",
         "stderr": ""
       },
       "session": "docs-a",
@@ -74,27 +74,8 @@
       "session": "docs-b"
     },
     {
-      "id": "documents_hidden_mount_not_advertised",
-      "seq": 960003,
-      "targets": [
-        "ram",
-        "disk",
-        "s3",
-        "s3-prefix",
-        "redis",
-        "opfs"
-      ],
-      "command": "grep -c '/data2' /VFS.md",
-      "expect": {
-        "exit": 1,
-        "stdout": "0\n",
-        "stderr": ""
-      },
-      "session": "docs-a"
-    },
-    {
       "id": "documents_global_view_renders_for_reader",
-      "seq": 960004,
+      "seq": 960003,
       "targets": [
         "ram",
         "disk",
@@ -118,7 +99,33 @@
       ]
     },
     {
-      "id": "documents_same_global_view_still_restricted",
+      "id": "documents_session_skill_and_file",
+      "seq": 960004,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -n 3 /SKILL.md; grep -c '/data2' /VFS.md; if { echo overwrite > /VFS.md; } 2>/dev/null; then echo wrote; else echo readonly; fi; head -n 1 /VFS.md; test \"$(stat -c %s /VFS.md)\" -eq \"$(cat /VFS.md | wc -c)\" && echo exact; cat /VFS.md > /data/copied-vfs.md; cmp /VFS.md /data/copied-vfs.md && echo copied",
+      "expect": {
+        "exit": 0,
+        "stdout": "---\nname: mirage\ndescription: Work with data and registered commands inside a MIRAGE workspace.\n0\nreadonly\n# Virtual filesystem\nexact\ncopied\n",
+        "stderr": ""
+      },
+      "session": "docs-a",
+      "documents": [
+        {
+          "kind": "skill",
+          "path": "/SKILL.md",
+          "session": "docs-a"
+        }
+      ]
+    },
+    {
+      "id": "documents_live_profile_update",
       "seq": 960005,
       "targets": [
         "ram",
@@ -128,29 +135,10 @@
         "redis",
         "opfs"
       ],
-      "command": "grep -c '/data2' /VFS.md",
+      "command": "grep -c '/data2' /VFS.md; test ! -e /SKILL.md && echo hidden",
       "expect": {
-        "exit": 1,
-        "stdout": "0\n",
-        "stderr": ""
-      },
-      "session": "docs-a"
-    },
-    {
-      "id": "documents_live_profile_update",
-      "seq": 960006,
-      "targets": [
-        "ram",
-        "disk",
-        "s3",
-        "s3-prefix",
-        "redis",
-        "opfs"
-      ],
-      "command": "grep -c '/data2' /VFS.md",
-      "expect": {
-        "exit": 1,
-        "stdout": "0\n",
+        "exit": 0,
+        "stdout": "0\nhidden\n",
         "stderr": ""
       },
       "session": "docs-b",
@@ -165,90 +153,8 @@
       }
     },
     {
-      "id": "documents_independent_skill",
-      "seq": 960007,
-      "targets": [
-        "ram",
-        "disk",
-        "s3",
-        "s3-prefix",
-        "redis",
-        "opfs"
-      ],
-      "command": "head -n 3 /SKILL.md",
-      "expect": {
-        "exit": 0,
-        "stdout": "---\nname: mirage\ndescription: Work with data and registered commands inside a MIRAGE workspace.\n",
-        "stderr": ""
-      },
-      "session": "docs-a",
-      "documents": [
-        {
-          "kind": "skill",
-          "path": "/SKILL.md",
-          "session": "docs-a"
-        }
-      ]
-    },
-    {
-      "id": "documents_skill_not_shared",
-      "seq": 960008,
-      "targets": [
-        "ram",
-        "disk",
-        "s3",
-        "s3-prefix",
-        "redis",
-        "opfs"
-      ],
-      "command": "test ! -e /SKILL.md && echo hidden",
-      "expect": {
-        "exit": 0,
-        "stdout": "hidden\n",
-        "stderr": ""
-      },
-      "session": "docs-b"
-    },
-    {
-      "id": "documents_readonly",
-      "seq": 960009,
-      "targets": [
-        "ram",
-        "disk",
-        "s3",
-        "s3-prefix",
-        "redis",
-        "opfs"
-      ],
-      "command": "if { echo overwrite > /VFS.md; } 2>/dev/null; then echo wrote; else echo readonly; fi; head -n 1 /VFS.md",
-      "expect": {
-        "exit": 0,
-        "stdout": "readonly\n# Virtual filesystem\n",
-        "stderr": ""
-      },
-      "session": "docs-a"
-    },
-    {
-      "id": "documents_backend_directory",
-      "seq": 960010,
-      "targets": [
-        "ram",
-        "disk",
-        "s3",
-        "s3-prefix",
-        "redis",
-        "opfs"
-      ],
-      "command": "mkdir -p /data/mirage-guides",
-      "expect": {
-        "exit": 0,
-        "stdout": "",
-        "stderr": ""
-      }
-    },
-    {
       "id": "documents_custom_path_on_backend",
-      "seq": 960011,
+      "seq": 960006,
       "targets": [
         "ram",
         "disk",
@@ -271,46 +177,8 @@
       ]
     },
     {
-      "id": "documents_stat_matches_read",
-      "seq": 960012,
-      "targets": [
-        "ram",
-        "disk",
-        "s3",
-        "s3-prefix",
-        "redis",
-        "opfs"
-      ],
-      "command": "test \"$(stat -c %s /VFS.md)\" -eq \"$(cat /VFS.md | wc -c)\" && echo exact",
-      "expect": {
-        "exit": 0,
-        "stdout": "exact\n",
-        "stderr": ""
-      },
-      "session": "docs-a"
-    },
-    {
-      "id": "documents_namespace_copy",
-      "seq": 960013,
-      "targets": [
-        "ram",
-        "disk",
-        "s3",
-        "s3-prefix",
-        "redis",
-        "opfs"
-      ],
-      "command": "cat /VFS.md > /data/copied-vfs.md; cmp /VFS.md /data/copied-vfs.md",
-      "expect": {
-        "exit": 0,
-        "stdout": "",
-        "stderr": ""
-      },
-      "session": "docs-a"
-    },
-    {
       "id": "documents_subtree_mode",
-      "seq": 960018,
+      "seq": 960007,
       "targets": [
         "ram",
         "disk",

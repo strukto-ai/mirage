@@ -17,13 +17,12 @@ import type { ProcessView } from '../../../process/types.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
 import { clapMissingOperands, leafRefusal } from '../../../commands/cli/refusal.ts'
 import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
-import { nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
+import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { verbVisible } from '../../lookup/lookup.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
-import { HELP_OPTION } from '../../../commands/spec/constants.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
-import { Option, UsageStyle } from '../../../commands/spec/types.ts'
+import { UsageStyle } from '../../../commands/spec/types.ts'
 import { Operand, type FlagValue } from '../../../commands/spec/types.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -70,20 +69,7 @@ function parseSpecFor(leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): [
   // eslint-disable-next-line @typescript-eslint/no-misused-spread
   if (ownsArgv(leaf)) return [new CLISpec({ ...leaf, rest: PASSTHROUGH_REST }), false]
   if (leaf.options.some((option) => option.long === '--help')) return [leaf, false]
-
-  return [
-    new CLISpec({
-      // eslint-disable-next-line @typescript-eslint/no-misused-spread
-      ...leaf,
-      options: [
-        ...leaf.options,
-        style === UsageStyle.ARGPARSE && !leaf.options.some((o) => o.short === '-h')
-          ? new Option({ long: '--help', short: '-h', description: 'Show this help and exit' })
-          : HELP_OPTION,
-      ],
-    }),
-    true,
-  ]
+  return [listedNode(leaf, style), true]
 }
 
 /**

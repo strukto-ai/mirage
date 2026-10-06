@@ -30,14 +30,13 @@ from mirage.commands.cli.refusal import (
     leaf_refusal,
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
-from mirage.commands.cli.walk import node_help, owns_argv, walk
+from mirage.commands.cli.walk import listed_node, node_help, owns_argv, walk
 from mirage.commands.errors import (
     CommandTimeoutError,
     PartialOutputError,
     UsageError,
 )
 from mirage.commands.spec import flag_kwarg_name
-from mirage.commands.spec.constants import HELP_OPTION
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.concurrency.limiter import run_blocking
@@ -108,6 +107,7 @@ def parse_spec_for(
 
     Args:
         leaf (CLISpec): the resolved leaf node.
+        style (UsageStyle): the root's voice; argparse also takes ``-h``.
 
     Returns:
         tuple[CLISpec, bool]: the spec to parse with, and whether the
@@ -117,13 +117,7 @@ def parse_spec_for(
         return replace(leaf, rest=PASSTHROUGH_REST), False
     if any(option.long == "--help" for option in leaf.options):
         return leaf, False
-    help_option = (
-        replace(HELP_OPTION, short="-h")
-        if style is UsageStyle.ARGPARSE
-        and not any(o.short == "-h" for o in leaf.options)
-        else HELP_OPTION
-    )
-    return replace(leaf, options=leaf.options + (help_option,)), True
+    return listed_node(leaf, style), True
 
 
 def _select_runtime(

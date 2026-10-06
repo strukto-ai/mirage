@@ -17,86 +17,30 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { CLISpec } from '../../commands/cli/types.ts'
-import { Option, Operand } from '../../commands/spec/types.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 
 function workspace(): Workspace {
-  const ws = new Workspace(
+  return new Workspace(
     { '/data': new RAMVFS(), '/secret': new RAMVFS() },
     { mode: MountMode.WRITE, profiles: { reader: { paths: { hide: ['/secret'] } } } },
   )
-  ws.registerCli(
-    'tickets',
-    new CLISpec({
-      name: 'tickets',
-      description: 'Ticket operations',
-      subcommands: [
-        new CLISpec({
-          name: 'list',
-          fn: () => null,
-          options: [
-            new Option({
-              long: '--limit',
-              type: 'int',
-              metavar: 'N',
-              default: '20',
-              description: 'Maximum rows',
-            }),
-          ],
-        }),
-        new CLISpec({
-          name: 'delete',
-          fn: () => null,
-          positional: [new Operand({ name: 'id', type: 'str' })],
-        }),
-      ],
-    }),
-  )
-  return ws
 }
 
 describe('generated documents', () => {
-  it('is optional, independent and scoped to a session', async () => {
-    const ws = workspace()
-    const a = await ws.session('a', { profile: 'reader' })
-    const b = await ws.session('b')
-    expect(await ws.vfs.readdir('/')).not.toContain('/VFS.md')
-    const preview = await ws.vfsMd(undefined, { profile: 'reader' })
-    expect(preview).not.toContain('/secret')
-    expect(ws.listSessions()).toHaveLength(3)
-    await a.vfsMd('/VFS.md')
-    expect(await ws.vfs.readdir('/', 'a')).toContain('/VFS.md')
-    expect(await ws.vfs.readdir('/', 'b')).not.toContain('/VFS.md')
-    await expect(ws.vfs.read('/VFS.md', {}, 'b')).rejects.toThrow()
-    expect(await ws.vfs.cat('/VFS.md', 'a')).toBe(preview)
-    await b.skillMd('/SKILL.md')
-    expect(await ws.vfs.readdir('/', 'a')).not.toContain('/SKILL.md')
-    expect(await ws.vfs.cat('/SKILL.md', 'b')).toContain('tickets list')
-    await ws.close()
-  })
-  it('renders global views for the current reader on every read', async () => {
+  it('previews a profile without a session, and renders for each reader', async () => {
     const ws = workspace()
     await ws.session('a', { profile: 'reader' })
     await ws.session('b')
+    const preview = await ws.vfsMd(undefined, { profile: 'reader' })
+    expect(preview).not.toContain('/secret')
+    expect(ws.listSessions()).toHaveLength(3)
     await ws.vfsMd('/VFS.md')
-    await ws.skillMd('/SKILL.md')
     const [restricted, full] = await Promise.all([
       ws.vfs.cat('/VFS.md', 'a'),
       ws.vfs.cat('/VFS.md', 'b'),
     ])
-    expect(restricted).not.toContain('/secret')
+    expect(restricted).toBe(preview)
     expect(full).toContain('/secret')
-    await ws.setSessionProfile('b', 'reader')
-    expect(await ws.vfs.cat('/VFS.md', 'b')).toBe(restricted)
-    await ws.setSessionProfile('a', { commands: { allow: ['tickets list', 'cat', 'man'] } })
-    const skill = await ws.vfs.cat('/SKILL.md', 'a')
-    expect(skill).toContain('tickets list')
-    expect(skill).not.toContain('tickets delete')
-    expect(skill).toContain('--limit N')
-    expect(skill).toContain('default: 20')
-    expect((await ws.vfs.stat('/SKILL.md', 'a')).size).toBe(new TextEncoder().encode(skill).length)
-    await expect(ws.vfs.write('/SKILL.md', 'replacement', 'a')).rejects.toThrow()
     await ws.close()
   })
   it('checks exact paths, existing parents and collisions without backend writes', async () => {

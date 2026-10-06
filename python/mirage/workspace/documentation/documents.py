@@ -63,9 +63,7 @@ class Documents:
     async def release_session(self, session_id: str) -> None:
         async with self.lock:
             for path, view in list(self.views.items()):
-                view.sessions = {
-                    s for s in view.sessions if s[0] != session_id
-                }
+                view.sessions.pop(session_id, None)
                 if not view.global_view and not view.sessions:
                     await self.workspace.unmount(path)
 
@@ -100,14 +98,12 @@ class Documents:
             if path is not None:
                 virtual = path.virtual if isinstance(path, PathSpec) else path
                 if (
-                    not virtual.startswith("/")
-                    or virtual.endswith("/")
-                    or norm(virtual) != virtual
+                    norm(virtual) != virtual
+                    or "\x00" in virtual
                     or any(
                         part in {"", ".", ".."}
                         for part in virtual.split("/")[1:]
                     )
-                    or "\x00" in virtual
                 ):
                     raise ValueError(
                         "document path must be an absolute, normalized file path"
@@ -158,7 +154,6 @@ class Documents:
                     raise eexist(path)
             finally:
                 reset_current_session(token)
-        if view is None:
             view = DocumentVFS(
                 path.rsplit("/", 1)[-1], lambda: self.render(kind), kind
             )
@@ -167,12 +162,12 @@ class Documents:
             )
             mount.visible = lambda: (
                 view.global_view
-                or (self.session().session_id, self.session().created_at)
-                in view.sessions
+                or view.sessions.get(self.session().session_id)
+                == self.session().created_at
             )
             self.views[path] = view
             ws._ops.set_mounts(ws._registry.ops_mounts())
         if session is None:
             view.global_view = True
         else:
-            view.sessions.add((session.session_id, session.created_at))
+            view.sessions[session.session_id] = session.created_at

@@ -18,7 +18,7 @@ import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Ops } from '../../ops/ops.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { DEFAULT_READ_SPEC, FileType, MountMode, PathSpec } from '../../types.ts'
-import { eexist, enoent, enotdir, isFsError } from '../../utils/errors.ts'
+import { eexist, enoent, enotdir, isEnoent } from '../../utils/errors.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { norm, parent } from '../../utils/path.ts'
 import { DocumentVFS } from '../../vfs/document/document.ts'
@@ -85,14 +85,12 @@ export class Documents {
         if (path !== undefined) {
           const virtual = path instanceof PathSpec ? path.virtual : path
           if (
-            !virtual.startsWith('/') ||
-            virtual.endsWith('/') ||
             norm(virtual) !== virtual ||
+            virtual.includes('\0') ||
             virtual
               .slice(1)
               .split('/')
-              .some((part) => ['', '.', '..'].includes(part)) ||
-            virtual.includes('\0')
+              .some((part) => ['', '.', '..'].includes(part))
           ) {
             throw new Error('document path must be an absolute, normalized file path')
           }
@@ -117,27 +115,21 @@ export class Documents {
     let view = this.views.get(path)
     if (view !== undefined && view.kind !== kind) throw eexist(path)
     if (view === undefined) {
+      // Collision checks are host-side: a hidden backend entry must not be
+      // overwritten by a new view either.
       await runWithSession(
         new SessionState({ sessionId: '' }),
         async () => {
           try {
             await this.ops.stat(path, undefined, { nofollow: true })
           } catch (error) {
-            if (
-              isFsError(error) &&
-              error instanceof Error &&
-              'code' in error &&
-              error.code === 'ENOENT'
-            )
-              return
+            if (isEnoent(error)) return
             throw error
           }
           throw eexist(path)
         },
         this.manager,
       )
-    }
-    if (view === undefined) {
       view = new DocumentVFS(path.slice(path.lastIndexOf('/') + 1), () => this.render(kind), kind)
       this.opsRegistry.registerVfs(view)
       const document = view

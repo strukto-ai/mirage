@@ -33,4 +33,4 @@ class DocumentVFS(BaseVFS):
         )
         self.kind = kind
         self.global_view = False
-        self.sessions: set[tuple[str, float]] = set()
+        self.sessions: dict[str, float] = {}
