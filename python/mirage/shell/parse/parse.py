@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.shell.bytes import encode_text
 from mirage.shell.parse.assignment import repair_assignments
 from mirage.shell.parse.diagnostics import diagnose
@@ -158,5 +160,5 @@ def parse_program(command: str) -> ParsedProgram:
     root = parse(command)
     offsets = tuple(source_offsets(command, root))
     return ParsedProgram(
-        command, root, offsets, diagnose(root, offsets, parse)
+        command, root, offsets, partial(diagnose, root, offsets, parse)
     )

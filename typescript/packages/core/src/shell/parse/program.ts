@@ -38,13 +38,14 @@ export class ParsedProgram {
   readonly normalized: string
   private readonly resource: Resource
   private released = false
+  private diagnosed: readonly SyntaxDiagnostic[] | null = null
 
   constructor(
     readonly original: string,
     root: ShellNode,
     readonly offsets: readonly number[],
     dispose: () => void,
-    readonly diagnostics: readonly SyntaxDiagnostic[] = [],
+    private readonly diagnose: () => readonly SyntaxDiagnostic[] = () => [],
   ) {
     this.normalized = root.text
     this.resource = { references: 1, dispose }
@@ -54,6 +55,13 @@ export class ParsedProgram {
 
   get references(): number {
     return this.resource.references
+  }
+
+  /** The line's syntax errors, found when first read. */
+  get diagnostics(): readonly SyntaxDiagnostic[] {
+    this.check()
+    this.diagnosed ??= this.diagnose()
+    return this.diagnosed
   }
 
   check(): void {

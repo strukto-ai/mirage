@@ -91,7 +91,6 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
       try {
         const root = parseRoot(trees, command)
         const offsets = sourceOffsets(trees, command, root)
-        const diagnostics = diagnose(root, offsets, (source) => parseRoot(trees, source))
         const tree = trees.take(root)
         return new ParsedProgram(
           command,
@@ -100,7 +99,15 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
           () => {
             tree.delete()
           },
-          diagnostics,
+          () => {
+            if (disposed) throw new Error('shell parser is disposed')
+            const nested = new ParseTrees(parser)
+            try {
+              return diagnose(root, offsets, (source) => parseRoot(nested, source))
+            } finally {
+              nested.release()
+            }
+          },
         )
       } finally {
         trees.release()

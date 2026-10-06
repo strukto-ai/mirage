@@ -11,15 +11,24 @@ class ParsedProgram:
         original: str,
         root: TSNodeLike,
         offsets: tuple[int, ...],
-        diagnostics: tuple[SyntaxDiagnostic, ...] = (),
+        diagnose: Callable[[], tuple[SyntaxDiagnostic, ...]] = tuple,
     ) -> None:
-        self.diagnostics = diagnostics
+        self._diagnose = diagnose
+        self._diagnostics: tuple[SyntaxDiagnostic, ...] | None = None
         self.original = original
         self.normalized = root.text or b""
         self.offsets = offsets
         self.references = 1
         self._released = False
         self.root = ProgramNode(root, self)
+
+    @property
+    def diagnostics(self) -> tuple[SyntaxDiagnostic, ...]:
+        """The line's syntax errors, found when first read."""
+        self.check()
+        if self._diagnostics is None:
+            self._diagnostics = self._diagnose()
+        return self._diagnostics
 
     def check(self) -> None:
         if self.references == 0:
