@@ -230,5 +230,5 @@ export function handleMan(args: string[], registry: MountRegistry, session: Sess
 
 /** The `man` arm. */
 export function manBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleMan([...call.argv.args], call.registry, call.session))
+  return Promise.resolve(handleMan([...call.argv.args], call.registry, call.context.session))
 }

@@ -104,5 +104,5 @@ export function handleUmask(args: string[], session: SessionState): Result {
 
 /** The `umask` arm. */
 export function umaskBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleUmask([...call.argv.args], call.session))
+  return Promise.resolve(handleUmask([...call.argv.args], call.context.session))
 }

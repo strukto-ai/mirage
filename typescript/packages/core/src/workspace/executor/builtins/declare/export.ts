@@ -133,7 +133,7 @@ export async function handleExport(
 export async function exportBuiltin(call: BuiltinCall): Promise<Result> {
   return handleExport(
     [...call.argv.args],
-    call.session,
-    sessionView(call.session, call.registry.policies),
+    call.context.session,
+    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
   )
 }

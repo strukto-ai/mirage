@@ -36,12 +36,12 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.shell.xtrace import trace_assignment
 from mirage.types import word_text
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.statement import assignment_status
 from mirage.workspace.expand import expand_and_classify, expand_node
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     conversion_scalar,
     deref,
@@ -66,15 +66,16 @@ def _arith_fatal(exc: ArithError) -> ExitSignal:
 
 
 async def _fatal_index(
-    session: SessionState, subscript: str, view: SessionView | None
+    context: EvaluationContext, subscript: str, view: SessionView | None
 ) -> int:
     """``subscript_index`` whose failure ends the line, in bash's words.
 
     Args:
-        session (SessionState): the session the subscript reads.
+        context (EvaluationContext): the session the subscript reads.
         subscript (str): the raw subscript text.
         view (SessionView | None): the gated door.
     """
+    session = context.session
     try:
         return await subscript_index(session, subscript, view)
     except ArithError as exc:
@@ -131,7 +132,7 @@ async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
 
 async def expand_array_items(
     array_node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace,
@@ -145,22 +146,25 @@ async def expand_array_items(
 
     Args:
         array_node (Any): the tree-sitter ``array`` node.
-        session (SessionState): shell session.
+        context (EvaluationContext): shell session.
         execute_fn (Callable): workspace execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
         cs (CallStack | None): function-call scope, if any.
     """
+    session = context.session
     # The session plane's door, bound once for the line: every
     # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
     # so a pre_session rule governs those exactly as it governs `X=d`.
-    view = session_view(session, registry.policies)
+    view = session_view(
+        session, registry.policies, diagnostics=context.frame.diagnostics
+    )
     values = list(array_node.named_children)
     # A bare assignment is no command, but its glob reads listings all the
     # same, so it gets a scope of its own.
     async with command_scope():
         classified = await expand_and_classify(
-            values, session, execute_fn, registry, session.cwd, cs, view=view
+            values, context, execute_fn, registry, session.cwd, cs, view=view
         )
         resolved = await resolve_globs(
             classified,
@@ -178,7 +182,7 @@ _SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER, NT.ERROR})
 async def _subscript_key_text(
     subscript_node: Any,
     name: str,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     cs: CallStack | None,
     view: SessionView | None,
@@ -195,7 +199,7 @@ async def _subscript_key_text(
     Args:
         subscript_node (Any): the tree-sitter ``subscript`` node.
         name (str): the array variable's name, for the raw slice.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         cs (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -210,13 +214,13 @@ async def _subscript_key_text(
         return raw
     parts = []
     for sc in inner:
-        parts.append(await expand_node(sc, session, execute_fn, cs, view=view))
+        parts.append(await expand_node(sc, context, execute_fn, cs, view=view))
     return "".join(parts)
 
 
 async def execute_assignment(
     node: Any,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace,
@@ -231,16 +235,17 @@ async def execute_assignment(
 
     Args:
         node (Any): the tree-sitter ``variable_assignment`` node.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
         cs (CallStack | None): function-call scope, if any.
     """
+    session = context.session
     text = get_text(node)
     if "=" not in text:
         return None, IOResult(), ExecutionNode(command=text, exit_code=0)
-    sub_seq = session._cmdsub_seq
+    sub_seq = context.frame.cmdsub_seq
     subscript_node = next(
         (c for c in node.named_children if c.type == "subscript"), None
     )
@@ -273,10 +278,14 @@ async def execute_assignment(
     # Every branch below computes its resulting value with bash's
     # own mechanics on a copy, then stores through the one session
     # door, which owns the gate and the scalar/array invariant.
-    view = session_view(session, namespace.registry.policies)
+    view = session_view(
+        session,
+        namespace.registry.policies,
+        diagnostics=context.frame.diagnostics,
+    )
     if val_nodes and val_nodes[0].type == NT.ARRAY:
         items = await expand_array_items(
-            val_nodes[0], session, execute_fn, registry, namespace, cs
+            val_nodes[0], context, execute_fn, registry, namespace, cs
         )
         amap = session.assocs.get(key)
         if amap is not None:
@@ -296,7 +305,7 @@ async def execute_assignment(
                     IOResult(exit_code=1, stderr=err),
                     ExecutionNode(command=text, exit_code=1, stderr=err),
                 )
-            code = assignment_status(session, sub_seq)
+            code = assignment_status(context.frame, sub_seq)
             return (
                 None,
                 IOResult(exit_code=code),
@@ -317,7 +326,7 @@ async def execute_assignment(
             functools.partial(subscript_index, session, view=view),
         )
         await _assign_var(view, key, base)
-        code = assignment_status(session, sub_seq)
+        code = assignment_status(context.frame, sub_seq)
         return (
             None,
             IOResult(exit_code=code),
@@ -325,13 +334,13 @@ async def execute_assignment(
         )
     if val_nodes:
         val = await expand_node(
-            val_nodes[0], session, execute_fn, cs, view=view
+            val_nodes[0], context, execute_fn, cs, view=view
         )
     else:
         val = text.partition("=")[2]
     if subscript_node is not None:
         sub_text = await _subscript_key_text(
-            subscript_node, spelled, session, execute_fn, cs, view
+            subscript_node, spelled, context, execute_fn, cs, view
         )
         amap = session.assocs.get(key)
         raw_sub = get_text(subscript_node)[len(spelled) + 1 : -1]
@@ -354,7 +363,7 @@ async def execute_assignment(
                 (amap.get(sub_text, "") + val) if append else val
             )
             await _assign_var(view, key, new_map)
-            code = assignment_status(session, sub_seq)
+            code = assignment_status(context.frame, sub_seq)
             return (
                 None,
                 IOResult(exit_code=code),
@@ -366,7 +375,7 @@ async def execute_assignment(
             arr = [] if scalar is None else [scalar]
         else:
             arr = list(arr)
-        idx = await _fatal_index(session, sub_text, view)
+        idx = await _fatal_index(context, sub_text, view)
         if idx < 0:
             idx += array_extent(arr)
         if idx < 0:
@@ -377,7 +386,7 @@ async def execute_assignment(
             )
         array_set(arr, idx, array_get(arr, idx) + val if append else val)
         await _assign_var(view, key, arr)
-        code = assignment_status(session, sub_seq)
+        code = assignment_status(context.frame, sub_seq)
         return (
             None,
             IOResult(exit_code=code),
@@ -414,7 +423,7 @@ async def execute_assignment(
     # getopts scan, matching bash's internal char pointer.
     if key == "OPTIND":
         session._getopts_optind = None
-    code = assignment_status(session, sub_seq)
+    code = assignment_status(context.frame, sub_seq)
     io = IOResult(exit_code=code)
     if session.shell_options.get("xtrace"):
         io.stderr = trace_assignment(key, val, append)

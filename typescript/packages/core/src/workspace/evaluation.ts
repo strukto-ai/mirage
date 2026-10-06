@@ -1,40 +1,51 @@
-import { ExecutionFrame, frames, states } from './frame.ts'
+import { runWithSession } from '../context/session_context.ts'
+import { createAsyncContext } from '../utils/async_context.ts'
+import type { SessionManager } from './session/manager.ts'
+import { ExecutionFrame } from './frame.ts'
 import { RANDOM, RANDOM_UNSET } from '../shell/constants.ts'
 import { copyVar, type ShellVar } from '../shell/variable.ts'
 import type { SessionState, SessionInit } from './session/session.ts'
-export { persistentSession } from './frame.ts'
 
-const FIELDS = new Set(['diagnostics', 'cmdsubSeq', 'cmdsubStatus', 'abortSignal'])
+/** One evaluator's state, separate from the session stored by its manager. */
+export class EvaluationContext {
+  constructor(
+    readonly session: SessionState,
+    readonly frame = new ExecutionFrame(),
+    readonly parent: EvaluationContext | null = null,
+  ) {}
 
-/** An explicit execution view: durable writes reach the shell, temporaries do not. */
-export function executionSession(session: SessionState, frame?: ExecutionFrame): SessionState {
-  if (frame === undefined && frames.has(session)) return session
-  const state = states.get(session) ?? session
-  const current = frame ?? new ExecutionFrame()
-  const view = new Proxy(state, {
-    get(target, key, receiver): unknown {
-      if (typeof key === 'string' && FIELDS.has(key)) return Reflect.get(current, key)
-      if (key === 'fork')
-        return (overrides?: Partial<SessionInit>) =>
-          executionSession(target.fork(overrides), current.fork())
-      return Reflect.get(target, key, receiver)
-    },
-    set(target, key, value: unknown): boolean {
-      if (typeof key === 'string' && FIELDS.has(key)) return Reflect.set(current, key, value)
-      return Reflect.set(target, key, value)
-    },
-  })
-  frames.set(view, current)
-  states.set(view, state)
-  return view
+  fork(overrides?: Partial<SessionInit>): EvaluationContext {
+    return new EvaluationContext(this.session.fork(overrides), this.frame.fork(), this)
+  }
+}
+
+const current = createAsyncContext<EvaluationContext>()
+
+/** Bind the evaluator and its session without exposing execution state to storage. */
+export function runWithEvaluation<T>(
+  context: EvaluationContext,
+  fn: () => Promise<T>,
+  owner?: SessionManager,
+): Promise<T> {
+  const ancestors: SessionState[] = []
+  for (let parent = context.parent; parent !== null; parent = parent.parent)
+    ancestors.push(parent.session)
+  return Promise.resolve(
+    current.run(context, () =>
+      runWithSession(context.session, fn, owner, ancestors, current.capture()),
+    ),
+  )
+}
+
+export function getCurrentEvaluation(): EvaluationContext | null {
+  return current.getStore() ?? null
 }
 
 /** A shell child copies variables while inheriting the current reader context. */
-export function childSession(parent: SessionState): SessionState {
-  const child = executionSession(parent.fork())
-  const frame = frames.get(child)
-  if (frame === undefined) throw new Error('child has no execution frame')
-  frame.parent = parent
+export function childContext(context: EvaluationContext): EvaluationContext {
+  const result = context.fork()
+  const parent = context.session
+  const child = result.session
   child.parseSeq = parent.parseSeq
   child.parseCurrent = parent.parseCurrent
   child.aliasMarks = new Map(parent.aliasMarks)
@@ -49,7 +60,7 @@ export function childSession(parent: SessionState): SessionState {
     const word = parent.vars[RANDOM]?.value
     child.randomSeed = typeof word === 'string' ? word : null
   }
-  return child
+  return result
 }
 
 /** Copy locals; temporary call environments become ordinary saved scopes in the child. */

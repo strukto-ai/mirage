@@ -65,7 +65,7 @@ async def eval_builtin(call: BuiltinCall) -> Result:
     return await handle_eval(
         call.execute_fn,
         list(call.argv.args),
-        call.session,
+        call.context.session,
         call.stdin,
         call.sink,
         call.call_stack,

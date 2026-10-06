@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecutionFrame } from '../frame.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -229,8 +230,8 @@ export function statementStdin(
   return session.execStdin ?? stdin
 }
 
-export function assignmentStatus(session: SessionState, seqBefore: number): number {
-  if (session.cmdsubSeq !== seqBefore) return session.cmdsubStatus
+export function assignmentStatus(frame: ExecutionFrame, seqBefore: number): number {
+  if (frame.cmdsubSeq !== seqBefore) return frame.cmdsubStatus
   return 0
 }
 

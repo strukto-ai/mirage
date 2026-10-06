@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childSession, executionSession, persistentSession } from '../evaluation.ts'
+import {
+  getCurrentEvaluation,
+  runWithEvaluation,
+  EvaluationContext,
+  childContext,
+} from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 import { releaseFunctions } from '../session/functions.ts'
 
@@ -400,7 +405,13 @@ async function runPreparedLine(
   // for, so a path the session cannot see is one its policy cannot read
   // either), a whole-line runtime, and the tree. Python binds the
   // effective session the same way before it parses.
-  const effectiveSession = executionSession(forkForCall(targetSession, options.cwd, options.env))
+  const effectiveSession = forkForCall(targetSession, options.cwd, options.env)
+  const bound = options.evaluation ?? getCurrentEvaluation()
+  const parent = bound?.session === targetSession ? bound : null
+  const context =
+    parent?.session === effectiveSession
+      ? parent
+      : new EvaluationContext(effectiveSession, parent?.frame.fork(), parent)
   try {
     // The line's signal, the caller's folded with the session's kill
     // channel, rides the async context so the status door can refuse an
@@ -408,7 +419,7 @@ async function runPreparedLine(
     // a syntax error's or a deny's included, is the line's to put back.
     // Python sets the line writer at the same point.
     return await runWithLineAbort(
-      mergeSignals(options.signal, effectiveSession.abortSignal),
+      mergeSignals(options.signal, context.frame.abortSignal),
       [targetSession, effectiveSession],
       frame.writer,
       async () => {
@@ -475,7 +486,7 @@ async function runPreparedLine(
                   await judged(),
                   env.registry,
                   handed,
-                  mergeSignals(options.signal, effectiveSession.abortSignal),
+                  mergeSignals(options.signal, context.frame.abortSignal),
                 ),
             )
           // A line placement refuses ends here, so what admission claimed
@@ -517,7 +528,8 @@ async function runPreparedLine(
             const innerOpts: ExecuteOptions = {
               record: false,
               sessionId: opts.sessionId,
-              session: opts.session ?? effectiveSession,
+              session: opts.session ?? opts.context?.session ?? effectiveSession,
+              evaluation: opts.context ?? context,
             }
             // The walker already merged its signal into this one (`executeNode`),
             // so a `timeout` bound and a background job's own abort both reach it.
@@ -551,7 +563,11 @@ async function runPreparedLine(
             // only them, and its caller's never see them.
             const jobs = opts.jobTable ?? options.jobTable
             if (jobs !== undefined) innerOpts.jobTable = jobs
-            let session = opts.session ?? effectiveSession
+            let innerContext = opts.context ?? context
+            let session = opts.session ?? innerContext.session
+            if (session !== innerContext.session)
+              innerContext = new EvaluationContext(session, innerContext.frame.fork(), innerContext)
+            innerOpts.evaluation = innerContext
             if (opts.substitution === true && opts.node?.type === NT.COMMAND_SUBSTITUTION) {
               // A background evaluation can outlive the line that created this door.
               const substitutionParser = parser.fork()
@@ -574,7 +590,7 @@ async function runPreparedLine(
                       innerOpts.handed ?? handed,
                     ),
                     substitutionTree,
-                    session,
+                    innerContext,
                     null,
                     true,
                   )
@@ -589,8 +605,10 @@ async function runPreparedLine(
             }
             const substitution = opts.substitution === true
             if (substitution) {
-              session = childSession(session)
+              innerContext = childContext(innerContext)
+              session = innerContext.session
               innerOpts.session = session
+              innerOpts.evaluation = innerContext
             }
             const capture = new Terminal()
             const waits = new JobWaits(capture.jobs)
@@ -683,8 +701,8 @@ async function runPreparedLine(
             options.sink !== undefined ? { ...lineDeps, sink: options.sink } : lineDeps,
             handed,
           )
-          return await runWithSession(
-            effectiveSession,
+          return await runWithEvaluation(
+            context,
             () =>
               runParsedLine(
                 env,
@@ -693,7 +711,7 @@ async function runPreparedLine(
                 rootNode,
                 deps,
                 targetSession,
-                effectiveSession,
+                context,
                 stdin,
                 (line) => parser.parse(line),
                 nested,
@@ -708,8 +726,7 @@ async function runPreparedLine(
       },
     )
   } finally {
-    if (persistentSession(effectiveSession) !== persistentSession(targetSession))
-      releaseFunctions(effectiveSession.functions)
+    if (effectiveSession !== targetSession) releaseFunctions(effectiveSession.functions)
     // Durable session fields (cwd, env, grants) flush at the end of
     // every execute, success or failure, mirroring Python's finally. It
     // joins under the grace like the tree: a stalled store finishes in
@@ -735,13 +752,14 @@ async function runParsedLine(
   rootNode: TSNodeLike,
   deps: ExecuteNodeDeps,
   targetSession: SessionState,
-  effectiveSession: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   reparse: (line: string) => TSNodeLike,
   nested: NestedRefusal,
   handed: HandOff,
   judged: () => Promise<[Walked, Judged[]][]>,
 ): Promise<ExecuteResult> {
+  const effectiveSession = context.session
   const cacheFacts = env.dispatcher.captureCacheFacts()
   const callAgentId = options.agentId ?? env.agentId ?? ''
   // An op a policy refuses inside a command prints the command's own GNU
@@ -758,7 +776,7 @@ async function runParsedLine(
   // The session's kill channel folded in, as the dispatcher folds it
   // for the tree: a question put to a host has to answer to both, and
   // both admission passes below can put one.
-  const killed = mergeSignals(deps.signal, effectiveSession.abortSignal)
+  const killed = mergeSignals(deps.signal, context.frame.abortSignal)
   const lineRuntime = env.runtimes.wholeLineFor(deps.routingDecision ?? null)
   // Filled only after the applicable line-tier admission (a refused
   // line must never reach a secret store) and before expansion or the
@@ -844,7 +862,7 @@ async function runParsedLine(
       // it for the retry of a line held on a question.
       const refused = await admitLine(
         rootNode,
-        effectiveSession,
+        context.session,
         env.registry,
         env.namespace,
         callAgentId,
@@ -991,7 +1009,7 @@ async function runParsedLine(
         const running = runCommandTree(
           deps,
           rootNode,
-          effectiveSession,
+          context,
           stdin,
           false,
           options.callStack ?? null,

@@ -26,7 +26,12 @@ from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import IFS_DEFAULT
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
-from mirage.workspace.evaluation import child_session
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    child_context,
+    reset_current_evaluation,
+    set_current_evaluation,
+)
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
     BASH_START_FLAGS,
@@ -38,11 +43,6 @@ from mirage.workspace.executor.builtins.script.script import (
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.traps import clear_exit_trap, finish_shell
-from mirage.workspace.session import (
-    SessionState,
-    reset_current_session,
-    set_current_session,
-)
 from mirage.workspace.session.state import seed_var
 from mirage.workspace.types import ExecutionNode
 
@@ -107,7 +107,7 @@ async def handle_bash(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     name: str = "bash",
     sink: JobConsole | None = None,
@@ -126,7 +126,7 @@ async def handle_bash(
         dispatch (DispatchFn): op dispatcher, used to read a script file.
         execute_fn (Callable): runs the program text in this session.
         args (list[str]): words after the head word.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         stdin (ByteSource | None): input stream, also the program source
             when no operand names one.
         name (str): the head word (``bash`` or ``sh``). bash reports
@@ -137,6 +137,7 @@ async def handle_bash(
         job_table (JobTable | None): the caller's jobs, which the nested
             shell starts a table of its own beside.
     """
+    session = context.session
     parsed = parse_bash_args(args)
     if parsed.invalid is not None:
         # GNU words this "invalid option" and follows it with a usage
@@ -167,8 +168,9 @@ async def handle_bash(
             stdin = None
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
-    session = child_session(session)
-    child_token = set_current_session(session)
+    context = child_context(context)
+    session = context.session
+    child_token = set_current_evaluation(context)
     clear_exit_trap(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session.positional_args = positional
@@ -200,7 +202,7 @@ async def handle_bash(
     finally:
         reset_program_invocation(token)
         session.functions.clear()
-        reset_current_session(child_token)
+        reset_current_evaluation(child_token)
     label = f"{name} {parsed.path}" if parsed.path else f"{name} -c {script}"
     return io.stdout, io, ExecutionNode(command=label, exit_code=io.exit_code)
 
@@ -216,7 +218,7 @@ async def bash_builtin(call: BuiltinCall) -> Result:
         call.dispatch,
         call.execute_fn,
         list(call.argv.args),
-        call.session,
+        call.context,
         call.stdin,
         str(call.argv.name),
         call.sink,

@@ -382,8 +382,6 @@ export class SessionState {
   randomState: number | null = null
   randomSeed: string | null = null
   randomLast = 0
-  // Scoped by the executing node so diagnostics follow its redirections.
-  declare diagnostics: (string | Uint8Array)[]
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -411,21 +409,6 @@ export class SessionState {
   // value stale, restarting the scan, matching bash's char pointer.
   getoptsPos = 0
   getoptsOptind: number | null = null
-  // The cancel channel for work running under this shell: killing a
-  // background job aborts it, and the mount layer folds it into the
-  // signal handed to runtimes. Never part of SessionInit (transient,
-  // not persisted); fork() carries it so a job's whole subtree shares
-  // one channel. Python needs no equivalent: kill cancels the asyncio
-  // task and cancellation is ambient.
-  declare abortSignal: AbortSignal | null
-  // Command-substitution tracking for assignment statements: how many
-  // substitutions have run in this session, and the status of the
-  // most recent one. An assignment statement snapshots the count
-  // before expanding its value and, when it grew, reports the last
-  // substitution's status as its own (bash: `x=$(false)` exits 1,
-  // `x=abc` exits 0).
-  declare cmdsubSeq: number
-  declare cmdsubStatus: number
   // `shopt` options, kept apart from `set -o` ones (bash keeps two
   // vocabularies). Only names set away from their default are stored.
   shopts: Record<string, boolean> = {}

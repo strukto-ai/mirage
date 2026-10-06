@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { runWithAdmission } from '../../context/session_context.ts'
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
@@ -28,7 +29,7 @@ import { expandRedirects } from '../expand/redirects.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { handleRedirect } from '../executor/redirect.ts'
 import { sessionView } from '../session/state.ts'
-import type { SessionState } from '../session/session.ts'
+
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { Admitted, admit } from './admission.ts'
@@ -42,25 +43,26 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
 export async function runCommandTree(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   commandSubstitution = false,
   // The frames of the caller the tree runs in place of (`eval`), null for
   // a line of its own.
   callStack: CallStack | null = null,
 ): Promise<Result> {
+  const session = context.session
   const redirect = commandSubstitution ? inputSubstitutionRedirect(node) : null
   let result: Result
   if (redirect === null) {
-    result = await executeNode(deps, node, session, stdin, callStack)
+    result = await executeNode(deps, node, context, stdin, callStack)
   } else {
     const [redirects] = await expandRedirects(
       [redirect],
-      session,
+      context,
       deps.executeFn,
       deps.registry,
       null,
-      sessionView(session, deps.registry.policies),
+      sessionView(session, deps.registry.policies, context.frame.diagnostics),
     )
     // Bash's implicit read uses cat's policy identity without invoking
     // a shadowing function/alias or expanding the filename a second time.
@@ -71,7 +73,7 @@ export async function runCommandTree(
       'cat',
       [],
       [],
-      session,
+      context.session,
       deps.registry,
       deps.namespace,
       deps.agentId,
@@ -103,7 +105,7 @@ export async function runCommandTree(
           deps.dispatch,
           null,
           redirects,
-          session,
+          context,
           stdin,
           null,
           true,

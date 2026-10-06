@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { PathSpec } from '../../types.ts'
 import { markEscapedGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { homeDir } from '../session/shell_dirs.ts'
 import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
@@ -46,11 +47,12 @@ import type { TSNodeLike } from '../../shell/types.ts'
 // unquoted value still splits: `{a,b}$x` is `a$x b$x`.
 async function expandBraceWord(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
 ): Promise<Chunk[][] | null> {
+  const session = context.session
   const pieces: string[] = []
   const atoms: TSNodeLike[] = []
   for (const child of node.children) {
@@ -65,7 +67,7 @@ async function expandBraceWord(
   if (words === null) return null
   const values: Chunk[][] = []
   for (const atom of atoms) {
-    values.push(await expandChunks(atom, session, executeFn, callStack, view))
+    values.push(await expandChunks(atom, context, executeFn, callStack, view))
   }
   const home = homeDir(session)
   return words.map((w) =>
@@ -85,22 +87,23 @@ async function expandBraceWord(
  */
 export async function expandWords(
   parts: TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,
 ): Promise<string[]> {
+  const session = context.session
   const ifs = ifsValue(session, callStack)
   const result: string[] = []
   for (const p of parts) {
     if (BRACE_WORD_TYPES.has(p.type) && session.shellOptions.braceexpand !== false) {
-      const braceWords = await expandBraceWord(p, session, executeFn, callStack, view)
+      const braceWords = await expandBraceWord(p, context, executeFn, callStack, view)
       if (braceWords !== null) {
         for (const chunks of braceWords) for (const w of splitFields(chunks, ifs)) result.push(w)
         continue
       }
     }
-    const chunks = await expandChunks(p, session, executeFn, callStack, view)
+    const chunks = await expandChunks(p, context, executeFn, callStack, view)
     for (const w of splitFields(chunks, ifs)) result.push(w)
   }
   return result
@@ -108,7 +111,7 @@ export async function expandWords(
 
 export async function expandAndClassify(
   words: TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   cwd: string,
@@ -119,6 +122,6 @@ export async function expandAndClassify(
   // next (`resolveGlobs`, which is where the marks come off): `for f in
   // '/data/*.txt'` iterates once over the name as typed, like bash,
   // while `for f in '/data/*'?.txt` still globs on the `?`.
-  const expanded = await expandWords(words, session, executeFn, callStack, view)
+  const expanded = await expandWords(words, context, executeFn, callStack, view)
   return expanded.map((w) => classifyWord(w, registry, cwd))
 }

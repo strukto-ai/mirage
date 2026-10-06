@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { runWithRedirectPaths } from '../../context/session_context.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../utils/errors.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -195,12 +196,13 @@ export async function handleRedirect(
   dispatch: DispatchFn,
   command: TSNodeLike | null,
   redirects: readonly Redirect[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   captureInput = false,
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
   const inputs = new Map<number, Input>([
@@ -213,7 +215,7 @@ export async function handleRedirect(
     [1, TO_STDOUT],
     [2, TO_STDERR],
   ])
-  const inputDest = stdinDest(session)
+  const inputDest = stdinDest(context)
   if (typeof inputDest === 'string') {
     const file = new FileDescription(ensureScope(inputDest), true)
     file.opened = true
@@ -230,7 +232,7 @@ export async function handleRedirect(
     if (binding?.startsWith(OPEN_FOR_READING)) inputs.set(fd, source)
     else if (binding === EXEC_TO_STDIN) inputs.set(fd, inputs.get(0) ?? null)
   }
-  const closed = persistentlyClosed(session)
+  const closed = persistentlyClosed(context)
   for (const [fd, descriptor] of session.descriptors) {
     if (fd <= 2) continue
     inputs.set(fd, descriptor.source ?? UNREADABLE)
@@ -341,7 +343,7 @@ export async function handleRedirect(
       for (const fd of fds) outputs.set(fd, file)
     }
   }
-  const refusal = await openRefusal(dispatch, session, redirects)
+  const refusal = await openRefusal(dispatch, context, redirects)
   if (refusal !== null) return refusal
   const opening = files.filter((file) => file.source === null)
   const opened = new Set<FileDescription>()
@@ -422,7 +424,7 @@ export async function handleRedirect(
             () =>
               executeNode(
                 command,
-                session,
+                context,
                 given === UNREADABLE ? unreadableStdin() : given,
                 callStack,
                 { sink: recorder },
@@ -736,9 +738,10 @@ async function isDevice(dispatch: DispatchFn, scope: PathSpec): Promise<boolean>
  */
 async function openRefusal(
   dispatch: DispatchFn,
-  session: SessionState,
+  context: EvaluationContext,
   redirects: readonly Redirect[],
 ): Promise<Result | null> {
+  const session = context.session
   const noclobber = session.shellOptions.noclobber === true
   const opened = new Set<string>()
   const pending: PathSpec[] = []
@@ -823,7 +826,8 @@ async function applyPendingOpens(
 
 /** The descriptors an `exec` closed for the shell, which a line's dup
  * from refuses before the command runs. */
-function persistentlyClosed(session: SessionState): Set<number> {
+function persistentlyClosed(context: EvaluationContext): Set<number> {
+  const session = context.session
   const closed = new Set<number>()
   if (session.execStdinIdentity === EXEC_CLOSED) closed.add(FD_STDIN)
   if (session.execStdout === EXEC_CLOSED) closed.add(FD_STDOUT)
@@ -838,7 +842,8 @@ function persistentlyClosed(session: SessionState): Set<number> {
  * pipe); a terminal stream dup'd onto it (`exec 0<&1`) writes where that
  * stream goes; a file opened for writing (`exec 0>f`) is the file.
  */
-function stdinDest(session: SessionState): FdDest | string {
+function stdinDest(context: EvaluationContext): FdDest | string {
+  const session = context.session
   const id = session.execStdinIdentity
   if (id === null || id === EXEC_CLOSED || id.startsWith(OPEN_FOR_READING)) return CLOSED
   if (id === EXEC_TO_STDOUT) return TO_STDOUT

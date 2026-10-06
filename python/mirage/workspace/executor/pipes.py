@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import asyncio
 from collections.abc import Callable
 from functools import partial
@@ -47,6 +46,11 @@ from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    reset_current_evaluation,
+    set_current_evaluation,
+)
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import handle_background, pump
@@ -64,11 +68,6 @@ from mirage.workspace.executor.traps import (
     inherit_exit_trap,
     run_exit_trap,
 )
-from mirage.workspace.session import (
-    SessionState,
-    reset_current_session,
-    set_current_session,
-)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -76,7 +75,7 @@ async def handle_pipe(
     execute_node,
     commands: list[TSNodeLike],
     stderr_flags: list[bool],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     processes: ProcessSupervisor | None = None,
@@ -87,6 +86,7 @@ async def handle_pipe(
     Each stage is a child shell, which runs its own EXIT action through
     ``execute_fn`` when it ends.
     """
+    session = context.session
     # Reassociated pipelines can enter here without execute_node resetting
     # the parent. An exemption belongs to the preceding statement only;
     # the caller applies this pipeline's own negation after it finishes.
@@ -98,15 +98,16 @@ async def handle_pipe(
     ios: list[IOResult] = [IOResult() for _ in commands]
     child_nodes: list[ExecutionNode] = [ExecutionNode() for _ in commands]
 
-    children = [session.fork() for _ in commands]
+    children = [context.fork() for _ in commands]
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
-        child = children[i]
+        child_evaluation = children[i]
+        child = child_evaluation.session
         inherit_exit_trap(child)
         child.terminal_output = (
             session.terminal_output and i == len(commands) - 1
         )
-        token = set_current_session(child)
+        token = set_current_evaluation(child_evaluation)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
         io = IOResult()
@@ -133,7 +134,11 @@ async def handle_pipe(
                 input_stream,
                 stage_stack,
                 execute_node(
-                    cmd, child, input_stream, stage_stack, sink=output
+                    cmd,
+                    child_evaluation,
+                    input_stream,
+                    stage_stack,
+                    sink=output,
                 ),
             )
             await pump(output, Channel.STDOUT, stdout)
@@ -165,7 +170,7 @@ async def handle_pipe(
             io.stderr = await output.snapshot(Channel.STDERR)
             ios[i] = io
             child_nodes[i] = child_exec
-            reset_current_session(token)
+            reset_current_evaluation(token)
         return io.exit_code
 
     tasks: list[asyncio.Task[int]] = []
@@ -188,7 +193,7 @@ async def handle_pipe(
                 raise ExitSignal(
                     FORK_FAILED_STATUS, stderr=FORK_FAILED
                 ) from exc
-            children[i].process_id = process.info.pid
+            children[i].session.process_id = process.info.pid
             tasks.append(process.task)
         result = await run_with_timeout(
             asyncio.gather(materialize(pipes[-1].stream()), *tasks),
@@ -206,8 +211,8 @@ async def handle_pipe(
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        for child_session in children:
-            child_session.functions.clear()
+        for evaluation in children:
+            evaluation.session.functions.clear()
         if failed:
             for io in ios:
                 await discard_io(io)
@@ -263,14 +268,15 @@ async def handle_connection(
     left: TSNodeLike,
     op: str,
     right: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Handle &&, ||"""
+    session = context.session
     bound = fd0_binding(session)
     left_stdout, left_io, left_exec = await execute_node(
-        left, session, stdin, call_stack
+        left, context, stdin, call_stack
     )
     children = [left_exec]
 
@@ -291,7 +297,7 @@ async def handle_connection(
 
     try:
         right_stdout, right_io, right_exec = await execute_node(
-            right, session, statement_stdin(session, stdin, bound), call_stack
+            right, context, statement_stdin(session, stdin, bound), call_stack
         )
     except UNWINDING as sig:
         raise await carried(sig, left_bytes, left_io)
@@ -314,7 +320,7 @@ async def handle_connection(
 async def handle_subshell(
     execute_node,
     body: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -333,7 +339,7 @@ async def handle_subshell(
         body (list[TSNodeLike]): ALL subshell children, including
             the `&` tokens that mark background statements (named-only
             lists would run `a & b` synchronously and never set `$!`).
-        session (SessionState): the process owner's isolated child session.
+        context (EvaluationContext): the process owner's isolated child session.
         stdin (ByteSource | None): input stream.
         call_stack (CallStack | None): function-call scope, if any.
         job_table (JobTable | None): the subshell's private job table
@@ -349,7 +355,8 @@ async def handle_subshell(
         execute_fn (Callable[..., Any] | None): runs the subshell's own
             EXIT action as it ends.
     """
-    child_token = set_current_session(session)
+    session = context.session
+    child_token = set_current_evaluation(context)
     inherit_exit_trap(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session._line_open = True
@@ -379,7 +386,7 @@ async def handle_subshell(
                         execute_node,
                         child,
                         None,
-                        session,
+                        context,
                         job_table,
                         agent_id or "",
                         stdin,
@@ -421,7 +428,7 @@ async def handle_subshell(
                 jobs.recorder = recorder
                 try:
                     stdout, io, last_exec = await execute_node(
-                        child, session, child_stdin, call_stack, sink=recorder
+                        child, context, child_stdin, call_stack, sink=recorder
                     )
                 finally:
                     jobs.recorder = held
@@ -506,4 +513,4 @@ async def handle_subshell(
         return combined, merged_io, last_exec
     finally:
         session.functions.clear()
-        reset_current_session(child_token)
+        reset_current_evaluation(child_token)

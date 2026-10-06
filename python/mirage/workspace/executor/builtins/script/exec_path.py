@@ -25,7 +25,12 @@ from mirage.shell.join import shell_join
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.path import resolve_path
 from mirage.vfs.bin import BinViewVFS
-from mirage.workspace.evaluation import child_session
+from mirage.workspace.evaluation import (
+    EvaluationContext,
+    child_context,
+    reset_current_evaluation,
+    set_current_evaluation,
+)
 from mirage.workspace.executor.builtins.command.command import (
     handle_command_builtin,
 )
@@ -36,11 +41,6 @@ from mirage.workspace.executor.builtins.script.script import (
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import (
-    SessionState,
-    reset_current_session,
-    set_current_session,
-)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -93,7 +93,7 @@ async def handle_exec_path(
     execute_fn: Callable[..., Any],
     path: str,
     args: list[str],
-    session: SessionState,
+    context: EvaluationContext,
     registry: MountRegistry,
     namespace: Namespace,
     stdin: ByteSource | None = None,
@@ -124,7 +124,7 @@ async def handle_exec_path(
         execute_fn (Callable): runs a program line in this session.
         path (str): the head word, as typed.
         args (list[str]): the words after it, positional for the script.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         registry (MountRegistry): identifies the program view.
         namespace (Namespace): resolves links to program files.
         stdin (ByteSource | None): input stream for the script.
@@ -133,6 +133,7 @@ async def handle_exec_path(
         job_table (JobTable | None): the caller's jobs, which a shell
             script starts a table of its own beside.
     """
+    session = context.session
     try:
         script = await read_script_text(dispatch, path, session.cwd)
     except FS_ERRORS as exc:
@@ -147,8 +148,9 @@ async def handle_exec_path(
         # The read above enforces visibility and path policy. Dispatch the
         # target through its own command gate, without requiring permission
         # for the stub's implementation helper, `command`.
-        session = child_session(session)
-        child_token = set_current_session(session)
+        context = child_context(context)
+        session = context.session
+        child_token = set_current_evaluation(context)
         token = clear_program_invocation()
         try:
             return await handle_command_builtin(
@@ -161,7 +163,7 @@ async def handle_exec_path(
         finally:
             reset_program_invocation(token)
             session.functions.clear()
-            reset_current_session(child_token)
+            reset_current_evaluation(child_token)
     words = shebang_words(script)
     interp = words[0] if words else "sh"
     if interp in ("sh", "bash"):
@@ -169,7 +171,7 @@ async def handle_exec_path(
             dispatch,
             execute_fn,
             [*words[1:], path, *args],
-            session,
+            context,
             stdin,
             interp,
             sink,

@@ -87,5 +87,5 @@ async def shift_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation.
     """
     return await handle_shift(
-        list(call.argv.args), call.call_stack, session=call.session
+        list(call.argv.args), call.call_stack, session=call.context.session
     )

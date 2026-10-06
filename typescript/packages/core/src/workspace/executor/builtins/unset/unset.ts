@@ -235,7 +235,7 @@ export async function handleUnset(
 export async function unsetBuiltin(call: BuiltinCall): Promise<Result> {
   return handleUnset(
     [...call.argv.args],
-    call.session,
-    sessionView(call.session, call.registry.policies),
+    call.context.session,
+    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
   )
 }

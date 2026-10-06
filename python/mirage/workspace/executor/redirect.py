@@ -52,6 +52,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,
@@ -64,7 +65,6 @@ from mirage.workspace.executor.builtins.exec.constants import (
 from mirage.workspace.executor.control import UNWINDING, carried, take_stderr
 from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.jobs import drained, pump
-from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -120,8 +120,9 @@ class JobRoute(JobOutput):
         outputs: dict[int, "_Fd | FileDescription | Inherited"],
         outer: JobConsole,
         dispatch: DispatchFn,
-        session: SessionState,
+        context: EvaluationContext,
     ) -> None:
+        session = context.session
         super().__init__(outer)
         self.recorder = recorder
         self.owner: StreamOwner = recorder
@@ -222,13 +223,14 @@ class JobRoute(JobOutput):
             await write_description(self.dispatch, self.session, dest, data)
 
 
-def _persistently_closed(session: SessionState) -> set[int]:
+def _persistently_closed(context: EvaluationContext) -> set[int]:
     """The descriptors an ``exec`` closed for the shell, which a line's
     dup from refuses before the command runs.
 
     Args:
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
     """
+    session = context.session
     closed: set[int] = set()
     if session.exec_stdin_identity == CLOSED:
         closed.add(FD_STDIN)
@@ -239,7 +241,7 @@ def _persistently_closed(session: SessionState) -> set[int]:
     return closed
 
 
-def _stdin_dest(session: SessionState) -> _Fd | str:
+def _stdin_dest(context: EvaluationContext) -> _Fd | str:
     """Where a write through fd 0 lands, read off the shell's bindings.
 
     Its own read end, a closed descriptor and a file's read end take
@@ -249,8 +251,9 @@ def _stdin_dest(session: SessionState) -> _Fd | str:
     (`exec 0>f`) is the file.
 
     Args:
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
     """
+    session = context.session
     identity = session.exec_stdin_identity
     if (
         identity is None
@@ -270,7 +273,7 @@ async def handle_redirect(
     dispatch,
     command: TSNodeLike | None,
     redirects: list[Redirect],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     capture_input: bool = False,
@@ -301,12 +304,13 @@ async def handle_redirect(
         dispatch (DispatchFn): workspace operation dispatcher.
         command (TSNodeLike | None): command, or a redirect-only statement.
         redirects (list[Redirect]): expanded redirects in source order.
-        session (SessionState): enclosing descriptor bindings.
+        context (EvaluationContext): enclosing descriptor bindings.
         stdin (ByteSource | None): inherited input.
         call_stack (CallStack | None): function stack.
         capture_input (bool): capture a redirect-only substitution's input.
         sink (JobConsole | None): destination for terminal output.
     """
+    session = context.session
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
         return _shell_failure(bad_descriptor_line(bad_fd))
@@ -320,7 +324,7 @@ async def handle_redirect(
         1: _TO_STDOUT,
         2: _TO_STDERR,
     }
-    stdin_dest = _stdin_dest(session)
+    stdin_dest = _stdin_dest(context)
     outputs[0] = (
         FileDescription(_ensure_scope(stdin_dest), append=True, opened=True)
         if isinstance(stdin_dest, str)
@@ -340,7 +344,7 @@ async def handle_redirect(
             inputs[fd] = held_input
         elif binding == TO_STDIN:
             inputs[fd] = inputs[0]
-    closed = _persistently_closed(session)
+    closed = _persistently_closed(context)
     for fd, descriptor in session.descriptors.items():
         if fd <= 2:
             continue
@@ -453,7 +457,7 @@ async def handle_redirect(
             files.append(file)
             for fd in fds:
                 outputs[fd] = file
-    refusal = await _open_refusal(dispatch, session, redirects)
+    refusal = await _open_refusal(dispatch, context, redirects)
     if refusal is not None:
         return refusal
     opening = [file for file in files if file.source is None]
@@ -524,7 +528,7 @@ async def handle_redirect(
         outputs,
         job_output or session.tty.jobs,
         dispatch,
-        session,
+        context,
     )
     session.job_output = route
     enclosing = ENCLOSING.set(recorder)
@@ -540,7 +544,7 @@ async def handle_redirect(
                 recorder,
                 *await execute_node(
                     command,
-                    session,
+                    context,
                     unreadable_stdin()
                     if isinstance(inputs[0], _Unreadable)
                     else inputs[0],
@@ -894,7 +898,7 @@ async def _is_device(dispatch: DispatchFn, scope: PathSpec) -> bool:
 
 async def _open_refusal(
     dispatch: DispatchFn,
-    session: SessionState,
+    context: EvaluationContext,
     redirects: list[Redirect],
 ) -> tuple[None, IOResult, ExecutionNode] | None:
     """Refuse the whole statement when one of its opens cannot happen.
@@ -944,13 +948,14 @@ async def _open_refusal(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (SessionState): the session holding the shell options.
+        context (EvaluationContext): the session holding the shell options.
         redirects (list[Redirect]): the statement's redirects, in the
             order they were written.
 
     Returns:
         The refusal result, or None when every open is allowed.
     """
+    session = context.session
     noclobber = bool(session.shell_options.get("noclobber"))
     opened: set[str] = set()
     pending: list[PathSpec] = []

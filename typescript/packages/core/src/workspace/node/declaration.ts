@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
@@ -32,7 +33,7 @@ import {
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { SessionState } from '../session/session.ts'
+
 import {
   conversionScalar,
   ensureVarVisible,
@@ -144,12 +145,13 @@ function declareOptionRefusal(
  */
 function plusRefusals(
   cmd: string,
-  session: SessionState,
+  context: EvaluationContext,
   view: SessionView,
   plusChars: ReadonlySet<string>,
   assignments: readonly string[],
   staged: readonly { name: string }[] | null,
 ): Result | null {
+  const session = context.session
   if (!plusChars.has('r') && !plusChars.has('a') && !plusChars.has('A')) return null
   const names = assignments.map((a) => a.split('=')[0] ?? a)
   for (const { name } of staged ?? []) names.push(name)
@@ -194,7 +196,7 @@ function plusRefusals(
  * of the ungated-write allowlist that `setAttr` sites must justify.
  */
 async function stampAttrs(
-  session: SessionState,
+  context: EvaluationContext,
   view: SessionView,
   flagChars: ReadonlySet<string>,
   plusChars: ReadonlySet<string>,
@@ -202,7 +204,7 @@ async function stampAttrs(
   staged: readonly { name: string }[] | null,
   stored: readonly string[],
 ): Promise<Result | null> {
-  const refused = await stampExport(session, view, flagChars, assignments, staged, stored)
+  const refused = await stampExport(context, view, flagChars, assignments, staged, stored)
   if (refused !== null) return refused
   let onAttrs = attrsFor('ilunt', (c) => flagChars.has(c) && !plusChars.has(c))
   if (flagChars.has('l') && flagChars.has('u')) {
@@ -259,13 +261,14 @@ async function stampAttrs(
  * the deployment had refused.
  */
 async function stampExport(
-  session: SessionState,
+  context: EvaluationContext,
   view: SessionView,
   flagChars: ReadonlySet<string>,
   assignments: readonly string[],
   staged: readonly { name: string }[] | null,
   stored: readonly string[],
 ): Promise<Result | null> {
+  const session = context.session
   if (!flagChars.has('x')) return null
   const covered = new Set<string>()
   for (const a of assignments) {
@@ -304,12 +307,13 @@ async function stampExport(
  */
 export async function executeDeclaration(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   namespace: Namespace,
   callStack: CallStack | null,
 ): Promise<Result> {
+  const session = context.session
   const keyword = getDeclarationKeyword(node)
   const assignments: string[] = []
   // Array literals are staged, not stored: `readonly -a a=(y)` on an
@@ -336,7 +340,7 @@ export async function executeDeclaration(
           append,
           items: await expandArrayItems(
             firstVal,
-            session,
+            context,
             executeFn,
             registry,
             namespace,
@@ -348,10 +352,10 @@ export async function executeDeclaration(
       assignments.push(
         await expandNode(
           child,
-          session,
+          context,
           executeFn,
           callStack,
-          sessionView(session, registry.policies),
+          sessionView(session, registry.policies, context.frame.diagnostics),
         ),
       )
     } else if (
@@ -370,10 +374,10 @@ export async function executeDeclaration(
     ) {
       const expanded = await expandNode(
         child,
-        session,
+        context,
         executeFn,
         callStack,
-        sessionView(session, registry.policies),
+        sessionView(session, registry.policies, context.frame.diagnostics),
       )
       // An *unquoted* expansion that came back empty is removed by
       // word splitting, so `export $UNSET` is a bare `export` and
@@ -479,7 +483,7 @@ export async function executeDeclaration(
   if (isReadonly) {
     // Only the `readonly` keyword owns -p / illegal-option handling;
     // `declare -r` keeps names only.
-    const declView = sessionView(session, registry.policies)
+    const declView = sessionView(session, registry.policies, context.frame.diagnostics)
     const stored: string[] = []
     const result =
       keyword === 'readonly'
@@ -505,7 +509,7 @@ export async function executeDeclaration(
     // `declare -rx X="1"`. Readonly answers first, so the export stamp
     // has to land here too, or `-r` silently ate the `-x`.
     const refused = await stampAttrs(
-      session,
+      context,
       declView,
       flagChars,
       plusChars,
@@ -527,7 +531,7 @@ export async function executeDeclaration(
     ) {
       return handleDeclarePrint(assignments, session)
     }
-    const declView2 = sessionView(session, registry.policies)
+    const declView2 = sessionView(session, registry.policies, context.frame.diagnostics)
     const stored2: string[] = []
     const result = await handleLocal(
       assignments,
@@ -543,10 +547,10 @@ export async function executeDeclaration(
       flagChars.has('n') && !plusChars.has('n'),
       flagChars.has('g'),
     )
-    const plusRefused = plusRefusals(cmdWord, session, declView2, plusChars, assignments, staged)
+    const plusRefused = plusRefusals(cmdWord, context, declView2, plusChars, assignments, staged)
     if (plusRefused !== null) return plusRefused
     const refused2 = await stampAttrs(
-      session,
+      context,
       declView2,
       flagChars,
       plusChars,
@@ -560,7 +564,7 @@ export async function executeDeclaration(
   const exportResult = await handleExport(
     [...flagWords, ...assignments],
     session,
-    sessionView(session, registry.policies),
+    sessionView(session, registry.policies, context.frame.diagnostics),
     staged,
   )
   return mergeConversionErrors(exportResult, conversionErrors)

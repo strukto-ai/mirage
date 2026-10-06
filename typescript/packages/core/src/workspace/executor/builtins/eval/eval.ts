@@ -48,7 +48,7 @@ export async function evalBuiltin(call: BuiltinCall): Promise<Result> {
   return handleEval(
     call.executeFn,
     [...call.argv.args],
-    call.session,
+    call.context.session,
     call.stdin,
     call.sink,
     call.callStack ?? undefined,

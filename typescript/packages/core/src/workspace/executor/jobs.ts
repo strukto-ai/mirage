@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { releaseFunctions } from '../session/functions.ts'
 
@@ -28,7 +29,7 @@ import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
-import { isProgramInvocation, runWithSession } from '../../context/session_context.ts'
+import { isProgramInvocation } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, mergeSignals } from '../abort.ts'
 import type { SessionView } from '../../ops/types.ts'
@@ -153,7 +154,7 @@ export async function handleBackground(
   executeNode: ExecuteNodeFn,
   left: TSNodeLike,
   right: TSNodeLike | null,
-  session: SessionState,
+  context: EvaluationContext,
   jobTable: JobTable,
   agentId: string | null,
   stdin: ByteSource | null = null,
@@ -170,9 +171,11 @@ export async function handleBackground(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<JobHandlerResult> {
+  const session = context.session
   const releaseProgram = retainPrograms([left])
   const executionScope = new ExecutionScope()
-  const bgSession = session.fork()
+  const childEvaluation = context.fork()
+  const bgSession = childEvaluation.session
   inheritExitTrap(bgSession)
   const output = session.jobOutput ?? session.tty.jobs
   // A job is a shell of its own: what jobs it starts write into the
@@ -190,8 +193,8 @@ export async function handleBackground(
   // `kill %n` aborts this controller; the signal rides the forked
   // session so the job's whole subtree (builtins, mounts, runtimes)
   // observes the kill, merged with any enclosing job's channel.
-  const killed = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
-  bgSession.abortSignal = killed
+  const killed = mergeSignals(context.frame.abortSignal, abort.signal) ?? abort.signal
+  childEvaluation.frame.abortSignal = killed
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
     // What the job writes stays in its console and goes where its shell
@@ -214,7 +217,7 @@ export async function handleBackground(
           endsShell: true,
         }
         if (jobHanded !== null) opts.handed = jobHanded
-        ;[stdout, io, execNode] = await executeNode(left, bgSession, null, bgCallStack, opts)
+        ;[stdout, io, execNode] = await executeNode(left, childEvaluation, null, bgCallStack, opts)
       } catch (err) {
         if (err instanceof CommandTimeoutError) {
           const msg = encodeText(`${err.message}\n`)
@@ -256,7 +259,7 @@ export async function handleBackground(
     // it keeps the outer binding; nested shell evaluations carry the
     // walker's exact session explicitly on both runtimes.
     try {
-      return await (asyncContextIsolatesTasks ? runWithSession(bgSession, body) : body())
+      return await (asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, body) : body())
     } finally {
       executionScope.release()
       releaseProgram()
@@ -311,7 +314,7 @@ export async function handleBackground(
     return [null, new IOResult(), tree]
   }
 
-  const [rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
+  const [rightStdout, rightIo, rightExec] = await executeNode(right, context, stdin, callStack)
   const children = [new ExecutionNode({ command: cmdStr, exitCode: 0 }), rightExec]
   const tree = new ExecutionNode({
     op: '&',
@@ -338,7 +341,7 @@ export async function handleBackground(
 export function runStatement(
   executeNode: ExecuteNodeFn,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   bound: readonly [SharedInput | null, boolean],
   callStack: CallStack | null,
@@ -347,8 +350,9 @@ export function runStatement(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<JobHandlerResult> {
+  const session = context.session
   if (!isBackgrounded(node)) {
-    return executeNode(node, session, statementStdin(session, stdin, bound), callStack)
+    return executeNode(node, context, statementStdin(session, stdin, bound), callStack)
   }
   if (jobTable === null) {
     throw new Error(`\`${node.text} &\` needs a job table; none was wired`)
@@ -357,7 +361,7 @@ export function runStatement(
     executeNode,
     node,
     null,
-    session,
+    context,
     jobTable,
     agentId,
     stdin,

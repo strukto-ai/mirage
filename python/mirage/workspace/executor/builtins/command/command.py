@@ -173,7 +173,7 @@ async def command_builtin(call: BuiltinCall) -> Result:
     return await handle_command_builtin(
         call.execute_fn,
         list(call.argv.args),
-        call.session,
+        call.context.session,
         call.registry,
         call.stdin,
         call.call_stack,

@@ -21,6 +21,7 @@ from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.shell.errors import ArithError
 from mirage.shell.job_table import JobStatus, JobTable
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.control import (
     BreakSignal,
     ContinueSignal,
@@ -85,7 +86,9 @@ async def test_if_runs_the_first_matching_branch_and_skips_the_rest():
         return result(f"{n.text}-out".encode())
 
     branches = [(node("c1"), [node("b1")]), (node("c2"), [node("b2")])]
-    stdout, io, _ = await handle_if(execute, branches, None, session())
+    stdout, io, _ = await handle_if(
+        execute, branches, None, EvaluationContext(session())
+    )
     assert io.exit_code == 0
     assert await text_of(stdout) == "b2-out"
     assert calls == ["c1", "c2", "b2"]
@@ -99,7 +102,10 @@ async def test_if_runs_the_else_body_when_no_branch_matches():
         return result(b"else-out")
 
     stdout, io, _ = await handle_if(
-        execute, [(node("c"), [node("b")])], [node("e")], session()
+        execute,
+        [(node("c"), [node("b")])],
+        [node("e")],
+        EvaluationContext(session()),
     )
     assert io.exit_code == 0
     assert await text_of(stdout) == "else-out"
@@ -111,7 +117,7 @@ async def test_if_without_an_else_body_succeeds_silently():
         return result(exit_code=1)
 
     stdout, io, _ = await handle_if(
-        execute, [(node("c"), [node("b")])], None, session()
+        execute, [(node("c"), [node("b")])], None, EvaluationContext(session())
     )
     assert io.exit_code == 0
     assert stdout is None
@@ -123,11 +129,11 @@ async def test_for_iterates_values_binding_the_loop_variable():
     sess = session()
 
     async def execute(_n, s, *_args):
-        seen.append(s.env.get("X", ""))
-        return result(f"iter-{s.env.get('X', '')}\n".encode())
+        seen.append(s.session.env.get("X", ""))
+        return result(f"iter-{s.session.env.get('X', '')}\n".encode())
 
     stdout, _, _ = await handle_for(
-        execute, "X", ["a", "b", "c"], [node("body")], sess
+        execute, "X", ["a", "b", "c"], [node("body")], EvaluationContext(sess)
     )
     assert seen == ["a", "b", "c"]
     assert await text_of(stdout) == "iter-a\niter-b\niter-c\n"
@@ -140,12 +146,18 @@ async def test_for_stops_early_on_break():
     seen = []
 
     async def execute(_n, s, *_args):
-        seen.append(s.env["X"])
-        if s.env["X"] == "b":
+        seen.append(s.session.env["X"])
+        if s.session.env["X"] == "b":
             raise BreakSignal()
         return result()
 
-    await handle_for(execute, "X", ["a", "b", "c"], [node("body")], session())
+    await handle_for(
+        execute,
+        "X",
+        ["a", "b", "c"],
+        [node("body")],
+        EvaluationContext(session()),
+    )
     assert seen == ["a", "b"]
 
 
@@ -154,12 +166,18 @@ async def test_for_skips_to_the_next_iteration_on_continue():
     seen = []
 
     async def execute(_n, s, *_args):
-        seen.append(s.env["X"])
-        if s.env["X"] == "b":
+        seen.append(s.session.env["X"])
+        if s.session.env["X"] == "b":
             raise ContinueSignal()
         return result()
 
-    await handle_for(execute, "X", ["a", "b", "c"], [node("body")], session())
+    await handle_for(
+        execute,
+        "X",
+        ["a", "b", "c"],
+        [node("body")],
+        EvaluationContext(session()),
+    )
     assert seen == ["a", "b", "c"]
 
 
@@ -173,7 +191,9 @@ async def test_for_keeps_the_loop_variables_last_value():
     async def execute(*_args):
         return result()
 
-    await handle_for(execute, "X", ["a", "b"], [node("body")], sess)
+    await handle_for(
+        execute, "X", ["a", "b"], [node("body")], EvaluationContext(sess)
+    )
     assert sess.env["X"] == "b"
 
 
@@ -186,7 +206,7 @@ async def test_for_over_no_words_leaves_the_variable_untouched():
     async def execute(*_args):
         return result()
 
-    await handle_for(execute, "Y", [], [node("body")], sess)
+    await handle_for(execute, "Y", [], [node("body")], EvaluationContext(sess))
     assert "Y" not in sess.env
 
 
@@ -198,9 +218,11 @@ async def test_for_runs_a_list_of_300000_words_and_keeps_the_last_one():
     sess = session()
 
     async def execute(_n, s, *_args):
-        return result(f"{s.env['X']}\n".encode())
+        return result(f"{s.session.env['X']}\n".encode())
 
-    stdout, io, _ = await handle_for(execute, "X", words, [node("body")], sess)
+    stdout, io, _ = await handle_for(
+        execute, "X", words, [node("body")], EvaluationContext(sess)
+    )
     assert io.exit_code == 0
     assert await text_of(stdout) == "".join(f"{w}\n" for w in words)
     assert sess.env["X"] == "300000"
@@ -211,11 +233,17 @@ async def test_for_carries_a_multi_level_break_out_to_the_caller():
     seen = []
 
     async def execute(_n, s, *_args):
-        seen.append(s.env["X"])
+        seen.append(s.session.env["X"])
         raise BreakSignal(levels=2)
 
     with pytest.raises(BreakSignal) as caught:
-        await handle_for(execute, "X", ["a", "b"], [node("body")], session())
+        await handle_for(
+            execute,
+            "X",
+            ["a", "b"],
+            [node("body")],
+            EvaluationContext(session()),
+        )
     assert caught.value.levels == 1
     assert seen == ["a"]
 
@@ -231,7 +259,7 @@ async def test_while_runs_the_body_while_the_condition_succeeds():
         return result(f"{state['i']};".encode())
 
     stdout, _, _ = await handle_while(
-        execute, node("cond"), [node("body")], session()
+        execute, node("cond"), [node("body")], EvaluationContext(session())
     )
     assert await text_of(stdout) == "1;2;"
 
@@ -247,7 +275,7 @@ async def test_until_runs_the_body_while_the_condition_fails():
         return result(f"{state['i']};".encode())
 
     stdout, _, _ = await handle_until(
-        execute, node("cond"), [node("body")], session()
+        execute, node("cond"), [node("body")], EvaluationContext(session())
     )
     assert await text_of(stdout) == "1;2;"
 
@@ -258,7 +286,7 @@ async def test_while_caps_runaway_loops_and_says_so_on_stderr():
         return result(exit_code=0) if n.text == "cond" else result()
 
     _, io, _ = await handle_while(
-        execute, node("cond"), [node("body")], session()
+        execute, node("cond"), [node("body")], EvaluationContext(session())
     )
     assert b"while loop terminated after 10000" in await materialize(io.stderr)
 
@@ -276,7 +304,7 @@ async def test_case_runs_the_first_arm_whose_pattern_matches():
         (["b*"], [node("B")], ";;"),
         (["*"], [node("catchall")], ";;"),
     ]
-    await handle_case(execute, "banana", items, session())
+    await handle_case(execute, "banana", items, EvaluationContext(session()))
     assert ran == ["B"]
 
 
@@ -289,7 +317,7 @@ async def test_case_reaches_the_catchall_arm():
         return result()
 
     items = [(["a*"], [node("A")], ";;"), (["*"], [node("catchall")], ";;")]
-    await handle_case(execute, "xyz", items, session())
+    await handle_case(execute, "xyz", items, EvaluationContext(session()))
     assert ran == ["catchall"]
 
 
@@ -302,7 +330,9 @@ async def test_case_succeeds_silently_when_nothing_matches():
         return result()
 
     items = [(["z*"], [node("body")], ";;")]
-    stdout, io, _ = await handle_case(execute, "abc", items, session())
+    stdout, io, _ = await handle_case(
+        execute, "abc", items, EvaluationContext(session())
+    )
     assert ran == []
     assert io.exit_code == 0
     assert stdout is None
@@ -321,7 +351,7 @@ async def test_case_falls_through_the_next_arm_on_semicolon_amp():
         (["b"], [node("B")], ";;"),
         (["c"], [node("C")], ";;"),
     ]
-    await handle_case(execute, "a", items, session())
+    await handle_case(execute, "a", items, EvaluationContext(session()))
     assert ran == ["A", "B"]
 
 
@@ -338,7 +368,7 @@ async def test_case_keeps_testing_later_patterns_on_double_semicolon_amp():
         (["a"], [node("A2")], ";;&"),
         (["b"], [node("B")], ";;"),
     ]
-    await handle_case(execute, "a", items, session())
+    await handle_case(execute, "a", items, EvaluationContext(session()))
     assert ran == ["A", "A2"]
 
 
@@ -364,7 +394,7 @@ async def test_cfor_runs_init_once_then_condition_and_update_per_iteration():
 
     exprs = [node("init"), node("cond"), node("update")]
     _, io, _ = await handle_cfor(
-        execute, exprs, [node("body")], eval_expr, session()
+        execute, exprs, [node("body")], eval_expr, EvaluationContext(session())
     )
     assert ran == ["body", "body", "body"]
     assert io.exit_code == 0
@@ -387,7 +417,7 @@ async def test_cfor_aborts_with_status_1_on_a_bad_expression():
 
     exprs = [node("init"), node("cond"), node("update")]
     stdout, io, _ = await handle_cfor(
-        execute, exprs, [node("body")], eval_expr, session()
+        execute, exprs, [node("body")], eval_expr, EvaluationContext(session())
     )
     assert io.exit_code == 1
     assert b"bash: ((: x +: syntax error" in await materialize(io.stderr)
@@ -428,7 +458,7 @@ async def test_if_body_ampersand_launches_a_job_and_answers_the_launch_status():
             _parked_executor(gate, ran),
             branches,
             None,
-            sess,
+            EvaluationContext(sess),
             job_table=table,
             agent_id="a1",
         ),
@@ -460,7 +490,7 @@ async def test_case_arm_ampersand_launches_a_job():
             _parked_executor(gate, ran),
             "x",
             items,
-            session(),
+            EvaluationContext(session()),
             job_table=table,
             agent_id="a1",
         ),
@@ -487,7 +517,7 @@ async def test_for_body_ampersand_launches_one_job_per_iteration():
             "i",
             ["1", "2"],
             [bg("slow")],
-            session(),
+            EvaluationContext(session()),
             job_table=table,
             agent_id="a1",
         ),
@@ -507,4 +537,9 @@ async def test_body_ampersand_without_a_job_table_fails_loud():
         return result()
 
     with pytest.raises(RuntimeError, match="job table"):
-        await handle_if(execute, [(node("c"), [bg("x")])], None, session())
+        await handle_if(
+            execute,
+            [(node("c"), [bg("x")])],
+            None,
+            EvaluationContext(session()),
+        )

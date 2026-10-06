@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -23,7 +24,6 @@ import { expandPattern } from '../expand/pattern.ts'
 import { splitFields } from '../expand/fields.ts'
 import { ifsValue } from '../expand/variable.ts'
 import { unmarkGlobs } from '../../utils/glob_walk.ts'
-import type { SessionState } from '../session/session.ts'
 
 const CONTAINER_TYPES = new Set<string>([
   NT.BINARY_EXPRESSION,
@@ -47,13 +47,13 @@ const COND_OP_TOKENS = new Set(['=', '==', '!=', '=~', '<', '>', '&&', '||'])
  */
 export async function expandTestExpr(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
 ): Promise<string[]> {
   const result: string[] = []
-  await flatten(node, result, session, executeFn, cs, view)
+  await flatten(node, result, context, executeFn, cs, view)
   return result
 }
 
@@ -66,17 +66,18 @@ export async function expandTestExpr(
 async function flatten(
   node: TSNodeLike,
   out: string[],
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
 ): Promise<boolean> {
+  const session = context.session
   for (const child of node.children) {
     const ctype = child.type
     if (ctype === '[' || ctype === ']' || ctype === '[[' || ctype === ']]') continue
     if (ctype === NT.ERROR) {
       if (child.children.some((g) => g.isNamed !== true && g.type === ';')) return false
-      if (!(await flatten(child, out, session, executeFn, cs, view))) return false
+      if (!(await flatten(child, out, context, executeFn, cs, view))) return false
       continue
     }
     if (child.isNamed !== true) {
@@ -86,17 +87,17 @@ async function flatten(
     if (CONTAINER_TYPES.has(ctype)) {
       const negative = negativeNumberChild(child)
       if (negative !== null) {
-        out.push('-' + (await expandNode(negative, session, executeFn, cs, view)))
+        out.push('-' + (await expandNode(negative, context, executeFn, cs, view)))
         continue
       }
-      if (!(await flatten(child, out, session, executeFn, cs, view))) return false
+      if (!(await flatten(child, out, context, executeFn, cs, view))) return false
       continue
     }
     if (ctype === NT.TEST_OPERATOR) {
       out.push(child.text)
       continue
     }
-    const chunks = await expandChunks(child, session, executeFn, cs, view)
+    const chunks = await expandChunks(child, context, executeFn, cs, view)
     for (const word of splitFields(chunks, ifsValue(session, cs))) out.push(unmarkGlobs(word))
   }
   return true
@@ -129,20 +130,20 @@ function negativeNumberChild(node: TSNodeLike): TSNodeLike | null {
 /** Build a structured condition tree from a `[[ ... ]]` node. */
 export async function expandDoubleBracket(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
 ): Promise<CondNode> {
   const first = node.namedChildren[0]
   if (first === undefined) return { kind: 'word', value: '' }
-  return buildCond(first, session, executeFn, cs, view)
+  return buildCond(first, context, executeFn, cs, view)
 }
 
 /** Recursively translate one expression node into a CondNode. */
 async function buildCond(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
@@ -151,21 +152,21 @@ async function buildCond(
   if (ntype === NT.PARENTHESIZED_EXPRESSION) {
     const inner = node.namedChildren[0]
     if (inner === undefined) return { kind: 'word', value: '' }
-    return buildCond(inner, session, executeFn, cs, view)
+    return buildCond(inner, context, executeFn, cs, view)
   }
   if (ntype === NT.UNARY_EXPRESSION || ntype === NT.NEGATION_EXPRESSION) {
-    return buildUnary(node, session, executeFn, cs, view)
+    return buildUnary(node, context, executeFn, cs, view)
   }
   if (ntype === NT.BINARY_EXPRESSION) {
-    return buildBinary(node, session, executeFn, cs, view)
+    return buildBinary(node, context, executeFn, cs, view)
   }
-  return { kind: 'word', value: await expandNode(node, session, executeFn, cs, view) }
+  return { kind: 'word', value: await expandNode(node, context, executeFn, cs, view) }
 }
 
 /** Translate a unary/negation expression node. */
 async function buildUnary(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
@@ -181,16 +182,16 @@ async function buildUnary(
     }
   }
   if (op === null && operandNode !== null && negated) {
-    return { kind: 'not', inner: await buildCond(operandNode, session, executeFn, cs, view) }
+    return { kind: 'not', inner: await buildCond(operandNode, context, executeFn, cs, view) }
   }
   if (op === null) {
     const value =
-      operandNode === null ? '' : await expandNode(operandNode, session, executeFn, cs, view)
+      operandNode === null ? '' : await expandNode(operandNode, context, executeFn, cs, view)
     const word: CondNode = { kind: 'word', value }
     return negated ? { kind: 'not', inner: word } : word
   }
   const operand =
-    operandNode === null ? '' : await expandNode(operandNode, session, executeFn, cs, view)
+    operandNode === null ? '' : await expandNode(operandNode, context, executeFn, cs, view)
   const unary: CondNode = { kind: 'unary', op, operand }
   return negated ? { kind: 'not', inner: unary } : unary
 }
@@ -198,7 +199,7 @@ async function buildUnary(
 /** Translate a binary expression node (logical or comparison). */
 async function buildBinary(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
@@ -219,8 +220,8 @@ async function buildBinary(
   const left = operands[0]
   const right = operands[1]
   if ((op === '&&' || op === '||') && left !== undefined && right !== undefined) {
-    const leftCond = await buildCond(left, session, executeFn, cs, view)
-    const rightCond = await buildCond(right, session, executeFn, cs, view)
+    const leftCond = await buildCond(left, context, executeFn, cs, view)
+    const rightCond = await buildCond(right, context, executeFn, cs, view)
     return op === '&&'
       ? { kind: 'and', left: leftCond, right: rightCond }
       : { kind: 'or', left: leftCond, right: rightCond }
@@ -228,11 +229,11 @@ async function buildBinary(
   if (op === null || left === undefined || right === undefined) {
     const textParts: string[] = []
     for (const operand of operands) {
-      textParts.push(await expandNode(operand, session, executeFn, cs, view))
+      textParts.push(await expandNode(operand, context, executeFn, cs, view))
     }
     return { kind: 'word', value: textParts.join(' ') }
   }
-  const leftText = await expandNode(left, session, executeFn, cs, view)
+  const leftText = await expandNode(left, context, executeFn, cs, view)
   if (op === '=~' && right.type === NT.REGEX) {
     const raw = right.text
     // After =~ tree-sitter lexes even a quoted operand as one regex
@@ -251,9 +252,9 @@ async function buildBinary(
     // fnmatches unconditionally. A wholly-literal pattern matches
     // exactly itself, which is what the equality the old whole-node
     // boolean spelled out reduced to.
-    const pattern = await expandPattern(right, session, executeFn, cs, view)
+    const pattern = await expandPattern(right, context, executeFn, cs, view)
     return { kind: 'binary', left: leftText, op, right: pattern, rightLiteral: false }
   }
-  const rightText = await expandNode(right, session, executeFn, cs, view)
+  const rightText = await expandNode(right, context, executeFn, cs, view)
   return { kind: 'binary', left: leftText, op, right: rightText, rightLiteral: false }
 }

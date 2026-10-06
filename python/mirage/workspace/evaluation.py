@@ -1,60 +1,72 @@
+from contextvars import ContextVar, Token
+from dataclasses import dataclass, field
 from typing import Any
 
+from mirage.context.session_context import (
+    reset_current_session,
+    set_current_session,
+)
 from mirage.shell.constants import RANDOM, RANDOM_UNSET
 from mirage.shell.variable import ShellVar, copy_var
 from mirage.workspace.frame import ExecutionFrame
-from mirage.workspace.frame import persistent_session as persistent_session
+from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.session import SessionState
 
-_FIELDS = {
-    "_diagnostics": "diagnostics",
-    "_cmdsub_seq": "cmdsub_seq",
-    "_cmdsub_status": "cmdsub_status",
-}
 
+@dataclass(frozen=True, slots=True)
+class EvaluationContext:
+    """One evaluator's state, separate from the session stored by its manager."""
 
-class EvaluationSession(SessionState):
-    """An explicit view forwarding durable writes to its calling shell."""
+    session: SessionState
+    frame: ExecutionFrame = field(default_factory=ExecutionFrame)
+    parent: "EvaluationContext | None" = None
 
-    def __init__(self, state: SessionState, frame: ExecutionFrame) -> None:
-        self.__dict__["_state"] = state
-        self.__dict__["_frame"] = frame
-
-    def __getattribute__(self, name: str) -> Any:
-        if name in {"__dict__", "_state", "_frame", "fork", "__class__"}:
-            return super().__getattribute__(name)
-        frame_field = _FIELDS.get(name)
-        if frame_field is not None:
-            return getattr(self._frame, frame_field)
-        return getattr(self._state, name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        frame_field = _FIELDS.get(name)
-        if frame_field is not None:
-            setattr(self._frame, frame_field, value)
-        else:
-            setattr(self._state, name, value)
-
-    def fork(self, **overrides: Any) -> SessionState:
-        return execution_session(
-            self._state.fork(**overrides), self._frame.fork()
+    def fork(self, **overrides: Any) -> "EvaluationContext":
+        return EvaluationContext(
+            self.session.fork(**overrides), self.frame.fork(), self
         )
 
 
-def execution_session(
-    session: SessionState, frame: ExecutionFrame | None = None
-) -> SessionState:
-    if isinstance(session, EvaluationSession):
-        if frame is None:
-            return session
-        session = session._state
-    return EvaluationSession(session, frame or ExecutionFrame())
+_current: ContextVar[EvaluationContext | None] = ContextVar(
+    "mirage_evaluation", default=None
+)
 
 
-def child_session(parent: SessionState) -> SessionState:
-    child = execution_session(parent.fork())
-    if isinstance(child, EvaluationSession):
-        child._frame.parent = parent
+def set_current_evaluation(
+    context: EvaluationContext, owner: SessionManager | None = None
+) -> tuple[Token[Any], Token[EvaluationContext | None]]:
+    """Bind evaluation and session scopes together.
+
+    Args:
+        context (EvaluationContext): the evaluator entering this task.
+        owner (SessionManager | None): the workspace owner; inherited if omitted.
+    """
+    ancestors = []
+    parent = context.parent
+    while parent is not None:
+        ancestors.append(parent.session)
+        parent = parent.parent
+    session_token = set_current_session(
+        context.session, owner, ancestors=tuple(ancestors)
+    )
+    return session_token, _current.set(context)
+
+
+def reset_current_evaluation(
+    tokens: tuple[Token[Any], Token[EvaluationContext | None]],
+) -> None:
+    session_token, evaluation_token = tokens
+    _current.reset(evaluation_token)
+    reset_current_session(session_token)
+
+
+def get_current_evaluation() -> EvaluationContext | None:
+    return _current.get()
+
+
+def child_context(context: EvaluationContext) -> EvaluationContext:
+    result = context.fork()
+    parent, child = context.session, result.session
     child._parse_seq = parent._parse_seq
     child._parse_current = parent._parse_current
     child._alias_marks = dict(parent._alias_marks)
@@ -77,7 +89,7 @@ def child_session(parent: SessionState) -> SessionState:
             if var is not None and isinstance(var.value, str)
             else None
         )
-    return child
+    return result
 
 
 def copy_locals(

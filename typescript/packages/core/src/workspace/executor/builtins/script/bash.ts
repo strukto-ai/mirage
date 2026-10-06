@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childSession } from '../../../evaluation.ts'
+import { type EvaluationContext, childContext } from '../../../evaluation.ts'
 import { releaseFunctions } from '../../../session/functions.ts'
 
 import { runAsShell } from '../../../../context/session_context.ts'
@@ -22,7 +22,7 @@ import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
 import { IFS_DEFAULT } from '../../../../shell/constants.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
-import type { SessionState } from '../../../session/session.ts'
+
 import { seedVar } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -122,12 +122,13 @@ export async function handleBash(
   dispatch: DispatchFn,
   executeFn: ExecuteStringFn,
   args: string[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   name = 'bash',
   sink?: JobConsole,
   jobTable?: JobTable,
 ): Promise<Result> {
+  let session = context.session
   const parsed = parseBashArgs(args)
   if (parsed.invalid !== null) {
     // GNU words this "invalid option" and follows it with a usage block.
@@ -159,7 +160,8 @@ export async function handleBash(
   if (script === null) {
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
-  session = childSession(session)
+  context = childContext(context)
+  session = context.session
   clearExitTrap(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
@@ -181,10 +183,10 @@ export async function handleBash(
   try {
     io = await runAsShell(async () =>
       finishShell(
-        (action, opts) => executeFn(action, { ...opts, ...jobs, session }),
+        (action, opts) => executeFn(action, { ...opts, ...jobs, context }),
         session,
         await executeFn(script, {
-          session,
+          context,
           sessionId: session.sessionId,
           stdin,
           ...(sink === undefined ? {} : { sink }),
@@ -206,7 +208,7 @@ export async function bashBuiltin(call: BuiltinCall): Promise<Result> {
     call.dispatch,
     call.executeFn,
     [...call.argv.args],
-    call.session,
+    call.context,
     call.stdin,
     call.argv.name,
     call.sink,

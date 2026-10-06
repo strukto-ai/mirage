@@ -144,5 +144,5 @@ async def set_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation.
     """
     return await handle_set(
-        list(call.argv.args), call.session, call_stack=call.call_stack
+        list(call.argv.args), call.context.session, call_stack=call.call_stack
     )

@@ -40,6 +40,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.fields import join_chunks, value_piece
 from mirage.workspace.expand.types import Chunk, Piece
@@ -49,7 +50,7 @@ from mirage.workspace.expand.variable import (
     land_arith_writes,
     parameter_chunks,
 )
-from mirage.workspace.session import SessionState, visible_env
+from mirage.workspace.session import visible_env
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import random_reader, session_elements
 
@@ -73,7 +74,7 @@ def _folded_whitespace(node: TSNodeLike) -> str:
 
 async def _expand_backtick_region(
     raw: str,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     node: TSNodeLike,
     offset: int,
@@ -83,7 +84,7 @@ async def _expand_backtick_region(
 
     Args:
         raw (str): the region's text, the folded prefix stripped.
-        session (SessionState): the session expanding it.
+        context (EvaluationContext): the session expanding it.
         execute_fn (Callable[..., Any]): the nested-line door.
         node (TSNodeLike): the region's node.
         offset (int): where ``raw`` starts in the node's text, in the
@@ -99,7 +100,7 @@ async def _expand_backtick_region(
         # touching pair, so the span within it says which one runs,
         # measured as the parser measures the node.
         io = await child_line(
-            session,
+            context,
             execute_fn,
             segment.text,
             node,
@@ -110,14 +111,14 @@ async def _expand_backtick_region(
             ),
         )
         parts.append(decode_text(await io.materialize_stdout()).rstrip("\n"))
-        session._diagnostics.append(await io.materialize_stderr())
-        session._cmdsub_seq += 1
-        session._cmdsub_status = io.exit_code
+        context.frame.diagnostics.append(await io.materialize_stderr())
+        context.frame.cmdsub_seq += 1
+        context.frame.cmdsub_status = io.exit_code
     return "".join(parts)
 
 
 async def child_line(
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     text: str,
     node: Any,
@@ -137,7 +138,7 @@ async def child_line(
     ``break`` from a loop the caller is in.
 
     Args:
-        session (SessionState): the parent shell's session.
+        context (EvaluationContext): the parent shell's session.
         execute_fn (Callable[..., Any]): the workspace's nested-line
             executor.
         text (str): the line the substitution holds.
@@ -146,6 +147,7 @@ async def child_line(
         span (tuple[int, int] | None): the pair's byte span within the
             node, for a backtick region holding several.
     """
+    session = context.session
     return await execute_fn(
         text,
         session_id=session.session_id,
@@ -187,7 +189,7 @@ def arith_exit(expr: str, exc: ArithError) -> DiscardSignal:
 
 async def expand_arith(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None = None,
@@ -202,7 +204,7 @@ async def expand_arith(
     """
     return await named(
         _arith_inside(ts_node),
-        _arith_text(ts_node, session, execute_fn, call_stack, view),
+        _arith_text(ts_node, context, execute_fn, call_stack, view),
     )
 
 
@@ -216,7 +218,7 @@ def _arith_inside(ts_node: TSNodeLike) -> str:
 
 async def _arith_text(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None,
@@ -238,12 +240,12 @@ async def _arith_text(
             NT.POSTFIX_EXPRESSION,
         ):
             parts.append(
-                await _arith_text(child, session, execute_fn, call_stack, view)
+                await _arith_text(child, context, execute_fn, call_stack, view)
             )
         elif child.type == "subscript":
             parts.append(
                 await _arith_subscript(
-                    child, session, execute_fn, call_stack, view
+                    child, context, execute_fn, call_stack, view
                 )
             )
         elif child.type in ARITH_OPERATORS:
@@ -257,7 +259,7 @@ async def _arith_text(
         ):
             parts.append(
                 await expand_node(
-                    child, session, execute_fn, call_stack, view=view
+                    child, context, execute_fn, call_stack, view=view
                 )
             )
         elif child.type == NT.VARIABLE_NAME:
@@ -265,7 +267,7 @@ async def _arith_text(
         else:
             parts.append(
                 await expand_node(
-                    child, session, execute_fn, call_stack, view=view
+                    child, context, execute_fn, call_stack, view=view
                 )
             )
     parts.append(decode_text(raw[end:]))
@@ -274,7 +276,7 @@ async def _arith_text(
 
 async def _arith_subscript(
     sub_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None,
@@ -290,7 +292,7 @@ async def _arith_subscript(
 
     Args:
         sub_node (TSNodeLike): the ``subscript`` node.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -319,7 +321,7 @@ async def _arith_subscript(
         ):
             parts.append(
                 await expand_node(
-                    sc, session, execute_fn, call_stack, view=view
+                    sc, context, execute_fn, call_stack, view=view
                 )
             )
         else:
@@ -329,7 +331,7 @@ async def _arith_subscript(
 
 async def expand_node(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -338,7 +340,7 @@ async def expand_node(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door, for
@@ -346,14 +348,14 @@ async def expand_node(
     """
     return unmark_globs(
         await expand_node_marked(
-            ts_node, session, execute_fn, call_stack, view=view
+            ts_node, context, execute_fn, call_stack, view=view
         )
     )
 
 
 async def expand_node_marked(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -367,7 +369,7 @@ async def expand_node_marked(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door, for
@@ -375,14 +377,14 @@ async def expand_node_marked(
     """
     return join_chunks(
         await expand_chunks(
-            ts_node, session, execute_fn, call_stack, view=view
+            ts_node, context, execute_fn, call_stack, view=view
         )
     )
 
 
 async def expand_chunks(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -397,7 +399,7 @@ async def expand_chunks(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door, for
@@ -406,7 +408,7 @@ async def expand_chunks(
     """
     try:
         return await _node_chunks(
-            ts_node, session, execute_fn, call_stack, view, quoted
+            ts_node, context, execute_fn, call_stack, view, quoted
         )
     except BadSubstitution as exc:
         raise exc.within(get_text(ts_node).lstrip())
@@ -414,12 +416,13 @@ async def expand_chunks(
 
 async def _node_chunks(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None,
     quoted: bool,
 ) -> list[Chunk]:
+    session = context.session
     ntype = ts_node.type
 
     if ntype == NT.WORD:
@@ -432,7 +435,7 @@ async def _node_chunks(
         # through to its own expansion rule.
         for child in ts_node.named_children:
             return await expand_chunks(
-                child, session, execute_fn, call_stack, view=view
+                child, context, execute_fn, call_stack, view=view
             )
         return [Piece(get_text(ts_node))]
 
@@ -455,7 +458,7 @@ async def _node_chunks(
         prefix = _folded_whitespace(ts_node)
         expand_child = partial(
             _expand_child,
-            session=session,
+            context=context,
             execute_fn=execute_fn,
             call_stack=call_stack,
             view=view,
@@ -472,7 +475,7 @@ async def _node_chunks(
 
     if ntype in (NT.COMMAND_SUBSTITUTION, NT.ARITHMETIC_EXPANSION):
         text = await _substitution(
-            ts_node, session, execute_fn, call_stack, view
+            ts_node, context, execute_fn, call_stack, view
         )
         prefix = _folded_whitespace(ts_node)
         lead = [Piece(prefix)] if prefix else []
@@ -497,14 +500,14 @@ async def _node_chunks(
                 continue
             chunks.extend(
                 await expand_chunks(
-                    child, session, execute_fn, call_stack, view=view
+                    child, context, execute_fn, call_stack, view=view
                 )
             )
         return chunks
 
     if ntype == NT.STRING:
         return await _string_chunks(
-            ts_node, session, execute_fn, call_stack, view
+            ts_node, context, execute_fn, call_stack, view
         )
 
     if ntype == NT.TRANSLATED_STRING:
@@ -514,11 +517,11 @@ async def _node_chunks(
         for child in ts_node.named_children:
             if child.type == NT.STRING:
                 return await _string_chunks(
-                    child, session, execute_fn, call_stack, view
+                    child, context, execute_fn, call_stack, view
                 )
         return [Piece("")]
 
-    text = await _literal_node(ts_node, session, execute_fn, call_stack, view)
+    text = await _literal_node(ts_node, context, execute_fn, call_stack, view)
     return [Piece(mark_globs(text) if quoted else text)]
 
 
@@ -526,7 +529,7 @@ async def _expand_child(
     node: TSNodeLike,
     quoted: bool,
     *,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None,
@@ -536,19 +539,19 @@ async def _expand_child(
     Args:
         node (TSNodeLike): the nested node.
         quoted (bool): whether it sits inside double quotes.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
     """
     return await expand_chunks(
-        node, session, execute_fn, call_stack, view=view, quoted=quoted
+        node, context, execute_fn, call_stack, view=view, quoted=quoted
     )
 
 
 async def _string_chunks(
     node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None,
@@ -568,7 +571,7 @@ async def _string_chunks(
 
     Args:
         node (TSNodeLike): the string node.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -589,7 +592,7 @@ async def _string_chunks(
         pieces = await named(
             inside,
             expand_chunks(
-                part, session, execute_fn, call_stack, view=view, quoted=True
+                part, context, execute_fn, call_stack, view=view, quoted=True
             ),
         )
         if is_at_splat(part):
@@ -603,7 +606,7 @@ async def _string_chunks(
 
 async def _substitution(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None,
@@ -612,15 +615,16 @@ async def _substitution(
 
     Args:
         ts_node (TSNodeLike): the substitution node.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
     """
+    session = context.session
     prefix = _folded_whitespace(ts_node)
     if ts_node.type == NT.ARITHMETIC_EXPANSION:
         expr = await expand_arith(
-            ts_node, session, execute_fn, call_stack, view=view
+            ts_node, context, execute_fn, call_stack, view=view
         )
         try:
             # Reads resolve against the visible env, so a hidden name
@@ -650,7 +654,7 @@ async def _substitution(
         # split_backtick_region).
         return await _expand_backtick_region(
             raw,
-            session,
+            context,
             execute_fn,
             ts_node,
             len(encode_text(prefix)),
@@ -666,7 +670,7 @@ async def _substitution(
             arith = _find_first(reparsed, NT.ARITHMETIC_EXPANSION)
             if arith is not None:
                 return await expand_node(
-                    arith, session, execute_fn, call_stack, view=view
+                    arith, context, execute_fn, call_stack, view=view
                 )
     # The whole body goes to the evaluator: bash substitutes the
     # full statement list, and picking child nodes dropped every
@@ -677,20 +681,20 @@ async def _substitution(
         return ""
     # The substitution names its own node: the nested line's
     # commands stand under it, which is where the pass placed them.
-    io = await child_line(session, execute_fn, inner, ts_node, call_stack)
+    io = await child_line(context, execute_fn, inner, ts_node, call_stack)
     text = decode_text(await io.materialize_stdout()).rstrip("\n")
     # Record the substitution's status: an assignment-only
     # statement whose value ran substitutions reports the last
     # one's status as its own (see assignment_status).
-    session._diagnostics.append(await io.materialize_stderr())
-    session._cmdsub_seq += 1
-    session._cmdsub_status = io.exit_code
+    context.frame.diagnostics.append(await io.materialize_stderr())
+    context.frame.cmdsub_seq += 1
+    context.frame.cmdsub_status = io.exit_code
     return text
 
 
 async def _literal_node(
     ts_node: TSNodeLike,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None,
@@ -699,7 +703,7 @@ async def _literal_node(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -729,7 +733,7 @@ async def _literal_node(
             ]
             if val_nodes:
                 expanded = await expand_node(
-                    val_nodes[0], session, execute_fn, call_stack, view=view
+                    val_nodes[0], context, execute_fn, call_stack, view=view
                 )
                 return f"{key}={expanded}"
             return f"{key}={val_part}"

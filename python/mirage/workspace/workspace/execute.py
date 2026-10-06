@@ -48,9 +48,11 @@ from mirage.workspace.abort import (
     set_line_writer,
 )
 from mirage.workspace.evaluation import (
-    child_session,
-    execution_session,
-    persistent_session,
+    EvaluationContext,
+    child_context,
+    get_current_evaluation,
+    reset_current_evaluation,
+    set_current_evaluation,
 )
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias import expanding_aliases
@@ -196,6 +198,9 @@ async def recurse(
         session = ws._session_mgr.get(
             opts.get("session_id") or ws._session_mgr.default_id
         )
+    context = get_current_evaluation()
+    if context is None or context.session is not session:
+        context = EvaluationContext(session)
     if (
         substitution
         and node is not None
@@ -223,7 +228,7 @@ async def recurse(
                     evaluate,
                     agent_id or "",
                     tree,
-                    session,
+                    context,
                     None,
                     cancel,
                     routing_decision=routing_decision,
@@ -239,8 +244,9 @@ async def recurse(
             parser.release()
     child_token = None
     if substitution:
-        session = child_session(session)
-        child_token = set_current_session(session, owner=ws._session_mgr)
+        context = child_context(context)
+        session = context.session
+        child_token = set_current_evaluation(context, owner=ws._session_mgr)
     capture = Terminal()
     waits = JobWaits(capture.jobs)
     rest = session.job_output or session.tty.jobs
@@ -306,7 +312,7 @@ async def recurse(
         if substitution:
             session.functions.clear()
             if child_token is not None:
-                reset_current_session(child_token)
+                reset_current_evaluation(child_token)
     if io.refusal is not None:
         nested.latest = io.refusal
     return io
@@ -561,7 +567,15 @@ async def run_prepared_line(
     """
     session_id = session.session_id
     cache_facts = ws._dispatcher.capture_cache_facts()
-    effective_session = execution_session(fork_for_call(session, cwd, env))
+    effective_session = fork_for_call(session, cwd, env)
+    parent = get_current_evaluation()
+    if parent is not None and parent.session is not session:
+        parent = None
+    context = (
+        parent
+        if parent is not None and parent.session is effective_session
+        else EvaluationContext(effective_session, parent=parent)
+    )
     # The agent of this line, carried with the execution rather than
     # held on the workspace: a nested line inherits it through
     # `recurse`, a concurrent line keeps its own.
@@ -574,9 +588,7 @@ async def run_prepared_line(
     scope = RecordingScope(active=is_line)
     parse_scope = ParseScope()
 
-    session_token = set_current_session(
-        effective_session, owner=ws._session_mgr
-    )
+    session_token = set_current_evaluation(context, owner=ws._session_mgr)
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
     # ``Workspace.shell``, after the last await of the line, so an
@@ -861,7 +873,7 @@ async def run_prepared_line(
                 exec_recursion,
                 agent or "",
                 ast,
-                effective_session,
+                context,
                 stdin,
                 cancel,
                 routing_decision=decision,
@@ -940,12 +952,10 @@ async def run_prepared_line(
         # event's exit_code says whether the line that emitted them
         # succeeded.
         parse_scope.release()
-        if persistent_session(effective_session) is not persistent_session(
-            session
-        ):
+        if effective_session is not session:
             effective_session.functions.clear()
         scope.close()
-        reset_current_session(session_token)
+        reset_current_evaluation(session_token)
         await ws._session_mgr.flush(session.session_id)
         ws._ops.records.extend(scope.records)
         # bash adds a line to history only when it is non-empty

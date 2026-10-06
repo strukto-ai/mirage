@@ -184,7 +184,7 @@ async function freshLocal(
 export async function localBuiltin(call: BuiltinCall): Promise<Result> {
   return handleLocal(
     [...call.argv.args],
-    call.session,
-    sessionView(call.session, call.registry.policies),
+    call.context.session,
+    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
   )
 }

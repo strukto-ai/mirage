@@ -29,6 +29,7 @@ from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import NodeType as NT
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import (
     UNWINDING,
@@ -46,14 +47,13 @@ from mirage.workspace.executor.statement import (
     statement_stdin,
 )
 from mirage.workspace.executor.traps import run_exit_trap
-from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
 async def execute_program(
     recurse,
     node,
-    session,
+    context: EvaluationContext,
     stdin,
     call_stack,
     job_table,
@@ -83,6 +83,7 @@ async def execute_program(
     through ``execute_fn``. Either resumes at its next line after an
     error that discards one, unless it runs in a child shell.
     """
+    session = context.session
     # Every program loop is one parse, which is the unit bash's alias
     # rule counts in: an alias defined on this parse and row is not
     # expanded by a use on the same parse and row. Restored on the way
@@ -97,7 +98,7 @@ async def execute_program(
         return await _run_program(
             recurse,
             node,
-            session,
+            context,
             stdin,
             call_stack,
             job_table,
@@ -119,7 +120,7 @@ async def execute_program(
 async def _run_program(
     recurse,
     node,
-    session,
+    context: EvaluationContext,
     stdin,
     call_stack,
     job_table,
@@ -132,6 +133,7 @@ async def _run_program(
     inline: bool = False,
     execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
+    session = context.session
     children = node.children
     all_stdout: list[Any] = []
     merged_io = IOResult()
@@ -201,7 +203,7 @@ async def _run_program(
                     recurse,
                     child,
                     None,
-                    session,
+                    context,
                     job_table,
                     agent_id,
                     stdin,
@@ -249,7 +251,7 @@ async def _run_program(
                 jobs.recorder = recorder
                 try:
                     stdout, io, last_exec = await recurse(
-                        child, session, child_stdin, call_stack, sink=recorder
+                        child, context, child_stdin, call_stack, sink=recorder
                     )
                 finally:
                     jobs.recorder = held
@@ -310,7 +312,7 @@ async def _run_program(
                 )
                 merged_io = await _exit_shell(
                     execute_fn,
-                    session,
+                    context,
                     code,
                     stdin,
                     call_stack,
@@ -370,7 +372,7 @@ async def _run_program(
             if not inline:
                 merged_io = await _exit_shell(
                     execute_fn,
-                    session,
+                    context,
                     io.exit_code,
                     stdin,
                     call_stack,
@@ -387,7 +389,7 @@ async def _run_program(
 
 async def _exit_shell(
     execute_fn: Callable[..., Any] | None,
-    session: SessionState,
+    context: EvaluationContext,
     code: int,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
@@ -399,13 +401,14 @@ async def _exit_shell(
 
     Args:
         execute_fn (Callable[..., Any] | None): runs the action.
-        session (SessionState): the shell.
+        context (EvaluationContext): the shell.
         code (int): the status it ends with.
         stdin (ByteSource | None): its standard input.
         call_stack (CallStack | None): its frames.
         all_stdout (list[Any]): its output so far, extended in place.
         merged_io (IOResult): its result so far.
     """
+    session = context.session
     cleanup = await run_exit_trap(execute_fn, session, code, stdin, call_stack)
     if cleanup is None:
         merged_io.exit_code = code

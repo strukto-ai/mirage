@@ -31,6 +31,7 @@ from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import TSNodeLike
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import StatusWriter, line_status_writer
+from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -269,7 +270,7 @@ def statement_stdin(
     return stdin
 
 
-def assignment_status(session: SessionState, seq_before: int) -> int:
+def assignment_status(frame: ExecutionFrame, seq_before: int) -> int:
     """Exit status of an assignment-only statement.
 
     Bash: an assignment statement exits 0 unless expanding it ran
@@ -277,12 +278,12 @@ def assignment_status(session: SessionState, seq_before: int) -> int:
     substitution performed becomes the statement's own.
 
     Args:
-        session (SessionState): shell session carrying substitution counters.
-        seq_before (int): session._cmdsub_seq snapshot taken before the
+        frame (ExecutionFrame): counters owned by this evaluation.
+        seq_before (int): frame.cmdsub_seq snapshot taken before the
             assignment expanded its value.
     """
-    if session._cmdsub_seq != seq_before:
-        return session._cmdsub_status
+    if frame.cmdsub_seq != seq_before:
+        return frame.cmdsub_status
     return 0
 
 

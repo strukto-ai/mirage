@@ -128,5 +128,5 @@ export async function handleHistory(
 
 /** The `history` arm. */
 export async function historyBuiltin(call: BuiltinCall): Promise<Result> {
-  return handleHistory(call.registry, [...call.argv.args], call.session)
+  return handleHistory(call.registry, [...call.argv.args], call.context.session)
 }

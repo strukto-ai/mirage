@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { sessionEntry, setSessionEntry } from '../session/session.ts'
 import { seedVar, setAttr } from '../session/state.ts'
 import { TempEnv, VarAttr } from '../../shell/variable.ts'
@@ -100,7 +101,7 @@ import {
   lsLinkMode,
 } from '../lookup/index.ts'
 import { Admitted, admit } from './admission.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { ensureVarVisible, sessionView } from '../session/state.ts'
 import { preSessionGate } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
@@ -125,7 +126,7 @@ async function ownWords<T>(node: TSNodeLike, pending: Promise<T>): Promise<T> {
 export async function executeCommand(
   recurse: (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
@@ -135,7 +136,7 @@ export async function executeCommand(
   namespace: Namespace,
   executeFn: ExecuteFn,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -153,6 +154,7 @@ export async function executeCommand(
   // nested shell) writes them as they finish.
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   const name = getCommandName(node)
   const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
 
@@ -213,7 +215,7 @@ export async function executeCommand(
         // alias's text is the caller's own line.
         return await recurse(
           ast,
-          session,
+          context,
           stdinIn,
           callStack ?? new CallStack(),
           expansion === null ? undefined : { handed: expansion },
@@ -240,10 +242,10 @@ export async function executeCommand(
             node,
             expandNode(
               firstVal,
-              session,
+              context,
               executeFn,
               callStack,
-              sessionView(session, registry.policies),
+              sessionView(session, registry.policies, context.frame.diagnostics),
             ),
           )
         : rawVal
@@ -333,7 +335,7 @@ export async function executeCommand(
       node,
       nonPrefixParts,
       name,
-      session,
+      context,
       stdinIn,
       callStack,
       jobTable,
@@ -362,7 +364,7 @@ export async function executeCommand(
 async function runCommandBody(
   recurse: (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -373,7 +375,7 @@ async function runCommandBody(
   node: TSNodeLike,
   parts: TSNodeLike[],
   name: string,
-  session: SessionState,
+  context: EvaluationContext,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -385,10 +387,11 @@ async function runCommandBody(
   seedPrefix?: (command: string) => void,
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   const stdin = stdinIn
   // A background job's kill channel rides the session; fold it in so
   // builtins (sleep) and the mount layer observe the kill.
-  const signal = mergeSignals(signalIn, session.abortSignal)
+  const signal = mergeSignals(signalIn, context.frame.abortSignal)
   // The command's place on the line, as the pass computed it, and the
   // door its nested evaluations re-enter through: a word that runs a
   // line (eval, source, xargs) is bound to this node, and a substitution
@@ -426,7 +429,7 @@ async function runCommandBody(
       procSubInputs.push([path, allocation])
       const inner = getProcessSubBody(p)
       if (inner !== '') {
-        const io = await childLine(session, executeFn, inner, p, callStack)
+        const io = await childLine(context, executeFn, inner, p, callStack)
         dev.setInput(path, allocation, await materialize(io.stdout))
         procSubStderr.push(await materialize(io.stderr))
       }
@@ -437,12 +440,12 @@ async function runCommandBody(
       node,
       expandArgv(
         cleanParts,
-        session,
+        context,
         executeFn,
         callStack,
         registry,
         namespace,
-        sessionView(session, registry.policies),
+        sessionView(session, registry.policies, context.frame.diagnostics),
         routingDecision,
       ),
     )
@@ -479,7 +482,7 @@ async function runCommandBody(
         namespace,
         executeFn,
         argv,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,
@@ -542,7 +545,7 @@ async function runCommandBody(
 async function runArgv(
   recurse: (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -551,7 +554,7 @@ async function runArgv(
   namespace: Namespace,
   executeFn: ExecuteFn,
   argv: Argv,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -574,6 +577,7 @@ async function runArgv(
   // Opens the redirect targets once the line is admitted.
   opener: RedirectOpener | null = null,
 ): Promise<Result> {
+  const session = context.session
   const name = argv.name
 
   // A glob whose directory holds a child mount cannot be pushed down to
@@ -616,7 +620,7 @@ async function runArgv(
       name,
       [...argv.args],
       [...argv.operands],
-      session,
+      context.session,
       registry,
       namespace,
       agentId,
@@ -664,7 +668,7 @@ async function runArgv(
       namespace,
       executeFn,
       argv,
-      session,
+      context,
       stdin,
       callStack,
       jobTable,
@@ -702,7 +706,7 @@ export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
 async function routeArgv(
   recurse: (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -711,7 +715,7 @@ async function routeArgv(
   namespace: Namespace,
   executeFn: ExecuteFn,
   argv: Argv,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -723,6 +727,7 @@ async function routeArgv(
   handed: HandOff | null,
   sink?: JobConsole,
 ): Promise<Result> {
+  const session = context.session
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.
   // Every handler below reaches the op door through this one function,
@@ -730,7 +735,7 @@ async function routeArgv(
   // between its operands (`rm l1 l2` with the first unlink held past
   // the grace). Python needs nothing here: its cancelled task never
   // reaches the next operand.
-  const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, session.abortSignal))
+  const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, context.frame.abortSignal))
   const name = argv.name
   const args = [...argv.args]
   let operands = [...argv.operands]
@@ -745,7 +750,7 @@ async function routeArgv(
       executeFn,
       name,
       args,
-      session,
+      context,
       registry,
       namespace,
       stdin,
@@ -779,7 +784,7 @@ async function routeArgv(
   if (builtin !== undefined) {
     return builtin({
       argv,
-      session,
+      context,
       stdin,
       callStack,
       signal,
@@ -918,7 +923,7 @@ async function routeArgv(
     dispatch,
     registry,
     dispatchArgv.words,
-    session,
+    context,
     stdin,
     callStack,
     jobTable,

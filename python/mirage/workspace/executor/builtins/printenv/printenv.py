@@ -52,4 +52,4 @@ async def printenv_builtin(call: BuiltinCall) -> Result:
     """
     args = list(call.argv.args)
     var_name = args[0] if args else None
-    return await handle_printenv(var_name, call.session)
+    return await handle_printenv(var_name, call.context.session)

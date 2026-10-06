@@ -226,7 +226,7 @@ async def return_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation.
     """
     return await handle_return(
-        list(call.argv.args), call.session, call.call_stack
+        list(call.argv.args), call.context.session, call.call_stack
     )
 
 
@@ -238,7 +238,7 @@ async def exit_builtin(call: BuiltinCall) -> Result:
     """
     return await handle_exit(
         list(call.argv.args),
-        call.session,
+        call.context.session,
         call.execute_fn,
         call.stdin,
         call.call_stack,
@@ -252,7 +252,7 @@ async def break_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation.
     """
     return leave_loops(
-        "break", list(call.argv.args), call.session, call.call_stack
+        "break", list(call.argv.args), call.context.session, call.call_stack
     )
 
 
@@ -263,5 +263,5 @@ async def continue_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation.
     """
     return leave_loops(
-        "continue", list(call.argv.args), call.session, call.call_stack
+        "continue", list(call.argv.args), call.context.session, call.call_stack
     )

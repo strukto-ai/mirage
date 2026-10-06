@@ -113,7 +113,7 @@ export async function handleLet(
 export async function letBuiltin(call: BuiltinCall): Promise<Result> {
   return handleLet(
     [...call.argv.args],
-    call.session,
-    sessionView(call.session, call.registry.policies),
+    call.context.session,
+    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
   )
 }

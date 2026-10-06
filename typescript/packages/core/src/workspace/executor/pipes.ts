@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
 import { releaseFunctions } from '../session/functions.ts'
 
 import type { ProcessHandle } from '../../process/handle.ts'
@@ -39,7 +40,7 @@ import { carried, ended, isUnwinding } from './control.ts'
 import { ERREXIT_EXEMPT_TYPES, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
-import type { SessionState } from '../session/session.ts'
+
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { handleBackground, pump } from './jobs.ts'
@@ -53,7 +54,7 @@ import { PipeConsole } from '../../shell/console/pipe.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
 import { ENCLOSING, Recorder } from '../../shell/descriptors.ts'
 import { Channel } from '../../shell/console/types.ts'
-import { runWithSession } from '../../context/session_context.ts'
+
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, makeAbortError, mergeSignals } from '../abort.ts'
 import { concat } from '../../io/cachable_iterator.ts'
@@ -65,7 +66,7 @@ export async function handlePipe(
   executeNode: ExecuteNodeFn,
   commands: readonly TSNodeLike[],
   stderrFlags: readonly boolean[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   signal?: AbortSignal,
@@ -74,6 +75,7 @@ export async function handlePipe(
   // this when it ends.
   executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
+  const session = context.session
   // Reassociated pipelines can enter here without executeNode resetting
   // the parent. An exemption belongs to the preceding statement only;
   // the caller applies this pipeline's own negation after it finishes.
@@ -82,7 +84,7 @@ export async function handlePipe(
   const ios: IOResult[] = commands.map(() => new IOResult())
   const childNodes: ExecutionNode[] = commands.map(() => new ExecutionNode())
   const abort = new AbortController()
-  const parentSignal = mergeSignals(signal, session.abortSignal)
+  const parentSignal = mergeSignals(signal, context.frame.abortSignal)
   const onAbort = (): void => {
     abort.abort(parentSignal?.reason)
     for (const pipe of pipes) pipe.closeReader()
@@ -95,10 +97,12 @@ export async function handlePipe(
   let failed = false
   const tasks: Promise<void>[] = []
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
-    const child = session.fork()
+    const childEvaluation = context.fork()
+    const child = childEvaluation.session
     inheritExitTrap(child)
     child.terminalOutput = session.terminalOutput && i === commands.length - 1
-    child.abortSignal = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
+    childEvaluation.frame.abortSignal =
+      mergeSignals(context.frame.abortSignal, abort.signal) ?? abort.signal
     const output = pipes[i]
     if (output === undefined) throw new Error('Missing pipeline segment')
     const upstream = pipes[i - 1]
@@ -129,7 +133,10 @@ export async function handlePipe(
           child,
           input,
           stageStack,
-          executeNode(cmd, child, input, stageStack, { sink: output, signal: abort.signal }),
+          executeNode(cmd, childEvaluation, input, stageStack, {
+            sink: output,
+            signal: abort.signal,
+          }),
         )
         io = result
         childExec = execution
@@ -161,7 +168,8 @@ export async function handlePipe(
         if (failed) await discardIo(io)
       }
     }
-    const execute = () => (asyncContextIsolatesTasks ? runWithSession(child, run) : run())
+    const execute = () =>
+      asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, run) : run()
     if (processes === undefined) return execute()
     let process: ProcessHandle
     try {
@@ -286,12 +294,13 @@ export async function handleConnection(
   left: TSNodeLike,
   op: string | null,
   right: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
+  const session = context.session
   const bound = fd0Binding(session)
-  const [leftStdout, leftIo, leftExec] = await executeNode(left, session, stdin, callStack)
+  const [leftStdout, leftIo, leftExec] = await executeNode(left, context, stdin, callStack)
   const children = [leftExec]
 
   const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
@@ -306,7 +315,7 @@ export async function handleConnection(
   try {
     ;[rightStdout, rightIo, rightExec] = await executeNode(
       right,
-      session,
+      context,
       statementStdin(session, stdin, bound),
       callStack,
     )
@@ -338,7 +347,7 @@ export async function handleConnection(
 export async function handleSubshell(
   executeNode: ExecuteNodeFn,
   body: readonly TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -358,6 +367,7 @@ export async function handleSubshell(
   // Runs the subshell's own EXIT action as it ends.
   executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
+  const session = context.session
   inheritExitTrap(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.lineOpen = true
@@ -387,7 +397,7 @@ export async function handleSubshell(
             executeNode,
             child,
             null,
-            session,
+            context,
             jobTable,
             agentId ?? '',
             stdin,
@@ -432,7 +442,7 @@ export async function handleSubshell(
         jobs.recorder = recorder
         try {
           ;[stdout, io, childExec] = await ENCLOSING.run(recorder, () =>
-            executeNode(child, session, childStdin, callStack, { sink: recorder }),
+            executeNode(child, context, childStdin, callStack, { sink: recorder }),
           )
         } finally {
           jobs.recorder = held

@@ -152,7 +152,9 @@ async def type_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return handle_type(list(call.argv.args), call.session, call.registry)
+    return handle_type(
+        list(call.argv.args), call.context.session, call.registry
+    )
 
 
 async def which_builtin(call: BuiltinCall) -> Result:
@@ -161,4 +163,6 @@ async def which_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return handle_which(list(call.argv.args), call.session, call.registry)
+    return handle_which(
+        list(call.argv.args), call.context.session, call.registry
+    )

@@ -30,6 +30,7 @@ from mirage.utils.glob_walk import (
     mark_globs,
     unmark_globs,
 )
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.parts import expand_words
@@ -49,7 +50,6 @@ from mirage.workspace.lookup import (
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import SessionState
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +103,7 @@ class Argv:
 
 async def expand_argv(
     parts: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     registry: MountRegistry,
@@ -123,7 +123,7 @@ async def expand_argv(
     Args:
         parts (list[TSNodeLike]): word nodes after env-prefix
             stripping and process-substitution removal.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         registry (MountRegistry): mount registry for classification.
@@ -131,8 +131,9 @@ async def expand_argv(
             links, so a glob word sees links and nested mount roots the
             way a listing does.
     """
+    session = context.session
     expanded = await expand_words(
-        parts, session, execute_fn, call_stack, view=view
+        parts, context, execute_fn, call_stack, view=view
     )
     if not expanded:
         return Argv(name="", args=(), operands=())

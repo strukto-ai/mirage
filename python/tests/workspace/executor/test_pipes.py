@@ -21,7 +21,7 @@ from mirage.io.types import materialize
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.evaluation import child_session
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.pipes import handle_pipe, handle_subshell
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -61,7 +61,10 @@ async def test_cache_read_remains_drainable_after_early_pipeline_exit():
     session = SessionState(session_id="test")
     session.shell_options["pipefail"] = True
     _, io, _ = await handle_pipe(
-        execute_node, [FakeNode("cat"), FakeNode("head")], [], session
+        execute_node,
+        [FakeNode("cat"), FakeNode("head")],
+        [],
+        EvaluationContext(session),
     )
     assert io.exit_code == 0
     assert not closed
@@ -99,7 +102,7 @@ async def test_handle_pipe_passes_empty_stdin_when_left_returns_none():
         execute_node,
         [FakeNode("left"), FakeNode("right")],
         [False],
-        SessionState(session_id="t"),
+        EvaluationContext(SessionState(session_id="t")),
         None,
     )
     right = next(c for c in calls if c["text"] == "right")
@@ -123,7 +126,7 @@ async def test_handle_pipe_threads_stdout_to_next_stdin():
         execute_node,
         [FakeNode("a"), FakeNode("b")],
         [False],
-        SessionState(session_id="t"),
+        EvaluationContext(SessionState(session_id="t")),
         None,
     )
     assert seen[0] == b""
@@ -137,7 +140,7 @@ async def test_handle_subshell_seeds_last_exit_code_between_children():
     seen: list[int] = []
 
     async def execute_node(nd, sess, _stdin, _call_stack=None, **kwargs):
-        seen.append(sess.last_exit_code)
+        seen.append(sess.session.last_exit_code)
         code = 7 if nd.text == "a" else 0
         return (
             b"",
@@ -148,7 +151,7 @@ async def test_handle_subshell_seeds_last_exit_code_between_children():
     await handle_subshell(
         execute_node,
         [FakeNode("a"), FakeNode("b")],
-        child_session(session),
+        child_context(EvaluationContext(session)),
         None,
     )
     assert seen == [0, 7]
@@ -162,9 +165,9 @@ async def test_each_segment_sees_the_status_the_pipeline_started_with():
     seen: list[int] = []
 
     async def execute_node(nd, sess, _stdin, _call_stack=None, **kwargs):
-        seen.append(sess.last_exit_code)
+        seen.append(sess.session.last_exit_code)
         # An inner statement of a compound segment lands its own status.
-        sess.last_exit_code = 0
+        sess.session.last_exit_code = 0
         return (
             b"",
             IOResult(exit_code=0),
@@ -172,7 +175,11 @@ async def test_each_segment_sees_the_status_the_pipeline_started_with():
         )
 
     await handle_pipe(
-        execute_node, [FakeNode("a"), FakeNode("b")], [False], session, None
+        execute_node,
+        [FakeNode("a"), FakeNode("b")],
+        [False],
+        EvaluationContext(session),
+        None,
     )
     assert seen == [1, 1]
 

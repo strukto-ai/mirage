@@ -112,5 +112,5 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
 
 /** The `trap` arm. */
 export function trapBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleTrap(call.argv.args, call.session))
+  return Promise.resolve(handleTrap(call.argv.args, call.context.session))
 }

@@ -152,7 +152,7 @@ export async function commandBuiltin(call: BuiltinCall): Promise<Result> {
   return handleCommandBuiltin(
     call.executeFn,
     [...call.argv.args],
-    call.session,
+    call.context.session,
     call.registry,
     call.stdin,
     call.callStack,

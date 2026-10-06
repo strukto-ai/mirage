@@ -145,10 +145,10 @@ export async function handleMapfile(
 export async function mapfileBuiltin(call: BuiltinCall): Promise<Result> {
   return handleMapfile(
     [...call.argv.args],
-    call.session,
+    call.context.session,
     call.stdin,
     call.executeFn,
-    sessionView(call.session, call.registry.policies),
+    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
     call.argv.name,
     call.signal,
   )

@@ -201,7 +201,8 @@ function cdSuccess(
  * flag, and GNU applies it to both `cd` and `pwd`.
  */
 export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
-  const { session, dispatch, registry, namespace } = call
+  const { dispatch, registry, namespace } = call
+  const { session } = call.context
   const shellPhysical = session.shellOptions.physical === true
   const {
     operands: cdOperands,

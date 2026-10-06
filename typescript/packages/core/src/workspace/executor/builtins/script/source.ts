@@ -106,7 +106,7 @@ export async function sourceBuiltin(call: BuiltinCall): Promise<Result> {
     call.dispatch,
     call.executeFn,
     target,
-    call.session,
+    call.context.session,
     sourceArgs,
     call.stdin,
     call.callStack,

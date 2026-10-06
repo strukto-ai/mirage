@@ -107,5 +107,5 @@ export function handleShopt(args: string[], session: SessionState): Result {
 
 /** The `shopt` arm. */
 export function shoptBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleShopt([...call.argv.args], call.session))
+  return Promise.resolve(handleShopt([...call.argv.args], call.context.session))
 }

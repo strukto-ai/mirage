@@ -39,6 +39,7 @@ from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.read.read import read_reply
 from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import (
@@ -46,7 +47,6 @@ from mirage.workspace.executor.statement import (
     finish_statement,
     record_status,
 )
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view, visible_env
 from mirage.workspace.types import ExecutionNode
 
@@ -60,7 +60,7 @@ _MAX_WHILE = 10000
 async def _execute_body(
     execute_node: Callable[..., Any],
     body: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     job_table: JobTable | None,
@@ -74,6 +74,7 @@ async def _execute_body(
     ``run_statement`` rather than run inline; ``job_table`` and
     ``agent_id`` are the job plane it needs.
     """
+    session = context.session
     all_stdout: list[ByteSource | None] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="", exit_code=0)
@@ -83,7 +84,7 @@ async def _execute_body(
             stdout, io, last_exec = await run_statement(
                 execute_node,
                 cmd,
-                session,
+                context,
                 stdin,
                 bound,
                 call_stack,
@@ -239,7 +240,7 @@ async def handle_if(
     execute_node: Callable[..., Any],
     branches: list[tuple[TSNodeLike, list[TSNodeLike]]],
     else_body: list[TSNodeLike] | None,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -247,12 +248,13 @@ async def handle_if(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    session = context.session
     bound = fd0_binding(session)
     for condition, body in branches:
         cond_stdout, cond_io, _ = await run_statement(
             execute_node,
             condition,
-            session,
+            context,
             stdin,
             bound,
             call_stack,
@@ -271,7 +273,7 @@ async def handle_if(
             return await _execute_body(
                 execute_node,
                 body,
-                session,
+                context,
                 stdin,
                 call_stack,
                 job_table,
@@ -283,7 +285,7 @@ async def handle_if(
         return await _execute_body(
             execute_node,
             else_body,
-            session,
+            context,
             stdin,
             call_stack,
             job_table,
@@ -304,7 +306,7 @@ async def handle_for(
     variable: str,
     values: list[str | PathSpec],
     body: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     policies: Policies | None = None,
@@ -313,9 +315,12 @@ async def handle_for(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    session = context.session
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
-    view = session_view(session, policies)
+    view = session_view(
+        session, policies, diagnostics=context.frame.diagnostics
+    )
     # The loop variable is the shell's own write: readonly is bash's
     # rule, checked up front so the loop never starts, exactly as bash
     # refuses `for x` on a readonly x before the first iteration.
@@ -344,7 +349,7 @@ async def handle_for(
             stdout, io, _ = await _execute_body(
                 execute_node,
                 body,
-                session,
+                context,
                 stdin,
                 call_stack,
                 job_table,
@@ -369,7 +374,7 @@ async def _condition_loop(
     execute_node: Callable[..., Any],
     condition: TSNodeLike,
     body: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     label: str,
@@ -379,6 +384,7 @@ async def _condition_loop(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    session = context.session
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
     hit_limit = True
@@ -390,7 +396,7 @@ async def _condition_loop(
         cond_stdout, cond_io, _ = await run_statement(
             execute_node,
             condition,
-            session,
+            context,
             stdin,
             bound,
             call_stack,
@@ -415,7 +421,7 @@ async def _condition_loop(
             stdout, io, _ = await _execute_body(
                 execute_node,
                 body,
-                session,
+                context,
                 stdin,
                 call_stack,
                 job_table,
@@ -448,7 +454,7 @@ async def handle_cfor(
     exprs: list[list[TSNodeLike]],
     body: list[TSNodeLike],
     eval_expr: Callable[..., Any],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -469,7 +475,7 @@ async def handle_cfor(
             default when the slot is empty; raises ArithError with the
             offending expression text on an invalid expression, or
             ReadonlyError when it assigns to a readonly variable.
-        session (SessionState): shell session.
+        context (EvaluationContext): shell session.
         stdin (ByteSource | None): input stream, which each iteration
             reads on from where the one before stopped, like for/while.
         call_stack (CallStack | None): function-call scope, if any.
@@ -479,6 +485,7 @@ async def handle_cfor(
         handed (HandOff | None): approval claims inherited by a job.
         decisions (Decisions | None): ledger that holds those claims.
     """
+    session = context.session
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
     hit_limit = True
@@ -495,7 +502,7 @@ async def handle_cfor(
                 stdout, io, _ = await _execute_body(
                     execute_node,
                     body,
-                    session,
+                    context,
                     stdin,
                     call_stack,
                     job_table,
@@ -544,7 +551,7 @@ async def handle_while(
     execute_node: Callable[..., Any],
     condition: TSNodeLike,
     body: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -556,7 +563,7 @@ async def handle_while(
         execute_node,
         condition,
         body,
-        session,
+        context,
         stdin,
         call_stack,
         "while",
@@ -572,7 +579,7 @@ async def handle_until(
     execute_node: Callable[..., Any],
     condition: TSNodeLike,
     body: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -584,7 +591,7 @@ async def handle_until(
         execute_node,
         condition,
         body,
-        session,
+        context,
         stdin,
         call_stack,
         "until",
@@ -600,7 +607,7 @@ async def handle_case(
     execute_node: Callable[..., Any],
     word: str,
     items: list[tuple[list[str], list[TSNodeLike], str]],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -608,6 +615,7 @@ async def handle_case(
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    session = context.session
     all_stdout: list[ByteSource] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="case", exit_code=0)
@@ -623,7 +631,7 @@ async def handle_case(
                 stdout, io, last_exec = await run_statement(
                     execute_node,
                     stmt,
-                    session,
+                    context,
                     stdin,
                     bound,
                     call_stack,
@@ -696,7 +704,7 @@ async def handle_select(
     variable: str,
     values: list[str | PathSpec],
     body: list[TSNodeLike],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     policies: Policies | None = None,
@@ -720,7 +728,7 @@ async def handle_select(
         variable (str): the select variable name.
         values (list[str | PathSpec]): menu entries, already expanded.
         body (list[TSNodeLike]): loop body statements.
-        session (SessionState): shell session state.
+        context (EvaluationContext): shell session state.
         stdin (ByteSource | None): line source for choices.
         call_stack (CallStack | None): function-call scope, if any.
         job_table (JobTable | None): the job plane for a body statement
@@ -731,9 +739,12 @@ async def handle_select(
         sink (JobConsole | None): where the body's statements write as
             they finish, so the loop's own newline lands in order.
     """
+    session = context.session
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
-    view = session_view(session, policies)
+    view = session_view(
+        session, policies, diagnostics=context.frame.diagnostics
+    )
     lines = line_buffer(stdin) if stdin is not None else None
     words = [word_text(v) for v in values]
     show_menu = bool(words)
@@ -783,7 +794,7 @@ async def handle_select(
             stdout, io, _ = await _execute_body(
                 execute_node,
                 body,
-                session,
+                context,
                 stdin,
                 call_stack,
                 job_table,

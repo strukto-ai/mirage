@@ -68,5 +68,5 @@ export function handleShift(
 
 /** The `shift` arm. */
 export function shiftBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleShift([...call.argv.args], call.callStack, call.session))
+  return Promise.resolve(handleShift([...call.argv.args], call.callStack, call.context.session))
 }

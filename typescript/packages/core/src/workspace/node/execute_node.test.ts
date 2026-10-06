@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
@@ -68,7 +69,7 @@ describe('executeNode dispatcher', () => {
     const [stdout, io] = await executeNode(
       buildDeps(reg),
       node,
-      new SessionState({ sessionId: 't' }),
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
     )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
@@ -108,7 +109,7 @@ describe('executeNode dispatcher', () => {
       isNamed: true,
     }
     const session = new SessionState({ sessionId: 't' })
-    const [stdout, io] = await executeNode(buildDeps(reg), fnNode, session)
+    const [stdout, io] = await executeNode(buildDeps(reg), fnNode, new EvaluationContext(session))
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
     expect(session.functions.greet).toEqual([stmt])
@@ -124,7 +125,7 @@ describe('executeNode dispatcher', () => {
       isNamed: true,
     }
     const session = new SessionState({ sessionId: 't' })
-    const [, io] = await executeNode(buildDeps(reg), node, session)
+    const [, io] = await executeNode(buildDeps(reg), node, new EvaluationContext(session))
     expect(io.exitCode).toBe(0)
     expect(session.env.FOO).toBe('bar')
   })
@@ -139,7 +140,7 @@ describe('executeNode dispatcher', () => {
       isNamed: true,
     }
     const session = new SessionState({ sessionId: 't' })
-    await executeNode(buildDeps(reg), node, session)
+    await executeNode(buildDeps(reg), node, new EvaluationContext(session))
     // Only the seeded $PWD, $PATH and $IFS, so the assignment really did
     // nothing.
     expect(Object.keys(session.env)).toEqual(['PWD', 'PATH', 'IFS'])
@@ -165,7 +166,11 @@ describe('executeNode dispatcher', () => {
       namedChildren: [inner],
       isNamed: true,
     }
-    const [, io] = await executeNode(buildDeps(reg), neg, new SessionState({ sessionId: 't' }))
+    const [, io] = await executeNode(
+      buildDeps(reg),
+      neg,
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
+    )
     expect(io.exitCode).toBe(1)
   })
 
@@ -192,7 +197,11 @@ describe('executeNode dispatcher', () => {
       namedChildren: [inner],
       isNamed: true,
     }
-    const [, io] = await executeNode(buildDeps(reg), neg, new SessionState({ sessionId: 't' }))
+    const [, io] = await executeNode(
+      buildDeps(reg),
+      neg,
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
+    )
     expect(io.exitCode).toBe(0)
   })
 
@@ -210,7 +219,7 @@ describe('executeNode dispatcher', () => {
       isNamed: true,
     }
     const session = new SessionState({ sessionId: 't', cwd: '/ram/subdir' })
-    const [stdout, io] = await executeNode(buildDeps(reg), cmd, session)
+    const [stdout, io] = await executeNode(buildDeps(reg), cmd, new EvaluationContext(session))
     expect(io.exitCode).toBe(0)
     expect(decode(await materialize(stdout))).toBe('/ram/subdir\n')
   })
@@ -231,7 +240,7 @@ describe('executeNode dispatcher', () => {
     const [stdout, io] = await executeNode(
       buildDeps(reg),
       cmd,
-      new SessionState({ sessionId: 't' }),
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
     )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
@@ -250,7 +259,11 @@ describe('executeNode dispatcher', () => {
       ],
       isNamed: true,
     }
-    const [, io] = await executeNode(buildDeps(reg), cmd, new SessionState({ sessionId: 't' }))
+    const [, io] = await executeNode(
+      buildDeps(reg),
+      cmd,
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
+    )
     expect(io.exitCode).toBe(1)
   })
 
@@ -289,7 +302,7 @@ describe('executeNode dispatcher', () => {
       isNamed: true,
     }
     const session = new SessionState({ sessionId: 't' })
-    const [, io] = await executeNode(buildDeps(reg), prog, session)
+    const [, io] = await executeNode(buildDeps(reg), prog, new EvaluationContext(session))
     expect(io.exitCode).toBe(0)
     expect(session.lastExitCode).toBe(0)
   })
@@ -306,7 +319,7 @@ describe('executeNode dispatcher', () => {
     const [stdout, io, exec] = await executeNode(
       buildDeps(reg),
       comment,
-      new SessionState({ sessionId: 't' }),
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
     )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
@@ -344,7 +357,7 @@ describe('executeNode dispatcher', () => {
       isNamed: true,
     }
     const session = new SessionState({ sessionId: 't' })
-    const [, io] = await executeNode(buildDeps(reg), prog, session)
+    const [, io] = await executeNode(buildDeps(reg), prog, new EvaluationContext(session))
     expect(io.exitCode).toBe(0)
     expect(session.lastExitCode).toBe(0)
   })
@@ -390,7 +403,7 @@ describe('executeNode dispatcher', () => {
     const [, io, exec] = await executeNode(
       buildDeps(reg),
       compound,
-      new SessionState({ sessionId: 't' }),
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
     )
     // The comment must not become the lastExec; the real `false` should.
     expect(exec.command).toBe('false')
@@ -431,7 +444,7 @@ describe('executeNode dispatcher', () => {
     const [, io, exec] = await executeNode(
       buildDeps(reg),
       compound,
-      new SessionState({ sessionId: 't' }),
+      new EvaluationContext(new SessionState({ sessionId: 't' })),
     )
     expect(io.exitCode).toBe(1)
     expect(exec.command).toBe('false')

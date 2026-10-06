@@ -18,7 +18,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.shell.constants import RANDOM, RANDOM_MAX, RANDOM_UNSET
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
-from mirage.workspace.evaluation import child_session, execution_session
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     conversion_scalar,
@@ -34,7 +34,7 @@ from mirage.workspace.session.state import (
 
 
 def test_seed_from_evaluates_the_word_as_arithmetic():
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     s.vars["x"] = ShellVar("42")
     assert seed_from("42", s) == 42
     assert seed_from("-1", s) == (1 << 32) - 1
@@ -57,10 +57,11 @@ def test_seed_from_evaluates_the_word_as_arithmetic():
 async def test_an_unevaluable_word_leaves_the_generator_alone():
     # bash 5.2.37: `RANDOM=0; echo $RANDOM; RANDOM=1.5; echo $RANDOM`
     # prints the error for 1.5 and then 24386, the second draw of seed 0.
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     assert next_random(s, "0") == 20814
-    await set_var(s, None, RANDOM, "1.5")
-    assert s._diagnostics == ['1.5: syntax error: invalid character "."']
+    diagnostics: list[str | bytes] = []
+    await set_var(s, None, RANDOM, "1.5", diagnostics=diagnostics)
+    assert diagnostics == ['1.5: syntax error: invalid character "."']
     assert next_random(s, s.vars[RANDOM].value) == 24386
     assert next_random(s, s.vars[RANDOM].value) == 149
 
@@ -83,7 +84,7 @@ def test_seeded_sequences_are_bash_5_2s(seed, expected):
     # 32 bits, 4294967338 is 42 past 2**32, seed 32768 renders 0 on its
     # first step, which the no-repeat rule redraws, and the last three
     # are arithmetic words: 3, 16, and an unset name.
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     drawn = [
         next_random(s, seed if i == 0 else s.vars[RANDOM].value)
         for i in range(3)
@@ -92,8 +93,8 @@ def test_seeded_sequences_are_bash_5_2s(seed, expected):
 
 
 def test_seeded_sequence_is_deterministic_and_bounded():
-    a = execution_session(SessionState(session_id="a"))
-    b = execution_session(SessionState(session_id="b"))
+    a = SessionState(session_id="a")
+    b = SessionState(session_id="b")
     seq_a = [
         next_random(a, "42" if i == 0 else a.vars[RANDOM].value)
         for i in range(5)
@@ -109,7 +110,7 @@ def test_seeded_sequence_is_deterministic_and_bounded():
 
 
 def test_write_back_reseeds_only_on_a_new_word():
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     first = next_random(s, "7")
     stored = s.vars[RANDOM].value
     assert stored == str(first)
@@ -118,15 +119,15 @@ def test_write_back_reseeds_only_on_a_new_word():
 
 
 def test_unset_after_a_read_strips_the_meaning():
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     assert next_random(s, None) is not None
     assert next_random(s, None) is None
 
 
 def test_a_child_shell_reseeds_without_advancing_the_parent():
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     parent = [next_random(s, "42"), next_random(s, s.vars[RANDOM].value)]
-    child = child_session(s)
+    child = child_context(EvaluationContext(s)).session
     assert child._random_seed == s.vars[RANDOM].value
     assert child._random_state is None
     drawn = next_random(child, child.vars[RANDOM].value)
@@ -137,14 +138,17 @@ def test_a_child_shell_reseeds_without_advancing_the_parent():
 
 
 def test_a_child_shell_does_not_replay_a_pending_seed():
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     seed_var(s, RANDOM, "42")
-    child = child_session(s)
+    child = child_context(EvaluationContext(s)).session
     assert child._random_seed == "42" and child._random_state is None
-    unset = execution_session(SessionState(session_id="u"))
+    unset = SessionState(session_id="u")
     next_random(unset, None)
     assert next_random(unset, None) is None
-    assert next_random(child_session(unset), None) is None
+    assert (
+        next_random(child_context(EvaluationContext(unset)).session, None)
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -476,7 +480,7 @@ def test_random_reader_draws_from_the_pending_seed_and_settles():
     # The reader is told of the assignment, draws from a scratch
     # generator seeded with it, and replays those draws on the session
     # only once the door has landed the same seed.
-    session = execution_session(SessionState(session_id="s"))
+    session = SessionState(session_id="s")
     session.vars[RANDOM] = ShellVar("1")
     reader = random_reader(session)
     assert reader.read("X") is None
@@ -672,34 +676,34 @@ async def test_an_array_on_random_ends_its_special_meaning(command, stdout):
 
 @pytest.mark.asyncio
 async def test_every_store_door_ends_the_meaning_on_a_non_string():
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     seed_var(s, RANDOM, ["1", "2"])
     assert next_random(s, None) is None
     assert s.vars[RANDOM].value == ["1", "2"]
-    t = execution_session(SessionState(session_id="t"))
+    t = SessionState(session_id="t")
     await set_var(t, None, RANDOM, {"k": "v"})
     assert next_random(t, None) is None
     assert t.vars[RANDOM].value == {"k": "v"}
-    u = execution_session(SessionState(session_id="u"))
+    u = SessionState(session_id="u")
     note_random_kind(u, "other", ["1"])
     assert next_random(u, None) is not None
 
 
 def test_conversion_scalar_draws_once_for_a_live_random():
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     seed_var(s, RANDOM, "42")
     assert conversion_scalar(s, RANDOM) == "17772"
     assert s.vars[RANDOM].value == "17772"
     seed_var(s, "x", "5")
     assert conversion_scalar(s, "x") == "5"
     assert conversion_scalar(s, "absent") is None
-    u = execution_session(SessionState(session_id="u"))
+    u = SessionState(session_id="u")
     u._random_seed = RANDOM_UNSET
     assert conversion_scalar(u, RANDOM) is None
 
 
 def test_a_local_random_parks_the_marker_and_restores_it():
-    s = execution_session(SessionState(session_id="s"))
+    s = SessionState(session_id="s")
     seed_var(s, RANDOM, "42")
     assert next_random(s, "42") == 17772
     frame: dict[str, ShellVar | None] = {}

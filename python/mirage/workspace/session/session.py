@@ -16,7 +16,7 @@ import time
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mirage.io.async_line_iterator import SharedInput
 from mirage.policy.types import (
@@ -719,27 +719,6 @@ class SessionState:
             for name, var in self.vars.items()
             if VarAttr.READONLY in var.attrs
         )
-
-    # Type-only execution view; these are never dataclass/session fields.
-    if TYPE_CHECKING:
-
-        @property
-        def _cmdsub_seq(self) -> int: ...
-
-        @_cmdsub_seq.setter
-        def _cmdsub_seq(self, value: int) -> None: ...
-
-        @property
-        def _cmdsub_status(self) -> int: ...
-
-        @_cmdsub_status.setter
-        def _cmdsub_status(self, value: int) -> None: ...
-
-        @property
-        def _diagnostics(self) -> list[str | bytes]: ...
-
-        @_diagnostics.setter
-        def _diagnostics(self, value: list[str | bytes]) -> None: ...
 
     def __post_init__(self) -> None:
         self.functions = FunctionTable(self.functions)

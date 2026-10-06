@@ -38,7 +38,6 @@ from mirage.utils.hidden import (
     shown_mode,
 )
 from mirage.utils.path import parent
-from mirage.workspace.frame import parent_session, persistent_session
 
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
@@ -61,6 +60,7 @@ class SessionBinding:
 
     session: "SessionState | None"
     owner: "SessionManager | None"
+    ancestors: "tuple[SessionState, ...]" = ()
 
 
 _current_session: ContextVar[SessionBinding | None] = ContextVar(
@@ -70,7 +70,10 @@ _current_session: ContextVar[SessionBinding | None] = ContextVar(
 
 
 def set_current_session(
-    session: "SessionState | None", owner: "SessionManager | None" = None
+    session: "SessionState | None",
+    owner: "SessionManager | None" = None,
+    *,
+    ancestors: "tuple[SessionState, ...]" = (),
 ) -> Token[Any]:
     """Bind ``session`` to the current async context.
 
@@ -84,7 +87,9 @@ def set_current_session(
     if owner is None:
         current = _current_session.get()
         owner = current.owner if current is not None else None
-    return _current_session.set(SessionBinding(session=session, owner=owner))
+    return _current_session.set(
+        SessionBinding(session=session, owner=owner, ancestors=ancestors)
+    )
 
 
 def reset_current_session(token: Token[Any]) -> None:
@@ -607,12 +612,14 @@ def program_invocation(session: "SessionState") -> bool:
     marked = _program_invocation.get()
     if marked is None:
         return False
-    current: SessionState | None = session
-    while current is not None:
-        if persistent_session(current) is persistent_session(marked):
-            return True
-        current = parent_session(current)
-    return False
+    if session is marked:
+        return True
+    binding = _current_session.get()
+    return (
+        binding is not None
+        and binding.session is session
+        and any(ancestor is marked for ancestor in binding.ancestors)
+    )
 
 
 def redirect_target_judged(virtual: str) -> bool:

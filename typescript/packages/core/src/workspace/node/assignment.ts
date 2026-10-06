@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -37,7 +38,7 @@ import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -64,10 +65,11 @@ function arithFatal(err: ArithError): ExitSignal {
 
 /** `subscriptIndex` whose failure ends the line, in bash's words. */
 async function fatalIndex(
-  session: SessionState,
+  context: EvaluationContext,
   subscript: string,
   view: SessionView,
 ): Promise<number> {
+  const session = context.session
   try {
     return await subscriptIndex(session, subscript, view)
   } catch (err) {
@@ -113,23 +115,24 @@ async function assignVar(view: SessionView, key: string, value: ShellValue): Pro
 // (`a=($(cmd) /data/*.txt)`), with zero-match globs kept literal.
 export async function expandArrayItems(
   arrayNode: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   namespace: Namespace,
   callStack: CallStack | null,
 ): Promise<string[]> {
+  const session = context.session
   // A bare assignment is no command, but its glob reads listings all the
   // same, so it gets a scope of its own.
   const resolved = await runInCommandScope(async () => {
     const classified = await expandAndClassify(
       arrayNode.namedChildren,
-      session,
+      context,
       executeFn,
       registry,
       session.cwd,
       callStack,
-      sessionView(session, registry.policies),
+      sessionView(session, registry.policies, context.frame.diagnostics),
     )
     return resolveGlobs(
       classified,
@@ -156,7 +159,7 @@ const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER
 async function subscriptKeyText(
   subscriptNode: TSNodeLike,
   name: string,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -168,7 +171,7 @@ async function subscriptKeyText(
   }
   const parts: string[] = []
   for (const sc of inner) {
-    parts.push(await expandNode(sc, session, executeFn, callStack, view))
+    parts.push(await expandNode(sc, context, executeFn, callStack, view))
   }
   return parts.join('')
 }
@@ -183,17 +186,18 @@ async function subscriptKeyText(
  */
 export async function executeAssignment(
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   namespace: Namespace,
   callStack: CallStack | null,
 ): Promise<Result> {
+  const session = context.session
   const text = getText(node)
   if (!text.includes('=')) {
     return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
   }
-  const subSeq = session.cmdsubSeq
+  const subSeq = context.frame.cmdsubSeq
   const subscriptNode = node.namedChildren.find((c) => c.type === 'subscript') ?? null
   const nameSource = subscriptNode ?? node
   const nameNode = nameSource.namedChildren.find((c) => c.type === NT.VARIABLE_NAME)
@@ -217,12 +221,12 @@ export async function executeAssignment(
   // Every branch below computes its resulting value with bash's own
   // mechanics on a copy, then stores through the one session door,
   // which owns the gate and the scalar/array invariant.
-  const view = sessionView(session, registry.policies)
+  const view = sessionView(session, registry.policies, context.frame.diagnostics)
   const firstVal = valNodes[0]
   if (firstVal?.type === NT.ARRAY) {
     const items = await expandArrayItems(
       firstVal,
-      session,
+      context,
       executeFn,
       registry,
       namespace,
@@ -247,7 +251,7 @@ export async function executeAssignment(
           new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
         ]
       }
-      const mapCode = assignmentStatus(session, subSeq)
+      const mapCode = assignmentStatus(context.frame, subSeq)
       return [
         null,
         new IOResult({ exitCode: mapCode }),
@@ -267,7 +271,7 @@ export async function executeAssignment(
       subscriptIndex(session, sub, view),
     )
     await assignVar(view, key, base)
-    const arrCode = assignmentStatus(session, subSeq)
+    const arrCode = assignmentStatus(context.frame, subSeq)
     return [
       null,
       new IOResult({ exitCode: arrCode }),
@@ -278,20 +282,20 @@ export async function executeAssignment(
   if (firstVal !== undefined) {
     val = await expandNode(
       firstVal,
-      session,
+      context,
       executeFn,
       callStack,
-      sessionView(session, registry.policies),
+      sessionView(session, registry.policies, context.frame.diagnostics),
     )
   }
   if (subscriptNode !== null) {
     const subText = await subscriptKeyText(
       subscriptNode,
       spelled,
-      session,
+      context,
       executeFn,
       callStack,
-      sessionView(session, registry.policies),
+      sessionView(session, registry.policies, context.frame.diagnostics),
     )
     const heldMap = session.assocs[key]
     const rawSub = subscriptNode.text.slice(spelled.length + 1, -1)
@@ -310,7 +314,7 @@ export async function executeAssignment(
       const newMap = { ...heldMap }
       newMap[subText] = append ? (heldMap[subText] ?? '') + val : val
       await assignVar(view, key, newMap)
-      const mapCode = assignmentStatus(session, subSeq)
+      const mapCode = assignmentStatus(context.frame, subSeq)
       return [
         null,
         new IOResult({ exitCode: mapCode }),
@@ -325,7 +329,7 @@ export async function executeAssignment(
     } else {
       arr = [...existing]
     }
-    let idx = await fatalIndex(session, subText, view)
+    let idx = await fatalIndex(context, subText, view)
     if (idx < 0) idx += arrayExtent(arr)
     if (idx < 0) {
       // Same fatal shape as the empty subscript above.
@@ -334,7 +338,7 @@ export async function executeAssignment(
     }
     arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
     await assignVar(view, key, arr)
-    const subCode = assignmentStatus(session, subSeq)
+    const subCode = assignmentStatus(context.frame, subSeq)
     return [
       null,
       new IOResult({ exitCode: subCode }),
@@ -370,7 +374,7 @@ export async function executeAssignment(
   // Reassigning OPTIND (even to its current value) restarts the getopts
   // scan, matching bash's internal char pointer.
   if (key === 'OPTIND') session.getoptsOptind = null
-  const code = assignmentStatus(session, subSeq)
+  const code = assignmentStatus(context.frame, subSeq)
   const assignIo = new IOResult({ exitCode: code })
   if (session.shellOptions.xtrace === true) {
     assignIo.stderr = traceAssignment(key, val, append)

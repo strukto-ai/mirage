@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../../evaluation.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
@@ -34,6 +35,7 @@ export type ExecuteStringFn = (
   script: string,
   opts: {
     sessionId: string
+    context?: EvaluationContext
     session?: SessionState
     stdin?: ByteSource | null
     signal?: AbortSignal
@@ -58,7 +60,7 @@ export type ExecuteStringFn = (
  */
 export interface BuiltinCall {
   argv: Argv
-  session: SessionState
+  context: EvaluationContext
   stdin: ByteSource | null
   callStack: CallStack | null
   signal: AbortSignal | undefined

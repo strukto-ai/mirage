@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { executionSession } from '../evaluation.ts'
-
+import { EvaluationContext } from '../evaluation.ts'
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
@@ -30,11 +29,14 @@ async function words(cmd: string, env: Record<string, string> = {}, stdout = '')
   const parser = await getTestParser()
   const root = parser.parse(cmd)
   const parts = getParts(root.namedChildren[0] as never)
-  const session = executionSession(
-    new SessionState({ sessionId: 't', cwd: '/', vars: varsFromEnv(env) }),
-  )
+  const session = new SessionState({ sessionId: 't', cwd: '/', vars: varsFromEnv(env) })
   const executeFn: ExecuteFn = () => Promise.resolve(new IOResult({ stdout: ENC.encode(stdout) }))
-  return { parts, session, executeFn, out: await expandWords(parts, session, executeFn) }
+  return {
+    parts,
+    session,
+    executeFn,
+    out: await expandWords(parts, new EvaluationContext(session), executeFn),
+  }
 }
 
 // One word's literal spelling and the pattern a matcher would see.

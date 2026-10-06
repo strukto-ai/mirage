@@ -8,7 +8,7 @@ import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { SessionState } from './session/session.ts'
 import { seedVar } from './session/state.ts'
 import { Workspace } from './workspace/workspace.ts'
-import { childSession, executionSession } from './evaluation.ts'
+import { childContext, EvaluationContext } from './evaluation.ts'
 import type { TSNodeLike } from '../shell/types.ts'
 
 afterEach(() => vi.restoreAllMocks())
@@ -36,15 +36,22 @@ const it = test.extend<{ owned: { ws: Workspace; programs: ParsedProgram[] } }>(
 
 it('keeps temporary frames off persistent state and child writes off the parent', () => {
   const state = new SessionState({ sessionId: 's' })
-  const first = executionSession(state)
-  first.diagnostics.push('first')
-  first.cmdsubSeq = 4
-  seedVar(first, 'NAME', 'parent')
-  const second = executionSession(state)
-  const child = childSession(first)
-  seedVar(child, 'NAME', 'child')
-  expect(second.diagnostics).toEqual([])
-  expect(second.cmdsubSeq).toBe(0)
+  const first = new EvaluationContext(state)
+  first.frame.diagnostics.push('first')
+  first.frame.cmdsubSeq = 4
+  first.frame.abortSignal = new AbortController().signal
+  seedVar(first.session, 'NAME', 'parent')
+  const second = new EvaluationContext(state)
+  const child = childContext(first)
+  expect(first.session).toBe(state)
+  expect(second.session).toBe(state)
+  expect(child.parent).toBe(first)
+  expect(child.frame).not.toBe(first.frame)
+  expect(child.frame.abortSignal).toBe(first.frame.abortSignal)
+  expect(second.frame.abortSignal).toBeNull()
+  seedVar(child.session, 'NAME', 'child')
+  expect(second.frame.diagnostics).toEqual([])
+  expect(second.frame.cmdsubSeq).toBe(0)
   expect(state.env.NAME).toBe('parent')
   expect(Object.hasOwn(state, 'diagnostics')).toBe(false)
   expect(Object.hasOwn(state, 'abortSignal')).toBe(false)

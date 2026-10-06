@@ -20,6 +20,7 @@ from mirage.shell.helpers import get_case_items
 from mirage.shell.parse import parse
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.pattern import _unquoted_pattern, expand_pattern
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
@@ -34,7 +35,9 @@ def _expand(snippet: str, env: dict[str, str] | None = None) -> str:
     patterns = get_case_items(root.children[0])[0][0]
     assert len(patterns) == 1
     session = SessionState(session_id="t", vars=vars_from_env(env or {}))
-    return asyncio.run(expand_pattern(patterns[0], session, _fail_exec))
+    return asyncio.run(
+        expand_pattern(patterns[0], EvaluationContext(session), _fail_exec)
+    )
 
 
 @pytest.mark.parametrize(

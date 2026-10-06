@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runWithEvaluation, type EvaluationContext, childContext } from '../evaluation.ts'
 import { releaseFunctions } from '../session/functions.ts'
-import { childSession, executionSession } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
 import { timingReport } from './timing.ts'
 import { PathSpec } from '../../types.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
-import { runWithSession } from '../../context/session_context.ts'
+
 import { isProgramInvocation, runAsProgram } from '../../context/session_context.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessSupervisor } from '../../process/supervisor.ts'
@@ -91,7 +91,7 @@ import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.
 import { handleRedirect } from '../executor/redirect.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { ExecutionNode } from '../types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandDoubleBracket, expandTestExpr } from './test_expr.ts'
@@ -135,7 +135,7 @@ const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 type Recurse = (
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
@@ -198,16 +198,17 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
 async function evalCforExpr(
   exprs: readonly TSNodeLike[],
   dflt: number,
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
 ): Promise<number> {
+  const session = context.session
   if (exprs.length === 0) return dflt
   // One comma expression, evaluated once, so an assignment early in the
   // slot is seen by the expressions after it.
   const parts: string[] = []
-  for (const expr of exprs) parts.push(await expandArith(expr, session, executeFn, callStack, view))
+  for (const expr of exprs) parts.push(await expandArith(expr, context, executeFn, callStack, view))
   const text = parts.join(', ')
   const reader = randomReader(session)
   let error: ArithError | null = null
@@ -267,12 +268,12 @@ async function recurseReassociated(
   signal: AbortSignal | undefined,
   processes: ProcessSupervisor | undefined,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
 ): Promise<Result> {
-  if (node !== right) return recurse(node, session, stdin, callStack, opts)
+  if (node !== right) return recurse(node, context, stdin, callStack, opts)
   return runRedirected(
     recurse,
     dispatch,
@@ -283,7 +284,7 @@ async function recurseReassociated(
     signal,
     processes,
     undefined,
-    session,
+    context,
     stdin,
     callStack,
   )
@@ -304,19 +305,19 @@ async function recurseLifted(
   signal: AbortSignal | undefined,
   processes: ProcessSupervisor | undefined,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
 ): Promise<Result> {
-  if (node !== right) return recurse(node, session, stdin, callStack, opts)
+  if (node !== right) return recurse(node, context, stdin, callStack, opts)
   return runPipeline(
     recurse,
     dispatch,
     executeFn,
     registry,
     stages,
-    session,
+    context,
     stdin,
     callStack,
     signal,
@@ -341,7 +342,7 @@ async function recurseStage(
   signal: AbortSignal | undefined,
   processes: ProcessSupervisor | undefined,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
@@ -356,7 +357,7 @@ async function recurseStage(
       registry,
       targets,
       node,
-      session,
+      context,
       stdin,
       callStack,
       opts,
@@ -376,7 +377,7 @@ async function recurseStage(
     signal,
     processes,
     undefined,
-    session,
+    context,
     stdin,
     callStack,
   )
@@ -395,12 +396,13 @@ async function runPipeline(
   executeFn: ExecuteFn,
   registry: MountRegistry,
   stages: PipelineStages,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   signal?: AbortSignal,
   processes?: ProcessSupervisor,
 ): Promise<Result> {
+  const session = context.session
   if (stages.lead !== null) {
     const [left, op, right] = stages.lead
     const wrapped = recurseLifted.bind(
@@ -414,7 +416,7 @@ async function runPipeline(
       signal,
       processes,
     )
-    return handleConnection(wrapped, left, op, right, session, stdin, callStack)
+    return handleConnection(wrapped, left, op, right, context, stdin, callStack)
   }
   const targets = stages.commands.filter((_, i) => stages.stderrFlags[i] === true)
   const pipeRecurse = recurseStage.bind(
@@ -432,7 +434,7 @@ async function runPipeline(
     pipeRecurse,
     stages.commands,
     stages.stderrFlags,
-    session,
+    context,
     stdin,
     callStack,
     signal,
@@ -454,7 +456,7 @@ async function runPipeline(
 }
 
 type RunLeft = (
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ) => Promise<Result>
@@ -464,9 +466,10 @@ async function negated(
   rawStdout: ByteSource | null,
   io: IOResult,
   execNode: ExecutionNode,
-  session: SessionState,
+  context: EvaluationContext,
   inner: TSNodeLike,
 ): Promise<Result> {
+  const session = context.session
   // Lazy exit codes (exitOnEmpty in grep) must be final before
   // inverting, or `! grep miss f` negates the provisional 0.
   const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
@@ -507,14 +510,15 @@ async function runRedirected(
   signal: AbortSignal | undefined,
   processes: ProcessSupervisor | undefined,
   sink: JobConsole | undefined,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
+  const session = context.session
   if (command !== null && command.type === NT.FUNCTION_DEFINITION) {
     // The redirects belong to the function, applied at each call
     // (getFunctionBody), not to the definition.
-    return recurse(command, session, stdin, callStack)
+    return recurse(command, context, stdin, callStack)
   }
   if (command !== null && command.type === NT.LIST) {
     // tree-sitter hoists a trailing redirect over the whole &&/||
@@ -537,7 +541,7 @@ async function runRedirected(
       signal,
       processes,
     )
-    return handleConnection(wrapped, left, op, right, session, stdin, callStack)
+    return handleConnection(wrapped, left, op, right, context, stdin, callStack)
   }
   if (command !== null && command.type === NT.PIPELINE) {
     return runPipeline(
@@ -546,7 +550,7 @@ async function runRedirected(
       executeFn,
       registry,
       getPipelineStages(command, redirects),
-      session,
+      context,
       stdin,
       callStack,
       signal,
@@ -568,20 +572,20 @@ async function runRedirected(
       signal,
       processes,
       sink,
-      session,
+      context,
       stdin,
       callStack,
     )
-    return negated(stdout, io, execNode, session, inner)
+    return negated(stdout, io, execNode, context, inner)
   }
   const [expandedRedirects, pipeNode] = await expandRedirects(
     redirects,
-    session,
+    context,
     executeFn,
     registry,
     callStack,
-    sessionView(session, registry.policies),
-    forks(command, session),
+    sessionView(session, registry.policies, context.frame.diagnostics),
+    forks(command, context),
   )
   // `exec > file` with no command installs the redirects on the shell
   // for every later statement, rather than applying them to one
@@ -599,8 +603,8 @@ async function runRedirected(
     (command.type === NT.COMMAND ||
       command.type === NT.VARIABLE_ASSIGNMENT ||
       command.type === NT.VARIABLE_ASSIGNMENTS)
-  const outer = session.diagnostics
-  if (simple) session.diagnostics = []
+  const outer = context.frame.diagnostics
+  if (simple) context.frame.diagnostics = []
   let stdout: ByteSource | null
   let io: IOResult
   let execNode: ExecutionNode
@@ -612,27 +616,27 @@ async function runRedirected(
       dispatch,
       command,
       expandedRedirects,
-      session,
+      context,
       stdin,
       callStack,
       false,
       pipeNode === null ? sink : undefined,
     )
-    if (simple && session.diagnostics.length > 0) {
-      const err = diagnosticStderr(command, session)
+    if (simple && context.frame.diagnostics.length > 0) {
+      const err = diagnosticStderr(command, context)
       io.stderr = concat([err, await io.materializeStderr()])
       execNode.stderr = concat([err, execNode.stderr])
     }
   } catch (err) {
     if (simple && err instanceof ExitSignal) {
-      err.stderr = concat([diagnosticStderr(command, session), err.stderr])
+      err.stderr = concat([diagnosticStderr(command, context), err.stderr])
     }
     throw err
   } finally {
-    session.diagnostics = outer
+    context.frame.diagnostics = outer
   }
   if (pipeNode !== null && stdout !== null) {
-    const [stdout2, io2, execNode2] = await recurse(pipeNode, session, stdout, callStack)
+    const [stdout2, io2, execNode2] = await recurse(pipeNode, context, stdout, callStack)
     stdout = stdout2
     io = await io.merge(io2)
     execNode = execNode2
@@ -656,15 +660,15 @@ async function runContinuation(
   runLeft: RunLeft,
   left: TSNodeLike,
   steps: readonly (readonly [string, TSNodeLike])[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
   const last = steps[steps.length - 1]
-  if (last === undefined) return runLeft(session, stdin, callStack)
+  if (last === undefined) return runLeft(context, stdin, callStack)
   const [op, right] = last
   const wrapped = recurseContinuation.bind(null, recurse, runLeft, left, steps.slice(0, -1))
-  return handleConnection(wrapped, left, op, right, session, stdin, callStack)
+  return handleConnection(wrapped, left, op, right, context, stdin, callStack)
 }
 
 async function recurseContinuation(
@@ -673,13 +677,13 @@ async function recurseContinuation(
   left: TSNodeLike,
   steps: readonly (readonly [string, TSNodeLike])[],
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
   if (node === left)
-    return runContinuation(recurse, runLeft, left, steps, session, stdin, callStack)
-  return recurse(node, session, stdin, callStack)
+    return runContinuation(recurse, runLeft, left, steps, context, stdin, callStack)
+  return recurse(node, context, stdin, callStack)
 }
 
 async function recursePipeStderr(
@@ -689,35 +693,36 @@ async function recursePipeStderr(
   registry: MountRegistry,
   targets: readonly TSNodeLike[],
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
 ): Promise<Result> {
+  const session = context.session
   if (!targets.includes(node) || nodeKind(node) !== NodeKind.REDIRECT) {
-    return recurse(node, session, stdin, callStack, opts)
+    return recurse(node, context, stdin, callStack, opts)
   }
   const [command, redirects] = getRedirects(node)
   redirects.push(new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }))
   const [expanded, pipeNode] = await expandRedirects(
     redirects,
-    session,
+    context,
     executeFn,
     registry,
     callStack,
-    sessionView(session, registry.policies),
+    sessionView(session, registry.policies, context.frame.diagnostics),
   )
   let [stdout, io, execNode] = await handleRedirect(
     recurse,
     dispatch,
     command,
     expanded,
-    session,
+    context,
     stdin,
     callStack,
   )
   if (pipeNode !== null && stdout !== null) {
-    const [stdout2, io2, execNode2] = await recurse(pipeNode, session, stdout, callStack)
+    const [stdout2, io2, execNode2] = await recurse(pipeNode, context, stdout, callStack)
     stdout = stdout2
     io = await io.merge(io2)
     execNode = execNode2
@@ -784,7 +789,8 @@ function isBareExec(command: TSNodeLike | null): boolean {
  * masked; a name only an expansion spells is taken for a program. Mirrors
  * Python's _forks.
  */
-function forks(command: TSNodeLike | null, session: SessionState): boolean {
+function forks(command: TSNodeLike | null, context: EvaluationContext): boolean {
+  const session = context.session
   if (command?.type !== NT.COMMAND) return command?.type === NT.SUBSHELL
   let words = getParts(command).filter((part) => part.type !== NT.VARIABLE_ASSIGNMENT)
   let functions = true
@@ -813,7 +819,7 @@ function forks(command: TSNodeLike | null, session: SessionState): boolean {
 export async function executeNode(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   // What expanding the node printed (a substitution's stderr) goes out with
@@ -825,12 +831,12 @@ export async function executeNode(
   // `executeNodeBody` binds it for the node's own lines.
   endsShell = false,
 ): Promise<Result> {
-  session = executionSession(session)
+  const session = context.session
   if (endsShell) {
     const { signal, executionScope } = deps
     const executeFn: ExecuteFn = (cmd, opts) =>
       deps.executeFn(cmd, {
-        session,
+        context,
         ...(signal !== undefined ? { signal } : {}),
         ...(executionScope !== undefined ? { executionScope } : {}),
         ...opts,
@@ -840,40 +846,40 @@ export async function executeNode(
       session,
       stdin,
       callStack,
-      executeNode(deps, node, session, stdin, callStack, ownDiagnostics),
+      executeNode(deps, node, context, stdin, callStack, ownDiagnostics),
     )
   }
   const executionScope = deps.executionScope ?? new ExecutionScope()
-  await executionScope.checkpoint(deps.signal ?? session.abortSignal ?? undefined)
+  await executionScope.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
   if (!ownDiagnostics) {
-    const result = await executeNodeBody(deps, node, session, stdin, callStack, executionScope)
-    if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
+    const result = await executeNodeBody(deps, node, context, stdin, callStack, executionScope)
+    if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
       throw makeAbortError(
-        deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+        deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
       )
     }
     return result
   }
-  const outer = session.diagnostics
-  session.diagnostics = []
+  const outer = context.frame.diagnostics
+  context.frame.diagnostics = []
   try {
     const [stdout, io, execNode] = await executeNodeBody(
       deps,
       node,
-      session,
+      context,
       stdin,
       callStack,
       executionScope,
     )
     // A statement that settles after the caller aborted is an orphan: its
     // status must not reach the shell the caller was already released from.
-    if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
+    if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
       throw makeAbortError(
-        deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+        deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
       )
     }
-    if (session.diagnostics.length > 0) {
-      const err = diagnosticStderr(node, session)
+    if (context.frame.diagnostics.length > 0) {
+      const err = diagnosticStderr(node, context)
       const existing = await io.materializeStderr()
       const merged = new Uint8Array(err.length + existing.length)
       merged.set(err)
@@ -884,7 +890,7 @@ export async function executeNode(
     return [stdout, io, execNode]
   } catch (err) {
     if (err instanceof ExitSignal) {
-      const extra = diagnosticStderr(node, session)
+      const extra = diagnosticStderr(node, context)
       const merged = new Uint8Array(extra.length + err.stderr.length)
       merged.set(extra)
       merged.set(err.stderr, extra.length)
@@ -892,17 +898,17 @@ export async function executeNode(
     }
     throw err
   } finally {
-    session.diagnostics = outer
+    context.frame.diagnostics = outer
   }
 }
 
-function diagnosticStderr(node: TSNodeLike, session: SessionState): Uint8Array {
+function diagnosticStderr(node: TSNodeLike, context: EvaluationContext): Uint8Array {
   const head = getText(node).trimStart().split(/\s+/, 1)[0] ?? ''
   const builtin = ['export', 'declare', 'local', 'readonly', 'read', 'printf', 'let'].includes(head)
     ? head
     : ''
   const prefix = builtin === '' ? 'bash: ' : `bash: ${builtin}: `
-  const parts = session.diagnostics.map((message) =>
+  const parts = context.frame.diagnostics.map((message) =>
     typeof message === 'string' ? encodeText(prefix + message + '\n') : message,
   )
   const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
@@ -917,11 +923,12 @@ function diagnosticStderr(node: TSNodeLike, session: SessionState): Uint8Array {
 async function executeNodeBody(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   executionScope: ExecutionScope,
 ): Promise<Result> {
+  const session = context.session
   // The scope and signal this subtree runs under are the ones its nested
   // evaluations run under, bound into `executeFn` here, at the one door
   // every node goes through, as Python binds them into `execute_fn`: a
@@ -946,7 +953,7 @@ async function executeNodeBody(
   const { sink, ...captureDeps } = deps
   const recurse = (
     n: TSNodeLike,
-    s: SessionState,
+    s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
@@ -965,7 +972,7 @@ async function executeNodeBody(
       ? recurse
       : (
           n: TSNodeLike,
-          s: SessionState,
+          s: EvaluationContext,
           i: ByteSource | null,
           cs: CallStack | null,
           opts?: ExecuteNodeOpts,
@@ -983,7 +990,7 @@ async function executeNodeBody(
   const { dispatch, registry, jobTable, agentId } = deps
   // Capture the walker's session before any await; a concurrent line's
   // ambient frame cannot identify this node's nested evaluations.
-  const executeFn: ExecuteFn = (cmd, opts) => deps.executeFn(cmd, { session, ...opts })
+  const executeFn: ExecuteFn = (cmd, opts) => deps.executeFn(cmd, { context, ...opts })
   const kind = nodeKind(node)
   // A root run on a caller's frames is the caller's own line (eval,
   // source, an alias, `$( )`); one given none is a shell of its own.
@@ -1008,9 +1015,9 @@ async function executeNodeBody(
   if (session.shellOptions.noexec === true) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
-  if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
+  if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
     throw makeAbortError(
-      deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+      deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
     )
   }
   session.errexitImmune = false
@@ -1028,14 +1035,14 @@ async function executeNodeBody(
     kind !== NodeKind.VAR_ASSIGN &&
     kind !== NodeKind.VAR_ASSIGNS
   ) {
-    return drained(sink, ...(await recurse(node, session, stdin, callStack)))
+    return drained(sink, ...(await recurse(node, context, stdin, callStack)))
   }
 
   if (kind === NodeKind.TIMED) {
     const started = performance.now()
     const inner = node.namedChildren[0]
     if (inner === undefined) throw new Error('timed statement has no body')
-    const [body, io, execNode] = await stream(inner, session, stdin, callStack)
+    const [body, io, execNode] = await stream(inner, context, stdin, callStack)
     const stdout = await applyBarrier(body, io, BarrierPolicy.VALUE)
     const elapsed = (performance.now() - started) / 1000
     const stderr = await io.materializeStderr()
@@ -1063,7 +1070,7 @@ async function executeNodeBody(
     return executeProgram(
       recurse,
       node,
-      session,
+      context,
       stdin,
       callStack,
       jobTable,
@@ -1086,7 +1093,7 @@ async function executeNodeBody(
         deps.namespace,
         executeFn,
         node,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,
@@ -1113,7 +1120,7 @@ async function executeNodeBody(
       executeFn,
       registry,
       getPipelineStages(node),
-      session,
+      context,
       stdin,
       callStack,
       deps.signal,
@@ -1123,7 +1130,7 @@ async function executeNodeBody(
 
   if (kind === NodeKind.LIST) {
     const [left, op, right] = getListParts(node)
-    return handleConnection(stream, left, op, right, session, stdin, callStack)
+    return handleConnection(stream, left, op, right, context, stdin, callStack)
   }
 
   if (kind === NodeKind.REDIRECT) {
@@ -1147,8 +1154,8 @@ async function executeNodeBody(
     )
     const result =
       continuation.length === 0
-        ? await runLeft(session, stdin, callStack)
-        : await runContinuation(recurse, runLeft, node, continuation, session, stdin, callStack)
+        ? await runLeft(context, stdin, callStack)
+        : await runContinuation(recurse, runLeft, node, continuation, context, stdin, callStack)
     return sink === undefined ? result : drained(sink, ...result)
   }
 
@@ -1172,7 +1179,7 @@ async function executeNodeBody(
     // sink and signal instead.
     const subRecurse = (
       n: TSNodeLike,
-      s: SessionState,
+      s: EvaluationContext,
       inp: ByteSource | null,
       cs: CallStack | null,
       opts?: ExecuteNodeOpts,
@@ -1186,7 +1193,7 @@ async function executeNodeBody(
         opts?.ownDiagnostics !== false,
         opts?.endsShell === true,
       )
-    const child = childSession(session)
+    const child = childContext(context)
     const asProgram = isProgramInvocation(session)
     let result: Result | undefined
     let process: ProcessHandle
@@ -1216,25 +1223,25 @@ async function executeNodeBody(
               sink ?? null,
               executeFn,
             )
-          result = await runWithSession(child, () =>
-            asProgram ? runAsProgram(child, body) : body(),
+          result = await runWithEvaluation(child, () =>
+            asProgram ? runAsProgram(child.session, body) : body(),
           )
           return result[1].exitCode
         },
       })
     } catch (error) {
-      releaseFunctions(child.functions)
+      releaseFunctions(child.session.functions)
       if ((error as { code?: unknown }).code === 'EAGAIN')
         throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
-    child.processId = process.info.pid
+    child.session.processId = process.info.pid
     try {
       await process.task
       if (result === undefined) throw new Error('subshell completed without a result')
       return result
     } finally {
-      releaseFunctions(child.functions)
+      releaseFunctions(child.session.functions)
     }
   }
 
@@ -1242,10 +1249,10 @@ async function executeNodeBody(
     const text = getText(node)
     const expr = await expandArith(
       node,
-      session,
+      context,
       executeFn,
       callStack,
-      sessionView(session, registry.policies),
+      sessionView(session, registry.policies, context.frame.diagnostics),
     )
     const reader = randomReader(session)
     let error: ArithError | null = null
@@ -1298,7 +1305,7 @@ async function executeNodeBody(
       for (const write of writes) {
         await assignElement(
           session,
-          sessionView(session, registry.policies),
+          sessionView(session, registry.policies, context.frame.diagnostics),
           write.name,
           write.key,
           write.value,
@@ -1342,7 +1349,7 @@ async function executeNodeBody(
         result = await runStatement(
           stream,
           child,
-          session,
+          context,
           stdin,
           bound,
           callStack,
@@ -1384,7 +1391,7 @@ async function executeNodeBody(
       stream,
       branches,
       elseBody,
-      session,
+      context,
       stdin,
       callStack,
       jobTable,
@@ -1397,14 +1404,21 @@ async function executeNodeBody(
   if (kind === NodeKind.CFOR) {
     const [exprs, body] = getCforParts(node)
     const evalExpr: CforEval = (e, d) =>
-      evalCforExpr(e, d, session, executeFn, callStack, sessionView(session, registry.policies))
+      evalCforExpr(
+        e,
+        d,
+        context,
+        executeFn,
+        callStack,
+        sessionView(session, registry.policies, context.frame.diagnostics),
+      )
     return callStack.loop(() =>
       handleCfor(
         stream,
         exprs,
         body,
         evalExpr,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,
@@ -1428,12 +1442,12 @@ async function executeNodeBody(
     const resolved = await runInCommandScope(async () => {
       const classified = await expandAndClassify(
         values,
-        session,
+        context,
         executeFn,
         registry,
         session.cwd,
         callStack,
-        sessionView(session, registry.policies),
+        sessionView(session, registry.policies, context.frame.diagnostics),
       )
       // The loop word list is consumed by the shell (WordPolicy.SHELL):
       // globs resolve to matches before iteration starts.
@@ -1452,7 +1466,7 @@ async function executeNodeBody(
           variable,
           resolved,
           body,
-          session,
+          context,
           stdin,
           callStack,
           registry.policies,
@@ -1460,7 +1474,7 @@ async function executeNodeBody(
           agentId,
           deps.handed ?? null,
           registry.decisions,
-          mergeSignals(deps.signal, session.abortSignal),
+          mergeSignals(deps.signal, context.frame.abortSignal),
           sink,
         ),
       )
@@ -1471,7 +1485,7 @@ async function executeNodeBody(
         variable,
         resolved,
         body,
-        session,
+        context,
         stdin,
         callStack,
         registry.policies,
@@ -1491,7 +1505,7 @@ async function executeNodeBody(
           stream,
           condition,
           body,
-          session,
+          context,
           stdin,
           callStack,
           jobTable,
@@ -1506,7 +1520,7 @@ async function executeNodeBody(
         stream,
         condition,
         body,
-        session,
+        context,
         stdin,
         callStack,
         jobTable,
@@ -1521,10 +1535,10 @@ async function executeNodeBody(
     const wordNode = getCaseWord(node)
     const word = await expandNode(
       wordNode,
-      session,
+      context,
       executeFn,
       callStack,
-      sessionView(session, registry.policies),
+      sessionView(session, registry.policies, context.frame.diagnostics),
     )
     const items: [string[], TSNodeLike[], string][] = []
     for (const [patternNodes, body, terminator] of getCaseItems(node)) {
@@ -1533,10 +1547,10 @@ async function executeNodeBody(
         patterns.push(
           await expandPattern(
             patternNode,
-            session,
+            context,
             executeFn,
             callStack,
-            sessionView(session, registry.policies),
+            sessionView(session, registry.policies, context.frame.diagnostics),
           ),
         )
       }
@@ -1546,7 +1560,7 @@ async function executeNodeBody(
       stream,
       word,
       items,
-      session,
+      context,
       stdin,
       callStack,
       jobTable,
@@ -1576,12 +1590,16 @@ async function executeNodeBody(
 
   if (kind === NodeKind.DECLARATION) {
     return await runInCommandScope(() =>
-      executeDeclaration(node, session, executeFn, registry, deps.namespace, callStack),
+      executeDeclaration(node, context, executeFn, registry, deps.namespace, callStack),
     )
   }
 
   if (kind === NodeKind.UNSET) {
-    return handleUnset(getUnsetArgs(node), session, sessionView(session, registry.policies))
+    return handleUnset(
+      getUnsetArgs(node),
+      session,
+      sessionView(session, registry.policies, context.frame.diagnostics),
+    )
   }
 
   if (kind === NodeKind.TEST) {
@@ -1589,10 +1607,10 @@ async function executeNodeBody(
     if (opener === '[[') {
       const tree = await expandDoubleBracket(
         node,
-        session,
+        context,
         executeFn,
         callStack,
-        sessionView(session, registry.policies),
+        sessionView(session, registry.policies, context.frame.diagnostics),
       )
       return handleTest(
         dispatch,
@@ -1600,15 +1618,15 @@ async function executeNodeBody(
         tree,
         session,
         '[[',
-        sessionView(session, registry.policies),
+        sessionView(session, registry.policies, context.frame.diagnostics),
       )
     }
     const expanded = await expandTestExpr(
       node,
-      session,
+      context,
       executeFn,
       callStack,
-      sessionView(session, registry.policies),
+      sessionView(session, registry.policies, context.frame.diagnostics),
     )
     return handleTest(
       dispatch,
@@ -1616,32 +1634,32 @@ async function executeNodeBody(
       expanded,
       session,
       '[',
-      sessionView(session, registry.policies),
+      sessionView(session, registry.policies, context.frame.diagnostics),
     )
   }
 
   if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
-    const [stdout, io, execNode] = await stream(inner, session, stdin, callStack)
-    return negated(stdout, io, execNode, session, inner)
+    const [stdout, io, execNode] = await stream(inner, context, stdin, callStack)
+    return negated(stdout, io, execNode, context, inner)
   }
 
   if (kind === NodeKind.VAR_ASSIGN) {
-    return await executeAssignment(node, session, executeFn, registry, deps.namespace, callStack)
+    return await executeAssignment(node, context, executeFn, registry, deps.namespace, callStack)
   }
 
   // Assignment-only statement (a=1 b=2).
   if (kind === NodeKind.VAR_ASSIGNS) {
-    const subSeq = session.cmdsubSeq
+    const subSeq = context.frame.cmdsubSeq
     let mergedIo = new IOResult()
     for (const child of node.namedChildren) {
       if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
-      const [, io] = await recurse(child, session, stdin, callStack, { ownDiagnostics: false })
+      const [, io] = await recurse(child, context, stdin, callStack, { ownDiagnostics: false })
       mergedIo = await mergedIo.merge(io)
     }
     // The statement's status follows the last command substitution
     // performed across ALL its assignments, not the last child's.
-    const code = assignmentStatus(session, subSeq)
+    const code = assignmentStatus(context.frame, subSeq)
     mergedIo.exitCode = code
     return [null, mergedIo, new ExecutionNode({ command: getText(node), exitCode: code })]
   }

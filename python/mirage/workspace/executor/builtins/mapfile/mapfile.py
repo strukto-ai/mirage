@@ -211,9 +211,13 @@ async def mapfile_builtin(call: BuiltinCall) -> Result:
     """
     return await handle_mapfile(
         list(call.argv.args),
-        call.session,
+        call.context.session,
         call.stdin,
         call.execute_fn,
-        session_view(call.session, call.namespace.registry.policies),
+        session_view(
+            call.context.session,
+            call.namespace.registry.policies,
+            diagnostics=call.context.frame.diagnostics,
+        ),
         cmd=str(call.argv.name),
     )

@@ -19,6 +19,7 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.types import NodeType as NT
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import unmark_globs
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.condition import (
     CondAnd,
     CondBinary,
@@ -48,7 +49,11 @@ _COND_OP_TOKENS = frozenset({"=", "==", "!=", "=~", "<", ">", "&&", "||"})
 
 
 async def expand_test_expr(
-    node, session, execute_fn, cs, view: SessionView | None = None
+    node,
+    context: EvaluationContext,
+    execute_fn,
+    cs,
+    view: SessionView | None = None,
 ) -> list[str | PathSpec]:
     """Expand a test_command ``[ ... ]`` into flat argv, tokens in
     source order.
@@ -60,19 +65,19 @@ async def expand_test_expr(
 
     Args:
         node: tree-sitter test_command node.
-        session: shell session for expansion.
+        context (EvaluationContext): shell session for expansion.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
     result: list[str | PathSpec] = []
-    await _flatten(node, result, session, execute_fn, cs, view=view)
+    await _flatten(node, result, context, execute_fn, cs, view=view)
     return result
 
 
 async def _flatten(
     node,
     out: list[str | PathSpec],
-    session,
+    context: EvaluationContext,
     execute_fn,
     cs,
     view: SessionView | None = None,
@@ -86,10 +91,11 @@ async def _flatten(
     Args:
         node: tree-sitter node to serialize.
         out (list[str]): accumulator.
-        session: shell session for expansion.
+        context (EvaluationContext): shell session for expansion.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
+    session = context.session
     for child in node.children:
         ctype = child.type
         if ctype in ("[", "]", "[[", "]]"):
@@ -98,7 +104,7 @@ async def _flatten(
             if any(not g.is_named and g.type == ";" for g in child.children):
                 return False
             if not await _flatten(
-                child, out, session, execute_fn, cs, view=view
+                child, out, context, execute_fn, cs, view=view
             ):
                 return False
             continue
@@ -110,19 +116,19 @@ async def _flatten(
             negative = _negative_number_child(child)
             if negative is not None:
                 expanded = await expand_node(
-                    negative, session, execute_fn, cs, view=view
+                    negative, context, execute_fn, cs, view=view
                 )
                 out.append("-" + expanded)
                 continue
             if not await _flatten(
-                child, out, session, execute_fn, cs, view=view
+                child, out, context, execute_fn, cs, view=view
             ):
                 return False
             continue
         if ctype == NT.TEST_OPERATOR:
             out.append(decode_text(child.text))
             continue
-        chunks = await expand_chunks(child, session, execute_fn, cs, view=view)
+        chunks = await expand_chunks(child, context, execute_fn, cs, view=view)
         out.extend(
             unmark_globs(word)
             for word in split_fields(chunks, ifs_value(session, cs))
@@ -154,30 +160,38 @@ def _negative_number_child(node):
 
 
 async def expand_double_bracket(
-    node, session, execute_fn, cs, view: SessionView | None = None
+    node,
+    context: EvaluationContext,
+    execute_fn,
+    cs,
+    view: SessionView | None = None,
 ) -> CondNode:
     """Build a structured condition tree from a ``[[ ... ]]`` node.
 
     Args:
         node: tree-sitter test_command node opened with ``[[``.
-        session: shell session for expansion.
+        context (EvaluationContext): shell session for expansion.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
     exprs = [c for c in node.named_children]
     if not exprs:
         return CondWord("")
-    return await _build_cond(exprs[0], session, execute_fn, cs, view=view)
+    return await _build_cond(exprs[0], context, execute_fn, cs, view=view)
 
 
 async def _build_cond(
-    node, session, execute_fn, cs, view: SessionView | None = None
+    node,
+    context: EvaluationContext,
+    execute_fn,
+    cs,
+    view: SessionView | None = None,
 ) -> CondNode:
     """Recursively translate one expression node into a CondNode.
 
     Args:
         node: tree-sitter expression node.
-        session: shell session for expansion.
+        context (EvaluationContext): shell session for expansion.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
@@ -186,23 +200,27 @@ async def _build_cond(
         inner = [c for c in node.named_children]
         if not inner:
             return CondWord("")
-        return await _build_cond(inner[0], session, execute_fn, cs, view=view)
+        return await _build_cond(inner[0], context, execute_fn, cs, view=view)
     if ntype in (NT.UNARY_EXPRESSION, NT.NEGATION_EXPRESSION):
-        return await _build_unary(node, session, execute_fn, cs, view=view)
+        return await _build_unary(node, context, execute_fn, cs, view=view)
     if ntype == NT.BINARY_EXPRESSION:
-        return await _build_binary(node, session, execute_fn, cs, view=view)
-    value = await expand_node(node, session, execute_fn, cs, view=view)
+        return await _build_binary(node, context, execute_fn, cs, view=view)
+    value = await expand_node(node, context, execute_fn, cs, view=view)
     return CondWord(value)
 
 
 async def _build_unary(
-    node, session, execute_fn, cs, view: SessionView | None = None
+    node,
+    context: EvaluationContext,
+    execute_fn,
+    cs,
+    view: SessionView | None = None,
 ) -> CondNode:
     """Translate a unary/negation expression node.
 
     Args:
         node: tree-sitter unary_expression or negation_expression.
-        session: shell session for expansion.
+        context (EvaluationContext): shell session for expansion.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
@@ -216,34 +234,38 @@ async def _build_unary(
             operand_node = child
     if op is None and operand_node is not None and negated:
         inner = await _build_cond(
-            operand_node, session, execute_fn, cs, view=view
+            operand_node, context, execute_fn, cs, view=view
         )
         return CondNot(inner)
     if op is None:
         value = ""
         if operand_node is not None:
             value = await expand_node(
-                operand_node, session, execute_fn, cs, view=view
+                operand_node, context, execute_fn, cs, view=view
             )
         result: CondNode = CondWord(value)
         return CondNot(result) if negated else result
     operand = ""
     if operand_node is not None:
         operand = await expand_node(
-            operand_node, session, execute_fn, cs, view=view
+            operand_node, context, execute_fn, cs, view=view
         )
     unary: CondNode = CondUnary(op=op, operand=operand)
     return CondNot(unary) if negated else unary
 
 
 async def _build_binary(
-    node, session, execute_fn, cs, view: SessionView | None = None
+    node,
+    context: EvaluationContext,
+    execute_fn,
+    cs,
+    view: SessionView | None = None,
 ) -> CondNode:
     """Translate a binary expression node (logical or comparison).
 
     Args:
         node: tree-sitter binary_expression.
-        session: shell session for expansion.
+        context (EvaluationContext): shell session for expansion.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
@@ -260,21 +282,21 @@ async def _build_binary(
         operands.append(child)
     if op in ("&&", "||") and len(operands) == 2:
         left = await _build_cond(
-            operands[0], session, execute_fn, cs, view=view
+            operands[0], context, execute_fn, cs, view=view
         )
         right = await _build_cond(
-            operands[1], session, execute_fn, cs, view=view
+            operands[1], context, execute_fn, cs, view=view
         )
         return CondAnd(left, right) if op == "&&" else CondOr(left, right)
     if op is None or len(operands) != 2:
         text_parts = []
         for operand in operands:
             text_parts.append(
-                await expand_node(operand, session, execute_fn, cs, view=view)
+                await expand_node(operand, context, execute_fn, cs, view=view)
             )
         return CondWord(" ".join(text_parts))
     left_text = await expand_node(
-        operands[0], session, execute_fn, cs, view=view
+        operands[0], context, execute_fn, cs, view=view
     )
     right_node = operands[1]
     if op == "=~" and right_node.type == NT.REGEX:
@@ -296,13 +318,13 @@ async def _build_binary(
         # pattern matches exactly itself, which is what the equality
         # the old whole-node boolean spelled out reduced to.
         pattern = await expand_pattern(
-            right_node, session, execute_fn, cs, view=view
+            right_node, context, execute_fn, cs, view=view
         )
         return CondBinary(
             left=left_text, op=op, right=pattern, right_literal=False
         )
     right_text = await expand_node(
-        right_node, session, execute_fn, cs, view=view
+        right_node, context, execute_fn, cs, view=view
     )
     return CondBinary(
         left=left_text, op=op, right=right_text, right_literal=False

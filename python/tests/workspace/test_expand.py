@@ -21,6 +21,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.helpers import get_parts
 from mirage.types import PathSpec
 from mirage.workspace.cli.registry import CLIRegistry
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand import (
     classify_parts,
     classify_word,
@@ -90,13 +91,17 @@ def _mock_registry(prefixes=None):
 
 def test_expand_word():
     node = _cmd_parts("echo hello")[1]
-    result = _run(expand_node(node, _session(), _execute_fn()))
+    result = _run(
+        expand_node(node, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == "hello"
 
 
 def test_expand_command_name():
     node = _cmd_parts("echo hello")[0]
-    result = _run(expand_node(node, _session(), _execute_fn()))
+    result = _run(
+        expand_node(node, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == "echo"
 
 
@@ -106,13 +111,15 @@ def test_expand_command_name():
 def test_expand_simple_var():
     node = _first_arg("echo $FOO")
     session = _session(env={"FOO": "bar"})
-    result = _run(expand_node(node, session, _execute_fn()))
+    result = _run(expand_node(node, EvaluationContext(session), _execute_fn()))
     assert result == "bar"
 
 
 def test_expand_simple_var_missing():
     node = _first_arg("echo $MISSING")
-    result = _run(expand_node(node, _session(), _execute_fn()))
+    result = _run(
+        expand_node(node, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == ""
 
 
@@ -120,7 +127,7 @@ def test_expand_special_question():
     node = _first_arg("echo $?")
     session = _session()
     session.last_exit_code = 42
-    result = _run(expand_node(node, session, _execute_fn()))
+    result = _run(expand_node(node, EvaluationContext(session), _execute_fn()))
     assert result == "42"
 
 
@@ -128,7 +135,11 @@ def test_expand_special_at():
     node = _first_arg("echo $@")
     cs = CallStack()
     cs.push(["a", "b", "c"])
-    result = _run(expand_node(node, _session(), _execute_fn(), call_stack=cs))
+    result = _run(
+        expand_node(
+            node, EvaluationContext(_session()), _execute_fn(), call_stack=cs
+        )
+    )
     assert result == "a b c"
 
 
@@ -136,13 +147,19 @@ def test_expand_positional():
     node = _first_arg("echo $1")
     cs = CallStack()
     cs.push(["first", "second"])
-    result = _run(expand_node(node, _session(), _execute_fn(), call_stack=cs))
+    result = _run(
+        expand_node(
+            node, EvaluationContext(_session()), _execute_fn(), call_stack=cs
+        )
+    )
     assert result == "first"
 
 
 def test_expand_dollar_zero():
     node = _first_arg("echo $0")
-    result = _run(expand_node(node, _session(), _execute_fn()))
+    result = _run(
+        expand_node(node, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == "mirage"
 
 
@@ -152,20 +169,22 @@ def test_expand_dollar_zero():
 def test_expand_braces():
     node = _first_arg("echo ${FOO}")
     session = _session(env={"FOO": "hello"})
-    result = _run(expand_node(node, session, _execute_fn()))
+    result = _run(expand_node(node, EvaluationContext(session), _execute_fn()))
     assert result == "hello"
 
 
 def test_expand_braces_default():
     node = _first_arg("echo ${FOO:-default_val}")
-    result = _run(expand_node(node, _session(), _execute_fn()))
+    result = _run(
+        expand_node(node, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == "default_val"
 
 
 def test_expand_braces_default_not_used():
     node = _first_arg("echo ${FOO:-default_val}")
     session = _session(env={"FOO": "exists"})
-    result = _run(expand_node(node, session, _execute_fn()))
+    result = _run(expand_node(node, EvaluationContext(session), _execute_fn()))
     assert result == "exists"
 
 
@@ -178,7 +197,7 @@ def test_expand_command_sub():
     io = IOResult()
     io.stdout = b"testuser\n"
     execute_fn.return_value = io
-    result = _run(expand_node(node, _session(), execute_fn))
+    result = _run(expand_node(node, EvaluationContext(_session()), execute_fn))
     assert result == "testuser"
     execute_fn.assert_called_once()
 
@@ -192,7 +211,7 @@ def test_expand_command_sub_runs_the_whole_body():
     io = IOResult()
     io.stdout = b"a\nb\n"
     execute_fn.return_value = io
-    result = _run(expand_node(node, _session(), execute_fn))
+    result = _run(expand_node(node, EvaluationContext(_session()), execute_fn))
     assert result == "a\nb"
     # Unwrapped: the child shell is the session restore around the run,
     # not a subshell in the text.
@@ -203,7 +222,7 @@ def test_expand_command_sub_runs_a_declaration():
     node = _first_arg("echo $(export X=1)")
     execute_fn = AsyncMock()
     execute_fn.return_value = IOResult()
-    _run(expand_node(node, _session(), execute_fn))
+    _run(expand_node(node, EvaluationContext(_session()), execute_fn))
     assert execute_fn.call_args.args[0] == "export X=1"
 
 
@@ -212,13 +231,17 @@ def test_expand_command_sub_runs_a_declaration():
 
 def test_expand_arithmetic():
     node = _first_arg("echo $((1 + 2))")
-    result = _run(expand_node(node, _session(), _execute_fn()))
+    result = _run(
+        expand_node(node, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == "3"
 
 
 def test_expand_arithmetic_multiply():
     node = _first_arg("echo $((3 * 4))")
-    result = _run(expand_node(node, _session(), _execute_fn()))
+    result = _run(
+        expand_node(node, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == "12"
 
 
@@ -228,7 +251,7 @@ def test_expand_arithmetic_multiply():
 def test_expand_concatenation():
     node = _first_arg("echo $DIR/file.txt")
     session = _session(env={"DIR": "/data"})
-    result = _run(expand_node(node, session, _execute_fn()))
+    result = _run(expand_node(node, EvaluationContext(session), _execute_fn()))
     assert result == "/data/file.txt"
 
 
@@ -238,13 +261,15 @@ def test_expand_concatenation():
 def test_expand_double_quoted():
     node = _first_arg('echo "hello $NAME"')
     session = _session(env={"NAME": "world"})
-    result = _run(expand_node(node, session, _execute_fn()))
+    result = _run(expand_node(node, EvaluationContext(session), _execute_fn()))
     assert result == "hello world"
 
 
 def test_expand_double_quoted_no_var():
     node = _first_arg('echo "plain text"')
-    result = _run(expand_node(node, _session(), _execute_fn()))
+    result = _run(
+        expand_node(node, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == "plain text"
 
 
@@ -254,7 +279,7 @@ def test_expand_double_quoted_no_var():
 def test_expand_raw_string():
     node = _first_arg("echo 'no $expansion'")
     session = _session(env={"expansion": "SHOULD_NOT_SEE"})
-    result = _run(expand_node(node, session, _execute_fn()))
+    result = _run(expand_node(node, EvaluationContext(session), _execute_fn()))
     assert result == "no $expansion"
 
 
@@ -264,14 +289,18 @@ def test_expand_raw_string():
 def test_expand_words_basic():
     parts = _cmd_parts("echo hello world")
     session = _session()
-    result = _run(expand_words(parts, session, _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(session), _execute_fn())
+    )
     assert result == ["echo", "hello", "world"]
 
 
 def test_expand_words_with_var():
     parts = _cmd_parts("echo $A $B")
     session = _session(env={"A": "foo", "B": "bar"})
-    result = _run(expand_words(parts, session, _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(session), _execute_fn())
+    )
     assert result == ["echo", "foo", "bar"]
 
 
@@ -282,7 +311,7 @@ def test_expand_words_cmd_sub_splits():
     io.stdout = b"file1\nfile2\nfile3\n"
     execute_fn.return_value = io
     session = _session()
-    result = _run(expand_words(parts, session, execute_fn))
+    result = _run(expand_words(parts, EvaluationContext(session), execute_fn))
     assert "file1" in result
     assert "file2" in result
     assert "file3" in result
@@ -291,21 +320,27 @@ def test_expand_words_cmd_sub_splits():
 def test_expand_words_empty_var_skipped():
     parts = _cmd_parts("echo $EMPTY")
     session = _session()
-    result = _run(expand_words(parts, session, _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(session), _execute_fn())
+    )
     assert result == ["echo"]
 
 
 def test_expand_words_splits_unquoted_var():
     parts = _cmd_parts("echo $VAR")
     session = _session(env={"VAR": "a b c"})
-    result = _run(expand_words(parts, session, _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(session), _execute_fn())
+    )
     assert result == ["echo", "a", "b", "c"]
 
 
 def test_expand_words_no_split_quoted_var():
     parts = _cmd_parts('echo "$VAR"')
     session = _session(env={"VAR": "a b c"})
-    result = _run(expand_words(parts, session, _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(session), _execute_fn())
+    )
     assert result == ["echo", "a b c"]
 
 
@@ -314,35 +349,47 @@ def test_expand_words_splits_dollar_at():
     cs = CallStack()
     cs.push(["a", "b", "c"])
     session = _session()
-    result = _run(expand_words(parts, session, _execute_fn(), call_stack=cs))
+    result = _run(
+        expand_words(
+            parts, EvaluationContext(session), _execute_fn(), call_stack=cs
+        )
+    )
     assert result == ["echo", "a", "b", "c"]
 
 
 def test_expand_words_no_split_empty_var():
     parts = _cmd_parts("echo $EMPTY")
     session = _session(env={"EMPTY": ""})
-    result = _run(expand_words(parts, session, _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(session), _execute_fn())
+    )
     assert result == ["echo"]
 
 
 def test_expand_words_splits_expansion_braces():
     parts = _cmd_parts("echo ${VAR}")
     session = _session(env={"VAR": "x y z"})
-    result = _run(expand_words(parts, session, _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(session), _execute_fn())
+    )
     assert result == ["echo", "x", "y", "z"]
 
 
 def test_expand_words_keeps_empty_raw_string():
     """A quoted empty literal '' is a real (empty) argument, not dropped."""
     parts = _cmd_parts("echo a '' b")
-    result = _run(expand_words(parts, _session(), _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == ["echo", "a", "", "b"]
 
 
 def test_expand_words_keeps_empty_double_quote():
     """A quoted empty literal "" is a real (empty) argument, not dropped."""
     parts = _cmd_parts('echo a "" b')
-    result = _run(expand_words(parts, _session(), _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == ["echo", "a", "", "b"]
 
 
@@ -350,14 +397,18 @@ def test_expand_words_keeps_empty_quoted_var():
     """A quoted expansion that yields empty stays a word (bash keeps "$x")."""
     parts = _cmd_parts('echo a "$EMPTY" b')
     session = _session(env={"EMPTY": ""})
-    result = _run(expand_words(parts, session, _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(session), _execute_fn())
+    )
     assert result == ["echo", "a", "", "b"]
 
 
 def test_expand_words_drops_empty_quoted_dollar_at():
     """Quoted "$@" with no positional args yields zero words, not one empty."""
     parts = _cmd_parts('echo a "$@" b')
-    result = _run(expand_words(parts, _session(), _execute_fn()))
+    result = _run(
+        expand_words(parts, EvaluationContext(_session()), _execute_fn())
+    )
     assert result == ["echo", "a", "b"]
 
 
@@ -522,7 +573,11 @@ def test_expand_and_classify_text():
     parts = _cmd_parts("echo hello world")[1:]
     reg = _mock_registry(["/data/"])
     session = _session()
-    result = _run(expand_and_classify(parts, session, _execute_fn(), reg, "/"))
+    result = _run(
+        expand_and_classify(
+            parts, EvaluationContext(session), _execute_fn(), reg, "/"
+        )
+    )
     assert result == ["hello", "world"]
 
 
@@ -531,7 +586,9 @@ def test_expand_and_classify_glob():
     reg = _mock_registry(["/data/"])
     session = _session(cwd="/data")
     result = _run(
-        expand_and_classify(parts, session, _execute_fn(), reg, "/data")
+        expand_and_classify(
+            parts, EvaluationContext(session), _execute_fn(), reg, "/data"
+        )
     )
     assert len(result) == 1
     assert isinstance(result[0], PathSpec)
@@ -542,7 +599,11 @@ def test_expand_and_classify_absolute_path():
     parts = _cmd_parts("echo /data/file.txt")[1:]
     reg = _mock_registry(["/data/"])
     session = _session()
-    result = _run(expand_and_classify(parts, session, _execute_fn(), reg, "/"))
+    result = _run(
+        expand_and_classify(
+            parts, EvaluationContext(session), _execute_fn(), reg, "/"
+        )
+    )
     assert len(result) == 1
     assert isinstance(result[0], PathSpec)
     assert result[0].virtual == "/data/file.txt"
@@ -553,7 +614,11 @@ def test_expand_and_classify_var_to_glob():
     parts = _cmd_parts("echo $PATTERN")[1:]
     reg = _mock_registry(["/s3/"])
     session = _session(env={"PATTERN": "/s3/*.csv"})
-    result = _run(expand_and_classify(parts, session, _execute_fn(), reg, "/"))
+    result = _run(
+        expand_and_classify(
+            parts, EvaluationContext(session), _execute_fn(), reg, "/"
+        )
+    )
     assert len(result) == 1
     assert isinstance(result[0], PathSpec)
     assert result[0].pattern == "*.csv"
@@ -563,7 +628,11 @@ def test_expand_and_classify_var_to_path():
     parts = _cmd_parts("echo $FILE")[1:]
     reg = _mock_registry(["/data/"])
     session = _session(env={"FILE": "/data/report.csv"})
-    result = _run(expand_and_classify(parts, session, _execute_fn(), reg, "/"))
+    result = _run(
+        expand_and_classify(
+            parts, EvaluationContext(session), _execute_fn(), reg, "/"
+        )
+    )
     assert len(result) == 1
     assert isinstance(result[0], PathSpec)
     assert result[0].virtual == "/data/report.csv"
@@ -574,6 +643,10 @@ def test_expand_and_classify_no_mount_stays_text():
     parts = _cmd_parts("echo /unknown/file.txt")[1:]
     reg = _mock_registry(["/data/"])
     session = _session()
-    result = _run(expand_and_classify(parts, session, _execute_fn(), reg, "/"))
+    result = _run(
+        expand_and_classify(
+            parts, EvaluationContext(session), _execute_fn(), reg, "/"
+        )
+    )
     assert result == ["/unknown/file.txt"]
     assert isinstance(result[0], str)

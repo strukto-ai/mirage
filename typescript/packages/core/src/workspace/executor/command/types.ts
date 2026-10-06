@@ -21,7 +21,7 @@ import type { ExecutionScope } from '../../execution.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { HandOff } from '../../../policy/types.ts'
-import type { SessionState } from '../../session/session.ts'
+import type { EvaluationContext } from '../../evaluation.ts'
 import type { TSNodeLike } from '../../../shell/types.ts'
 
 export type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -84,7 +84,7 @@ export interface ExecuteNodeOpts {
 
 export type ExecuteNodeFn = (
   node: TSNodeLike,
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,

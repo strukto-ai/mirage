@@ -9,22 +9,26 @@ from mirage.io import IOResult
 from mirage.shell.console import Channel
 from mirage.shell.parse import scope
 from mirage.shell.parse.program import ProgramNode
-from mirage.workspace.evaluation import child_session, execution_session
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var
 
 
 def test_execution_frames_do_not_live_on_persistent_sessions():
     state = SessionState(session_id="s")
-    first = execution_session(state)
-    first._diagnostics.append("first")
-    first._cmdsub_seq = 4
-    seed_var(first, "NAME", "parent")
-    second = execution_session(state)
-    child = child_session(first)
-    seed_var(child, "NAME", "child")
-    assert second._diagnostics == []
-    assert second._cmdsub_seq == 0
+    first = EvaluationContext(state)
+    first.frame.diagnostics.append("first")
+    first.frame.cmdsub_seq = 4
+    seed_var(first.session, "NAME", "parent")
+    second = EvaluationContext(state)
+    child = child_context(first)
+    assert first.session is state
+    assert second.session is state
+    assert child.parent is first
+    assert child.frame is not first.frame
+    seed_var(child.session, "NAME", "child")
+    assert second.frame.diagnostics == []
+    assert second.frame.cmdsub_seq == 0
     assert state.env["NAME"] == "parent"
     assert "_diagnostics" not in vars(state)
 

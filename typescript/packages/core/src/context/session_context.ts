@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parentSession, persistentSession } from '../workspace/frame.ts'
-
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
@@ -35,6 +33,8 @@ import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 interface SessionBinding {
   session: SessionState
   owner: SessionManager | null
+  ancestors?: readonly SessionState[]
+  restoreExecution?: ContextCall
 }
 
 const sessionStorage = createAsyncContext<SessionBinding>()
@@ -50,10 +50,14 @@ export function runWithSession<T>(
   session: SessionState,
   fn: () => Promise<T>,
   owner?: SessionManager,
+  ancestors?: readonly SessionState[],
+  restoreExecution?: ContextCall,
 ): Promise<T> {
   const binding: SessionBinding = {
     session,
     owner: owner ?? sessionStorage.getStore()?.owner ?? null,
+    ...(ancestors === undefined ? {} : { ancestors }),
+    ...(restoreExecution === undefined ? {} : { restoreExecution }),
   }
   return Promise.resolve(sessionStorage.run(binding, fn))
 }
@@ -547,12 +551,16 @@ export function captureSessionContext(
   session?: SessionState,
   owner?: SessionManager,
 ): ContextCall[] {
+  const bound = sessionStorage.getStore()
+  const inherited = session === undefined || session === bound?.session ? bound : undefined
   const sessionScope: ContextCall =
     session === undefined
       ? sessionStorage.capture()
-      : (fn) => sessionStorage.run({ session, owner: owner ?? null }, fn)
+      : (fn) => sessionStorage.run({ ...inherited, session, owner: owner ?? null }, fn)
+  const restoreExecution = inherited?.restoreExecution
   return [
     sessionScope,
+    ...(restoreExecution === undefined ? [] : [restoreExecution]),
     admissionStorage.capture(),
     opPoliciesStorage.capture(),
     mountGateStorage.capture(),
@@ -585,14 +593,9 @@ export function runAsShell<T>(fn: () => Promise<T>): Promise<T> {
 export function isProgramInvocation(session: SessionState): boolean {
   const marked = programStorage.getStore()
   if (marked == null) return false
-  for (
-    let current: SessionState | null = session;
-    current !== null;
-    current = parentSession(current)
-  ) {
-    if (persistentSession(current) === persistentSession(marked)) return true
-  }
-  return false
+  if (session === marked) return true
+  const binding = sessionStorage.getStore()
+  return binding?.session === session && binding.ancestors?.includes(marked) === true
 }
 
 /**

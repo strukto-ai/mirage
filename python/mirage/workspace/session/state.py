@@ -813,6 +813,7 @@ async def _land_coercion(
     session: SessionState,
     policies: Policies | None,
     coercion: _IntegerCoercion,
+    diagnostics: list[str | bytes] | None = None,
 ) -> None:
     """Land the assignments a coercion made, each through the door, then
     settle its ``RANDOM`` draws.
@@ -824,7 +825,11 @@ async def _land_coercion(
     """
     for write in coercion.writes:
         await set_var(
-            session, policies, write.name, _written_value(session, write)
+            session,
+            policies,
+            write.name,
+            _written_value(session, write),
+            diagnostics=diagnostics,
         )
     coercion.reader.settle()
 
@@ -917,6 +922,8 @@ async def set_var(
     name: str,
     value: ShellValue,
     follow_ref: bool = True,
+    *,
+    diagnostics: list[str | bytes] | None = None,
 ) -> None:
     """Write one variable through the session plane's gate.
 
@@ -937,6 +944,8 @@ async def set_var(
         policies (Policies | None): admission policies the write clears.
         name (str): variable name.
         value (ShellValue): the value to store.
+        diagnostics (list[str | bytes] | None): evaluation-owned warnings;
+            without a sink, arithmetic errors propagate to the caller.
         follow_ref (bool): resolve a ``declare -n`` reference to its
             target first, which is what every ordinary assignment does.
             ``declare -n r=w`` on an existing reference is the one
@@ -979,7 +988,7 @@ async def set_var(
             # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a
             # RANDOM seed in it seeds); they land, gated, before the
             # refusal reports.
-            await _land_coercion(session, policies, coercion)
+            await _land_coercion(session, policies, coercion, diagnostics)
             raise
     await pre_session_gate(
         policies,
@@ -999,8 +1008,10 @@ async def set_var(
         try:
             seed = int(coercion(value)) % RANDOM_MODULUS
         except ArithError as exc:
-            session._diagnostics.append(str(exc))
-            await _land_coercion(session, policies, coercion)
+            if diagnostics is None:
+                raise
+            diagnostics.append(str(exc))
+            await _land_coercion(session, policies, coercion, diagnostics)
             return
         session._random_state = seed
         session._random_seed = value
@@ -1008,7 +1019,7 @@ async def set_var(
     note_random_kind(session, name, value)
     # The assignments the coercion or the seed made land now, gated
     # each, before the name they were made for.
-    await _land_coercion(session, policies, coercion)
+    await _land_coercion(session, policies, coercion, diagnostics)
     stored = (
         ShellVar(value) if existing is None else with_value(existing, value)
     )
@@ -1363,7 +1374,10 @@ def session_profile(session: SessionState) -> str | None:
 
 
 def session_view(
-    session: SessionState, policies: Policies | None = None
+    session: SessionState,
+    policies: Policies | None = None,
+    *,
+    diagnostics: list[str | bytes] | None = None,
 ) -> SessionView:
     """The session plane's view: seven facts bound to one session.
 
@@ -1377,11 +1391,14 @@ def session_view(
         policies (Policies | None): admission policies writes clear;
             None gates nothing (a view constructed outside a
             workspace).
+        diagnostics (list[str | bytes] | None): the evaluator's warning sink.
     """
     return SessionView(
         get=functools.partial(env_get, session),
         snapshot=functools.partial(env_snapshot, session),
-        set=functools.partial(set_var, session, policies),
+        set=functools.partial(
+            set_var, session, policies, diagnostics=diagnostics
+        ),
         unset=functools.partial(unset_var, session, policies),
         mark=functools.partial(mark_var, session, policies),
         is_readonly=functools.partial(env_is_readonly, session),

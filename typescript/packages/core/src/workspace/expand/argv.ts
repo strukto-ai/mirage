@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EvaluationContext } from '../evaluation.ts'
 import type { RouteDecision } from '../../runtime/routing/types.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { scopesPaths } from '../../policy/match/reads.ts'
@@ -28,7 +29,7 @@ import {
   runtimeRefused,
   wordPolicy,
 } from '../lookup/index.ts'
-import type { SessionState } from '../session/session.ts'
+
 import { classifyParts } from './classify/index.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { globNeedsShell, globOptions, resolveGlobs } from './globs.ts'
@@ -104,7 +105,7 @@ export class Argv {
  */
 export async function expandArgv(
   parts: TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   registry: MountRegistry,
@@ -112,7 +113,8 @@ export async function expandArgv(
   view?: SessionView,
   routing?: RouteDecision,
 ): Promise<Argv> {
-  let expanded = await expandWords(parts, session, executeFn, callStack, view)
+  const session = context.session
+  let expanded = await expandWords(parts, context, executeFn, callStack, view)
   if (expanded.length === 0) return new Argv('', [], [])
   // `set -f` turns pathname expansion off, which is the same word for
   // word as every glob character having been quoted.

@@ -54,6 +54,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.cli import (
     CLIContext,
     drops_mount_caches,
@@ -108,7 +109,6 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.mount.storage import make_storage_key
-from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
@@ -138,7 +138,7 @@ async def _finish_find(
     io: IOResult,
     texts: list[str],
     registry: MountRegistry,
-    session: SessionState,
+    context: EvaluationContext,
     execute_fn: ExecuteLine | None,
     ns: NamespaceView | None,
     stat_path: StatPath | None,
@@ -160,7 +160,7 @@ async def _finish_find(
         io (IOResult): the selection's result, amended in place.
         texts (list[str]): the expression tokens.
         registry (MountRegistry): used to route per-match dispatch.
-        session (SessionState): the session the line runs under.
+        context (EvaluationContext): the session the line runs under.
         execute_fn (ExecuteLine | None): runs an ``-exec`` line.
         ns (NamespaceView | None): the name plane's facts.
         stat_path (StatPath | None): dispatcher stat.
@@ -171,6 +171,7 @@ async def _finish_find(
         starts (list[PathSpec] | None): the start operands, for the
             stat ``-ls`` renders after a ``-delete``.
     """
+    session = context.session
     stdout, action_err, action_exit = await _apply_find_actions(
         stdout,
         io.matched_runs,
@@ -182,7 +183,14 @@ async def _finish_find(
         ns=ns,
         stat_path=stat_path,
         dispatch=dispatch,
-        identity=identity_from(ns, session_view(session, registry.policies)),
+        identity=identity_from(
+            ns,
+            session_view(
+                session,
+                registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
+        ),
         stdin=stdin,
         starts=starts,
     )
@@ -199,7 +207,7 @@ async def handle_command(
     dispatch: DispatchFn,
     registry: MountRegistry,
     parts: list[str | PathSpec],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -217,6 +225,7 @@ async def handle_command(
     runs a line in the session, which is how find's ``-exec`` runs its
     command. ``sink`` is where a function body writes its statements.
     """
+    session = context.session
     if not parts:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
 
@@ -230,7 +239,9 @@ async def handle_command(
         text_parts = [
             p.virtual if isinstance(p, PathSpec) else p for p in parts
         ]
-        view = session_view(session, registry.policies)
+        view = session_view(
+            session, registry.policies, diagnostics=context.frame.diagnostics
+        )
         if cmd_name == "fg":
             # The one job builtin that writes before it blocks.
             return await handle_fg(job_table, text_parts, session, view, sink)
@@ -244,7 +255,7 @@ async def handle_command(
             execute_node,
             cmd_name,
             parts,
-            session,
+            context,
             stdin,
             call_stack,
             job_table,
@@ -285,7 +296,11 @@ async def handle_command(
                     else None
                 ),
                 ns=namespace_view_of(registry, namespace, dispatch, session),
-                session_view=session_view(session, registry.policies),
+                session_view=session_view(
+                    session,
+                    registry.policies,
+                    diagnostics=context.frame.diagnostics,
+                ),
                 processes=registry.process_view(session)
                 if registry.process_view is not None
                 else None,
@@ -529,7 +544,7 @@ async def handle_command(
         run_single = functools.partial(
             run_on_mount,
             registry,
-            session,
+            context,
             dispatch,
             namespace,
             routing_decision=routing_decision,
@@ -550,7 +565,11 @@ async def handle_command(
             registry,
             session.cwd,
             cross_ns,
-            session_view(session, registry.policies),
+            session_view(
+                session,
+                registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
             dispatch=dispatch,
         )
         stdout, io = await handle_cross_mount(
@@ -563,7 +582,11 @@ async def handle_command(
             stdin=stdin,
             storage_key=make_storage_key(registry),
             ns=cross_ns,
-            session_view=session_view(session, registry.policies),
+            session_view=session_view(
+                session,
+                registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
             cwd=session.cwd,
             argv=spelled_words(parts[1:]),
             aggregate=aggregate_for(cmd_name, cross_scopes, registry),
@@ -574,7 +597,7 @@ async def handle_command(
                 io,
                 cross_texts,
                 registry,
-                session,
+                context,
                 execute_fn,
                 cross_ns,
                 cross_stat,
@@ -714,12 +737,16 @@ async def handle_command(
             cmd_str,
             stdin,
             ns=single_ns,
-            session_view=session_view(session, registry.policies),
+            session_view=session_view(
+                session,
+                registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
             dispatch=dispatch,
             native=functools.partial(
                 run_on_mount,
                 registry,
-                session,
+                context,
                 dispatch,
                 namespace,
                 routing_decision=routing_decision,
@@ -733,7 +760,7 @@ async def handle_command(
                 io,
                 texts,
                 registry,
-                session,
+                context,
                 execute_fn,
                 single_ns,
                 single_stat,
@@ -751,7 +778,7 @@ async def handle_command(
 
     stdout, io = await run_on_mount(
         registry,
-        session,
+        context,
         dispatch,
         namespace,
         cmd_name,
@@ -770,7 +797,7 @@ async def handle_command(
             io,
             texts,
             registry,
-            session,
+            context,
             execute_fn,
             single_ns,
             single_stat,

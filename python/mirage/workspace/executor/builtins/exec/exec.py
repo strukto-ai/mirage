@@ -636,4 +636,6 @@ async def exec_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_exec_command(list(call.argv.args), call.session)
+    return await handle_exec_command(
+        list(call.argv.args), call.context.session
+    )
