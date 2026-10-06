@@ -271,6 +271,7 @@ _FENCED = {
     "invalidate_dir": lambda view: view.invalidate_dir("/data"),
     "invalidate_prefix": lambda view: view.invalidate_prefix("/data"),
     "invalidate": lambda view: view.invalidate(),
+    "holds_subtree": lambda view: view.holds_subtree("/data"),
 }
 
 
@@ -814,3 +815,16 @@ async def test_every_written_folder_is_noted_after_its_write():
         datetime.now(timezone.utc) + timedelta(hours=1),
     )
     assert noted == ["/data", "/data/p", "/data/s", "/data/t"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owns", [_owns_all, _owns_none])
+async def test_a_view_answers_holds_subtree_from_its_store(owns):
+    holding = RAMIndexCacheStore()
+    await holding.set_dir("/data/dir/sub", [("f", _row("f"))])
+    cache = RAMFileCacheStore()
+    assert await IndexView(holding, cache, "/data", owns).holds_subtree(
+        "/data/dir"
+    )
+    empty = IndexView(RAMIndexCacheStore(), cache, "/data", owns)
+    assert not await empty.holds_subtree("/data/dir")

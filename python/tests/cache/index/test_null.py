@@ -12,8 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.cache.index.null import NullIndexCacheStore
 
 
 def test_a_store_that_never_caches_keeps_a_listing_for_no_time():
     assert NullIndexCacheStore().ttl == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_never_caches_holds_no_subtree():
+    assert await NullIndexCacheStore().holds_subtree("/a") is False

@@ -18,9 +18,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../types.ts'
 import { withCacheMutation } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
-import { IndexEntry } from './index/config.ts'
+import { IndexEntry, LookupStatus } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
+import { RedisIndexCacheStore } from './index/redis.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
@@ -36,6 +37,12 @@ async function seeded(): Promise<[RAMFileCacheStore, RAMIndexCacheStore]> {
   ])
   return [cache, index]
 }
+
+function file(name: string): IndexEntry {
+  return new IndexEntry({ id: name, name, resourceType: 'file' })
+}
+
+const REDIS_URL = process.env.REDIS_URL
 
 describe('CacheManager', () => {
   it('write evicts file entry and parent listing', async () => {
@@ -152,6 +159,138 @@ describe('CacheManager', () => {
     expect((await index.listDir('/data/chan/day/files')).entries).toEqual([
       '/data/chan/day/files/a.png',
     ])
+  })
+
+  for (const kind of ['ram', 'ram-no-bodies', 'redis']) {
+    it.skipIf(kind === 'redis' && REDIS_URL === undefined)(
+      `${kind}: removing a folder drops what is cached beneath it`,
+      async () => {
+        const index =
+          kind === 'redis'
+            ? new RedisIndexCacheStore({
+                ...(REDIS_URL === undefined ? {} : { url: REDIS_URL }),
+                keyPrefix: `remove:${crypto.randomUUID()}:`,
+              })
+            : new RAMIndexCacheStore({ ttl: 600 })
+        const cache = kind === 'ram-no-bodies' ? null : new RAMFileCacheStore()
+        try {
+          if (cache !== null) {
+            await cache.set('/data/dir/sub/f', new TextEncoder().encode('old\n'))
+            await cache.set('/data/dir2/x', new TextEncoder().encode('keep\n'))
+          }
+          await index.setDir('/data/dir/sub', [['f', file('f')]])
+          await index.setDir('/data/dirx', [['y', file('y')]])
+          await index.setDir('/data', [['other', file('other')]])
+          const manager = new CacheManager(cache, index, '/data/', cache !== null)
+          await manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/dir'))
+          expect((await index.listDir('/data/dir/sub')).status).toBe(LookupStatus.NOT_FOUND)
+          expect((await index.listDir('/data')).entries).toBeUndefined()
+          expect((await index.listDir('/data/dirx')).entries).toEqual(['/data/dirx/y'])
+          if (cache !== null) {
+            expect(await cache.exists('/data/dir/sub/f')).toBe(false)
+            expect(await cache.exists('/data/dir2/x')).toBe(true)
+          }
+        } finally {
+          try {
+            await index.clear()
+          } finally {
+            await index.close()
+          }
+        }
+      },
+    )
+  }
+
+  it('removing a file does unlink work and nothing more', async () => {
+    const cache = new RAMFileCacheStore()
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await cache.set('/data/d/f', new TextEncoder().encode('f'))
+    await cache.set('/data/d/g', new TextEncoder().encode('g'))
+    await cache.set('/data/e/h', new TextEncoder().encode('h'))
+    await index.setDir(
+      '/data',
+      ['d', 'e'].map((name) => [name, new IndexEntry({ id: name, name, resourceType: 'folder' })]),
+    )
+    await index.setDir('/data/d', [
+      ['f', file('f')],
+      ['g', file('g')],
+    ])
+    await index.setDir('/data/e', [['h', file('h')]])
+    const manager = new CacheManager(cache, index, '/data/', true)
+    const evict = vi.spyOn(cache, 'evictPrefix')
+    const drop = vi.spyOn(index, 'invalidatePrefix')
+    const probe = vi.spyOn(index, 'holdsSubtree')
+    await manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/d/f'))
+    expect(await cache.exists('/data/d/f')).toBe(false)
+    expect(await cache.exists('/data/d/g')).toBe(true)
+    expect(await cache.exists('/data/e/h')).toBe(true)
+    expect((await index.listDir('/data')).entries).toEqual(['/data/d', '/data/e'])
+    expect(
+      Object.fromEntries([...(await index.entries())].map(([key, row]) => [key, row.resourceType])),
+    ).toEqual({
+      '/data/d': 'folder',
+      '/data/e': 'folder',
+      '/data/e/h': 'file',
+    })
+    expect((await index.listDir('/data/d')).entries).toBeUndefined()
+    expect((await index.listDir('/data/e')).entries).toEqual(['/data/e/h'])
+    expect(evict).toHaveBeenCalledTimes(0)
+    expect(drop).toHaveBeenCalledTimes(0)
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['probe', 'drop'] as const)(
+    'still drops the body and listings when removal fails at %s',
+    async (stage) => {
+      const cache = new RAMFileCacheStore()
+      const index = new RAMIndexCacheStore({ ttl: 600 })
+      await cache.set('/data/d/f', new TextEncoder().encode('f'))
+      for (const directory of ['/data/d', '/data/d/f']) await index.setDir(directory, [])
+      const method = stage === 'probe' ? 'holdsSubtree' : 'invalidatePrefix'
+      const error = new Error('registry recovery failed')
+      vi.spyOn(index, method).mockRejectedValue(error)
+      const manager = new CacheManager(cache, index, '/data/', true)
+      await expect(manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/d/f'))).rejects.toBe(
+        error,
+      )
+      expect(await cache.exists('/data/d/f')).toBe(false)
+      for (const directory of ['/data/d', '/data/d/f']) {
+        expect((await index.listDir(directory)).entries).toBeUndefined()
+      }
+    },
+  )
+
+  it.each([false, true])('preserves cleanup failures when probe fails: %s', async (probeFails) => {
+    const cache = new RAMFileCacheStore()
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await cache.set('/data/d/f', new TextEncoder().encode('f'))
+    const manager = new CacheManager(cache, index, '/data/', true)
+    const probe = vi.spyOn(index, 'holdsSubtree')
+    if (probeFails) probe.mockRejectedValue(0)
+    else probe.mockResolvedValue(false)
+    const cleanupError = new Error('listing cleanup failed')
+    const cleanup = vi.spyOn(index, 'invalidateDir').mockRejectedValue(cleanupError)
+    const result = manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/d/f'))
+    if (probeFails) {
+      await expect(result).rejects.toBeInstanceOf(AggregateError)
+      await expect(result).rejects.toHaveProperty('errors', [0, cleanupError])
+    } else {
+      await expect(result).rejects.toBe(cleanupError)
+    }
+    expect(cleanup).toHaveBeenCalledExactlyOnceWith('/data/d/f')
+    expect(await cache.exists('/data/d/f')).toBe(false)
+  })
+
+  it('without an index, treats a removed path as holding nothing below', async () => {
+    // Mirrors the Python null index: no listing is cached anywhere, so only
+    // the path itself goes and bodies beneath it stay until their ttl.
+    const cache = new RAMFileCacheStore()
+    await cache.set('/data/dir', new TextEncoder().encode('d'))
+    await cache.set('/data/dir/f', new TextEncoder().encode('f'))
+    const manager = new CacheManager(cache, null, '/data/', true)
+    await manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/dir'))
+    expect(await cache.exists('/data/dir')).toBe(false)
+    expect(await cache.exists('/data/dir/f')).toBe(true)
   })
 
   it('a relative path that looks prefixed is still prefixed', async () => {
@@ -557,6 +696,7 @@ describe('what a probe saw this command', () => {
     ['a write', (m) => m.invalidateAfterWrite(PathSpec.fromStrPath('/data/elsewhere'))],
     ['an unlink', (m) => m.invalidateAfterUnlink(PathSpec.fromStrPath('/data/elsewhere'))],
     ['a subtree drop', (m) => m.invalidateSubtree(PathSpec.fromStrPath('/data/elsewhere'))],
+    ['a removal', (m) => m.invalidateAfterRemove(PathSpec.fromStrPath('/data/elsewhere'))],
     ['an external clear', (m, index) => m.clearIndex(index)],
     ['a path-less drop', (m) => m.dropPrefix()],
     [
