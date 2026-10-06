@@ -31,7 +31,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { activeRecords, runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import { WRITE_FINGERPRINT_OPS, type OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
 import { Terminal } from '../../shell/console/index.ts'
@@ -775,10 +775,10 @@ async function runParsedLine(
   // caller's recorder, and no command entry is logged for them.
   const isLine = options.record !== false
   // A nested line collects no records of its own and hands only its
-  // streams back, so it applies against the records it adds to the
-  // enclosing line's, copied at apply: a drain looks its read token up
-  // after apply, so a read the outer line made before or after this one
-  // must not be there to label the nested line's bytes.
+  // streams back, so it applies against the write records added to the
+  // enclosing line's since it began, copied at apply. Its reads take no
+  // token: a concurrent sibling stage records into the same list, and its
+  // read token would label bytes this line read before the change.
   const nestedStart = isLine ? 0 : (activeRecords()?.length ?? 0)
   // The session's kill channel folded in, as the dispatcher folds it
   // for the tree: a question put to a host has to answer to both, and
@@ -1087,7 +1087,11 @@ async function runParsedLine(
     if (!callerError) recordStatus(targetSession, io.exitCode, true)
     try {
       if (executionFailure === undefined) {
-        const applied = isLine ? opRecords : activeRecords()?.slice(nestedStart)
+        const applied = isLine
+          ? opRecords
+          : activeRecords()
+              ?.slice(nestedStart)
+              .filter((r) => WRITE_FINGERPRINT_OPS.has(r.op))
         await abortable(env.dispatcher.applyIo(io, applied, cacheFacts), killed)
       }
       stdoutBytes =

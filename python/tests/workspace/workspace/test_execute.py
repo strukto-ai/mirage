@@ -702,17 +702,18 @@ async def test_invocation_shell_does_not_admit_unrelated_calls(named):
 
 
 @pytest.mark.asyncio
-async def test_a_nested_line_applies_against_only_the_records_it_made():
-    # A nested drain looks its read token up after apply, so a read the
-    # outer line made earlier must not be in what the nested apply sees:
-    # its token would label bytes it never described.
+async def test_a_nested_line_applies_against_only_the_writes_since_it_began():
+    # Neither the outer line's earlier write nor any read reaches the
+    # nested apply: a concurrent sibling records into the same list, so a
+    # read token there could label bytes it never described.
     ws = caching_ram_workspace()
     try:
         assert (await ws.shell("echo a > /r/f")).exit_code == 0
         captured = capture_marks(ws)
-        assert (await ws.shell("cat /r/f; x=$(cat /r/f)")).exit_code == 0
+        line = "cat /r/f; echo b | tee /r/g; x=$(cat /r/f; echo c | tee /r/h)"
+        assert (await ws.shell(line)).exit_code == 0
     finally:
         await ws.close()
     (nested, _), (outer, _) = captured
-    assert [m[:2] for m in nested].count(("read", "/r/f")) == 1
+    assert [m[:2] for m in nested] == [("write", "/r/h")]
     assert [m[:2] for m in outer].count(("read", "/r/f")) == 2

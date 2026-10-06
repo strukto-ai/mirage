@@ -412,18 +412,20 @@ describe('same-session lines run one at a time', () => {
 })
 
 describe('a nested line', () => {
-  it('applies against only the records it made', async () => {
-    // A nested drain looks its read token up after apply, so a read the
-    // outer line made earlier must not be in what the nested apply sees: its
-    // token would label bytes it never described.
+  it('applies against only the writes since it began', async () => {
+    // Neither the outer line's earlier write nor any read reaches the nested
+    // apply: a concurrent sibling records into the same list, so a read token
+    // there could label bytes it never described.
     const ws = await cachingRamWorkspace()
     open.push(ws)
     expect((await ws.shell('echo a > /r/f')).exitCode).toBe(0)
     const captured = captureMarks(ws)
-    expect((await ws.shell('cat /r/f; x=$(cat /r/f)')).exitCode).toBe(0)
-    const reads = (marks: Mark[] | undefined) =>
-      (marks ?? []).filter(([op, path]) => op === 'read' && path === '/r/f')
-    expect(reads(captured[0]?.[0])).toHaveLength(1)
-    expect(reads(captured[1]?.[0])).toHaveLength(2)
+    const line = 'cat /r/f; echo b | tee /r/g; x=$(cat /r/f; echo c | tee /r/h)'
+    expect((await ws.shell(line)).exitCode).toBe(0)
+    const opPaths = (marks: Mark[] | undefined) => (marks ?? []).map(([op, path]) => [op, path])
+    expect(opPaths(captured[0]?.[0])).toEqual([['write', '/r/h']])
+    expect(
+      opPaths(captured[1]?.[0]).filter(([op, path]) => op === 'read' && path === '/r/f'),
+    ).toHaveLength(2)
   })
 })

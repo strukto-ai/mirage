@@ -24,7 +24,7 @@ from mirage.context import reset_refusal_sink, set_refusal_sink
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
-from mirage.observe.record import OpRecord
+from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
 from mirage.policy import Deny, HandOff
 from mirage.runtime.routing import RouteDecision, RouteError
 from mirage.shell.bytes import decode_text
@@ -590,10 +590,10 @@ async def run_prepared_line(
     is_line = record
     scope = RecordingScope(active=is_line)
     parse_scope = ParseScope()
-    # A nested line applies against the records it adds to the enclosing
-    # line's, copied at apply: a drain looks its read token up after apply,
-    # so a read the outer line made before or after this one must not be
-    # there to label the nested line's bytes.
+    # A nested line applies against the write records added to the
+    # enclosing line's since it began, copied at apply. Its reads take no
+    # token: a concurrent sibling stage records into the same list, and its
+    # read token would label bytes this line read before the change.
     outer = None if is_line else active_records()
     nested_start = len(outer) if outer is not None else 0
 
@@ -926,7 +926,15 @@ async def run_prepared_line(
         record_status(session, io.exit_code, transparent=True)
         applied: list[OpRecord] | None = scope.records
         if not is_line:
-            applied = None if outer is None else outer[nested_start:]
+            applied = (
+                None
+                if outer is None
+                else [
+                    r
+                    for r in outer[nested_start:]
+                    if r.op in WRITE_FINGERPRINT_OPS
+                ]
+            )
         await ws.apply_io(io, records=applied, cache_facts=cache_facts)
         return io
     except CommandTimeoutError as exc:

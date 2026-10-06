@@ -260,6 +260,22 @@ describe('object-store write fingerprint (mocked S3)', () => {
     expect(got.downloads).toBe(0)
   })
 
+  it('a nested read never takes a concurrent sibling read token', async () => {
+    // The background substitution reads aaaa, then waits while the
+    // foreground rewrites f and reads bbbb in its own substitution; a
+    // sibling's read token must not label the older bytes.
+    const waitFor = (path: string): string =>
+      `for i in $(seq 500); do [ -e ${path} ] && break; sleep 0.01; done`
+    const line =
+      `x=$(cat /s3/f; touch /s3/go; ${waitFor('/s3/done')}) & ` +
+      `${waitFor('/s3/go')}; echo bbbb | sed -n 'w /s3/f'; ` +
+      'y=$(cat /s3/f); touch /s3/done; wait'
+    const got = await writeThenRead(["echo aaaa | sed -n 'w /s3/f'", line], FRESH)
+    expect(got.stored).toBe('bbbb\n')
+    expect(got.served).toBe('bbbb\n')
+    expect(got.again).toBe('bbbb\n')
+  }, 30_000)
+
   // The oracle is the object the mock holds, so the landing order the
   // sleep sets is a margin, not what the assertion depends on.
   it.each([

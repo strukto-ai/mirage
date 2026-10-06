@@ -349,6 +349,25 @@ def test_a_nested_claimed_write_serves_from_cache(line):
     assert downloads == 0
 
 
+def test_a_nested_read_never_takes_a_concurrent_siblings_read_token():
+    # The background substitution reads aaaa, then waits while the
+    # foreground rewrites f and reads bbbb in its own substitution; a
+    # sibling's read token must not label the older bytes.
+    wait_for = "for i in $(seq 500); do [ -e {0} ] && break; sleep 0.01; done"
+    line = (
+        f"x=$(cat /s3/f; touch /s3/go; {wait_for.format('/s3/done')}) & "
+        f"{wait_for.format('/s3/go')}; echo bbbb | sed -n 'w /s3/f'; "
+        "y=$(cat /s3/f); touch /s3/done; wait"
+    )
+    stored, served, again, _ = _write_then_read(
+        ["echo aaaa | sed -n 'w /s3/f'", line],
+        ReadSpec(policy=ReadPolicy.FRESH),
+    )
+    assert stored == b"bbbb\n"
+    assert served == b"bbbb\n"
+    assert again == b"bbbb\n"
+
+
 @pytest.mark.parametrize(
     "line",
     [
