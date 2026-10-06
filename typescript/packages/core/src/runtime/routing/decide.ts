@@ -152,7 +152,7 @@ function ctxForRuntime(
  * RouteOutcome arm) fails loud: a deny-dict is truthy, so coercing it
  * would mean "willing", the opposite of intent.
  */
-async function evaluateScript(
+export async function evaluateScript(
   script: RouteScript,
   ctx: RouteContext,
   runtime: Runtime,

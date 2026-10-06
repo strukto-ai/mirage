@@ -646,6 +646,39 @@ describe('the placement stage', () => {
     }
   })
 
+  it('a runtime that declines its placement refuses the line', async () => {
+    const heavyOnly = new NamedFakeRuntime('beta')
+    heavyOnly.script = (ctx) => ctx.line.includes('heavy')
+    const ws = await placed({
+      routePolicy: () => 'beta',
+      runtimes: [new NamedFakeRuntime('alpha'), heavyOnly, 'workspace'],
+    })
+    try {
+      expect(DEC.decode((await ws.shell('python3 -c "heavy"')).stdout)).toBe('ran-beta\n')
+      const refused = await ws.shell('python3 -c "light"')
+      expect([refused.exitCode, DEC.decode(refused.stderr)]).toEqual([
+        126,
+        'python3: Permission denied\n',
+      ])
+      expect([refused.refusal?.reason, refused.refusal?.policy]).toEqual([
+        'runtime beta declines this line',
+        'runtimes.beta',
+      ])
+      // The caller's own argument forces its runtime.
+      const forced = await ws.shell('python3 -c "light"', { runtime: 'beta' })
+      expect(DEC.decode(forced.stdout)).toBe('ran-beta\n')
+      const [said] = await ws.explain('python3 -c "light"')
+      expect(said?.placement.at(-1)).toEqual({
+        kind: 'deny',
+        reason: 'runtime beta declines this line',
+        policy: 'runtimes.beta',
+      })
+      expect(said?.exitCode).toBe(126)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('explain names the policy that placed the line', async () => {
     const ws = await placed({
       routePolicy: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),

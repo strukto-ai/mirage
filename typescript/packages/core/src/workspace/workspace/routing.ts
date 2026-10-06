@@ -15,6 +15,7 @@
 import {
   parsedCommands,
   decideLine,
+  evaluateScript,
   RouteError,
   type RouteContext,
   type RouteDecision,
@@ -43,9 +44,10 @@ import type { Runtimes } from './runtimes.ts'
  * nothing to consult) so dispatch falls to the static bindings, and the
  * stage's Deny when a placing policy refuses the line; a nested eval
  * inherits the typed line's decision and never re-routes. The runtime
- * argument is the caller's own placement, so a Route is not asked for,
- * but a coded policy's Deny still refuses the line. Admission comes
- * first: a line `held` reports refused or waiting on a question is left
+ * argument is the caller's own placement, so a Route is not asked for and
+ * the runtime's own `script:` is not consulted (the caller forces it), but
+ * a coded policy's Deny still refuses the line. A runtime a policy names
+ * must take the line itself (`validated`). Admission comes first: a line `held` reports refused or waiting on a question is left
  * on the static bindings, unplaced, for the gate to answer.
  */
 export class Router {
@@ -88,7 +90,7 @@ export class Router {
     const ctx = this.context(root, command, options, session)
     const said = await policies.preExecute(ctx)
     if (said?.kind === 'deny') return said
-    if (said?.kind === 'route') return this.placed(said.runtime)
+    if (said?.kind === 'route') return this.validated(said.runtime, ctx, session)
     return this.scripted(ctx, session)
   }
 
@@ -110,8 +112,42 @@ export class Router {
     const answers = said.filter((a): a is Deny | Route => a.kind !== 'ask')
     const winner = settled(answers)
     if (winner?.kind === 'deny') return [answers, winner]
-    if (winner?.kind === 'route') return [answers, this.placed(winner.runtime)]
+    if (winner?.kind === 'route') {
+      const checked = await this.validated(winner.runtime, ctx, session)
+      return 'kind' in checked ? [[...answers, checked], checked] : [answers, checked]
+    }
     return [answers, await this.scripted(ctx, session)]
+  }
+
+  /**
+   * The decision placing a line on the runtime `name`, once the runtime
+   * agrees: its own `script:`, when it has one, must take the line, or
+   * the placement and the runtime conflict and the line is refused, as two
+   * policies placing it apart refuse it. Mirrors Python's
+   * `Router._validated`.
+   */
+  private async validated(
+    name: string,
+    ctx: RouteContext,
+    session: SessionState,
+  ): Promise<RouteDecision | Deny> {
+    const placed = this.placed(name)
+    const entries = this.runtimes.entries
+    const entry = entries.find((e) => e.name === name)
+    if (entry?.script === undefined) return placed
+    const willing = await evaluateScript(
+      entry.script,
+      ctx,
+      entry,
+      entries,
+      this.external(ctx.commands, session),
+    )
+    if (willing) return placed
+    return {
+      kind: 'deny',
+      reason: `runtime ${name} declines this line`,
+      policy: `runtimes.${name}`,
+    }
   }
 
   /**

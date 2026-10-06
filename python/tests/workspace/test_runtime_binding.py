@@ -494,6 +494,40 @@ async def test_two_placements_that_disagree_refuse_the_line():
 
 
 @pytest.mark.asyncio
+async def test_a_runtime_that_declines_its_placement_refuses_the_line():
+    heavy_only = BetaRuntime(script=lambda ctx: "heavy" in ctx.line)
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[AlphaRuntime(), heavy_only, "workspace"],
+        route_policy=lambda ctx: "beta",
+    )
+    try:
+        io = await ws.shell("python3 -c 'heavy'")
+        assert await materialize(io.stdout) == b"ran-beta\n"
+        io = await ws.shell("python3 -c 'light'")
+        assert (io.exit_code, io.stderr) == (
+            126,
+            b"python3: Permission denied\n",
+        )
+        assert io.refusal is not None
+        assert (io.refusal.reason, io.refusal.policy) == (
+            "runtime beta declines this line",
+            "runtimes.beta",
+        )
+        # The caller's own argument forces its runtime.
+        io = await ws.shell("python3 -c 'light'", runtime="beta")
+        assert await materialize(io.stdout) == b"ran-beta\n"
+        [said] = await ws.explain("python3 -c 'light'")
+        assert said.placement[-1] == Deny(
+            "runtime beta declines this line", policy="runtimes.beta"
+        )
+        assert said.exit_code == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_admission_comes_before_placement():
     seen: list[str] = []
 

@@ -25,6 +25,7 @@ from mirage.runtime.routing import (
     RouteDecision,
     RouteError,
     decide_line,
+    evaluate_script,
     parsed_commands,
 )
 from mirage.runtime.table import (
@@ -44,7 +45,10 @@ class Router:
     The order is: an inherited decision, then the ``execute()`` runtime
     argument, then the placement stage (``pre_execute``: the configured
     route policy as a built-in, then the coded policies), then the
-    entry scripts. It reads the runtime entries and the registry's
+    entry scripts. A runtime a policy names is then validated against
+    the runtime itself: its own ``script:`` must take the line, or the
+    two conflict and the line is refused; the caller's argument forces
+    its runtime. It reads the runtime entries and the registry's
     static bindings but owns no mutable workspace state, so the
     volatile parts (the current agent, the line's admission) arrive per
     call and a new step is added here rather than in the workspace.
@@ -83,8 +87,11 @@ class Router:
         stage's Deny when a placing policy refuses the line. A nested
         eval passes its typed line's decision as ``inherited`` and keeps
         it: nested lines never re-route. The runtime argument is the
-        caller's own placement, so a Route is not asked for, but a coded
-        policy's Deny still refuses the line. Admission comes first: a
+        caller's own placement, so a Route is not asked for and the
+        runtime's own ``script:`` is not consulted (the caller forces
+        it), but a coded policy's Deny still refuses the line. A runtime
+        a policy names must take the line itself (``_validated``).
+        Admission comes first: a
         line ``held`` reports refused or waiting on a question is left
         on the static bindings, unplaced, for the gate to answer.
 
@@ -129,7 +136,7 @@ class Router:
         if isinstance(said, Deny):
             return said
         if isinstance(said, Route):
-            return self._placed(entries, said.runtime)
+            return await self._validated(entries, said.runtime, ctx, session)
         return await self._scripted(entries, ctx, session)
 
     async def placement(
@@ -166,7 +173,12 @@ class Router:
         if isinstance(winner, Deny):
             return answers, winner
         if isinstance(winner, Route):
-            return answers, self._placed(entries, winner.runtime)
+            checked = await self._validated(
+                entries, winner.runtime, ctx, session
+            )
+            if isinstance(checked, Deny):
+                return (*answers, checked), checked
+            return answers, checked
         return answers, await self._scripted(entries, ctx, session)
 
     async def _scripted(
@@ -195,6 +207,50 @@ class Router:
             raise
         except (ValueError, ImportError) as exc:
             raise RouteError(str(exc)) from exc
+
+    async def _validated(
+        self,
+        entries: list[Runtime],
+        name: str,
+        ctx: RouteContext,
+        session: SessionState,
+    ) -> RouteDecision | Deny:
+        """The decision placing a line on the runtime ``name``, once the
+        runtime agrees: its own ``script:``, when it has one, must take
+        the line, or the placement and the runtime conflict and the line
+        is refused, as two policies placing it apart refuse it.
+
+        Args:
+            entries (list[Runtime]): the workspace's ordered runtimes.
+            name (str): the runtime entry the line is placed on.
+            ctx (RouteContext): the placement stage's payload.
+            session (SessionState): the effective session.
+
+        Raises:
+            RouteError: no entry has the name, or its script fails or
+                answers a verdict shape.
+        """
+        placed = self._placed(entries, name)
+        entry = next((e for e in entries if e.name == name), None)
+        if entry is None or entry.script is None:
+            return placed
+        try:
+            willing = await evaluate_script(
+                entry.script,
+                ctx,
+                entry,
+                entries,
+                self._external(ctx.commands, session),
+            )
+        except RouteError:
+            raise
+        except (ValueError, ImportError) as exc:
+            raise RouteError(str(exc)) from exc
+        if willing:
+            return placed
+        return Deny(
+            f"runtime {name} declines this line", policy=f"runtimes.{name}"
+        )
 
     def runtime_for(self, command: str, decision: RouteDecision | None) -> str:
         """The runtime entry that serves a command under a decision (the

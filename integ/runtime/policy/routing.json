@@ -682,6 +682,50 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_runtime_that_declines_its_placement_refuses_the_line",
+      "note": "A runtime a policy places the line on is asked too: its own script declining the line conflicts with the placement and refuses it. The caller's runtime argument forces its runtime.",
+      "world": {
+        "runtimes": [
+          {
+            "name": "local",
+            "script": "'heavy' in ctx['line']"
+          },
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "route_policy": "'local'"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sys; print('heavy')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "heavy\n"
+          }
+        },
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "python3: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print(1)\"",
+          "runtime": "local",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        }
+      ]
     }
   ]
 }
