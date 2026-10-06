@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.context.session_context import require_paths_writable
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition, ReadOnlyError
 from mirage.policy.base import Policy
-from mirage.policy.types import Deny, OpsContext
-from mirage.utils.errors import ReadOnlyError
+from mirage.policy.types import Deny, VfsContext
 
 
 class MountModePolicy(Policy):
@@ -25,7 +26,7 @@ class MountModePolicy(Policy):
     by ``/``, the turf a profile's root mode is written under.
     """
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if not ctx.write or ctx.mode is None:
             return None
         try:
@@ -33,5 +34,5 @@ class MountModePolicy(Policy):
                 [ctx.path], ctx.prefix or "/", ctx.mode, subtree=ctx.subtree
             )
         except ReadOnlyError as error:
-            return Deny("Read-only file system", error=error)
+            return Deny(posix_phrase(FsCondition.EROFS), error=error)
         return None

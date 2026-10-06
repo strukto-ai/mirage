@@ -47,22 +47,14 @@ The same bearer token as the [HTTP API](/home/access/http#auth). `mirage rpc` re
 | Method | Params | Result |
 | --- | --- | --- |
 | `initialize` | | `server_info`, `protocol_version`, `workspace_id`, `session_id`, `methods` |
-| `shell` | `command`, `cwd?`, `env?`, `stdin_base64?` | `exit_code`, `stdout`, `stderr`, `refusal` |
+| `shell` | `command`, `cwd?`, `env?`, `stdin_base64?`, `explain?` | `exit_code`, `stdout`, `stderr`, `refusal` |
 | `glob` | `pattern` | `paths` |
-| `vfs/read` | `path`, `offset?`, `size?` | `data_base64` |
-| `vfs/write`, `vfs/append` | `path`, `data_base64` | `{}` |
-| `vfs/stat` | `path`, `nofollow?` | `name`, `type`, `size`, `modified`, `mode`, ... |
-| `vfs/readdir` | `path` | `entries` |
-| `vfs/exists` | `path` | `exists` |
-| `vfs/mkdir`, `vfs/rmdir`, `vfs/unlink` | `path` | `{}` |
-| `vfs/rename` | `src`, `dst` | `{}` |
-| `vfs/truncate` | `path`, `length` | `{}` |
-| `explain/shell` | `command` | the line's verdict, `exit_code`, `stderr` and `node`, its parse tree |
-| `explain/vfs/<call>` | the params of `vfs/<call>` | the call's verdict, `call`, `paths` and `error` |
+| `vfs/<call>` | the call's arguments, `explain?` | the call's answer |
+| `tools/<tool>` | the tool's input | `text`, `is_error` |
 | `tools/list` | | `tools`, as MCP lists them |
 | `tools/call` | `name`, `arguments` | `text`, `is_error` |
 
-`?` marks an optional param. The `explain/` methods answer what `shell` and `vfs/<call>` would do, without running them; see [Explain](/home/permissions#explain). `initialize` creates nothing and is optional: it reports the server and the workspace and session this connection is bound to. Bytes travel base64 in the `*_base64` fields, and a message is at most 4 MiB, so stream larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH. A non-zero exit is a result, not an error. The [tools](/home/access/mcp#tools) take the inputs listed under [Call a tool](/home/access/http#call-a-tool).
+`vfs/<call>` is each of the 24 [VFS calls](/home/access/http#call-the-vfs), with the same arguments and answers as over HTTP. `explain: true` on `shell` or a VFS call answers what it would do instead of doing it; see [Explain](/home/policy/explain). `?` marks an optional param. `initialize` creates nothing and is optional: it reports the server and the workspace and session this connection is bound to. Bytes travel base64 in the `*_base64` fields, and a message is at most 4 MiB, so stream larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH. A non-zero exit is a result, not an error; a failed call's error carries its `errno` and, for a policy's refusal, its `refusal` record in `data`. The [tools](/home/access/mcp#tools) take the inputs listed under [Call a tool](/home/access/http#call-a-tool).
 
 ## Sessions
 

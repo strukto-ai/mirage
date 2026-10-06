@@ -16,7 +16,7 @@ import type { CommandOpts } from '../../config.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { type FileStat, PathSpec } from '../../../types.ts'
-import { eloop } from '../../../utils/errors.ts'
+import { eloop } from '../../../errors/fs.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 
 /**

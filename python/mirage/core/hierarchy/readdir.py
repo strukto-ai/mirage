@@ -20,8 +20,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hierarchy.probe import A, ReaddirFn, resolve_entry
 from mirage.core.hierarchy.scope import INVALID, ROOT, DetectFn, ScopeMatch
+from mirage.errors.fs import enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 

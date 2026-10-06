@@ -70,7 +70,7 @@ if TYPE_CHECKING:
         ShellOperand,
         VfsExplanation,
     )
-    from mirage.policy.types import OpsContext
+    from mirage.policy.types import VfsContext
     from mirage.runtime.base import Runtime
     from mirage.runtime.binding import WorkspaceBinding
     from mirage.runtime.config import RuntimeConfig
@@ -221,7 +221,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.io": ("IOResult",),
     "mirage.ops.generic": ("OpsTable", "make_generic_ops"),
     "mirage.ops.registry": ("RegisteredOp", "op"),
-    "mirage.policy.types": ("OpsContext",),
+    "mirage.policy.types": ("VfsContext",),
     "mirage.vfs.base": ("BaseVFS",),
     "mirage.vfs.testing": (
         "DriverOps",
@@ -346,7 +346,7 @@ __all__ = [
     "LineExecutorMixin",
     "ProcessExecutorMixin",
     "NULL_INDEX",
-    "OpsContext",
+    "VfsContext",
     "OpsTable",
     "Outcome",
     "PathSpec",

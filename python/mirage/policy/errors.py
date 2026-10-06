@@ -48,7 +48,7 @@ class PolicyDenied(PermissionError):
     door that renders the error stays byte-identical to a plain EACCES
     and a door that hands the agent text appends the record's line.
 
-    It carries no accounting: a post_ops refusal suppresses the result,
+    It carries no accounting: a post_vfs refusal suppresses the result,
     not the effect, and the door reports the completed op through the
     caller's ``OpReport``, which covers this error and any foreign one
     the same way.

@@ -19,7 +19,7 @@ import { OpsRegistry } from './registry.ts'
 import type { RegisteredOp } from './registry.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied, PolicyError } from '../policy/errors.ts'
-import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
+import type { Action, VfsContext, VfsResultContext } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { stat as ramStat } from '../core/ram/stat.ts'
 import {
@@ -31,7 +31,7 @@ import {
   OnExceed,
   ReadPolicy,
 } from '../types.ts'
-import { eacces, enoent, enotdir } from '../utils/errors.ts'
+import { eacces, enoent, enotdir } from '../errors/fs.ts'
 import { Session } from '../workspace/workspace/handle.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -117,7 +117,7 @@ describe('Ops', () => {
     await ws.vfs.write('/data/f.txt', 'abc')
     const seen: [string, boolean][] = []
     ws.policies.add({
-      preOps(ctx: OpsContext): Action | null {
+      preVfs(ctx: VfsContext): Action | null {
         seen.push([ctx.op, ctx.write])
         return ctx.op === 'read' ? { kind: 'deny', reason: 'write-only' } : null
       },
@@ -216,7 +216,7 @@ describe('Ops existence probes', () => {
 // access read through it, so policy hooks must fire here too.
 describe('Ops policy door', () => {
   class SealReads implements Policy {
-    preOps(ctx: OpsContext): Action | null {
+    preVfs(ctx: VfsContext): Action | null {
       if (!ctx.write && ctx.path.virtual.endsWith('.sealed')) {
         return { kind: 'deny', reason: 'sealed' }
       }
@@ -225,7 +225,7 @@ describe('Ops policy door', () => {
   }
 
   class RedactReads implements Policy {
-    postOps(ctx: OpsResultContext): Action | null {
+    postVfs(ctx: VfsResultContext): Action | null {
       const data = ctx.result instanceof Uint8Array ? ctx.result : null
       if (ctx.op === 'read' && data !== null && DEC.decode(data).includes('TOPSECRET')) {
         return { kind: 'deny', reason: 'redacted' }
@@ -235,7 +235,7 @@ describe('Ops policy door', () => {
   }
 
   class CapReads implements Policy {
-    postOps(ctx: OpsResultContext): Action | null {
+    postVfs(ctx: VfsResultContext): Action | null {
       if (ctx.op === 'read' && ctx.path.virtual.endsWith('.log')) {
         return new Limit({ maxBytes: 5 })
       }
@@ -244,7 +244,7 @@ describe('Ops policy door', () => {
   }
 
   class LockWrites implements Policy {
-    preOps(ctx: OpsContext): Action | null {
+    preVfs(ctx: VfsContext): Action | null {
       if (ctx.write && ctx.path.virtual.startsWith('/data/locked/')) {
         return { kind: 'deny', reason: 'locked' }
       }
@@ -266,13 +266,13 @@ describe('Ops policy door', () => {
     )
   }
 
-  it('preOps denies a read through the facade with EACCES', async () => {
+  it('preVfs denies a read through the facade with EACCES', async () => {
     const ws = mkGuarded()
     await ws.vfs.write('/data/x.sealed', 'nope\n')
     await expect(ws.vfs.read('/data/x.sealed')).rejects.toThrow(PolicyDenied)
   })
 
-  it('postOps denies on result content the pre hook cannot see', async () => {
+  it('postVfs denies on result content the pre hook cannot see', async () => {
     const ws = mkGuarded()
     await ws.vfs.write('/data/secret.txt', 'TOPSECRET plans\n')
     await expect(ws.vfs.read('/data/secret.txt')).rejects.toThrow(PolicyDenied)
@@ -280,13 +280,13 @@ describe('Ops policy door', () => {
     expect(await ws.vfs.cat('/data/clean.txt')).toBe('hello\n')
   })
 
-  it('postOps Limit caps facade read bytes', async () => {
+  it('postVfs Limit caps facade read bytes', async () => {
     const ws = mkGuarded()
     await ws.vfs.write('/data/big.log', 'abcdefghij\n')
     expect(DEC.decode(await ws.vfs.read('/data/big.log'))).toBe('abcde')
   })
 
-  it('preOps denies a facade write before the backend runs', async () => {
+  it('preVfs denies a facade write before the backend runs', async () => {
     const ws = mkGuarded()
     await expect(ws.vfs.write('/data/locked/f.txt', 'hi')).rejects.toThrow(PolicyDenied)
     expect(await ws.vfs.exists('/data/locked/f.txt')).toBe(false)
@@ -357,7 +357,7 @@ async function seed(ws: Workspace, path: string): Promise<void> {
 describe('Ops is one door with the dispatcher', () => {
   class CountPre implements Policy {
     readonly seen: string[] = []
-    preOps(ctx: OpsContext): Action | null {
+    preVfs(ctx: VfsContext): Action | null {
       this.seen.push(`${ctx.op}:${ctx.prefix}`)
       return null
     }
@@ -375,7 +375,7 @@ describe('Ops is one door with the dispatcher', () => {
   })
 
   class DenyInner implements Policy {
-    postOps(ctx: OpsResultContext): Action | null {
+    postVfs(ctx: VfsResultContext): Action | null {
       if (ctx.path.virtual === '/m/inner') return { kind: 'deny', reason: 'no' }
       return null
     }
@@ -659,35 +659,35 @@ function s3NamedRam(): RAMVFS {
 
 describe('Ops accounting survives the delegation', () => {
   class DenyBigReads implements Policy {
-    postOps(ctx: OpsResultContext): Action | null {
+    postVfs(ctx: VfsResultContext): Action | null {
       if (ctx.op === 'read') return { kind: 'deny', reason: 'too big' }
       return null
     }
   }
 
   class CapReadsTo3 implements Policy {
-    postOps(ctx: OpsResultContext): Action | null {
+    postVfs(ctx: VfsResultContext): Action | null {
       if (ctx.op === 'read') return new Limit({ maxBytes: 3 })
       return null
     }
   }
 
   class HardCapReadsTo3 implements Policy {
-    postOps(ctx: OpsResultContext): Action | null {
+    postVfs(ctx: VfsResultContext): Action | null {
       if (ctx.op === 'read') return new Limit({ maxBytes: 3, onExceed: OnExceed.ERROR })
       return null
     }
   }
 
   class SealReads implements Policy {
-    preOps(ctx: OpsContext): Action | null {
+    preVfs(ctx: VfsContext): Action | null {
       if (ctx.op === 'read') return { kind: 'deny', reason: 'sealed' }
       return null
     }
   }
 
-  class BrokenPostOps implements Policy {
-    postOps(ctx: OpsResultContext): Action | null {
+  class BrokenPostVfs implements Policy {
+    postVfs(ctx: VfsResultContext): Action | null {
       if (ctx.write && ctx.path.virtual === '/m/a.txt') return 42 as unknown as Action
       return null
     }
@@ -708,7 +708,7 @@ describe('Ops accounting survives the delegation', () => {
   })
 
   it('records a capped read against what the backend moved', async () => {
-    // A postOps Limit truncates what the caller receives; the transfer
+    // A postVfs Limit truncates what the caller receives; the transfer
     // already happened, so recording the capped length would
     // under-report networkBytes by whatever the cap removed.
     const ws = mkWs(new CapReadsTo3())
@@ -738,7 +738,7 @@ describe('Ops accounting survives the delegation', () => {
 
   it('records a committed write when bookkeeping after it fails', async () => {
     // The backend applied the write, then a step after it (here an
-    // invalid postOps return, but any foreign bookkeeping error looks
+    // invalid postVfs return, but any foreign bookkeeping error looks
     // the same) blew up. The error must propagate AND the transfer
     // must stay on the books: the door stamped the report at
     // completion, so the record does not depend on what kind of
@@ -748,7 +748,7 @@ describe('Ops accounting survives the delegation', () => {
     for (const op of vfs.ops()) ops.register(op)
     const ws = new Workspace(
       { '/m': vfs },
-      { mode: MountMode.WRITE, ops, policies: [new BrokenPostOps()] },
+      { mode: MountMode.WRITE, ops, policies: [new BrokenPostVfs()] },
     )
     ws.records.length = 0
     await expect(ws.vfs.write('/m/a.txt', '123456')).rejects.toThrow(PolicyError)
@@ -1034,7 +1034,7 @@ describe('Ops.readlink', () => {
     const ops = new OpsRegistry()
     for (const op of vfs.ops()) ops.register(op)
     const noProbe: Policy = {
-      preOps: (ctx: OpsContext) =>
+      preVfs: (ctx: VfsContext) =>
         Promise.resolve(
           ctx.op === 'stat' || ctx.op === 'readdir'
             ? { kind: 'deny' as const, reason: 'no probing' }

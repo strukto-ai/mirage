@@ -56,7 +56,7 @@ async def test_mkdir(mk_store):
 @pytest.mark.asyncio
 async def test_mkdir_parent_not_found(mk_store):
     a = await mk_store("test:mkdir:2:")
-    # The operand is what a GNU stderr line names, so the error carries the
+    # The operand is what mkdir's stderr line names, so the error carries the
     # virtual path, not the internal "parent does not exist" phrasing.
     with pytest.raises(FileNotFoundError, match="/no/parent"):
         await mkdir(
@@ -106,7 +106,7 @@ async def test_mkdir_already_exists_needs_parents_to_be_idempotent(mk_store):
     a = await mk_store("test:mkdir:3:")
     spec = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
     await mkdir(a, spec)
-    # Only -p is idempotent; plain mkdir refuses an existing target (GNU).
+    # Only -p is idempotent; plain mkdir refuses an existing target.
     with pytest.raises(FileExistsError):
         await mkdir(a, spec)
     await mkdir(a, spec, parents=True)
@@ -127,9 +127,9 @@ async def test_mkdir_p_across_a_file_names_the_component(mk_store):
             ),
             parents=True,
         )
-    # GNU quotes the component it tripped on, not the operand, and the file
-    # it collided with is left alone.
-    assert str(excinfo.value) == "/a.txt"
+    # mkdir -p quotes the component it tripped on, not the operand, and the
+    # file it collided with is left alone.
+    assert excinfo.value.filename == "/a.txt"
     assert not await a.store.has_dir("/a.txt")
     assert await a.store.get_file("/a.txt") == b"hi"
 

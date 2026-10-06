@@ -14,7 +14,6 @@
 
 import errno
 import functools
-import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
@@ -33,6 +32,21 @@ from mirage.context import (
     get_current_session,
     hidden_refusal,
     session_visibility,
+)
+from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.fs import (
+    eacces,
+    eexist,
+    einval,
+    eisdir,
+    eloop,
+    enoent,
+    enotdir,
+    enotempty,
+    exdev,
+    no_mount,
+    no_xattr,
+    walk_refusal,
 )
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record, start_op
@@ -57,16 +71,6 @@ from mirage.types import (
     MountMode,
     PathSpec,
     VFSName,
-)
-from mirage.utils.errors import (
-    MISS_ERRORS,
-    eisdir,
-    eloop,
-    enoent,
-    exdev,
-    no_mount,
-    no_xattr,
-    walk_refusal,
 )
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
 from mirage.utils.key_prefix import mount_key
@@ -220,7 +224,7 @@ class _MountChannel:
     would. Only the dispatcher's own visibility filter sits above that
     door, which is what lets the cascade see hidden entries.
 
-    Each deletion answers the same pre-ops admission a dispatched op
+    Each deletion answers the same pre-vfs admission a dispatched op
     answers, with its own child path: the gate that admitted the rmdir
     judged the directory, not what the cascade found under it, and a
     policy that protects one of those paths must refuse its deletion
@@ -239,7 +243,7 @@ class _MountChannel:
         mount (MountEntry): the mount owning the subtree.
         boundary (OpBoundary): the dispatcher's op boundary for that
             mount; its admit raises to refuse a deletion. A deletion is
-            not completed through post_ops, which could only refuse
+            not completed through post_vfs, which could only refuse
             after the entry is gone and strand the cascade.
         invalidate (Callable): the dispatcher's write invalidation,
             bound to that mount.
@@ -493,9 +497,7 @@ class Dispatcher:
             if move_reveals(
                 vis, path.virtual, dst.virtual
             ) and await self._moved_source_is_dir(path):
-                raise PermissionError(
-                    errno.EACCES, os.strerror(errno.EACCES), path.virtual
-                )
+                raise eacces(path.virtual)
         if (
             op == "rename"
             and isinstance(dst, PathSpec)
@@ -508,9 +510,7 @@ class Dispatcher:
             # one. Left to the backend the rename succeeded and the
             # purge below then deleted the link with it, losing
             # namespace state silently where POSIX promises ENOTEMPTY.
-            raise OSError(
-                errno.ENOTEMPTY, os.strerror(errno.ENOTEMPTY), dst.virtual
-            )
+            raise enotempty(dst.virtual)
         if self._table_answers(op, path.virtual, kwargs):
             return (
                 await self._namespace_table_op(op, path, kwargs, report),
@@ -599,9 +599,7 @@ class Dispatcher:
             path_visible(vis, link)
             for link, _ in self._namespace.link_stats_below(path.virtual)
         ):
-            raise OSError(
-                errno.ENOTEMPTY, os.strerror(errno.ENOTEMPTY), path.virtual
-            )
+            raise enotempty(path.virtual)
         await mount.ensure_ready()
         caches_reads = mount.vfs.caches_reads
         # The file cache holds what commands read, keyed on the path
@@ -1086,9 +1084,7 @@ class Dispatcher:
             if not self._namespace.is_link(dst.virtual):
                 kind = await self._entry_type(dst.virtual)
                 if kind == FileType.DIRECTORY:
-                    raise IsADirectoryError(
-                        errno.EISDIR, os.strerror(errno.EISDIR), dst.virtual
-                    )
+                    raise eisdir(dst.virtual)
                 if kind is not None:
                     await self.dispatch("unlink", dst)
             await self._namespace.unlink(dst.virtual)
@@ -1110,9 +1106,7 @@ class Dispatcher:
         elif op == "stat":
             row = self._namespace.link_stat_at(path.virtual)
             if row is None:
-                raise FileNotFoundError(
-                    errno.ENOENT, os.strerror(errno.ENOENT), path.virtual
-                )
+                raise enoent(path.virtual)
             target = self._namespace.readlink(path.virtual) or ""
             result = row
         else:
@@ -1147,12 +1141,8 @@ class Dispatcher:
         """
         present, _ = await self._occupancy(path)
         if present:
-            return OSError(
-                errno.EINVAL, os.strerror(errno.EINVAL), path.virtual
-            )
-        return FileNotFoundError(
-            errno.ENOENT, os.strerror(errno.ENOENT), path.virtual
-        )
+            return einval(path.virtual)
+        return enoent(path.virtual)
 
     async def _occupancy(
         self, path: PathSpec
@@ -1229,9 +1219,7 @@ class Dispatcher:
         """
         present, listing = await self._occupancy(path)
         if present:
-            return FileExistsError(
-                errno.EEXIST, os.strerror(errno.EEXIST), path.virtual
-            )
+            return eexist(path.virtual)
         if listing:
             return None
         return await self._parent_refusal(path)
@@ -1268,13 +1256,9 @@ class Dispatcher:
         except (PolicyError, PolicyDenied):
             return None
         if kind is not FileType.DIRECTORY:
-            return NotADirectoryError(
-                errno.ENOTDIR, os.strerror(errno.ENOTDIR), path.virtual
-            )
+            return enotdir(path.virtual)
         if node != immediate:
-            return FileNotFoundError(
-                errno.ENOENT, os.strerror(errno.ENOENT), path.virtual
-            )
+            return enoent(path.virtual)
         return None
 
     async def _entry_type(self, virtual: str) -> FileType | None:
@@ -1409,9 +1393,7 @@ class Dispatcher:
             result = found
         elif op == "setxattr":
             if kwargs.get("create") and name in stored:
-                raise FileExistsError(
-                    errno.EEXIST, os.strerror(errno.EEXIST), path.virtual
-                )
+                raise eexist(path.virtual)
             if kwargs.get("replace") and name not in stored:
                 raise no_xattr(path)
             await self._namespace.set_xattr(

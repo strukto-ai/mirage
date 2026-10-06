@@ -33,7 +33,8 @@ import {
   type JqOptions,
   type NoValue,
 } from './types.ts'
-import { READ_FAILURES, fsStrerror, isFsError } from '../../utils/errors.ts'
+import { READ_FAILURES } from '../../errors/constants.ts'
+import { fsStrerror, isFsError } from '../../errors/fs.ts'
 
 /**
  * The most bytes one read of jq's input reader takes (jq 1.8's util.c):

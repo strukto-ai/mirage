@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { isEacces } from '../../../../utils/errors.ts'
+import { isEacces } from '../../../../errors/fs.ts'
 import { UsageError } from '../../../errors.ts'
 import { findTable, jsonObject, oneOperand, scopedBase, stdinText } from './util.ts'
 

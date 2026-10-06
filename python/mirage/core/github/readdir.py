@@ -30,8 +30,8 @@ from mirage.core.github.tree import (
     refill_snapshot,
 )
 from mirage.core.github.tree_entry import TreeEntry
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 log = logging.getLogger(__name__)

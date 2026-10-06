@@ -67,6 +67,7 @@
     "@struktoai/mirage-agents": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
+    "@struktoai/mirage-server": "workspace:*",
     "chromadb": "^3.4.3",
     "graphql": "16.11.0",
     "imapflow": "^1.3.2",

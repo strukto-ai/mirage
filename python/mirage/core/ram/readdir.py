@@ -21,8 +21,8 @@ from mirage.cache.index import (
     IndexEntry,
     ResourceType,
 )
+from mirage.errors.fs import readdir_error
 from mirage.types import PathSpec
-from mirage.utils.errors import readdir_error
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 from mirage.vfs.ram.store import RAMStore

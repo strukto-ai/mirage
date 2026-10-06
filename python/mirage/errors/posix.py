@@ -26,6 +26,7 @@ _NO_XATTR = (
 )
 
 POSIX: dict[FsCondition, PosixErrno] = {
+    FsCondition.EBADF: PosixErrno(errno.EBADF, "Bad file descriptor"),
     FsCondition.ENOENT: PosixErrno(errno.ENOENT, "No such file or directory"),
     FsCondition.ENOTDIR: PosixErrno(errno.ENOTDIR, "Not a directory"),
     FsCondition.EISDIR: PosixErrno(errno.EISDIR, "Is a directory"),
@@ -42,6 +43,7 @@ POSIX: dict[FsCondition, PosixErrno] = {
     FsCondition.EIO: PosixErrno(errno.EIO, "Input/output error"),
     FsCondition.EBUSY: PosixErrno(errno.EBUSY, "Device or resource busy"),
     FsCondition.EROFS: PosixErrno(errno.EROFS, "Read-only file system"),
+    FsCondition.EFBIG: PosixErrno(errno.EFBIG, "File too large"),
     FsCondition.NO_XATTR: _NO_XATTR,
 }
 
@@ -50,6 +52,7 @@ POSIX: dict[FsCondition, PosixErrno] = {
 # N)``), and the table above follows the host instead (macOS ELOOP is 62).
 # TypeScript's POSIX table is this numbering already.
 LINUX_ERRNO: dict[FsCondition, int] = {
+    FsCondition.EBADF: 9,
     FsCondition.ENOENT: 2,
     FsCondition.ENOTDIR: 20,
     FsCondition.EISDIR: 21,
@@ -64,6 +67,7 @@ LINUX_ERRNO: dict[FsCondition, int] = {
     FsCondition.EIO: 5,
     FsCondition.EBUSY: 16,
     FsCondition.EROFS: 30,
+    FsCondition.EFBIG: 27,
     FsCondition.NO_XATTR: 61,
 }
 
@@ -77,8 +81,8 @@ def posix_errno(condition: FsCondition) -> int:
     return POSIX[condition].errno
 
 
-def gnu_phrase(condition: FsCondition) -> str:
-    """The GNU strerror text for a condition.
+def posix_phrase(condition: FsCondition) -> str:
+    """The strerror text for a condition.
 
     Args:
         condition (FsCondition): the named condition.

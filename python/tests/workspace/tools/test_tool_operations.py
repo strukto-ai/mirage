@@ -8,7 +8,7 @@ from mirage.context.session_context import (
     set_current_session,
 )
 from mirage.ops.ops import Ops
-from mirage.policy import OpsContext, Outcome
+from mirage.policy import Outcome, VfsContext
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 from mirage.workspace.tools.tool_operations import TOOL_NAMES, number_lines
 
@@ -342,7 +342,7 @@ async def test_a_refused_write_or_edit_is_a_tool_error():
 class LockedFile(Policy):
     """Refuse every op on one file, a stat included."""
 
-    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
         if ctx.path.virtual == "/d/locked.txt":
             return Deny("locked")
         return None
@@ -397,7 +397,9 @@ async def test_a_probe_that_fails_leaves_the_tool_error(monkeypatch):
     finally:
         await ws.close()
     # The read's own error stands, never the probe's.
-    assert read.is_error and read.text == "Error: /d/flaky.txt"
+    assert read.is_error and read.text == (
+        "Error: /d/flaky.txt: No such file or directory"
+    )
     assert written.is_error and "Input/output error" in written.text
 
 
@@ -506,7 +508,7 @@ async def test_a_path_ask_waits_on_the_host_outside_a_line():
     [record] = ws.decisions.pending("agent")
     assert (record.command, record.paths) == ("", ("/data/out/a.txt",))
     assert asked.text == (
-        "Error: [Errno 13] Permission denied: '/data/out/a.txt'\n"
+        "Error: /data/out/a.txt: Permission denied\n"
         f"requires approval: outbox needs a nod (ask {record.id})\n"
     )
     # Asking again quotes the same question.

@@ -26,7 +26,7 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import type { FindOptions } from '../../../vfs/base.ts'
-import { eacces, enoent, enotsup } from '../../../utils/errors.ts'
+import { eacces, enoent, enotsup } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
   cpFlags,

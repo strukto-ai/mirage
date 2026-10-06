@@ -60,7 +60,7 @@ async def test_mkdir_refuses_a_missing_parent_without_parents(make_acc):
     So a bare ``mkdir a/b/c`` looks ``a/b`` up first, as mkdir(2) does.
     """
     acc = make_acc({})
-    with pytest.raises(FileNotFoundError, match="^/a/b/c$"):
+    with pytest.raises(FileNotFoundError, match="'/a/b/c'$"):
         await _record(acc, PathSpec.from_str_path("/a/b/c"))
     assert acc._fake.dirs == set()
 
@@ -102,14 +102,14 @@ async def test_mkdir_refuses_a_name_a_file_holds(make_acc):
 async def test_mkdir_under_a_file_is_enotdir(make_acc):
     acc = make_acc({"mkp/f": b"x"})
     _refuse_create(acc)
-    with pytest.raises(NotADirectoryError, match="^/mkp/f/g$"):
+    with pytest.raises(NotADirectoryError, match="'/mkp/f/g'$"):
         await mkdir(acc, PathSpec.from_str_path("/mkp/f/g"))
 
 
 @pytest.mark.asyncio
 async def test_mkdir_under_a_deeper_file_names_the_operand(make_acc):
     acc = make_acc({"mkp/f": b"x"})
-    with pytest.raises(NotADirectoryError, match="^/mkp/f/g/h$"):
+    with pytest.raises(NotADirectoryError, match="'/mkp/f/g/h'$"):
         await mkdir(acc, PathSpec.from_str_path("/mkp/f/g/h"))
 
 
@@ -117,7 +117,7 @@ async def test_mkdir_under_a_deeper_file_names_the_operand(make_acc):
 async def test_mkdir_parents_names_the_file_it_stops_at(make_acc):
     acc = make_acc({"mkp/f": b"x"})
     _refuse_create(acc)
-    with pytest.raises(NotADirectoryError, match="^/mkp/f$"):
+    with pytest.raises(NotADirectoryError, match="'/mkp/f'$"):
         await mkdir(acc, PathSpec.from_str_path("/mkp/f/g/h"), parents=True)
 
 

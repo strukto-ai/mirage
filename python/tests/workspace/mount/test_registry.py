@@ -19,9 +19,10 @@ from mirage.commands.cli.types import CLISpec
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_admission, set_admission
+from mirage.errors.fs import ebusy
+from mirage.errors.types import NoMountError
 from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec
-from mirage.utils.errors import NoMountError, ebusy
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig

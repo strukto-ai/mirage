@@ -29,6 +29,7 @@ export type FsErrorCode = FsCondition
 // Identity except for mirage's own condition: the interpreter calls
 // "attribute not set" ENODATA.
 const CONDITION_KEY: Record<FsCondition, keyof ErrnoCodes> = {
+  EBADF: 'EBADF',
   ENOENT: 'ENOENT',
   ENOTDIR: 'ENOTDIR',
   EISDIR: 'EISDIR',
@@ -43,6 +44,7 @@ const CONDITION_KEY: Record<FsCondition, keyof ErrnoCodes> = {
   EIO: 'EIO',
   EBUSY: 'EBUSY',
   EROFS: 'EROFS',
+  EFBIG: 'EFBIG',
   NO_XATTR: 'ENODATA',
 }
 

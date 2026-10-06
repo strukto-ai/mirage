@@ -23,10 +23,10 @@ from mirage.commands.builtin.utils.links import (
     typed_link,
 )
 from mirage.commands.config import CommandOpts
+from mirage.errors.types import DotWalkLoop
 from mirage.io.types import IOResult
 from mirage.ops.types import LinkView, NamespaceView
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import DotWalkLoop
 from mirage.utils.path import CycleError
 
 

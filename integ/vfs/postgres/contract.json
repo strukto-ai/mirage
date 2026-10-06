@@ -335,7 +335,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "rg: /pg-limited/public/tables/books/rows.jsonl: File too large\n"
+        "stderr": "rg: /pg-limited/public/tables/books/rows.jsonl: File too large (os error 27)\n"
       }
     },
     {
@@ -413,7 +413,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "rg: /pg-bytes/byte_budget/tables/wide/rows.jsonl: File too large\n"
+        "stderr": "rg: /pg-bytes/byte_budget/tables/wide/rows.jsonl: File too large (os error 27)\n"
       }
     },
     {

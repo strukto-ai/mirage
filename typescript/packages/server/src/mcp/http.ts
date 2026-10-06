@@ -33,6 +33,7 @@ import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { createMirageMcpServer } from './server.ts'
 
 const MCP_PATH = '/v1/workspaces/:workspaceId/mcp'
+const CALLS: Readonly<Record<string, boolean>> = { tools: false, all: true }
 /**
  * The tool table as the daemon serves it: through its own API.
  *
@@ -100,7 +101,9 @@ export class DaemonToolOperations extends MirageToolOperations {
  *
  * The endpoint is stateless: each request runs in the workspace's default
  * session, or the one `?session_id=` names, as `/shell` picks its
- * session. One tool table per workspace and live session outlives the requests,
+ * session. `?calls=all` also serves the VFS calls and explain; `tools`,
+ * the default, serves the agent tools alone. One tool table per
+ * workspace and live session outlives the requests,
  * so the read one request stamps guards the edit the next one makes; the
  * SDK builds a server per request around it.
  */
@@ -111,7 +114,7 @@ export class McpDoor {
       entry: WorkspaceEntry
       session: SessionState
       operations: DaemonToolOperations
-      handler: McpHttpHandler
+      handlers: Map<boolean, McpHttpHandler>
     }
   >()
 
@@ -128,7 +131,11 @@ export class McpDoor {
     parsedBody: unknown,
     account: string | null,
   ): Promise<Response> {
-    const target = await this.target(new URL(request.url), account)
+    const url = new URL(request.url)
+    if (!Object.hasOwn(CALLS, url.searchParams.get('calls') ?? 'tools')) {
+      return Response.json({ detail: 'calls must be tools or all' }, { status: 400 })
+    }
+    const target = await this.target(url, account)
     if (typeof target === 'string') return Response.json({ detail: target }, { status: 404 })
     const { handler, workspaceId, sessionId } = target
     const options = parsedBody === undefined ? {} : { parsedBody }
@@ -206,7 +213,7 @@ export class McpDoor {
 
   /** Close every handler; the app's `onClose` awaits it. */
   async close(): Promise<void> {
-    const handlers = [...this.served.values()].map((s) => s.handler)
+    const handlers = [...this.served.values()].flatMap((s) => [...s.handlers.values()])
     this.served.clear()
     await Promise.all(handlers.map((h) => h.close()))
   }
@@ -230,8 +237,9 @@ export class McpDoor {
   }
 
   /**
-   * The handler a request's URL is for, or why there is none: the
-   * workspace or the session does not exist.
+   * The handler a request's URL is for, by its workspace, session and
+   * `?calls=`, or why there is none: the workspace or the session does
+   * not exist.
    */
   private async target(
     url: URL,
@@ -246,7 +254,9 @@ export class McpDoor {
       account,
     )
     if (typeof served === 'string') return served
-    return { handler: served.handler, workspaceId, sessionId: served.session.sessionId }
+    const handler = served.handlers.get(CALLS[url.searchParams.get('calls') ?? 'tools'] === true)
+    if (handler === undefined) return 'not found'
+    return { handler, workspaceId, sessionId: served.session.sessionId }
   }
 
   private async servedFor(
@@ -258,7 +268,7 @@ export class McpDoor {
         entry: WorkspaceEntry
         session: SessionState
         operations: DaemonToolOperations
-        handler: McpHttpHandler
+        handlers: Map<boolean, McpHttpHandler>
       }
     | string
   > {
@@ -278,8 +288,13 @@ export class McpDoor {
     if (current?.session === session) return current
     await this.forget(key)
     const operations = new DaemonToolOperations(entry, this.jobs, sessionId)
-    const handler = createMcpHandler(() => createMirageMcpServer(ws, { operations }))
-    const served = { entry, session, operations, handler }
+    const handlers = new Map(
+      Object.values(CALLS).map((allCalls) => [
+        allCalls,
+        createMcpHandler(() => createMirageMcpServer(ws, { sessionId, operations, allCalls })),
+      ]),
+    )
+    const served = { entry, session, operations, handlers }
     this.served.set(key, served)
     return served
   }
@@ -299,7 +314,7 @@ export class McpDoor {
     const served = this.served.get(key)
     if (served === undefined) return
     this.served.delete(key)
-    await served.handler.close()
+    await Promise.all([...served.handlers.values()].map((h) => h.close()))
   }
 }
 

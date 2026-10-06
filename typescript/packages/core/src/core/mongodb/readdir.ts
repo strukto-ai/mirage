@@ -14,7 +14,7 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
-import { enoent, isEnoent } from '../../utils/errors.ts'
+import { enoent, isEnoent } from '../../errors/fs.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { databaseExists, entityExists, listCollections, listDatabases } from './client.ts'

@@ -55,7 +55,7 @@ export class Explained extends Error {
  * null for a door that refuses on no policy's behalf (a hidden
  * variable).
  *
- * It carries no accounting: a postOps refusal suppresses the result,
+ * It carries no accounting: a postVfs refusal suppresses the result,
  * not the effect, and the door reports the completed op through the
  * caller's `OpReport`, which covers this error and any foreign one the
  * same way.

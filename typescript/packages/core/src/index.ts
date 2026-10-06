@@ -52,8 +52,8 @@ export type {
   Action,
   CommandContext,
   ExecuteResultContext,
-  OpsContext,
-  OpsResultContext,
+  VfsContext,
+  VfsResultContext,
   Policy,
 } from './policy/index.ts'
 export { Outcome, Scope } from './policy/index.ts'
@@ -119,7 +119,7 @@ export {
   VFSName,
 } from './types.ts'
 export type { ReadSpec, WalkEntry } from './types.ts'
-export { eisdir, enoent, enotdir } from './utils/errors.ts'
+export { eisdir, enoent, enotdir } from './errors/fs.ts'
 export { snakeToCamel } from './utils/normalize.ts'
 export { ListingDeltaHook, RAMWatchQueue, Watcher } from './watch/index.ts'
 export { SessionStore } from './workspace/session/store.ts'

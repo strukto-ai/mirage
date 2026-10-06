@@ -31,7 +31,7 @@ npm install -g @struktoai/mirage-cli
 ```bash
 mirage workspace create workspace.yaml --id demo   # starts the server
 mirage shell -w demo -c 'ls / | head'
-mirage grep -w demo -i error /
+mirage tools grep -w demo -i error /
 mirage workspace delete demo
 ```
 
@@ -42,28 +42,25 @@ mirage workspace delete demo
 | Code | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `1` | A tool command's tool failed, or the server could not be reached. |
+| `1` | A tool failed, a VFS call was refused or failed, or the server could not be reached. |
 | `2` | A usage error, a bad config, or a refusal from the server. |
 | `130` | The line was interrupted with Ctrl-C or canceled. |
 | `N` | `shell`, `job wait` and `job get` exit with the line's own status. |
 
-## Run lines and tools
+## Run lines, VFS calls and tools
 
-`-w` names the workspace and `-s` the session, the default one when absent.
+`-w` names the workspace and `-s` the session, the default one when absent. `--explain` prints what a line or a VFS call would do, running nothing; see [Explain](/home/policy/explain).
 
 | Command | Does |
 | --- | --- |
-| `mirage shell -w ID -c LINE [--cwd PATH] [--bg]` | Run a line. Piped stdin streams to it, Ctrl-C cancels it, and `--bg` returns a job id at once. |
-| `mirage read -w ID PATH [--offset N] [--limit N]` | Read a file. |
-| `mirage write -w ID PATH [--content TEXT]` | Write a file, from stdin without `--content`. |
-| `mirage edit -w ID PATH OLD NEW [--replace-all]` | Replace a string in a file. |
-| `mirage ls -w ID PATH` | List a directory. |
-| `mirage grep -w ID PATTERN PATH [-i] [-F] [-l] [-c] [-m N] [-C N] [--include GLOB]` | Search file contents. |
-| `mirage glob -w ID PATTERN [PATH]` | Find paths by pattern. |
+| `mirage shell -w ID [-s SESSION] -c LINE [--cwd PATH] [--runtime NAME] [--bg] [--explain]` | Run a line. Piped stdin streams to it, Ctrl-C cancels it, and `--bg` returns a job id at once. |
+| `mirage vfs CALL ARGS -w ID [-s SESSION] [--explain]` | One of the 24 [VFS calls](/home/access/http#call-the-vfs): its required arguments in order, the rest as `--name VALUE`, bytes from `--data` / `--value` or stdin. Calls are spelled with dashes: `mirage vfs is-dir`. |
+| `mirage glob PATTERN -w ID [-s SESSION]` | Every path a pattern matches. |
+| `mirage tools TOOL ARGS -w ID [-s SESSION]` | One of the [agent tools](/home/access/mcp#tools): `shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`. |
 
 ### `mirage mcp`
 
-`mirage mcp [CONFIG] [-w ID] [-s SESSION]` serves a session's [MCP](/home/access/mcp) tools on stdio. `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc). `mirage ssh-proxy ID` carries [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`.
+`mirage mcp [CONFIG] [-w ID] [-s SESSION] [--all-calls]` serves a session's [MCP](/home/access/mcp) tools on stdio; `--all-calls` adds the [VFS calls and explain](/home/access/mcp#vfs-calls-and-explain). `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc). `mirage ssh-proxy ID` carries [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`.
 
 With `-w`, it serves a workspace the server already holds. Otherwise it creates one from `CONFIG`, from `MIRAGE_MCP_CONFIG` (`MIRAGE_RPC_CONFIG`) or `MIRAGE_CONFIG`, or from a `workspace.yaml` found walking up from the working directory. It deletes that workspace when the client disconnects, unless the config names a `workspace_id`.
 
@@ -91,7 +88,6 @@ With `-w`, it serves a workspace the server already holds. Otherwise it creates 
 | Command | Does |
 | --- | --- |
 | `mirage workspace list-asks ID [--session S] [--all]` | List pending [asks](/home/permissions#asks). |
-| `mirage workspace explain ID LINE [--session S]` | What a line would do, without running it; see [Explain](/home/permissions#explain). |
 | `mirage workspace allow ID ASK [--scope once\|session]` | Allow one. |
 | `mirage workspace deny ID ASK` | Deny one. |
 

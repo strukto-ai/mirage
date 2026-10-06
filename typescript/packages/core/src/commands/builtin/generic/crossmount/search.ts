@@ -43,7 +43,7 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { walkErrorLine } from '../../rg_scan.ts'
 import { LinkDoor } from '../../utils/links.ts'
-import { fsErrorLine } from '../../../../utils/errors.ts'
+import { fsErrorLine } from '../../../../errors/render.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 function admitGrep(flags: FlagSet, path: PathSpec, stat: FileStat): boolean {

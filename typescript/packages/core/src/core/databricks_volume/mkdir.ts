@@ -21,7 +21,7 @@ import { ensurePathSpec, parentPath } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { stat } from './stat.ts'
-import { enoent, enotdir } from '../../utils/errors.ts'
+import { enoent, enotdir } from '../../errors/fs.ts'
 
 async function createDirectory(
   accessor: DatabricksVolumeAccessor,

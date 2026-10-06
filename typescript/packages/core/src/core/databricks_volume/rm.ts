@@ -23,7 +23,7 @@ import { backendPath, virtualPath } from './path.ts'
 import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
 import { unlink } from './unlink.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 
 async function removeTreeRecurse(
   accessor: DatabricksVolumeAccessor,

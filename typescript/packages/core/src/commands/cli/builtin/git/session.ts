@@ -23,7 +23,7 @@ import { openRepo, type Repo } from './repo.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { fatal, gitBool, startPoint } from './util.ts'
-import { isErofs } from '../../../../utils/errors.ts'
+import { isErofs } from '../../../../errors/fs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 
 const ENC = new TextEncoder()

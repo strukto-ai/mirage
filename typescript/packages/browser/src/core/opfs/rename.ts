@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import {
   destError,

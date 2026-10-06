@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { enoent } from './errors.ts'
+import { enoent } from '../errors/fs.ts'
 import {
   NAME_MAX_BYTES,
   byteLength,

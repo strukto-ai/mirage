@@ -15,7 +15,7 @@
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
-import { efbig } from '../../utils/errors.ts'
+import { efbig } from '../../errors/fs.ts'
 import { jsonBytes } from '../render/json.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { makeRead, type Reader, type ReadWindow, type WindowedReader } from '../hierarchy/read.ts'

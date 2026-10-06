@@ -219,7 +219,7 @@ def namespace_stat(
 def paths_scoped(
     ns: NamespaceView | None, paths: Sequence[PathSpec], prefix: str = ""
 ) -> bool:
-    """Whether a hide, a path rule or a pre_ops policy judges anything a
+    """Whether a hide, a path rule or a pre_vfs policy judges anything a
     command's operands reach, so a native walk that classifies the raw
     tree gives way to the checked one.
 

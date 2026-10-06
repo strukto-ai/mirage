@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { parseCommand } from '../../../../commands/spec/parser.ts'
-import { eexist, enoent, noXattr } from '../../../../utils/errors.ts'
+import { eexist, enoent, noXattr } from '../../../../errors/fs.ts'
 import { GETFATTR_USAGE, attrError, attrOperands, attrUsageRefusal } from './xattr.ts'
 
 describe('attr helpers', () => {

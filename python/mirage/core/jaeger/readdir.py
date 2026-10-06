@@ -28,7 +28,7 @@ from mirage.core.jaeger.scope import (
     detect_scope,
 )
 from mirage.core.render.json import json_bytes
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 
 
 async def assert_service(

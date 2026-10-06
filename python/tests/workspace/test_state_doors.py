@@ -20,7 +20,7 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import CommandSpec
 from mirage.fuse.core import MountCore
 from mirage.io.types import IOResult
-from mirage.policy import Action, Deny, OpsContext, Policy
+from mirage.policy import Action, Deny, Policy, VfsContext
 from mirage.policy.types import SessionContext
 from mirage.shell.variable import VarAttr
 from mirage.types import (
@@ -46,7 +46,7 @@ class DenyOp(Policy):
     def __init__(self, op: str) -> None:
         self._op = op
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if ctx.op == self._op:
             return Deny(f"{self._op} refused by policy\n")
         return None
@@ -317,7 +317,7 @@ class DenySecretEnv(Policy):
 
 def test_export_fires_the_state_gate():
     # The session plane's gate: an env write clears pre_session exactly
-    # as a VFS write clears pre_ops, whichever tier asked.
+    # as a VFS write clears pre_vfs, whichever tier asked.
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():

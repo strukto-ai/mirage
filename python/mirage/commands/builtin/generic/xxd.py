@@ -14,10 +14,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, read_fail_exit_code
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, ReadBytesFn, ReadStreamFn
-from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 # xxd's exit for an OUTFILE it cannot open, and for a dump that seeks
 # backwards on a stream (vim's xxd 2024-12-07).

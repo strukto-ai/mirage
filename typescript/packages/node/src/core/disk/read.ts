@@ -17,7 +17,7 @@ import { open, readFile } from 'node:fs/promises'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 

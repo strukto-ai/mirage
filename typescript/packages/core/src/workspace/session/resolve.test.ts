@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_ASK_REASON } from '../../policy/constants.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { matchOp, ruleScope } from '../../policy/match/rule.ts'
-import type { OpsContext } from '../../policy/types.ts'
+import type { VfsContext } from '../../policy/types.ts'
 import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
 import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
 import { pathHidden, pathVisible } from '../../utils/hidden.ts'
@@ -33,7 +33,7 @@ import {
 import { SessionState } from './session.ts'
 import { VarAttr } from '../../shell/variable.ts'
 
-function readOp(virtual: string): OpsContext {
+function readOp(virtual: string): VfsContext {
   return {
     op: 'read',
     path: new PathSpec({

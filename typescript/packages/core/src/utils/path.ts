@@ -225,13 +225,15 @@ export class CycleError extends Error {
   readonly path: string
   // The condition's name in the shared vocabulary (errors/classify.ts
   // keys on codes), so a loop stops degrading to EIO at the kernel and
-  // guest boundaries.
+  // guest boundaries, and the path a command line names for it.
   readonly code = 'ELOOP'
+  readonly virtualPath: string
 
   constructor(path: string) {
     super(`too many levels of symbolic links: ${path}`)
     this.name = 'CycleError'
     this.path = path
+    this.virtualPath = path
   }
 }
 

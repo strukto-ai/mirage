@@ -1,6 +1,6 @@
 import type { WandbAccessor } from '../../accessor/wandb.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { RunVariables } from './types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 

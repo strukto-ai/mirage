@@ -21,8 +21,8 @@ import pytest
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.postgres.read import read
+from mirage.errors.types import FileTooLargeError
 from mirage.types import PathSpec
-from mirage.utils.errors import FileTooLargeError
 from mirage.vfs.postgres.config import PostgresConfig
 
 

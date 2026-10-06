@@ -59,6 +59,7 @@ export interface ErrnoCodes {
   readonly EINVAL: number
   readonly EIO: number
   readonly EXDEV: number
+  readonly EBADF?: number
   readonly ENOTDIR?: number
   readonly EISDIR?: number
   readonly EEXIST?: number
@@ -68,6 +69,7 @@ export interface ErrnoCodes {
   readonly ELOOP?: number
   readonly EBUSY?: number
   readonly EROFS?: number
+  readonly EFBIG?: number
   readonly ENODATA?: number
 }
 

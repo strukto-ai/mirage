@@ -14,7 +14,7 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
-import { eacces, enoent, enotdir } from '../../utils/errors.ts'
+import { eacces, enoent, enotdir } from '../../errors/fs.ts'
 import { GoogleApiError, type TokenManager } from '../google/client.ts'
 import { FOLDER_MIME, MIME_TO_EXT, getFile, listFiles, listSharedDrives } from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'

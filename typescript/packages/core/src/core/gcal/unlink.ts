@@ -14,7 +14,7 @@
 
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
-import { eacces, enoent } from '../../utils/errors.ts'
+import { eacces, enoent } from '../../errors/fs.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeUnlink } from '../hierarchy/unlink.ts'
 import { deleteEvent } from './client.ts'

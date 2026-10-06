@@ -19,7 +19,7 @@ import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
-import { isEnotdir, isMissingPath } from '../utils/errors.ts'
+import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import { dottedSpelling } from '../utils/path.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { getCurrentSession, sessionVisibility } from '../context/session_context.ts'
@@ -224,7 +224,7 @@ export class Ops {
       owner = this.ownerOf(followed)
     } catch (err) {
       owner = this.ownerOf(followed)
-      // Anything thrown after the op ran (a postOps deny, a hard
+      // Anything thrown after the op ran (a postVfs deny, a hard
       // output cap, a bookkeeping failure) suppresses the result, not
       // the effect, so observation must reflect the op before the
       // error propagates. The door stamps the report at the moment of

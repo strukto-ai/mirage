@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.errors.fs import eexist, eisdir, enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import eexist, eisdir, enoent, enotdir
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
 from mirage.vfs.redis.store import RedisStore

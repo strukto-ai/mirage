@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { liveSessions } from '../../context/session_context.ts'
-import { enoent, eacces } from '../../utils/errors.ts'
+import { enoent, eacces } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { RAMAttrs } from '../ram/store.ts'
 

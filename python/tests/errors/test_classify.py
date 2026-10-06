@@ -17,10 +17,10 @@ import errno
 import pytest
 
 from mirage.errors.classify import classify
+from mirage.errors.fs import enotsup, no_mount
 from mirage.errors.posix import POSIX
-from mirage.errors.types import FsCondition
+from mirage.errors.types import FsCondition, ReadOnlyError
 from mirage.runtime.errors import CrossMountError
-from mirage.utils.errors import ReadOnlyError, enotsup, no_mount
 from mirage.utils.path import CycleError
 
 

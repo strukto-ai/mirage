@@ -15,11 +15,12 @@
 import { canonicalize } from '../../../../commands/builtin/generic/realpath.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import { dispatchStat, dotRefusal, typedSpec } from '../../../../commands/builtin/utils/paths.ts'
-import { gnuPhrase } from '../../../../errors/posix.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 import { PathSpec } from '../../../../types.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { fsErrorLine, fsStrerror, walkRefusal } from '../../../../utils/errors.ts'
+import { fsErrorLine } from '../../../../errors/render.ts'
+import { fsStrerror, walkRefusal } from '../../../../errors/fs.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { fail, operandText, parseLine, result } from '../shared.ts'
@@ -135,7 +136,7 @@ export async function handleReadlink(
         const code = (err as { code?: unknown }).code
         errors.push(
           fsStrerror(err) === null && code === 'EINVAL'
-            ? `${line.trimEnd()}: ${gnuPhrase('EINVAL')}\n`
+            ? `${line.trimEnd()}: ${posixPhrase('EINVAL')}\n`
             : line,
         )
       }

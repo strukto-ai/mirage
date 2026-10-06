@@ -36,6 +36,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import eacces, eisdir, fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.render import fs_error_line
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import (
@@ -46,7 +51,6 @@ from mirage.shell.bytes import (
     utf8_locale,
 )
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line, fs_strerror
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
 
@@ -101,7 +105,7 @@ class _Doors:
             await self.dispatch("write", path, data=data)
             return
         if self.write_bytes is None:
-            raise PermissionError(13, "Permission denied", name)
+            raise eacces(name)
         await self.write_bytes(path, data)
 
 
@@ -123,7 +127,7 @@ def _line_length(raw: str | None) -> int:
 
 
 def _open_failure(name: str, exc: BaseException) -> str:
-    strerror = fs_strerror(exc) or "Permission denied"
+    strerror = fs_strerror(exc) or posix_phrase(FsCondition.EACCES)
     return f"sed: couldn't open file {name}: {strerror}\n"
 
 

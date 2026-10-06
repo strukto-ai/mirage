@@ -29,7 +29,7 @@ from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
     CommandRule,
-    OpsContext,
+    VfsContext,
 )
 from mirage.types import HiddenPaths, PathSpec
 from mirage.utils.hidden import (
@@ -479,7 +479,7 @@ def skipped_at_op_doors(rules: AdmissionRules | None) -> tuple[str, ...]:
 
 
 def op_reach(
-    rule: CommandRule, scope: HiddenPaths | None, ctx: OpsContext
+    rule: CommandRule, scope: HiddenPaths | None, ctx: VfsContext
 ) -> int | None:
     """The anchor depth at which a rule reaches an op, None when it does
     not reach it at all.
@@ -500,7 +500,7 @@ def op_reach(
     Args:
         rule (CommandRule): the rule.
         scope (HiddenPaths | None): the rule's classified paths.
-        ctx (OpsContext): the op about to run.
+        ctx (VfsContext): the op about to run.
     """
     if rule.commands or scope is None or ctx.op in METADATA_OPS:
         return None
@@ -513,7 +513,7 @@ def op_reach(
 
 
 def match_op(
-    rule: CommandRule, scope: HiddenPaths | None, ctx: OpsContext
+    rule: CommandRule, scope: HiddenPaths | None, ctx: VfsContext
 ) -> bool:
     """Whether a rule refuses an op. The boolean case of
     :func:`op_reach`.
@@ -521,14 +521,14 @@ def match_op(
     Args:
         rule (CommandRule): the rule.
         scope (HiddenPaths | None): the rule's classified paths.
-        ctx (OpsContext): the op about to run.
+        ctx (VfsContext): the op about to run.
     """
     return op_reach(rule, scope, ctx) is not None
 
 
 def op_ruling(
     rules: AdmissionRules | None,
-    ctx: OpsContext,
+    ctx: VfsContext,
     granted: Collection[CommandRule],
 ) -> tuple[CommandRule, bool] | None:
     """The rule an op meets and whether it asks, None when the op may
@@ -549,7 +549,7 @@ def op_ruling(
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.
-        ctx (OpsContext): the op about to run.
+        ctx (VfsContext): the op about to run.
         granted (Collection[CommandRule]): the ask rules the running
             line holds a grant under, empty when no command is bound.
     """
@@ -574,7 +574,7 @@ def op_ruling(
 
 def op_refusal(
     rules: AdmissionRules | None,
-    ctx: OpsContext,
+    ctx: VfsContext,
     granted: Collection[CommandRule],
 ) -> str | None:
     """The reason an op may not run, None when it may: the reason of
@@ -582,7 +582,7 @@ def op_refusal(
 
     Args:
         rules (AdmissionRules | None): the session's admission rules.
-        ctx (OpsContext): the op about to run.
+        ctx (VfsContext): the op about to run.
         granted (Collection[CommandRule]): the ask rules the running
             line holds a grant under, empty when no command is bound.
     """

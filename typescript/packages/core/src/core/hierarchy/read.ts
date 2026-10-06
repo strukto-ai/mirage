@@ -15,7 +15,7 @@
 import type { Accessor } from '../../accessor/base.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec, StatFn } from '../../types.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { assertParent } from './probe.ts'
 import { ROOT, type DetectFn, type ScopeMatch } from './scope.ts'

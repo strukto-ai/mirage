@@ -24,7 +24,7 @@ import type {
   Action,
   Decision,
   CommandContext,
-  OpsContext,
+  VfsContext,
   Policy,
   SessionContext,
 } from '../policy/index.ts'
@@ -48,7 +48,7 @@ class DenyOp implements Policy {
   constructor(op: string) {
     this.op = op
   }
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (ctx.op === this.op) return { kind: 'deny', reason: `${this.op} refused by policy` }
     return null
   }
@@ -273,7 +273,7 @@ const CMD_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
 describe('session-state writes go through the view', () => {
   it('export fires the state gate', async () => {
     // The session plane's gate: an env write clears preSession exactly
-    // as a VFS write clears preOps, whichever tier asked.
+    // as a VFS write clears preVfs, whichever tier asked.
     const ws = await makeWs([new DenySecretEnv()])
     const denied = await ws.shell('export SECRET_X=1')
     expect(denied.exitCode).not.toBe(0)
@@ -601,14 +601,14 @@ describe('the remaining session writers clear the same gate', () => {
   })
 })
 
-/** Seal one file's reads and one subtree's writes wherever preOps fires. */
+/** Seal one file's reads and one subtree's writes wherever preVfs fires. */
 class SealedPaths implements Policy {
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     if (!ctx.write && ctx.path.virtual === '/a/secret.txt') {
       return { kind: 'deny', reason: 'secret is sealed' }
     }
     // The subtree spelling covers the root too: a native tree op
-    // (rm_r) admits as one op on the root, per the preOps docstring.
+    // (rm_r) admits as one op on the root, per the preVfs docstring.
     if (ctx.write && (ctx.path.virtual === '/a/prod' || ctx.path.virtual.startsWith('/a/prod/'))) {
       return { kind: 'deny', reason: 'prod is read-only' }
     }
@@ -616,10 +616,10 @@ class SealedPaths implements Policy {
   }
 }
 
-/** Record every op preOps is asked about; allow them all. */
+/** Record every op preVfs is asked about; allow them all. */
 class OpRecorder implements Policy {
   readonly asked: [string, string, boolean][] = []
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     this.asked.push([ctx.op, ctx.path.virtual, ctx.write])
     return null
   }
@@ -628,7 +628,7 @@ class OpRecorder implements Policy {
 /** Record each op with the identity fields a scoped policy keys on. */
 class IdentityRecorder implements Policy {
   readonly asked: [string, string, string, string][] = []
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     this.asked.push([ctx.op, ctx.path.virtual, ctx.prefix, ctx.sessionId ?? ''])
     return null
   }
@@ -651,8 +651,8 @@ async function makeSealedWs(policies: Policy[]): Promise<Workspace> {
 }
 
 describe('op hooks bind at the op doors and the command tier', () => {
-  it('preOps refuses the doors and handler I/O alike', async () => {
-    // The documented boundary (Policy.preOps): coded op hooks fire at
+  it('preVfs refuses the doors and handler I/O alike', async () => {
+    // The documented boundary (Policy.preVfs): coded op hooks fire at
     // the op doors AND for the backend I/O inside a mount command's
     // handler (withPolicyGuard). Both tiers are pinned so a move of
     // the boundary is loud.
@@ -679,7 +679,7 @@ describe('op hooks bind at the op doors and the command tier', () => {
     expect(stdoutStr(kept)).toBe('keep\n')
   })
 
-  it('preOps holds walks and lazy readers', async () => {
+  it('preVfs holds walks and lazy readers', async () => {
     // A walk is held per entry (GNU's unreadable-file shape: the other
     // entries still serve, stderr names the refused one), and a reader
     // the output pipeline drains after dispatch (head binds a lazy
@@ -714,7 +714,7 @@ describe('op hooks bind at the op doors and the command tier', () => {
     expect(stdoutStr(found)).toContain('/a/secret.txt')
   })
 
-  it('shell rm -r admits through preOps', async () => {
+  it('shell rm -r admits through preVfs', async () => {
     // The cascade asymmetry closed: an ops-door rmdir cascade always
     // admitted per deletion while a shell rm -r admitted nothing. The
     // shell tree removal now admits the op the backend performs, and
@@ -748,8 +748,8 @@ describe('op hooks bind at the op doors and the command tier', () => {
     expect(writes).toEqual([['unlink', '/a/prod/keep.txt', true]])
   })
 
-  it('preOps sees the session and prefix on lazy drains', async () => {
-    // OpsContext.prefix and .sessionId name the command's identity on
+  it('preVfs sees the session and prefix on lazy drains', async () => {
+    // VfsContext.prefix and .sessionId name the command's identity on
     // the command tier exactly as at the op doors, including for a
     // reader the pipeline drains after the gate scopes return (head
     // binds a lazy stream); both ride the wrap-time capture.
@@ -2905,10 +2905,10 @@ describe('admitted path rules on recursive commands', () => {
   })
 })
 
-describe('coded preOps on native walks', () => {
+describe('coded preVfs on native walks', () => {
   // Refuses listing /data/sec, as a mode 0300 directory does.
   const sealedSubtree: Policy = {
-    preOps: (ctx: OpsContext) =>
+    preVfs: (ctx: VfsContext) =>
       ctx.op === 'readdir' && ctx.path.virtual.startsWith('/data/sec')
         ? { kind: 'deny', reason: 'sealed' }
         : null,

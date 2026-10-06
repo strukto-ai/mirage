@@ -16,9 +16,9 @@ from mirage.policy.types import (
     Action,
     CommandContext,
     ExecuteResultContext,
-    OpsContext,
-    OpsResultContext,
     SessionContext,
+    VfsContext,
+    VfsResultContext,
 )
 from mirage.runtime.routing.types import RouteContext
 
@@ -58,7 +58,7 @@ class Policy:
         """
         return None
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         """Admit or refuse one VFS op, at the op doors and on the
         command tier's backend I/O.
 
@@ -80,7 +80,7 @@ class Policy:
         pre_command or precomputed into policy state.
 
         Args:
-            ctx (OpsContext): the op about to run.
+            ctx (VfsContext): the op about to run.
         """
         return None
 
@@ -97,18 +97,18 @@ class Policy:
         """
         return None
 
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         """Observe one completed VFS op; a Deny suppresses its result,
         a Limit caps a byte-producing one.
 
-        Narrower than pre_ops: the dispatcher and facade doors only.
+        Narrower than pre_vfs: the dispatcher and facade doors only.
         The backend I/O inside a mount command's handler and each
-        ``find -delete`` deletion admit through pre_ops and report no
+        ``find -delete`` deletion admit through pre_vfs and report no
         per-op result here; the command tier's result plane is
         post_execute, which bounds the finished line's output.
 
         Args:
-            ctx (OpsResultContext): the op and its raw result.
+            ctx (VfsResultContext): the op and its raw result.
         """
         return None
 

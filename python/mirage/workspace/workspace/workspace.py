@@ -55,6 +55,7 @@ from mirage.context import (
     set_program_invocation,
     set_refusal_sink,
 )
+from mirage.errors.fs import enoent
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -1063,7 +1064,7 @@ class Workspace:
                 program(name, session, self._registry) is None
                 and lookup(name, session, self._registry) != Consumer.EXTERNAL
             ):
-                raise FileNotFoundError(2, "No such file or directory", head)
+                raise enoent(head)
             argv = (name, *argv[1:])
         cwd = request.cwd or PathSpec.from_str_path(session.cwd)
         inherited_env = {} if request.replace_env else env_snapshot(session)

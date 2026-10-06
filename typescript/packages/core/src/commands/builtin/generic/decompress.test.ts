@@ -3,7 +3,7 @@ import { yieldBytes } from '../../../io/stream.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { gzip } from '../../../utils/compress.ts'
-import { eisdir, enoent } from '../../../utils/errors.ts'
+import { eisdir, enoent } from '../../../errors/fs.ts'
 import { decompressInputs, gzipSuffix, suffixRefusal } from './decompress.ts'
 
 const enc = new TextEncoder()

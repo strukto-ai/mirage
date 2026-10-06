@@ -19,7 +19,7 @@ from functools import partial
 from mirage.commands.builtin.utils.backup import backup_control, backup_target
 from mirage.commands.builtin.utils.constants import DEFAULT_BACKUP_SUFFIX
 from mirage.commands.builtin.utils.paths import (
-    absent_dest_strerror,
+    absent_dest_error,
     dispatch_stat,
     dot_refusal,
     typed_spec,
@@ -37,11 +37,15 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.context import session_visibility
+from mirage.errors.classify import classify
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec, word_text
-from mirage.utils.errors import FS_ERRORS, DotWalkLoop, fs_strerror
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import CycleError, dotted_spelling
 from mirage.workspace.executor.builtins.shared import abs_path, fail, result
@@ -49,7 +53,7 @@ from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import (
     link_target_stat,
-    miss_strerror,
+    miss_condition,
     path_readdir,
     path_stat,
 )
@@ -58,8 +62,6 @@ from mirage.workspace.session import SessionState
 _TARGET_DIR_LONG = "--target-directory"
 _SUFFIX_LONG = "--suffix"
 _VALUED_SHORTS = "tS"
-_ENOENT_TEXT = "No such file or directory"
-_ELOOP_TEXT = "Too many levels of symbolic links"
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,8 +290,8 @@ def _walk_verdict(
     word: str | PathSpec,
     cwd: str,
     follow_last: bool = False,
-) -> str | None:
-    """The strerror the kernel walk answers for an operand before any op.
+) -> FsCondition | None:
+    """The condition the kernel walk answers for an operand before any op.
 
     An empty name resolves nowhere, and a link loop stops the walk in
     front of the final name; ``follow_last`` asks for that name too, for
@@ -305,7 +307,7 @@ def _walk_verdict(
         follow_last (bool): whether the final name is followed as well.
     """
     if word_text(word) == "":
-        return _ENOENT_TEXT
+        return FsCondition.ENOENT
     virtual = abs_path(word, cwd)
     if not path_visible(session_visibility(), virtual):
         return None
@@ -316,7 +318,7 @@ def _walk_verdict(
         else:
             namespace.follow_parent(trimmed)
     except CycleError:
-        return _ELOOP_TEXT
+        return FsCondition.ELOOP
     return None
 
 
@@ -382,7 +384,9 @@ async def _dir_at(
     return virtual, stat
 
 
-def _refused(flags: LnFlags, typed: str, target_typed: str, why: str) -> str:
+def _refused(
+    flags: LnFlags, typed: str, target_typed: str, why: FsCondition
+) -> str:
     """ln's line for a link its name's parent chain would not take.
 
     GNU words the step that failed. Under ``-f`` or ``-b`` it lstats the
@@ -394,14 +398,15 @@ def _refused(flags: LnFlags, typed: str, target_typed: str, why: str) -> str:
         flags (LnFlags): the parsed flags.
         typed (str): the link name as GNU spells it.
         target_typed (str): the TARGET as typed.
-        why (str): the strerror.
+        why (FsCondition): the condition.
     """
     backs = flags.backup not in (None, "none")
-    if (flags.force or backs) and why != _ENOENT_TEXT:
-        return f"ln: failed to access '{typed}': {why}\n"
+    words = posix_phrase(why)
+    if (flags.force or backs) and why is not FsCondition.ENOENT:
+        return f"ln: failed to access '{typed}': {words}\n"
     kind = "symbolic link" if flags.symbolic else "hard link"
     arrow = "" if flags.symbolic else f" => '{target_typed}'"
-    return f"ln: failed to create {kind} '{typed}'{arrow}: {why}\n"
+    return f"ln: failed to create {kind} '{typed}'{arrow}: {words}\n"
 
 
 def _into(source: str | PathSpec, dir_abs: str, dir_typed: str) -> LinkPlan:
@@ -454,7 +459,7 @@ async def plan_links(
         typed = target_typed if target_typed is not None else target_dir
         why = _walk_verdict(namespace, typed, cwd, follow_last=True)
         if why is not None:
-            return [], f"ln: failed to access '{typed}': {why}\n"
+            return [], f"ln: failed to access '{typed}': {posix_phrase(why)}\n"
         unwalked = await dot_refusal(
             partial(dispatch_stat, dispatch),
             typed_spec(typed, cwd),
@@ -473,7 +478,7 @@ async def plan_links(
         if stat is None:
             return [], (
                 f"ln: failed to access '{typed}': "
-                f"{await miss_strerror(dispatch, resolved)}\n"
+                f"{posix_phrase(await miss_condition(dispatch, resolved))}\n"
             )
         if stat.type != FileType.DIRECTORY:
             return [], f"ln: target '{typed}' is not a directory\n"
@@ -514,11 +519,11 @@ async def plan_links(
             # A link standing at the name that leads nowhere, dangling or
             # looping, is ENOENT to GNU; a loop above it is ELOOP.
             why = (
-                _ENOENT_TEXT
+                FsCondition.ENOENT
                 if word_text(last) == "" or _visible_link(namespace, last_abs)
-                else await miss_strerror(dispatch, resolved)
+                else await miss_condition(dispatch, resolved)
             )
-            return [], f"ln: target '{word_text(last)}': {why}\n"
+            return [], f"ln: target '{word_text(last)}': {posix_phrase(why)}\n"
         return [], f"ln: target '{word_text(last)}': Not a directory\n"
     return [_into(op, resolved, word_text(last)) for op in operands[:-1]], None
 
@@ -562,7 +567,7 @@ async def _source_bytes(
     if stat is None:
         return None, (
             f"ln: failed to access '{typed}': "
-            f"{await miss_strerror(dispatch, src_abs)}\n"
+            f"{posix_phrase(await miss_condition(dispatch, src_abs))}\n"
         )
     if stat.type == FileType.DIRECTORY:
         if flags.directory:
@@ -625,13 +630,15 @@ async def make_link(
     if flags.symbolic and target_typed == "":
         errors.append(
             f"ln: failed to create symbolic link '{typed}' -> '': "
-            f"{_ENOENT_TEXT}\n"
+            f"{posix_phrase(FsCondition.ENOENT)}\n"
         )
         return
     if not flags.symbolic:
         why = _walk_verdict(namespace, plan.source, cwd, flags.logical)
         if why is not None:
-            errors.append(f"ln: failed to access '{target_typed}': {why}\n")
+            errors.append(
+                f"ln: failed to access '{target_typed}': {posix_phrase(why)}\n"
+            )
             return
     why = _walk_verdict(namespace, typed, cwd)
     if why is not None:
@@ -657,14 +664,8 @@ async def make_link(
         creates=not replaces,
     )
     if unwalked is not None:
-        errors.append(
-            _refused(
-                flags,
-                typed,
-                target_typed,
-                fs_strerror(unwalked) or _ENOENT_TEXT,
-            )
-        )
+        why = classify(unwalked) or FsCondition.ENOENT
+        errors.append(_refused(flags, typed, target_typed, why))
         return
     if flags.symbolic:
         link_target = target_typed
@@ -726,11 +727,11 @@ async def make_link(
             and (flags.force or backs)
         ):
             errors.append(
-                _refused(flags, typed, target_typed, "Not a directory")
+                _refused(flags, typed, target_typed, FsCondition.ENOTDIR)
             )
             return
         if not linked and behind is None:
-            missed = await miss_strerror(dispatch, plan.link_abs)
+            missed = await miss_condition(dispatch, plan.link_abs)
             errors.append(_refused(flags, typed, target_typed, missed))
             return
         if linked and (
@@ -803,7 +804,9 @@ async def make_link(
             errors.append(f"ln: {typed}: cannot overwrite directory\n")
             return
         except DotWalkLoop:
-            errors.append(_refused(flags, typed, target_typed, _ELOOP_TEXT))
+            errors.append(
+                _refused(flags, typed, target_typed, FsCondition.ELOOP)
+            )
             return
         occupied = False
     if occupied:
@@ -815,7 +818,7 @@ async def make_link(
         # mkdir -p, so the parent chain of the name (absent by now) is
         # judged first, as cp judges its destination's; the door judges
         # a symlink's itself.
-        why = await absent_dest_strerror(
+        why = await absent_dest_error(
             partial(dispatch_stat, dispatch), link_spec
         )
         if why is not None:
@@ -826,17 +829,12 @@ async def make_link(
             await dispatch("symlink", link_spec, target=link_target)
         else:
             await dispatch("write", link_spec, data=data)
-    except (FileNotFoundError, NotADirectoryError) as exc:
+    except (FileNotFoundError, NotADirectoryError, DotWalkLoop) as exc:
         # The door refuses a name its parent cannot hold (symlink(2)'s
-        # ENOENT and ENOTDIR), and a store's write refuses the same way.
-        errors.append(
-            _refused(
-                flags, typed, target_typed, fs_strerror(exc) or _ENOENT_TEXT
-            )
-        )
-        return
-    except DotWalkLoop:
-        errors.append(_refused(flags, typed, target_typed, _ELOOP_TEXT))
+        # ENOENT, ENOTDIR and ELOOP), and a store's write refuses the
+        # same way.
+        why = classify(exc) or FsCondition.ENOENT
+        errors.append(_refused(flags, typed, target_typed, why))
         return
     except FileExistsError:
         # The door owns the existence rule (it is the only layer that

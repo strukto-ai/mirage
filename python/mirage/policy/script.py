@@ -31,10 +31,10 @@ from mirage.policy.types import (
     Ask,
     CommandContext,
     Deny,
-    OpsContext,
     ProfileScript,
     SessionContext,
     SessionScriptsQuery,
+    VfsContext,
 )
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
@@ -49,16 +49,16 @@ from mirage.types import PathSpec
 logger = logging.getLogger(__name__)
 
 # The admission hooks a policy program may define, python spelling to
-# JavaScript spelling. The output doors (post_ops, post_execute) stay
+# JavaScript spelling. The output doors (post_vfs, post_execute) stay
 # coded: they answer with a Limit over a live result.
 HOOKS: Mapping[str, str] = {
     "pre_command": "preCommand",
-    "pre_ops": "preOps",
+    "pre_vfs": "preVfs",
     "pre_session": "preSession",
 }
 
 # Set for the duration of one op the policy's own engine dispatches, so
-# the policy's ``pre_ops`` lets the read through: the policy is the one
+# the policy's ``pre_vfs`` lets the read through: the policy is the one
 # asking, and judging its own read would re-enter the evaluation that
 # is waiting on it.
 _POLICY_READ: ContextVar[bool] = ContextVar(
@@ -106,14 +106,14 @@ def script_context(
 
 
 def ops_script_context(
-    profile: str, ctx: OpsContext, mounts: Sequence[str]
+    profile: str, ctx: VfsContext, mounts: Sequence[str]
 ) -> dict[str, EvalValue]:
     """What a profile's policy is told about one VFS op: the
-    ``OpsContext`` the coded hooks read, as plain data.
+    ``VfsContext`` the coded hooks read, as plain data.
 
     Args:
         profile (str): the profile the script speaks for.
-        ctx (OpsContext): the op about to run, as the door built it.
+        ctx (VfsContext): the op about to run, as the door built it.
         mounts (Sequence[str]): the workspace's mount prefixes.
     """
     return {
@@ -155,8 +155,8 @@ def session_script_context(
 
 
 def hook_name(script: ScriptSource, hook: str) -> str:
-    """A hook's name in the program's own language: ``pre_ops`` in
-    python, ``preOps`` in JavaScript.
+    """A hook's name in the program's own language: ``pre_vfs`` in
+    python, ``preVfs`` in JavaScript.
 
     Args:
         script (ScriptSource): the policy program, carrying its
@@ -248,7 +248,7 @@ def script_action(
     The vocabulary is the coded hook's own, spelled as data: ``None``
     or ``'allow'`` is no opinion (the command runs unless another rule
     refuses it, and can never override one that does), ``'deny'`` /
-    ``{'deny': reason}`` refuses, and at ``pre_command`` and ``pre_ops``
+    ``{'deny': reason}`` refuses, and at ``pre_command`` and ``pre_vfs``
     ``'ask'`` / ``{'ask': reason}`` takes the line (or an op no line is
     running behind) to the approval door, since the session door cannot
     wait on a host (``VALIDITY``). The bare strings carry the document's
@@ -297,7 +297,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     this one calls the profile's policy program with the same facts. A
     program defines the hooks it answers at, the way a coded Policy
     overrides only the hooks it cares about: ``pre_command`` per
-    command (``script_context``), ``pre_ops`` per VFS op
+    command (``script_context``), ``pre_vfs`` per VFS op
     (``ops_script_context``), ``pre_session`` per env write
     (``session_script_context``). Which ones it defines is probed once
     per program (``hook_probe``), so a hook it leaves out is silence at
@@ -319,7 +319,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     ``Runtimes`` attaches an agent's engine), so a policy may read what
     an operand holds and answer for its content, not only its name. A
     read from a policy clears the op door like any other, except this
-    policy's own ``pre_ops``: the policy is the one asking, and judging
+    policy's own ``pre_vfs``: the policy is the one asking, and judging
     its own read would re-enter the evaluation waiting on it.
 
     Engines are built lazily on the first judgment that needs one,
@@ -372,11 +372,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             lambda entry: script_context(entry.profile, ctx, self._mounts()),
         )
 
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if _POLICY_READ.get():
             return None
         return await self._judge(
-            "pre_ops",
+            "pre_vfs",
             ctx.session_id,
             lambda entry: ops_script_context(
                 entry.profile, ctx, self._mounts()
@@ -523,7 +523,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     ) -> tuple[Any, IOResult]:
         """The door the policy's engine reads through: the workspace's
         dispatch, with the op marked as the policy's own for as long as
-        it runs, so ``pre_ops`` above lets it through.
+        it runs, so ``pre_vfs`` above lets it through.
 
         Args:
             op (str): the op the engine asked for.

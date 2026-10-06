@@ -14,7 +14,7 @@
 
 import type { EvaluationContext } from '../evaluation.ts'
 import { runWithRedirectPaths } from '../../context/session_context.ts'
-import { fsStrerror, isFsError, isMissingPath } from '../../utils/errors.ts'
+import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { SharedInput, share } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -65,6 +65,7 @@ import { carried, isUnwinding, takeStderr, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 import { concat } from '../../io/cachable_iterator.ts'
+import { posixPhrase } from '../../errors/posix.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -780,7 +781,7 @@ async function openRefusal(
     if (noclobber && exists && !r.append && !r.clobber) {
       const earlier = await applyPendingOpens(dispatch, pending)
       if (earlier !== null) return earlier
-      const detail = isDir ? 'Is a directory' : 'cannot overwrite existing file'
+      const detail = isDir ? posixPhrase('EISDIR') : 'cannot overwrite existing file'
       return shellFailure(encodeText(`${scope.rawPath}: ${detail}\n`))
     }
     // This open succeeds, so the target exists for every redirect after

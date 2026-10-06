@@ -14,7 +14,7 @@
 
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { makeReaddir, type DirListing } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listBases, listTables } from './client.ts'

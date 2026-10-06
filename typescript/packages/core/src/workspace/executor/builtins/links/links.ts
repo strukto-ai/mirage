@@ -17,7 +17,8 @@ import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.t
 import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
-import { ELOOP_STRERROR, fsStrerror, isEnoent } from '../../../../utils/errors.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
+import { fsStrerror, isEnoent } from '../../../../errors/fs.ts'
 import { CycleError, gnuBasename, posixNormpath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -235,7 +236,7 @@ async function slashedLinkRefusal(
     followed = namespace.follow(src.virtual)
   } catch (err) {
     if (!(err instanceof CycleError)) throw err
-    return fail('mv', `mv: cannot stat '${src.rawPath}': ${ELOOP_STRERROR}\n`)
+    return fail('mv', `mv: cannot stat '${src.rawPath}': ${posixPhrase('ELOOP')}\n`)
   }
   const target = await statOrNull(dispatch, PathSpec.fromStrPath(followed))
   if (target === null) {
@@ -397,7 +398,7 @@ async function preparePair(
       return { items, early }
     }
     if (dst.walkError === 'ELOOP' && src.walkError === null && namespace.isLink(src.virtual)) {
-      const early = fail('mv', `mv: cannot stat '${dst.rawPath}': ${ELOOP_STRERROR}\n`)
+      const early = fail('mv', `mv: cannot stat '${dst.rawPath}': ${posixPhrase('ELOOP')}\n`)
       return { items, early }
     }
     return { items, early: null }
@@ -430,13 +431,13 @@ async function preparePair(
       // at the destination's stat, the same two wordings a regular source
       // gets from the generic, whose chain walk also keeps an absent
       // parent's ENOENT (`mv dlnk nodir/name/`) ahead of the slash.
-      const { strerror } = await destKind(dispatchStat(dispatch), dst)
+      const { condition } = await destKind(dispatchStat(dispatch), dst)
       const early =
-        strerror === 'Not a directory'
+        condition === 'ENOTDIR'
           ? fail('mv', `mv: cannot stat '${dst.rawPath}': Not a directory\n`)
           : fail(
               'mv',
-              `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${strerror ?? 'Not a directory'}\n`,
+              `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${posixPhrase(condition ?? 'ENOTDIR')}\n`,
             )
       return { items, early }
     }

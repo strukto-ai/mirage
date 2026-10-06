@@ -22,7 +22,7 @@ import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
-import { enoent, enotdir, enotempty } from '../../utils/errors.ts'
+import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 
 export async function rmdir(
   accessor: DatabricksVolumeAccessor,

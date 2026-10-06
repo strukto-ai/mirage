@@ -15,7 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { eacces, eisdir } from '../../utils/errors.ts'
+import { eacces, eisdir } from '../../errors/fs.ts'
 import { updateFileContent, uploadFile } from '../google/drive.ts'
 import { eaccesOnDenied, isFolder, isNative, resolveKey, resolveParent } from './resolve.ts'
 

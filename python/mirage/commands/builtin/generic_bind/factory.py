@@ -34,8 +34,8 @@ from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
+from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir
 
 
 def _cached_stat(
@@ -258,7 +258,7 @@ async def _run_with_namespace_globs(
         glob_children=children,
         glob_target_stat=(links.target_stat if links is not None else None),
     )
-    # Command path restrictions speak first, then the coded pre_ops
+    # Command path restrictions speak first, then the coded pre_vfs
     # hooks, both outside the cache wraps (`finish`) so a refusal fires
     # before a warm serve, the dispatcher's own order at the op door. A
     # probe answer is served below them (`with_probe_answers` on the

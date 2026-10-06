@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
-import { efbig } from '../../../utils/errors.ts'
+import { efbig } from '../../../errors/fs.ts'
 import { catGeneric } from './cat.ts'
 
 const ENC = new TextEncoder()

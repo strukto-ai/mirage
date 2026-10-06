@@ -23,7 +23,7 @@ import { MirageToolOperations, TOOL_NAMES } from './tool_operations.ts'
 import { Outcome } from '../../policy/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
-import type { OpsContext } from '../../policy/types.ts'
+import type { VfsContext } from '../../policy/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 
@@ -249,7 +249,7 @@ describe('a session', () => {
   it('answers a file refused down to its stat as a tool error', async () => {
     await ws.shell('mkdir /d && echo l > /d/locked.txt && echo o > /d/open.txt')
     const lockedFile: Policy = {
-      preOps(ctx: OpsContext) {
+      preVfs(ctx: VfsContext) {
         return ctx.path.virtual === '/d/locked.txt' ? { kind: 'deny', reason: 'locked' } : null
       },
     }
@@ -286,7 +286,7 @@ describe('a session', () => {
       const written = await ops.call('write', { path: '/d/flaky.txt', content: 'x' })
       // The read's own error stands, never the probe's.
       expect(read.isError).toBe(true)
-      expect(textOf(read)).toBe('Error: /d/flaky.txt')
+      expect(textOf(read)).toBe('Error: /d/flaky.txt: No such file or directory')
       expect(written.isError).toBe(true)
       expect(textOf(written)).toContain('Input/output error')
     } finally {
@@ -373,7 +373,7 @@ describe('a path ask outside a line', () => {
     const [record] = own.decisions.pending('agent')
     expect([record?.command, record?.paths]).toEqual(['', ['/data/out/a.txt']])
     expect(asked.content[0]?.text).toBe(
-      `Error: Permission denied\nrequires approval: outbox needs a nod (ask ${record?.id ?? ''})\n`,
+      `Error: /data/out/a.txt: Permission denied\nrequires approval: outbox needs a nod (ask ${record?.id ?? ''})\n`,
     )
     // Asking again quotes the same question.
     await tools.write('/data/out/a.txt', 'hi')

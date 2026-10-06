@@ -16,8 +16,8 @@ from mirage.accessor.box import BoxAccessor
 from mirage.core.box.api import download_file
 from mirage.core.box.resolve import path_parts, resolve_item
 from mirage.core.box.write import write
+from mirage.errors.fs import enotsup
 from mirage.types import PathSpec
-from mirage.utils.errors import enotsup
 
 
 async def truncate(

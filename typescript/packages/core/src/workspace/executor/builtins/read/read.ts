@@ -17,7 +17,7 @@ import { type AsyncLineIterator, lineBuffer } from '../../../../io/async_line_it
 import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
-import { isFsError } from '../../../../utils/errors.ts'
+import { isFsError } from '../../../../errors/fs.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'

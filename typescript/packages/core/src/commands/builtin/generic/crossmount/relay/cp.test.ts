@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../../../types.ts'
-import { enoent } from '../../../../../utils/errors.ts'
+import { enoent } from '../../../../../errors/fs.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
 import type { DispatchFn } from '../types.ts'

@@ -12,16 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
 
 from mirage.commands.builtin.utils.paths import descendant_path
+from mirage.errors.fs import eloop, enoent, enotdir
+from mirage.errors.types import FsCondition
 from mirage.types import FileType, PathSpec, StatFn
-from mirage.utils.errors import ELOOP_STRERROR, DotWalkLoop
 
-# The destination verdicts GNU meets at the destination's own stat, before
-# any create or rename: a plain file in its chain, or a link loop in it.
-# cp and mv both word them ``cannot stat 'DST'`` (coreutils 9.7).
-STAT_REFUSALS = ("Not a directory", ELOOP_STRERROR)
+# The destination verdicts met at the destination's own stat, before any
+# create or rename: a plain file in its chain, or a link loop in it. cp
+# and mv both word them ``cannot stat 'DST'``.
+STAT_REFUSALS = frozenset({FsCondition.ENOTDIR, FsCondition.ELOOP})
 
 _SWALLOW = (FileNotFoundError, ValueError)
 
@@ -39,7 +39,7 @@ def copy_targets(
     dst: PathSpec,
     dst_is_dir: bool,
     dst_exists: bool = True,
-    dst_err: str | None = None,
+    dst_err: FsCondition | None = None,
 ) -> list[tuple[PathSpec, PathSpec]]:
     """Map copy or move sources to their destination paths.
 
@@ -59,20 +59,19 @@ def copy_targets(
         dst_is_dir (bool): Whether the destination is an existing directory.
         dst_exists (bool): Whether the destination exists at all; False
             picks GNU's ENOENT wording over ENOTDIR.
-        dst_err (str | None): The destination probe's strerror when it can
-            be neither found nor created there.
+        dst_err (FsCondition | None): The destination probe's condition
+            when it can be neither found nor created there.
 
     Returns:
         list[tuple[PathSpec, PathSpec]]: Source-to-target pairs.
     """
     if len(sources) > 1 and not dst_is_dir:
-        if dst_err == ELOOP_STRERROR:
-            raise DotWalkLoop(
-                errno.ELOOP, ELOOP_STRERROR, f"target '{dst.raw_path}'"
-            )
-        if not dst_exists and dst_err != "Not a directory":
-            raise FileNotFoundError(f"target '{dst.raw_path}'")
-        raise NotADirectoryError(f"target '{dst.raw_path}'")
+        label = f"target '{dst.raw_path}'"
+        if dst_err is FsCondition.ELOOP:
+            raise eloop(label)
+        if not dst_exists and dst_err is not FsCondition.ENOTDIR:
+            raise enoent(label)
+        raise enotdir(label)
     if not dst_is_dir:
         return [(sources[0], dst)]
     pairs: list[tuple[PathSpec, PathSpec]] = []

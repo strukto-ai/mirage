@@ -24,8 +24,8 @@ from mirage.core.slug_tree.types import (
     ResolvedFile,
     ResolvedPath,
 )
+from mirage.errors.fs import enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_prefix_of, rekey
 
 

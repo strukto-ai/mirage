@@ -21,9 +21,9 @@ from typing import Any, Protocol
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.context import dotglob_active, session_visibility
+from mirage.errors.constants import WALK_ERRORS
 from mirage.ops.types import ChildMounts, LinkTargetStat
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey

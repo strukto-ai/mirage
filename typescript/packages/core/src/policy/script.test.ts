@@ -16,7 +16,7 @@ import {
   scriptContext,
   sessionScriptContext,
 } from './script.ts'
-import type { CommandContext, OpsContext, ProfileScript, SessionContext } from './types.ts'
+import type { CommandContext, VfsContext, ProfileScript, SessionContext } from './types.ts'
 
 // A policy is a program defining the hook it answers at, the way a
 // coded Policy does, and it answers with return.
@@ -227,7 +227,7 @@ describe('ScriptPolicy', () => {
     const policy = track(policyOf(entry('null')))
     expect(await policy.preCommand(ctx())).toEqual({
       kind: 'deny',
-      reason: "profile 'release' policy defines no hook: preCommand, preOps or preSession",
+      reason: "profile 'release' policy defines no hook: preCommand, preVfs or preSession",
     })
   })
 
@@ -281,7 +281,7 @@ describe('ScriptPolicy wiring', () => {
 
 // A program at the op and session doors and nowhere else.
 const GATES = `\
-function preOps(ctx) {
+function preVfs(ctx) {
   const op = ctx.op
   return op.write && op.path.startsWith('/scratch/frozen/') ? { deny: 'frozen by ' + ctx.profile } : null
 }
@@ -290,7 +290,7 @@ function preSession(ctx) {
 }
 `
 
-function opsCtx(op = 'write', virtual = '/scratch/frozen/f', write = true): OpsContext {
+function opsCtx(op = 'write', virtual = '/scratch/frozen/f', write = true): VfsContext {
   return { op, path: path(virtual), write, prefix: '/scratch', sessionId: 's' }
 }
 
@@ -302,22 +302,22 @@ describe('the hooks a program defines', () => {
   it("spells the call and the probe in the program's language", () => {
     const py = new ScriptSource('x', 'python')
     const js = new ScriptSource('x', 'js')
-    expect(hookCall(py, 'preOps')).toBe('pre_ops(ctx)')
-    expect(hookCall(js, 'preOps')).toBe('preOps(ctx)')
+    expect(hookCall(py, 'preVfs')).toBe('pre_vfs(ctx)')
+    expect(hookCall(js, 'preVfs')).toBe('preVfs(ctx)')
     expect(hookProbe(py)).toContain('try:\n    pre_session\n')
     expect(hookProbe(py).endsWith('_mirage_hooks')).toBe(true)
     expect(hookProbe(js)).toContain('typeof preCommand')
   })
 
   it("reads the probe's answer as the Policy interface spells it", () => {
-    expect(definedHooks(new ScriptSource('x', 'python'), ['pre_ops'])).toEqual(new Set(['preOps']))
+    expect(definedHooks(new ScriptSource('x', 'python'), ['pre_vfs'])).toEqual(new Set(['preVfs']))
     expect(definedHooks(new ScriptSource('x', 'js'), ['preCommand', 'preSession'])).toEqual(
       new Set(['preCommand', 'preSession']),
     )
     expect(definedHooks(new ScriptSource('x', 'js'), [])).toEqual(new Set())
   })
 
-  it.each([[null], ['pre_ops'], [['nope']], [[1]]])('refuses %j as a probe answer', (value) => {
+  it.each([[null], ['pre_vfs'], [['nope']], [[1]]])('refuses %j as a probe answer', (value) => {
     expect(() => definedHooks(new ScriptSource('x', 'python'), value)).toThrow(
       /hook probe answered/,
     )
@@ -357,16 +357,16 @@ describe('scriptAction at the op and session doors', () => {
 describe('ScriptPolicy at the op and session doors', () => {
   it('a hook the program leaves out is silence', async () => {
     const policy = track(policyOf(entry()))
-    expect(await policy.preOps(opsCtx())).toBeNull()
+    expect(await policy.preVfs(opsCtx())).toBeNull()
     expect(await policy.preSession(sessionCtx())).toBeNull()
     expect(await policy.preCommand(ctx('cat'))).toMatchObject({ kind: 'deny' })
   })
 
   it('judges an op with the deny it computed', async () => {
     const policy = track(policyOf(entry(GATES)))
-    expect(await policy.preOps(opsCtx())).toEqual({ kind: 'deny', reason: 'frozen by release' })
-    expect(await policy.preOps(opsCtx('read', '/scratch/frozen/f', false))).toBeNull()
-    expect(await policy.preOps(opsCtx('write', '/scratch/open/f'))).toBeNull()
+    expect(await policy.preVfs(opsCtx())).toEqual({ kind: 'deny', reason: 'frozen by release' })
+    expect(await policy.preVfs(opsCtx('read', '/scratch/frozen/f', false))).toBeNull()
+    expect(await policy.preVfs(opsCtx('write', '/scratch/open/f'))).toBeNull()
     // No command hook: a command is silence, not a refusal.
     expect(await policy.preCommand(ctx('cat'))).toBeNull()
   })
@@ -383,17 +383,17 @@ describe('ScriptPolicy at the op and session doors', () => {
   it('an op hook may ask', async () => {
     // The door puts it to the host where no line is running, and refuses
     // it inside one.
-    const policy = track(policyOf(entry("function preOps() { return { ask: 'nod' } }")))
-    expect(await policy.preOps(opsCtx())).toEqual({ kind: 'ask', reason: 'nod' })
+    const policy = track(policyOf(entry("function preVfs() { return { ask: 'nod' } }")))
+    expect(await policy.preVfs(opsCtx())).toEqual({ kind: 'ask', reason: 'nod' })
   })
 
   it('fails closed at every door on a program that defines no hook', async () => {
     const policy = track(policyOf(entry('null')))
     const refused = {
       kind: 'deny',
-      reason: "profile 'release' policy defines no hook: preCommand, preOps or preSession",
+      reason: "profile 'release' policy defines no hook: preCommand, preVfs or preSession",
     }
-    expect(await policy.preOps(opsCtx())).toEqual(refused)
+    expect(await policy.preVfs(opsCtx())).toEqual(refused)
     expect(await policy.preSession(sessionCtx())).toEqual(refused)
   })
 })
@@ -406,8 +406,8 @@ describe('wantsFor', () => {
     const policy = track(policyOf(entry()))
     expect(await policy.wantsFor('preCommand', 's')).toBe(true)
     expect(await policy.wantsFor('preSession', 's')).toBe(false)
-    expect(await policy.wantsFor('preOps', 's')).toBe(false)
-    expect(await policy.wantsFor('postOps', 's')).toBe(false)
+    expect(await policy.wantsFor('preVfs', 's')).toBe(false)
+    expect(await policy.wantsFor('postVfs', 's')).toBe(false)
     expect(await track(policyOf(null)).wantsFor('preSession', 's')).toBe(false)
   })
 
@@ -461,7 +461,7 @@ def pre_command(ctx):
         pass
     return None
 
-def pre_ops(ctx):
+def pre_vfs(ctx):
     return {'deny': 'judged ' + ctx['op']['path']}
 `
 
@@ -535,9 +535,9 @@ describe("a policy's own reads at its op door", () => {
     await arrived
     const [token] = stamped
     if (token === undefined) throw new Error('the bridge was never built')
-    expect(await policy.preOps({ ...opsCtx('read', '/repo/a', false), issuer: token })).toBeNull()
-    const other = policy.preOps(opsCtx('read', '/repo/a', false))
-    const forged = policy.preOps({
+    expect(await policy.preVfs({ ...opsCtx('read', '/repo/a', false), issuer: token })).toBeNull()
+    const other = policy.preVfs(opsCtx('read', '/repo/a', false))
+    const forged = policy.preVfs({
       ...opsCtx('read', '/repo/a', false),
       issuer: Symbol('policy read'),
     })

@@ -133,7 +133,7 @@ async def test_stat_null_index_missing_is_enoent(dropbox_accessor):
     with patch(RPC, new=rpc):
         with pytest.raises(FileNotFoundError) as excinfo:
             await stat(dropbox_accessor, PathSpec.from_str_path("/ghost.txt"))
-    assert str(excinfo.value) == "/ghost.txt"
+    assert excinfo.value.filename == "/ghost.txt"
 
 
 @pytest.mark.asyncio
@@ -309,7 +309,7 @@ async def test_stat_miss_after_populate_is_enoent(dropbox_accessor, index):
                 ),
                 index,
             )
-    assert str(excinfo.value) == "/note.txt"
+    assert excinfo.value.filename == "/note.txt"
     assert rpc.list_requests == 1
 
 
@@ -349,7 +349,7 @@ async def test_stat_failed_populate_is_enoent(dropbox_accessor, index):
                 ),
                 index,
             )
-    assert str(excinfo.value) == "/ghost/missing.txt"
+    assert excinfo.value.filename == "/ghost/missing.txt"
 
 
 @pytest.mark.asyncio

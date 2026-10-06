@@ -20,7 +20,7 @@ import { ChunkedHandle, FileTable, writeRuns } from '@struktoai/mirage-core/runt
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
-import { isMissingOp } from '@struktoai/mirage-core/utils/errors'
+import { isMissingOp } from '@struktoai/mirage-core/errors/fs'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { DIR_MODE, DIR_SIZE, FILE_MODE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'

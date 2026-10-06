@@ -14,7 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { fsStrerror, isFsError } from '../../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'

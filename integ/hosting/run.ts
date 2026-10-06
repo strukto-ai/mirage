@@ -207,9 +207,8 @@ async function run(
         } else if (scenario.gate === 'file') {
           await poll(async () =>
             (
-              await request<Result>('POST', path, {
+              await request<Result>('POST', `${path}?session_id=other`, {
                 command: 'test -e /work/started',
-                sessionId: 'other',
               })
             ).exitCode === 0
               ? true
@@ -251,9 +250,8 @@ async function run(
           assert.equal(job.startedAt, null)
         }
         const [sameWorkspace, otherWorkspace, health] = await Promise.all([
-          request<Result>('POST', path, {
+          request<Result>('POST', `${path}?session_id=other`, {
             command: mounted ? 'python3 /work/probe.py other' : 'echo same-workspace',
-            sessionId: 'other',
           }),
           request<Result>('POST', `/v1/workspaces/${b}/shell`, {
             command: mounted ? 'python3 /work/probe.py default' : 'echo other-workspace',
@@ -351,8 +349,8 @@ async function run(
     // Lifecycle: cancel and kill by session, then close.
     const background = await request<Job>(
       'POST',
-      '/v1/workspaces/a/shell?background=true',
-      { command: 'sleep 30', sessionId: 'other' },
+      '/v1/workspaces/a/shell?background=true&session_id=other',
+      { command: 'sleep 30' },
       202,
     )
     await poll(async () =>
@@ -367,7 +365,7 @@ async function run(
       (await request<Job>('POST', `/v1/jobs/${background.jobId}/wait`, {})).status,
       'canceled',
     )
-    await request('POST', '/v1/workspaces/a/shell', { command: 'sleep 30 &', sessionId: 'other' })
+    await request('POST', '/v1/workspaces/a/shell?session_id=other', { command: 'sleep 30 &' })
     assert.deepEqual(await request('POST', '/v1/workspaces/a/sessions/other/kill'), { killed: 1 })
     await request('POST', '/v1/workspaces/loaded/close')
     await request('GET', '/v1/workspaces/loaded', undefined, 404)

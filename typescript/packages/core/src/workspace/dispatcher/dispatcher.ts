@@ -23,7 +23,7 @@ import { getExtension } from '../../commands/resolve.ts'
 import { IOResult, type OpReport } from '../../io/types.ts'
 import {
   eacces,
-  erofsReadOnly,
+  erofs,
   eexist,
   einval,
   enoent,
@@ -38,8 +38,8 @@ import {
   noMount,
   noXattr,
   walkRefusal,
-  type FsError,
-} from '../../utils/errors.ts'
+} from '../../errors/fs.ts'
+import { type FsError } from '../../errors/types.ts'
 import { Policies, PolicyDenied } from '../../policy/index.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { OpBoundary } from '../../ops/boundary.ts'
@@ -55,7 +55,7 @@ import type { OpsRegistry } from '../../ops/registry.ts'
 import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
-import { ebusy, isMissingPath } from '../../utils/errors.ts'
+import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {
   type CacheFacts,
@@ -153,7 +153,7 @@ function sessionId(): string {
  *
  * A caller that stamps its ops (a profile policy's bridge) does so as
  * an argument, and the door consumes it here: it reaches every gate the
- * dispatch clears as `OpsContext.issuer`, probes and cascades included,
+ * dispatch clears as `VfsContext.issuer`, probes and cascades included,
  * and is never forwarded to a backend, which has no such argument.
  */
 function takeIssuer(
@@ -603,12 +603,12 @@ export class Dispatcher {
         : null
     if (this.opsRegistry.find(opName, vfs)?.write === true) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofsReadOnly(`mount at '${p.virtual}' is read-only`, p)
+        throw erofs(p, `mount at '${p.virtual}' is read-only`)
       }
       // A rename mutates its destination too, so both endpoints answer.
       const wDst = opName === 'rename' && args?.[0] instanceof PathSpec ? args[0] : null
       if (wDst !== null && effectivePathMode(wDst.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofsReadOnly(`mount at '${wDst.virtual}' is read-only`, wDst)
+        throw erofs(wDst, `mount at '${wDst.virtual}' is read-only`)
       }
     }
     // Ops registered under a rendered filetype (gdocs/gsheets/gslides/
@@ -960,7 +960,7 @@ export class Dispatcher {
     const write = this.opsRegistry.find(opName, vfs)?.write === true
     const boundary = new OpBoundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
     if (write) {
-      // The same pre-ops admission a dispatched op answers, with the
+      // The same pre-vfs admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
       // the directory, not what the cascade found under it, and a
       // policy that protects one of those paths must refuse its
@@ -989,7 +989,7 @@ export class Dispatcher {
         )
         return wrapOpStream(answer, mount.mountId, mount.activity)
       })
-      // A deletion is not completed through postOps, which could only
+      // A deletion is not completed through postVfs, which could only
       // refuse after the entry is gone and strand the cascade.
       return result
     } finally {

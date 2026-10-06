@@ -18,8 +18,8 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
+from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir
 
 
 async def unlink(accessor: DiskAccessor, path_spec: PathSpec) -> None:

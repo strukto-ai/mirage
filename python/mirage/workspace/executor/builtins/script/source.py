@@ -15,6 +15,8 @@
 from collections.abc import Callable
 from typing import Any
 
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -22,7 +24,6 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.errors import ReturnSignal
 from mirage.types import PathSpec, word_text
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.workspace.executor.builtins.scope import _scope_path
 from mirage.workspace.executor.builtins.script.constants import SOURCE_USAGE
 from mirage.workspace.executor.builtins.script.script import (

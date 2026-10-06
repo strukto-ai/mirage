@@ -29,8 +29,8 @@ from mirage.core.mongodb.client import (
 from mirage.core.mongodb.readdir import entity_guard
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.types import PRIMARY_KEY
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.json_canonical import canonicalize_value
 
 

@@ -16,13 +16,14 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.context import clear_program_invocation, reset_program_invocation
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.shell.join import shell_join
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.path import resolve_path
 from mirage.vfs.bin import BinViewVFS
 from mirage.workspace.evaluation import (

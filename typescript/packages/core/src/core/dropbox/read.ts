@@ -23,7 +23,7 @@ import { RESULT_HEADER } from './constants.ts'
 import { resultToken } from './fingerprint.ts'
 import { readdir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 import { windowFor } from '../../utils/ranges.ts'
 
 function dropboxPathFromVirtual(root: string, virtualKey: string, prefix: string): string {

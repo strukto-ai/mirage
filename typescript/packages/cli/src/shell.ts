@@ -16,6 +16,7 @@ import type { Command } from 'commander'
 import { makeClient, type DaemonClient } from './client.ts'
 import { emit, exitCodeFromResponse, fail, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
+import { answer, post } from './vfs.ts'
 
 const WAIT_SLICE_S = 30
 const INTERRUPTED = 130
@@ -33,6 +34,51 @@ async function waitJob(
     )) as Awaited<ReturnType<typeof waitJob>>
     if (job.finished_at !== null) return job
   }
+}
+
+interface ExplainedNode {
+  type: string
+  text: string
+  outcome?: string
+  exit_code?: number
+  reason?: string
+  source?: string
+  runtime?: string
+  children: ExplainedNode[]
+}
+
+export interface ExplanationRecord {
+  line: string
+  outcome: string
+  reason: string
+  exit_code: number
+  node: ExplainedNode
+}
+
+/** An explained line as a tree, one node a row, each command with its verdict. */
+export function formatExplanation(data: ExplanationRecord): string {
+  let verdict = `${data.outcome}, exit ${String(data.exit_code)}`
+  if (data.reason !== '') verdict += `: ${data.reason}`
+  const out = [`${data.line}  [${verdict}]`]
+  for (const child of data.node.children) explainedLines(child, 1, out)
+  return out.join('\n')
+}
+
+/** Append one node of an explained line, and what it holds, as rows. */
+function explainedLines(node: ExplainedNode, depth: number, out: string[]): void {
+  const pad = '  '.repeat(depth)
+  if (node.outcome === undefined) {
+    out.push(`${pad}${node.type}: ${node.text}`)
+  } else {
+    let line = `${pad}${node.text}  [${node.outcome}`
+    if (node.exit_code !== undefined && node.exit_code !== 0)
+      line += `, exit ${String(node.exit_code)}`
+    line += node.reason !== undefined && node.reason !== '' ? `: ${node.reason}]` : ']'
+    if (node.source !== undefined && node.source !== '') line += `  ${node.source}`
+    if (node.runtime !== undefined && node.runtime !== '') line += `  on ${node.runtime}`
+    out.push(line)
+  }
+  for (const child of node.children) explainedLines(child, depth + 1, out)
 }
 
 /**
@@ -54,6 +100,7 @@ export function registerShellCommand(program: Command): void {
     .option('--cwd <path>', 'Working directory for this line (a workspace path)')
     .option('--runtime <name>', "Workspace runtime entry to place this line's captured stages on")
     .option('--bg', 'Background; return job_id immediately')
+    .option('--explain', 'Say what the line would do, as a tree; run nothing')
     .action(
       async (opts: {
         workspace: string
@@ -62,14 +109,24 @@ export function registerShellCommand(program: Command): void {
         cwd?: string
         runtime?: string
         bg?: boolean
+        explain?: boolean
       }) => {
         const body: Record<string, unknown> = { command: opts.command }
-        if (opts.session !== undefined) body.session_id = opts.session
         if (opts.cwd !== undefined) body.cwd = opts.cwd
         if (opts.runtime !== undefined) body.runtime = opts.runtime
+        if (opts.explain === true) {
+          const said = await answer(await post(opts, 'shell', body))
+          emit(said as ExplanationRecord, formatExplanation)
+          return
+        }
+        const session =
+          opts.session === undefined ? '' : `session_id=${encodeURIComponent(opts.session)}`
         const path = `/v1/workspaces/${encodeURIComponent(opts.workspace)}/shell`
         const c = makeClient(loadDaemonSettings())
         await c.ensureRunning({ allowSpawn: false })
+        const foreground = session === '' ? path : `${path}?${session}`
+        const background =
+          session === '' ? `${path}?background=true` : `${path}?${session}&background=true`
         const piped = !process.stdin.isTTY
         if (piped && opts.bg !== true) {
           const stop = new AbortController()
@@ -81,7 +138,7 @@ export function registerShellCommand(program: Command): void {
           try {
             answered = await c.requestUpload(
               'POST',
-              path,
+              foreground,
               body,
               { name: 'stdin', data: process.stdin },
               stop.signal,
@@ -108,11 +165,11 @@ export function registerShellCommand(program: Command): void {
         let job: Awaited<ReturnType<typeof waitJob>>
         try {
           const submittedResponse = piped
-            ? await c.requestUpload('POST', `${path}?background=true`, body, {
+            ? await c.requestUpload('POST', background, body, {
                 name: 'stdin',
                 data: process.stdin,
               })
-            : await c.request('POST', `${path}?background=true`, { body: JSON.stringify(body) })
+            : await c.request('POST', background, { body: JSON.stringify(body) })
           const submitted = (await handleResponse(submittedResponse)) as { job_id: string }
           if (opts.bg === true) {
             emit(submitted)

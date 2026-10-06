@@ -1,5 +1,5 @@
 import { apiRequest } from '../api/client.ts'
-import { eacces, enoent } from '../../utils/errors.ts'
+import { eacces, enoent } from '../../errors/fs.ts'
 import { WandbAPIError } from './errors.ts'
 import type { WandbConfig } from './config.ts'
 import type { Connection, Named, Run, RunFile, FileMetadata, RunVariables } from './types.ts'

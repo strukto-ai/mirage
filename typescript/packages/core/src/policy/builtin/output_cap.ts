@@ -14,7 +14,7 @@
 
 import { Limit, OnExceed, type Producer } from '../../types.ts'
 import type { Policy } from '../base.ts'
-import type { Action, OpsResultContext } from '../types.ts'
+import type { Action, VfsResultContext } from '../types.ts'
 
 const DEFAULT_MAX_LINES = 2000
 const DEFAULT_TIMEOUT_SECONDS = 600
@@ -131,7 +131,7 @@ export class OutputCapPolicy implements Policy {
     this.overrideFor = overrideFor
   }
 
-  postOps(ctx: OpsResultContext): Action | null {
+  postVfs(ctx: VfsResultContext): Action | null {
     return this.overrideFor(ctx.prefix, ctx.op)
   }
 }

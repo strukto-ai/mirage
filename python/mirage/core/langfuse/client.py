@@ -19,7 +19,7 @@ from typing import Any, TypeVar
 from langfuse.api.client import AsyncLangfuseAPI
 from langfuse.api.core.api_error import ApiError
 
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 
 T = TypeVar("T")
 

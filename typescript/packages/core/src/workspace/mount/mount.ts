@@ -66,7 +66,8 @@ import {
   MountMode,
   PathSpec,
 } from '../../types.ts'
-import { ebusy, enotsup, formatFsError } from '../../utils/errors.ts'
+import { ebusy, enotsup } from '../../errors/fs.ts'
+import { formatFsError } from '../../errors/render.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   effectiveMountMode,
@@ -807,7 +808,7 @@ export class MountEntry {
         ...(filetype !== null && kwargs.filetype === undefined ? { filetype } : {}),
       }
       const accessor = this.vfs.accessor
-      // Per-op caps are policy and fire at the op door (postOps); only
+      // Per-op caps are policy and fire at the op door (postVfs); only
       // the timeout stays here, bounding the backend call itself.
       const opOverride = this.commandLimits.get(opName) ?? null
       const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null

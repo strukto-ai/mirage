@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
-import { isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
+import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -48,10 +48,6 @@ const SOURCE_DIRECTORY_EMPTY = 'source directory is empty'
 const NOT_UNDER_VERSION_CONTROL = 'not under version control'
 const MULTIPLE_SOURCES = 'multiple sources for the same target'
 const CONFLICTED = 'conflicted'
-// Not one of git's, because git has no concept to word: a mount is mirage's own
-// boundary, so the refusal borrows the strerror the kernel gives for a rename it
-// will not perform.
-const BUSY = 'Device or resource busy'
 
 /** The parsed shape of a `git mv` invocation. */
 export interface MvFlags {
@@ -308,9 +304,11 @@ export async function plan(
     ) {
       // Last, after every check git itself makes, so a source git would refuse
       // anyway is refused in git's own words. `-k` skips it like any other
-      // rename this source cannot survive.
+      // rename this source cannot survive. git has no word for a mount,
+      // mirage's own boundary, so the refusal borrows the kernel's EBUSY for
+      // a rename it will not perform.
       if (flags.skip) continue
-      throw new RenameFailedError(source, BUSY)
+      throw new RenameFailedError(source, 'EBUSY')
     }
     if (reason !== null) {
       if (flags.skip) continue

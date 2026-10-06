@@ -40,17 +40,21 @@ import {
   Outcome,
   Scope,
   type Ask,
+  type CommandContext,
   type CommandExplanation,
   type Deny,
+  type VfsContext,
   type Route,
+  type SessionContext,
   type ShellExplanation,
   type ShellNode,
   type VfsExplanation,
 } from '@struktoai/mirage-core/policy/types'
 import type { RouteContext } from '@struktoai/mirage-core/runtime/routing/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
-import type { VfsExplainer } from '@struktoai/mirage-core/workspace/workspace/explainer'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
+import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
+import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
@@ -105,19 +109,60 @@ type Step = (
       paths?: string[]
       vars?: string[]
       lines?: string[]
+      routes?: Record<string, string>
       reason: string
     }
   | { op: 'tools' | 'asks' }
   | { op: 'tool'; tool: string; arguments: Record<string, unknown> }
   | { op: 'answer'; outcome?: Outcome; scope?: Scope }
   | { op: 'explain'; command: string }
-  | { op: 'explain_vfs'; name: string; args: string[] }
+  | { op: 'vfs'; call: string; args?: Record<string, unknown>; explain?: boolean }
   | { op: 'unregister_policy'; id: string }
   | {
       op: 'mounts' | 'clis' | 'runtimes' | 'close' | 'snapshot' | 'checkout' | 'drain_processes'
     }
   | { op: 'concurrent'; steps: Step[] }
 ) & { expect?: Record<string, unknown>; session?: string }
+
+/** A host policy whose command and op refusals are supplied by JSON. Mirrors Python's `RulePolicy`. */
+class RulePolicy implements Policy {
+  constructor(
+    private readonly rule: {
+      commands?: string[]
+      paths?: string[]
+      vars?: string[]
+      lines?: string[]
+      routes?: Record<string, string>
+      reason: string
+    },
+  ) {}
+
+  preCommand(ctx: CommandContext): Deny | null {
+    return this.rule.commands?.includes(ctx.command) === true
+      ? { kind: 'deny', reason: this.rule.reason }
+      : null
+  }
+
+  preVfs(ctx: VfsContext): Deny | null {
+    return this.rule.paths?.includes(ctx.path.virtual) === true
+      ? { kind: 'deny', reason: this.rule.reason }
+      : null
+  }
+
+  preSession(ctx: SessionContext): Deny | null {
+    return this.rule.vars?.includes(ctx.key) === true
+      ? { kind: 'deny', reason: this.rule.reason }
+      : null
+  }
+
+  preExecute(ctx: RouteContext): Deny | Route | null {
+    if ((this.rule.lines ?? []).some((word) => ctx.line.includes(word))) {
+      return { kind: 'deny', reason: this.rule.reason }
+    }
+    const routed = Object.entries(this.rule.routes ?? {}).find(([word]) => ctx.line.includes(word))
+    return routed === undefined ? null : { kind: 'route', runtime: routed[1] }
+  }
+}
 
 interface ScriptDocument {
   source: string
@@ -187,35 +232,6 @@ function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, stri
     policy: a.policy ?? '',
     ...(a.kind === 'route' ? { runtime: a.runtime } : { reason: a.reason }),
   }))
-}
-
-// One call of `session.explain.vfs`, its arguments as a case spells them:
-// the paths, then the bytes a write or an append carries.
-function explainVfs(
-  vfs: VfsExplainer,
-  step: { name: string; args: string[] },
-): Promise<VfsExplanation> {
-  const [first = '', second = ''] = step.args
-  switch (step.name) {
-    case 'write':
-      return vfs.write(first, second)
-    case 'append':
-      return vfs.append(first, new TextEncoder().encode(second))
-    case 'rename':
-      return vfs.rename(first, second)
-    case 'truncate':
-      return vfs.truncate(first, Number(second))
-    case 'read':
-    case 'stat':
-    case 'readdir':
-    case 'exists':
-    case 'mkdir':
-    case 'rmdir':
-    case 'unlink':
-      return vfs[step.name](first)
-    default:
-      throw new Error(`unknown vfs op: ${step.name}`)
-  }
 }
 
 /**
@@ -325,22 +341,7 @@ async function action(
       return ws.runtimes().map((entry) => entry.name)
     case 'register_policy': {
       if (policies.has(step.id)) throw new Error('policy already registered')
-      const policy: Policy = {
-        preCommand: (ctx) =>
-          step.commands?.includes(ctx.command) ? { kind: 'deny', reason: step.reason } : null,
-        preOps: (ctx) =>
-          step.paths?.includes(ctx.path.virtual) ? { kind: 'deny', reason: step.reason } : null,
-        preSession: (ctx) =>
-          step.vars?.includes(ctx.key) ? { kind: 'deny', reason: step.reason } : null,
-        ...(step.lines === undefined
-          ? {}
-          : {
-              preExecute: (ctx: RouteContext) =>
-                (step.lines ?? []).some((word) => ctx.line.includes(word))
-                  ? { kind: 'deny', reason: step.reason }
-                  : null,
-            }),
-      }
+      const policy = new RulePolicy(step)
       ws.policies.add(policy)
       policies.set(step.id, policy)
       break
@@ -447,8 +448,16 @@ async function action(
       break
     case 'explain':
       return explained(await new Session(ws, step.session ?? null).explain.shell(step.command))
-    case 'explain_vfs':
-      return explained(await explainVfs(new Session(ws, step.session ?? null).explain.vfs, step))
+    case 'vfs': {
+      const session = new Session(ws, step.session ?? null)
+      const call = VFS_CALL_BY_NAME.get(step.call)
+      if (call === undefined) throw new Error(`unknown vfs call: ${step.call}`)
+      const args = await checked(call, step.args ?? {})
+      if (step.explain === true) {
+        return explained((await call.run(session.explain.vfs, args)) as VfsExplanation)
+      }
+      return answeredCall(session, call, args, false)
+    }
     default:
       throw new Error(`unknown lifecycle action: ${String((step as { op: string }).op)}`)
   }
@@ -520,7 +529,8 @@ function matches(actual: unknown, expected: unknown): boolean {
   })
 }
 
-const suite = JSON.parse(readFileSync(new URL('./cases.json', import.meta.url), 'utf8')) as {
+const corpus = process.argv[2] ?? new URL('./cases.json', import.meta.url)
+const suite = JSON.parse(readFileSync(corpus, 'utf8')) as {
   cases: Case[]
 }
 let passed = 0

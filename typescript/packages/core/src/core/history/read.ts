@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HistoryAccessor } from '../../accessor/history.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { PathSpec } from '../../types.ts'
 import { renderBashHistory } from './render.ts'

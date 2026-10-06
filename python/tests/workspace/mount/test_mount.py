@@ -21,9 +21,9 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Option
+from mirage.errors.types import OperationNotSupportedError, ReadOnlyError
 from mirage.io.types import IOResult, materialize
 from mirage.types import MountMode, PathSpec
-from mirage.utils.errors import OperationNotSupportedError, ReadOnlyError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry

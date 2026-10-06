@@ -18,9 +18,9 @@ from mirage.core.hf_buckets.hub import read_token, resolve_url
 from mirage.core.hf_hub.client import HfHubError, hub_bytes_tagged
 from mirage.core.hf_hub.constants import REFUSED_STATUSES
 from mirage.core.hf_hub.lookup import refusals_denied
+from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent
 from mirage.utils.ranges import ByteWindow
 
 MISSING_ENTRY = "EntryNotFound"

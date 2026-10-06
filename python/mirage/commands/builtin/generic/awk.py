@@ -30,6 +30,10 @@ from mirage.core.awk import (
 )
 from mirage.core.awk.builtins import unescape
 from mirage.core.awk.value import text as text_value
+from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
+from mirage.errors.fs import eisdir, fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
@@ -43,7 +47,6 @@ from mirage.shell.bytes import (
 )
 from mirage.shell.join import shell_join
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, WALK_ERRORS, eisdir, fs_strerror
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
 
@@ -114,7 +117,7 @@ async def _guarded(source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
                 yield chunk
     except FS_ERRORS as exc:
         raise AwkIOError(
-            fs_strerror(exc) or "No such file or directory"
+            fs_strerror(exc) or posix_phrase(FsCondition.ENOENT)
         ) from exc
 
 
@@ -166,7 +169,7 @@ class AwkStreams:
 
     async def read_path(self, name: str | PathSpec) -> AsyncIterator[bytes]:
         if self.dispatch is None:
-            raise AwkIOError("No such file or directory")
+            raise AwkIOError(posix_phrase(FsCondition.ENOENT))
         path = typed_spec(name, self.cwd.virtual)
         # A keyed store reads a directory as nothing at all, and other
         # backends fail it in their own words, so the stat goes first to

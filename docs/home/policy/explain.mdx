@@ -1,0 +1,116 @@
+---
+title: Explain
+description: What a line or a VFS call would do under a session's policies, without running it.
+icon: lightbulb
+---
+
+Explain asks every [policy](/home/policy/policies) and
+[profile](/home/permissions) rule about a line or a VFS call and returns
+their answer. Nothing runs, nothing is written and no
+[ask](/home/permissions#asks) is spent.
+
+```python
+explain = (await ws.session("agent")).explain
+line = await explain.shell("cat /data/keys/k")
+call = await explain.vfs.read("/data/keys/k")
+```
+
+```typescript
+const explain = (await ws.session('agent')).explain
+const line = await explain.shell('cat /data/keys/k')
+const call = await explain.vfs.read('/data/keys/k')
+```
+
+`explain.vfs` has the same 24 calls as `session.vfs`.
+
+## From any door
+
+| Door | A line | A VFS call |
+| --- | --- | --- |
+| In-app | `session.explain.shell(line)` | `session.explain.vfs.<call>(...)` |
+| [HTTP](/home/access/http#shell-vfs-calls-and-tools) | `POST /shell?explain=true` | `POST /vfs/<call>?explain=true` |
+| [RPC](/home/access/rpc) | `shell` with `explain: true` | `vfs/<call>` with `explain: true` |
+| [MCP](/home/access/mcp#vfs-calls-and-explain), with `?calls=all` | `shell` with `explain: true` | `vfs_<call>` with `explain: true` |
+| [CLI](/home/access/cli#run-lines-vfs-calls-and-tools) | `mirage shell -w ID -s SESSION -c LINE --explain` | `mirage vfs CALL ARGS -w ID -s SESSION --explain` |
+
+Every door answers the same JSON. Explain reads the line only, so stdin,
+`cwd`, `runtime` and a background job are refused with it.
+
+## What it asks
+
+Explain stops before anything runs, so it asks only the hooks that answer
+first:
+
+| Explained | Asks | Never asks |
+| --- | --- | --- |
+| A line | `pre_command`, `pre_execute`, the profile's rules | `pre_session`, `pre_vfs`, `post_execute` |
+| A VFS call | `pre_vfs`, the profile's rules | `post_vfs` |
+
+The post hooks need a result, and on a line `pre_session` and `pre_vfs`
+fire only as it runs. So `export AWS_SECRET=x` explains as `allow` even
+when a `pre_session` policy refuses it. Explain the VFS call to see a
+`pre_vfs` answer.
+
+## What comes back
+
+With a profile that denies `/data/keys/*`:
+
+```json
+{
+  "call": "read",
+  "paths": ["/data/keys/k"],
+  "outcome": "deny",
+  "reason": "keys stay sealed",
+  "source": "top",
+  "refusal": {"kind": "deny", "reason": "keys stay sealed", "policy": "PermissionsPolicy", "scope": "command", "ask_id": null},
+  "answers": [{"kind": "deny", "reason": "keys stay sealed", "policy": "PermissionsPolicy"}],
+  "error": "EACCES"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `outcome` | `allow`, `deny` or `ask` |
+| `reason` | the rule's reason, or empty |
+| `source` | where the profile writes the rule (`top`, `mounts./runbook`, `commands.allow`); empty for a coded policy |
+| `answers` | every policy that answered, in order |
+| `refusal` | the record the agent would get, or `null` |
+| `error` | a VFS call only: the error it would raise (`EACCES`, `EROFS`), or empty |
+
+A line adds `exit_code` and `stderr`, what the agent would read, and
+`node`, the line as a tree of commands. Each command in the tree has its
+own `outcome`, `exit_code`, `stderr`, `argv`, `operands` and `runtime`.
+
+## A line
+
+`mirage shell --explain` prints the tree:
+
+```text
+cat /data/a | wc -l && echo $(cat /data/keys/k)  [deny, exit 1: keys stay sealed]
+  list: cat /data/a | wc -l && echo $(cat /data/keys/k)
+    pipeline: cat /data/a | wc -l
+      cat /data/a  [allow]
+      wc -l  [allow]
+    echo $(cat /data/keys/k)  [allow]
+      substitution: cat /data/keys/k
+        cat /data/keys/k  [deny, exit 1: keys stay sealed]  top
+```
+
+A profile rule, an ask or a policy's `Deny(reason)` on any command
+refuses the whole line, and the first such command gives the line its
+answer. A command missing from the allow list, or a `Deny` with operand
+scope, fails only itself:
+
+```text
+rm /data/a; echo done  [allow, exit 0]
+  rm /data/a  [deny, exit 127]  commands.allow
+  echo done  [allow]
+```
+
+## Limits
+
+- A hidden path explains like any path no rule names, so explain never
+  reveals a hide.
+- A policy that reads a file to decide still reads it.
+- In a browser, `explain.vfs` throws and `explain.shell` runs its
+  policies for real.

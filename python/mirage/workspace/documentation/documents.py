@@ -21,8 +21,8 @@ from mirage.context import (
     reset_current_session,
     set_current_session,
 )
+from mirage.errors.fs import eexist, enoent, enotdir
 from mirage.types import FileType, MountMode, PathSpec, ReadSpec
-from mirage.utils.errors import eexist, enoent, enotdir
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm, parent
 from mirage.vfs.document.document import DocumentVFS

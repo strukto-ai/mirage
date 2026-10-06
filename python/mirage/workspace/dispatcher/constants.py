@@ -36,7 +36,7 @@ DISPATCH_WRITE_OPS = frozenset(
     }
 )
 
-# What the admission gates classify as a write (``OpsContext.write``).
+# What the admission gates classify as a write (``VfsContext.write``).
 # A superset of DISPATCH_WRITE_OPS: setattr mutates the mount but keeps
 # its own overlay bookkeeping in ``_apply_setattr``, and symlink writes
 # only the node table, so both need write admission without joining the

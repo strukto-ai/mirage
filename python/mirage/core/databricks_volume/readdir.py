@@ -23,8 +23,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import modified_to_iso
+from mirage.errors.fs import listing_error
 from mirage.types import PathSpec
-from mirage.utils.errors import listing_error
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
 

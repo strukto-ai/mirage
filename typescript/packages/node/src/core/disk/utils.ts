@@ -16,7 +16,7 @@ import type { Dirent } from 'node:fs'
 import { constants, lstat, open, realpath, readdir, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { diskError } from './errors.ts'
 

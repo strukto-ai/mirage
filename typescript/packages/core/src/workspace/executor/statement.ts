@@ -17,7 +17,7 @@ import { readFailExitCode } from '../../commands/spec/usage.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import { formatFsError } from '../../utils/errors.ts'
+import { formatFsError } from '../../errors/render.ts'
 import type { ExecutionNode } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import {

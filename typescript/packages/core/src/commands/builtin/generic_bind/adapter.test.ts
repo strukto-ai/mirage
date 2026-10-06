@@ -23,7 +23,7 @@ import {
 import { IOResult } from '../../../io/types.ts'
 import type { Policy } from '../../../policy/base.ts'
 import { Policies } from '../../../policy/policies.ts'
-import type { Action, OpsContext } from '../../../policy/types.ts'
+import type { Action, VfsContext } from '../../../policy/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import {
   requireOp,
@@ -33,7 +33,8 @@ import {
   withPolicyGuard,
 } from './adapter.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
-import { eacces, eisdir, enoent, formatFsError } from '../../../utils/errors.ts'
+import { eacces, eisdir, enoent } from '../../../errors/fs.ts'
+import { formatFsError } from '../../../errors/render.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts } from '../../config.ts'
@@ -482,7 +483,7 @@ class SealedRead implements Policy {
   constructor(sealed: string) {
     this.sealed = sealed
   }
-  preOps(ctx: OpsContext): Action | null {
+  preVfs(ctx: VfsContext): Action | null {
     this.asked.push([ctx.op, ctx.path.virtual, ctx.write])
     if (!ctx.write && ctx.path.virtual === this.sealed) {
       return { kind: 'deny', reason: 'sealed' }

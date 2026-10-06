@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.context import hidden_refusal, session_visibility
-from mirage.policy.types import Hide, OpsContext
+from mirage.policy.types import Hide, VfsContext
 from mirage.utils.hidden import path_visible
 
 
@@ -24,11 +24,11 @@ class HiddenPathsPolicy:
     policy: not a ``Policy``, because no coded hook returns a Hide.
     """
 
-    async def pre_ops(self, ctx: OpsContext) -> Hide | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Hide | None:
         """Hide the op's path when the bound session cannot see it.
 
         Args:
-            ctx (OpsContext): the op about to run.
+            ctx (VfsContext): the op about to run.
         """
         vis = session_visibility()
         if path_visible(vis, ctx.path.virtual):

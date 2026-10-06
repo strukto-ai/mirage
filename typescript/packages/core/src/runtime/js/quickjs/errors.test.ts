@@ -29,6 +29,7 @@ describe('the preview1 wire table', () => {
     // here would be EDOM where a POSIX host means EXDEV. Mirrors the
     // python tests/runtime/wasm/test_errors.py pin exactly.
     expect(WASI).toEqual({
+      EBADF: 8,
       ENOENT: 44,
       ENOTDIR: 54,
       EISDIR: 31,
@@ -43,6 +44,7 @@ describe('the preview1 wire table', () => {
       EIO: 29,
       EBUSY: 10,
       EROFS: 69,
+      EFBIG: 22,
       NO_XATTR: 58,
     })
   })

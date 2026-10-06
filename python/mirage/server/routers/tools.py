@@ -12,16 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 import logging
 from collections.abc import Awaitable, Callable
 
 import jsonschema
 from fastapi import APIRouter, HTTPException, Request
-from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE
 from pydantic import BaseModel
 
 from mirage.server.mcp.server import TOOLS
+from mirage.server.routers.vfs import json_body
 from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}")
 
 INPUTS: dict[str, dict[str, JsonValue]] = {
-    tool.name: tool.input_schema for tool in TOOLS if tool.name != "shell"
+    tool.name: tool.input_schema for tool in TOOLS
 }
 
 
@@ -62,19 +61,7 @@ async def call_tool(
     Returns:
         ToolResponse: the tool's text and whether it failed.
     """
-    body = bytearray()
-    async for chunk in request.stream():
-        body += chunk
-        if len(body) > DEFAULT_MAX_REQUEST_BODY_SIZE:
-            raise HTTPException(
-                status_code=413, detail="request body too large"
-            )
-    try:
-        arguments = json.loads(body)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid JSON body for tool {name}"
-        ) from exc
+    arguments = await json_body(request)
     try:
         jsonschema.validate(arguments, INPUTS[name])
     except jsonschema.ValidationError as exc:
@@ -118,7 +105,7 @@ def tool_route(name: str) -> Callable[..., Awaitable[ToolResponse]]:
 
 for _name in INPUTS:
     router.add_api_route(
-        f"/{_name}",
+        f"/tools/{_name}",
         tool_route(_name),
         methods=["POST"],
         response_model=ToolResponse,

@@ -19,15 +19,15 @@ import pytest
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Deny, Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
-from mirage.policy.types import Action, Hide, OpsContext
+from mirage.policy.types import Action, Hide, VfsContext
 from mirage.types import HiddenPaths, MountMode, PathSpec, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import SessionState
 
 
-def _ctx(virtual: str, create: bool = False) -> OpsContext:
-    return OpsContext(
+def _ctx(virtual: str, create: bool = False) -> VfsContext:
+    return VfsContext(
         op="write" if create else "read",
         path=PathSpec.from_str_path(virtual),
         write=create,
@@ -45,11 +45,11 @@ async def test_a_hidden_path_answers_as_absent():
     token = set_current_session(sess)
     try:
         policy = HiddenPathsPolicy()
-        assert await policy.pre_ops(_ctx("/w/open.txt")) is None
-        under = await policy.pre_ops(_ctx("/w/vault/k"))
+        assert await policy.pre_vfs(_ctx("/w/open.txt")) is None
+        under = await policy.pre_vfs(_ctx("/w/vault/k"))
         assert isinstance(under, Hide)
         assert under.error.errno == errno.ENOENT
-        named = await policy.pre_ops(_ctx("/w/vault", create=True))
+        named = await policy.pre_vfs(_ctx("/w/vault", create=True))
         assert isinstance(named, Hide)
         assert named.error.errno == errno.EACCES
     finally:
@@ -58,11 +58,11 @@ async def test_a_hidden_path_answers_as_absent():
 
 @pytest.mark.asyncio
 async def test_without_a_session_nothing_is_hidden():
-    assert await HiddenPathsPolicy().pre_ops(_ctx("/w/vault/k")) is None
+    assert await HiddenPathsPolicy().pre_vfs(_ctx("/w/vault/k")) is None
 
 
 class _SealedReads(Policy):
-    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if not ctx.write and ctx.path.virtual == "/data/secret":
             return Deny("sealed")
         return None

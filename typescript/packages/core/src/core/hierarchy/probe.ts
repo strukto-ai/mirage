@@ -17,7 +17,7 @@ import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { PathSpec, type StatFn } from '../../types.ts'
-import { enoent, isEnoent } from '../../utils/errors.ts'
+import { enoent, isEnoent } from '../../errors/fs.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 

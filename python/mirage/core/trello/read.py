@@ -38,8 +38,8 @@ from mirage.core.trello.normalize import (
 )
 from mirage.core.trello.scope import detect_scope
 from mirage.core.trello.stat import stat
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def _read_workspace_json(

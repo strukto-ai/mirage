@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.errors.fs import error_path, fs_strerror
 from mirage.io.types import IOResult
 from mirage.policy import PolicyDenied, describe_refusal, says_why
 from mirage.types import Refusal
@@ -27,7 +28,7 @@ def refusal_line(text: str, refusal: Refusal | None) -> str:
     """The one line a text surface appends for a refusal, newline
     included, or the empty string when there is nothing to add: no
     record, or a text that already says why (an operand-scoped
-    denial's GNU line, wherever a redirect landed it). A command-scoped
+    denial's own line, wherever a redirect landed it). A command-scoped
     refusal's stderr is bash's bare ``Permission denied``, which never
     does.
 
@@ -71,15 +72,28 @@ def with_refusal_bytes(data: bytes, refusal: Refusal | None) -> bytes:
 
 
 def error_text(exc: Exception) -> str:
-    """A tool's failure as the agent reads it: the error in Python's own
-    words (a policy's refusal reads as a plain ``Permission denied``),
-    then the refusal's line when a policy refused the op.
+    """A tool's failure as the agent reads it: a filesystem error as
+    ``<path>: <phrase>`` (a policy's refusal reads as ``Permission
+    denied``), or the phrase alone when no path was stamped and the
+    message adds nothing, anything else in its own words, then the
+    refusal's line when a policy refused the op. Mirrors TS ``errorText``.
 
     Args:
         exc (Exception): the failure.
     """
     refusal = exc.refusal if isinstance(exc, PolicyDenied) else None
-    return with_refusal(f"Error: {exc}", refusal)
+    strerror = fs_strerror(exc)
+    if strerror is None:
+        words = str(exc)
+    elif isinstance(getattr(exc, "filename", None), str):
+        words = f"{error_path(exc)}: {strerror}"
+    elif str(exc) in ("", strerror) or (
+        isinstance(exc, OSError) and exc.errno
+    ):
+        words = strerror
+    else:
+        words = f"{exc}: {strerror}"
+    return with_refusal(f"Error: {words}", refusal)
 
 
 def io_to_str(io: IOResult) -> str:

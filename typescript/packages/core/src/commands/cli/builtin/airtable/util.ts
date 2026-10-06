@@ -16,7 +16,7 @@ import { AirtableAccessor } from '../../../../accessor/airtable.ts'
 import type { AirtableConfig } from '../../../../core/airtable/config.ts'
 import type { Row } from '../../../../core/airtable/normalize.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
-import { eaccesRefused } from '../../../../utils/errors.ts'
+import { eacces } from '../../../../errors/fs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -64,7 +64,7 @@ export function optionalOperand(texts: readonly string[]): string | null {
 export function scopedBase(config: AirtableConfig, baseId: string): string {
   const wanted = config.baseIds
   if (wanted !== undefined && !wanted.includes(baseId)) {
-    throw eaccesRefused(`${baseId}: Permission denied`, baseId)
+    throw eacces(baseId, `${baseId}: Permission denied`)
   }
   return baseId
 }

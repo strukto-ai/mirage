@@ -26,7 +26,7 @@ def pre_command(ctx):
     return None
 
 
-def pre_ops(ctx):
+def pre_vfs(ctx):
     op = ctx["op"]
     if op["write"] and op["path"].startswith("/scratch/cold/"):
         return {"deny": "the cold store is frozen"}

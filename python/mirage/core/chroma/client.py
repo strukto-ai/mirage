@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.chroma import ChromaAccessor
+from mirage.errors.fs import enoent
 
 PATH_TREE_ID = "__path_tree__"
 PAGE_CHUNK_BATCH_SIZE = 100
@@ -14,10 +15,10 @@ async def fetch_path_tree(
     result = await collection.get(ids=[PATH_TREE_ID])
     documents = result.get("documents") or []
     if not documents:
-        raise FileNotFoundError(PATH_TREE_ID)
+        raise enoent(PATH_TREE_ID)
     value = documents[0]
     if value is None:
-        raise FileNotFoundError(PATH_TREE_ID)
+        raise enoent(PATH_TREE_ID)
     if isinstance(value, str):
         return value
     return str(value)

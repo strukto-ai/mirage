@@ -38,7 +38,7 @@ import {
 } from '../../../context/session_context.ts'
 import { pathsScoped } from '../../../ops/namespace_view.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
-import { preOpsGate, type Policies } from '../../../policy/policies.ts'
+import { preVfsGate, type Policies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../../utils/hidden.ts'
@@ -55,12 +55,12 @@ import {
   enoent,
   enotdir,
   enotsup,
-  erofsReadOnly,
+  erofs,
   isDotWalkError,
   isEnoent,
   isMissError,
   walkRefusal,
-} from '../../../utils/errors.ts'
+} from '../../../errors/fs.ts'
 import { dotRefusal } from '../utils/paths.ts'
 import type { ChildMounts } from '../../../ops/types.ts'
 import { makeResolveGlob, type TargetStat } from '../../../utils/glob_walk.ts'
@@ -678,7 +678,7 @@ async function mkdirOnReadOnly<A extends Accessor>(
   const base = rstripSlash(prefix)
   const leaf = rstripSlash(path.virtual) || '/'
   if (leaf !== base && !leaf.startsWith(base + '/')) {
-    throw erofsReadOnly(`mount ${prefix} is read-only`, path.virtual)
+    throw erofs(path.virtual, `mount ${prefix} is read-only`)
   }
   // Each component's backend key keeps the leaf's own key prefix, recovered
   // from its (virtual, vfsPath) pair as PathSpec.dir does.
@@ -702,7 +702,7 @@ async function mkdirOnReadOnly<A extends Accessor>(
         chain
           .slice(index)
           .find((spec) => effectivePathMode(spec.virtual, prefix, mode) === MountMode.READ) ?? path
-      throw erofsReadOnly(`mount ${prefix} is read-only`, blame.virtual)
+      throw erofs(blame.virtual, `mount ${prefix} is read-only`)
     }
     if (row.type !== FileType.DIRECTORY) {
       if (index === chain.length - 1) throw eexist(path.virtual)
@@ -1013,11 +1013,11 @@ interface OpPolicyScope {
 
 /**
  * The scope to consult for this op call: null is the fast path (no
- * dispatched command bound policies, or none of them override preOps).
+ * dispatched command bound policies, or none of them override preVfs).
  */
 function opPolicyScope(prefix: string | null): OpPolicyScope | null {
   const policies = getOpPolicies()
-  if (!policies?.wants('preOps')) return null
+  if (!policies?.wants('preVfs')) return null
   return { policies, prefix, sessionId: getCurrentSession()?.sessionId ?? '' }
 }
 
@@ -1037,7 +1037,7 @@ function livePolicyScope(scope: OpPolicyScope | null): OpPolicyScope | null {
   return scope ?? opPolicyScope(null)
 }
 
-/** Fire preOps for one PathSpec of one slot call; the op is the slot
+/** Fire preVfs for one PathSpec of one slot call; the op is the slot
  * name in its shared snake spelling, so a policy portable across the
  * languages and tiers sees one vocabulary. The hides are not judged
  * here: the command guards wrapped around this one answer them first,
@@ -1050,7 +1050,7 @@ async function policyAdmit(
   write: boolean,
 ): Promise<void> {
   const prefix = scope.prefix ?? mountGateFor(path.virtual)?.[0] ?? ''
-  await preOpsGate(scope.policies, op, path, write, prefix, scope.sessionId, undefined, {
+  await preVfsGate(scope.policies, op, path, write, prefix, scope.sessionId, undefined, {
     checkHidden: false,
   })
 }
@@ -1068,7 +1068,7 @@ async function* policyStream(
 
 /**
  * Return `ops` whose content and mutation slots admit each PathSpec
- * through the workspace's coded preOps hooks.
+ * through the workspace's coded preVfs hooks.
  *
  * The coded-policy arm of the guard chain, applied outside the cache
  * wraps so admission fires before a warm serve, the dispatcher's own
@@ -1079,7 +1079,7 @@ async function* policyStream(
  * entry still lists and stats while the read of it is what fails;
  * `scopedIo` drops the native find/du slots, so the walk meets the
  * guarded readdir. Inert unless a dispatched command bound
- * policies overriding preOps (`opPolicyScope`, with the mount prefix
+ * policies overriding preVfs (`opPolicyScope`, with the mount prefix
  * and session identity captured at wrap time so a lazily drained
  * reader still answers as the command that bound it, see
  * `livePolicyScope`; `prefix` arrives from the wrap site because the
@@ -1137,7 +1137,7 @@ function guardOperation<Args extends unknown[], R>(
 }
 
 /**
- * Drop the native walks when a hide, a path rule or a coded preOps
+ * Drop the native walks when a hide, a path rule or a coded preVfs
  * policy judges the command's paths, as the command's namespace view
  * (`ns`) answers.
  */

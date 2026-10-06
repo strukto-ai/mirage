@@ -14,7 +14,7 @@
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { isEnoent } from '@struktoai/mirage-core/utils/errors'
+import { isEnoent } from '@struktoai/mirage-core/errors/fs'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { stat } from './stat.ts'
 

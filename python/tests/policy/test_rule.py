@@ -19,7 +19,7 @@ from mirage.policy import (
     CommandRule,
     Deny,
     DenyScope,
-    OpsContext,
+    VfsContext,
 )
 from mirage.policy.rule import RulePolicy
 from mirage.types import MountMode, PathSpec
@@ -80,10 +80,10 @@ async def test_slashless_glob_matches_any_name_component():
     deny = await policy.pre_command(_ctx("cat", [_path("/a/b.key/c")]))
     assert deny == Deny("keys", DenyScope.OPERAND, path="/a/b.key/c")
     assert await policy.pre_command(_ctx("cat", [_path("/a/b.keyx")])) is None
-    op = OpsContext(
+    op = VfsContext(
         op="read", path=_path("/x/y.key"), write=False, prefix="/x/"
     )
-    assert await policy.pre_ops(op) == Deny("keys")
+    assert await policy.pre_vfs(op) == Deny("keys")
 
 
 @pytest.mark.asyncio
@@ -161,16 +161,16 @@ async def test_rule_policy_op_twin_holds_for_path_only_rules():
     policy = RulePolicy(
         CommandRule(reason="frozen", paths=("/data/locked/*",))
     )
-    ctx = OpsContext(
+    ctx = VfsContext(
         op="read", path=_path("/data/locked/a"), write=False, prefix="/data/"
     )
-    deny = await policy.pre_ops(ctx)
+    deny = await policy.pre_vfs(ctx)
     assert deny is not None
     assert deny == Deny("frozen")
-    open_ctx = OpsContext(
+    open_ctx = VfsContext(
         op="read", path=_path("/data/open/a"), write=False, prefix="/data/"
     )
-    assert await policy.pre_ops(open_ctx) is None
+    assert await policy.pre_vfs(open_ctx) is None
 
 
 @pytest.mark.asyncio
@@ -180,7 +180,7 @@ async def test_rule_policy_op_twin_skips_command_scoped_rules():
     policy = RulePolicy(
         CommandRule(reason="no rm", commands=("rm",), paths=("/data/prod/*",))
     )
-    ctx = OpsContext(
+    ctx = VfsContext(
         op="unlink", path=_path("/data/prod/x"), write=True, prefix="/data/"
     )
-    assert await policy.pre_ops(ctx) is None
+    assert await policy.pre_vfs(ctx) is None

@@ -50,7 +50,7 @@ _NAMED_ESCAPES = {
 # style), while head/tail/tac/fmt/split/csplit/truncate/strings quote
 # always and word the line differently ("cannot open X for reading").
 # Those say it in GNU's words (``FAILURE_WORDING`` in
-# mirage.utils.errors). For the rest mirage renders one line shape, so it
+# mirage.errors.render). For the rest mirage renders one line shape, so it
 # renders one policy too: quote when the name needs it, which is the same
 # answer for every name that carries a metacharacter and differs only for
 # the plain ones GNU's always-quoting half would dress up.

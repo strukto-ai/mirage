@@ -70,8 +70,8 @@ async function execute(
 }> {
   const r = await app.inject({
     method: 'POST',
-    url: `/v1/workspaces/${wsId}/shell`,
-    payload: { command, session_id: sessionId },
+    url: `/v1/workspaces/${wsId}/shell?session_id=${sessionId}`,
+    payload: { command },
   })
   expect(r.statusCode).toBe(200)
   return r.json<{

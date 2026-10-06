@@ -34,7 +34,7 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { asyncContextIsolatesTasks } from '../../../../utils/async_context.ts'
-import { fsStrerror } from '../../../../utils/errors.ts'
+import { fsStrerror, enoent } from '../../../../errors/fs.ts'
 import { shellQuote } from '../../../../utils/quote.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
@@ -792,7 +792,7 @@ export async function handleXargs(
   } else {
     try {
       if (doors.dispatch === undefined || doors.dispatch === null) {
-        throw Object.assign(new Error(argFile), { code: 'ENOENT' })
+        throw enoent(argFile)
       }
       data = await readScriptBytes(doors.dispatch, argFile, session.cwd)
     } catch (err) {

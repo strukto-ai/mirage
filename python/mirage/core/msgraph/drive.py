@@ -50,6 +50,7 @@ from mirage.core.msgraph.client import (
     upload_chunk,
 )
 from mirage.core.msgraph.config import MsGraphConfig
+from mirage.errors.fs import eexist, enoent, enotdir, enotsup, listing_error
 from mirage.observe.context import (
     active_recorder,
     record,
@@ -58,13 +59,6 @@ from mirage.observe.context import (
     start_op,
 )
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import (
-    eexist,
-    enoent,
-    enotdir,
-    enotsup,
-    listing_error,
-)
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.ranges import window_for

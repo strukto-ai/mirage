@@ -16,7 +16,7 @@ import { constants as fsConstants } from 'node:fs'
 import { getCurrentSession, runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
-import { enotsup } from '@struktoai/mirage-core/utils/errors'
+import { enotsup } from '@struktoai/mirage-core/errors/fs'
 import { DIR_SIZE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { describe, expect, it, vi } from 'vitest'
@@ -166,7 +166,7 @@ describe('MountCore', () => {
     const ws = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE })
     await ws.shell("printf 'line1\\n' > /data/log")
     ws.policies.add({
-      preOps: (ctx) => (ctx.op === 'read' ? { kind: 'deny', reason: 'write-only' } : null),
+      preVfs: (ctx) => (ctx.op === 'read' ? { kind: 'deny', reason: 'write-only' } : null),
     })
     const core = new MountCore(ws.vfs)
     const enc = new TextEncoder()

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../types.ts'
-import { eexist, eisdir, enoent, enotdir, type FsError } from '../../utils/errors.ts'
+import { eexist, eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { type FsError } from '../../errors/types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { ancestors } from '../../utils/path.ts'
 import type { RedisStoreLike } from '../../vfs/redis/store.ts'

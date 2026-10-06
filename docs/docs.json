@@ -84,6 +84,14 @@
             ]
           },
           {
+            "group": "Policy",
+            "pages": [
+              "home/policy/overview",
+              "home/policy/policies",
+              "home/policy/explain"
+            ]
+          },
+          {
             "group": "Learn",
             "pages": [
               "home/architecture",
@@ -95,7 +103,6 @@
               "home/snapshot",
               "home/observer",
               "home/permissions",
-              "home/policy-engine",
               "home/route-policy"
             ]
           },
@@ -665,6 +672,14 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/home/policy-engine",
+      "destination": "/home/policy/policies"
+    },
+    {
+      "source": "/home/explain",
+      "destination": "/home/policy/explain"
+    },
     {
       "source": "/home/auth",
       "destination": "/home/access/http"

@@ -356,7 +356,7 @@ async def test_read_still_renders_after_a_partial_write():
 
 
 class _NoReads(Policy):
-    async def pre_ops(self, ctx):
+    async def pre_vfs(self, ctx):
         return Deny("write-only") if ctx.op == "read" else None
 
 

@@ -5,8 +5,8 @@ from opendal.types import EntryMode
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.nextcloud.util import nextcloud_key
+from mirage.errors.fs import eexist, enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import eexist, enoent, enotdir
 from mirage.utils.key_prefix import mounted_path
 
 

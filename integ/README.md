@@ -30,6 +30,13 @@ implementations cannot drift apart.
   checks auth per deployment, the CLI's daemon lifecycle and config, and
   gates that every HTTP route and CLI command was exercised. `inapp.ts` is
   the in-app access on TypeScript.
+- `policy/`: the policy corpus. Each case binds sessions to profiles and
+  registers coded policies, then drives lines, VFS calls, tools, asks and
+  explain, pinning what each refuses, asks or lets through: the allow list,
+  command and path rules, anchor depth, asks and their answers, the VFS
+  door, hide and show, mount modes and sections, coded and script
+  policies, and placement. `lifecycle/run.py` and `lifecycle/run.ts` run
+  it, given its path.
 - `prisma/`: one schema per kit fake.
 - `fixtures/`: the seed data cases assume.
 

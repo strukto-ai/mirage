@@ -27,7 +27,7 @@ import {
   SUBTREE_COMMANDS,
   SUBTREE_OPS,
 } from '../constants.ts'
-import type { CommandContext, CommandRule, AdmissionRules, OpsContext } from '../types.ts'
+import type { CommandContext, CommandRule, AdmissionRules, VfsContext } from '../types.ts'
 import { lineTokens } from './allow.ts'
 import { patternMatches } from './pattern.ts'
 
@@ -269,7 +269,7 @@ export function coversDepth(rule: CommandRule, virtual: string, ancestors = true
 export function opReach(
   rule: CommandRule,
   scope: HiddenPaths | null,
-  ctx: OpsContext,
+  ctx: VfsContext,
 ): number | null {
   if ((rule.commands ?? []).length > 0 || scope === null || METADATA_OPS.has(ctx.op)) return null
   const virtual = ctx.path.virtual
@@ -279,7 +279,7 @@ export function opReach(
 }
 
 /** Whether a rule refuses an op. The boolean case of `opReach`. */
-export function matchOp(rule: CommandRule, scope: HiddenPaths | null, ctx: OpsContext): boolean {
+export function matchOp(rule: CommandRule, scope: HiddenPaths | null, ctx: VfsContext): boolean {
   return opReach(rule, scope, ctx) !== null
 }
 
@@ -301,7 +301,7 @@ export function matchOp(rule: CommandRule, scope: HiddenPaths | null, ctx: OpsCo
  */
 export function opRuling(
   rules: AdmissionRules | null,
-  ctx: OpsContext,
+  ctx: VfsContext,
   granted: readonly CommandRule[],
 ): [CommandRule, boolean] | null {
   if (rules === null) return null
@@ -329,7 +329,7 @@ export function opRuling(
  */
 export function opRefusal(
   rules: AdmissionRules | null,
-  ctx: OpsContext,
+  ctx: VfsContext,
   granted: readonly CommandRule[],
 ): string | null {
   return opRuling(rules, ctx, granted)?.[0].reason ?? null
