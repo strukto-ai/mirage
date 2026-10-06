@@ -16,3 +16,20 @@ it('reports diagnostics in the original Unicode source after recovery', async ()
     program.release()
   }
 })
+
+it.each([
+  ['echo $(echo ok; fi)', 'fi'],
+  ['x=$(echo ok; done)', 'done'],
+  ['echo $(echo $(fi))', 'fi'],
+])('keeps the span of a stray word inside a substitution: %s', async (line, word) => {
+  const program = (await getTestParser()).parseProgram(line)
+  try {
+    expect(program.diagnostics).toHaveLength(1)
+    const diagnostic = program.diagnostics[0]
+    assert(diagnostic)
+    expect(diagnostic.offending).toBe(word)
+    expect(line.slice(diagnostic.span.start, diagnostic.span.end)).toBe(word)
+  } finally {
+    program.release()
+  }
+})

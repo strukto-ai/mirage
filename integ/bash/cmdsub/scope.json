@@ -197,7 +197,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( f() { bash -c 'local y=2; echo \"y=$y\"'; }; f )",
+      "command": "( unset y; f() { bash -c 'local y=2; echo \"y=$y\"'; }; f )",
       "expect": {
         "exit": 0,
         "stdout": "y=\n",
