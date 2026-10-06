@@ -37,6 +37,7 @@ import { seedVar, sessionView } from '../workspace/session/state.ts'
 import type { EntryGate } from '../types.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import type { CommandRule } from '../policy/types.ts'
+import type { Policy } from '../policy/base.ts'
 import type { Policies } from '../policy/policies.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
@@ -478,6 +479,40 @@ describe('a named facade session on the fallback storage', () => {
       expect(await ws.vfs.cat('/data/vault/secret')).toBe('top\n')
       release()
       await holding
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('dry runs on the fallback storage', () => {
+  it('refuse explain.vfs and leave a concurrent write alone', async () => {
+    // Without task isolation a dry run's binding would sit on top of the
+    // frame stack for every concurrent task: a real op would be stopped
+    // as explained, or refused as a deciding policy's write.
+    const ws = new Workspace(
+      { '/data': [new RAMVFS(), MountMode.WRITE] as const },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const session = new Session(ws, ws.defaultSessionId)
+      await expect(session.explain.vfs.read('/data/x')).rejects.toThrow(/isolates async tasks/)
+      const [held, release] = gate()
+      const [deciding, decided] = gate()
+      const waits: Policy = {
+        async preCommand(): Promise<null> {
+          decided()
+          await held
+          return null
+        },
+      }
+      ws.policies.add(waits)
+      const explained = session.explain.shell('ls /data')
+      await deciding
+      await ws.vfs.write('/data/y', 'y')
+      release()
+      await explained
+      expect(await ws.vfs.cat('/data/y')).toBe('y')
     } finally {
       await ws.close()
     }

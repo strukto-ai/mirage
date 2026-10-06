@@ -84,7 +84,10 @@ class VfsExplainer:
     beyond the ``argv`` it was asked about, since what the door resolved
     a path to would tell a hidden one from a missing one. A rename passes
     two gates, its source and then its destination; its explanation is
-    the first that refuses, with the answers of both.
+    the first that refuses, with the answers of both. A restore's
+    pending drift checks are no policy's answer either: the dry run
+    leaves them to the first op that runs, so a policy reading while it
+    decides reads the restored state.
 
     Args:
         vfs (Ops): the session's op facade.

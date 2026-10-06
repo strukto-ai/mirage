@@ -16,6 +16,7 @@ import { runExplaining } from '../../context/session_context.ts'
 import type { Ops } from '../../ops/ops.ts'
 import { Explained } from '../../policy/errors.ts'
 import { Outcome, type Explanation } from '../../policy/types.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { isFsError } from '../../utils/errors.ts'
 import type { Workspace } from './workspace.ts'
 
@@ -68,7 +69,9 @@ export class Explainer {
  * was asked about, since what the door resolved a path to would tell a
  * hidden one from a missing one. A rename passes two gates, its source and
  * then its destination; its explanation is the first that refuses, with
- * the answers of both.
+ * the answers of both. A restore's pending drift checks are no policy's
+ * answer either: the dry run leaves them to the first op that runs, so a
+ * policy reading while it decides reads the restored state.
  * Mirrors the Python `VfsExplainer`.
  */
 export class VfsExplainer {
@@ -136,13 +139,17 @@ export class VfsExplainer {
 /**
  * Walk one op through its door as a dry run and say what its gates
  * answered. Throws when the op returned, since it then ran past its gate,
- * which no door may let it do.
+ * which no door may let it do, and on a runtime whose async context does
+ * not isolate tasks, where the dry run would reach another task's ops.
  */
 async function dry(
   op: string,
   argv: readonly string[],
   call: () => Promise<unknown>,
 ): Promise<Explanation> {
+  if (!asyncContextIsolatesTasks) {
+    throw new Error(`explain.vfs.${op} needs a runtime that isolates async tasks`)
+  }
   const trace: Explanation[] = []
   let ran = false
   try {

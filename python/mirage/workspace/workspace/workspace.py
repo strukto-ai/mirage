@@ -47,8 +47,10 @@ from mirage.context import (
     get_current_session_for,
     get_current_session_unless_foreign,
     reset_current_session,
+    reset_explaining,
     reset_program_invocation,
     set_current_session,
+    set_explaining,
     set_program_invocation,
 )
 from mirage.io import IOResult
@@ -72,6 +74,7 @@ from mirage.policy import (
     SessionProfile,
 )
 from mirage.policy.builtin import PlacementPolicy
+from mirage.policy.types import DryRun
 from mirage.process.child import ChildProcess
 from mirage.process.stdio import ProcessInput, ProcessOutput
 from mirage.process.supervisor import ProcessSupervisor
@@ -520,7 +523,9 @@ class Workspace:
         and the refusal an agent would read come out of one place and
         cannot disagree. It runs no command, expands nothing, spends no
         grant and puts no question to a host, which is what makes it
-        safe to call about a line nobody typed. Each explanation carries
+        safe to call about a line nobody typed; a policy deciding it
+        reads for real but changes nothing (``DryRun``). Each explanation
+        carries
         every policy's answer to its command and the line's placement:
         every answer at ``pre_execute`` and the runtime that would run
         the command. A line a rule refuses, or that waits on the host,
@@ -543,6 +548,22 @@ class Workspace:
             order, nested lines included.
         """
         await self.ensure_sessions_loaded()
+        token = set_explaining(DryRun.DECIDING)
+        try:
+            return await self._explained(line, session_id)
+        finally:
+            reset_explaining(token)
+
+    async def _explained(
+        self, line: str, session_id: str
+    ) -> list[Explanation]:
+        """:meth:`explain`'s judging, run with its policies deciding.
+
+        Args:
+            line (str): the line to judge.
+            session_id (str): whose profile to judge it under; the
+                default session when empty.
+        """
         session = self.get_session(session_id or self.default_session_id)
         ast = parse(line)
         said = await explain_line(

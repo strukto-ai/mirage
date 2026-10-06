@@ -261,7 +261,8 @@ async function explainedOp(
  * run (`explaining`) the gate notes its answer and throws `Explained`
  * once the op would refuse or has no gate left, so the door stops before
  * any backend or cache is touched; a write a policy makes while it
- * decides that op throws EROFS, since the dry run may change nothing.
+ * decides that op throws EROFS, since the dry run may change nothing, and
+ * an ask its read meets reads the ledger and records nothing.
  */
 export async function preOpsGate(
   policies: Policies,
@@ -277,8 +278,7 @@ export async function preOpsGate(
     final?: boolean
   } = {},
 ): Promise<void> {
-  const { checkHidden = true, decisions: ledger = null, final = true, ...context } = access
-  let decisions = ledger
+  const { checkHidden = true, decisions = null, final = true, ...context } = access
   const ctx: OpsContext = {
     op,
     path,
@@ -298,10 +298,8 @@ export async function preOpsGate(
     if (final || noted.error !== '') throw new Explained()
     return
   }
-  if (trace === DryRun.DECIDING) {
-    if (write) throw erofsReadOnly('Read-only file system', path)
-    decisions = null
-  }
+  const deciding = trace === DryRun.DECIDING
+  if (deciding && write) throw erofsReadOnly('Read-only file system', path)
   if (!(policies.wants('preOps') || checkHidden || (write && context.mode !== undefined))) {
     return
   }
@@ -312,7 +310,9 @@ export async function preOpsGate(
     if (decisions === null || lineRunning()) {
       throw policyDenied({ kind: 'deny', reason: answer.reason }, path.virtual)
     }
-    const settled = await decisions.resolveOp(ctx, answer)
+    const settled = deciding
+      ? await decisions.heldOp(ctx, answer)
+      : await decisions.resolveOp(ctx, answer)
     if (settled === null) return
     if (settled.kind === 'pending') throw policyPending(settled, path.virtual)
     answer = settled

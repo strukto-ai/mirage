@@ -312,8 +312,9 @@ export class Dispatcher {
     // and the op facade come straight here, so a drain that lived any
     // higher would let a first write clobber drifted state. drain()
     // clears pending before it stats, so its own probes cannot recurse
-    // into it. A dry run leaves them pending: it touches no mount, and the
-    // op that does run still owes them.
+    // into it. A dry run leaves them pending, its policies' reads included:
+    // the check is no policy's answer, and the op that does run still owes
+    // it.
     if (this.drift?.pending === true && explaining() === null) {
       // Resolve backend IDs afresh without consulting the restored index.
       await this.drift.drain(this.namespace, async (p) => {

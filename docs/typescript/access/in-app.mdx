@@ -258,7 +258,7 @@ session.explain.shell(line): Promise<Explanation[]>
 session.explain.vfs.<op>(...): Promise<Explanation>
 ```
 
-The session's doors as a dry run, under the same names: what a line, or one file op, would do as the session, without running it. A line gets the refusal the agent would read, every policy's answer and the line's placement; an op gets every policy's answer and the error the call would throw. See [Dry runs](/home/permissions#dry-runs).
+The session's doors as a dry run, under the same names: what a line, or one file op, would do as the session, without running it. A line gets the refusal the agent would read, every policy's answer and the line's placement; an op gets every policy's answer and the error the call would throw. `explain.vfs` needs a runtime whose async context isolates tasks (a working `AsyncLocalStorage`, as in Node); in a browser it throws rather than let its dry run reach another task's ops. See [Dry runs](/home/permissions#dry-runs).
 
 ```ts
 const [shellRes] = await session.explain.shell('rm /data/x')

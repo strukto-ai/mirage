@@ -419,8 +419,9 @@ class Dispatcher:
         # FUSE and the ops facade come straight here, so a drain that
         # lived any higher would let a first write clobber drifted
         # state. drain() clears pending before it stats, so its own
-        # probes cannot recurse into it. A dry run leaves them pending:
-        # it touches no mount, and the op that does run still owes them.
+        # probes cannot recurse into it. A dry run leaves them pending,
+        # its policies' reads included: the check is no policy's answer,
+        # and the op that does run still owes it.
         if (
             self._drift is not None
             and self._drift.pending

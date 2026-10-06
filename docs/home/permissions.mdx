@@ -428,7 +428,10 @@ the arguments the real call does. Nothing runs: no command, no backend
 or cache read, no grant spent and no question recorded. A policy that
 reads a file to decide (a profile script checking a flag) reads it for
 real, but changes nothing: a write it makes fails with `EROFS`, and a
-read the session may not make fails without recording a question.
+read that would ask fails without recording a question unless an
+approval the session already holds covers it. In TypeScript,
+`explain.vfs` needs a runtime whose async context isolates tasks (a working
+`AsyncLocalStorage`, as in Node); elsewhere it throws rather than reach another task's ops.
 
 ```python
 explain = (await ws.session("reviewer")).explain

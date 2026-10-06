@@ -255,7 +255,8 @@ async def pre_ops_gate(
             is noted and the op would refuse or has no gate left: the
             door stops before any backend or cache is touched.
         ReadOnlyError: a write a policy makes while it decides a dry
-            run's op, which the dry run may not let change anything.
+            run's op, which the dry run may not let change anything (an
+            ask its read meets reads the ledger and records nothing).
     """
     ctx = OpsContext(
         op=op,
@@ -285,12 +286,9 @@ async def pre_ops_gate(
         if final or noted.error:
             raise Explained()
         return
-    if trace is DryRun.DECIDING:
-        if write:
-            raise ReadOnlyError(
-                errno.EROFS, "Read-only file system", path.virtual
-            )
-        decisions = None
+    deciding = trace is DryRun.DECIDING
+    if deciding and write:
+        raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)
     if not (
         policies.wants("pre_ops")
         or check_hidden
@@ -303,7 +301,11 @@ async def pre_ops_gate(
     if isinstance(answer, Ask):
         if decisions is None or line_running():
             raise policy_denied(Deny(answer.reason), path.virtual)
-        settled = await decisions.resolve_op(ctx, answer)
+        settled = (
+            decisions.held_op(ctx, answer)
+            if deciding
+            else await decisions.resolve_op(ctx, answer)
+        )
         if settled is None:
             return
         if isinstance(settled, Pending):

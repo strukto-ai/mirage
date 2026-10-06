@@ -19,8 +19,9 @@ import pytest
 import pytest_asyncio
 
 from mirage import Session, Workspace
-from mirage.policy import Deny, OpsContext, Policy
+from mirage.policy import CommandContext, Deny, OpsContext, Policy
 from mirage.policy.match import Outcome
+from mirage.policy.types import Scope
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 
@@ -134,15 +135,14 @@ async def test_a_policy_reads_for_real_while_it_decides(ws):
 
 
 class _Busy(Policy):
-    """Deciding a write, reads an asked file as the agent and stamps one."""
+    """Deciding a write to ``/data/new``, or the line ``ls /data/new``,
+    reads an asked file as the agent and stamps one."""
 
     def __init__(self, ws: Workspace) -> None:
         self.ws = ws
         self.errors: list[int | None] = []
 
-    async def pre_ops(self, ctx: OpsContext) -> None:
-        if ctx.op != "write" or ctx.path.virtual != "/data/new":
-            return None
+    async def _busy(self) -> None:
         try:
             await Session(self.ws, "agent").vfs.read("/data/out/q")
         except PermissionError as exc:
@@ -151,6 +151,15 @@ class _Busy(Policy):
             await self.ws.vfs.write("/data/stamp", b"seen")
         except PermissionError as exc:
             self.errors.append(exc.errno)
+
+    async def pre_ops(self, ctx: OpsContext) -> None:
+        if ctx.op == "write" and ctx.path.virtual == "/data/new":
+            await self._busy()
+        return None
+
+    async def pre_command(self, ctx: CommandContext) -> None:
+        if ctx.command == "ls":
+            await self._busy()
         return None
 
 
@@ -162,3 +171,27 @@ async def test_a_policy_changes_nothing_while_it_decides(ws):
     assert busy.errors == [errno.EACCES, errno.EROFS]
     assert ws.decisions.pending("agent") == ()
     assert not await ws.vfs.exists("/data/stamp")
+
+
+@pytest.mark.asyncio
+async def test_a_line_s_policies_change_nothing_either(ws):
+    busy = _Busy(ws)
+    ws.policies.add(busy)
+    await Session(ws, "agent").explain.shell("ls /data/new")
+    assert busy.errors == [errno.EACCES, errno.EROFS]
+    assert ws.decisions.pending("agent") == ()
+    assert not await ws.vfs.exists("/data/stamp")
+
+
+@pytest.mark.asyncio
+async def test_a_standing_approval_covers_a_deciding_read(ws):
+    await ws.vfs.mkdir("/data/out")
+    await ws.vfs.write("/data/out/q", b"q")
+    with pytest.raises(PermissionError):
+        await Session(ws, "agent").vfs.read("/data/out/q")
+    [asked] = ws.decisions.pending("agent")
+    await ws.decisions.answer(asked.id, Outcome.ALLOW, Scope.SESSION)
+    busy = _Busy(ws)
+    ws.policies.add(busy)
+    await Session(ws, "agent").explain.vfs.write("/data/new", b"x")
+    assert busy.errors == [errno.EROFS]

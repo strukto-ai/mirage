@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Outcome, type Deny, type OpsContext, type Policy } from '../../policy/index.ts'
+import {
+  Outcome,
+  Scope,
+  type CommandContext,
+  type Deny,
+  type OpsContext,
+  type Policy,
+} from '../../policy/index.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -121,23 +128,56 @@ describe('session.explain.vfs', () => {
     expect([said.reason, said.answers.map((a) => a.reason)]).toEqual(['closed', ['closed']])
   })
 
-  it('lets a policy change nothing while it decides', async () => {
-    const errors: (string | undefined)[] = []
+  /**
+   * Deciding a write to `/data/new`, or the line `ls /data/new`, reads an
+   * asked file as the agent and stamps one; `errors` collects the codes.
+   */
+  function busy(errors: (string | undefined)[]): Policy {
     const failed = (err: unknown): void => {
       errors.push((err as { code?: string }).code)
     }
-    const busy: Policy = {
+    const work = async (): Promise<null> => {
+      await new Session(ws, 'agent').vfs.read('/data/out/q').catch(failed)
+      await ws.vfs.write('/data/stamp', 'seen').catch(failed)
+      return null
+    }
+    return {
       async preOps(ctx: OpsContext): Promise<null> {
-        if (ctx.op !== 'write' || ctx.path.virtual !== '/data/new') return null
-        await new Session(ws, 'agent').vfs.read('/data/out/q').catch(failed)
-        await ws.vfs.write('/data/stamp', 'seen').catch(failed)
-        return null
+        return ctx.op === 'write' && ctx.path.virtual === '/data/new' ? work() : null
+      },
+      async preCommand(ctx: CommandContext): Promise<null> {
+        return ctx.command === 'ls' ? work() : null
       },
     }
-    ws.policies.add(busy)
+  }
+
+  it('lets a policy change nothing while it decides', async () => {
+    const errors: (string | undefined)[] = []
+    ws.policies.add(busy(errors))
     await new Session(ws, 'agent').explain.vfs.write('/data/new', 'x')
     expect(errors).toEqual(['EACCES', 'EROFS'])
     expect(ws.decisions.pending('agent')).toEqual([])
     expect(await ws.vfs.exists('/data/stamp')).toBe(false)
+  })
+
+  it('lets a line’s policies change nothing either', async () => {
+    const errors: (string | undefined)[] = []
+    ws.policies.add(busy(errors))
+    await new Session(ws, 'agent').explain.shell('ls /data/new')
+    expect(errors).toEqual(['EACCES', 'EROFS'])
+    expect(ws.decisions.pending('agent')).toEqual([])
+    expect(await ws.vfs.exists('/data/stamp')).toBe(false)
+  })
+
+  it('lets a standing approval cover a deciding read', async () => {
+    await ws.vfs.mkdir('/data/out')
+    await ws.vfs.write('/data/out/q', 'q')
+    await expect(new Session(ws, 'agent').vfs.read('/data/out/q')).rejects.toThrow()
+    const [asked] = ws.decisions.pending('agent')
+    await ws.decisions.answer(asked?.id ?? '', Outcome.ALLOW, Scope.SESSION)
+    const errors: (string | undefined)[] = []
+    ws.policies.add(busy(errors))
+    await new Session(ws, 'agent').explain.vfs.write('/data/new', 'x')
+    expect(errors).toEqual(['EROFS'])
   })
 })

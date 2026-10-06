@@ -65,6 +65,7 @@ import {
   parseMountMode,
 } from '../../types.ts'
 import type { Explanation, Policies } from '../../policy/index.ts'
+import { DryRun } from '../../policy/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { Ops } from '../../ops/ops.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -84,6 +85,7 @@ import { captureRecordingContext } from '../../observe/context.ts'
 import {
   captureSessionContext,
   getCurrentSessionUnlessForeign,
+  runExplaining,
   runWithSession,
   runAsProgram,
 } from '../../context/session_context.ts'
@@ -1116,7 +1118,9 @@ export class Workspace {
    * refusal an agent would read come out of one place and cannot disagree.
    * It runs no command, expands nothing, spends no grant and puts no
    * question to a host, which is what makes it safe to call about a line
-   * nobody typed. Each explanation carries every policy's answer to its
+   * nobody typed; a policy deciding it reads for real but changes nothing
+   * (`DryRun`), where the runtime isolates async tasks. Each explanation
+   * carries every policy's answer to its
    * command and the line's placement: every answer at `preExecute` and the
    * runtime that would run the command. A line a rule refuses, or that
    * waits on the host, is never placed, as it is never placed when it
@@ -1129,6 +1133,13 @@ export class Workspace {
    */
   async explain(line: string, sessionId = ''): Promise<Explanation[]> {
     await this.ensureSessionsLoaded()
+    // Without task isolation the binding would reach other tasks' ops.
+    if (!asyncContextIsolatesTasks) return this.explained(line, sessionId)
+    return runExplaining(DryRun.DECIDING, () => this.explained(line, sessionId))
+  }
+
+  /** `explain`'s judging, run with its policies deciding. */
+  private async explained(line: string, sessionId: string): Promise<Explanation[]> {
     const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
     const parser = await this.getShellParser()
     const reparse = (text: string): TSNodeLike => parser.parse(text)
