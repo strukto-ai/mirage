@@ -36,6 +36,21 @@ const call = await explain.vfs.read('/data/keys/k')
 Every door answers the same JSON. Explain reads the line only, so stdin,
 `cwd`, `runtime` and a background job are refused with it.
 
+## What it asks
+
+Explain stops before anything runs, so it asks only the hooks that answer
+first:
+
+| Explained | Asks | Never asks |
+| --- | --- | --- |
+| A line | `pre_command`, `pre_execute`, the profile's rules | `pre_session`, `pre_vfs`, `post_execute` |
+| A VFS call | `pre_vfs`, the profile's rules | `post_vfs` |
+
+The post hooks need a result, and on a line `pre_session` and `pre_vfs`
+fire only as it runs. So `export AWS_SECRET=x` explains as `allow` even
+when a `pre_session` policy refuses it. Explain the VFS call to see a
+`pre_vfs` answer.
+
 ## What comes back
 
 With a profile that denies `/data/keys/*`:
@@ -96,9 +111,6 @@ rm /data/a; echo done  [allow, exit 0]
 
 - A hidden path explains like any path no rule names, so explain never
   reveals a hide.
-- On a line, explain asks `pre_command`, `pre_execute` and the profile's
-  rules. A coded `pre_vfs` answers only when a file is touched; explain
-  the VFS call to see it.
 - A policy that reads a file to decide still reads it.
 - In a browser, `explain.vfs` throws and `explain.shell` runs its
   policies for real.
