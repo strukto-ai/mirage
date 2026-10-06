@@ -14,10 +14,13 @@
 
 import dataclasses
 import json
+import sys
 
 from mirage.policy.match import Outcome
 from mirage.policy.types import AdmissionRules, CommandRule, Decision, Scope
 from mirage.secrets.config import EnvVar
+from mirage.shell.helpers import get_function_body
+from mirage.shell.parse.parse import parse_program
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
 from mirage.workspace.session import SessionState
@@ -25,6 +28,7 @@ from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     TRANSIENT_FIELDS,
 )
+from mirage.workspace.session.functions import FunctionTable
 from mirage.workspace.session.session import (
     vars_from_entries,
     vars_from_env,
@@ -581,3 +585,23 @@ def test_session_profile_round_trips_and_is_omitted_when_none():
     assert data["profile"] == "admin"
     assert SessionState.from_dict(data).profile == "admin"
     assert original.fork().profile == "admin"
+
+
+def test_fork_leases_each_stored_function_once(monkeypatch):
+    program = parse_program("f() { echo a; }")
+    body = get_function_body(program.root.named_children[0])
+    parent = SessionState(session_id="s", functions={"f": body})
+    module = sys.modules[FunctionTable.__module__]
+    original = module.retain_programs
+    leases = []
+
+    def counted(nodes):
+        leases.append(nodes)
+        return original(nodes)
+
+    monkeypatch.setattr(module, "retain_programs", counted)
+    child = parent.fork()
+    assert len(leases) == 1
+    assert program.references == 3
+    child.functions.clear()
+    assert program.references == 2
