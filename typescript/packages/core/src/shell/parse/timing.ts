@@ -1,4 +1,4 @@
-import type { Parser } from 'web-tree-sitter'
+import { linkTree, type NativeParser } from './engine.ts'
 import type { HeredocNode } from './heredoc/node.ts'
 import type { ShellNode } from '../types.ts'
 import type { HeredocSource } from './heredoc/types.ts'
@@ -30,7 +30,10 @@ function sourceOffset(source: HeredocSource, index: number): number {
 }
 
 /** Remove reserved prefixes so the grammar can read the complete pipeline/compound body. */
-export function lowerTiming(parser: Parser, source: HeredocSource): [HeredocSource, TimingMark[]] {
+export function lowerTiming(
+  parser: NativeParser,
+  source: HeredocSource,
+): [HeredocSource, TimingMark[]] {
   let text = source.source
   let marks: TimingMark[] = []
   for (;;) {
@@ -102,6 +105,7 @@ export class PrefixNode implements ShellNode {
     private readonly skip = 0,
     private readonly parentNode: PrefixNode | null = null,
   ) {
+    linkTree(this, node)
     this.prefixes = (targets.get(node.id) ?? []).slice(skip)
     const first = this.prefixes[0]
     this.timing = first === undefined ? [] : [first[1]]

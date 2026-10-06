@@ -38,6 +38,7 @@ from mirage.utils.hidden import (
     shown_mode,
 )
 from mirage.utils.path import parent
+from mirage.workspace.frame import parent_session, persistent_session
 
 if TYPE_CHECKING:
     from mirage.policy.policies import Policies
@@ -486,7 +487,7 @@ def redirect_opener_for(node_id: int) -> RedirectOpener | None:
     return bound[2]
 
 
-_program_invocation: ContextVar[int | None] = ContextVar(
+_program_invocation: ContextVar["SessionState | None"] = ContextVar(
     "mirage_program_invocation", default=None
 )
 
@@ -504,7 +505,7 @@ def set_program_invocation(session: "SessionState") -> Token[Any]:
     Args:
         session (SessionState): the session the program line runs in.
     """
-    return _program_invocation.set(id(session))
+    return _program_invocation.set(session)
 
 
 def clear_program_invocation() -> Token[Any]:
@@ -525,7 +526,15 @@ def program_invocation(session: "SessionState") -> bool:
     Args:
         session (SessionState): the session a builtin is answering in.
     """
-    return _program_invocation.get() == id(session)
+    marked = _program_invocation.get()
+    if marked is None:
+        return False
+    current: SessionState | None = session
+    while current is not None:
+        if persistent_session(current) is persistent_session(marked):
+            return True
+        current = parent_session(current)
+    return False
 
 
 def redirect_target_judged(virtual: str) -> bool:

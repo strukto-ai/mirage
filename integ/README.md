@@ -232,6 +232,15 @@ The program cases cover program files read across mounts (`grep -f`, `sed -f`,
 manifest; the shared parity job also compares it and `ram-nested`. The existing `python/**`, `typescript/**`, and `integ/**`
 filters cover these modules and cases.
 
+The parser ownership and execution-frame modules are covered by the existing
+`python/**` and `typescript/**` filters; their shared Bash regressions and Chrome
+suite are covered by `integ/**`. No new filter is needed for those modules.
+`bash/assign/redirect.json` is pinned to Debian Bash 5.2.37, image
+`sha256:5bc3287b25407c965a30f38e32603dc253a3869e1b12a21ac09bfc27fd8b13ce`.
+In #1438's assignment example, substitution stderr precedes the assignment's
+redirect: stdout is `value\n` and stderr is `err\n`. The issue's originally
+proposed empty stderr does not match Bash.
+
 ## Running locally
 
 The `unix/cp` and `unix/mv` cases use GNU coreutils 9.7 as their transfer

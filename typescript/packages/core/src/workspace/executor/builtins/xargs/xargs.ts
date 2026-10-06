@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { releaseFunctions } from '../../../session/functions.ts'
+
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
 import { runAsProgram, runWithSession } from '../../../../context/session_context.ts'
@@ -582,6 +584,7 @@ async function runLines(
         return io
       })
     } finally {
+      releaseFunctions(child.functions)
       taken.delete(slot)
     }
   }

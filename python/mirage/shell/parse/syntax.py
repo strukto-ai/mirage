@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from itertools import chain
 
 from mirage.io import IOResult
@@ -23,7 +23,7 @@ from mirage.shell.parse.constants import (
     SEPARATOR_TOKENS,
     STRUCTURAL_TOKENS,
 )
-from mirage.shell.parse.parse import parse
+from mirage.shell.parse.types import SourceSpan, SyntaxIssue
 from mirage.shell.types import TSNodeLike
 
 
@@ -287,7 +287,27 @@ def find_syntax_error(
     aliases: frozenset[str] = frozenset(),
     own: Mapping[str, tuple[int, int]] | None = None,
     offsets: Sequence[int] | None = None,
+    parse_fn: Callable[[str], TSNodeLike] | None = None,
 ) -> str | None:
+    found = find_syntax_issue(node, aliases, own, offsets, parse_fn)
+    return None if found is None else found.offending
+
+
+def _issue(node: TSNodeLike, offending: str | None) -> SyntaxIssue | None:
+    return (
+        None
+        if offending is None
+        else SyntaxIssue(offending, SourceSpan(node.start_byte, node.end_byte))
+    )
+
+
+def find_syntax_issue(
+    node: TSNodeLike,
+    aliases: frozenset[str] = frozenset(),
+    own: Mapping[str, tuple[int, int]] | None = None,
+    offsets: Sequence[int] | None = None,
+    parse_fn: Callable[[str], TSNodeLike] | None = None,
+) -> SyntaxIssue | None:
     """Locate structural errors and missing tokens throughout a parsed AST.
 
     Of the tokens the grammar accepts and bash refuses, the first on the
@@ -311,7 +331,7 @@ def find_syntax_error(
     # `[` is a builtin whose argument grammar is judged by that builtin.
     if node.type == "expansion":
         return (
-            ""
+            _issue(node, "")
             if any(c.is_missing and c.type == "}" for c in node.children)
             else None
         )
@@ -320,14 +340,21 @@ def find_syntax_error(
         and node.children
         and node.children[0].type == "["
     ):
-        return _missing_quote(node)
+        return _issue(node, _missing_quote(node))
     if node.type == "command_substitution":
         source = decode_text(node.text or b"")
         unclosed = find_unterminated_backtick(source)
         if unclosed is not None:
-            return unclosed
-        if source.startswith("$(") and source.endswith(")"):
-            return find_syntax_error(parse(source[2:-1]))
+            return _issue(node, unclosed)
+        if (
+            parse_fn is not None
+            and source.startswith("$(")
+            and source.endswith(")")
+        ):
+            nested = find_syntax_issue(
+                parse_fn(source[2:-1]), parse_fn=parse_fn
+            )
+            return None if nested is None else _issue(node, nested.offending)
     stray = min(
         chain(
             _stray_case_terminators(node),
@@ -337,9 +364,12 @@ def find_syntax_error(
         default=None,
     )
     if stray is not None:
-        return stray[1]
+        return SyntaxIssue(
+            stray[1],
+            SourceSpan(stray[0], stray[0] + len(encode_text(stray[1]))),
+        )
     if not node.has_error:
-        return find_unterminated_quote(node)
+        return _issue(node, find_unterminated_quote(node))
     previous = None
     for child in node.children:
         # Bash permits unquoted spaces in associative subscripts. The
@@ -356,7 +386,7 @@ def find_syntax_error(
             continue
         if child.is_missing:
             text = child.text
-            return decode_text(text) if text else ""
+            return _issue(child, decode_text(text) if text else "")
         if (
             child.type == "ERROR"
             and _is_structural_error(child)
@@ -369,9 +399,9 @@ def find_syntax_error(
                 previous = child
                 continue
             text = child.text
-            return decode_text(text) if text else ""
+            return _issue(child, decode_text(text) if text else "")
         if child.type != "ERROR":
-            nested = find_syntax_error(child, aliases, own, offsets)
+            nested = find_syntax_issue(child, aliases, own, offsets, parse_fn)
             if nested is not None:
                 return nested
         if child.is_named:

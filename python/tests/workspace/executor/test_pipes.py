@@ -21,6 +21,7 @@ from mirage.io.types import materialize
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.evaluation import child_session
 from mirage.workspace.executor.pipes import handle_pipe, handle_subshell
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -147,7 +148,7 @@ async def test_handle_subshell_seeds_last_exit_code_between_children():
     await handle_subshell(
         execute_node,
         [FakeNode("a"), FakeNode("b")],
-        session,
+        child_session(session),
         None,
     )
     assert seen == [0, 7]

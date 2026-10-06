@@ -68,6 +68,7 @@ from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import PipelineStages, Redirect, RedirectKind
 from mirage.types import PathSpec
+from mirage.workspace.evaluation import child_session, execution_session
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
@@ -687,7 +688,11 @@ async def _run_redirected(
     # returned rather than written. A simple command expands its words
     # before its redirects apply, so what that printed (a substitution's
     # stderr) goes around them; a compound body expands inside them.
-    simple = command is not None and command.type == NT.COMMAND
+    simple = command is not None and command.type in (
+        NT.COMMAND,
+        NT.VARIABLE_ASSIGNMENT,
+        NT.VARIABLE_ASSIGNMENTS,
+    )
     outer = session._diagnostics
     if simple:
         session._diagnostics = []
@@ -876,6 +881,7 @@ async def execute_node(
     ends_shell: bool = False,
     own_diagnostics: bool = True,
 ) -> tuple[Any, IOResult, ExecutionNode]:
+    session = execution_session(session)
     execution_scope = execution_scope or ExecutionScope()
     # The node is the whole of a child shell (a background job), which
     # runs its EXIT action when the node ends, its evaluator bound the
@@ -1096,7 +1102,13 @@ async def _execute_node(
     if (
         sink is not None
         and kind not in STREAMING_KINDS
-        and kind not in (NodeKind.COMMAND, NodeKind.REDIRECT)
+        and kind
+        not in (
+            NodeKind.COMMAND,
+            NodeKind.REDIRECT,
+            NodeKind.VAR_ASSIGN,
+            NodeKind.VAR_ASSIGNS,
+        )
     ):
         return await drained(sink, *await recurse(node, session, stdin, cs))
 
@@ -1232,20 +1244,20 @@ async def _execute_node(
             routing_decision=routing_decision,
             handed=handed,
         )
-        child_session = session.fork()
+        child = child_session(session)
         as_program = program_invocation(session)
         results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
 
         async def run_subshell() -> int:
-            token = set_current_session(child_session)
+            token = set_current_session(child)
             program_token = (
-                set_program_invocation(child_session) if as_program else None
+                set_program_invocation(child) if as_program else None
             )
             try:
                 result = await handle_subshell(
                     sub_recurse,
                     list(node.children),
-                    child_session,
+                    child,
                     stdin,
                     cs,
                     sub_table,
@@ -1273,10 +1285,14 @@ async def _execute_node(
                 limit=session.processes.max,
             )
         except BlockingIOError as exc:
+            child.functions.clear()
             raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
-        child_session.process_id = process.info.pid
-        await process.task
-        return results[0]
+        child.process_id = process.info.pid
+        try:
+            await process.task
+            return results[0]
+        finally:
+            child.functions.clear()
 
     # ── arithmetic command ((( ... ))) ──────────
     if (
@@ -1622,7 +1638,9 @@ async def _execute_node(
         for child in node.named_children:
             if child.type != NT.VARIABLE_ASSIGNMENT:
                 continue
-            _, io, _ = await recurse(child, session, stdin, cs)
+            _, io, _ = await recurse(
+                child, session, stdin, cs, own_diagnostics=False
+            )
             merged_io = await merged_io.merge(io)
         # The statement's status follows the last command substitution
         # performed across ALL its assignments, not the last child's.

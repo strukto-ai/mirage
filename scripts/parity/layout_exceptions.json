@@ -192,6 +192,11 @@
    "typescript_only": {
     "config": "The browser NotionVFS's config: an MCP OAuthClientProvider for Notion's hosted MCP server, which only the browser build talks to. Python's NotionConfig is the API-key model in core/notion/config, twin of TypeScript's core/notion/config.ts."
    }
+  },
+  "shell/parse": {
+   "typescript_only": {
+    "config": "The WASM parser factory accepts engine and grammar bytes. Python loads its installed native tree-sitter binding and has no WASM input configuration."
+   }
   }
  }
 }

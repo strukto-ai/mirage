@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 import asyncio
 from collections.abc import Callable
 from functools import partial
@@ -153,6 +154,7 @@ async def handle_pipe(
             output.end(error)
             raise
         finally:
+            child.functions.clear()
             if i > 0:
                 pipes[i - 1].close_reader()
             if input_stream is not None and not isinstance(
@@ -204,6 +206,8 @@ async def handle_pipe(
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        for child_session in children:
+            child_session.functions.clear()
         if failed:
             for io in ios:
                 await discard_io(io)
@@ -329,7 +333,7 @@ async def handle_subshell(
         body (list[TSNodeLike]): ALL subshell children, including
             the `&` tokens that mark background statements (named-only
             lists would run `a & b` synchronously and never set `$!`).
-        session (SessionState): shell session; env/options snapshot-restored.
+        session (SessionState): the process owner's isolated child session.
         stdin (ByteSource | None): input stream.
         call_stack (CallStack | None): function-call scope, if any.
         job_table (JobTable | None): the subshell's private job table
@@ -337,8 +341,7 @@ async def handle_subshell(
         agent_id (str | None): agent identity for job bookkeeping.
         dispatch (DispatchFn | None): the op door, so a subshell honors
             an `exec` redirect the way the program loop does. A subshell
-            is a child shell, so the redirect it installs is restored
-            with the rest of the snapshot when the body ends.
+            is a child shell, so its redirects leave the parent unchanged.
         sink (JobConsole | None): where each statement's output goes as
             it finishes; the body is a shell of its own, which routes
             what it wrote to its terminal through a copy, so a program
@@ -346,7 +349,7 @@ async def handle_subshell(
         execute_fn (Callable[..., Any] | None): runs the subshell's own
             EXIT action as it ends.
     """
-    saved = session.snapshot()
+    child_token = set_current_session(session)
     inherit_exit_trap(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session._line_open = True
@@ -367,8 +370,8 @@ async def handle_subshell(
 
             # `set -n` needs no arm here: `execute_node` refuses every
             # node while the option is on, so this loop simply runs a
-            # tail of no-ops. The restore at the end of the subshell is
-            # what keeps the option from leaking to the parent.
+            # tail of no-ops. The child owns the option, so it cannot
+            # leak to the parent.
             is_bg = i + 1 < len(body) and body[i + 1].type == NT.BACKGROUND
             if is_bg and job_table is not None:
                 try:
@@ -502,4 +505,5 @@ async def handle_subshell(
         combined = async_chain(all_stdout) if all_stdout else None
         return combined, merged_io, last_exec
     finally:
-        session.restore(saved)
+        session.functions.clear()
+        reset_current_session(child_token)

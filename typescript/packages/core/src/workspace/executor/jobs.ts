@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { retainPrograms } from '../../shell/parse/program.ts'
+import { releaseFunctions } from '../session/functions.ts'
+
 import { ExecutionScope } from '../execution.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -167,6 +170,8 @@ export async function handleBackground(
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<JobHandlerResult> {
+  const releaseProgram = retainPrograms([left])
+  const executionScope = new ExecutionScope()
   const bgSession = session.fork()
   inheritExitTrap(bgSession)
   const output = session.jobOutput ?? session.tty.jobs
@@ -205,7 +210,7 @@ export async function handleBackground(
         const opts: ExecuteNodeOpts = {
           sink: console_,
           signal: abort.signal,
-          executionScope: new ExecutionScope(),
+          executionScope,
           endsShell: true,
         }
         if (jobHanded !== null) opts.handed = jobHanded
@@ -253,6 +258,9 @@ export async function handleBackground(
     try {
       return await (asyncContextIsolatesTasks ? runWithSession(bgSession, body) : body())
     } finally {
+      executionScope.release()
+      releaseProgram()
+      releaseFunctions(bgSession.functions)
       if (jobHanded !== null && decisions !== null) {
         await decisions.revoke(session.sessionId, jobHanded)
       }
@@ -275,6 +283,9 @@ export async function handleBackground(
       limit: session.processes.max,
     })
   } catch (err) {
+    executionScope.release()
+    releaseProgram()
+    releaseFunctions(bgSession.functions)
     // A submission that fails (a console the table cannot build, a
     // session at its process cap) starts no runner, so nothing would ever
     // revoke the job's hand-off: its grants would stay reserved for good,

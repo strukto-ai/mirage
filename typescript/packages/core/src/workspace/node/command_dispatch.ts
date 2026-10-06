@@ -144,7 +144,7 @@ export async function executeCommand(
   signal?: AbortSignal,
   // The shell parser; only alias expansion needs it. Absent means an
   // alias is stored and printed but never expanded.
-  parser?: ShellParser,
+  parser?: Pick<ShellParser, 'parse' | 'sourceOffsets'>,
   // The agent the line is attributed to, which an approval request names.
   agentId = '',
   // The line's hand-off, which its gate claims on and runs on.

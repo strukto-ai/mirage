@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { childSession } from '../../../evaluation.ts'
+import { releaseFunctions } from '../../../session/functions.ts'
+
 import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
@@ -156,7 +159,7 @@ export async function handleBash(
   if (script === null) {
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
-  const saved = session.snapshot()
+  session = childSession(session)
   clearExitTrap(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
@@ -178,9 +181,10 @@ export async function handleBash(
   try {
     io = await runAsShell(async () =>
       finishShell(
-        (action, opts) => executeFn(action, { ...opts, ...jobs }),
+        (action, opts) => executeFn(action, { ...opts, ...jobs, session }),
         session,
         await executeFn(script, {
+          session,
           sessionId: session.sessionId,
           stdin,
           ...(sink === undefined ? {} : { sink }),
@@ -190,7 +194,7 @@ export async function handleBash(
       ),
     )
   } finally {
-    session.restore(saved)
+    releaseFunctions(session.functions)
   }
   const label = parsed.path !== null ? `${name} ${parsed.path}` : `${name} -c ${script}`
   return [io.stdout, io, new ExecutionNode({ command: label, exitCode: io.exitCode })]

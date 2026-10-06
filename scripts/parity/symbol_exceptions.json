@@ -302,6 +302,45 @@
    "typescript_only": {
     "BoxFileInfo": "The shape of GET /files/{id} with the fields the fresh check asks for (path_collection, item_status) beside BoxItem's; Python reads the same answer as a plain dict, as it does every Box item."
    }
+  },
+  "shell/parse/engine": {
+   "typescript_only": {
+    "NativeParser": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
+    "ParseTrees": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
+    "linkTree": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
+    "treeOf": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker.",
+    "trees": "web-tree-sitter requires explicit Tree.delete for every temporary parse and wrappers must retain their native Tree identity. Python nodes own reference-counted native trees through the binding, with no deletion API or allocation tracker."
+   }
+  },
+  "shell/parse/program": {
+   "typescript_only": {
+    "Resource": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases.",
+    "collected": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases.",
+    "releaseResource": "WASM tree deletion uses an independent finalizer payload as a reachability fallback for legacy parse callers. Python native node references already release their trees on collection; both ParsedProgram implementations expose the same explicit leases."
+   }
+  },
+  "shell/parse/parse": {
+   "python_only": {
+    "parse_program": "Python exposes the native singleton entry point as a module function; TypeScript exposes parseProgram on the asynchronously created ShellParser instance."
+   }
+  },
+  "workspace/evaluation": {
+   "python_only": {
+    "EvaluationSession": "Python forwards durable state and per-execution fields through a SessionState subclass; TypeScript uses Proxy directly inside executionSession."
+   }
+  },
+  "workspace/frame": {
+   "typescript_only": {
+    "frames": "WeakMaps associate a Proxy execution view with its frame and durable state. Python stores those references on the EvaluationSession instance.",
+    "states": "WeakMaps associate a Proxy execution view with its frame and durable state. Python stores those references on the EvaluationSession instance."
+   }
+  },
+  "workspace/session/functions": {
+   "typescript_only": {
+    "collected": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize.",
+    "leases": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize.",
+    "releaseFunctions": "The JavaScript function record is a Proxy whose leases live in a WeakMap and are closed through releaseFunctions, with a FinalizationRegistry fallback. Python uses FunctionTable.clear and an instance-owned weakref.finalize."
+   }
   }
  }
 }

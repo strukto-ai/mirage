@@ -19,6 +19,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.join import shell_join
+from mirage.shell.parse.program import retain_programs
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.lookup import (
@@ -140,6 +141,7 @@ async def handle_command_builtin(
     # An alias is masked the same way: bash expands an alias only as a
     # command's first word, which `command` is, so `command cat` runs
     # the program past `alias cat=...` too.
+    release_program = retain_programs(session.functions.get(inner_name, []))
     saved_fn = session.functions.pop(inner_name, None)
     saved_alias = session.aliases.pop(inner_name, None)
     try:
@@ -152,6 +154,7 @@ async def handle_command_builtin(
     finally:
         if saved_fn is not None:
             session.functions[inner_name] = saved_fn
+        release_program()
         if saved_alias is not None:
             session.aliases[inner_name] = saved_alias
     return (

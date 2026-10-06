@@ -21,6 +21,7 @@ from mirage.io import IOResult
 from mirage.shell import parse
 from mirage.shell.helpers import get_parts
 from mirage.utils.glob_walk import glob_pattern, unmark_globs
+from mirage.workspace.evaluation import execution_session
 from mirage.workspace.expand.parts import expand_words
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
@@ -28,8 +29,8 @@ from mirage.workspace.session.session import vars_from_env
 
 def _words(cmd: str, env=None, stdout: bytes = b""):
     parts = get_parts(parse(cmd).named_children[0])
-    session = SessionState(
-        session_id="t", cwd="/", vars=vars_from_env(env or {})
+    session = execution_session(
+        SessionState(session_id="t", cwd="/", vars=vars_from_env(env or {}))
     )
     execute_fn = AsyncMock(return_value=IOResult(stdout=stdout))
     return asyncio.run(expand_words(parts, session, execute_fn))

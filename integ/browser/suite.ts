@@ -23,6 +23,7 @@ import {
   type ExecWorkspace,
 } from '../runners/typescript/execution.ts'
 import substitutionScope from '../bash/cmdsub/scope.json'
+import assignmentRedirect from '../bash/assign/redirect.json'
 import substitutionStatus from '../bash/cmdsub/status.json'
 import commandFunction from '../bash/command/function.json'
 import commandRun from '../bash/command/run.json'
@@ -79,6 +80,7 @@ function battery(): [string, Check][] {
   const files = [
     traps,
     substitutionScope,
+    assignmentRedirect,
     substitutionStatus,
     commandRun,
     commandFunction,

@@ -1,4 +1,3 @@
-import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +11,9 @@ import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { functionTable, releaseFunctions } from './functions.ts'
+import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 
 import {
   DEFAULT_PROCESS_PERMISSIONS,
@@ -438,7 +440,7 @@ export class SessionState {
   randomSeed: string | null = null
   randomLast = 0
   // Scoped by the executing node so diagnostics follow its redirections.
-  diagnostics: (string | Uint8Array)[] = []
+  declare diagnostics: (string | Uint8Array)[]
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -472,15 +474,15 @@ export class SessionState {
   // not persisted); fork() carries it so a job's whole subtree shares
   // one channel. Python needs no equivalent: kill cancels the asyncio
   // task and cancellation is ambient.
-  abortSignal: AbortSignal | null = null
+  declare abortSignal: AbortSignal | null
   // Command-substitution tracking for assignment statements: how many
   // substitutions have run in this session, and the status of the
   // most recent one. An assignment statement snapshots the count
   // before expanding its value and, when it grew, reports the last
   // substitution's status as its own (bash: `x=$(false)` exits 1,
   // `x=abc` exits 0).
-  cmdsubSeq = 0
-  cmdsubStatus = 0
+  declare cmdsubSeq: number
+  declare cmdsubStatus: number
   // `shopt` options, kept apart from `set -o` ones (bash keeps two
   // vocabularies). Only names set away from their default are stored.
   shopts: Record<string, boolean> = {}
@@ -552,7 +554,7 @@ export class SessionState {
     this.logicalCwd = init.logicalCwd
     this.vars = ownRecord(init.vars)
     this.createdAt = init.createdAt ?? Date.now() / 1000
-    this.functions = ownRecord(init.functions)
+    this.functions = functionTable(init.functions)
     this.readonlyFunctions = new Set(init.readonlyFunctions ?? [])
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
@@ -653,9 +655,6 @@ export class SessionState {
     forked.jobWaits = this.jobWaits
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
-    forked.abortSignal = this.abortSignal
-    forked.cmdsubSeq = this.cmdsubSeq
-    forked.cmdsubStatus = this.cmdsubStatus
     forked.shopts = { ...this.shopts }
     forked.aliases = { ...this.aliases }
     forked.aliasMarks = new Map(this.aliasMarks)
@@ -742,7 +741,7 @@ export class SessionState {
       logicalCwd: this.logicalCwd,
       functionNames: this.functionNames,
       vars: copyVars(this.vars),
-      functions: ownRecord(this.functions),
+      functions: functionTable(this.functions),
       readonlyFunctions: new Set(this.readonlyFunctions),
       shellOptions: { ...this.shellOptions },
       positionalArgs: [...this.positionalArgs],
@@ -794,6 +793,7 @@ export class SessionState {
     this.logicalCwd = state.logicalCwd
     this.functionNames = state.functionNames
     this.vars = state.vars
+    releaseFunctions(this.functions)
     this.functions = state.functions
     this.readonlyFunctions = state.readonlyFunctions
     this.shellOptions = state.shellOptions

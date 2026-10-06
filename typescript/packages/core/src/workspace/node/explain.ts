@@ -532,7 +532,10 @@ function afterCd(
   if (target === null || target.startsWith('-') || (lost && !target.startsWith('/'))) {
     return [session, true]
   }
-  return [session.fork({ cwd: resolvePath(target, session.cwd) }), false]
+  const predicted = session.fork({ cwd: resolvePath(target, session.cwd), functions: {} })
+  // A read-only prediction borrows functions from the executing line.
+  predicted.functions = session.functions
+  return [predicted, false]
 }
 
 /**

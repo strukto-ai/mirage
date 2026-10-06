@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { childSession } from '../../../evaluation.ts'
+import { releaseFunctions } from '../../../session/functions.ts'
+
 import { runAsShell } from '../../../../context/session_context.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import { BinViewVFS } from '../../../../vfs/bin/bin.ts'
@@ -126,11 +129,11 @@ export async function handleExecPath(
   if (vfs instanceof BinViewVFS) {
     // The read enforces visibility and path policy; the target still passes
     // its command gate, without needing permission for the stub's helper.
-    const saved = session.snapshot()
+    session = childSession(session)
     try {
       return await runAsShell(() =>
         handleCommandBuiltin(
-          executeFn,
+          (command, opts) => executeFn(command, { ...opts, session }),
           ['--', stripSlash(spec.mountPath), ...args],
           session,
           registry,
@@ -138,7 +141,7 @@ export async function handleExecPath(
         ),
       )
     } finally {
-      session.restore(saved)
+      releaseFunctions(session.functions)
     }
   }
   const words = shebangWords(script)

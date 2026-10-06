@@ -26,6 +26,7 @@ from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import IFS_DEFAULT
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
+from mirage.workspace.evaluation import child_session
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
     BASH_START_FLAGS,
@@ -37,7 +38,11 @@ from mirage.workspace.executor.builtins.script.script import (
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.traps import clear_exit_trap, finish_shell
-from mirage.workspace.session import SessionState
+from mirage.workspace.session import (
+    SessionState,
+    reset_current_session,
+    set_current_session,
+)
 from mirage.workspace.session.state import seed_var
 from mirage.workspace.types import ExecutionNode
 
@@ -162,7 +167,8 @@ async def handle_bash(
             stdin = None
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
-    saved = session.snapshot()
+    session = child_session(session)
+    child_token = set_current_session(session)
     clear_exit_trap(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session.positional_args = positional
@@ -193,7 +199,8 @@ async def handle_bash(
         io = await finish_shell(execute_fn, session, io, stdin)
     finally:
         reset_program_invocation(token)
-        session.restore(saved)
+        session.functions.clear()
+        reset_current_session(child_token)
     label = f"{name} {parsed.path}" if parsed.path else f"{name} -c {script}"
     return io.stdout, io, ExecutionNode(command=label, exit_code=io.exit_code)
 

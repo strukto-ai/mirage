@@ -39,6 +39,7 @@ from mirage.shell.parse import (
     parse,
     syntax_error_result,
 )
+from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -46,6 +47,11 @@ from mirage.workspace.abort import (
     MirageAbortError,
     StatusWriter,
     set_line_writer,
+)
+from mirage.workspace.evaluation import (
+    child_session,
+    execution_session,
+    persistent_session,
 )
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias import expanding_aliases
@@ -213,12 +219,14 @@ async def recurse(
         )
         record_status(session, io.exit_code, transparent=True)
     else:
-        saved = session.snapshot() if substitution else None
-        terminal_output = session.terminal_output
+        child_token = None
+        if substitution:
+            session = child_session(session)
+            child_token = set_current_session(session, owner=ws._session_mgr)
         capture = Terminal()
         waits = JobWaits(capture.jobs)
         rest = session.job_output or session.tty.jobs
-        if saved is not None:
+        if substitution:
             session.terminal_output = False
             inherit_exit_trap(session)
             # A substitution reads its pipe until every writer has closed
@@ -245,10 +253,10 @@ async def recurse(
                 # A substitution runs on a copy of the caller's frames,
                 # and it is a child shell: whatever unwinds out of it
                 # ends it.
-                if saved is None:
+                if not substitution:
                     raise
                 io = ended(sig)
-            if saved is not None:
+            if substitution:
                 io = await finish_shell(
                     partial(
                         recurse,
@@ -277,9 +285,10 @@ async def recurse(
                 io.stdout = out or None
                 io.stderr = err or None
         finally:
-            if saved is not None:
-                session.terminal_output = terminal_output
-                session.restore(saved)
+            if substitution:
+                session.functions.clear()
+                if child_token is not None:
+                    reset_current_session(child_token)
     if io.refusal is not None:
         nested.latest = io.refusal
     return io
@@ -534,7 +543,7 @@ async def run_prepared_line(
     """
     session_id = session.session_id
     cache_facts = ws._dispatcher.capture_cache_facts()
-    effective_session = fork_for_call(session, cwd, env)
+    effective_session = execution_session(fork_for_call(session, cwd, env))
     # The agent of this line, carried with the execution rather than
     # held on the workspace: a nested line inherits it through
     # `recurse`, a concurrent line keeps its own.
@@ -545,6 +554,7 @@ async def run_prepared_line(
     # evaluations get an inert scope.
     is_line = record
     scope = RecordingScope(active=is_line)
+    parse_scope = ParseScope()
 
     session_token = set_current_session(
         effective_session, owner=ws._session_mgr
@@ -560,12 +570,16 @@ async def run_prepared_line(
         # and every nested evaluation under it inherits the identity.
         set_line_writer(frame.writer)
     try:
-        ast = parse(command) if argv is None else literal_tree(argv)
+        ast = (
+            parse_scope.parse(command) if argv is None else literal_tree(argv)
+        )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
         # consulted about it.
         offending = find_syntax_error(
-            ast, expanding_aliases(effective_session)
+            ast,
+            expanding_aliases(effective_session),
+            parse_fn=parse_scope.parse,
         )
         if offending is None and argv is None:
             # tree-sitter accepts an unclosed backtick as a complete
@@ -879,6 +893,11 @@ async def run_prepared_line(
         # fingerprints/drift) and as observer op events. The command
         # event's exit_code says whether the line that emitted them
         # succeeded.
+        parse_scope.release()
+        if persistent_session(effective_session) is not persistent_session(
+            session
+        ):
+            effective_session.functions.clear()
         scope.close()
         reset_current_session(session_token)
         await ws._session_mgr.flush(session.session_id)

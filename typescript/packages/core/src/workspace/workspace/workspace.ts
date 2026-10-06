@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ParseScope } from '../../shell/parse/scope.ts'
+import { releaseFunctions } from '../session/functions.ts'
+
 import { indexConfigDump } from '../snapshot/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { KeyLock } from '../../cache/lock.ts'
@@ -625,7 +628,11 @@ export class Workspace {
         view.checkSpawn()
         const child = session.fork()
         child.processId = parentPid
-        return this.spawnForSession(request, child)
+        try {
+          return this.spawnForSession(request, child)
+        } finally {
+          releaseFunctions(child.functions)
+        }
       },
     })
   }
@@ -710,6 +717,7 @@ export class Workspace {
           })
           return result.exitCode
         } finally {
+          releaseFunctions(child.functions)
           input.stop()
           output.end()
         }
@@ -1141,17 +1149,21 @@ export class Workspace {
   async explain(line: string, sessionId = ''): Promise<Explanation[]> {
     await this.ensureSessionsLoaded()
     const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
-    const parser = await this.getShellParser()
-    const reparse = (text: string): TSNodeLike => parser.parse(text)
-    return explainLine(
-      parser.parse(line),
-      session,
-      this.registry,
-      this.namespace,
-      '',
-      reparse,
-      this.runtimeWorld.wholeLineFor(null) !== null,
-    )
+    const parser = new ParseScope(await this.getShellParser())
+    try {
+      const reparse = (text: string): TSNodeLike => parser.parse(text)
+      return await explainLine(
+        parser.parse(line),
+        session,
+        this.registry,
+        this.namespace,
+        '',
+        reparse,
+        this.runtimeWorld.wholeLineFor(null) !== null,
+      )
+    } finally {
+      parser.release()
+    }
   }
 
   get workspaceId(): string {

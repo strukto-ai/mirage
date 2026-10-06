@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { releaseFunctions } from '../session/functions.ts'
+
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessSupervisor } from '../../process/supervisor.ts'
 import { PathSpec } from '../../types.ts'
@@ -149,6 +151,7 @@ export async function handlePipe(
           throw error
         }
       } finally {
+        releaseFunctions(child.functions)
         upstream?.release()
         if (input !== null && !(input instanceof Uint8Array)) await closeQuietly(input)
         output.end()
@@ -177,6 +180,7 @@ export async function handlePipe(
         limit: session.processes.max,
       })
     } catch (error) {
+      releaseFunctions(child.functions)
       if ((error as { code?: unknown }).code === 'EAGAIN')
         throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
@@ -341,7 +345,7 @@ export async function handleSubshell(
   agentId: string | null = null,
   // The op door, so a subshell honors an `exec` redirect the way the
   // program loop does. A subshell is a child shell, so the redirect it
-  // installs is restored with the rest of the snapshot when the body
+  // installs belongs to the child and is discarded when the body
   // ends.
   dispatch?: DispatchFn,
   // The line's hand-off and its ledger, for a background job to borrow.
@@ -354,7 +358,6 @@ export async function handleSubshell(
   // Runs the subshell's own EXIT action as it ends.
   executeFn: ExecuteFn | null = null,
 ): Promise<Result> {
-  const saved = session.snapshot()
   inheritExitTrap(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.lineOpen = true
@@ -375,8 +378,7 @@ export async function handleSubshell(
       }
       // `set -n` needs no arm here: `executeNode` refuses every node
       // while the option is on, so this loop simply runs a tail of
-      // no-ops. The restore at the end of the subshell is what keeps the
-      // option from leaking to the parent.
+      // no-ops. The child owns the option, so it cannot leak to the parent.
       const isBg = body[i + 1]?.type === NT.BACKGROUND
       if (isBg && jobTable !== null) {
         let launched: Result
@@ -481,7 +483,7 @@ export async function handleSubshell(
       executeFn === null
         ? null
         : (action, opts) =>
-            executeFn(action, { ...opts, ...(jobTable === null ? {} : { jobTable }) }),
+            executeFn(action, { ...opts, session, ...(jobTable === null ? {} : { jobTable }) }),
       session,
       mergedIo.exitCode,
       stdin,
@@ -504,6 +506,6 @@ export async function handleSubshell(
     const combined = parts.length > 0 ? asyncChain(parts) : null
     return [combined, mergedIo, lastExec]
   } finally {
-    session.restore(saved)
+    releaseFunctions(session.functions)
   }
 }

@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { releaseFunctions } from '../session/functions.ts'
+import { childSession, executionSession } from '../evaluation.ts'
+import { ParseScope } from '../../shell/parse/scope.ts'
+
 import { ExecutionScope } from '../execution.ts'
 import { timingReport } from './timing.ts'
 import { PathSpec } from '../../types.ts'
@@ -169,7 +173,16 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
   let next: ExecuteNodeDeps = { ...base }
   if (opts.sink !== undefined) next.sink = opts.sink
   if (opts.signal !== undefined) next.signal = opts.signal
-  if (opts.executionScope !== undefined) next.executionScope = opts.executionScope
+  if (opts.executionScope !== undefined) {
+    next.executionScope = opts.executionScope
+    if (opts.executionScope !== base.executionScope && base.parser instanceof ParseScope) {
+      const parser = base.parser.fork()
+      opts.executionScope.own(() => {
+        parser.release()
+      })
+      next.parser = parser
+    }
+  }
   if (opts.handed !== undefined) next = withHandOff(next, opts.handed)
   return next
 }
@@ -581,7 +594,11 @@ async function runRedirected(
   // returned rather than written. A simple command expands its words
   // before its redirects apply, so what that printed (a substitution's
   // stderr) goes around them; a compound body expands inside them.
-  const simple = command !== null && command.type === NT.COMMAND
+  const simple =
+    command !== null &&
+    (command.type === NT.COMMAND ||
+      command.type === NT.VARIABLE_ASSIGNMENT ||
+      command.type === NT.VARIABLE_ASSIGNMENTS)
   const outer = session.diagnostics
   if (simple) session.diagnostics = []
   let stdout: ByteSource | null
@@ -736,7 +753,7 @@ export interface ExecuteNodeDeps {
    * directly) means an alias definition is stored and printed but never
    * expanded.
    */
-  parser?: ShellParser
+  parser?: ShellParser | ParseScope
   /**
    * Console this node writes its output to as it is produced.
    * When set, the node emits and returns no stdout; when unset
@@ -808,6 +825,7 @@ export async function executeNode(
   // `executeNodeBody` binds it for the node's own lines.
   endsShell = false,
 ): Promise<Result> {
+  session = executionSession(session)
   if (endsShell) {
     const { signal, executionScope } = deps
     const executeFn: ExecuteFn = (cmd, opts) =>
@@ -1006,7 +1024,9 @@ async function executeNodeBody(
     sink !== undefined &&
     !STREAMING_KINDS.has(kind) &&
     kind !== NodeKind.COMMAND &&
-    kind !== NodeKind.REDIRECT
+    kind !== NodeKind.REDIRECT &&
+    kind !== NodeKind.VAR_ASSIGN &&
+    kind !== NodeKind.VAR_ASSIGNS
   ) {
     return drained(sink, ...(await recurse(node, session, stdin, callStack)))
   }
@@ -1166,7 +1186,7 @@ async function executeNodeBody(
         opts?.ownDiagnostics !== false,
         opts?.endsShell === true,
       )
-    const childSession = session.fork()
+    const child = childSession(session)
     const asProgram = isProgramInvocation(session)
     let result: Result | undefined
     let process: ProcessHandle
@@ -1185,7 +1205,7 @@ async function executeNodeBody(
             handleSubshell(
               subRecurse,
               node.children,
-              childSession,
+              child,
               stdin,
               callStack,
               subTable,
@@ -1196,21 +1216,26 @@ async function executeNodeBody(
               sink ?? null,
               executeFn,
             )
-          result = await runWithSession(childSession, () =>
-            asProgram ? runAsProgram(childSession, body) : body(),
+          result = await runWithSession(child, () =>
+            asProgram ? runAsProgram(child, body) : body(),
           )
           return result[1].exitCode
         },
       })
     } catch (error) {
+      releaseFunctions(child.functions)
       if ((error as { code?: unknown }).code === 'EAGAIN')
         throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
-    childSession.processId = process.info.pid
-    await process.task
-    if (result === undefined) throw new Error('subshell completed without a result')
-    return result
+    child.processId = process.info.pid
+    try {
+      await process.task
+      if (result === undefined) throw new Error('subshell completed without a result')
+      return result
+    } finally {
+      releaseFunctions(child.functions)
+    }
   }
 
   if (kind === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {
@@ -1611,7 +1636,7 @@ async function executeNodeBody(
     let mergedIo = new IOResult()
     for (const child of node.namedChildren) {
       if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
-      const [, io] = await recurse(child, session, stdin, callStack)
+      const [, io] = await recurse(child, session, stdin, callStack, { ownDiagnostics: false })
       mergedIo = await mergedIo.merge(io)
     }
     // The statement's status follows the last command substitution

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { childSession } from '../evaluation.ts'
+
 import { seedVar } from '../../workspace/session/state.ts'
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
@@ -246,7 +248,7 @@ describe('handleConnection (&&, ||, ;)', () => {
 })
 
 describe('handleSubshell', () => {
-  it('restores cwd and env after body execution', async () => {
+  it('keeps cwd and env changes in the child', async () => {
     const s = new SessionState({
       sessionId: 'test',
       cwd: '/orig',
@@ -257,7 +259,7 @@ describe('handleSubshell', () => {
       seedVar(session, 'X', 'inside')
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
-    await handleSubshell(execute, [node('a')], s)
+    await handleSubshell(execute, [node('a')], childSession(s))
     expect(s.cwd).toBe('/orig')
     expect(s.env.X).toBe('orig')
   })
@@ -273,7 +275,7 @@ describe('handleSubshell', () => {
         new ExecutionNode(),
       ])
     }
-    const [stdout, io] = await handleSubshell(execute, [node('a'), node('b')], s)
+    const [stdout, io] = await handleSubshell(execute, [node('a'), node('b')], childSession(s))
     expect(io.exitCode).toBe(2)
     expect(decode(await materialize(stdout))).toBe('s1s2')
   })
@@ -291,7 +293,7 @@ describe('handleSubshell', () => {
         new ExecutionNode({ command: nd.text, exitCode: code }),
       ])
     }
-    await handleSubshell(execute, [node('a'), node('b')], s)
+    await handleSubshell(execute, [node('a'), node('b')], childSession(s))
     expect(seen).toEqual([0, 7])
     expect(s.lastExitCode).toBe(0)
   })

@@ -25,6 +25,7 @@ from mirage.shell.join import shell_join
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.path import resolve_path
 from mirage.vfs.bin import BinViewVFS
+from mirage.workspace.evaluation import child_session
 from mirage.workspace.executor.builtins.command.command import (
     handle_command_builtin,
 )
@@ -35,7 +36,11 @@ from mirage.workspace.executor.builtins.script.script import (
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import SessionState
+from mirage.workspace.session import (
+    SessionState,
+    reset_current_session,
+    set_current_session,
+)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -142,7 +147,8 @@ async def handle_exec_path(
         # The read above enforces visibility and path policy. Dispatch the
         # target through its own command gate, without requiring permission
         # for the stub's implementation helper, `command`.
-        saved = session.snapshot()
+        session = child_session(session)
+        child_token = set_current_session(session)
         token = clear_program_invocation()
         try:
             return await handle_command_builtin(
@@ -154,7 +160,8 @@ async def handle_exec_path(
             )
         finally:
             reset_program_invocation(token)
-            session.restore(saved)
+            session.functions.clear()
+            reset_current_session(child_token)
     words = shebang_words(script)
     interp = words[0] if words else "sh"
     if interp in ("sh", "bash"):

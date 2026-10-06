@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mirage.io.async_line_iterator import SharedInput
 from mirage.policy.types import (
@@ -62,6 +62,7 @@ from mirage.workspace.session.constants import (
     CHILD_SHELL_FIELDS,
     INHERITED_FIELDS,
 )
+from mirage.workspace.session.functions import FunctionTable
 from mirage.workspace.session.serialize import (
     commands_from_dict,
     commands_to_dict,
@@ -78,6 +79,8 @@ def copy_state(value: Any) -> Any:
     Args:
         value (Any): the field value.
     """
+    if isinstance(value, FunctionTable):
+        return value.copy()
     if isinstance(value, ShellVar):
         # The record is frozen, but an indexed or associative value is
         # a live container, so the copy has to reach inside it.
@@ -263,7 +266,7 @@ class SessionState:
     # value it describes.
     vars: dict[str, ShellVar] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
-    functions: dict[str, FunctionBody] = field(default_factory=dict)
+    functions: MutableMapping[str, FunctionBody] = field(default_factory=dict)
     # The functions `readonly -f` has frozen. A set beside `functions`
     # rather than a flag on the body because a body is a list of parsed
     # nodes shared with the parser, and the readonly fact is the
@@ -381,14 +384,6 @@ class SessionState:
     _trap_status: int | None = field(default=None, repr=False)
     _getopts_pos: int = field(default=1, repr=False)
     _getopts_optind: int | None = field(default=None, repr=False)
-    # Command-substitution tracking for assignment statements: how many
-    # substitutions have run in this session, and the status of the
-    # most recent one. An assignment statement snapshots the count
-    # before expanding its value and, when it grew, reports the last
-    # substitution's status as its own (bash: `x=$(false)` exits 1,
-    # `x=abc` exits 0).
-    _cmdsub_seq: int = field(default=0, repr=False)
-    _cmdsub_status: int = field(default=0, repr=False)
     # A pipeline's per-segment statuses, parked by `handle_pipe` for the
     # statement boundary that closes it to claim. None between them.
     _pipe_status_pending: tuple[int, ...] | None = field(
@@ -400,8 +395,6 @@ class SessionState:
     _random_state: int | None = field(default=None, repr=False)
     _random_seed: str | None = field(default=None, repr=False)
     _random_last: int = field(default=0, repr=False)
-    # Scoped by the executing node so diagnostics follow its redirections.
-    _diagnostics: list[str | bytes] = field(default_factory=list, repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
     # that uses it, so a definition takes effect from the next line read
     # (`alias x=..; x` on one line finds no `x`; the same two statements
@@ -731,7 +724,29 @@ class SessionState:
             if VarAttr.READONLY in var.attrs
         )
 
+    # Type-only execution view; these are never dataclass/session fields.
+    if TYPE_CHECKING:
+
+        @property
+        def _cmdsub_seq(self) -> int: ...
+
+        @_cmdsub_seq.setter
+        def _cmdsub_seq(self, value: int) -> None: ...
+
+        @property
+        def _cmdsub_status(self) -> int: ...
+
+        @_cmdsub_status.setter
+        def _cmdsub_status(self, value: int) -> None: ...
+
+        @property
+        def _diagnostics(self) -> list[str | bytes]: ...
+
+        @_diagnostics.setter
+        def _diagnostics(self, value: list[str | bytes]) -> None: ...
+
     def __post_init__(self) -> None:
+        self.functions = FunctionTable(self.functions)
         # bash exports `$PWD` from startup, so a session that has never
         # run `cd` still has one. Seeding here rather than at lookup time
         # is what makes it an ordinary variable: assignable, unsettable,
@@ -819,4 +834,6 @@ class SessionState:
             state (dict[str, Any]): what ``snapshot`` returned.
         """
         for name, value in state.items():
+            if name == "functions":
+                self.functions.clear()
             setattr(self, name, value)

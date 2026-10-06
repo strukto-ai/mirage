@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { parentSession, persistentSession } from '../workspace/frame.ts'
+
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
@@ -519,7 +521,16 @@ export function runAsShell<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Whether the line running in this session is a program run. */
 export function isProgramInvocation(session: SessionState): boolean {
-  return programStorage.getStore() === session
+  const marked = programStorage.getStore()
+  if (marked == null) return false
+  for (
+    let current: SessionState | null = session;
+    current !== null;
+    current = parentSession(current)
+  ) {
+    if (persistentSession(current) === persistentSession(marked)) return true
+  }
+  return false
 }
 
 /**

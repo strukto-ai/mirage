@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "id": "assign_redirect_substitution",
+      "seq": 940076,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "value=$(echo err >&2; echo value) 2>/dev/null; echo \"$value\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "value\n",
+        "stderr": "err\n"
+      }
+    },
+    {
+      "id": "assign_redirect_status",
+      "seq": 940077,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "value=$(exit 7) 2>/dev/null; echo status=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "status=7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "assign_redirect_unicode",
+      "seq": 940078,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "  value=$(echo é💡) 2>/dev/null; echo \"$value\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "é💡\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "assign_redirect_multiple",
+      "seq": 940079,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=$(echo one >&2; echo x) y=$(echo two >&2; echo y) 2>/dev/null; echo \"$x:$y\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "x:y\n",
+        "stderr": "one\ntwo\n"
+      }
+    },
+    {
+      "id": "assign_redirect_command",
+      "seq": 940082,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=before; x=child 2>/dev/null echo hello; echo \"$x\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nbefore\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "assign_redirect_logical",
+      "seq": 940083,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "value=$(false) 2>/dev/null || echo failed; value=ok 2>/dev/null && echo \"$value\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "failed\nok\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

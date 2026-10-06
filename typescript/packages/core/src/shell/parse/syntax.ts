@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SyntaxIssue } from './types.ts'
+
 import { IOResult } from '../../io/types.ts'
 import { encodeText } from '../bytes.ts'
 import type { TSNodeLike } from '../types.ts'
@@ -294,14 +296,33 @@ export function findSyntaxError(
   own: ReadonlyMap<string, readonly [number, number]> = new Map(),
   offsets?: readonly number[],
 ): string | null {
+  return findSyntaxIssue(node, parse, aliases, own, offsets)?.offending ?? null
+}
+
+function issue(node: TSNodeLike, offending: string | null): SyntaxIssue | null {
+  return offending === null
+    ? null
+    : { offending, span: { start: node.startIndex ?? 0, end: node.endIndex ?? node.text.length } }
+}
+
+export function findSyntaxIssue(
+  node: TSNodeLike,
+  parse?: (command: string) => TSNodeLike,
+  aliases: ReadonlySet<string> = new Set(),
+  own: ReadonlyMap<string, readonly [number, number]> = new Map(),
+  offsets?: readonly number[],
+): SyntaxIssue | null {
   // Expansion and the `[` builtin own their argument grammar.
   if (node.type === 'expansion') {
-    return node.children.some((child) => child.isMissing && child.type === '}') ? '' : null
+    return node.children.some((child) => child.isMissing && child.type === '}')
+      ? issue(node, '')
+      : null
   }
-  if (node.type === 'test_command' && node.children[0]?.type === '[') return missingQuote(node)
+  if (node.type === 'test_command' && node.children[0]?.type === '[')
+    return issue(node, missingQuote(node))
   if (node.type === 'command_substitution') {
     const unclosed = findUnterminatedBacktick(node.text)
-    if (unclosed !== null) return unclosed
+    if (unclosed !== null) return issue(node, unclosed)
   }
   if (
     node.type === 'command_substitution' &&
@@ -309,7 +330,8 @@ export function findSyntaxError(
     node.text.startsWith('$(') &&
     node.text.endsWith(')')
   ) {
-    return findSyntaxError(parse(node.text.slice(2, -1)), parse)
+    const nested = findSyntaxIssue(parse(node.text.slice(2, -1)), parse)
+    return nested === null ? null : issue(node, nested.offending)
   }
   let stray: [number, string] | null = null
   for (const hit of [
@@ -319,8 +341,9 @@ export function findSyntaxError(
   ]) {
     if (stray === null || hit[0] < stray[0]) stray = hit
   }
-  if (stray !== null) return stray[1]
-  if (!node.hasError) return findUnterminatedQuote(node)
+  if (stray !== null)
+    return { offending: stray[1], span: { start: stray[0], end: stray[0] + stray[1].length } }
+  if (!node.hasError) return issue(node, findUnterminatedQuote(node))
   let previous: TSNodeLike | null = null
   for (const child of node.children) {
     // Bash permits unquoted spaces in associative subscripts. The grammar
@@ -332,7 +355,7 @@ export function findSyntaxError(
       child.children.every((part) => part.type === 'word' && !part.hasError)
     )
       continue
-    if (child.isMissing) return child.text
+    if (child.isMissing) return issue(child, child.text)
     if (
       child.type === 'ERROR' &&
       isStructuralError(child) &&
@@ -342,10 +365,10 @@ export function findSyntaxError(
         previous = child
         continue
       }
-      return child.text
+      return issue(child, child.text)
     }
     if (child.type !== 'ERROR') {
-      const nested = findSyntaxError(child, parse, aliases, own, offsets)
+      const nested = findSyntaxIssue(child, parse, aliases, own, offsets)
       if (nested !== null) return nested
     }
     if (child.isNamed) previous = child

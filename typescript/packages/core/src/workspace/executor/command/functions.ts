@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { retainPrograms } from '../../../shell/parse/program.ts'
+import type { TSNodeLike } from '../../../shell/types.ts'
+
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -54,6 +57,7 @@ export async function executeShellFunction(
   sink?: JobConsole,
 ): Promise<Result> {
   // The body's statements read the caller's stdin in turn.
+  const releaseProgram = retainPrograms(body as TSNodeLike[])
   const bodyStdin = share(stdin)
   const cs = callStack ?? new CallStack()
   // Positional args carry the word as typed ($1 stays sub/a.txt).
@@ -126,6 +130,7 @@ export async function executeShellFunction(
       }
     })
   } finally {
+    releaseProgram()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
     restoreLocals(session, savedLocals)

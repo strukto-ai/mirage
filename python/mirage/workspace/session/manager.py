@@ -528,6 +528,7 @@ class SessionManager:
         if session_id not in self._sessions:
             raise KeyError(session_id)
         async with self._locks[session_id]:
+            self._sessions[session_id].functions.clear()
             del self._sessions[session_id]
         del self._locks[session_id]
         self._line_locks.pop(session_id, None)
@@ -542,6 +543,8 @@ class SessionManager:
             await self.close(sid)
 
     async def close_store(self) -> None:
+        for session in self._sessions.values():
+            session.functions.clear()
         await self._store.close()
 
     def lock_for(self, session_id: str) -> asyncio.Lock:

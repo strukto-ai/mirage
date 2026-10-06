@@ -48,6 +48,7 @@ from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
+from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
@@ -184,6 +185,7 @@ async def handle_background(
     job revokes it when it ends, which spends what no other hand-off
     still holds.
     """
+    release_program = retain_programs([left])
     bg_session = session.fork()
     inherit_exit_trap(bg_session)
     output = session.job_output or session.tty.jobs
@@ -276,6 +278,8 @@ async def handle_background(
                 await console.emit(Channel.STDERR, stderr)
             return io, exec_node
         finally:
+            release_program()
+            bg_session.functions.clear()
             reset_current_session(token)
             if job_handed is not None and decisions is not None:
                 await decisions.revoke(session.session_id, job_handed)
@@ -295,6 +299,8 @@ async def handle_background(
             limit=session.processes.max,
         )
     except Exception as exc:
+        release_program()
+        bg_session.functions.clear()
         # A submission that fails (a console the table cannot build, a
         # session at its process cap) starts no runner, so nothing would
         # ever revoke the job's hand-off: its grants would stay reserved
