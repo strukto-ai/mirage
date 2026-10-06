@@ -151,7 +151,8 @@ async def _batch_lines(
     repo: BaseRepo, heads: list[tuple[bytes, ObjectID | None]], contents: bool
 ) -> AsyncIterator[bytes]:
     """The batch answers in order, each object's bytes read only when its
-    turn comes, so a long ``--batch`` never holds every object at once.
+    turn comes, so a long ``--batch`` never holds every object at once; a
+    record goes out whole or not at all.
 
     Args:
         repo (BaseRepo): the opened repository.

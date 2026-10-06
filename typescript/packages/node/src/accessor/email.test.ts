@@ -16,12 +16,13 @@ import net from 'node:net'
 import { expect, it } from 'vitest'
 import { EmailAccessor } from './email.ts'
 
-// The server greets, answers each command and resets the socket 100 ms in: the
-// uncaught `error` event that ended the process. Mirrors test_email.py.
-function resettingServer(): Promise<{ server: net.Server; port: number; opened: () => number }> {
-  let connections = 0
+// An IMAP server that answers every command and keeps its sockets, so the test
+// resets them once the client is connected: the uncaught `error` event that
+// ended the process. Mirrors test_email.py.
+function imapServer(): Promise<{ server: net.Server; port: number; sockets: net.Socket[] }> {
+  const sockets: net.Socket[] = []
   const server = net.createServer((sock) => {
-    connections += 1
+    sockets.push(sock)
     sock.on('error', () => undefined)
     sock.write('* OK IMAP4rev1 ready\r\n')
     let buf = ''
@@ -36,18 +37,17 @@ function resettingServer(): Promise<{ server: net.Server; port: number; opened: 
         end = buf.indexOf('\r\n')
       }
     })
-    setTimeout(() => sock.resetAndDestroy(), 100)
   })
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
       const address = server.address() as net.AddressInfo
-      resolve({ server, port: address.port, opened: () => connections })
+      resolve({ server, port: address.port, sockets })
     })
   })
 }
 
 it('drops an IMAP client whose socket the server reset and connects afresh', async () => {
-  const { server, port, opened } = await resettingServer()
+  const { server, port, sockets } = await imapServer()
   const accessor = new EmailAccessor({
     imapHost: '127.0.0.1',
     imapPort: port,
@@ -62,9 +62,11 @@ it('drops an IMAP client whose socket the server reset and connects afresh', asy
   })
   try {
     const first = await accessor.getImap()
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    const closed = new Promise((resolve) => first.once('close', resolve))
+    for (const sock of sockets) sock.resetAndDestroy()
+    await closed
     expect(await accessor.getImap()).not.toBe(first)
-    expect(opened()).toBe(2)
+    expect(sockets).toHaveLength(2)
   } finally {
     await accessor.close()
     server.close()

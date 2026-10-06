@@ -152,7 +152,8 @@ async function batchHead(
 
 /**
  * The batch answers in order, each object's bytes read only when its turn
- * comes, so a long `--batch` never holds every object at once.
+ * comes, so a long `--batch` never holds every object at once; a record goes out
+ * whole or not at all.
  */
 async function* batchLines(
   repo: Repo,
@@ -160,9 +161,10 @@ async function* batchLines(
   contents: boolean,
 ): AsyncIterable<Uint8Array> {
   for (const [head, oid] of heads) {
+    const body = contents && oid !== null ? await raw(repo, oid) : null
     yield head
-    if (contents && oid !== null) {
-      yield await raw(repo, oid)
+    if (body !== null) {
+      yield body
       yield ENC.encode('\n')
     }
   }
