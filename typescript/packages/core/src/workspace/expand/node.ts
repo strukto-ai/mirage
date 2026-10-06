@@ -37,6 +37,7 @@ import { expandBraces, isAtSplat, landArithWrites, parameterChunks } from './var
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { ExecutionScope } from '../execution.ts'
+import { recordStatus } from '../executor/statement.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 
 /**
@@ -111,6 +112,7 @@ async function expandBacktickRegion(
     context.frame.diagnostics.push(await io.materializeStderr())
     context.frame.cmdsubSeq += 1
     context.frame.cmdsubStatus = io.exitCode
+    recordStatus(context.session, io.exitCode, true)
   }
   return out
 }
@@ -599,10 +601,12 @@ async function substitution(
   const text = decodeText(await io.materializeStdout()).replace(/\n+$/, '')
   // Record the substitution's status: an assignment-only statement
   // whose value ran substitutions reports the last one's status as
-  // its own (see assignmentStatus).
+  // its own (see assignmentStatus), and `$?` reads it in the words that
+  // follow (`false; echo $(true) $?` prints 0).
   context.frame.diagnostics.push(await io.materializeStderr())
   context.frame.cmdsubSeq += 1
   context.frame.cmdsubStatus = io.exitCode
+  recordStatus(context.session, io.exitCode, true)
   return text
 }
 

@@ -41,6 +41,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.statement import record_status
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.fields import join_chunks, value_piece
 from mirage.workspace.expand.types import Chunk, Piece
@@ -114,6 +115,7 @@ async def _expand_backtick_region(
         context.frame.diagnostics.append(await io.materialize_stderr())
         context.frame.cmdsub_seq += 1
         context.frame.cmdsub_status = io.exit_code
+        record_status(context.session, io.exit_code, transparent=True)
     return "".join(parts)
 
 
@@ -685,10 +687,12 @@ async def _substitution(
     text = decode_text(await io.materialize_stdout()).rstrip("\n")
     # Record the substitution's status: an assignment-only
     # statement whose value ran substitutions reports the last
-    # one's status as its own (see assignment_status).
+    # one's status as its own (see assignment_status), and `$?` reads
+    # it in the words that follow (`false; echo $(true) $?` prints 0).
     context.frame.diagnostics.append(await io.materialize_stderr())
     context.frame.cmdsub_seq += 1
     context.frame.cmdsub_status = io.exit_code
+    record_status(context.session, io.exit_code, transparent=True)
     return text
 
 
