@@ -173,7 +173,6 @@ export async function handleBackground(
 ): Promise<JobHandlerResult> {
   const session = context.session
   const releaseProgram = retainPrograms([left])
-  const executionScope = new ExecutionScope()
   const childEvaluation = context.fork()
   const bgSession = childEvaluation.session
   inheritExitTrap(bgSession)
@@ -213,7 +212,7 @@ export async function handleBackground(
         const opts: ExecuteNodeOpts = {
           sink: console_,
           signal: abort.signal,
-          executionScope,
+          executionScope: new ExecutionScope(),
           endsShell: true,
         }
         if (jobHanded !== null) opts.handed = jobHanded
@@ -261,7 +260,6 @@ export async function handleBackground(
     try {
       return await (asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, body) : body())
     } finally {
-      executionScope.release()
       releaseProgram()
       releaseFunctions(bgSession.functions)
       if (jobHanded !== null && decisions !== null) {
@@ -286,7 +284,6 @@ export async function handleBackground(
       limit: session.processes.max,
     })
   } catch (err) {
-    executionScope.release()
     releaseProgram()
     releaseFunctions(bgSession.functions)
     // A submission that fails (a console the table cannot build, a

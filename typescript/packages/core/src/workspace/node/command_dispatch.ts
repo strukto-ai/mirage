@@ -55,7 +55,8 @@ import {
   aliasCommandText,
   expandingAliases,
 } from '../executor/builtins/alias/index.ts'
-import { findSyntaxError, syntaxErrorResult, type ShellParser } from '../../shell/parse/index.ts'
+import { findSyntaxError, syntaxErrorResult } from '../../shell/parse/index.ts'
+import type { ParseScope } from '../../shell/parse/scope.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import { guardIO, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import {
@@ -143,9 +144,10 @@ export async function executeCommand(
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signal?: AbortSignal,
-  // The shell parser; only alias expansion needs it. Absent means an
+  // The line's parse scope; only alias expansion needs it, and each
+  // expansion parses in a fork released when it ends. Absent means an
   // alias is stored and printed but never expanded.
-  parser?: Pick<ShellParser, 'parse' | 'sourceOffsets'>,
+  parser?: ParseScope,
   // The agent the line is attributed to, which an approval request names.
   agentId = '',
   // The line's hand-off, which its gate claims on and runs on.
@@ -182,47 +184,56 @@ export async function executeCommand(
       const [rewritten, texts] = rewrite
       let at = (headNode.startIndex ?? 0) - base
       const line = source.slice(0, at) + rewritten
-      const ast = parser.parse(line)
-      const own = new Map<string, readonly [number, number]>()
-      for (const [alias, text] of texts) {
-        own.set(alias, [at, at + text.length])
-        at += text.length
-      }
-      const reparse = (text: string): TSNodeLike => parser.parse(text)
-      const offending = findSyntaxError(
-        ast,
-        reparse,
-        expandingAliases(session),
-        own,
-        parser.sourceOffsets(line, ast),
-      )
-      if (offending !== null) {
-        const io = syntaxErrorResult(offending, ast)
-        const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
-        return [null, io, new ExecutionNode({ command: head, exitCode: io.exitCode, stderr: bad })]
-      }
-      session.aliasStack.push(head)
-      // The rewritten line is read from this node, so it runs as a line
-      // of its own under the word that named it: each invocation of one
-      // alias is a place of its own on the line (`c && c` asks twice, as
-      // its spelled-out form does), and what its gates claim is the
-      // line's again at its end. Run on the line's own hand-off, both
-      // reads stood at the same offsets of the same text and the second
-      // ran on the first's nod.
-      const expansion = handed === undefined ? null : evaluatedFrom(node, handed)
+      const scope = parser.fork()
       try {
-        // In the caller's frame, as Python's line root has one: the
-        // alias's text is the caller's own line.
-        return await recurse(
+        const ast = scope.parse(line)
+        const own = new Map<string, readonly [number, number]>()
+        for (const [alias, text] of texts) {
+          own.set(alias, [at, at + text.length])
+          at += text.length
+        }
+        const reparse = (text: string): TSNodeLike => scope.parse(text)
+        const offending = findSyntaxError(
           ast,
-          context,
-          stdinIn,
-          callStack ?? new CallStack(),
-          expansion === null ? undefined : { handed: expansion },
+          reparse,
+          expandingAliases(session),
+          own,
+          scope.sourceOffsets(line, ast),
         )
+        if (offending !== null) {
+          const io = syntaxErrorResult(offending, ast)
+          const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+          return [
+            null,
+            io,
+            new ExecutionNode({ command: head, exitCode: io.exitCode, stderr: bad }),
+          ]
+        }
+        session.aliasStack.push(head)
+        // The rewritten line is read from this node, so it runs as a line
+        // of its own under the word that named it: each invocation of one
+        // alias is a place of its own on the line (`c && c` asks twice, as
+        // its spelled-out form does), and what its gates claim is the
+        // line's again at its end. Run on the line's own hand-off, both
+        // reads stood at the same offsets of the same text and the second
+        // ran on the first's nod.
+        const expansion = handed === undefined ? null : evaluatedFrom(node, handed)
+        try {
+          // In the caller's frame, as Python's line root has one: the
+          // alias's text is the caller's own line.
+          return await recurse(
+            ast,
+            context,
+            stdinIn,
+            callStack ?? new CallStack(),
+            expansion === null ? undefined : { handed: expansion },
+          )
+        } finally {
+          session.aliasStack.pop()
+          if (expansion !== null) registry.decisions.handUp(session.sessionId, expansion)
+        }
       } finally {
-        session.aliasStack.pop()
-        if (expansion !== null) registry.decisions.handUp(session.sessionId, expansion)
+        scope.release()
       }
     }
   }

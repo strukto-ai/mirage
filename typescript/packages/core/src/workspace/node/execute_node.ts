@@ -14,7 +14,7 @@
 
 import { runWithEvaluation, type EvaluationContext, childContext } from '../evaluation.ts'
 import { releaseFunctions } from '../session/functions.ts'
-import { ParseScope } from '../../shell/parse/scope.ts'
+import type { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
 import { timingReport } from './timing.ts'
@@ -32,7 +32,6 @@ import { type ByteSource, IOResult } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
-import type { ShellParser } from '../../shell/parse/index.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import {
@@ -173,16 +172,7 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
   let next: ExecuteNodeDeps = { ...base }
   if (opts.sink !== undefined) next.sink = opts.sink
   if (opts.signal !== undefined) next.signal = opts.signal
-  if (opts.executionScope !== undefined) {
-    next.executionScope = opts.executionScope
-    if (opts.executionScope !== base.executionScope && base.parser instanceof ParseScope) {
-      const parser = base.parser.fork()
-      opts.executionScope.own(() => {
-        parser.release()
-      })
-      next.parser = parser
-    }
-  }
+  if (opts.executionScope !== undefined) next.executionScope = opts.executionScope
   if (opts.handed !== undefined) next = withHandOff(next, opts.handed)
   return next
 }
@@ -758,7 +748,7 @@ export interface ExecuteNodeDeps {
    * directly) means an alias definition is stored and printed but never
    * expanded.
    */
-  parser?: ShellParser | ParseScope
+  parser?: ParseScope
   /**
    * Console this node writes its output to as it is produced.
    * When set, the node emits and returns no stdout; when unset
