@@ -15,6 +15,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ObserveModule from '../../observe/context.ts'
 import type * as ApiModule from './api.ts'
+import type * as ContextModule from '../../cache/context.ts'
 
 const H = vi.hoisted(() => ({
   order: [] as string[],
@@ -44,15 +45,18 @@ vi.mock('./api.ts', async () => {
     updateFile: vi.fn(),
     updateFolder: vi.fn(),
     copyFile: vi.fn(),
+    copyFolder: vi.fn(),
   }
 })
 
-vi.mock('../../cache/context.ts', () => {
+vi.mock('../../cache/context.ts', async () => {
+  const actual = await vi.importActual<typeof ContextModule>('../../cache/context.ts')
   return {
-    invalidateAfterWrite: vi.fn(),
-    invalidateAfterUnlink: vi.fn(),
-    invalidateSubtree: vi.fn(),
-    invalidateAfterMove: vi.fn(),
+    evictAfter: actual.evictAfter,
+    invalidateAfterWrite: vi.fn(() => Promise.resolve()),
+    invalidateAfterUnlink: vi.fn(() => Promise.resolve()),
+    invalidateSubtree: vi.fn(() => Promise.resolve()),
+    invalidateAfterMove: vi.fn(() => Promise.resolve()),
   }
 })
 
@@ -306,6 +310,107 @@ describe('box write ops', () => {
   it('copy copies a file into the dst parent', async () => {
     await copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt'))
     expect(vi.mocked(api.copyFile)).toHaveBeenCalledWith(STUB_TM, '200', '100', 'c.txt')
+  })
+
+  const COPY_TREE: Record<string, ApiModule.BoxItem[]> = {
+    '0': [{ type: 'folder', id: '100', name: 'data' }],
+    '100': [
+      { type: 'file', id: '200', name: 'a.txt', size: 5 },
+      { type: 'file', id: '210', name: 'b.txt', size: 5 },
+      { type: 'folder', id: '300', name: 'sub' },
+      { type: 'folder', id: '400', name: 'dst' },
+    ],
+    '300': [{ type: 'file', id: '310', name: 'x.txt', size: 3 }],
+    '400': [{ type: 'file', id: '410', name: 'x.txt', size: 3 }],
+  }
+
+  it.each<[string, string, string, boolean, string | null, string[][]]>([
+    [
+      'file-ok',
+      '/data/a.txt',
+      '/data/c.txt',
+      false,
+      null,
+      [
+        ['copyFile', 'c.txt'],
+        ['write', '/data/c.txt'],
+      ],
+    ],
+    [
+      'file-fails',
+      '/data/a.txt',
+      '/data/b.txt',
+      true,
+      'copy failed',
+      [
+        ['deleteFile', '210'],
+        ['copyFile', 'b.txt'],
+        ['write', '/data/b.txt'],
+      ],
+    ],
+    [
+      'folder-ok',
+      '/data/sub',
+      '/data/new',
+      false,
+      null,
+      [
+        ['copyFolder', 'new'],
+        ['subtree', '/data/new'],
+      ],
+    ],
+    [
+      'folder-fails',
+      '/data/sub',
+      '/data/dst',
+      true,
+      'copy failed',
+      [
+        ['deleteFile', '410'],
+        ['copyFile', 'x.txt'],
+        ['subtree', '/data/dst'],
+      ],
+    ],
+    ['refused', '/data/sub', '/data/a.txt', false, 'ENOTDIR', [['subtree', '/data/a.txt']]],
+  ])('a copy evicts after it ends: %s', async (_row, src, dst, fails, raised, expected) => {
+    const events: string[][] = []
+    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
+      Promise.resolve(COPY_TREE[folderId] ?? []),
+    )
+    vi.mocked(api.copyFile).mockImplementation((_tm, _id, _parent, name) => {
+      events.push(['copyFile', name ?? ''])
+      if (fails) return Promise.reject(new Error('copy failed'))
+      return Promise.resolve({} as ApiModule.BoxItem)
+    })
+    vi.mocked(api.copyFolder).mockImplementation((_tm, _id, _parent, name) => {
+      events.push(['copyFolder', name ?? ''])
+      return Promise.resolve({} as ApiModule.BoxItem)
+    })
+    vi.mocked(api.deleteFile).mockImplementation((_tm, id) => {
+      events.push(['deleteFile', id])
+      return Promise.resolve()
+    })
+    vi.mocked(invalidateAfterWrite).mockImplementation((path) => {
+      events.push(['write', typeof path === 'string' ? path : path.virtual])
+      return Promise.resolve()
+    })
+    vi.mocked(invalidateSubtree).mockImplementation((path) => {
+      events.push(['subtree', typeof path === 'string' ? path : path.virtual])
+      return Promise.resolve()
+    })
+    try {
+      const copied = copy(makeAccessor(), spec(src), spec(dst))
+      if (raised === 'copy failed') await expect(copied).rejects.toThrow(raised)
+      else if (raised !== null) await expect(copied).rejects.toMatchObject({ code: raised })
+      else await copied
+      expect(events).toEqual(expected)
+    } finally {
+      vi.mocked(api.copyFile).mockReset()
+      vi.mocked(api.copyFolder).mockReset()
+      vi.mocked(api.deleteFile).mockReset()
+      vi.mocked(invalidateAfterWrite).mockReset()
+      vi.mocked(invalidateSubtree).mockReset()
+    }
   })
 })
 

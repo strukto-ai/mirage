@@ -528,6 +528,126 @@ async def test_write_records_the_virtual_path(root_accessor):
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
 
 
+_COPY_TREE = {
+    "0": [{"id": "100", "name": "data", "type": "folder"}],
+    "100": [
+        {"id": "200", "name": "a.txt", "type": "file", "size": 5},
+        {"id": "210", "name": "b.txt", "type": "file", "size": 5},
+        {"id": "300", "name": "sub", "type": "folder"},
+        {"id": "400", "name": "dst", "type": "folder"},
+    ],
+    "300": [{"id": "310", "name": "x.txt", "type": "file", "size": 3}],
+    "400": [{"id": "410", "name": "x.txt", "type": "file", "size": 3}],
+}
+
+
+async def _copy_list(_tm, folder_id, limit=1000):
+    return _COPY_TREE.get(folder_id, [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("src", "dst", "fails", "raised", "expected"),
+    [
+        (
+            "/data/a.txt",
+            "/data/c.txt",
+            False,
+            None,
+            [
+                ("copy_file", "c.txt"),
+                ("write", "/data/c.txt"),
+            ],
+        ),
+        (
+            "/data/a.txt",
+            "/data/b.txt",
+            True,
+            RuntimeError,
+            [
+                ("delete_file", "210"),
+                ("copy_file", "b.txt"),
+                ("write", "/data/b.txt"),
+            ],
+        ),
+        (
+            "/data/sub",
+            "/data/new",
+            False,
+            None,
+            [
+                ("copy_folder", "new"),
+                ("subtree", "/data/new"),
+            ],
+        ),
+        (
+            "/data/sub",
+            "/data/dst",
+            True,
+            RuntimeError,
+            [
+                ("delete_file", "410"),
+                ("copy_file", "x.txt"),
+                ("subtree", "/data/dst"),
+            ],
+        ),
+        (
+            "/data/sub",
+            "/data/a.txt",
+            False,
+            NotADirectoryError,
+            [("subtree", "/data/a.txt")],
+        ),
+    ],
+    ids=["file-ok", "file-fails", "folder-ok", "folder-fails", "refused"],
+)
+async def test_a_copy_evicts_after_it_ends(
+    root_accessor, src, dst, fails, raised, expected
+):
+    events: list[tuple[str, str]] = []
+
+    async def fake_copy_file(_tm, _file_id, _parent_id, name=None):
+        events.append(("copy_file", name))
+        if fails:
+            raise RuntimeError("copy failed")
+        return {}
+
+    async def fake_copy_folder(_tm, _folder_id, _parent_id, name=None):
+        events.append(("copy_folder", name))
+        return {}
+
+    async def fake_delete_file(_tm, file_id):
+        events.append(("delete_file", file_id))
+
+    async def wrote(path):
+        events.append(("write", path.virtual))
+
+    async def dropped(path):
+        events.append(("subtree", path.virtual))
+
+    with (
+        patch("mirage.core.box.resolve.list_folder_items", new=_copy_list),
+        patch("mirage.core.box.copy.list_folder_items", new=_copy_list),
+        patch("mirage.core.box.copy.copy_file", new=fake_copy_file),
+        patch("mirage.core.box.copy.copy_folder", new=fake_copy_folder),
+        patch("mirage.core.box.copy.delete_file", new=fake_delete_file),
+        patch(
+            "mirage.core.box.copy.invalidate_after_write",
+            new=AsyncMock(side_effect=wrote),
+        ),
+        patch(
+            "mirage.core.box.copy.invalidate_subtree",
+            new=AsyncMock(side_effect=dropped),
+        ),
+    ):
+        if raised is None:
+            await copy(root_accessor, _spec(src), _spec(dst))
+        else:
+            with pytest.raises(raised):
+                await copy(root_accessor, _spec(src), _spec(dst))
+    assert events == expected
+
+
 def _file_entry(**fields) -> dict:
     return {
         "type": "file",

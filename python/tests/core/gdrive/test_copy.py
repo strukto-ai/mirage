@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.core.gdrive.copy import copy
@@ -92,3 +94,104 @@ async def test_copy_dir_onto_file_raises(fake_drive, gdrive_accessor):
 async def test_copy_missing_src_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
         await copy(gdrive_accessor, spec("/missing.txt"), spec("/dst.txt"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("folder", "dst_kind", "fails", "raised", "expected"),
+    [
+        (
+            False,
+            None,
+            False,
+            None,
+            [("copy_file", "dst.txt"), ("write", "/dst.txt")],
+        ),
+        (
+            False,
+            "file",
+            True,
+            RuntimeError,
+            [
+                ("delete_file",),
+                ("copy_file", "dst.txt"),
+                ("write", "/dst.txt"),
+            ],
+        ),
+        (
+            True,
+            None,
+            False,
+            None,
+            [("copy_file", "f.txt"), ("subtree", "/dst")],
+        ),
+        (
+            True,
+            "folder",
+            True,
+            RuntimeError,
+            [("copy_file", "f.txt"), ("subtree", "/dst")],
+        ),
+        (
+            True,
+            "file",
+            False,
+            NotADirectoryError,
+            [("subtree", "/dst")],
+        ),
+    ],
+    ids=["file-ok", "file-fails", "folder-ok", "folder-fails", "refused"],
+)
+async def test_a_copy_evicts_after_it_ends(
+    fake_drive, gdrive_accessor, folder, dst_kind, fails, raised, expected
+):
+    if folder:
+        src = fake_drive.folder("src")
+        fake_drive.add("f.txt", parent=src, content=b"new")
+        src_path, dst_path = "/src", "/dst"
+    else:
+        fake_drive.add("src.txt", content=b"new")
+        src_path, dst_path = "/src.txt", "/dst.txt"
+    dst_name = dst_path.lstrip("/")
+    if dst_kind == "file":
+        fake_drive.add(dst_name, content=b"old")
+    elif dst_kind == "folder":
+        fake_drive.folder(dst_name)
+    events: list[tuple[str, ...]] = []
+
+    async def copy_file(token_manager, file_id, name, parent_id):
+        events.append(("copy_file", name))
+        if fails:
+            raise RuntimeError("copy failed")
+        return await fake_drive.copy_file(
+            token_manager, file_id, name, parent_id
+        )
+
+    async def delete_file(token_manager, file_id):
+        events.append(("delete_file",))
+        await fake_drive.delete_file(token_manager, file_id)
+
+    async def wrote(path):
+        events.append(("write", path.virtual))
+
+    async def dropped(path):
+        events.append(("subtree", path.virtual))
+
+    with (
+        patch("mirage.core.gdrive.copy.copy_file", new=copy_file),
+        patch("mirage.core.gdrive.copy.delete_file", new=delete_file),
+        patch(
+            "mirage.core.gdrive.copy.invalidate_after_write",
+            new=AsyncMock(side_effect=wrote),
+        ),
+        patch(
+            "mirage.core.gdrive.copy.invalidate_subtree",
+            new=AsyncMock(side_effect=dropped),
+        ),
+    ):
+        if raised is None:
+            await copy(gdrive_accessor, spec(src_path), spec(dst_path))
+        else:
+            with pytest.raises(raised):
+                await copy(gdrive_accessor, spec(src_path), spec(dst_path))
+    assert events == expected
