@@ -21,7 +21,7 @@ from mirage.policy import PolicyDenied
 from mirage.shell.array import build_assoc_literal, build_indexed_literal
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, DiscardSignal
-from mirage.shell.printer import function_text
+from mirage.shell.printer import stored_function_text
 from mirage.shell.variable import ShellValue, VarAttr, attr_letters
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.executor.builtins.declare.constants import (
@@ -457,7 +457,7 @@ def handle_declare_functions(
         if "F" in flags:
             lines.append(name if names else f"declare -f {name}")
         else:
-            lines.append(function_text(name, session.functions[name]))
+            lines.append(stored_function_text(name, session.functions[name]))
     out = encode_text(("\n".join(lines) + "\n") if lines else "")
     code = 1 if missing else 0
     return (

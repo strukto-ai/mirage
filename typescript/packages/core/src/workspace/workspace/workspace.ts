@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ParseScope } from '../../shell/parse/scope.ts'
-import { releaseFunctions } from '../session/functions.ts'
 
 import { indexConfigDump } from '../snapshot/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -630,11 +629,8 @@ export class Workspace {
         view.checkSpawn()
         const child = session.fork()
         child.processId = parentPid
-        try {
-          return this.spawnForSession(request, child)
-        } finally {
-          releaseFunctions(child.functions)
-        }
+
+        return this.spawnForSession(request, child)
       },
     })
   }
@@ -719,7 +715,6 @@ export class Workspace {
           })
           return result.exitCode
         } finally {
-          releaseFunctions(child.functions)
           input.stop()
           output.end()
         }

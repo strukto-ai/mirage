@@ -1069,10 +1069,8 @@ describe('fillEnv through execute', () => {
       new DenyNamed('printenv'),
     ])
     try {
-      const parser = await getTestParser()
       const session = ws.getSession(ws.defaultSessionId)
-      const tree = parser.parse('printenv TOKEN; echo "e:$TOKEN"')
-      session.functions.f = tree.namedChildren.filter((node) => node.type === 'command')
+      session.functions.f = 'f() { printenv TOKEN; echo "e:$TOKEN"; }'
       const io = await ws.shell('f')
       expect(stdoutStr(io)).toBe('e:t0\n')
       expect(io.refusal?.reason).toContain('printenv is off')

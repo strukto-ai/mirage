@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithEvaluation, type EvaluationContext } from '../../../evaluation.ts'
-import { releaseFunctions } from '../../../session/functions.ts'
 
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
@@ -592,7 +591,6 @@ async function runLines(
         return io
       })
     } finally {
-      releaseFunctions(child.functions)
       taken.delete(slot)
     }
   }

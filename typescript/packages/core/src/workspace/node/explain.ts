@@ -532,6 +532,7 @@ function* walkNode(
   reparse: (line: string) => TSNodeLike,
   lost = false,
 ): Walk {
+  if (node.type === NodeType.FUNCTION_DEFINITION) frame = rootFrame(node, frame.parent)
   if (node.type === NodeType.COMMAND) {
     let walked: [SessionState, boolean] = [session, lost]
     const words = wordsOf(node, home)
@@ -628,9 +629,7 @@ function afterCd(
   if (target === null || target.startsWith('-') || (lost && !target.startsWith('/'))) {
     return [session, true]
   }
-  const predicted = session.fork({ cwd: resolvePath(target, session.cwd), functions: {} })
-  // A read-only prediction borrows functions from the executing line.
-  predicted.functions = session.functions
+  const predicted = session.fork({ cwd: resolvePath(target, session.cwd) })
   return [predicted, false]
 }
 

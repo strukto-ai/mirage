@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
@@ -38,7 +38,6 @@ from mirage.shell.constants import (
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
 from mirage.shell.job_table import JobWaits
-from mirage.shell.types import FunctionBody
 from mirage.shell.variable import (
     ManagedRef,
     ShellVar,
@@ -59,7 +58,7 @@ from mirage.types import (
 )
 from mirage.workspace.abort import StatusWriter
 from mirage.workspace.session.constants import INHERITED_FIELDS
-from mirage.workspace.session.functions import FunctionTable
+from mirage.workspace.session.functions import function_sources
 from mirage.workspace.session.serialize import (
     commands_from_dict,
     commands_to_dict,
@@ -76,9 +75,6 @@ def copy_state(value: Any) -> Any:
     Args:
         value (Any): the field value.
     """
-    if isinstance(value, FunctionTable):
-        # The fork's own table leases the bodies when it is built.
-        return dict(value)
     if isinstance(value, ShellVar):
         # The record is frozen, but an indexed or associative value is
         # a live container, so the copy has to reach inside it.
@@ -280,11 +276,10 @@ class SessionState:
     # value it describes.
     vars: dict[str, ShellVar] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
-    functions: MutableMapping[str, FunctionBody] = field(default_factory=dict)
+    functions: dict[str, str] = field(default_factory=dict)
     # The functions `readonly -f` has frozen. A set beside `functions`
-    # rather than a flag on the body because a body is a list of parsed
-    # nodes shared with the parser, and the readonly fact is the
-    # session's, not the definition's. Kept in step with the readonly
+    # rather than a flag on the source because readonly is the
+    # session's property, not the definition's. Kept in step with the readonly
     # *variable* set only by name: `readonly -f f` and `readonly f` are
     # two different frozen things in bash, and each refuses in its own
     # voice.
@@ -503,6 +498,10 @@ class SessionState:
                     entry["fetch"] = "eager"
                 refs[name] = entry
             data["managed"] = refs
+        if self.functions:
+            data["functions"] = dict(self.functions)
+        if self.readonly_functions:
+            data["readonly_functions"] = sorted(self.readonly_functions)
         if self.mount_modes is not None:
             data["mount_modes"] = {
                 prefix: mode.value for prefix, mode in self.mount_modes.items()
@@ -586,6 +585,11 @@ class SessionState:
                     ),
                 )
             data["vars"] = out_vars
+        if "readonly_functions" in data:
+            data = {
+                **data,
+                "readonly_functions": set(data["readonly_functions"]),
+            }
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")
@@ -739,7 +743,7 @@ class SessionState:
         )
 
     def __post_init__(self) -> None:
-        self.functions = FunctionTable(self.functions)
+        self.functions = function_sources(self.functions)
         # bash exports `$PWD` from startup, so a session that has never
         # run `cd` still has one. Seeding here rather than at lookup time
         # is what makes it an ordinary variable: assignable, unsettable,

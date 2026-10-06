@@ -129,6 +129,8 @@ describe('SessionManager with a SessionStore', () => {
       env: { K: 'v' },
       created_at: 1.0,
       mount_modes: { '/data': 'read' },
+      functions: { f: 'f() { echo persisted; }' },
+      readonly_functions: ['f'],
     })
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
@@ -136,6 +138,8 @@ describe('SessionManager with a SessionStore', () => {
     expect(s.cwd).toBe('/w')
     expect(s.env).toEqual({ K: 'v', PWD: '/w', PATH: '/usr/bin', IFS: ' \t\n' })
     expect(s.mountModes?.get('/data')).toBe(MountMode.READ)
+    expect(s.functions).toEqual({ f: 'f() { echo persisted; }' })
+    expect(s.readonlyFunctions).toEqual(new Set(['f']))
   })
 
   it('locally created sessions win a hydration conflict', async () => {
@@ -150,9 +154,17 @@ describe('SessionManager with a SessionStore', () => {
 
   it('default session adopts stored durable fields', async () => {
     const store = new RAMSessionStore()
-    await store.set('def', { session_id: 'def', cwd: '/w', env: { A: '1' } })
+    await store.set('def', {
+      session_id: 'def',
+      cwd: '/w',
+      env: { A: '1' },
+      functions: { f: 'f() { :; }' },
+      readonly_functions: ['f'],
+    })
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
+    expect(m.get('def').functions).toEqual({ f: 'f() { :; }' })
+    expect(m.get('def').readonlyFunctions).toEqual(new Set(['f']))
     expect(m.cwd).toBe('/w')
     expect(m.env).toEqual({ A: '1', PWD: '/w', PATH: '/usr/bin', IFS: ' \t\n' })
   })

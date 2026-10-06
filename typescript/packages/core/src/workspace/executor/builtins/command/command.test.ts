@@ -248,7 +248,7 @@ describe('handleCommandBuiltin run mode', () => {
 
   it('masks a shadowing function for the inner run and restores it', async () => {
     const session = makeSession()
-    const fnBody = ['<fn-body>']
+    const fnBody = 'cat() { :; }'
     session.functions.cat = fnBody
     let maskedDuringCall = false
     const shell = vi.fn(() => {

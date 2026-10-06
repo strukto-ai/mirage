@@ -14,12 +14,12 @@
 
 import re
 import shlex
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 
-from mirage.shell.bytes import decode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.constants import (
     FD_BOTH,
     FD_CLOSE,
@@ -37,6 +37,7 @@ from mirage.shell.parse.heredoc import (
     clean_delimiter,
     delimiter_quoted,
 )
+from mirage.shell.parse.program import ProgramNode
 from mirage.shell.types import (
     FunctionBody,
     PipelineStages,
@@ -1042,6 +1043,65 @@ def get_function_redirects(node: TSNodeLike) -> list[TSNodeLike]:
             if c.type in REDIRECT_NODE_TYPES
         ]
     return redirects
+
+
+def get_function_source(node: TSNodeLike) -> str:
+    """The definition's source, including redirects and heredoc bodies.
+
+    Args:
+        node (TSNodeLike): the function definition to persist.
+    """
+    parent = node.parent
+    if parent is not None and parent.type == NT.REDIRECTED_STATEMENT:
+        node = parent
+    root = node
+    while root.parent is not None:
+        root = root.parent
+    if isinstance(node, ProgramNode):
+        original = encode_text(node.program.original)
+        offsets = node.program.offsets
+    else:
+        original = getattr(root, "source_text", root.text) or b""
+        offsets = getattr(root, "offsets", tuple(range(len(original) + 1)))
+    start = offsets[node.start_byte]
+    end = offsets[node.end_byte - 1] + 1
+    source = original[start:end]
+    # A heredoc can follow the definition's closing brace and other commands.
+    # Append only its body and delimiter, never those neighboring commands.
+    documents: dict[int, int] = {}
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        doc = getattr(current, "heredoc", None)
+        if doc is not None and doc.body_start >= end:
+            documents[doc.body_start] = doc.end
+        pending.extend(current.named_children)
+    if documents:
+        source += b"\n" + b"".join(
+            original[begin:stop] for begin, stop in sorted(documents.items())
+        )
+    return decode_text(source)
+
+
+def parse_function(
+    source: str, parse_fn: Callable[[str], TSNodeLike]
+) -> FunctionBody:
+    """Parse one stored definition inside the caller's owned parse scope.
+
+    Args:
+        source (str): portable function definition, including redirects.
+        parse_fn (Callable[[str], TSNodeLike]): scope-owned parser.
+    """
+    root = parse_fn(source)
+    nodes = [n for n in root.named_children if n.type != NT.COMMENT]
+    if len(nodes) != 1:
+        raise ValueError("stored function must contain one definition")
+    node = nodes[0]
+    if node.type == NT.REDIRECTED_STATEMENT:
+        node = node.named_children[0]
+    if node.type != NT.FUNCTION_DEFINITION:
+        raise ValueError("stored function must contain one definition")
+    return get_function_body(node)
 
 
 def get_function_body(node: TSNodeLike) -> FunctionBody:

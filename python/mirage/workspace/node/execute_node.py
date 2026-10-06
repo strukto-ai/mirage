@@ -49,8 +49,8 @@ from mirage.shell.helpers import (
     get_case_word,
     get_cfor_parts,
     get_for_parts,
-    get_function_body,
     get_function_name,
+    get_function_source,
     get_if_branches,
     get_list_parts,
     get_negated_command,
@@ -1302,14 +1302,10 @@ async def _execute_node(
                 limit=session.processes.max,
             )
         except BlockingIOError as exc:
-            child.session.functions.clear()
             raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
         child.session.process_id = process.info.pid
-        try:
-            await process.task
-            return results[0]
-        finally:
-            child.session.functions.clear()
+        await process.task
+        return results[0]
 
     # ── arithmetic command ((( ... ))) ──────────
     if (
@@ -1597,8 +1593,7 @@ async def _execute_node(
                     command=f"function {name}", exit_code=1, stderr=err
                 ),
             )
-        func_body = get_function_body(node)
-        session.functions[name] = func_body
+        session.functions[name] = get_function_source(node)
         return (
             None,
             IOResult(),

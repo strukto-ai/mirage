@@ -19,7 +19,9 @@ import {
   getForParts,
   getFunctionRedirects,
   getText,
+  parseFunction,
 } from './helpers.ts'
+import type { ParseScope } from './parse/scope.ts'
 import { BASH_KEYWORDS } from './parse/constants.ts'
 import { delimiterEnd } from './parse/heredoc/reader.ts'
 import type { Heredoc } from './parse/heredoc/types.ts'
@@ -38,6 +40,20 @@ const RESERVED: ReadonlySet<string> = new Set([
   'time',
   'coproc',
 ])
+
+/** Render a portable definition without keeping its parsed tree. */
+export function storedFunctionText(name: string, source: string, parser?: ParseScope): string {
+  if (parser === undefined) throw new Error('function rendering requires a parse scope')
+  const scope = parser.fork()
+  try {
+    return functionText(
+      name,
+      parseFunction(source, (line) => scope.parse(line)),
+    )
+  } finally {
+    scope.release()
+  }
+}
 
 /**
  * A function as `declare -f` and `type` print it. bash prints its own

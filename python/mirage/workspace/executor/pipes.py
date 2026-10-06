@@ -161,7 +161,6 @@ async def handle_pipe(
             output.end(error)
             raise
         finally:
-            child.functions.clear()
             if i > 0:
                 pipes[i - 1].close_reader()
             if input_stream is not None and not isinstance(
@@ -213,8 +212,6 @@ async def handle_pipe(
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        for evaluation in children:
-            evaluation.session.functions.clear()
         if failed:
             for io in ios:
                 await discard_io(io)

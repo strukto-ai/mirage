@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { functionTable } from './functions.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { functionSources } from './functions.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 
 import {
@@ -97,7 +98,7 @@ export interface SessionInit {
   logicalCwd?: string | undefined
   vars?: Record<string, ShellVar>
   createdAt?: number
-  functions?: Record<string, unknown>
+  functions?: Record<string, string>
   readonlyFunctions?: Set<string>
   lastExitCode?: number
   positionalArgs?: string[]
@@ -358,7 +359,7 @@ export class SessionState {
   // describes.
   vars: Record<string, ShellVar>
   createdAt: number
-  functions: Record<string, unknown>
+  functions: Record<string, string>
   // The functions `readonly -f` has frozen. A set beside `functions`
   // rather than a flag on the body, because the readonly fact is the
   // session's, not the definition's. Kept apart from the readonly
@@ -494,7 +495,7 @@ export class SessionState {
     this.logicalCwd = init.logicalCwd
     this.vars = ownRecord(init.vars)
     this.createdAt = init.createdAt ?? Date.now() / 1000
-    this.functions = functionTable(init.functions)
+    this.functions = functionSources(init.functions)
     this.readonlyFunctions = new Set(init.readonlyFunctions ?? [])
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
@@ -750,6 +751,9 @@ export class SessionState {
       }
       data.managed = refs
     }
+    if (Object.keys(this.functions).length > 0) data.functions = { ...this.functions }
+    if (this.readonlyFunctions.size > 0)
+      data.readonly_functions = [...this.readonlyFunctions].sort(compareCodePoints)
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
@@ -809,11 +813,15 @@ export class SessionState {
     processes?: ProcessPermissions
     decisions?: DecisionJSON[] | null
     generation?: number
+    functions?: Record<string, string>
+    readonly_functions?: string[]
   }): SessionState {
     const commands = data.commands != null ? commandsFromJSON(data.commands) : null
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     return new SessionState({
       sessionId: data.session_id,
+      ...(data.functions === undefined ? {} : { functions: data.functions }),
+      readonlyFunctions: new Set(data.readonly_functions ?? []),
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
       // No `var_attrs` at all means the payload is a bare process
       // environment -- an embedder's record, or one another writer

@@ -80,11 +80,6 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       }
     },
   ])
-  try {
-    deps.sessions.release()
-  } catch (err) {
-    failures.push(err)
-  }
   await settle([() => deps.jobTable.closeConsoles()])
   await settle([...deps.registry.retiringMounts.values()].map((task) => () => task))
   await settle([...(deps.cache.drainTasks?.values() ?? [])].map((task) => () => task))

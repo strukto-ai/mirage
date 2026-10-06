@@ -8,7 +8,6 @@ from mirage.commands.cli.types import CLISpec
 from mirage.io import IOResult
 from mirage.shell.console import Channel
 from mirage.shell.parse import scope
-from mirage.shell.parse.program import ProgramNode
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var
@@ -73,12 +72,13 @@ async def test_background_function_survives_late_substitutions_and_unset(
     try:
         await ws.shell("f() { echo retained; }")
         stored = ws.get_session(ws.default_session_id).functions["f"]
-        assert isinstance(stored[0], ProgramNode)
-        defining = stored[0].program
+        assert isinstance(stored, str)
+        defining = programs[-1]
+        assert defining.references == 0
         await ws.shell('{ stall; echo "$(f):$(</dev/null)"; } &')
         await asyncio.wait_for(entered.wait(), 5)
         await ws.shell("unset -f f")
-        assert defining.references > 0
+        assert defining.references == 0
         job = ws.job_table.get(1, ws.default_session_id)
         assert job is not None
         gate.set()
@@ -113,17 +113,6 @@ async def test_a_job_killed_before_it_runs_releases_its_program(
     ws, programs = owned_workspace
     await ws.shell("{ :; } & kill %1; wait")
     assert all(program.references == 0 for program in programs)
-
-
-@pytest.mark.asyncio
-async def test_explain_borrows_function_programs(owned_workspace):
-    ws, programs = owned_workspace
-    await ws.shell("f() { echo retained; }")
-    before = [program.references for program in programs]
-    await ws.explain("cd /; f")
-    assert [
-        program.references for program in programs[: len(before)]
-    ] == before
 
 
 @pytest.mark.asyncio

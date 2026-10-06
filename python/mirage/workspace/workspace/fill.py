@@ -24,6 +24,7 @@ from mirage.secrets.summary import field_summary
 from mirage.secrets.types import ResolvedSource
 from mirage.shell.bytes import decode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
+from mirage.shell.helpers import parse_function
 from mirage.shell.parse import (
     arith_reads,
     assignment_values,
@@ -112,7 +113,10 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
             if word in seen:
                 continue
             seen.add(word)
-            bodies = list(session.functions.get(word) or ())
+            stored = session.functions.get(word)
+            bodies = (
+                parse_function(stored, parse) if stored is not None else []
+            )
             bodies.extend(defined.get(word) or ())
             if expand and word in session.aliases:
                 # An alias is a textual prefix: dispatch appends the

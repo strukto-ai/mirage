@@ -23,10 +23,12 @@ from mirage.shell.helpers import (
     get_for_parts,
     get_function_redirects,
     get_text,
+    parse_function,
 )
 from mirage.shell.parse.constants import BASH_KEYWORDS
 from mirage.shell.parse.heredoc.reader import delimiter_end
 from mirage.shell.parse.heredoc.types import Heredoc
+from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import FunctionBody, TSNodeLike
 from mirage.shell.types import NodeType as NT
 
@@ -34,6 +36,20 @@ _INDENT = "    "
 _CONTINUATION = re.compile(r"\\\n[ \t]*")
 # A name bash would read as a reserved word is printed after `function`.
 _RESERVED = BASH_KEYWORDS | {"!", "{", "}", "[[", "]]", "time", "coproc"}
+
+
+def stored_function_text(name: str, source: str) -> str:
+    """Render a portable function without keeping its parsed tree.
+
+    Args:
+        name (str): the function's stored name.
+        source (str): its definition as shell source.
+    """
+    scope = ParseScope()
+    try:
+        return function_text(name, parse_function(source, scope.parse))
+    finally:
+        scope.release()
 
 
 def function_text(name: str, body: FunctionBody) -> str:

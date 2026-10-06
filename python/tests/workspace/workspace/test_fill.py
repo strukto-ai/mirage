@@ -34,7 +34,6 @@ from mirage.secrets import registry
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
-from mirage.shell.parse import parse
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import HiddenVars, Visibility
 from mirage.vfs.ram import RAMVFS
@@ -1110,10 +1109,7 @@ async def test_denied_body_statement_keeps_a_sibling_reader_fetching():
     ws = _policed_ws("printenv", {"TOKEN": {"from": "fake", "ref": "r"}})
     try:
         session = ws.get_session(ws.default_session_id)
-        tree = parse('printenv TOKEN; echo "e:$TOKEN"')
-        session.functions["f"] = [
-            node for node in tree.named_children if node.type == "command"
-        ]
+        session.functions["f"] = 'f() { printenv TOKEN; echo "e:$TOKEN"; }'
         io = await ws.shell("f")
         assert (await io.stdout_str()) == "e:t0\n"
         assert io.refusal is not None

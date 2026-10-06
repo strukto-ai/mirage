@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { releaseFunctions } from './functions.ts'
-
 import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
@@ -289,6 +287,8 @@ export class SessionManager {
         const dflt = this.defaultSession()
         setCwd(dflt, stored.cwd)
         dflt.vars = stored.vars
+        dflt.functions = stored.functions
+        dflt.readonlyFunctions = stored.readonlyFunctions
         dflt.createdAt = stored.createdAt
         dflt.mountModes = stored.mountModes
         // The hidden shapes are durable restrictions, not scratch
@@ -432,7 +432,7 @@ export class SessionManager {
       if (session === undefined) {
         throw new Error(`unknown session: ${sessionId}`)
       }
-      releaseFunctions(session.functions)
+
       this.sessions.delete(sessionId)
       this.persisted.delete(sessionId)
       await this.sessionStore.delete([sessionId])
@@ -445,13 +445,7 @@ export class SessionManager {
   }
 
   closeStore(): Promise<void> {
-    this.release()
     return this.sessionStore.close()
-  }
-
-  /** Release session-owned runtime resources without closing shared storage. */
-  release(): void {
-    for (const session of this.sessions.values()) releaseFunctions(session.functions)
   }
 
   private defaultSession(): SessionState {

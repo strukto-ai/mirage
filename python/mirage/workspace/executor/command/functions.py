@@ -26,8 +26,9 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ReturnSignal
+from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
-from mirage.shell.parse.program import retain_programs
+from mirage.shell.parse.scope import ParseScope
 from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
@@ -77,8 +78,12 @@ async def run_shell_function(
             finishes, None to return the body's output.
     """
     session = context.session
-    func_body = session.functions[cmd_name]
-    release_program = retain_programs(func_body)
+    scope = ParseScope()
+    try:
+        func_body = parse_function(session.functions[cmd_name], scope.parse)
+    except BaseException:
+        scope.release()
+        raise
     if sink is not None:
         execute_node = partial(execute_node, sink=sink)
     # The body's statements read the caller's stdin in turn.
@@ -154,7 +159,7 @@ async def run_shell_function(
         last_exec.exit_code = merged_io.exit_code
         return combined, merged_io, last_exec
     finally:
-        release_program()
+        scope.release()
         reset_program_invocation(marked)
         cs.pop()
         if session.function_names is not None:

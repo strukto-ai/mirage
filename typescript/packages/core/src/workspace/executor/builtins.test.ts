@@ -252,7 +252,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 
   it('unset -f removes a function but not a same-named variable', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ fn: 'v' }) })
-    s.functions.fn = []
+    s.functions.fn = 'fn() { :; }'
     await handleUnset(['-f', 'fn'], s, sessionView(s))
     expect('fn' in s.functions).toBe(false)
     expect(s.env.fn).toBe('v')
@@ -260,7 +260,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 
   it('unset -v removes a variable but not a same-named function', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ fn: 'v' }) })
-    s.functions.fn = []
+    s.functions.fn = 'fn() { :; }'
     await handleUnset(['-v', 'fn'], s, sessionView(s))
     expect('fn' in s.functions).toBe(true)
     expect('fn' in s.env).toBe(false)
@@ -268,11 +268,11 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 
   it('unset bare prefers a variable, else the function', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ a: 'v' }) })
-    s.functions.a = []
+    s.functions.a = 'a() { :; }'
     await handleUnset(['a'], s, sessionView(s))
     expect('a' in s.env).toBe(false)
     expect('a' in s.functions).toBe(true)
-    s.functions.b = []
+    s.functions.b = 'b() { :; }'
     await handleUnset(['b'], s, sessionView(s))
     expect('b' in s.functions).toBe(false)
   })

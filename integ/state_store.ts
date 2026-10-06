@@ -76,6 +76,12 @@ async function write(prefix: string): Promise<void> {
   ws.createSession('narrow', { mounts: { '/data': 'read' } })
   const shared = ws.createSession('shared')
   seedVar(shared, 'ORIGIN', 'ts')
+  for (const sessionId of [ws.defaultSessionId, 'shared']) {
+    const result = await ws.shell('cloud_fn() { echo "cloud:$1"; }; readonly -f cloud_fn', {
+      sessionId,
+    })
+    check(`ts write: portable function in ${sessionId}`, result.exitCode === 0)
+  }
   await ws.flushSessions()
   check(
     'ts write: shared session at generation 1',
@@ -113,6 +119,18 @@ async function read(prefix: string): Promise<void> {
     ws.defaultSessionId === pointer,
     `got ${ws.defaultSessionId} want ${String(pointer)}`,
   )
+  for (const sessionId of [ws.defaultSessionId, 'shared']) {
+    const result = await ws.shell('cloud_fn restored', { sessionId })
+    check(
+      `ts read: foreign function runs in ${sessionId}`,
+      result.exitCode === 0 && result.stdoutText === 'cloud:restored\n',
+    )
+    const refused = await ws.shell('unset -f cloud_fn', { sessionId })
+    check(
+      `ts read: function stays readonly in ${sessionId}`,
+      refused.exitCode === 1 && refused.stderrText.includes('readonly function'),
+    )
+  }
   const history = await ws.shell('history')
   check('ts read: history has marker', history.stdoutText.includes(MARKER), history.stdoutText)
   const target = await ws.shell('readlink /data/l.txt')

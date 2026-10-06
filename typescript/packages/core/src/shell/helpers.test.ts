@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { Language, Parser } from 'web-tree-sitter'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { assert, beforeAll, describe, expect, it } from 'vitest'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
 import type { ShellParser } from './parse/index.ts'
 import type { TSNodeLike } from './types.ts'
@@ -29,6 +29,7 @@ import {
   getForParts,
   getFunctionBody,
   getFunctionName,
+  getFunctionSource,
   getIfBranches,
   getListParts,
   getNegatedCommand,
@@ -649,4 +650,32 @@ describe('sourceParts', () => {
     if (expansion === undefined) throw new Error('no expansion')
     expect(spelled(sourceParts(expansion))).toEqual(parts)
   })
+})
+
+it.each([
+  ['echo λ🙂; f() { echo x; }; echo unrelated', 'f() { echo x; }'],
+  [
+    'f() { alias late=echo; late; } >out 2>&1; echo unrelated',
+    'f() { alias late=echo; late; } >out 2>&1',
+  ],
+  [
+    "f() { cat <<'EOF'; }; echo unrelated\nλ🙂 $literal\nEOF",
+    "f() { cat <<'EOF'; }\nλ🙂 $literal\nEOF",
+  ],
+  [
+    'f() { cat <<A; cat <<B; }; echo unrelated\nfirst\nA\nsecond\nB',
+    'f() { cat <<A; cat <<B; }\nfirst\nA\nsecond\nB',
+  ],
+  ['f() { cat <<EOF\ninside\nEOF\n}; echo unrelated', 'f() { cat <<EOF\ninside\nEOF\n}'],
+])('copies only the function source: %s', async (line, expected) => {
+  const program = (await getTestParser()).parseProgram(line)
+  try {
+    const node = program.root.namedChildren.find(
+      (n) => n.type === 'function_definition' || n.type === 'redirected_statement',
+    )
+    assert(node)
+    expect(getFunctionSource(node)).toBe(expected)
+  } finally {
+    program.release()
+  }
 })

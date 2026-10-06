@@ -47,12 +47,15 @@ export function rootOf(node: TSNodeLike): TSNodeLike {
  * that parse's own offsets.
  *
  * The one rule both readers share. The gate builds it from the node it
- * runs, and the pass from the tree it walks, so a stored function body,
- * kept as the nodes of the line that defined it, is read at invocation
- * exactly as it was judged.
+ * runs, and the pass from the tree it walks, so a stored function body
+ * is placed relative to its definition. Reparsing that source in another
+ * worker gives its commands the same approval locations.
  */
 export function rootFrame(node: TSNodeLike, parent: Occurrence | null): Frame {
-  const root = rootOf(node)
+  let root = node
+  while (root.parent != null && root.type !== 'function_definition') root = root.parent
+  if (root.type === 'function_definition' && root.parent?.type === 'redirected_statement')
+    root = root.parent
   return { text: root.text, base: root.startIndex ?? 0, parent }
 }
 

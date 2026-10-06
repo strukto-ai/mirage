@@ -73,15 +73,23 @@ def root_frame(node: Any, parent: Occurrence | None) -> Frame:
 
     The one rule both readers share. The gate builds it from the node
     it runs, and the pass from the tree it walks, so a stored function
-    body, kept as the nodes of the line that defined it, is read at
-    invocation exactly as it was judged.
+    body is placed relative to its definition. Reparsing that source in
+    another worker gives its commands the same approval locations.
 
     Args:
         node (Any): any node of the tree.
         parent (Occurrence | None): the node the tree's text was
             evaluated from, None for a typed line.
     """
-    root = root_of(node)
+    root = node
+    while root.parent is not None and root.type != "function_definition":
+        root = root.parent
+    if (
+        root.type == "function_definition"
+        and root.parent is not None
+        and root.parent.type == "redirected_statement"
+    ):
+        root = root.parent
     return Frame(get_text(root), root.start_byte, parent)
 
 

@@ -27,6 +27,7 @@ from mirage.shell.helpers import (
     get_for_parts,
     get_function_body,
     get_function_name,
+    get_function_source,
     get_heredoc_meta,
     get_heredoc_parts,
     get_if_branches,
@@ -48,6 +49,7 @@ from mirage.shell.helpers import (
     take_continuation,
 )
 from mirage.shell.parse import parse
+from mirage.shell.parse.parse import parse_program
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import RedirectKind
 
@@ -1203,3 +1205,38 @@ def test_quoted_parts_keeps_the_text_between_children(cmd, parts):
 def test_source_parts_yields_the_text_no_child_owns(cmd, parts):
     expansion = _first(cmd).children[1].children[1]
     assert _spelled(source_parts(expansion)) == parts
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("echo λ🙂; f() { echo x; }; echo unrelated", "f() { echo x; }"),
+        (
+            "f() { alias late=echo; late; } >out 2>&1; echo unrelated",
+            "f() { alias late=echo; late; } >out 2>&1",
+        ),
+        (
+            "f() { cat <<'EOF'; }; echo unrelated\nλ🙂 $literal\nEOF",
+            "f() { cat <<'EOF'; }\nλ🙂 $literal\nEOF",
+        ),
+        (
+            "f() { cat <<A; cat <<B; }; echo unrelated\nfirst\nA\nsecond\nB",
+            "f() { cat <<A; cat <<B; }\nfirst\nA\nsecond\nB",
+        ),
+        (
+            "f() { cat <<EOF\ninside\nEOF\n}; echo unrelated",
+            "f() { cat <<EOF\ninside\nEOF\n}",
+        ),
+    ],
+)
+def test_function_source_copies_only_its_own_source(line, expected):
+    program = parse_program(line)
+    try:
+        node = next(
+            n
+            for n in program.root.named_children
+            if n.type in {"function_definition", "redirected_statement"}
+        )
+        assert get_function_source(node) == expected
+    finally:
+        program.release()

@@ -698,6 +698,8 @@ def _walk_node(
         lost (bool): whether the node begins with its cwd lost, as
             ``Walked`` carries it.
     """
+    if node.type == NodeType.FUNCTION_DEFINITION:
+        frame = root_frame(node, frame.parent)
     if node.type == NodeType.COMMAND:
         walked = session, lost
         words = _words_of(node, home)
@@ -803,11 +805,7 @@ def _after_cd(
         or (lost and not target.startswith("/"))
     ):
         return session, True
-    predicted = session.fork(
-        cwd=resolve_path(target, session.cwd), functions={}
-    )
-    # A read-only prediction borrows functions from the executing line.
-    predicted.functions = session.functions
+    predicted = session.fork(cwd=resolve_path(target, session.cwd))
     return predicted, False
 
 

@@ -42,6 +42,7 @@ import { abortable, makeAbortError } from '../abort.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { parseFunction } from '../../shell/helpers.ts'
 import { setSessionEntry, type SessionState } from '../session/session.ts'
 import { deref } from '../session/state.ts'
 
@@ -113,7 +114,7 @@ export function lineNodes(
       if (seen.has(word)) continue
       seen.add(word)
       const stored = Object.hasOwn(session.functions, word) ? session.functions[word] : undefined
-      const bodies = Array.isArray(stored) ? [...(stored as TSNodeLike[])] : []
+      const bodies = stored === undefined ? [] : parseFunction(stored, reparse)
       bodies.push(...(defined.get(word) ?? []))
       const aliased = Object.hasOwn(session.aliases, word) ? session.aliases[word] : undefined
       // An alias is a textual prefix: dispatch appends the

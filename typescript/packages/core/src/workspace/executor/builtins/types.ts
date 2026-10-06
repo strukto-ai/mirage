@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ParseScope } from '../../../shell/parse/scope.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -68,6 +69,7 @@ export interface BuiltinCall {
   dispatch: DispatchFn
   registry: MountRegistry
   namespace: Namespace
+  parser?: ParseScope
   executeFn: ExecuteFn
   sink?: JobConsole
   /** The calling shell's jobs, for a nested shell to start a table of its own beside. */

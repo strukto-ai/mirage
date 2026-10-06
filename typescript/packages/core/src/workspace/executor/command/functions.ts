@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EvaluationContext } from '../../evaluation.ts'
-import { retainPrograms } from '../../../shell/parse/program.ts'
-import type { TSNodeLike } from '../../../shell/types.ts'
+import { parseFunction } from '../../../shell/helpers.ts'
+import type { ParseScope } from '../../../shell/parse/scope.ts'
 
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -44,7 +44,8 @@ import type { Result } from './types.ts'
 export async function executeShellFunction(
   executeNode: ExecuteNodeFn,
   cmdName: string,
-  body: unknown[],
+  source: string,
+  parser: ParseScope,
   restParts: readonly (string | PathSpec)[],
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -59,7 +60,14 @@ export async function executeShellFunction(
 ): Promise<Result> {
   const session = context.session
   // The body's statements read the caller's stdin in turn.
-  const releaseProgram = retainPrograms(body as TSNodeLike[])
+  const scope = parser.fork()
+  let body
+  try {
+    body = parseFunction(source, (line) => scope.parse(line))
+  } catch (error) {
+    scope.release()
+    throw error
+  }
   const bodyStdin = share(stdin)
   const cs = callStack ?? new CallStack()
   // Positional args carry the word as typed ($1 stays sub/a.txt).
@@ -87,7 +95,7 @@ export async function executeShellFunction(
     await runAsShell(async () => {
       for (const cmd of body) {
         try {
-          const cmdNode = cmd as Parameters<ExecuteNodeFn>[0]
+          const cmdNode = cmd
           const [rawStdout, io, execNode] = await runStatement(
             sink === undefined
               ? executeNode
@@ -132,7 +140,7 @@ export async function executeShellFunction(
       }
     })
   } finally {
-    releaseProgram()
+    scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
     restoreLocals(session, savedLocals)

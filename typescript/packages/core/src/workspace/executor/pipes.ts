@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { childContext, runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
-import { releaseFunctions } from '../session/functions.ts'
 
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessSupervisor } from '../../process/supervisor.ts'
@@ -159,7 +158,6 @@ export async function handlePipe(
           throw error
         }
       } finally {
-        releaseFunctions(child.functions)
         upstream?.release()
         if (input !== null && !(input instanceof Uint8Array)) await closeQuietly(input)
         output.end()
@@ -189,7 +187,6 @@ export async function handlePipe(
         limit: session.processes.max,
       })
     } catch (error) {
-      releaseFunctions(child.functions)
       if ((error as { code?: unknown }).code === 'EAGAIN')
         throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error

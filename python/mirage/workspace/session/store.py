@@ -18,8 +18,8 @@ from collections.abc import Iterable
 from mirage.workspace.record.types import RecordFields
 
 # One session's durable fields: the JSON-able ``SessionState.to_dict()``
-# payload (session_id, cwd, env, created_at, mount_modes). Volatile
-# shell state (functions, arrays, stdin buffers) never persists.
+# payload, including function source and readonly metadata. Parser trees,
+# running jobs and stream handles never enter this record.
 # A session's stored shape is one keyed record like any other, so the
 # alias and the CAS helpers come from the record tier rather than being
 # restated here. The name stays SessionFields at this seam because that
