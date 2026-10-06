@@ -1,13 +1,23 @@
 ---
 title: Policy
 sidebarTitle: Overview
-description: Code that refuses, asks about, places or bounds what an agent does, at every way in.
+description: Control everything an agent does in the virtual terminal, in code or in scripts, with the whole context in hand.
 icon: /images/policy-icon.svg
 ---
 
-A policy is a class with hooks. Each hook sees one thing an agent is about
-to do and returns an answer, or `None` to stay out of it. Add policies to
-the workspace and every session goes through them.
+A policy controls everything an agent does in the virtual terminal: every
+line, every command, every file it touches and every env write. It can
+refuse, ask a host, move a line to another runtime, or bound what comes
+back.
+
+Each hook gets the whole context: the line and its commands, the words
+after expansion, the paths, cwd, session, env and mounts, and after a call
+its result. A policy can even read the files a command names before it
+decides. The hook returns an answer, or `None` to stay out of it.
+
+Write a policy as a class in Python or TypeScript, or as a script a
+[profile](/home/permissions#cwd-env-policy) loads from YAML, in Python or
+JavaScript. Add it to the workspace and every session goes through it.
 
 ## Why not a harness hook
 
