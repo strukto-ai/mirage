@@ -14,7 +14,7 @@
 
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { emit, handleResponse } from './output.ts'
+import { emit, fail, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
 
 function buildClient() {
@@ -148,4 +148,33 @@ export function registerSessionCommands(program: Command): void {
         ),
       )
     })
+
+  sess
+    .command('update')
+    .description("Replace the session's profile; its cwd, env and history stay.")
+    .argument('<wsId>')
+    .argument('<sessionId>')
+    .option('-p, --profile <name>', "Replace the live session's profile.")
+    .option('--default-profile', 'Use the workspace default profile.')
+    .action(
+      async (
+        wsId: string,
+        sessionId: string,
+        opts: { profile?: string; defaultProfile?: boolean },
+      ) => {
+        if ((opts.profile === undefined) === (opts.defaultProfile !== true))
+          fail('choose --profile or --default-profile', 2)
+        const c = buildClient()
+        await c.ensureRunning({ allowSpawn: false })
+        emit(
+          await handleResponse(
+            await c.request(
+              'PATCH',
+              `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}`,
+              { body: JSON.stringify({ profile: opts.profile ?? null }) },
+            ),
+          ),
+        )
+      },
+    )
 }

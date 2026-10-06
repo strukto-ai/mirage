@@ -201,7 +201,7 @@ def _structure_only(dispatcher) -> None:
     namespace.try_mount_for = MagicMock(return_value=None)
     deep = MagicMock()
     deep.prefix = "/data/locked/inner/deep/"
-    namespace.registry.mounts = MagicMock(return_value=[deep])
+    namespace.registry.visible_mounts = MagicMock(return_value=[deep])
     namespace.symlink_targets = MagicMock(return_value={})
 
 

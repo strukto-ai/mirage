@@ -55,7 +55,7 @@ def registry_child_mounts(
         parent (str): directory whose child segments to enumerate.
     """
     return namespace_names(
-        vis, [m.prefix for m in registry.mounts()], links, parent
+        vis, [m.prefix for m in registry.visible_mounts()], links, parent
     )
 
 

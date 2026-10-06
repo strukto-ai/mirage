@@ -111,11 +111,11 @@ from mirage.vfs.s3.config import S3Config
 from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
-from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.lookup import lookup, program, program_note, programs
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -418,6 +418,7 @@ class Workspace:
             else None
         )
 
+        self._documents = Documents(self)
         self.observer = Observer(store=stores.observe)
         # The stores this workspace's state lives in, whether the state
         # store built them or the caller passed one in directly: delete
@@ -793,6 +794,7 @@ class Workspace:
             lambda: self._shutting_down,
             self._shared_mounts,
         )
+        self._documents.views.pop(prefix.rstrip("/") or "/", None)
 
     def set_mount_mode(self, prefix: str, mode: MountMode) -> None:
         """Change an exact mount's ceiling, retaining data and session caps.
@@ -1120,9 +1122,37 @@ class Workspace:
     def env(self, value: dict[str, str]) -> None:
         self._session_mgr.env = value
 
-    @property
-    def file_prompt(self) -> str:
-        return build_file_prompt(self._registry.mounts())
+    async def vfs_md(
+        self,
+        path: str | PathSpec | None = None,
+        *,
+        profile: str | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        """Render VFS Markdown, optionally exposing a live file in the workspace.
+
+        Args:
+            path (str | PathSpec | None): existing-parent virtual destination.
+            profile (str | None): named profile preview; requires no path or session.
+            session_id (str | None): session scope, otherwise workspace-wide exposure.
+        """
+        return await self._documents.get("vfs", path, profile, session_id)
+
+    async def skill_md(
+        self,
+        path: str | PathSpec | None = None,
+        *,
+        profile: str | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        """Render a self-contained CLI skill, optionally exposing a live file.
+
+        Args:
+            path (str | PathSpec | None): existing-parent virtual destination.
+            profile (str | None): named profile preview; requires no path or session.
+            session_id (str | None): session scope, otherwise workspace-wide exposure.
+        """
+        return await self._documents.get("skill", path, profile, session_id)
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 
@@ -1857,6 +1887,7 @@ class Workspace:
         if session_id != self._session_mgr.default_id:
             await self.cancel(session_id)
         await self._session_mgr.close(session_id)
+        await self._documents.release_session(session_id)
         await self.job_table.close_session(session_id)
         self._tools.pop(session_id, None)
         self._reads.pop(session_id, None)
@@ -1869,6 +1900,7 @@ class Workspace:
         ]
         await self._session_mgr.close_all()
         for session_id in closed:
+            await self._documents.release_session(session_id)
             await self.job_table.close_session(session_id)
             self._tools.pop(session_id, None)
             self._reads.pop(session_id, None)

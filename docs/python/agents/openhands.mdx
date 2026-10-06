@@ -17,7 +17,9 @@ The OpenHands SDK needs Python 3.12 or newer; on 3.11 the extra installs nothing
 ## Usage
 
 ```python
+import asyncio
 import os
+
 from openhands.sdk import LLM, Agent, Conversation, Tool
 
 from mirage import MountMode, Workspace
@@ -26,21 +28,25 @@ from mirage.vfs.ram import RAMVFS
 
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
-llm = LLM(
-    model=os.getenv("LLM_MODEL", "anthropic/claude-sonnet-4-6"),
-    api_key=os.getenv("LLM_API_KEY"),
-)
 
-with MirageWorkspace(workspace=ws, working_dir="/") as mirage_ws:
-    tool_name = register_mirage_terminal(mirage_ws)
-    agent = Agent(
-        llm=llm,
-        tools=[Tool(name=tool_name)],
-        system_message=ws.file_prompt,
+async def main() -> None:
+    llm = LLM(
+        model=os.getenv("LLM_MODEL", "anthropic/claude-sonnet-4-6"),
+        api_key=os.getenv("LLM_API_KEY"),
     )
-    conversation = Conversation(agent=agent, workspace=mirage_ws)
-    conversation.send_message("Create /hello.txt with 'hi' and ls /.")
-    conversation.run()
+    with MirageWorkspace(workspace=ws, working_dir="/") as mirage_ws:
+        tool_name = register_mirage_terminal(mirage_ws)
+        agent = Agent(
+            llm=llm,
+            tools=[Tool(name=tool_name)],
+            system_message=await ws.vfs_md(),
+        )
+        conversation = Conversation(agent=agent, workspace=mirage_ws)
+        conversation.send_message("Create /hello.txt with 'hi' and ls /.")
+        conversation.run()
+
+
+asyncio.run(main())
 ```
 
 ## Exports

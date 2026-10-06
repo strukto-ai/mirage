@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Outcome, Scope } from '@struktoai/mirage-core/policy/index'
-import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 const ENC = new TextEncoder()
@@ -39,6 +39,8 @@ export interface StatCheck {
 }
 
 export interface Case {
+  session_profiles?: Record<string, unknown>
+  documents?: { kind: 'vfs' | 'skill'; path: string; session?: string }[]
   id: string
   seq?: number
   targets: string[]
@@ -110,6 +112,10 @@ export interface ExecWorkspace {
     sessionId: string,
     options: { profile?: string | SessionProfile; permissions?: SessionProfile },
   ): unknown
+  listSessions(): readonly { sessionId: string }[]
+  setSessionProfile(sessionId: string, profile: SessionProfile): Promise<unknown>
+  vfsMd(path?: string, options?: { sessionId?: string }): Promise<string>
+  skillMd(path?: string, options?: { sessionId?: string }): Promise<string>
   env: Record<string, string>
   decisions: {
     pending(): readonly { id: string }[]
@@ -371,6 +377,17 @@ export async function runCase(
   checkOut: string | null
   notes: string[]
 }> {
+  for (const [id, raw] of Object.entries(c.session_profiles ?? {})) {
+    const profile = parseSessionProfile(raw, `session ${id}`)
+    if (ws.listSessions().some((session) => session.sessionId === id))
+      await ws.setSessionProfile(id, profile)
+    else ws.createSession(id, { profile })
+  }
+  for (const document of c.documents ?? []) {
+    const options = document.session === undefined ? {} : { sessionId: document.session }
+    if (document.kind === 'vfs') await ws.vfsMd(document.path, options)
+    else await ws.skillMd(document.path, options)
+  }
   if (c.clear_cache === true) {
     // A full clear means the file cache AND every mount's index cache:
     // remote listings live in the mount's index, and a listing

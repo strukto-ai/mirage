@@ -27,6 +27,7 @@ import { registerShellRoutes } from './routers/shell.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerHealthRoutes } from './routers/health.ts'
 import { registerJobsRoutes } from './routers/jobs.ts'
+import { registerDocumentsRoutes } from './routers/documents.ts'
 import { registerOAuthRoutes } from './routers/oauth.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
 import { registerSshRoutes } from './routers/ssh.ts'
@@ -109,6 +110,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerOAuthRoutes(app, { auth: authConfig })
   registerWorkspacesRoutes(app, { registry, stateRoot, snapshotStore: options.snapshotStore })
   registerSessionsRoutes(app, { registry })
+  registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
   registerShellRoutes(app, { registry, jobs })
   registerJobsRoutes(app, { jobs, registry })

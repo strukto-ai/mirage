@@ -225,6 +225,7 @@ class MountEntry:
             raise ValueError(f"prefix must end with /: {prefix!r}")
         if "//" in prefix:
             raise ValueError(f"prefix must not contain //: {prefix!r}")
+        self.visible: Callable[[], bool] | None = None
         self.mount_id = uuid7()
         self.prefix = prefix
         self.vfs = vfs

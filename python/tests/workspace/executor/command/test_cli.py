@@ -191,7 +191,7 @@ async def test_bare_group_prints_usage_stdout_exit_1():
     )
     assert io.exit_code == 1
     out = await materialize(stdout)
-    assert b"Usage: prog message" in out
+    assert b"usage: prog message" in out
     assert b"send" in out
 
 
@@ -203,7 +203,7 @@ async def test_leaf_help_prints_installed_prog_exit_0():
     )
     assert io.exit_code == 0
     out = await materialize(stdout)
-    assert out.startswith(b"renamed message send\n")
+    assert out.startswith(b"usage: renamed message send ")
     assert b"--help" in out
 
 
@@ -536,7 +536,7 @@ async def test_script_help_renders_when_the_spec_declares_a_grammar():
     )
     assert io.exit_code == 0
     out = await materialize(stdout)
-    assert out.startswith(b"pager\n")
+    assert out.startswith(b"usage: pager ")
     assert b"--lines" in out
     assert py.seen == []
 

@@ -32,7 +32,7 @@ const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
 const agent = createDeepAgent({
   model: new ChatAnthropic({ model: 'claude-sonnet-4-6' }),
-  systemPrompt: buildSystemPrompt({
+  systemPrompt: await buildSystemPrompt({
     mountInfo: { '/': 'In-memory filesystem (read/write)' },
   }),
   backend: new LangchainWorkspace(ws),

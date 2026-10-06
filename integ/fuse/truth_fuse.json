@@ -30,5 +30,10 @@
   "session_kernel_hidden_absent": true,
   "session_kernel_create_under_hidden_absent": true,
   "session_kernel_write_refused": true,
-  "external_unmount_remounts": true
+  "external_unmount_remounts": true,
+  "document_kernel_profile": true,
+  "document_kernel_size": true,
+  "document_kernel_live_handle": true,
+  "document_kernel_skill": true,
+  "document_kernel_readonly": true
 }

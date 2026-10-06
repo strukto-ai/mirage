@@ -19,12 +19,22 @@ import { MirageServer } from './server.ts'
 
 export interface BuildOptionsOptions {
   systemPrompt?: string
+  sessionId?: string | undefined
 }
 
-export function buildOptions(workspace: Workspace, opts: BuildOptionsOptions = {}): Options {
+export async function buildOptions(
+  workspace: Workspace,
+  opts: BuildOptionsOptions = {},
+): Promise<Options> {
   return {
-    mcpServers: { mirage: MirageServer(workspace) },
+    mcpServers: {
+      mirage: MirageServer(
+        workspace,
+        opts.sessionId === undefined ? {} : { sessionId: opts.sessionId },
+      ),
+    },
     allowedTools: ['mcp__mirage__*'],
-    systemPrompt: opts.systemPrompt ?? buildSystemPrompt({ workspace }),
+    systemPrompt:
+      opts.systemPrompt ?? (await buildSystemPrompt({ workspace, sessionId: opts.sessionId })),
   }
 }

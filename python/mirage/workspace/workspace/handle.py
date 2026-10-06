@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.ops import Ops
+from mirage.types import PathSpec
 from mirage.workspace.session import SessionState
 
 if TYPE_CHECKING:
@@ -119,3 +120,19 @@ class Session:
             pattern (str): the pattern, such as ``/src/**/*.py``.
         """
         return await self._ws.glob(pattern, session_id=self._id)
+
+    async def vfs_md(self, path: str | PathSpec | None = None) -> str:
+        """Render this session's VFS Markdown, optionally at a virtual path.
+
+        Args:
+            path (str | PathSpec | None): destination inside this workspace.
+        """
+        return await self._ws.vfs_md(path, session_id=self._id)
+
+    async def skill_md(self, path: str | PathSpec | None = None) -> str:
+        """Render this session's CLI skill, optionally at a virtual path.
+
+        Args:
+            path (str | PathSpec | None): destination inside this workspace.
+        """
+        return await self._ws.skill_md(path, session_id=self._id)

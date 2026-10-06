@@ -83,6 +83,8 @@ With `-w`, it serves a workspace the server already holds. Otherwise it creates 
 | `mirage workspace snapshot ID --key KEY` | Save it to the server's [snapshot store](/home/snapshot#an-s3-like-store) instead. |
 | `mirage workspace load FILE.tar [CONFIG] [--id ID]` | Restore a tar from here, uploading it. `CONFIG` gives back the credentials the snapshot left out. |
 | `mirage workspace load --key KEY [CONFIG] [--id ID]` | Restore one from the server's snapshot store. |
+| `mirage workspace vfs-md ID [--session S] [--path PATH] [--profile P]` | Print the [VFS.md](/home/workspace#vfs-md-and-skill-md), or expose it as a live file at `PATH`. |
+| `mirage workspace skill-md ID [--session S] [--path PATH] [--profile P]` | The same for SKILL.md. |
 
 ### Asks
 
@@ -101,6 +103,7 @@ With `-w`, it serves a workspace the server already holds. Otherwise it creates 
 | `mirage session delete ID S` | Close a session. |
 | `mirage session cancel ID S` | Cancel the session's running lines. |
 | `mirage session kill ID S` | Kill the session's background jobs. |
+| `mirage session update ID S (-p PROFILE \| --default-profile)` | Replace the session's profile; its cwd, env and history stay. |
 
 ## Jobs
 

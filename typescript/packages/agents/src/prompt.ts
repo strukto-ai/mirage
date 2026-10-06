@@ -30,14 +30,18 @@ Use the shell tool for complex operations. Use read/write/edit for simple file o
 
 export interface BuildSystemPromptOptions {
   workspace?: Workspace
+  sessionId?: string | undefined
   mountInfo?: Record<string, string>
   extraInstructions?: string
 }
 
-export function buildSystemPrompt(opts: BuildSystemPromptOptions = {}): string {
+export async function buildSystemPrompt(opts: BuildSystemPromptOptions = {}): Promise<string> {
   const parts: string[] = [MIRAGE_SYSTEM_PROMPT]
   if (opts.workspace !== undefined) {
-    parts.push('Mounted data sources:\n' + opts.workspace.filePrompt)
+    parts.push(
+      'Mounted data sources:\n' +
+        (await opts.workspace.vfsMd(undefined, { sessionId: opts.sessionId })),
+    )
   } else if (opts.mountInfo !== undefined && Object.keys(opts.mountInfo).length > 0) {
     parts.push('\nMounted data sources:')
     for (const [prefix, description] of Object.entries(opts.mountInfo)) {

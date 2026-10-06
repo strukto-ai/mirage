@@ -170,6 +170,30 @@ function formatAsks(items: AskRecord[]): string {
 
 export function registerWorkspaceCommands(program: Command): void {
   const ws = program.command('workspace').description('Manage workspaces.')
+  for (const kind of ['vfs', 'skill']) {
+    ws.command(`${kind}-md`)
+      .argument('<wsId>')
+      .description(`Generate ${kind} Markdown, or expose it inside the workspace with --path.`)
+      .option('--path <path>', 'Expose a live file at this workspace path.')
+      .option('--session <id>', 'Limit exposure or generation to this session.')
+      .option('--profile <name>', 'Preview a profile without creating a file.')
+      .action(async (wsId: string, opts: { path?: string; session?: string; profile?: string }) => {
+        if (opts.profile !== undefined && (opts.path !== undefined || opts.session !== undefined))
+          fail('--profile requires no --path or --session', 2)
+        const c = buildClient()
+        await c.ensureRunning({ allowSpawn: false })
+        let route = `/v1/workspaces/${encodeURIComponent(wsId)}`
+        if (opts.session !== undefined) route += `/sessions/${encodeURIComponent(opts.session)}`
+        route += `/${kind}-md`
+        if (opts.profile !== undefined) route += `?profile=${encodeURIComponent(opts.profile)}`
+        const response =
+          opts.path === undefined
+            ? await c.request('GET', route)
+            : await c.request('PUT', route, { body: JSON.stringify({ path: opts.path }) })
+        if (!response.ok) await handleResponse(response)
+        if (opts.path === undefined) process.stdout.write(await response.text())
+      })
+  }
 
   ws.command('create')
     .description('Create a workspace; daemon auto-spawns if not running.')

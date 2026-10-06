@@ -685,3 +685,27 @@ async def test_a_session_is_told_the_command_rules_a_door_of_ops_skips(
     with caplog.at_level(logging.WARNING, logger="mirage.fuse.core"):
         MountCore(ws.vfs, session=pathed)
     assert caplog.text == ""
+
+
+@pytest.mark.asyncio
+async def test_generated_documents_refresh_even_on_an_open_handle():
+    ws = Workspace({"/": RAMVFS(), "/secret": RAMVFS()}, mode=MountMode.WRITE)
+    session = ws.create_session("reader")
+    await ws.skill_md("/SKILL.md", session_id="reader")
+    await ws.vfs_md("/VFS.md")
+    core = MountCore(ws.vfs, session=session)
+    skill = core.open("/SKILL.md")
+    assert b"name: mirage" in core.read("/SKILL.md", 100000, 0, skill)
+    core.release(skill)
+    handle = core.open("/VFS.md")
+    assert b"/secret" in core.read("/VFS.md", 100000, 0, handle)
+    await ws.set_session_profile("reader", {"paths": {"hide": ["/secret"]}})
+    changed = core.read("/VFS.md", 100000, 0, handle)
+    assert b"/secret" not in changed
+    assert changed == (await ws.vfs_md(session_id="reader")).encode()
+    assert core.getattr("/VFS.md", handle)["st_size"] == len(changed)
+    await ws.set_session_profile("reader", {"paths": {"hide": ["/VFS.md"]}})
+    with pytest.raises(FileNotFoundError):
+        core.read("/VFS.md", 100000, 0, handle)
+    core.release(handle)
+    await ws.close()

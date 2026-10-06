@@ -57,9 +57,10 @@ async def test_the_op_door_reads_calendar_json_cold():
 
 
 @pytest.mark.parametrize("size", [1, 7, 30])
-def test_the_prompt_shows_the_mount_s_own_tree(size):
+@pytest.mark.asyncio
+async def test_the_prompt_shows_the_mount_s_own_tree(size):
     vfs = GCalVFS(gcal_config(bucket_days=size))
-    text = Workspace({"/cal": vfs}).file_prompt
+    text = await Workspace({"/cal": vfs}).vfs_md()
     example = re.search(r"/primary/([^/]+)/<eventId>__(\S+)", text)
     assert example is not None
     assert parse_bucket(example[1], size) is not None

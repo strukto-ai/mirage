@@ -239,7 +239,7 @@ def test_handle_man_renders_an_installed_cli():
     )
     assert io.exit_code == 0
     text = out.decode()
-    assert "Usage: linear" in text
+    assert "usage: linear" in text
     assert "issue" in text
 
 
@@ -248,7 +248,7 @@ def test_handle_man_descends_a_verb_path_and_resolves_aliases():
     text = asyncio.run(
         handle_man(["linear", "issue", "create"], reg, _SESSION)
     )[0].decode()
-    assert "Usage: linear issue create" in text
+    assert "usage: linear issue create" in text
     aliased = asyncio.run(
         handle_man(["linear", "i", "create"], reg, _SESSION)
     )[0].decode()
@@ -296,7 +296,7 @@ def test_handle_man_prints_the_cli_before_a_colliding_mount_command():
     mount = _mk_mount("/ram/", "ram", cmds={"linear": _mk_cmd("linear", spec)})
     reg = _cli_registry([mount])
     text = asyncio.run(handle_man(["linear"], reg, _SESSION))[0].decode()
-    assert text.index("Usage: linear") < text.index("mount side")
+    assert text.index("usage: linear") < text.index("mount side")
 
 
 def test_render_man_index_lists_installed_clis_after_commands():

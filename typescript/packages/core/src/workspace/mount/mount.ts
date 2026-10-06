@@ -133,6 +133,7 @@ function withWalkProbe<T>(
 }
 
 export class MountEntry {
+  visible: (() => boolean) | null = null
   readonly mountId = uuid7()
   readonly prefix: string
   readonly vfs: BaseVFS

@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type * as UtilsModule from '../core/disk/utils.ts'
 import { ListingCheckStore } from '@struktoai/mirage-core/cache/index/ram'
@@ -36,10 +36,17 @@ vi.mock('../core/disk/utils.ts', async (importOriginal) => {
   return { ...original, readEntries: vi.fn(original.readEntries) }
 })
 
-const SPEC_VFS = resolve(
-  fileURLToPath(import.meta.url),
-  '../../../../../../spec/typescript/node/vfs.json',
-)
+// The capability facts scripts/gen-specs.ts dumps for the parity gate, read
+// live from source the same way. Imported by URL: the scripts package sits
+// outside this package's rootDir.
+const FACTS = resolve(fileURLToPath(import.meta.url), '../../../../../scripts/vfs_facts.ts')
+const { registryCapabilities } = (await import(pathToFileURL(FACTS).href)) as {
+  registryCapabilities: (
+    root: string,
+    pkgs: readonly string[],
+  ) => Record<string, { listing_version?: unknown } | null>
+}
+const CAPABILITIES = registryCapabilities(resolve(FACTS, '../../packages'), ['core', 'node'])
 
 const KINDS = ['none', 'mount', 'folder']
 
@@ -218,11 +225,9 @@ async function checkContract(name: string): Promise<void> {
 }
 
 function manifest(): Record<string, { listing_version?: unknown }> {
-  return (
-    JSON.parse(readFileSync(SPEC_VFS, 'utf8')) as {
-      capabilities: Record<string, { listing_version?: unknown }>
-    }
-  ).capabilities
+  return Object.fromEntries(
+    Object.entries(CAPABILITIES).flatMap(([name, caps]) => (caps === null ? [] : [[name, caps]])),
+  )
 }
 
 function declared(): string[] {

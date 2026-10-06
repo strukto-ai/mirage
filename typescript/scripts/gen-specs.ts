@@ -35,15 +35,16 @@ import {
   type Capabilities,
   type CommandIoFacts,
   type ConfigFacts,
-  capabilitiesOf,
-  collectClasses,
   commandIoFacts,
   configFacts,
-  registryClasses,
+  registryCapabilities,
 } from './vfs_facts.ts'
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..')
-const SPEC_ROOT = resolve(__dirname, '..', '..', 'spec', 'typescript')
+const SPEC_ROOT = resolve(
+  process.env.MIRAGE_SPEC_DIR ?? resolve(__dirname, '..', '..', '.cache', 'spec'),
+  'typescript',
+)
 const PACKAGES = resolve(__dirname, '..', 'packages')
 
 // Bespoke Google Workspace API passthroughs. They register command names that
@@ -335,22 +336,6 @@ function emitVfsNames(
   console.log(`emitted ${payload.registry.length} registry names to ${path}`)
 }
 
-// Every registry name's capability values, read from the class the entry
-// constructs. A name whose class cannot be resolved is a hard error: a
-// missing row would read as "no divergence here" in the parity gate.
-function capabilitiesFor(
-  pkgs: readonly string[],
-  variantPkg: string,
-): Record<string, Capabilities | null> {
-  const classes = collectClasses(PACKAGES, pkgs)
-  const names = registryClasses(resolve(PACKAGES, variantPkg, 'src', 'vfs', 'registry.ts'))
-  const out: Record<string, Capabilities | null> = {}
-  for (const [vfs, className] of [...names].sort(([a], [b]) => compareCodePoints(a, b))) {
-    out[vfs] = className === null ? null : capabilitiesOf(className, classes)
-  }
-  return out
-}
-
 // Every registered command SPECS does not declare. A backend verb (`trello
 // card create`) carries its spec inline, so the SPECS loop never sees it and
 // the parity gate could not tell a flag one language dropped. Each name gets
@@ -362,6 +347,9 @@ function emitVfsCommands(name: string, registry: Record<string, RegisteredComman
   const outDir = resolve(SPEC_ROOT, name, 'vfs_commands')
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
+  for (const stale of readdirSync(outDir)) {
+    if (stale.endsWith('.json')) rmSync(resolve(outDir, stale))
+  }
   const own = Object.entries(registry)
     .filter(([cmd]) => !(cmd in SPECS))
     .sort(([a], [b]) => compareCodePoints(a, b))
@@ -394,6 +382,9 @@ function emitVariant(
   const registry = collectRegistrations(modules)
   const outDir = resolve(SPEC_ROOT, name, 'general')
   mkdirSync(outDir, { recursive: true })
+  for (const stale of readdirSync(outDir)) {
+    if (stale.endsWith('.json')) rmSync(resolve(outDir, stale))
+  }
   // Entries, not keys: a key read back through `SPECS[cmd]` is
   // `CommandSpec | undefined` under `noUncheckedIndexedAccess`, and the only
   // ways to spend that are a cast or a skip that would emit fewer specs than
@@ -410,7 +401,7 @@ function emitVariant(
     name,
     knownVfsNames,
     registry,
-    capabilitiesFor(pkgs, pkgs[pkgs.length - 1] as string),
+    registryCapabilities(PACKAGES, pkgs),
     commandIoFacts(PACKAGES, pkgs, {
       maxGlobMatches: DEFAULT_MAX_GLOB_MATCHES,
       maxDuEntries: DEFAULT_MAX_DU_ENTRIES,

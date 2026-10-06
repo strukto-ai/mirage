@@ -249,3 +249,73 @@ def clap_group_refusal(
     return (
         f"{message}\n\n{usage}\n\nFor more information, try '--help'.\n"
     ).encode()
+
+
+def argparse_help(
+    name: str, spec: CommandSpec, subcommands: SubcommandRows = ()
+) -> str:
+    """Human-readable CLI help from the declared argparse-shaped grammar.
+
+    Args:
+        name (str): Installed command and canonical subcommand path.
+        spec (CommandSpec): Argument grammar for this node; group
+            options are listed on their group.
+        subcommands (SubcommandRows): Visible immediate subcommands.
+    """
+    usage = [name]
+    rows = []
+    for opt in spec.options:
+        value = opt.metavar or (
+            "{" + ",".join(opt.choices) + "}"
+            if opt.choices
+            else option_metavar(opt)
+        )
+        suffix = "" if opt.type == "bool" else " " + value
+        if opt.pair:
+            suffix = " NAME " + value
+        if opt.value_optional:
+            suffix = "[=" + value + "]"
+        flags = ", ".join(
+            flag + suffix for flag in (opt.short, opt.long) if flag
+        )
+        slot = (opt.short or opt.long or "") + suffix
+        usage.append(slot if opt.required else "[" + slot + "]")
+        details = [opt.description or ""]
+        if opt.default is not None:
+            details.append(f"(default: {opt.default})")
+        if opt.env is not None:
+            details.append(f"(env: {opt.env})")
+        if opt.required:
+            details.append("(required)")
+        if opt.multiple:
+            details.append("(repeatable)")
+        rows.append((flags, " ".join(v for v in details if v)))
+    operands = []
+    for operand in (*spec.positional, *((spec.rest,) if spec.rest else ())):
+        label = operand.name or ("PATH" if operand.type == "path" else "ARG")
+        slot = label + (" ..." if operand is spec.rest else "")
+        usage.append(slot if operand.required else "[" + slot + "]")
+        operands.append(
+            (label, "Virtual path" if operand.type == "path" else "")
+        )
+    if subcommands:
+        usage.append("{" + ",".join(sub for sub, _ in subcommands) + "} ...")
+    lines = ["usage: " + " ".join(usage)]
+    if spec.description:
+        lines.extend(["", spec.description])
+    for title, table in (
+        ("positional arguments:", operands),
+        ("commands:", subcommands),
+        ("options:", rows),
+    ):
+        if not table:
+            continue
+        lines.extend(["", title])
+        width = max(len(label) for label, _ in table)
+        for label, description in table:
+            lines.append(
+                ("  " + label.ljust(width) + "  " + description).rstrip()
+            )
+    if spec.epilog:
+        lines.extend(["", spec.epilog.rstrip("\n")])
+    return "\n".join(lines) + "\n"

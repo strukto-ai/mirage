@@ -150,7 +150,7 @@ repos:
         language: system
         # `scripts/` too: mypy's `files` reaches it, and a hook that did
         # not fire on it would be the gate-that-never-runs shape this
-        # repo keeps finding. Those files generate `spec/`, so a type
+        # repo keeps finding. Those files generate the parity manifests, so a type
         # error there lands as a wrong artifact, not a crash.
         files: ^(python/(mirage/.*\.py|tests/.*\.py|pyproject\.toml)|scripts/.*\.py)$
         pass_filenames: false
@@ -167,5 +167,5 @@ repos:
         name: VFS prompt parity
         entry: python3 scripts/check_prompt_parity.py --selftest
         language: system
-        files: ^(python/mirage/vfs/.*/prompt\.py|typescript/packages/[^/]+/src/vfs/.*/prompt\.ts|scripts/check_prompt_parity\.py|spec/prompt_exceptions\.json)$
+        files: ^(python/mirage/vfs/.*/prompt\.py|typescript/packages/[^/]+/src/vfs/.*/prompt\.ts|scripts/check_prompt_parity\.py|scripts/parity/prompt_exceptions\.json)$
         pass_filenames: false

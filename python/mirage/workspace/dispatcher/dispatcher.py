@@ -350,7 +350,9 @@ class Dispatcher:
             op (str): the dispatched op name.
             virtual (str): the virtual path being answered.
         """
-        prefixes = [m.prefix for m in self._namespace.registry.mounts()]
+        prefixes = [
+            m.prefix for m in self._namespace.registry.visible_mounts()
+        ]
         vis = session_visibility()
         if op == "readdir":
             return namespace_listing(vis, prefixes, self._namespace, virtual)
@@ -742,7 +744,10 @@ class Dispatcher:
                 merge_readdir(
                     vis,
                     result,
-                    [m.prefix for m in self._namespace.registry.mounts()],
+                    [
+                        m.prefix
+                        for m in self._namespace.registry.visible_mounts()
+                    ],
                     self._namespace,
                     path.virtual,
                 ),
@@ -897,7 +902,7 @@ class Dispatcher:
         merged = merge_readdir(
             vis,
             entries,
-            [m.prefix for m in self._namespace.registry.mounts()],
+            [m.prefix for m in self._namespace.registry.visible_mounts()],
             self._namespace,
             path.virtual,
         )
@@ -1165,7 +1170,9 @@ class Dispatcher:
         """
         if self._namespace.is_link(path.virtual):
             return True, None
-        prefixes = [m.prefix for m in self._namespace.registry.mounts()]
+        prefixes = [
+            m.prefix for m in self._namespace.registry.visible_mounts()
+        ]
         if (
             namespace_stat(
                 session_visibility(), prefixes, self._namespace, path.virtual
@@ -1269,7 +1276,9 @@ class Dispatcher:
         """
         if virtual == "/":
             return FileType.DIRECTORY
-        prefixes = [m.prefix for m in self._namespace.registry.mounts()]
+        prefixes = [
+            m.prefix for m in self._namespace.registry.visible_mounts()
+        ]
         if (
             namespace_stat(
                 session_visibility(), prefixes, self._namespace, virtual
@@ -1582,7 +1591,9 @@ class Dispatcher:
         after the command is stamped with the bound of the mount that
         produced the bytes rather than whatever holds the prefix by then.
         """
-        mounts = {m.prefix: m for m in self._namespace.registry.mounts()}
+        mounts = {
+            m.prefix: m for m in self._namespace.registry.visible_mounts()
+        }
 
         def facts(path: str) -> CacheFacts:
             prefix = owner_prefix(mounts, path)

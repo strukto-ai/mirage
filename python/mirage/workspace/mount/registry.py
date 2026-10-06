@@ -415,7 +415,9 @@ class MountRegistry:
             raise NoMountError(f"no mount with prefix {prefix!r}")
         return m
 
-    def try_mount_for_prefix(self, prefix: str) -> MountEntry | None:
+    def try_mount_for_prefix(
+        self, prefix: str, *, include_hidden: bool = False
+    ) -> MountEntry | None:
         """The mount at exactly this prefix, or None when none matches.
 
         The argument is normalized like ``mount``/``unmount`` take it, so
@@ -424,7 +426,7 @@ class MountRegistry:
         """
         stripped = prefix.strip("/")
         norm = "/" + stripped + "/" if stripped else "/"
-        for m in self._mounts:
+        for m in self._mounts if include_hidden else self.visible_mounts():
             if m.prefix == norm:
                 return m
         return None
@@ -461,7 +463,7 @@ class MountRegistry:
         stripped = path.strip("/")
         norm = "/" + stripped + "/" if stripped else "/"
         out: list[MountEntry] = []
-        for m in self._mounts:
+        for m in self.visible_mounts():
             if m.prefix == norm:
                 continue
             if not m.prefix.startswith(norm):
@@ -486,7 +488,7 @@ class MountRegistry:
 
     def try_mount_for(self, path: str) -> MountEntry | None:
         """The mount that handles this path, or None when none does."""
-        owner = owner_prefix((m.prefix for m in self._mounts), path)
+        owner = owner_prefix((m.prefix for m in self.visible_mounts()), path)
         if owner is None:
             return None
         return self.try_mount_for_prefix(owner)
@@ -531,7 +533,7 @@ class MountRegistry:
             and self._root.resolve_command(cmd_name) is not None
         ):
             return self._root
-        for m in self._mounts:
+        for m in self.visible_mounts():
             if m.prefix == DEV_PREFIX:
                 continue
             if m.resolve_command(cmd_name) is not None:
@@ -638,6 +640,9 @@ class MountRegistry:
 
     def mounts(self) -> list[MountEntry]:
         return list(self._mounts)
+
+    def visible_mounts(self) -> list[MountEntry]:
+        return [m for m in self._mounts if m.visible is None or m.visible()]
 
     def ops_mounts(self) -> list[OpsMount]:
         """Build OpsMount list from registered mounts for Ops layer."""

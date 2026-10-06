@@ -36,77 +36,76 @@ slack = SlackVFS(
 ws = Workspace({"/slack": (slack, MountMode.READ)}, mode=MountMode.READ)
 client = MirageSandboxClient(ws)
 
-navigator = SandboxAgent(
-    name="path-resolver",
-    model="gpt-5.4-mini",
-    instructions=(
-        f"{ws.file_prompt}\n\n"
-        "Use shell tools (ls, find) to locate files. "
-        "Reply with absolute paths only, one per line."
-    ),
-)
-
-analyst = SandboxAgent(
-    name="analyst",
-    model="gpt-5.4-mini",
-    instructions=(
-        f"{ws.file_prompt}\n\n"
-        "You have shell tools (ls, find, cat, grep, ...) and view_image. "
-        "Some files may already be attached to this message — read them "
-        "directly. For images you discover later, call view_image. "
-        "Answer using only attachments and confirmed file contents."
-    ),
-)
-
-
-async def mirage_run(task: str) -> str:
-    """Run a task with both pre-attached multimodal context and live tools.
-
-    Pipeline:
-      1. Navigator agent uses shell tools to resolve which paths the task
-         needs.
-      2. MirageRunner pre-attaches every resolved path as a multimodal
-         block — input_image (PNG/JPEG/GIF, base64 data URI), input_file
-         (PDF, uploaded via OpenAI Files API), or input_text otherwise.
-      3. The analyst SandboxAgent receives those blocks AND retains all
-         shell tools + native view_image. It can read the pre-attached
-         content directly OR call view_image / cat for anything else
-         it discovers mid-run.
-
-    Args:
-        task (str): Natural-language task referring to files in the VFS.
-
-    Returns:
-        str: The analyst's final output.
-    """
-    nav = await Runner.run(
-        navigator,
-        f"Find every file this request refers to: {task}",
-        run_config=RunConfig(sandbox=SandboxRunConfig(client=client)),
-        max_turns=20,
-    )
-    print("  navigator raw output:")
-    for line in nav.final_output.strip().splitlines():
-        print(f"    {line!r}")
-    paths = [
-        line.strip().strip("`").strip()
-        for line in nav.final_output.strip().splitlines()
-        if line.strip().startswith("/")
-    ]
-    print(f"  resolved paths: {paths}")
-
-    runner = MirageRunner(ws, client=AsyncOpenAI())
-    blocks = await runner.build_blocks(task, paths)
-    out = await Runner.run(
-        analyst,
-        [{"role": "user", "content": blocks}],
-        run_config=RunConfig(sandbox=SandboxRunConfig(client=client)),
-        max_turns=20,
-    )
-    return out.final_output
-
 
 async def main():
+    navigator = SandboxAgent(
+        name="path-resolver",
+        model="gpt-5.4-mini",
+        instructions=(
+            f"{(await ws.vfs_md())}\n\n"
+            "Use shell tools (ls, find) to locate files. "
+            "Reply with absolute paths only, one per line."
+        ),
+    )
+
+    analyst = SandboxAgent(
+        name="analyst",
+        model="gpt-5.4-mini",
+        instructions=(
+            f"{(await ws.vfs_md())}\n\n"
+            "You have shell tools (ls, find, cat, grep, ...) and view_image. "
+            "Some files may already be attached to this message — read them "
+            "directly. For images you discover later, call view_image. "
+            "Answer using only attachments and confirmed file contents."
+        ),
+    )
+
+    async def mirage_run(task: str) -> str:
+        """Run a task with both pre-attached multimodal context and live tools.
+
+        Pipeline:
+          1. Navigator agent uses shell tools to resolve which paths the task
+             needs.
+          2. MirageRunner pre-attaches every resolved path as a multimodal
+             block — input_image (PNG/JPEG/GIF, base64 data URI), input_file
+             (PDF, uploaded via OpenAI Files API), or input_text otherwise.
+          3. The analyst SandboxAgent receives those blocks AND retains all
+             shell tools + native view_image. It can read the pre-attached
+             content directly OR call view_image / cat for anything else
+             it discovers mid-run.
+
+        Args:
+            task (str): Natural-language task referring to files in the VFS.
+
+        Returns:
+            str: The analyst's final output.
+        """
+        nav = await Runner.run(
+            navigator,
+            f"Find every file this request refers to: {task}",
+            run_config=RunConfig(sandbox=SandboxRunConfig(client=client)),
+            max_turns=20,
+        )
+        print("  navigator raw output:")
+        for line in nav.final_output.strip().splitlines():
+            print(f"    {line!r}")
+        paths = [
+            line.strip().strip("`").strip()
+            for line in nav.final_output.strip().splitlines()
+            if line.strip().startswith("/")
+        ]
+        print(f"  resolved paths: {paths}")
+
+        runner = MirageRunner(ws, client=AsyncOpenAI())
+        blocks = await runner.build_blocks(task, paths)
+        out = await Runner.run(
+            analyst,
+            [{"role": "user", "content": blocks}],
+            run_config=RunConfig(sandbox=SandboxRunConfig(client=client)),
+            max_turns=20,
+        )
+        return out.final_output
+
     task = "Summarize the latest PNG and PDF in the slack general channel."
     print(f"=== Task: {task} ===")
     print()

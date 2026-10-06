@@ -15,6 +15,8 @@ uv add 'mirage-ai[openai]'
 ## Tools (`ShellTool` + `ApplyPatchTool`)
 
 ```python
+import asyncio
+
 from agents import Agent, ApplyPatchTool, Runner, ShellTool
 
 from mirage import MountMode, Workspace
@@ -27,17 +29,24 @@ from mirage.vfs.ram import RAMVFS
 
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
-agent = Agent(
-    name="Mirage RAM Agent",
-    model="gpt-5.5-mini",
-    instructions=build_system_prompt(
-        mount_info={"/": "In-memory filesystem (read/write)"},
-    ),
-    tools=[
-        ShellTool(executor=MirageShellExecutor(ws)),
-        ApplyPatchTool(editor=MirageEditor(ws)),
-    ],
-)
+
+async def main() -> None:
+    agent = Agent(
+        name="Mirage RAM Agent",
+        model="gpt-5.5-mini",
+        instructions=await build_system_prompt(
+            mount_info={"/": "In-memory filesystem (read/write)"},
+        ),
+        tools=[
+            ShellTool(executor=MirageShellExecutor(ws)),
+            ApplyPatchTool(editor=MirageEditor(ws)),
+        ],
+    )
+    result = await Runner.run(agent, "Create /hello.txt with 'hi' and cat it.")
+    print(result.final_output)
+
+
+asyncio.run(main())
 ```
 
 ## Sandbox Agent

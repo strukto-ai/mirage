@@ -43,8 +43,11 @@ class MirageCapability(Capability):
         super().bind(session)
 
     async def instructions(self, manifest: Manifest) -> str | None:
-        workspace = mirage_session(self.session).workspace
-        return f"{MOUNTS_INTRO}\n\n{workspace.file_prompt}"
+        session = mirage_session(self.session)
+        markdown = await session.workspace.vfs_md(
+            session_id=session.session_id
+        )
+        return f"{MOUNTS_INTRO}\n\n{markdown}"
 
 
 def mirage_session(session: BaseSandboxSession | None) -> MirageSandboxSession:

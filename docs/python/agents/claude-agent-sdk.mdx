@@ -29,7 +29,7 @@ ws = Workspace({"/s3": S3VFS(S3Config(bucket="my-bucket"))})
 
 async for msg in query(
     prompt="cat /s3/data.csv | grep error",
-    options=build_options(ws),
+    options=await build_options(ws),
 ):
     print(msg)
 ```
@@ -47,7 +47,7 @@ options = ClaudeAgentOptions(
     mcp_servers={"mirage": MirageServer(ws), "github": github_server},
     allowed_tools=["mcp__mirage__*", "mcp__github__*"],
     tools=[],
-    system_prompt=build_system_prompt(workspace=ws),
+    system_prompt=await build_system_prompt(workspace=ws),
 )
 ```
 

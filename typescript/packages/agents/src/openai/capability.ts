@@ -32,8 +32,9 @@ export class MirageCapability extends Capability {
     return super.bind(session)
   }
 
-  override instructions(_manifest: Manifest): string {
-    return `${MOUNTS_INTRO}\n\n${mirageSession(this._session).workspace.filePrompt}`
+  override async instructions(_manifest: Manifest): Promise<string> {
+    const session = mirageSession(this._session)
+    return `${MOUNTS_INTRO}\n\n${await session.workspace.vfsMd(undefined, { sessionId: session.sessionId })}`
   }
 }
 

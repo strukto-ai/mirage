@@ -76,7 +76,7 @@ const openAI = configureOpenAIExample(ws, 'gpt-5.5')
 const agent = new Agent({
   name: 'Mirage Multi-VFS Agent',
   model: openAI.model,
-  instructions: buildSystemPrompt({ workspace: ws }),
+  instructions: await buildSystemPrompt({ workspace: ws }),
   tools: openAI.tools,
 })
 

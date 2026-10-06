@@ -25,10 +25,11 @@ from mirage.agents.prompt import build_system_prompt
 from mirage.workspace.workspace import Workspace
 
 
-def build_options(
+async def build_options(
     workspace: Workspace,
     *,
     system_prompt: str | None = None,
+    session_id: str | None = None,
 ) -> ClaudeAgentOptions:
     """Build ClaudeAgentOptions backed by a Mirage Workspace.
 
@@ -39,15 +40,18 @@ def build_options(
     Args:
         workspace (Workspace): The workspace to serve.
         system_prompt (str | None): Override the default Mirage system prompt.
+        session_id (str | None): Bind the tools and prompt to this session.
 
     Returns:
         ClaudeAgentOptions: Ready to pass to claude_agent_sdk.query().
     """
-    server = MirageServer(workspace)
+    server = MirageServer(workspace, session_id=session_id)
     return ClaudeAgentOptions(
         mcp_servers={"mirage": server},
         allowed_tools=["mcp__mirage__*"],
         tools=[],
         system_prompt=system_prompt
-        or build_system_prompt(workspace=workspace),
+        or await build_system_prompt(
+            workspace=workspace, session_id=session_id
+        ),
     )

@@ -109,9 +109,9 @@ def test_bare_root_prints_usage_to_stdout_exit_1():
     assert result.stream == "stdout"
     assert result.exit_code == 1
     assert result.output.startswith(
-        b"gws: Google Workspace\n\nUsage: gws [flags] <command> [<args>]"
+        b"usage: gws [-C CWD] [-v] [-h] {gmail,docs} ..."
     )
-    assert b"Commands:" in result.output
+    assert b"commands:" in result.output
 
 
 def test_help_prints_the_same_usage_exit_0():
@@ -126,8 +126,7 @@ def test_nested_group_help_names_the_path():
     result = walk("gws", _tree(), ["gmail", "--help"])
     assert result.exit_code == 0
     assert result.output.startswith(
-        b"gws gmail: Gmail messages\n\n"
-        b"Usage: gws gmail [flags] <command> [<args>]"
+        b"usage: gws gmail [--account {primary,work}] [-h] {send,list} ..."
     )
 
 
@@ -159,9 +158,7 @@ def test_unknown_group_option_exits_129_with_usage():
     result = walk("gws", _tree(), ["--zzz", "gmail"])
     assert result.stream == "stderr"
     assert result.exit_code == 129
-    assert result.output.startswith(
-        b"unknown option: --zzz\n\ngws: Google Workspace"
-    )
+    assert result.output.startswith(b"unknown option: --zzz\n\nusage: gws")
 
 
 def test_a_clap_group_refusal_uses_claps_words_and_exit():
@@ -259,7 +256,7 @@ def test_required_group_option_missing_exits_129():
 
 def test_group_help_lists_the_injected_help_flag():
     result = walk("gws", _tree(), ["--help"])
-    assert b"\n  --help" in result.output
+    assert b"-h, --help" in result.output
     assert b"Show this help and exit" in result.output
 
 
@@ -443,8 +440,16 @@ def test_manual_of_a_grammarless_script_omits_the_help_row():
     text = node_help(
         "pager", CLISpec(name="pager", script=ScriptSource("print(1)"))
     )
-    assert text.startswith("pager\n")
+    assert text.startswith("usage: pager\n")
     assert "--help" not in text
+
+
+def test_group_help_lists_a_child_that_declares_its_own_help():
+    # The listed group is grammar only; a rebuilt CLISpec would refuse
+    # the added --help as colliding with the child's own.
+    child = CLISpec(name="run", fn=_verb, options=(Option(long="--help"),))
+    tree = CLISpec(name="tool", subcommands=(child,))
+    assert "run" in node_help("tool", tree)
 
 
 def test_path_typed_group_option_resolves_against_cwd():

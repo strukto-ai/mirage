@@ -58,6 +58,15 @@ function stdinBytes(spec: string | { repeat: string; times: number }): Uint8Arra
   return encoder.encode(typeof spec === 'string' ? spec : spec.repeat.repeat(spec.times))
 }
 
+// The mount paths a VFS.md names, one per "## `/path`" heading.
+function headings(markdown: string): string {
+  return markdown
+    .split('\n')
+    .filter((line) => line.startsWith('## `') && line.endsWith('`'))
+    .map((line) => line.slice(4, -1))
+    .join(' ')
+}
+
 function prefixOf(path: string): string {
   return path.replace(/\/+$/, '') || '/'
 }
@@ -229,6 +238,20 @@ async function steps(
       } else if (kind === 'kill_jobs') {
         const session = typeof step.session === 'string' ? step.session : undefined
         answers.push({ text: String(await get(wid).kill(session)) })
+      } else if (kind === 'document' || kind === 'expose') {
+        const ws = get(wid)
+        const options = {
+          ...(typeof step.session === 'string' ? { sessionId: step.session } : {}),
+          ...(typeof step.profile === 'string' ? { profile: step.profile } : {}),
+        }
+        const path = kind === 'expose' ? (step.path as string) : undefined
+        const markdown =
+          step.kind === 'vfs' ? await ws.vfsMd(path, options) : await ws.skillMd(path, options)
+        answers.push({ text: kind === 'expose' ? 'exposed' : headings(markdown) })
+      } else if (kind === 'session_update') {
+        const profile = typeof step.profile === 'string' ? step.profile : null
+        await get(wid).setSessionProfile(step.session as string, profile)
+        answers.push({ text: step.session })
       } else if (kind === 'close_workspace') {
         await get(wid).close()
         workspaces.delete(wid)

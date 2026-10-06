@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 import time
 
@@ -34,21 +35,20 @@ slack = SlackVFS(
 ws = Workspace({"/slack": slack}, mode=MountMode.READ)
 
 
-agent = Agent(
-    "openai:gpt-5.4-mini",
-    system_prompt=ws.file_prompt,
-    capabilities=[
-        MirageWorkspace(ws),
-        ConsoleCapability(
-            image_support=True,
-            document_support=True,
-            permissions=PERMISSIVE_RULESET,
-        ),
-    ],
-)
+async def main() -> None:
+    agent = Agent(
+        "openai:gpt-5.4-mini",
+        system_prompt=await ws.vfs_md(),
+        capabilities=[
+            MirageWorkspace(ws),
+            ConsoleCapability(
+                image_support=True,
+                document_support=True,
+                permissions=PERMISSIVE_RULESET,
+            ),
+        ],
+    )
 
-
-def main() -> None:
     task = (
         "Read and summarize the latest PNG and PDF in the slack "
         "general channel. Open each file with read_file before responding."
@@ -56,7 +56,7 @@ def main() -> None:
     print(f"=== Task: {task} ===")
     print()
     t0 = time.perf_counter()
-    result = agent.run_sync(task)
+    result = await agent.run(task)
     elapsed = time.perf_counter() - t0
     print(result.output)
     print()
@@ -74,4 +74,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
