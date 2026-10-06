@@ -23,7 +23,13 @@ import {
 import type { Limit } from '../../types.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
 import { parseCommandLimits, commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
-import { BIN_PREFIX, IFS_DEFAULT, RANDOM_UNSET, SHELL_ARGV0 } from '../../shell/constants.ts'
+import {
+  BIN_PREFIX,
+  IFS_DEFAULT,
+  RANDOM,
+  RANDOM_UNSET,
+  SHELL_ARGV0,
+} from '../../shell/constants.ts'
 import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
@@ -318,6 +324,14 @@ function restoredVars(
 }
 
 /** Copy a variable store deeply enough that a child cannot write back. */
+/** Copy locals; temporary call environments become ordinary saved scopes in the child. */
+function copyLocals(frame: Map<string, ShellVar | null>): Map<string, ShellVar | null> {
+  const copied = new Map<string, ShellVar | null>()
+  for (const [name, variable] of frame)
+    copied.set(name, variable === null ? null : copyVar(variable))
+  return copied
+}
+
 function copyVars(vars: Record<string, ShellVar>): Record<string, ShellVar> {
   const out = ownRecord<ShellVar>()
   for (const [name, v] of Object.entries(vars)) {
@@ -596,6 +610,31 @@ export class SessionState {
     forked.execStdinUnreadable = this.execStdinUnreadable
     forked.execStdinIdentity = this.execStdinIdentity
     return forked
+  }
+
+  /**
+   * A child shell of this session: a fork that reads on from here. `fork`
+   * copies what a session keeps; a child shell (a command substitution, a
+   * subshell, a nested `bash`) also inherits the reader's position, the
+   * alias bookkeeping and the local frames, and reseeds `$RANDOM` on its
+   * first draw instead of replaying this session's seed. Mirrors Python.
+   */
+  subshell(): SessionState {
+    const child = this.fork()
+    child.parseSeq = this.parseSeq
+    child.parseCurrent = this.parseCurrent
+    child.aliasMarks = new Map(this.aliasMarks)
+    child.aliasStack = [...this.aliasStack]
+    child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
+    child.localFrames = this.localFrames.map((frame) =>
+      frame === this.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),
+    )
+    child.localRandom = [...this.localRandom]
+    if (child.randomSeed !== RANDOM_UNSET) {
+      const word = this.vars[RANDOM]?.value
+      child.randomSeed = typeof word === 'string' ? word : null
+    }
+    return child
   }
 
   /**

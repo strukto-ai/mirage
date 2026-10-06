@@ -134,7 +134,7 @@ export async function handleExecPath(
     try {
       return await runAsShell(() =>
         handleCommandBuiltin(
-          (command, opts) => executeFn(command, { ...opts, session }),
+          (command, opts) => executeFn(command, { ...opts, context }),
           ['--', stripSlash(spec.mountPath), ...args],
           session,
           registry,

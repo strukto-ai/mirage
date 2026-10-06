@@ -335,7 +335,7 @@ export async function handleConnection(
 }
 
 /**
- * Execute body in isolated env.
+ * Run a subshell's body in the child shell its caller made.
  *
  * `body` is ALL subshell children, including the `&` tokens that mark
  * background statements (named-only lists would run `a & b`
@@ -374,148 +374,144 @@ export async function handleSubshell(
   // A child shell: `shift` or `set --` in it leaves the caller's
   // parameters alone, and it runs in none of the caller's loops.
   callStack = (callStack ?? new CallStack()).fork(false)
-  try {
-    const allStdout: (ByteSource | null)[] = []
-    let mergedIo = new IOResult()
-    let lastExec = new ExecutionNode({ command: '()', exitCode: 0 })
-    const bound = fd0Binding(session)
-    let i = 0
-    while (i < body.length) {
-      const child = body[i]
-      if (child?.isNamed !== true || child.type === NT.COMMENT) {
-        i += 1
-        continue
-      }
-      // `set -n` needs no arm here: `executeNode` refuses every node
-      // while the option is on, so this loop simply runs a tail of
-      // no-ops. The child owns the option, so it cannot leak to the parent.
-      const isBg = body[i + 1]?.type === NT.BACKGROUND
-      if (isBg && jobTable !== null) {
-        let launched: Result
-        try {
-          launched = await handleBackground(
-            executeNode,
-            child,
-            null,
-            context,
-            jobTable,
-            agentId ?? '',
-            stdin,
-            callStack,
-            handed,
-            decisions,
-          )
-        } catch (err) {
-          if (!(err instanceof ExitSignal)) throw err
-          // A job the subshell cannot fork ends the subshell only, its
-          // status the subshell's.
-          mergedIo = await mergedIo.merge(
-            new IOResult({ exitCode: err.containedCode, stderr: err.stderr }),
-          )
-          mergedIo.exitCode = err.containedCode
-          recordStatus(session, err.containedCode)
-          lastExec = new ExecutionNode({
-            command: '()',
-            exitCode: err.containedCode,
-            stderr: err.stderr,
-          })
-          break
-        }
-        const [bgStdout, bgIo, bgExec] = launched
-        if (bgStdout !== null) allStdout.push(bgStdout)
-        mergedIo = await mergedIo.merge(bgIo)
-        // Seed $? for later body commands (mirrors program loop).
-        recordStatus(session, bgIo.exitCode)
-        lastExec = bgExec
-        i += 2
-        continue
-      }
+  const allStdout: (ByteSource | null)[] = []
+  let mergedIo = new IOResult()
+  let lastExec = new ExecutionNode({ command: '()', exitCode: 0 })
+  const bound = fd0Binding(session)
+  let i = 0
+  while (i < body.length) {
+    const child = body[i]
+    if (child?.isNamed !== true || child.type === NT.COMMENT) {
       i += 1
-      let stdout: ByteSource | null
-      let io: IOResult
-      let childExec: ExecutionNode
-      const recorder = new Recorder()
-      const jobs = session.jobOutput
-      const held = jobs.recorder
+      continue
+    }
+    // `set -n` needs no arm here: `executeNode` refuses every node
+    // while the option is on, so this loop simply runs a tail of
+    // no-ops. The child owns the option, so it cannot leak to the parent.
+    const isBg = body[i + 1]?.type === NT.BACKGROUND
+    if (isBg && jobTable !== null) {
+      let launched: Result
       try {
-        const childStdin = statementStdin(session, stdin, bound)
-        jobs.recorder = recorder
-        try {
-          ;[stdout, io, childExec] = await ENCLOSING.run(recorder, () =>
-            executeNode(child, context, childStdin, callStack, { sink: recorder }),
-          )
-        } finally {
-          jobs.recorder = held
-        }
-      } catch (err) {
-        if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
-        // A subshell is its own shell: exit (or ${var:?}) ends the
-        // subshell only, becoming its exit status, and so does the
-        // `return` of a function it runs in.
-        mergedIo = await land(
-          await statementOutput(recorder, err.stdout, new IOResult(), session.terminal, sink),
-          sink,
-          allStdout,
-          mergedIo,
+        launched = await handleBackground(
+          executeNode,
+          child,
+          null,
+          context,
+          jobTable,
+          agentId ?? '',
+          stdin,
+          callStack,
+          handed,
+          decisions,
         )
-        const status = ended(err).exitCode
-        mergedIo = await mergedIo.merge(new IOResult({ exitCode: status, stderr: err.stderr }))
-        mergedIo.exitCode = status
-        recordStatus(session, status)
-        lastExec = new ExecutionNode({ command: '()', exitCode: status, stderr: err.stderr })
+      } catch (err) {
+        if (!(err instanceof ExitSignal)) throw err
+        // A job the subshell cannot fork ends the subshell only, its
+        // status the subshell's.
+        mergedIo = await mergedIo.merge(
+          new IOResult({ exitCode: err.containedCode, stderr: err.stderr }),
+        )
+        mergedIo.exitCode = err.containedCode
+        recordStatus(session, err.containedCode)
+        lastExec = new ExecutionNode({
+          command: '()',
+          exitCode: err.containedCode,
+          stderr: err.stderr,
+        })
         break
       }
-      stdout = await finishStatement(stdout, io, session, child, childExec)
-      const written = await divertStatement(
-        dispatch,
-        session,
-        await statementOutput(recorder, stdout, io, session.terminal, sink),
-        io,
-        child,
-        childExec.command ?? '',
+      const [bgStdout, bgIo, bgExec] = launched
+      if (bgStdout !== null) allStdout.push(bgStdout)
+      mergedIo = await mergedIo.merge(bgIo)
+      // Seed $? for later body commands (mirrors program loop).
+      recordStatus(session, bgIo.exitCode)
+      lastExec = bgExec
+      i += 2
+      continue
+    }
+    i += 1
+    let stdout: ByteSource | null
+    let io: IOResult
+    let childExec: ExecutionNode
+    const recorder = new Recorder()
+    const jobs = session.jobOutput
+    const held = jobs.recorder
+    try {
+      const childStdin = statementStdin(session, stdin, bound)
+      jobs.recorder = recorder
+      try {
+        ;[stdout, io, childExec] = await ENCLOSING.run(recorder, () =>
+          executeNode(child, context, childStdin, callStack, { sink: recorder }),
+        )
+      } finally {
+        jobs.recorder = held
+      }
+    } catch (err) {
+      if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
+      // A subshell is its own shell: exit (or ${var:?}) ends the
+      // subshell only, becoming its exit status, and so does the
+      // `return` of a function it runs in.
+      mergedIo = await land(
+        await statementOutput(recorder, err.stdout, new IOResult(), session.terminal, sink),
+        sink,
+        allStdout,
+        mergedIo,
       )
-      mergedIo = await land(written, sink, allStdout, mergedIo)
-      mergedIo = await mergedIo.merge(io)
-      lastExec = childExec
-      if (
-        io.exitCode !== 0 &&
-        session.shellOptions.errexit === true &&
-        !ERREXIT_EXEMPT_TYPES.has(child.type) &&
-        !session.errexitImmune
-      ) {
-        mergedIo.exitCode = io.exitCode
-        break
-      }
+      const status = ended(err).exitCode
+      mergedIo = await mergedIo.merge(new IOResult({ exitCode: status, stderr: err.stderr }))
+      mergedIo.exitCode = status
+      recordStatus(session, status)
+      lastExec = new ExecutionNode({ command: '()', exitCode: status, stderr: err.stderr })
+      break
     }
-    // The EXIT action is the subshell's: its `wait` and `jobs` see the
-    // subshell's jobs, not the caller's.
-    const cleanup = await runExitTrap(
-      executeFn === null
-        ? null
-        : (action, opts) =>
-            executeFn(action, { ...opts, session, ...(jobTable === null ? {} : { jobTable }) }),
+    stdout = await finishStatement(stdout, io, session, child, childExec)
+    const written = await divertStatement(
+      dispatch,
       session,
-      mergedIo.exitCode,
-      stdin,
-      callStack,
+      await statementOutput(recorder, stdout, io, session.terminal, sink),
+      io,
+      child,
+      childExec.command ?? '',
     )
-    if (cleanup !== null) {
-      const written: Written[] = []
-      const out = await cleanup.materializeStdout()
-      const err = await cleanup.materializeStderr()
-      if (out.byteLength > 0) written.push([Channel.STDOUT, out, false])
-      if (err.byteLength > 0) written.push([Channel.STDERR, err, false])
-      mergedIo = await land(written, sink, allStdout, mergedIo)
-      mergedIo.exitCode = cleanup.exitCode
-      lastExec = new ExecutionNode({ command: '()', exitCode: cleanup.exitCode })
+    mergedIo = await land(written, sink, allStdout, mergedIo)
+    mergedIo = await mergedIo.merge(io)
+    lastExec = childExec
+    if (
+      io.exitCode !== 0 &&
+      session.shellOptions.errexit === true &&
+      !ERREXIT_EXEMPT_TYPES.has(child.type) &&
+      !session.errexitImmune
+    ) {
+      mergedIo.exitCode = io.exitCode
+      break
     }
-    const parts = allStdout.filter((part): part is ByteSource => part !== null)
-    if (parts.length === 1 && parts[0] !== undefined) {
-      return [parts[0], mergedIo, lastExec]
-    }
-    const combined = parts.length > 0 ? asyncChain(parts) : null
-    return [combined, mergedIo, lastExec]
-  } finally {
-    releaseFunctions(session.functions)
   }
+  // The EXIT action is the subshell's: its `wait` and `jobs` see the
+  // subshell's jobs, not the caller's.
+  const cleanup = await runExitTrap(
+    executeFn === null
+      ? null
+      : (action, opts) =>
+          executeFn(action, { ...opts, session, ...(jobTable === null ? {} : { jobTable }) }),
+    session,
+    mergedIo.exitCode,
+    stdin,
+    callStack,
+  )
+  if (cleanup !== null) {
+    const written: Written[] = []
+    const out = await cleanup.materializeStdout()
+    const err = await cleanup.materializeStderr()
+    if (out.byteLength > 0) written.push([Channel.STDOUT, out, false])
+    if (err.byteLength > 0) written.push([Channel.STDERR, err, false])
+    mergedIo = await land(written, sink, allStdout, mergedIo)
+    mergedIo.exitCode = cleanup.exitCode
+    lastExec = new ExecutionNode({ command: '()', exitCode: cleanup.exitCode })
+  }
+  const parts = allStdout.filter((part): part is ByteSource => part !== null)
+  if (parts.length === 1 && parts[0] !== undefined) {
+    return [parts[0], mergedIo, lastExec]
+  }
+  const combined = parts.length > 0 ? asyncChain(parts) : null
+  return [combined, mergedIo, lastExec]
 }

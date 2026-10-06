@@ -199,8 +199,10 @@ async def recurse(
             opts.get("session_id") or ws._session_mgr.default_id
         )
     context = get_current_evaluation()
-    if context is None or context.session is not session:
+    if context is None:
         context = EvaluationContext(session)
+    elif context.session is not session:
+        context = EvaluationContext(session, context.frame.fork(), context)
     if (
         substitution
         and node is not None

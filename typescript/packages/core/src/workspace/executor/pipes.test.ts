@@ -14,8 +14,6 @@
 
 import { EvaluationContext, childContext } from '../evaluation.ts'
 
-import { seedVar } from '../../workspace/session/state.ts'
-import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -266,22 +264,6 @@ describe('handleConnection (&&, ||, ;)', () => {
 })
 
 describe('handleSubshell', () => {
-  it('keeps cwd and env changes in the child', async () => {
-    const s = new SessionState({
-      sessionId: 'test',
-      cwd: '/orig',
-      vars: varsFromEnv({ X: 'orig' }),
-    })
-    const execute: ExecuteNodeFn = (_n, session) => {
-      session.session.cwd = '/inside'
-      seedVar(session.session, 'X', 'inside')
-      return Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    }
-    await handleSubshell(execute, [node('a')], childContext(new EvaluationContext(s)))
-    expect(s.cwd).toBe('/orig')
-    expect(s.env.X).toBe('orig')
-  })
-
   it('runs multiple body statements and merges their IOResults', async () => {
     const s = new SessionState({ sessionId: 'test' })
     let i = 0

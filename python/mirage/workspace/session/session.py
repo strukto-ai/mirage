@@ -32,6 +32,7 @@ from mirage.shell.console import JobOutput, Terminal
 from mirage.shell.constants import (
     BIN_PREFIX,
     IFS_DEFAULT,
+    RANDOM,
     RANDOM_UNSET,
     SHELL_ARGV0,
 )
@@ -89,6 +90,22 @@ def copy_state(value: Any) -> Any:
     if isinstance(value, list):
         return list(value)
     return value
+
+
+def copy_locals(
+    frame: dict[str, ShellVar | None],
+) -> dict[str, ShellVar | None]:
+    """Copy saved locals into child-owned frames.
+
+    Temporary call environments become ordinary saved scopes in the child.
+
+    Args:
+        frame (dict[str, ShellVar | None]): the parent's saved variables.
+    """
+    return {
+        name: None if var is None else copy_var(var)
+        for name, var in frame.items()
+    }
 
 
 def vars_from_env(env: Mapping[str, str]) -> dict[str, ShellVar]:
@@ -777,3 +794,39 @@ class SessionState:
         if self._random_seed == RANDOM_UNSET:
             forked._random_seed = RANDOM_UNSET
         return forked
+
+    def subshell(self) -> "SessionState":
+        """A child shell of this session: a fork that reads on from here.
+
+        ``fork`` copies what a session keeps; a child shell (a command
+        substitution, a subshell, a nested ``bash``) also inherits the
+        reader's position, the alias bookkeeping and the local frames,
+        and reseeds ``$RANDOM`` on its first draw instead of replaying
+        this session's seed.
+
+        Args:
+            None
+        """
+        child = self.fork()
+        child._parse_seq = self._parse_seq
+        child._parse_current = self._parse_current
+        child._alias_marks = dict(self._alias_marks)
+        child._alias_stack = list(self._alias_stack)
+        child._local_vars = (
+            None if self._local_vars is None else copy_locals(self._local_vars)
+        )
+        child._local_frames = [
+            child._local_vars
+            if frame is self._local_vars and child._local_vars is not None
+            else copy_locals(frame)
+            for frame in self._local_frames
+        ]
+        child._local_random = list(self._local_random)
+        if child._random_seed != RANDOM_UNSET:
+            var = self.vars.get(RANDOM)
+            child._random_seed = (
+                var.value
+                if var is not None and isinstance(var.value, str)
+                else None
+            )
+        return child

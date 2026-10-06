@@ -18,7 +18,6 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.shell.constants import RANDOM, RANDOM_MAX, RANDOM_UNSET
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
-from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     conversion_scalar,
@@ -127,7 +126,7 @@ def test_unset_after_a_read_strips_the_meaning():
 def test_a_child_shell_reseeds_without_advancing_the_parent():
     s = SessionState(session_id="s")
     parent = [next_random(s, "42"), next_random(s, s.vars[RANDOM].value)]
-    child = child_context(EvaluationContext(s)).session
+    child = s.subshell()
     assert child._random_seed == s.vars[RANDOM].value
     assert child._random_state is None
     drawn = next_random(child, child.vars[RANDOM].value)
@@ -140,15 +139,12 @@ def test_a_child_shell_reseeds_without_advancing_the_parent():
 def test_a_child_shell_does_not_replay_a_pending_seed():
     s = SessionState(session_id="s")
     seed_var(s, RANDOM, "42")
-    child = child_context(EvaluationContext(s)).session
+    child = s.subshell()
     assert child._random_seed == "42" and child._random_state is None
     unset = SessionState(session_id="u")
     next_random(unset, None)
     assert next_random(unset, None) is None
-    assert (
-        next_random(child_context(EvaluationContext(unset)).session, None)
-        is None
-    )
+    assert next_random(unset.subshell(), None) is None
 
 
 @pytest.mark.asyncio

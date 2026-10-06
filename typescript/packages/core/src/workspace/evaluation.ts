@@ -2,9 +2,7 @@ import { runWithSession } from '../context/session_context.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { SessionManager } from './session/manager.ts'
 import { ExecutionFrame } from './frame.ts'
-import { RANDOM, RANDOM_UNSET } from '../shell/constants.ts'
-import { copyVar, type ShellVar } from '../shell/variable.ts'
-import type { SessionState, SessionInit } from './session/session.ts'
+import type { SessionState } from './session/session.ts'
 
 /** One evaluator's state, separate from the session stored by its manager. */
 export class EvaluationContext {
@@ -14,8 +12,9 @@ export class EvaluationContext {
     readonly parent: EvaluationContext | null = null,
   ) {}
 
-  fork(overrides?: Partial<SessionInit>): EvaluationContext {
-    return new EvaluationContext(this.session.fork(overrides), this.frame.fork(), this)
+  /** An evaluation on a fork of this session: a job or a stage. */
+  fork(): EvaluationContext {
+    return new EvaluationContext(this.session.fork(), this.frame.fork(), this)
   }
 }
 
@@ -41,32 +40,7 @@ export function getCurrentEvaluation(): EvaluationContext | null {
   return current.getStore() ?? null
 }
 
-/** A shell child copies variables while inheriting the current reader context. */
+/** A child shell's evaluation: the session's subshell and a new frame. */
 export function childContext(context: EvaluationContext): EvaluationContext {
-  const result = context.fork()
-  const parent = context.session
-  const child = result.session
-  child.parseSeq = parent.parseSeq
-  child.parseCurrent = parent.parseCurrent
-  child.aliasMarks = new Map(parent.aliasMarks)
-  child.aliasStack = [...parent.aliasStack]
-  child.localVars = parent.localVars === null ? null : copyLocals(parent.localVars)
-  child.localFrames = parent.localFrames.map((frame) =>
-    frame === parent.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),
-  )
-  child.localRandom = [...parent.localRandom]
-  // The child reseeds on its first draw instead of replaying the parent's seed.
-  if (child.randomSeed !== RANDOM_UNSET) {
-    const word = parent.vars[RANDOM]?.value
-    child.randomSeed = typeof word === 'string' ? word : null
-  }
-  return result
-}
-
-/** Copy locals; temporary call environments become ordinary saved scopes in the child. */
-function copyLocals(frame: Map<string, ShellVar | null>): Map<string, ShellVar | null> {
-  const copied = new Map<string, ShellVar | null>()
-  for (const [name, variable] of frame)
-    copied.set(name, variable === null ? null : copyVar(variable))
-  return copied
+  return new EvaluationContext(context.session.subshell(), context.frame.fork(), context)
 }

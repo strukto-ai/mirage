@@ -331,7 +331,7 @@ async def handle_subshell(
     sink: JobConsole | None = None,
     execute_fn: Callable[..., Any] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Execute body in isolated env.
+    """Run a subshell's body in the child shell its caller made.
 
     Args:
         execute_node (Callable): recursion bound to the subshell's own
@@ -356,161 +356,152 @@ async def handle_subshell(
             EXIT action as it ends.
     """
     session = context.session
-    child_token = set_current_evaluation(context)
     inherit_exit_trap(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
     session._line_open = True
     # A child shell: `shift` or `set --` in it leaves the caller's
     # parameters alone, and it runs in none of the caller's loops.
     call_stack = (call_stack or CallStack()).fork(loops=False)
-    try:
-        all_stdout: list[Any] = []
-        merged_io = IOResult()
-        last_exec = ExecutionNode(command="()", exit_code=0)
-        bound = fd0_binding(session)
-        i = 0
-        while i < len(body):
-            child = body[i]
-            if not child.is_named or child.type == NT.COMMENT:
-                i += 1
-                continue
-
-            # `set -n` needs no arm here: `execute_node` refuses every
-            # node while the option is on, so this loop simply runs a
-            # tail of no-ops. The child owns the option, so it cannot
-            # leak to the parent.
-            is_bg = i + 1 < len(body) and body[i + 1].type == NT.BACKGROUND
-            if is_bg and job_table is not None:
-                try:
-                    stdout, io, last_exec = await handle_background(
-                        execute_node,
-                        child,
-                        None,
-                        context,
-                        job_table,
-                        agent_id or "",
-                        stdin,
-                        call_stack,
-                        handed,
-                        decisions,
-                    )
-                except ExitSignal as sig:
-                    # A job the subshell cannot fork ends the subshell
-                    # only, its status the subshell's.
-                    merged_io = await merged_io.merge(
-                        IOResult(
-                            exit_code=sig.contained_code,
-                            stderr=sig.stderr or None,
-                        )
-                    )
-                    merged_io.exit_code = sig.contained_code
-                    record_status(session, sig.contained_code)
-                    last_exec = ExecutionNode(
-                        command="()",
-                        exit_code=sig.contained_code,
-                        stderr=sig.stderr,
-                    )
-                    break
-                merged_io = await merged_io.merge(io)
-                # Seed $? for later body commands (mirrors program loop).
-                record_status(session, io.exit_code)
-                if stdout is not None:
-                    all_stdout.append(stdout)
-                i += 2
-                continue
+    all_stdout: list[Any] = []
+    merged_io = IOResult()
+    last_exec = ExecutionNode(command="()", exit_code=0)
+    bound = fd0_binding(session)
+    i = 0
+    while i < len(body):
+        child = body[i]
+        if not child.is_named or child.type == NT.COMMENT:
             i += 1
-            child_stdin = statement_stdin(session, stdin, bound)
-            recorder = Recorder()
-            enclosing = ENCLOSING.set(recorder)
-            jobs = session.job_output
-            held = jobs.recorder
+            continue
+
+        # `set -n` needs no arm here: `execute_node` refuses every
+        # node while the option is on, so this loop simply runs a
+        # tail of no-ops. The child owns the option, so it cannot
+        # leak to the parent.
+        is_bg = i + 1 < len(body) and body[i + 1].type == NT.BACKGROUND
+        if is_bg and job_table is not None:
             try:
-                jobs.recorder = recorder
-                try:
-                    stdout, io, last_exec = await execute_node(
-                        child, context, child_stdin, call_stack, sink=recorder
-                    )
-                finally:
-                    jobs.recorder = held
-            except (ExitSignal, ReturnSignal) as sig:
-                # A subshell is its own shell: exit (or ${var:?}) ends
-                # the subshell only, becoming its exit status, and so
-                # does the `return` of a function it runs in.
-                merged_io = await land(
-                    await statement_output(
-                        recorder,
-                        sig.stdout or None,
-                        IOResult(),
-                        session.terminal,
-                        sink,
-                    ),
-                    sink,
-                    all_stdout,
-                    merged_io,
+                stdout, io, last_exec = await handle_background(
+                    execute_node,
+                    child,
+                    None,
+                    context,
+                    job_table,
+                    agent_id or "",
+                    stdin,
+                    call_stack,
+                    handed,
+                    decisions,
                 )
-                status = ended(sig).exit_code
-                sig_io = IOResult(exit_code=status, stderr=sig.stderr or None)
-                merged_io = await merged_io.merge(sig_io)
-                merged_io.exit_code = status
-                record_status(session, status)
+            except ExitSignal as sig:
+                # A job the subshell cannot fork ends the subshell
+                # only, its status the subshell's.
+                merged_io = await merged_io.merge(
+                    IOResult(
+                        exit_code=sig.contained_code,
+                        stderr=sig.stderr or None,
+                    )
+                )
+                merged_io.exit_code = sig.contained_code
+                record_status(session, sig.contained_code)
                 last_exec = ExecutionNode(
-                    command="()", exit_code=status, stderr=sig.stderr
+                    command="()",
+                    exit_code=sig.contained_code,
+                    stderr=sig.stderr,
                 )
                 break
-            finally:
-                ENCLOSING.reset(enclosing)
-            stdout = await finish_statement(
-                stdout, io, session, child, last_exec
-            )
-            written = await divert_statement(
-                dispatch,
-                session,
-                await statement_output(
-                    recorder, stdout, io, session.terminal, sink
-                ),
-                io,
-                child,
-                last_exec.command or "",
-            )
-            merged_io = await land(written, sink, all_stdout, merged_io)
             merged_io = await merged_io.merge(io)
-            if (
-                io.exit_code != 0
-                and session.shell_options.get("errexit")
-                and child.type not in ERREXIT_EXEMPT_TYPES
-                and not session.errexit_immune
-            ):
-                merged_io.exit_code = io.exit_code
-                break
-        # The EXIT action is the subshell's: its `wait` and `jobs` see the
-        # subshell's jobs, not the caller's.
-        if execute_fn is not None and job_table is not None:
-            execute_fn = partial(execute_fn, job_table=job_table)
-        cleanup = await run_exit_trap(
-            execute_fn, session, merged_io.exit_code, stdin, call_stack
-        )
-        if cleanup is not None:
+            # Seed $? for later body commands (mirrors program loop).
+            record_status(session, io.exit_code)
+            if stdout is not None:
+                all_stdout.append(stdout)
+            i += 2
+            continue
+        i += 1
+        child_stdin = statement_stdin(session, stdin, bound)
+        recorder = Recorder()
+        enclosing = ENCLOSING.set(recorder)
+        jobs = session.job_output
+        held = jobs.recorder
+        try:
+            jobs.recorder = recorder
+            try:
+                stdout, io, last_exec = await execute_node(
+                    child, context, child_stdin, call_stack, sink=recorder
+                )
+            finally:
+                jobs.recorder = held
+        except (ExitSignal, ReturnSignal) as sig:
+            # A subshell is its own shell: exit (or ${var:?}) ends
+            # the subshell only, becoming its exit status, and so
+            # does the `return` of a function it runs in.
             merged_io = await land(
-                [
-                    (channel, data, False)
-                    for channel, data in (
-                        (Channel.STDOUT, await cleanup.materialize_stdout()),
-                        (Channel.STDERR, await cleanup.materialize_stderr()),
-                    )
-                    if data
-                ],
+                await statement_output(
+                    recorder,
+                    sig.stdout or None,
+                    IOResult(),
+                    session.terminal,
+                    sink,
+                ),
                 sink,
                 all_stdout,
                 merged_io,
             )
-            merged_io.exit_code = cleanup.exit_code
+            status = ended(sig).exit_code
+            sig_io = IOResult(exit_code=status, stderr=sig.stderr or None)
+            merged_io = await merged_io.merge(sig_io)
+            merged_io.exit_code = status
+            record_status(session, status)
             last_exec = ExecutionNode(
-                command="()", exit_code=cleanup.exit_code
+                command="()", exit_code=status, stderr=sig.stderr
             )
-        if len(all_stdout) == 1:
-            return all_stdout[0], merged_io, last_exec
-        combined = async_chain(all_stdout) if all_stdout else None
-        return combined, merged_io, last_exec
-    finally:
-        session.functions.clear()
-        reset_current_evaluation(child_token)
+            break
+        finally:
+            ENCLOSING.reset(enclosing)
+        stdout = await finish_statement(stdout, io, session, child, last_exec)
+        written = await divert_statement(
+            dispatch,
+            session,
+            await statement_output(
+                recorder, stdout, io, session.terminal, sink
+            ),
+            io,
+            child,
+            last_exec.command or "",
+        )
+        merged_io = await land(written, sink, all_stdout, merged_io)
+        merged_io = await merged_io.merge(io)
+        if (
+            io.exit_code != 0
+            and session.shell_options.get("errexit")
+            and child.type not in ERREXIT_EXEMPT_TYPES
+            and not session.errexit_immune
+        ):
+            merged_io.exit_code = io.exit_code
+            break
+    # The EXIT action is the subshell's: its `wait` and `jobs` see the
+    # subshell's jobs, not the caller's.
+    if execute_fn is not None and job_table is not None:
+        execute_fn = partial(execute_fn, job_table=job_table)
+    cleanup = await run_exit_trap(
+        execute_fn, session, merged_io.exit_code, stdin, call_stack
+    )
+    if cleanup is not None:
+        merged_io = await land(
+            [
+                (channel, data, False)
+                for channel, data in (
+                    (Channel.STDOUT, await cleanup.materialize_stdout()),
+                    (Channel.STDERR, await cleanup.materialize_stderr()),
+                )
+                if data
+            ],
+            sink,
+            all_stdout,
+            merged_io,
+        )
+        merged_io.exit_code = cleanup.exit_code
+        last_exec = ExecutionNode(command="()", exit_code=cleanup.exit_code)
+    if len(all_stdout) == 1:
+        return all_stdout[0], merged_io, last_exec
+    combined = async_chain(all_stdout) if all_stdout else None
+    return combined, merged_io, last_exec

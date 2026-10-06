@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childContext, EvaluationContext } from '../evaluation.ts'
-
 import { describe, expect, it } from 'vitest'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 import { RANDOM, RANDOM_MAX, RANDOM_UNSET } from '../../shell/constants.ts'
@@ -106,7 +104,7 @@ describe('RANDOM generator', () => {
   it('reseeds in a child shell without advancing the parent', () => {
     const s = new SessionState({ sessionId: 's' })
     const parent = [nextRandom(s, '42'), nextRandom(s, stored(s))]
-    const child = childContext(new EvaluationContext(s)).session
+    const child = s.subshell()
     expect(child.randomSeed).toBe(stored(s))
     expect(child.randomState).toBeNull()
     const drawn = nextRandom(child, stored(child))
@@ -119,13 +117,13 @@ describe('RANDOM generator', () => {
   it('does not replay a pending seed in the child, and keeps unset unset', () => {
     const s = new SessionState({ sessionId: 's' })
     s.vars[RANDOM] = makeVar('42')
-    const child = childContext(new EvaluationContext(s)).session
+    const child = s.subshell()
     expect(child.randomSeed).toBe('42')
     expect(child.randomState).toBeNull()
     const unset = new SessionState({ sessionId: 'u' })
     nextRandom(unset, undefined)
     expect(nextRandom(unset, undefined)).toBeNull()
-    expect(nextRandom(childContext(new EvaluationContext(unset)).session, undefined)).toBeNull()
+    expect(nextRandom(unset.subshell(), undefined)).toBeNull()
   })
 
   it('unset after a read strips the meaning', () => {
