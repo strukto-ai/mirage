@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.errors.constants import FS_STRERROR, READ_FAILURES
-from mirage.errors.fs import error_path, fs_strerror, virtual_of
+from mirage.errors.constants import OPERAND_CONDITIONS, READ_FAILURES
+from mirage.errors.fs import error_path, fs_error, fs_strerror, virtual_of
+from mirage.errors.posix import posix_phrase
 from mirage.types import PathSpec
 from mirage.utils.path import drop_trailing_segments, respell_one
 from mirage.utils.quote import (
@@ -26,8 +27,8 @@ from mirage.utils.quote import (
 def operand_spelling(path: str, operand: PathSpec) -> str:
     """Re-spell a reported path the way its operand was typed.
 
-    Backends name paths in virtual space, but GNU quotes the operand as
-    the user wrote it: ``cd /data && mkdir -p f.txt/sub`` reports
+    Backends name paths in virtual space, but a command quotes the operand
+    as the user wrote it: ``cd /data && mkdir -p f.txt/sub`` reports
     ``'f.txt'``, not ``'/data/f.txt'``. The path an error names is the
     operand itself, an ancestor of it (``mkdir -p`` blames the component
     of the chain it tripped on), or something under it, so all three are
@@ -60,18 +61,18 @@ def _segments(path: str) -> list[str]:
 _CANNOT_OPEN = "cannot open {quoted} for reading: {strerror}"
 
 
-# How GNU words a failed operand for the commands that name the step that
+# How a failed operand is worded by the commands that name the step that
 # failed instead of printing ``<cmd>: <name>: <strerror>``. An entry is
 # (opening, reading): the line for a name the command could not open, and
 # for one it opened that then refused the read (READ_FAILURES). None keeps
-# the plain line for that step, which is also the choice wherever GNU's
-# own line drops the name (``base64: read error``, ``fmt: read error``):
-# mirage words a step GNU's way only while that still says which operand
-# failed. ``{quoted}`` is the name always quoted (gnulib's quoteaf),
-# ``{shown}`` quoted only when it needs it (quotef), ``{bare}`` as typed.
-# Measured on coreutils 9.7 and GNU sed 4.9 (debian:stable-slim), a
-# directory read on tmpfs: overlayfs answers a directory's read with
-# EINVAL, so a tac there says ``read error: Invalid argument``.
+# the plain line for that step, which is also the choice wherever the
+# reference line drops the name (``base64: read error``, ``fmt: read
+# error``): mirage words a step that way only while it still says which
+# operand failed. ``{quoted}`` is the name always quoted, ``{shown}``
+# quoted only when it needs it, ``{bare}`` as typed. Measured on
+# debian:stable-slim, a directory read on tmpfs: overlayfs answers a
+# directory's read with EINVAL, so a tac there says ``read error:
+# Invalid argument``.
 FAILURE_WORDING: dict[str, tuple[str | None, str | None]] = {
     "csplit": (_CANNOT_OPEN, None),
     "du": ("cannot access {quoted}: {strerror}", None),
@@ -119,9 +120,9 @@ FAILURE_WORDING: dict[str, tuple[str | None, str | None]] = {
 }
 
 
-# GNU wc and du vet every name the way their --files0-from reader does,
-# and refuse an empty one in these words before any open could answer
-# ENOENT for it (coreutils 9.7).
+# wc and du vet every name the way their --files0-from reader does, and
+# refuse an empty one in these words before any open could answer ENOENT
+# for it.
 ZERO_LENGTH_NAME = "invalid zero-length file name"
 
 
@@ -131,8 +132,8 @@ _VETS_EMPTY_NAMES = frozenset({"du", "wc"})
 def _step_wording(cmd_name: str, label: str, exc: BaseException) -> str | None:
     """The command's own template for this failure, None for the plain
     line: no entry, no template for the step, or standard input, whose
-    ``-`` line is the one GNU prints when it closes a stdin it could not
-    read.
+    ``-`` line is the one a command prints when it closes a stdin it could
+    not read.
 
     Args:
         cmd_name (str): Command name.
@@ -148,15 +149,15 @@ def _step_wording(cmd_name: str, label: str, exc: BaseException) -> str | None:
 def fs_error_line(
     cmd_name: str, path: str | PathSpec, exc: BaseException
 ) -> str:
-    """GNU coreutils stderr line for one failed path operand.
+    """The stderr line for one failed path operand.
 
     Produces ``<cmd>: <path>: <strerror>``, byte-identical with the
     TypeScript formatter. ``path`` is the operand itself when the caller
     knows it (read-family commands that keep processing remaining operands
     after one fails, reported as typed via ``raw_path``), or an
     already-resolved label string. A command in ``SHELL_QUOTED_COMMANDS``
-    reports the operand shell-quoted when it needs it (``'*.txt'``), the
-    way GNU does; every other command reports it bare. A command in
+    reports the operand shell-quoted when it needs it (``'*.txt'``);
+    every other command reports it bare. A command in
     ``FAILURE_WORDING`` says which step failed instead.
 
     Args:
@@ -209,10 +210,10 @@ def revoice_fs_error_line(
     if not line.startswith(prefix):
         return line
     strerror = line.rsplit(": ", 1)[-1]
-    for exc_type, text in FS_STRERROR:
-        if text != strerror:
+    for condition in OPERAND_CONDITIONS:
+        if posix_phrase(condition) != strerror:
             continue
-        exc = exc_type(virtual_of(operand))
+        exc = fs_error(operand, condition)
         if fs_error_line(from_cmd, operand, exc) == f"{line}\n":
             return fs_error_line(cmd_name, operand, exc).removesuffix("\n")
         break
@@ -222,7 +223,7 @@ def revoice_fs_error_line(
 def format_fs_error(
     cmd_name: str, exc: Exception, paths: list[PathSpec] | None = None
 ) -> bytes:
-    """Format a thrown command error as a GNU coreutils stderr line.
+    """Format a thrown command error as a stderr line.
 
     The chokepoint variant of ``fs_error_line`` for callers that only hold
     the exception, byte-identical with the TypeScript ``formatFsError``. A
@@ -230,11 +231,10 @@ def format_fs_error(
     path is recovered from ``exc.filename`` when set, else ``str(exc)``;
     backends raise with the resolved absolute path, and ``paths`` rewrites it
     to the as-typed ``PathSpec.raw_path`` so a relative argument is reported
-    as typed, like GNU). Any other exception becomes the generic
-    ``<cmd>: <message>`` line, so a command that throws is reported with the
-    ``prog: message`` prefix GNU and the TypeScript executor both use. A
+    as typed). Any other exception becomes the generic ``<cmd>: <message>``
+    line, the ``prog: message`` prefix the TypeScript executor uses too. A
     message that already carries the ``<cmd>: `` prefix (many generic
-    commands raise a fully GNU-formatted string, e.g. ``uniq: invalid
+    commands raise a fully formatted string, e.g. ``uniq: invalid
     count``) is emitted verbatim so the prefix is not doubled.
 
     Args:

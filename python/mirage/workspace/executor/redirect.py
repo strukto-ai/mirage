@@ -19,6 +19,8 @@ from functools import partial
 from mirage.context import reset_redirect_paths, set_redirect_paths
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.stream import materialize
@@ -991,7 +993,7 @@ async def _open_refusal(
             if earlier is not None:
                 return earlier
             detail = (
-                "Is a directory"
+                posix_phrase(FsCondition.EISDIR)
                 if is_dir
                 else "cannot overwrite existing file"
             )

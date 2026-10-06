@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
+
 # git exits 128 for every fatal, which is neither the argparse usage
 # exit (2) nor the generic command failure (1) the CLI dispatcher
 # applies to a thrown handler error. Leaves therefore return this
@@ -226,7 +229,7 @@ class WorkTreeChdirError(GitError):
     """
 
     def __init__(
-        self, path: str, reason: str = "No such file or directory"
+        self, path: str, reason: str = posix_phrase(FsCondition.ENOENT)
     ) -> None:
         super().__init__(f"cannot chdir to '{path}': {reason}")
 
@@ -246,7 +249,7 @@ class NoWorkingDirectoryError(GitError):
     """
 
     def __init__(
-        self, path: str, reason: str = "No such file or directory"
+        self, path: str, reason: str = posix_phrase(FsCondition.ENOENT)
     ) -> None:
         super().__init__(f"cannot change to '{path}': {reason}")
 
@@ -968,7 +971,10 @@ class RemovePathError(GitError):
     """
 
     def __init__(
-        self, path: str, report: str = "", reason: str = "Is a directory"
+        self,
+        path: str,
+        report: str = "",
+        reason: str = posix_phrase(FsCondition.EISDIR),
     ) -> None:
         super().__init__(f"git rm: '{path}': {reason}")
         self.report = report
@@ -1066,7 +1072,7 @@ class RenameFailedError(GitError):
     """
 
     def __init__(
-        self, source: str, reason: str = "No such file or directory"
+        self, source: str, reason: str = posix_phrase(FsCondition.ENOENT)
     ) -> None:
         super().__init__(f"renaming '{source}' failed: {reason}")
 

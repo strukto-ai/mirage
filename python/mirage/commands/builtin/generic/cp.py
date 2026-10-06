@@ -37,9 +37,10 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
-from mirage.errors.constants import ELOOP_STRERROR, FS_ERRORS
+from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.errors.types import DotWalkLoop, DotWalkMissing
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import DotWalkLoop, DotWalkMissing, FsCondition
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
@@ -504,7 +505,9 @@ async def copy_tree_links(
         try:
             resolved = copies.links.resolve(virtual)
         except CycleError:
-            errors.append(f"cp: cannot stat '{shown}': {ELOOP_STRERROR}")
+            errors.append(
+                f"cp: cannot stat '{shown}': {posix_phrase(FsCondition.ELOOP)}"
+            )
             continue
         leads = await copies.links.target_stat(virtual)
         if leads is None:
@@ -675,13 +678,13 @@ async def dest_kind(
     try:
         info = await stat(target)
     except NotADirectoryError:
-        return False, False, "Not a directory"
+        return False, False, posix_phrase(FsCondition.ENOTDIR)
     except DotWalkLoop:
-        return False, False, ELOOP_STRERROR
+        return False, False, posix_phrase(FsCondition.ELOOP)
     except DotWalkMissing:
         # Its `..` passes a name that is not there: the chain of the path
         # it simplifies to says nothing about this one.
-        return False, False, "No such file or directory"
+        return False, False, posix_phrase(FsCondition.ENOENT)
     except (FileNotFoundError, ValueError):
         pass
     else:
@@ -741,9 +744,9 @@ async def source_kind(
     try:
         info = await stat(path)
     except NotADirectoryError:
-        return False, False, "Not a directory"
+        return False, False, posix_phrase(FsCondition.ENOTDIR)
     except DotWalkLoop:
-        return False, False, ELOOP_STRERROR
+        return False, False, posix_phrase(FsCondition.ELOOP)
     except (FileNotFoundError, ValueError):
         pass
     else:
@@ -752,7 +755,11 @@ async def source_kind(
     return (
         False,
         False,
-        ("No such file or directory" if is_dir else "Not a directory"),
+        (
+            posix_phrase(FsCondition.ENOENT)
+            if is_dir
+            else posix_phrase(FsCondition.ENOTDIR)
+        ),
     )
 
 
@@ -1586,7 +1593,7 @@ async def cp_generic(
         # The create fails on the absent parent before the slash matters,
         # so a chain verdict keeps its ENOENT (`cp f deep/missing/`).
         if slash_refuses_file(target, target_exists, src_is_dir):
-            target_err = target_err or "Not a directory"
+            target_err = target_err or posix_phrase(FsCondition.ENOTDIR)
         if target_err is not None:
             noun = "directory" if src_is_dir else "regular file"
             errors.append(

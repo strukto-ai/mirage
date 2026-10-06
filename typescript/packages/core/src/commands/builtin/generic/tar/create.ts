@@ -36,6 +36,7 @@ import {
   USAGE_HINT,
 } from './constants.ts'
 import type { CreateResult, Member } from './types.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 
 export type { DirProbe, StatFn, WalkFn }
 
@@ -160,7 +161,7 @@ export async function checkDirectories(
       if (directory.walkError !== null) throw walkRefusal(directory)
       if (await isDir(directory)) continue
       await stat(directory)
-      reason = 'Not a directory'
+      reason = posixPhrase('ENOTDIR')
     } catch (err) {
       if (!isFsError(err)) throw err
       reason = fsStrerror(err) ?? String(err)

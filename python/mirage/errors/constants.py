@@ -35,12 +35,16 @@ from mirage.utils.path import CycleError
 # base, FileNotFoundError before the errno lookup).
 CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
     (CycleError, FsCondition.ELOOP),
+    (DotWalkLoop, FsCondition.ELOOP),
     (CrossMountError, FsCondition.EXDEV),
     (OperationNotSupportedError, FsCondition.ENOTSUP),
     (NotImplementedError, FsCondition.ENOTSUP),
+    (BadDescriptorError, FsCondition.EBADF),
+    (FileTooLargeError, FsCondition.EFBIG),
     (NotADirectoryError, FsCondition.ENOTDIR),
     (IsADirectoryError, FsCondition.EISDIR),
     (FileExistsError, FsCondition.EEXIST),
+    (ReadOnlyError, FsCondition.EROFS),
     (PermissionError, FsCondition.EACCES),
     (FileNotFoundError, FsCondition.ENOENT),
     # Only the registry's typed miss: a path outside every mount is
@@ -55,6 +59,7 @@ CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
 # EOPNOTSUPP is ENOTSUP's second spelling (a distinct number on macOS,
 # the same one on Linux); NO_XATTR reads its platform-resolved row.
 ERRNO_ARMS: dict[int, FsCondition] = {
+    errno.EBADF: FsCondition.EBADF,
     errno.ENOENT: FsCondition.ENOENT,
     errno.ENOTDIR: FsCondition.ENOTDIR,
     errno.EISDIR: FsCondition.EISDIR,
@@ -70,31 +75,57 @@ ERRNO_ARMS: dict[int, FsCondition] = {
     errno.EIO: FsCondition.EIO,
     errno.EBUSY: FsCondition.EBUSY,
     errno.EROFS: FsCondition.EROFS,
+    errno.EFBIG: FsCondition.EFBIG,
     POSIX[FsCondition.NO_XATTR].errno: FsCondition.NO_XATTR,
 }
 
-ELOOP_STRERROR = "Too many levels of symbolic links"
+# The conditions a command reports against one operand before it moves
+# on to the next: the line ends in the condition's phrase. A failure
+# outside the set (EIO, a dropped connection) carries its own words.
+# Mirrors TS OPERAND_CONDITIONS.
+OPERAND_CONDITIONS: frozenset[FsCondition] = frozenset(
+    {
+        FsCondition.EBADF,
+        FsCondition.ENOENT,
+        FsCondition.ENOTDIR,
+        FsCondition.EISDIR,
+        FsCondition.ELOOP,
+        FsCondition.EEXIST,
+        FsCondition.EROFS,
+        FsCondition.EACCES,
+        FsCondition.ENOTEMPTY,
+        FsCondition.ENOTSUP,
+        FsCondition.EXDEV,
+        FsCondition.EFBIG,
+    }
+)
 
+# The class a condition is raised as where mirage has one of its own;
+# every other condition is a plain OSError, which CPython constructs as
+# its builtin subclass (FileNotFoundError for ENOENT).
+CONDITION_CLASS: dict[FsCondition, type[OSError]] = {
+    FsCondition.EBADF: BadDescriptorError,
+    FsCondition.ELOOP: DotWalkLoop,
+    FsCondition.EROFS: ReadOnlyError,
+    FsCondition.ENOTSUP: OperationNotSupportedError,
+    FsCondition.EFBIG: FileTooLargeError,
+}
 
-FS_STRERROR: list[tuple[type[OSError], str]] = [
-    (BadDescriptorError, "Bad file descriptor"),
-    (FileNotFoundError, "No such file or directory"),
-    (NotADirectoryError, "Not a directory"),
-    (IsADirectoryError, "Is a directory"),
-    (DotWalkLoop, ELOOP_STRERROR),
-    (FileExistsError, "File exists"),
-    (ReadOnlyError, "Read-only file system"),
-    (PermissionError, "Permission denied"),
-    (OperationNotSupportedError, "Operation not supported"),
-    (FileTooLargeError, "File too large"),
-]
-
-
-# The recoverable per-operand filesystem errors: every catch site that
-# formats a GNU stderr line and keeps going uses this tuple, so the catch
-# set and the strerror table can never drift apart (mirrors TS isFsError).
-FS_ERRORS: tuple[type[OSError], ...] = tuple(t for t, _ in FS_STRERROR)
-
+# The per-operand errors a catch site names by class: every one that
+# writes a command line and keeps going. ENOTEMPTY and EXDEV have no
+# class, so a plain OSError carrying them renders its phrase but is not
+# caught here. Mirrors TS isFsError.
+FS_ERRORS: tuple[type[OSError], ...] = (
+    BadDescriptorError,
+    FileNotFoundError,
+    NotADirectoryError,
+    IsADirectoryError,
+    DotWalkLoop,
+    FileExistsError,
+    PermissionError,
+    OperationNotSupportedError,
+    FileTooLargeError,
+)
 
 # What a tree walk over a user operand tolerates: every recoverable
 # filesystem error, plus the ValueError store backends raise for "not a
@@ -117,8 +148,8 @@ MISS_ERRORS: tuple[type[Exception], ...] = (
 )
 
 
-# The failures that happen after the open, which GNU words as the read
-# step: a directory opens and then refuses the read, and the backend
+# The failures that happen after the open, which a command words as the
+# read step: a directory opens and then refuses the read, and the backend
 # contract raises the other two for a read it will not serve.
 READ_FAILURES: tuple[type[OSError], ...] = (
     IsADirectoryError,

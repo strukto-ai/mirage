@@ -30,9 +30,11 @@ class FsCondition(StrEnum):
 
     One member is mirage's own condition rather than a POSIX spelling:
     ``NO_XATTR`` is "attribute not set", which POSIX names ENOATTR on
-    macOS and ENODATA on Linux.
+    macOS and ENODATA on Linux. ``EBADF`` is the shell's own: no mount
+    raises it, only a standard input that is closed or write-only.
     """
 
+    EBADF = "ebadf"
     ENOENT = "enoent"
     ENOTDIR = "enotdir"
     EISDIR = "eisdir"
@@ -47,17 +49,18 @@ class FsCondition(StrEnum):
     EIO = "eio"
     EBUSY = "ebusy"
     EROFS = "erofs"
+    EFBIG = "efbig"
     NO_XATTR = "no_xattr"
 
 
 @dataclass(frozen=True, slots=True)
 class PosixErrno:
-    """One condition's POSIX rendering: host errno plus GNU strerror.
+    """One condition's POSIX rendering: host errno plus strerror text.
 
     Args:
         errno (int): the host's number for the condition (platform
             resolved, e.g. ENOTEMPTY is 66 on macOS and 39 on Linux).
-        phrase (str): the GNU strerror text command boundaries render.
+        phrase (str): the strerror text command boundaries render.
     """
 
     errno: int
@@ -70,8 +73,8 @@ class OperationNotSupportedError(OSError):
     Raised at the op-resolution boundary (``Mount.execute_op``) so a
     capability gap surfaces as a recoverable filesystem error
     (ENOTSUP, "Operation not supported") instead of an internal
-    AttributeError: GNU-wise the backend behaves like a filesystem
-    that does not allow the operation.
+    AttributeError: the backend behaves like a filesystem that does not
+    allow the operation.
     """
 
 
@@ -80,13 +83,12 @@ class ReadOnlyError(PermissionError):
 
     Raised by the mode gate (``Mount.execute_op``) with ``errno.EROFS``
     stamped and the op's path as ``filename``, so a command chokepoint
-    renders GNU's ``<cmd>: <path>: Read-only file system`` and a kernel
+    renders ``<cmd>: <path>: Read-only file system`` and a kernel
     adapter reports EROFS: the below-mode voice, distinct from both the
     hide voice (ENOENT) and the policy voice (EACCES). A
     ``PermissionError`` subclass because every catch site that tolerates
-    a refused write already names that class; the strerror table lists
-    this subclass first, and the classifiers read the errno, so the
-    voice stays EROFS everywhere.
+    a refused write already names that class; the classifiers read the
+    errno, so the voice stays EROFS everywhere.
     """
 
 
@@ -107,8 +109,8 @@ class FileTooLargeError(OSError):
     A records file past its mount's record cap (Airtable's
     ``max_read_records``) raises this rather than paging a large table at
     a few requests a second. Stamped like the other per-operand errors, so
-    a command chokepoint renders GNU's ``<cmd>: <path>: File too large``
-    and moves on to its next operand. Mirrors the TS ``efbig``.
+    a command chokepoint renders ``<cmd>: <path>: File too large`` and
+    moves on to its next operand. Mirrors the TS ``efbig``.
     """
 
 

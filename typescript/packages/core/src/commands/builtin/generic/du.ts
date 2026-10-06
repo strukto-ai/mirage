@@ -34,6 +34,7 @@ import type { Visibility } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import type { DuEntries } from '../../../vfs/types.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
 
@@ -188,8 +189,6 @@ async function duHasContent(
   }
 }
 
-const ENOENT_TEXT = 'No such file or directory'
-
 /**
  * Whether one operand is there at all, before anything is measured.
  *
@@ -255,7 +254,7 @@ async function duOperands(
   // An unmatched glob reaches GNU as the literal pattern, which it then
   // reports as unreadable.
   if (resolved.length === 0) {
-    missing.push(...targets.map((p): [string, string] => [p.rawPath, ENOENT_TEXT]))
+    missing.push(...targets.map((p): [string, string] => [p.rawPath, posixPhrase('ENOENT')]))
   }
   for (const path of resolved) {
     // A link has no backend inode, so it fails stat while still being a
@@ -275,13 +274,13 @@ async function duOperands(
       // directory. Unreadable like a missing one, but GNU reports the
       // errno it got, so the two cannot share a wording.
       if ((err as { code?: string }).code === 'ENOTDIR') {
-        missing.push([path.rawPath, 'Not a directory'])
+        missing.push([path.rawPath, posixPhrase('ENOTDIR')])
         continue
       }
       // The operand did not resolve, so no channel asked about the path
       // it simplifies to can find it there.
       if (isDotWalkError(err)) {
-        missing.push([path.rawPath, fsStrerror(err) ?? ENOENT_TEXT])
+        missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('ENOENT')])
         continue
       }
       if (!isMissingPath(err)) throw err
@@ -294,11 +293,11 @@ async function duOperands(
       // The door refuses to stat it: GNU names the errno it got
       // (`du: cannot access 'P': Permission denied`).
       if ((err as { code?: string }).code !== 'EACCES') throw err
-      missing.push([path.rawPath, fsStrerror(err) ?? 'Permission denied'])
+      missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('EACCES')])
       continue
     }
     if (!exists) {
-      missing.push([path.rawPath, ENOENT_TEXT])
+      missing.push([path.rawPath, posixPhrase('ENOENT')])
       continue
     }
     present.push(path)

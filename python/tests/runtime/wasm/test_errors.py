@@ -84,6 +84,7 @@ def test_preview1_numbering_is_the_wasi_libc_table():
     # on the wire and 2 in Python's errno module. Pinned literally so a
     # host-errno leak cannot pass.
     assert WASI == {
+        FsCondition.EBADF: 8,
         FsCondition.ENOENT: 44,
         FsCondition.ENOTDIR: 54,
         FsCondition.EISDIR: 31,
@@ -98,6 +99,7 @@ def test_preview1_numbering_is_the_wasi_libc_table():
         FsCondition.EIO: 29,
         FsCondition.EBUSY: 10,
         FsCondition.EROFS: 69,
+        FsCondition.EFBIG: 22,
         FsCondition.NO_XATTR: 58,
     }
 

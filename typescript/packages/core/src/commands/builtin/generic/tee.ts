@@ -25,6 +25,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 
 export interface TeeFlags {
   append: boolean
@@ -142,7 +143,7 @@ export async function openRefusal(
   if (exists) return null
   const strerror = await absentDestStrerror(stat, path)
   if (strerror === null) return null
-  return strerror === 'Not a directory' ? enotdir(path) : enoent(path)
+  return strerror === posixPhrase('ENOTDIR') ? enotdir(path) : enoent(path)
 }
 
 export async function writeOutput(

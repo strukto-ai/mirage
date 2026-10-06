@@ -60,6 +60,7 @@ import {
   type TransferPolicy,
 } from './cp.ts'
 import type { FlagView } from '../../spec/flag_view.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 
 const ENC = new TextEncoder()
 
@@ -415,7 +416,7 @@ export async function mvGeneric(
     }
     if (slashRefusesFile(target, targetExists, srcIsDir)) {
       errors.push(
-        `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${targetErr ?? 'Not a directory'}`,
+        `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${targetErr ?? posixPhrase('ENOTDIR')}`,
       )
       continue
     }

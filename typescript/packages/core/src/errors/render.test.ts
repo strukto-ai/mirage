@@ -13,18 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import {
-  ebadfStdin,
-  eisdir,
-  enoent,
-  enotdir,
-} from './fs.ts'
+import { ebadfStdin, eisdir, enoent, enotdir, enotempty, exdev } from './fs.ts'
 import { formatFsError, fsErrorLine, revoiceFsErrorLine } from './render.ts'
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
 describe('formatFsError', () => {
-  it('prefixes a thrown command error with the command name (GNU prog: message)', () => {
+  it('prefixes a thrown command error with the command name (prog: message)', () => {
     const line = decode(
       formatFsError(
         'slack-add-reaction',
@@ -39,7 +34,7 @@ describe('formatFsError', () => {
   })
 
   it('does not double the prefix when the message already carries cmd:', () => {
-    // Generic commands throw a fully GNU-formatted message (uniq: invalid
+    // Generic commands throw a fully formatted message (uniq: invalid
     // count); the prefix must not be doubled (uniq: uniq: ...).
     expect(decode(formatFsError('uniq', new Error("uniq: invalid count: '2junk'")))).toBe(
       "uniq: invalid count: '2junk'\n",
@@ -80,7 +75,7 @@ describe('fsErrorLine — commands that name the failed open', () => {
     expect(fsErrorLine(cmd, '/data/nope.txt', enoent('/data/nope.txt'))).toBe(line)
   })
 
-  // GNU's own fmt and base64 lines (`fmt: read error`, `base64: read error:
+  // The reference fmt and base64 lines (`fmt: read error`, `base64: read error:
   // Is a directory`) name no operand, so those keep the plain one.
   it.each([
     ['head', "head: error reading '/data/sub': Is a directory\n"],
@@ -136,7 +131,7 @@ describe('fsErrorLine — commands that name the failed open', () => {
     ['truncate', "cannot open '/data/a.txt/x' for writing"],
   ])('%s names its own failed step', (cmd, step) => {
     // The errno is the backend's either way; only the step and the quoting
-    // are the command's (coreutils 9.7).
+    // are the command's.
     expect(fsErrorLine(cmd, '/data/a.txt/x', enoent('/data/a.txt/x'))).toBe(
       `${cmd}: ${step}: No such file or directory\n`,
     )
@@ -146,8 +141,8 @@ describe('fsErrorLine — commands that name the failed open', () => {
   })
 
   it('names a tac directory read first and quotes it only when needed', () => {
-    // tac's read failure leads with the name, which GNU quotes the way
-    // quotef does: only a name that needs it, ':' included.
+    // tac's read failure leads with the name, quoted only when it needs
+    // it, ':' included.
     expect(fsErrorLine('tac', '/data/sub', eisdir('/data/sub'))).toBe(
       'tac: /data/sub: read error: Is a directory\n',
     )
@@ -186,6 +181,13 @@ describe('fsErrorLine — commands that name the failed open', () => {
       "tac: failed to open '' for reading: No such file or directory\n",
     )
     expect(fsErrorLine('cat', spec, enoent(spec))).toBe("cat: '': No such file or directory\n")
+  })
+
+  it('words a condition that has no class of its own', () => {
+    expect(decode(formatFsError('rmdir', enotempty('/d')))).toBe(
+      "rmdir: failed to remove '/d': Directory not empty\n",
+    )
+    expect(decode(formatFsError('mv', exdev('/d')))).toBe('mv: /d: Invalid cross-device link\n')
   })
 
   it('words a stat failure at the chokepoint', () => {

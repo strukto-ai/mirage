@@ -25,6 +25,8 @@ from mirage.core.generic.find import link_results, modified_ts, walk_find
 from mirage.errors.classify import failure_text
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatPath
 from mirage.types import FileStat, FileType, FindType, PathSpec, Visibility
@@ -174,7 +176,7 @@ def apply_mount_prefix(results: list[str], mount_prefix: str) -> list[str]:
 
 
 def missing_start_line(
-    search_path: PathSpec, detail: str = "No such file or directory"
+    search_path: PathSpec, detail: str = posix_phrase(FsCondition.ENOENT)
 ) -> str:
     """GNU's stderr line for a start point find will not walk.
 
@@ -219,13 +221,16 @@ class StartPoint:
     # plain file, or typed with a trailing slash that resolved to a
     # non-directory, reports ENOTDIR instead (`find flink/` -> "Not a
     # directory").
-    detail: str = "No such file or directory"
+    detail: str = posix_phrase(FsCondition.ENOENT)
 
 
 WALK_START = StartPoint(walk=True, results=[])
 MISSING_START = StartPoint(walk=False, results=[], missing=True)
 NOT_DIR_START = StartPoint(
-    walk=False, results=[], missing=True, detail="Not a directory"
+    walk=False,
+    results=[],
+    missing=True,
+    detail=posix_phrase(FsCondition.ENOTDIR),
 )
 
 
@@ -302,7 +307,7 @@ async def resolve_start(
             results=[],
             missing=True,
             detail=fs_strerror(walk_refusal(search))
-            or "No such file or directory",
+            or posix_phrase(FsCondition.ENOENT),
         )
     if stat_path is None:
         return WALK_START
@@ -316,7 +321,7 @@ async def resolve_start(
             walk=False,
             results=[],
             missing=True,
-            detail=fs_strerror(refusal) or "No such file or directory",
+            detail=fs_strerror(refusal) or posix_phrase(FsCondition.ENOENT),
         )
     if is_link:
         return WALK_START
@@ -670,9 +675,9 @@ async def _find_root(
         except NotADirectoryError:
             # The operand carried a trailing slash and did not name a
             # directory; the backend stat is the only probe wired here.
-            return None, "Not a directory"
+            return None, posix_phrase(FsCondition.ENOTDIR)
         except (FileNotFoundError, ValueError):
-            return None, "No such file or directory"
+            return None, posix_phrase(FsCondition.ENOENT)
     root_prefix = mount_prefix_of(search_path.virtual, search_path.vfs_path)
     # `-path` matches the row as printed; stamp the mount prefix and the
     # operand's spelling onto Path nodes before the backend walks

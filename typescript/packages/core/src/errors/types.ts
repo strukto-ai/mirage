@@ -28,9 +28,11 @@
  *
  * One member is mirage's own condition rather than a POSIX spelling:
  * `NO_XATTR` is "attribute not set", which POSIX names ENOATTR on macOS
- * and ENODATA on Linux.
+ * and ENODATA on Linux. `EBADF` is the shell's own: no mount raises it,
+ * only a standard input that is closed or write-only.
  */
 export type FsCondition =
+  | 'EBADF'
   | 'ENOENT'
   | 'ENOTDIR'
   | 'EISDIR'
@@ -45,9 +47,11 @@ export type FsCondition =
   | 'EIO'
   | 'EBUSY'
   | 'EROFS'
+  | 'EFBIG'
   | 'NO_XATTR'
 
 export const FS_CONDITIONS: readonly FsCondition[] = [
+  'EBADF',
   'ENOENT',
   'ENOTDIR',
   'EISDIR',
@@ -62,10 +66,11 @@ export const FS_CONDITIONS: readonly FsCondition[] = [
   'EIO',
   'EBUSY',
   'EROFS',
+  'EFBIG',
   'NO_XATTR',
 ]
 
-/** One condition's POSIX rendering: errno plus GNU strerror. */
+/** One condition's POSIX rendering: errno plus strerror text. */
 export interface PosixErrno {
   errno: number
   phrase: string

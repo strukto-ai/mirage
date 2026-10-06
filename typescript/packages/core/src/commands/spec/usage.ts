@@ -15,7 +15,9 @@
 import { UsageError } from '../errors.ts'
 import type { ArgmatchChoices, ArgmatchKind } from './argmatch.ts'
 import { quoteText } from '../quote.ts'
-import { gnuStrerror } from '../../errors/fs.ts'
+import { CODE_ARMS } from '../../errors/constants.ts'
+import { posixPhrase } from '../../errors/posix.ts'
+import type { FsCondition } from '../../errors/types.ts'
 import {
   IN_ORDER_OPERANDS,
   OLD_OPTION_EXIT,
@@ -60,7 +62,7 @@ export function operandExitCode(cmdName: string): number {
  * code; that is the safe side, and it is what the executor already did
  * before the tables existed.
  */
-const READ_FAIL_CODES: ReadonlySet<string> = new Set([
+const READ_FAIL_CODES: ReadonlySet<FsCondition> = new Set<FsCondition>([
   'ENOENT',
   'EISDIR',
   'ENOTDIR',
@@ -78,8 +80,9 @@ function readFailCode(cmdName: string, isDir: boolean): number {
 
 export function readFailExitCode(cmdName: string, err: unknown): number {
   const code = (err as { code?: string }).code
-  if (code === undefined || !READ_FAIL_CODES.has(code)) return 1
-  return readFailCode(cmdName, code === 'EISDIR')
+  const condition = code === undefined ? undefined : CODE_ARMS[code]
+  if (condition === undefined || !READ_FAIL_CODES.has(condition)) return 1
+  return readFailCode(cmdName, condition === 'EISDIR')
 }
 
 /**
@@ -96,7 +99,7 @@ function lineReadFailCode(cmdName: string, line: string): number | null {
   const cut = line.lastIndexOf(': ')
   const terminal = cut === -1 ? line : line.slice(cut + 2)
   for (const code of READ_FAIL_CODES) {
-    if (gnuStrerror(code) === terminal) return readFailCode(cmdName, code === 'EISDIR')
+    if (posixPhrase(code) === terminal) return readFailCode(cmdName, code === 'EISDIR')
   }
   return null
 }

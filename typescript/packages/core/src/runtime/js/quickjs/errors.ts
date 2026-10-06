@@ -21,6 +21,7 @@ import { classify, type FsCondition } from '../../../errors/index.ts'
 // table is total over the vocabulary; errors.test.ts fails a half-added
 // member.
 export const WASI: Record<FsCondition, number> = {
+  EBADF: 8,
   ENOENT: 44,
   ENOTDIR: 54,
   EISDIR: 31,
@@ -35,6 +36,7 @@ export const WASI: Record<FsCondition, number> = {
   EIO: 29,
   EBUSY: 10,
   EROFS: 69,
+  EFBIG: 22,
   // preview1 has no xattr syscalls, so this row is unreachable from a
   // guest; ENOTSUP is the honest answer if a future host ever asks.
   NO_XATTR: 58,

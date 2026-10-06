@@ -19,9 +19,9 @@ import pytest
 from mirage.errors.posix import (
     LINUX_ERRNO,
     POSIX,
-    gnu_phrase,
     linux_errno,
     posix_errno,
+    posix_phrase,
 )
 from mirage.errors.types import FsCondition
 
@@ -29,6 +29,7 @@ from mirage.errors.types import FsCondition
 @pytest.mark.parametrize(
     "cond,number",
     [
+        (FsCondition.EBADF, errno.EBADF),
         (FsCondition.ENOENT, errno.ENOENT),
         (FsCondition.ENOTDIR, errno.ENOTDIR),
         (FsCondition.EISDIR, errno.EISDIR),
@@ -43,6 +44,7 @@ from mirage.errors.types import FsCondition
         (FsCondition.EIO, errno.EIO),
         (FsCondition.EBUSY, errno.EBUSY),
         (FsCondition.EROFS, errno.EROFS),
+        (FsCondition.EFBIG, errno.EFBIG),
     ],
 )
 def test_numbers_come_from_the_host_errno_module(cond, number):
@@ -58,6 +60,7 @@ def test_xattr_miss_resolves_per_platform():
 @pytest.mark.parametrize(
     "cond,phrase",
     [
+        (FsCondition.EBADF, "Bad file descriptor"),
         (FsCondition.ENOENT, "No such file or directory"),
         (FsCondition.ENOTDIR, "Not a directory"),
         (FsCondition.EISDIR, "Is a directory"),
@@ -72,10 +75,11 @@ def test_xattr_miss_resolves_per_platform():
         (FsCondition.EIO, "Input/output error"),
         (FsCondition.EBUSY, "Device or resource busy"),
         (FsCondition.EROFS, "Read-only file system"),
+        (FsCondition.EFBIG, "File too large"),
     ],
 )
-def test_phrases_are_gnu_strerror(cond, phrase):
-    assert gnu_phrase(cond) == phrase
+def test_phrases_are_the_strerror_text(cond, phrase):
+    assert posix_phrase(cond) == phrase
 
 
 def test_every_row_has_a_positive_number_and_a_phrase():

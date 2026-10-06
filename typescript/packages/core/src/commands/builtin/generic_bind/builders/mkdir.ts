@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { ELOOP_STRERROR } from '../../../../errors/constants.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 import { errorVirtualPath, fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { operandSpelling } from '../../../../errors/render.ts'
 import { DEFAULT_DIR_MODE, parseChmod } from '../../../../utils/mode.ts'
@@ -57,16 +57,16 @@ async function enterNode<A extends Accessor>(
       links.resolve(node)
     } catch (err) {
       if (!(err instanceof CycleError)) throw err
-      return ELOOP_STRERROR
+      return posixPhrase('ELOOP')
     }
     const target = await links.targetStat(node)
-    if (target === null) return 'File exists'
-    return target.type === FileType.DIRECTORY ? null : 'Not a directory'
+    if (target === null) return posixPhrase('EEXIST')
+    return target.type === FileType.DIRECTORY ? null : posixPhrase('ENOTDIR')
   }
   const probe = walkProbeFor(path.virtual)
   if (probe !== null) {
     const { exists, isDir } = await entryKind(probe.stat, PathSpec.fromStrPath(node))
-    if (exists) return isDir ? null : 'Not a directory'
+    if (exists) return isDir ? null : posixPhrase('ENOTDIR')
   }
   const real = links !== null ? links.resolve(node) : node
   if (real.startsWith(`${root}/`)) await mkdir(accessor, descendantPath(path, real), true)
@@ -98,7 +98,9 @@ async function makeWalked<A extends Accessor>(
     } catch (err) {
       if (!isFsError(err)) throw err
       why =
-        (err as { code?: string }).code === 'EEXIST' ? 'Not a directory' : String(fsStrerror(err))
+        (err as { code?: string }).code === 'EEXIST'
+          ? posixPhrase('ENOTDIR')
+          : String(fsStrerror(err))
     }
     if (why !== null) return `mkdir: cannot create directory '${spelled}': ${why}`
   }

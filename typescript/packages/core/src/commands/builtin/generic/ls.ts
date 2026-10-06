@@ -43,7 +43,7 @@ import { isEntryError, UsageError } from '../../errors.ts'
 import { argmatchError, argmatchLine, usageHint } from '../../spec/usage.ts'
 import { type ArgmatchKind, argmatch } from '../../spec/argmatch.ts'
 import { identityOf, type Identity } from '../utils/identity.ts'
-import { gnuStrerror, isDotWalkError, isEacces, isWalkError } from '../../../errors/fs.ts'
+import { fsStrerror, isDotWalkError, isEacces, isWalkError } from '../../../errors/fs.ts'
 import { failureText } from '../../../errors/classify.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { CycleError, respellOne, posixNormpath } from '../../../utils/path.ts'
@@ -121,10 +121,7 @@ interface Operand {
 }
 
 function errText(err: unknown): string {
-  return (
-    gnuStrerror((err as { code?: string }).code) ??
-    (err instanceof Error ? err.message : String(err))
-  )
+  return fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
 }
 
 // GNU ratchets the status upward: a serious problem always wins, a minor one

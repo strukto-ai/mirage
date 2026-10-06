@@ -39,7 +39,8 @@ from mirage.commands.spec.usage import (
 from mirage.context import session_visibility
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.errors.types import DotWalkLoop
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
@@ -60,8 +61,6 @@ from mirage.workspace.session import SessionState
 _TARGET_DIR_LONG = "--target-directory"
 _SUFFIX_LONG = "--suffix"
 _VALUED_SHORTS = "tS"
-_ENOENT_TEXT = "No such file or directory"
-_ELOOP_TEXT = "Too many levels of symbolic links"
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,7 +306,7 @@ def _walk_verdict(
         follow_last (bool): whether the final name is followed as well.
     """
     if word_text(word) == "":
-        return _ENOENT_TEXT
+        return posix_phrase(FsCondition.ENOENT)
     virtual = abs_path(word, cwd)
     if not path_visible(session_visibility(), virtual):
         return None
@@ -318,7 +317,7 @@ def _walk_verdict(
         else:
             namespace.follow_parent(trimmed)
     except CycleError:
-        return _ELOOP_TEXT
+        return posix_phrase(FsCondition.ELOOP)
     return None
 
 
@@ -399,7 +398,7 @@ def _refused(flags: LnFlags, typed: str, target_typed: str, why: str) -> str:
         why (str): the strerror.
     """
     backs = flags.backup not in (None, "none")
-    if (flags.force or backs) and why != _ENOENT_TEXT:
+    if (flags.force or backs) and why != posix_phrase(FsCondition.ENOENT):
         return f"ln: failed to access '{typed}': {why}\n"
     kind = "symbolic link" if flags.symbolic else "hard link"
     arrow = "" if flags.symbolic else f" => '{target_typed}'"
@@ -516,7 +515,7 @@ async def plan_links(
             # A link standing at the name that leads nowhere, dangling or
             # looping, is ENOENT to GNU; a loop above it is ELOOP.
             why = (
-                _ENOENT_TEXT
+                posix_phrase(FsCondition.ENOENT)
                 if word_text(last) == "" or _visible_link(namespace, last_abs)
                 else await miss_strerror(dispatch, resolved)
             )
@@ -627,7 +626,7 @@ async def make_link(
     if flags.symbolic and target_typed == "":
         errors.append(
             f"ln: failed to create symbolic link '{typed}' -> '': "
-            f"{_ENOENT_TEXT}\n"
+            f"{posix_phrase(FsCondition.ENOENT)}\n"
         )
         return
     if not flags.symbolic:
@@ -664,7 +663,7 @@ async def make_link(
                 flags,
                 typed,
                 target_typed,
-                fs_strerror(unwalked) or _ENOENT_TEXT,
+                fs_strerror(unwalked) or posix_phrase(FsCondition.ENOENT),
             )
         )
         return
@@ -728,7 +727,12 @@ async def make_link(
             and (flags.force or backs)
         ):
             errors.append(
-                _refused(flags, typed, target_typed, "Not a directory")
+                _refused(
+                    flags,
+                    typed,
+                    target_typed,
+                    posix_phrase(FsCondition.ENOTDIR),
+                )
             )
             return
         if not linked and behind is None:
@@ -805,7 +809,11 @@ async def make_link(
             errors.append(f"ln: {typed}: cannot overwrite directory\n")
             return
         except DotWalkLoop:
-            errors.append(_refused(flags, typed, target_typed, _ELOOP_TEXT))
+            errors.append(
+                _refused(
+                    flags, typed, target_typed, posix_phrase(FsCondition.ELOOP)
+                )
+            )
             return
         occupied = False
     if occupied:
@@ -833,12 +841,19 @@ async def make_link(
         # ENOENT and ENOTDIR), and a store's write refuses the same way.
         errors.append(
             _refused(
-                flags, typed, target_typed, fs_strerror(exc) or _ENOENT_TEXT
+                flags,
+                typed,
+                target_typed,
+                fs_strerror(exc) or posix_phrase(FsCondition.ENOENT),
             )
         )
         return
     except DotWalkLoop:
-        errors.append(_refused(flags, typed, target_typed, _ELOOP_TEXT))
+        errors.append(
+            _refused(
+                flags, typed, target_typed, posix_phrase(FsCondition.ELOOP)
+            )
+        )
         return
     except FileExistsError:
         # The door owns the existence rule (it is the only layer that

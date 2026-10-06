@@ -18,6 +18,7 @@ import { ensureDir, readOptional, takeLock, under, writeFile } from './io.ts'
 import { validRefName } from './refs.ts'
 import type { Dispatch } from './types.ts'
 import { fatal, startPoint } from './util.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 
 /** Write a new git directory's skeleton, keeping what is there. */
 export async function layOut(
@@ -79,7 +80,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     if (here?.type !== FileType.DIRECTORY)
       throw new NoWorkingDirectoryError(
         start,
-        here === null ? 'No such file or directory' : 'Not a directory',
+        here === null ? posixPhrase('ENOENT') : posixPhrase('ENOTDIR'),
       )
     const target = resolvePath(inv.texts[0] ?? '.', start)
     const bare = fl.asBool('bare')
@@ -118,10 +119,10 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     } catch (err) {
       const path = (err as { virtualPath?: string }).virtualPath
       const locked = path === `${settings}.lock`
-      if (locked && isEexist(err)) throw new ConfigLockError(settings, 'File exists')
+      if (locked && isEexist(err)) throw new ConfigLockError(settings, posixPhrase('EEXIST'))
       if (!isErofs(err)) throw err
       if (made) throw new CannotMkdirError(typed)
-      if (locked) throw new ConfigLockError(settings, 'Read-only file system')
+      if (locked) throw new ConfigLockError(settings, posixPhrase('EROFS'))
       throw new InitReadOnlyError(path ?? gitdir)
     }
     const text = existing

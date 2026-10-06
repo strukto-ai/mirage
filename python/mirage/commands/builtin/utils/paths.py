@@ -18,8 +18,14 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from mirage.errors.fs import eexist, enoent
+from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
-from mirage.errors.types import DotWalkLoop, DotWalkMissing, DotWalkNotDir
+from mirage.errors.types import (
+    DotWalkLoop,
+    DotWalkMissing,
+    DotWalkNotDir,
+    FsCondition,
+)
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
@@ -235,10 +241,10 @@ async def absent_dest_strerror(stat: StatFn, target: PathSpec) -> str | None:
     """
     node, is_dir = await nearest_ancestor(stat, target)
     if not is_dir:
-        return "Not a directory"
+        return posix_phrase(FsCondition.ENOTDIR)
     if node == parent(norm(target.virtual)):
         return None
-    return "No such file or directory"
+    return posix_phrase(FsCondition.ENOENT)
 
 
 def link_follow(links: LinkView | None) -> Callable[[str], str] | None:

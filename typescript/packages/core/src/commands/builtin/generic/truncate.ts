@@ -11,6 +11,7 @@ import { type FlagValue } from '../../spec/types.ts'
 import { sizeSuffixes } from '../utils/size_suffix.ts'
 import { absentDestStrerror } from '../utils/paths.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 
 // GNU truncate's letter set differs from split's and od's: lowercase
 // g/k/m/t are accepted, b is not (pinned against coreutils 9.7).
@@ -156,7 +157,7 @@ async function truncateOne(
     if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err
     if (isEnotdir(err) && (flags.noCreate || !path.rawPath.endsWith('/'))) throw err
     const why = await absentDestStrerror(stat, path)
-    if (why === 'Not a directory') throw enotdir(path)
+    if (why === posixPhrase('ENOTDIR')) throw enotdir(path)
     if (flags.noCreate) return
     if (why !== null) throw enoent(path)
     current = 0

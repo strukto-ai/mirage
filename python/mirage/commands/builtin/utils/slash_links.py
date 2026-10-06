@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.errors.constants import ELOOP_STRERROR
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
 from mirage.utils.path import CycleError
@@ -107,7 +108,7 @@ async def mkdir_link_refusal(
             links.resolve(p.virtual)
         except CycleError:
             return True, (
-                f"mkdir: cannot stat '{p.raw_path}': {ELOOP_STRERROR}"
+                f"mkdir: cannot stat '{p.raw_path}': {posix_phrase(FsCondition.ELOOP)}"
             )
     target = await links.target_stat(p.virtual)
     if parents and target is not None and target.type == FileType.DIRECTORY:

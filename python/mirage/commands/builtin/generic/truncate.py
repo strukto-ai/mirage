@@ -11,7 +11,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eisdir, enoent, enotdir
+from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
@@ -194,7 +196,7 @@ async def _truncate_one(
         ):
             raise
         why = await absent_dest_strerror(stat, path)
-        if why == "Not a directory":
+        if why == posix_phrase(FsCondition.ENOTDIR):
             raise enotdir(path) from exc
         if flags.no_create:
             return

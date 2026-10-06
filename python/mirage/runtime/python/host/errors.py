@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.errors import FsCondition, classify
-from mirage.errors.posix import gnu_phrase, posix_errno
+from mirage.errors.posix import posix_errno, posix_phrase
 
 
 def refused(condition: FsCondition, path: str) -> OSError:
@@ -26,7 +26,7 @@ def refused(condition: FsCondition, path: str) -> OSError:
         condition (FsCondition): what the refusal table says to answer.
         path (str): the mounted virtual path the call named.
     """
-    return OSError(posix_errno(condition), gnu_phrase(condition), path)
+    return OSError(posix_errno(condition), posix_phrase(condition), path)
 
 
 def numbered(exc: OSError) -> OSError:

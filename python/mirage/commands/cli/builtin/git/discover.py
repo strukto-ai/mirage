@@ -26,6 +26,8 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.io import read_file, read_optional
 from mirage.commands.cli.builtin.git.repo import config_bool, config_values
 from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.ops.types import MountRoot, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType
@@ -192,7 +194,9 @@ async def discover(
         if here is None:
             raise NoWorkingDirectoryError(start)
         if here.type is not FileType.DIRECTORY:
-            raise NoWorkingDirectoryError(start, "Not a directory")
+            raise NoWorkingDirectoryError(
+                start, posix_phrase(FsCondition.ENOTDIR)
+            )
         candidate = _against(start, gitdir)
         info = await stat_path(candidate)
         if info is None:
@@ -250,7 +254,9 @@ async def discover(
             if here is None:
                 raise NoWorkingDirectoryError(start)
             if here.type is not FileType.DIRECTORY:
-                raise NoWorkingDirectoryError(start, "Not a directory")
+                raise NoWorkingDirectoryError(
+                    start, posix_phrase(FsCondition.ENOTDIR)
+                )
             first = False
         if current == root or current == "/":
             raise NotARepositoryError()
@@ -310,7 +316,9 @@ async def _location(
         if info is None:
             raise WorkTreeChdirError(spelled)
         if info.type is not FileType.DIRECTORY:
-            raise WorkTreeChdirError(spelled, "Not a directory")
+            raise WorkTreeChdirError(
+                spelled, posix_phrase(FsCondition.ENOTDIR)
+            )
     return replace(located, worktree=selected)
 
 

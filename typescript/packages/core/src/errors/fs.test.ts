@@ -22,6 +22,8 @@ import {
   enoent,
   enotsup,
   enotdir,
+  enotempty,
+  exdev,
   fsStrerror,
   isFsError,
   isMissingPath,
@@ -46,20 +48,20 @@ describe('enotsup', () => {
     expect(err.message).toContain('no op registered: unlink')
   })
 
-  it('is a recognized fs error with GNU strerror text', () => {
+  it('is a recognized fs error with its strerror text', () => {
     const err = enotsup('email', 'unlink', '/mail/a.txt')
     expect(isFsError(err)).toBe(true)
     expect(fsStrerror(err)).toBe('Operation not supported')
   })
 
-  it('formats as a GNU operand line at the chokepoint', () => {
+  it('formats as an operand line at the chokepoint', () => {
     const line = formatFsError('mv', enotsup('email', 'unlink', '/mail/a.txt'))
     expect(DEC.decode(line)).toBe('mv: /mail/a.txt: Operation not supported\n')
   })
 })
 
 describe('efbig', () => {
-  it('is a per-operand fs error that formats as GNU File too large', () => {
+  it('is a per-operand fs error that formats as File too large', () => {
     const err = efbig({ virtual: '/at/records.jsonl' })
     expect(err.code).toBe('EFBIG')
     expect(err.virtualPath).toBe('/at/records.jsonl')
@@ -117,6 +119,13 @@ describe('fsStrerror', () => {
     expect(fsStrerror(eacces('/x'))).toBe('Permission denied')
     expect(fsStrerror(new Error('nope'))).toBeNull()
   })
+
+  it('reads a condition that has no class of its own', () => {
+    expect(fsStrerror(enotempty('/d'))).toBe('Directory not empty')
+    expect(fsStrerror(exdev('/d'))).toBe('Invalid cross-device link')
+    expect(fsStrerror(Object.assign(new Error('x'), { code: 'EIO' }))).toBeNull()
+    expect(fsStrerror(null)).toBeNull()
+  })
 })
 
 describe('readdirError', () => {
@@ -130,7 +139,7 @@ describe('readdirError', () => {
   })
 
   it('stays ENOENT however deep the missing component is', async () => {
-    // GNU `ls /data/nope/deeper` reports the missing component, not ENOTDIR.
+    // `ls /data/nope/deeper` reports the missing component, not ENOTDIR.
     const err = await readdirError('/data/nope/deeper', '/data/nope/deeper', isFile, isDir)
     expect(err.code).toBe('ENOENT')
   })

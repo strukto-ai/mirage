@@ -15,14 +15,17 @@
 import errno
 
 from mirage.commands.builtin.utils.paths import descendant_path
-from mirage.errors.constants import ELOOP_STRERROR
-from mirage.errors.types import DotWalkLoop
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.types import FileType, PathSpec, StatFn
 
 # The destination verdicts GNU meets at the destination's own stat, before
 # any create or rename: a plain file in its chain, or a link loop in it.
 # cp and mv both word them ``cannot stat 'DST'`` (coreutils 9.7).
-STAT_REFUSALS = ("Not a directory", ELOOP_STRERROR)
+STAT_REFUSALS = (
+    posix_phrase(FsCondition.ENOTDIR),
+    posix_phrase(FsCondition.ELOOP),
+)
 
 _SWALLOW = (FileNotFoundError, ValueError)
 
@@ -67,11 +70,13 @@ def copy_targets(
         list[tuple[PathSpec, PathSpec]]: Source-to-target pairs.
     """
     if len(sources) > 1 and not dst_is_dir:
-        if dst_err == ELOOP_STRERROR:
+        if dst_err == posix_phrase(FsCondition.ELOOP):
             raise DotWalkLoop(
-                errno.ELOOP, ELOOP_STRERROR, f"target '{dst.raw_path}'"
+                errno.ELOOP,
+                posix_phrase(FsCondition.ELOOP),
+                f"target '{dst.raw_path}'",
             )
-        if not dst_exists and dst_err != "Not a directory":
+        if not dst_exists and dst_err != posix_phrase(FsCondition.ENOTDIR):
             raise FileNotFoundError(f"target '{dst.raw_path}'")
         raise NotADirectoryError(f"target '{dst.raw_path}'")
     if not dst_is_dir:

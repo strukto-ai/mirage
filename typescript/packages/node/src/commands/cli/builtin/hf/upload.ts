@@ -29,6 +29,7 @@ import { DEFAULT_COMMIT_MESSAGE } from '../../../../core/hf_hub/constants.ts'
 import { hubFor, repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
 import { refuseVariadic } from './download.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 
 interface Row {
   name: string
@@ -62,7 +63,7 @@ async function collect(
     directory = await isDir(dispatch, base)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err)) {
-      throw new UsageError(`${local}: ${fsStrerror(err) ?? 'No such file or directory'}`)
+      throw new UsageError(`${local}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`)
     }
     throw err
   }

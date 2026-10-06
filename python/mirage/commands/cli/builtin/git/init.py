@@ -21,6 +21,8 @@ from mirage.commands.cli.builtin.git.refs import valid_ref_name
 from mirage.commands.cli.builtin.git.util import fatal, start_point
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType
@@ -106,9 +108,9 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         if here is None or here.type is not FileType.DIRECTORY:
             raise NoWorkingDirectoryError(
                 start,
-                "No such file or directory"
+                posix_phrase(FsCondition.ENOENT)
                 if here is None
-                else "Not a directory",
+                else posix_phrase(FsCondition.ENOTDIR),
             )
         target = posixpath.normpath(
             posixpath.join(start, inv.texts[0] if inv.texts else ".")

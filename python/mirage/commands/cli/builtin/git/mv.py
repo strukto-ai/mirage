@@ -40,6 +40,8 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView, StatPath
@@ -56,10 +58,6 @@ SOURCE_DIRECTORY_EMPTY = "source directory is empty"
 NOT_UNDER_VERSION_CONTROL = "not under version control"
 MULTIPLE_SOURCES = "multiple sources for the same target"
 CONFLICTED = "conflicted"
-# Not one of git's, because git has no concept to word: a mount is
-# mirage's own boundary, so the refusal borrows the strerror the kernel
-# gives for a rename it will not perform.
-BUSY = "Device or resource busy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,9 +384,12 @@ async def plan(
             # Last, after every check git itself makes, so a source git
             # would refuse anyway is refused in git's own words. ``-k``
             # skips it like any other rename this source cannot survive.
+            # git has no word for a mount, mirage's own boundary, so the
+            # refusal borrows the kernel's EBUSY for a rename it will not
+            # perform.
             if flags.skip:
                 continue
-            raise RenameFailedError(source, BUSY)
+            raise RenameFailedError(source, posix_phrase(FsCondition.EBUSY))
         if reason is not None:
             if flags.skip:
                 continue

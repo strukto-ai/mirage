@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { ELOOP_STRERROR } from '../../../errors/constants.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 import { isEnotdir, isMissError } from '../../../errors/fs.ts'
 import { gnuBasename, posixNormpath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -106,12 +106,12 @@ export async function missStrerror(dispatch: DispatchFn, virtual: string): Promi
   try {
     await dispatch('stat', PathSpec.fromStrPath(virtual))
   } catch (err) {
-    if (isEnotdir(err)) return 'Not a directory'
-    if (isMissError(err)) return 'No such file or directory'
-    if (isEloop(err)) return ELOOP_STRERROR
+    if (isEnotdir(err)) return posixPhrase('ENOTDIR')
+    if (isMissError(err)) return posixPhrase('ENOENT')
+    if (isEloop(err)) return posixPhrase('ELOOP')
     throw err
   }
-  return 'No such file or directory'
+  return posixPhrase('ENOENT')
 }
 
 function isEloop(err: unknown): boolean {

@@ -20,22 +20,13 @@ import { CycleError } from '../../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { Entry, MemberKind, Problem, Scan, Walked } from './types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 
 // A mount boundary is a filesystem boundary, so both archivers stop at
 // one and say so in GNU tar's --one-file-system wording. Descending
 // would archive by accident exactly what the mount-root refusal forbids
 // on purpose.
 export const OTHER_FILESYSTEM = 'file is on a different filesystem; not dumped'
-// Why a path could not be reached, in GNU's strerror wording. Both ride
-// on a fatal Problem; tar prints them after "Cannot stat: " and Info-ZIP
-// words every unreachable name the same way, so it ignores the reason.
-const NO_SUCH = 'No such file or directory'
-const NOT_DIR = 'Not a directory'
-const TOO_MANY_LEVELS = 'Too many levels of symbolic links'
-// A directory below the operand the walk could not open: a rule refused
-// it. Rides on an `unreadable` Problem; tar prints it after "Cannot open: "
-// and fails the run, Info-ZIP stores the directory and is silent.
-const PERMISSION_DENIED = 'Permission denied'
 
 export type StatFn = (path: PathSpec) => Promise<FileStat>
 export type WalkFn = (path: PathSpec, findType: string) => Promise<Walked>
@@ -170,7 +161,7 @@ async function follow(
     target = links.resolve(virtual)
   } catch (e) {
     if (!(e instanceof CycleError)) throw e
-    return [[], [], TOO_MANY_LEVELS, []]
+    return [[], [], posixPhrase('ELOOP'), []]
   }
   if (!sameMount(deps.mounts ?? null, virtual, target)) return [[], [OTHER_FILESYSTEM], '', []]
   const spec = childSpec(target, root)
@@ -178,7 +169,7 @@ async function follow(
   try {
     targetStat = await deps.stat(spec)
   } catch (err) {
-    return [[], [], isEnotdir(err) ? NOT_DIR : NO_SUCH, []]
+    return [[], [], isEnotdir(err) ? posixPhrase('ENOTDIR') : posixPhrase('ENOENT'), []]
   }
   if (targetStat.type !== FileType.DIRECTORY) {
     return [[{ namePath: virtual, kind: 'file', read: spec }], [], '', []]
@@ -193,9 +184,11 @@ async function follow(
   ]
 }
 
-// The problems for directories a walk could not open.
+// The problems for directories a walk could not open. A rule refused each
+// one. tar prints the reason after "Cannot open: " and fails the run;
+// Info-ZIP stores the directory and is silent.
 function unreadableProblems(closed: readonly string[]): Problem[] {
-  return closed.map((path) => ({ path, reason: PERMISSION_DENIED, unreadable: true }))
+  return closed.map((path) => ({ path, reason: posixPhrase('EACCES'), unreadable: true }))
 }
 
 /**
@@ -237,7 +230,13 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
       return {
         entries: [],
         crossings: [],
-        problems: [{ path: base, reason: isEnotdir(err) ? NOT_DIR : NO_SUCH, fatal: true }],
+        problems: [
+          {
+            path: base,
+            reason: isEnotdir(err) ? posixPhrase('ENOTDIR') : posixPhrase('ENOENT'),
+            fatal: true,
+          },
+        ],
         missing: true,
       }
     }

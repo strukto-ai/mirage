@@ -19,9 +19,10 @@ import type { FsCondition, PosixErrno } from './types.ts'
 // kernel adapter that must speak its host's dialect keeps its own
 // condition -> number table (node/src/fuse/errors.ts pins macOS
 // ENOTEMPTY, and fuse-native normalizes); what lives here once is the
-// canonical numbering and the GNU strerror phrases every message
-// renderer shares.
+// canonical numbering and the strerror phrases every message renderer
+// shares.
 export const POSIX: Record<FsCondition, PosixErrno> = {
+  EBADF: { errno: 9, phrase: 'Bad file descriptor' },
   ENOENT: { errno: 2, phrase: 'No such file or directory' },
   ENOTDIR: { errno: 20, phrase: 'Not a directory' },
   EISDIR: { errno: 21, phrase: 'Is a directory' },
@@ -36,6 +37,7 @@ export const POSIX: Record<FsCondition, PosixErrno> = {
   EIO: { errno: 5, phrase: 'Input/output error' },
   EBUSY: { errno: 16, phrase: 'Device or resource busy' },
   EROFS: { errno: 30, phrase: 'Read-only file system' },
+  EFBIG: { errno: 27, phrase: 'File too large' },
   NO_XATTR: { errno: 61, phrase: 'No data available' },
 }
 
@@ -44,7 +46,7 @@ export function posixErrno(condition: FsCondition): number {
   return POSIX[condition].errno
 }
 
-/** The GNU strerror text for a condition. */
-export function gnuPhrase(condition: FsCondition): string {
+/** The strerror text for a condition. */
+export function posixPhrase(condition: FsCondition): string {
   return POSIX[condition].phrase
 }

@@ -17,7 +17,7 @@ import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.t
 import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
-import { ELOOP_STRERROR } from '../../../../errors/constants.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 import { fsStrerror, isEnoent } from '../../../../errors/fs.ts'
 import { CycleError, gnuBasename, posixNormpath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
@@ -236,7 +236,7 @@ async function slashedLinkRefusal(
     followed = namespace.follow(src.virtual)
   } catch (err) {
     if (!(err instanceof CycleError)) throw err
-    return fail('mv', `mv: cannot stat '${src.rawPath}': ${ELOOP_STRERROR}\n`)
+    return fail('mv', `mv: cannot stat '${src.rawPath}': ${posixPhrase('ELOOP')}\n`)
   }
   const target = await statOrNull(dispatch, PathSpec.fromStrPath(followed))
   if (target === null) {
@@ -398,7 +398,7 @@ async function preparePair(
       return { items, early }
     }
     if (dst.walkError === 'ELOOP' && src.walkError === null && namespace.isLink(src.virtual)) {
-      const early = fail('mv', `mv: cannot stat '${dst.rawPath}': ${ELOOP_STRERROR}\n`)
+      const early = fail('mv', `mv: cannot stat '${dst.rawPath}': ${posixPhrase('ELOOP')}\n`)
       return { items, early }
     }
     return { items, early: null }
@@ -433,11 +433,11 @@ async function preparePair(
       // parent's ENOENT (`mv dlnk nodir/name/`) ahead of the slash.
       const { strerror } = await destKind(dispatchStat(dispatch), dst)
       const early =
-        strerror === 'Not a directory'
+        strerror === posixPhrase('ENOTDIR')
           ? fail('mv', `mv: cannot stat '${dst.rawPath}': Not a directory\n`)
           : fail(
               'mv',
-              `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${strerror ?? 'Not a directory'}\n`,
+              `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${strerror ?? posixPhrase('ENOTDIR')}\n`,
             )
       return { items, early }
     }

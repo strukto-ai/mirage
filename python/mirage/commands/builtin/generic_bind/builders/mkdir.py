@@ -33,9 +33,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.context import DEFAULT_UMASK, get_walk_probe, session_umask
-from mirage.errors.constants import ELOOP_STRERROR, FS_ERRORS
+from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import error_path, fs_strerror
+from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
@@ -283,7 +285,7 @@ async def _enter_node(
         try:
             links.resolve(node)
         except CycleError:
-            return ELOOP_STRERROR
+            return posix_phrase(FsCondition.ELOOP)
         target = await links.target_stat(node)
         if target is None:
             return os.strerror(errno.EEXIST)

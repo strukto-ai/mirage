@@ -28,6 +28,7 @@ import { readFile, readOptional, under } from './io.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { gitBool } from './util.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 
 const GITDIR_PREFIX = 'gitdir:'
 const COMMON_DIR = 'commondir'
@@ -158,7 +159,7 @@ export async function discover(
     const here = await statPath(start)
     if (here === null) throw new NoWorkingDirectoryError(start)
     if (here.type !== FileType.DIRECTORY)
-      throw new NoWorkingDirectoryError(start, 'Not a directory')
+      throw new NoWorkingDirectoryError(start, posixPhrase('ENOTDIR'))
     const candidate = against(start, gitdir)
     const info = await statPath(candidate)
     if (info === null) throw new NotARepositoryError(gitdir)
@@ -204,7 +205,7 @@ export async function discover(
       const here = await statPath(current)
       if (here === null) throw new NoWorkingDirectoryError(start)
       if (here.type !== FileType.DIRECTORY) {
-        throw new NoWorkingDirectoryError(start, 'Not a directory')
+        throw new NoWorkingDirectoryError(start, posixPhrase('ENOTDIR'))
       }
       first = false
     }
@@ -252,7 +253,7 @@ async function location(
     const info = await statPath(selected)
     if (info === null) throw new WorkTreeChdirError(configured)
     if (info.type !== FileType.DIRECTORY)
-      throw new WorkTreeChdirError(configured, 'Not a directory')
+      throw new WorkTreeChdirError(configured, posixPhrase('ENOTDIR'))
   }
   return { ...located, worktree: selected }
 }

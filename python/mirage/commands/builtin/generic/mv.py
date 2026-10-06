@@ -53,6 +53,8 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
     MoveStrategy,
@@ -490,7 +492,7 @@ async def mv_generic(
             errors.append(
                 f"mv: cannot move '{src.raw_path}' to "
                 f"'{target.raw_path}': "
-                f"{target_err or 'Not a directory'}"
+                f"{target_err or posix_phrase(FsCondition.ENOTDIR)}"
             )
             continue
         mismatch = overwrite_type_error(

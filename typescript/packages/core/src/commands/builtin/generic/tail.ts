@@ -40,6 +40,7 @@ import { readStdinAsync } from '../utils/stream.ts'
 import { quoteText } from '../../quote.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -309,7 +310,7 @@ async function* follow(
           // the initial open alone, as in GNU, which words the loss as an
           // inaccessible name only when it means to wait for it.
           if (flags.byName) {
-            const strerror = fsStrerror(err) ?? 'No such file or directory'
+            const strerror = fsStrerror(err) ?? posixPhrase('ENOENT')
             note(
               io,
               flags.retry

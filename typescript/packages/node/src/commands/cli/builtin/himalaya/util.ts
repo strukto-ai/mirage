@@ -25,6 +25,7 @@ import type { EmailConfig } from '../../../../core/email/config.ts'
 import { build, readBody, splitAddresses, type Attachment, type Source } from './builder.ts'
 import { deliver, saveSentCopy } from './deliver.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 
 const ENC = new TextEncoder()
 
@@ -67,7 +68,7 @@ async function loadAttachments(
       ;[data] = await dispatch('read', PathSpec.fromStrPath(path))
     } catch (err) {
       if (isMissingPath(err) || isEnotdir(err)) {
-        const strerror = fsStrerror(err) ?? 'No such file or directory'
+        const strerror = fsStrerror(err) ?? posixPhrase('ENOENT')
         throw new Error(`read attachment ${path}: ${strerror}`)
       }
       throw err

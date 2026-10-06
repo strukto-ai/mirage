@@ -42,6 +42,7 @@ import {
   type VfsExplanation,
 } from './types.ts'
 import type { RouteContext } from '../runtime/routing/types.ts'
+import { posixPhrase } from '../errors/posix.ts'
 
 type Hook = keyof typeof VALIDITY
 
@@ -181,7 +182,7 @@ function denyOnly(hook: Hook, action: Deny | Ask | null): Deny | null {
 export function policyDenied(
   deny: Deny,
   filename: string,
-  message = 'Permission denied',
+  message = posixPhrase('EACCES'),
 ): PolicyDenied {
   const refusal = refusalOf(deny)
   noteRefusal(refusal)

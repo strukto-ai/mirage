@@ -47,7 +47,7 @@ import {
   pathExists,
   type BackendKeyFn,
 } from '../utils/copy.ts'
-import { ELOOP_STRERROR } from '../../../errors/constants.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 import {
   fsStrerror,
   isDotWalkError,
@@ -393,7 +393,7 @@ export async function copyTreeLinks(
       resolved = copies.links.resolve(virtual)
     } catch (err) {
       if (!(err instanceof CycleError)) throw err
-      errors.push(`cp: cannot stat '${shown}': ${ELOOP_STRERROR}`)
+      errors.push(`cp: cannot stat '${shown}': ${posixPhrase('ELOOP')}`)
       continue
     }
     const leads = await copies.links.targetStat(virtual)
@@ -503,7 +503,7 @@ export async function targetDirError(
   } catch (err) {
     if (isEnotdir(err)) return `${cmdName}: target directory '${target.rawPath}': Not a directory`
     if ((err as { code?: unknown }).code === 'ELOOP') {
-      return `${cmdName}: target directory '${target.rawPath}': ${ELOOP_STRERROR}`
+      return `${cmdName}: target directory '${target.rawPath}': ${posixPhrase('ELOOP')}`
     }
     if (!isMissingPath(err)) throw err
     return `${cmdName}: target directory '${target.rawPath}': No such file or directory`
@@ -539,12 +539,12 @@ export async function destKind(
     info = await stat(target)
   } catch (err) {
     const code = (err as { code?: unknown }).code
-    if (code === 'ENOTDIR') return { exists: false, isDir: false, strerror: 'Not a directory' }
-    if (code === 'ELOOP') return { exists: false, isDir: false, strerror: ELOOP_STRERROR }
+    if (code === 'ENOTDIR') return { exists: false, isDir: false, strerror: posixPhrase('ENOTDIR') }
+    if (code === 'ELOOP') return { exists: false, isDir: false, strerror: posixPhrase('ELOOP') }
     // Its `..` passes a name that is not there: the chain of the path it
     // simplifies to says nothing about this one.
     if (isDotWalkError(err)) {
-      return { exists: false, isDir: false, strerror: 'No such file or directory' }
+      return { exists: false, isDir: false, strerror: posixPhrase('ENOENT') }
     }
     if (!isMissingPath(err)) throw err
   }
@@ -586,8 +586,8 @@ export async function sourceKind(
     info = await stat(path)
   } catch (err) {
     const code = (err as { code?: unknown }).code
-    if (code === 'ENOTDIR') return { exists: false, isDir: false, strerror: 'Not a directory' }
-    if (code === 'ELOOP') return { exists: false, isDir: false, strerror: ELOOP_STRERROR }
+    if (code === 'ENOTDIR') return { exists: false, isDir: false, strerror: posixPhrase('ENOTDIR') }
+    if (code === 'ELOOP') return { exists: false, isDir: false, strerror: posixPhrase('ELOOP') }
     if (!isMissingPath(err)) throw err
   }
   if (info !== null)
@@ -596,7 +596,7 @@ export async function sourceKind(
   return {
     exists: false,
     isDir: false,
-    strerror: isDir ? 'No such file or directory' : 'Not a directory',
+    strerror: isDir ? posixPhrase('ENOENT') : posixPhrase('ENOTDIR'),
   }
 }
 
@@ -1231,7 +1231,7 @@ export async function cpGeneric(
     }
     // The create fails on the absent parent before the slash matters, so a
     // chain verdict keeps its ENOENT (`cp f deep/missing/`).
-    if (slashRefusesFile(target, targetExists, srcIsDir)) targetErr ??= 'Not a directory'
+    if (slashRefusesFile(target, targetExists, srcIsDir)) targetErr ??= posixPhrase('ENOTDIR')
     if (targetErr !== null) {
       const noun = srcIsDir ? 'directory' : 'regular file'
       errors.push(`cp: cannot create ${noun} '${target.rawPath}': ${targetErr}`)

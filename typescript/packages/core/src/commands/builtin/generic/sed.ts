@@ -38,6 +38,7 @@ import {
 } from '../sed_script.ts'
 import { SED_LINE_LENGTH, SedMachine, type SedFileContent, type SedInput } from '../sed_exec.ts'
 import { byteView, decodeText, encodeText, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Write = (p: PathSpec, data: Uint8Array) => Promise<void>
@@ -100,7 +101,7 @@ function lineLength(raw: string | undefined): number {
 }
 
 function openFailure(name: string, err: unknown): string {
-  return `sed: couldn't open file ${name}: ${fsStrerror(err) ?? 'Permission denied'}\n`
+  return `sed: couldn't open file ${name}: ${fsStrerror(err) ?? posixPhrase('EACCES')}\n`
 }
 
 // Truncate the `w` files as GNU opens them when it compiles the script,

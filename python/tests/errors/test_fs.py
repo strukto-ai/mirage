@@ -28,6 +28,7 @@ from mirage.errors.fs import (
     enotsup,
     error_path,
     exdev,
+    fs_error,
     fs_strerror,
     listing_error,
     no_mount,
@@ -39,12 +40,14 @@ from mirage.errors.render import (
     fs_error_line,
 )
 from mirage.errors.types import (
+    BadDescriptorError,
     DotWalkError,
     DotWalkLoop,
     DotWalkMissing,
     FileTooLargeError,
     NoMountError,
     OperationNotSupportedError,
+    ReadOnlyError,
 )
 from mirage.types import PathSpec
 
@@ -111,7 +114,7 @@ async def test_readdir_error_missing_path_is_enoent():
 
 @pytest.mark.asyncio
 async def test_readdir_error_missing_stays_enoent_at_any_depth():
-    # GNU `ls /data/nope/deeper` reports the missing component, not ENOTDIR.
+    # `ls /data/nope/deeper` reports the missing component, not ENOTDIR.
     exc = await readdir_error(
         "/data/nope/deeper", "/data/nope/deeper", _is_file, _is_dir
     )
@@ -345,3 +348,33 @@ def test_eloop_is_typed_and_classified():
     assert isinstance(exc, DotWalkLoop)
     assert exc.errno == errno.ELOOP
     assert fs_strerror(exc) == "Too many levels of symbolic links"
+
+
+def test_fs_strerror_reads_the_errno_of_a_plain_oserror():
+    # ENOTEMPTY and EXDEV have no class of their own; the phrase comes
+    # from the errno, so the chokepoint never prints a raw errno repr.
+    assert fs_strerror(enotempty("/d")) == "Directory not empty"
+    assert fs_strerror(exdev("/d")) == "Invalid cross-device link"
+    assert fs_strerror(OSError(errno.EIO, "Input/output error", "/d")) is None
+
+
+@pytest.mark.parametrize(
+    ("condition", "kind"),
+    [
+        (FsCondition.ENOENT, FileNotFoundError),
+        (FsCondition.ENOTDIR, NotADirectoryError),
+        (FsCondition.EISDIR, IsADirectoryError),
+        (FsCondition.EEXIST, FileExistsError),
+        (FsCondition.EACCES, PermissionError),
+        (FsCondition.EROFS, ReadOnlyError),
+        (FsCondition.ENOTSUP, OperationNotSupportedError),
+        (FsCondition.ELOOP, DotWalkLoop),
+        (FsCondition.EFBIG, FileTooLargeError),
+        (FsCondition.EBADF, BadDescriptorError),
+    ],
+)
+def test_fs_error_raises_each_condition_as_its_class(condition, kind):
+    exc = fs_error(PathSpec.from_str_path("/data/x"), condition)
+    assert type(exc) is kind
+    assert classify(exc) is condition
+    assert error_path(exc) == "/data/x"

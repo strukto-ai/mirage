@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { STRERROR } from './constants.ts'
+import { CODE_ARMS, OPERAND_CONDITIONS } from './constants.ts'
+import { posixPhrase } from './posix.ts'
 import type { DotWalkError, FsError, MissingOpError, NoMountError } from './types.ts'
 import { stripSlash } from '../utils/slash.ts'
 
@@ -33,8 +34,8 @@ export function fsError(path: string | { virtual: string }, code: string): FsErr
   return err
 }
 
-// Mirrors Python's FileNotFoundError(virtual). The GNU strerror suffix
-// ("No such file or directory") is appended once at the command chokepoints.
+// Mirrors Python's FileNotFoundError(virtual). The strerror suffix ("No such
+// file or directory") is appended once at the command chokepoints.
 export function enoent(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOENT')
 }
@@ -138,8 +139,8 @@ export function exdev(path: string | { virtual: string }): FsError {
 }
 
 // The errno a failed directory listing should report. opendir reports ENOTDIR
-// only when a component of the path exists and is not a directory (GNU
-// `ls /f.txt/x` -> 'Not a directory'); a component that does not exist at all
+// only when a component of the path exists and is not a directory
+// (`ls /f.txt/x` -> 'Not a directory'); a component that does not exist at all
 // is ENOENT (`ls /nope` -> 'No such file or directory'), however deep it is.
 // Store-backed backends have no kernel to draw that line for them, so they
 // walk the ancestors and ask here instead of collapsing both cases into one
@@ -242,7 +243,7 @@ export function isMissingPath(err: unknown): boolean {
 
 // A mount was asked for an op its backend does not register (e.g. unlink on
 // a mail mount). ENOTSUP is the honest POSIX spelling for a capability gap:
-// the fs chokepoints render GNU 'Operation not supported' against the
+// the fs chokepoints render 'Operation not supported' against the
 // operand, while the message keeps VFS + op for tracebacks. Mirrors
 // Python's OperationNotSupportedError/enotsup.
 export function enotsup(
@@ -294,17 +295,16 @@ export function erofsReadOnly(
   return err
 }
 
-// GNU strerror text for a POSIX error code, or null if not a recognized
-// filesystem code (so the chokepoint leaves the raw message untouched).
-export function gnuStrerror(code: string | undefined): string | null {
-  if (code === undefined) return null
-  return STRERROR[code] ?? null
-}
-
-// GNU strerror text for a thrown error, read from its stamped code
-// (Python's fs_strerror). Null when the error is not a recognized fs error.
+// The phrase a command line ends with for a failed operand, read from the
+// error's stamped code (Python's fs_strerror). Null for anything outside
+// OPERAND_CONDITIONS, so the chokepoint leaves the raw message untouched.
 export function fsStrerror(err: unknown): string | null {
-  return gnuStrerror((err as { code?: string }).code)
+  if (err === null || typeof err !== 'object') return null
+  const code = (err as { code?: unknown }).code
+  if (typeof code !== 'string') return null
+  const condition = CODE_ARMS[code]
+  if (condition === undefined || !OPERAND_CONDITIONS.has(condition)) return null
+  return posixPhrase(condition)
 }
 
 // The user-facing path for an error: the stamped virtualPath when present,
@@ -316,11 +316,10 @@ export function errorVirtualPath(err: unknown): string {
 }
 
 // True when the error carries a recognized filesystem code, i.e. it is the
-// per-operand kind a read-family command skips (GNU keeps processing the
-// remaining operands). Anything else keeps propagating.
+// per-operand kind a read-family command skips, going on with the remaining
+// operands. Anything else keeps propagating.
 export function isFsError(err: unknown): boolean {
-  const code = (err as { code?: unknown }).code
-  return typeof code === 'string' && gnuStrerror(code) !== null
+  return fsStrerror(err) !== null
 }
 
 // `enoent()` puts the *path* in the message, so matching on message text never
@@ -341,7 +340,7 @@ export function isEfbig(err: unknown): boolean {
   return err instanceof Error && (err as Error & { code?: string }).code === 'EFBIG'
 }
 
-// Python's twin is `except IsADirectoryError`. GNU sometimes spells a
+// Python's twin is `except IsADirectoryError`. A command sometimes spells a
 // directory read as something other than the EISDIR strerror (checksum
 // --check says the literal "read error"), so callers need the code, not
 // just the walk-error class.
@@ -357,7 +356,7 @@ export function isEexist(err: unknown): boolean {
 
 // Python's twin is `except PermissionError`: a refusal (a rule at the
 // command guard or the op door, a read-only mount), which a walk reports
-// per entry the way GNU reports an unreadable one.
+// per entry the way it reports an unreadable one.
 export function isEacces(err: unknown): boolean {
   return err instanceof Error && (err as Error & { code?: string }).code === 'EACCES'
 }
@@ -372,7 +371,7 @@ export function isErofs(err: unknown): boolean {
 // Mirrors Python's `except (OSError, ValueError)`, where ValueError is
 // the no-mount spelling. Anything else — auth failures, transport
 // errors, backend bugs — must propagate instead of vanishing from a
-// listing or being laundered into a GNU-shaped 'cannot access' line.
+// listing or being laundered into a 'cannot access' line.
 export function isWalkError(err: unknown): boolean {
   return isFsError(err) || (err as { noMount?: unknown }).noMount === true
 }

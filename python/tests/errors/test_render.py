@@ -21,7 +21,9 @@ from mirage.errors.fs import (
     eisdir,
     enoent,
     enotdir,
+    enotempty,
     enotsup,
+    exdev,
 )
 from mirage.errors.render import (
     format_fs_error,
@@ -116,7 +118,7 @@ def test_open_failure_line_names_the_failed_open(cmd, line):
     ],
 )
 def test_open_failure_line_names_a_directory_read(cmd, line):
-    # GNU's own fmt and base64 lines (`fmt: read error`, `base64: read
+    # The reference fmt and base64 lines (`fmt: read error`, `base64: read
     # error: Is a directory`) name no operand, so those keep the plain one.
     assert fs_error_line(cmd, "/data/sub", eisdir("/data/sub")) == line
 
@@ -187,7 +189,7 @@ def test_format_fs_error_words_a_head_open_failure():
 )
 def test_each_command_names_its_own_failed_step(cmd, step):
     # The errno is the backend's either way; only the step and the
-    # quoting are the command's (coreutils 9.7).
+    # quoting are the command's.
     for exc, strerror in (
         (enoent("/data/a.txt/x"), "No such file or directory"),
         (enotdir("/data/a.txt/x"), "Not a directory"),
@@ -197,8 +199,8 @@ def test_each_command_names_its_own_failed_step(cmd, step):
 
 
 def test_tac_names_a_directory_read_first_and_quotes_it_when_needed():
-    # tac's read failure leads with the name, which GNU quotes the way
-    # quotef does: only a name that needs it, ':' included.
+    # tac's read failure leads with the name, quoted only when it needs
+    # it, ':' included.
     assert fs_error_line("tac", "/data/sub", eisdir("/data/sub")) == (
         "tac: /data/sub: read error: Is a directory\n"
     )
@@ -272,7 +274,7 @@ def test_format_fs_error_generic_value_error():
 
 
 def test_format_fs_error_generic_does_not_double_prefix():
-    # Many generic commands raise a fully GNU-formatted message already
+    # Many generic commands raise a fully formatted message already
     # carrying the "<cmd>: " prefix; it must not be doubled (uniq: uniq: ...).
     err = format_fs_error("uniq", ValueError("uniq: invalid count: '2junk'"))
     assert err == b"uniq: invalid count: '2junk'\n"
@@ -301,4 +303,13 @@ def test_wc_and_du_vet_the_empty_name(cmd):
 def test_other_commands_name_the_empty_operand_quoted():
     assert fs_error_line("tail", "", enoent("")) == (
         "tail: cannot open '' for reading: No such file or directory\n"
+    )
+
+
+def test_format_fs_error_words_a_condition_without_a_class():
+    assert format_fs_error("rmdir", enotempty("/d")) == (
+        b"rmdir: failed to remove '/d': Directory not empty\n"
+    )
+    assert format_fs_error("mv", exdev("/d")) == (
+        b"mv: /d: Invalid cross-device link\n"
     )

@@ -12,15 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { READ_FAILURES, STRERROR } from './constants.ts'
-import { errorVirtualPath, fsError, gnuStrerror, virtualOf } from './fs.ts'
+import { OPERAND_CONDITIONS, READ_FAILURES } from './constants.ts'
+import { errorVirtualPath, fsError, fsStrerror, virtualOf } from './fs.ts'
+import { posixPhrase } from './posix.ts'
 import { encodeText } from '../shell/bytes.ts'
 import { dropTrailingSegments, respellOne } from '../utils/path.ts'
 import { quotesOperands, shellQuote, shellQuoteAlways } from '../utils/quote.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
 // Re-spell a reported path the way its operand was typed. Backends name paths
-// in virtual space, but GNU quotes the operand as the user wrote it:
+// in virtual space, but a command quotes the operand as the user wrote it:
 // `cd /data && mkdir -p f.txt/sub` reports 'f.txt', not '/data/f.txt'. The path
 // an error names is the operand itself, an ancestor of it (mkdir -p blames the
 // component of the chain it tripped on), or something under it, so all three
@@ -46,18 +47,18 @@ export function operandSpelling(
 
 const CANNOT_OPEN = 'cannot open {quoted} for reading: {strerror}'
 
-// How GNU words a failed operand for the commands that name the step that
+// How a failed operand is worded by the commands that name the step that
 // failed instead of printing `<cmd>: <name>: <strerror>`. An entry is
 // [opening, reading]: the line for a name the command could not open, and
 // for one it opened that then refused the read (READ_FAILURES). null keeps
-// the plain line for that step, which is also the choice wherever GNU's own
-// line drops the name (`base64: read error`, `fmt: read error`): mirage
-// words a step GNU's way only while that still says which operand failed.
-// `{quoted}` is the name always quoted (gnulib's quoteaf), `{shown}` quoted
-// only when it needs it (quotef), `{bare}` as typed. Measured on coreutils
-// 9.7 and GNU sed 4.9 (debian:stable-slim), a directory read on tmpfs:
-// overlayfs answers a directory's read with EINVAL, so a tac there says
-// `read error: Invalid argument`. Mirrors Python's FAILURE_WORDING.
+// the plain line for that step, which is also the choice wherever the
+// reference line drops the name (`base64: read error`, `fmt: read error`):
+// mirage words a step that way only while it still says which operand
+// failed. `{quoted}` is the name always quoted, `{shown}` quoted only when it
+// needs it, `{bare}` as typed. Measured on debian:stable-slim, a directory
+// read on tmpfs: overlayfs answers a directory's read with EINVAL, so a tac
+// there says `read error: Invalid argument`. Mirrors Python's
+// FAILURE_WORDING.
 export const FAILURE_WORDING: ReadonlyMap<string, readonly [string | null, string | null]> =
   new Map([
     ['csplit', [CANNOT_OPEN, null]],
@@ -93,29 +94,28 @@ export const FAILURE_WORDING: ReadonlyMap<string, readonly [string | null, strin
     ['uniq', [null, 'error reading {quoted}: {strerror}']],
   ])
 
-// The command's own template for this failure, null for the plain line: no
-// entry, no template for the step, or standard input, whose `-` line is the
-// one GNU prints when it closes a stdin it could not read.
-// GNU wc and du vet every name the way their --files0-from reader does,
-// and refuse an empty one in these words before any open could answer
-// ENOENT for it (coreutils 9.7). Mirrors Python's ZERO_LENGTH_NAME.
+// wc and du vet every name the way their --files0-from reader does, and
+// refuse an empty one in these words before any open could answer ENOENT
+// for it. Mirrors Python's ZERO_LENGTH_NAME.
 export const ZERO_LENGTH_NAME = 'invalid zero-length file name'
 
 const VETS_EMPTY_NAMES: ReadonlySet<string> = new Set(['du', 'wc'])
 
+// The command's own template for this failure, null for the plain line: no
+// entry, no template for the step, or standard input, whose `-` line is the
+// one a command prints when it closes a stdin it could not read.
 function stepWording(cmdName: string, label: string, code: string | undefined): string | null {
   const wording = FAILURE_WORDING.get(cmdName)
   if (wording === undefined || label === '-') return null
   return code !== undefined && READ_FAILURES.has(code) ? wording[1] : wording[0]
 }
 
-// GNU coreutils stderr line for one failed path operand, spelled as typed
+// The stderr line for one failed path operand, spelled as typed
 // (PathSpec.rawPath). Byte-identical with the executor chokepoint and the
 // Python fs_error_line. Used by read-family commands that keep processing
 // remaining operands after one fails, where the caller holds the operand.
 // A command in SHELL_QUOTED_COMMANDS reports the operand shell-quoted when
-// it needs it ('*.txt'), the way GNU does; every other command reports it
-// bare. A command in FAILURE_WORDING says which step failed instead.
+// it needs it ('*.txt'); every other command reports it bare. A command in FAILURE_WORDING says which step failed instead.
 export function fsErrorLine(
   cmdName: string,
   path: string | { virtual: string; rawPath?: string },
@@ -124,7 +124,7 @@ export function fsErrorLine(
   const code = (err as { code?: string }).code
   const typed = virtualOf(path)
   if (typed === '' && VETS_EMPTY_NAMES.has(cmdName)) return `${cmdName}: ${ZERO_LENGTH_NAME}\n`
-  const strerror = gnuStrerror(code)
+  const strerror = fsStrerror(err)
   const template = stepWording(cmdName, typed, code)
   if (template !== null && strerror !== null) {
     // One pass, so a name that spells a placeholder is never substituted.
@@ -161,7 +161,7 @@ export function revoiceFsErrorLine(
   const prefix = `${fromCmd}: `
   if (!line.startsWith(prefix)) return line
   const strerror = line.slice(line.lastIndexOf(': ') + 2)
-  const code = Object.keys(STRERROR).find((key) => STRERROR[key] === strerror)
+  const code = [...OPERAND_CONDITIONS].find((c) => posixPhrase(c) === strerror)
   if (code !== undefined) {
     const err = fsError(operand, code)
     if (fsErrorLine(fromCmd, operand, err) === `${line}\n`) {
@@ -175,7 +175,7 @@ export function revoiceFsErrorLine(
 // error, byte-identical with Python's format_fs_error: the path is
 // recovered from the error and, when `paths` is supplied, rewritten to the
 // as-typed spelling (PathSpec.rawPath) so a relative argument is reported
-// as typed, like GNU. Shared by the single-mount and cross-mount
+// as typed. Shared by the single-mount and cross-mount
 // chokepoints; takes a structural shape to avoid importing PathSpec (no
 // import cycle).
 export function formatFsError(
@@ -183,7 +183,7 @@ export function formatFsError(
   err: unknown,
   paths?: readonly { virtual: string; rawPath: string }[],
 ): Uint8Array {
-  const strerror = gnuStrerror((err as { code?: string }).code)
+  const strerror = fsStrerror(err)
   const vpath = errorVirtualPath(err)
   const spelled = paths?.find((p) => p.virtual === vpath)?.rawPath ?? vpath
   let line: string
@@ -191,7 +191,7 @@ export function formatFsError(
     line = fsErrorLine(cmdName, spelled, err)
   } else {
     // A message that already carries the `<cmd>: ` prefix (many generic
-    // commands throw a fully GNU-formatted string, e.g. `uniq: invalid
+    // commands throw a fully formatted string, e.g. `uniq: invalid
     // count`) is emitted verbatim so the prefix is not doubled.
     const message = err instanceof Error ? err.message : String(err)
     line = message.startsWith(`${cmdName}: `) ? `${message}\n` : `${cmdName}: ${message}\n`

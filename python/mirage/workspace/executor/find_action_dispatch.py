@@ -33,7 +33,9 @@ from mirage.context import (
     set_program_invocation,
 )
 from mirage.errors.classify import failure_text
-from mirage.errors.fs import enoent, fs_strerror
+from mirage.errors.fs import enoent
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.stream import SharedStdin, materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
@@ -291,7 +293,7 @@ async def _row_stat(
     if st is None:
         errors.append(
             encode_text(
-                f"find: '{path}': {fs_strerror(FileNotFoundError())}\n"
+                f"find: '{path}': {posix_phrase(FsCondition.ENOENT)}\n"
             )
         )
         return None

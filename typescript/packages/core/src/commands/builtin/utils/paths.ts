@@ -29,6 +29,7 @@ import {
   resolvePath,
 } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 
 // Stat via dispatch in the shape the generics' probes take: destKind and
 // its kin are written against a backend stat that raises on a miss, so a
@@ -134,8 +135,8 @@ export async function nearestAncestor(stat: StatFn, path: PathSpec): Promise<[st
 // Python's absent_dest_strerror.
 export async function absentDestStrerror(stat: StatFn, target: PathSpec): Promise<string | null> {
   const [node, isDir] = await nearestAncestor(stat, target)
-  if (!isDir) return 'Not a directory'
-  return node === parent(norm(target.virtual)) ? null : 'No such file or directory'
+  if (!isDir) return posixPhrase('ENOTDIR')
+  return node === parent(norm(target.virtual)) ? null : posixPhrase('ENOENT')
 }
 
 // The link resolution a dot walk is handed, null while no link exists.

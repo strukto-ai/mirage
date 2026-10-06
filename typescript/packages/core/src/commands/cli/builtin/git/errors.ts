@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 
 // git exits 128 for every fatal, which is neither the argparse usage exit (2)
 // nor the generic command failure (1) the CLI dispatcher applies to a thrown
@@ -402,7 +403,7 @@ export class BareResetError extends GitError {
  * the read-only ones included (pinned against git 2.54).
  */
 export class WorkTreeChdirError extends GitError {
-  constructor(path: string, reason = 'No such file or directory') {
+  constructor(path: string, reason = posixPhrase('ENOENT')) {
     super(`cannot chdir to '${path}': ${reason}`)
   }
 }
@@ -416,7 +417,7 @@ export class WorkTreeChdirError extends GitError {
  * tolerated finds the repository above it and quietly runs there instead.
  */
 export class NoWorkingDirectoryError extends GitError {
-  constructor(path: string, reason = 'No such file or directory') {
+  constructor(path: string, reason = posixPhrase('ENOENT')) {
     super(`cannot change to '${path}': ${reason}`)
   }
 }
@@ -997,7 +998,7 @@ export class RemovalRefusedError extends GitError {
 export class RemovePathError extends GitError {
   override readonly report: string
 
-  constructor(path: string, report = '', reason = 'Is a directory') {
+  constructor(path: string, report = '', reason = posixPhrase('EISDIR')) {
     super(`git rm: '${path}': ${reason}`)
     this.report = report
   }
@@ -1067,7 +1068,7 @@ export class NotADirectoryDestinationError extends GitError {
  * neither does this.
  */
 export class RenameFailedError extends GitError {
-  constructor(source: string, reason = 'No such file or directory') {
+  constructor(source: string, reason = posixPhrase('ENOENT')) {
     super(`renaming '${source}' failed: ${reason}`)
   }
 }

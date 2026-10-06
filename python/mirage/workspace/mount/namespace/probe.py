@@ -14,8 +14,9 @@
 
 import posixpath
 
-from mirage.errors.constants import ELOOP_STRERROR, MISS_ERRORS
-from mirage.errors.types import DotWalkLoop
+from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError
@@ -108,12 +109,12 @@ async def miss_strerror(dispatch: DispatchFn, virtual: str) -> str:
     try:
         await dispatch("stat", PathSpec.from_str_path(virtual))
     except NotADirectoryError:
-        return "Not a directory"
+        return posix_phrase(FsCondition.ENOTDIR)
     except MISS_ERRORS:
-        return "No such file or directory"
+        return posix_phrase(FsCondition.ENOENT)
     except DotWalkLoop:
-        return ELOOP_STRERROR
-    return "No such file or directory"
+        return posix_phrase(FsCondition.ELOOP)
+    return posix_phrase(FsCondition.ENOENT)
 
 
 async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:

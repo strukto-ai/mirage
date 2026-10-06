@@ -30,6 +30,8 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
@@ -37,15 +39,6 @@ from mirage.utils.key_prefix import mount_prefix_of, mounted_path
 from mirage.utils.path import CycleError, resolve_path
 
 logger = logging.getLogger(__name__)
-
-# What rmdir(2) answers for a mount point, which is what the walk up from
-# `-p` meets at the mount root.
-MOUNT_ROOT_BUSY = "Device or resource busy"
-
-# An ancestor gone by the time `-p` reaches it held the entry just removed,
-# so it was a keyed store's implicit prefix that vanished with its last key:
-# the directory GNU's rmdir would have removed is already gone.
-VANISHED = "No such file or directory"
 
 
 def followed_parent(virtual: str, links: LinkView | None) -> str:
@@ -135,15 +128,15 @@ async def rmdir(
         if links is not None and links.stat_at(p.virtual) is not None:
             if p.raw_path.endswith("/"):
                 return "Symbolic link not followed"
-            return "Not a directory"
+            return posix_phrase(FsCondition.ENOTDIR)
         try:
             s = await ops.stat(accessor, p, index=opts.index)
         except FS_ERRORS as exc:
             return fs_strerror(exc)
         if s.type != FileType.DIRECTORY:
-            return "Not a directory"
+            return posix_phrase(FsCondition.ENOTDIR)
         if await ops.readdir(accessor, p, index=opts.index):
-            return "Directory not empty"
+            return posix_phrase(FsCondition.ENOTEMPTY)
         try:
             await rmdir_fn(accessor, p, index=opts.index)
         except OSError as exc:
@@ -154,7 +147,7 @@ async def rmdir(
             # visible entry appearing mid-walk). A read-only region
             # refuses here too. GNU's voice, not the raw errno repr.
             reason = (
-                "Directory not empty"
+                posix_phrase(FsCondition.ENOTEMPTY)
                 if exc.errno in (errno.ENOTEMPTY, errno.EEXIST)
                 else fs_strerror(exc)
             )
@@ -169,7 +162,7 @@ async def rmdir(
             verbose_parts.append(f"rmdir: removing directory, '{p.raw_path}'")
         reason = await remove(p)
         if reason is not None:
-            if not (ignore and reason == "Directory not empty"):
+            if not (ignore and reason == posix_phrase(FsCondition.ENOTEMPTY)):
                 errors.append(
                     f"rmdir: failed to remove '{p.raw_path}': {reason}"
                 )
@@ -179,16 +172,29 @@ async def rmdir(
         for ancestor, typed in ancestors(p, opts.cwd.virtual, links):
             if v:
                 verbose_parts.append(f"rmdir: removing directory, '{typed}'")
+            # The walk up meets the mount root, which rmdir(2) answers
+            # with EBUSY. An ancestor already gone held the entry just
+            # removed, so it was a keyed store's implicit prefix that
+            # vanished with its last key: it counts as removed.
             reason = (
-                MOUNT_ROOT_BUSY if ancestor is None else await remove(ancestor)
+                posix_phrase(FsCondition.EBUSY)
+                if ancestor is None
+                else await remove(ancestor)
             )
-            if reason == VANISHED and ancestor is not None:
+            if (
+                reason == posix_phrase(FsCondition.ENOENT)
+                and ancestor is not None
+            ):
                 removed[ancestor.mount_path] = b""
                 continue
             if reason is None:
                 continue
-            if not (ignore and reason == "Directory not empty"):
-                what = "" if reason == "Not a directory" else "directory "
+            if not (ignore and reason == posix_phrase(FsCondition.ENOTEMPTY)):
+                what = (
+                    ""
+                    if reason == posix_phrase(FsCondition.ENOTDIR)
+                    else "directory "
+                )
                 errors.append(
                     f"rmdir: failed to remove {what}'{typed}': {reason}"
                 )

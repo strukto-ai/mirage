@@ -12,16 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 from collections.abc import Awaitable, Callable
 
-from mirage.errors.constants import ELOOP_STRERROR, FS_STRERROR
+from mirage.errors.classify import classify
+from mirage.errors.constants import CONDITION_CLASS, OPERAND_CONDITIONS
+from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import (
     DotWalkError,
     DotWalkLoop,
     DotWalkMissing,
     FileTooLargeError,
+    FsCondition,
     NoMountError,
     OperationNotSupportedError,
 )
@@ -31,6 +32,25 @@ from mirage.types import PathSpec
 def virtual_of(path: str | PathSpec) -> str:
     original = getattr(path, "virtual", None)
     return original if original is not None else str(path)
+
+
+def fs_error(path: str | PathSpec, condition: FsCondition) -> OSError:
+    """The error a mount raises for one condition at one path.
+
+    Stamped the way the kernel stamps it: the host errno, the condition's
+    phrase, and the operand as ``filename``. Raised as mirage's own class
+    for a condition that has one (``ReadOnlyError`` for EROFS), else as the
+    builtin CPython picks for the errno. Mirrors TS ``fsError``.
+
+    Args:
+        path (str | PathSpec): the operand; ``virtual`` is the reported
+            spelling.
+        condition (FsCondition): the condition to raise.
+    """
+    kind = CONDITION_CLASS.get(condition, OSError)
+    return kind(
+        posix_errno(condition), posix_phrase(condition), virtual_of(path)
+    )
 
 
 def enoent(path: str | PathSpec) -> FileNotFoundError:
@@ -47,18 +67,24 @@ def walk_refusal(path: PathSpec) -> DotWalkError:
         path (PathSpec): an operand whose ``walk_error`` is set.
     """
     if path.walk_error == "ELOOP":
-        return DotWalkLoop(errno.ELOOP, ELOOP_STRERROR, path.raw_path)
+        return eloop(path.raw_path)
     return DotWalkMissing(
-        errno.ENOENT, "No such file or directory", path.raw_path
+        posix_errno(FsCondition.ENOENT),
+        posix_phrase(FsCondition.ENOENT),
+        path.raw_path,
     )
 
 
 def efbig(path: str | PathSpec) -> FileTooLargeError:
-    return FileTooLargeError(errno.EFBIG, "File too large", virtual_of(path))
+    return FileTooLargeError(
+        posix_errno(FsCondition.EFBIG),
+        posix_phrase(FsCondition.EFBIG),
+        virtual_of(path),
+    )
 
 
 def ebusy(path: str | PathSpec) -> OSError:
-    return OSError(errno.EBUSY, "Device or resource busy", virtual_of(path))
+    return fs_error(path, FsCondition.EBUSY)
 
 
 def enotdir(path: str | PathSpec) -> NotADirectoryError:
@@ -102,20 +128,21 @@ def no_mount(path: str | PathSpec) -> NoMountError:
 
 
 def enotempty(path: str | PathSpec) -> OSError:
-    return OSError(errno.ENOTEMPTY, "Directory not empty", virtual_of(path))
+    return fs_error(path, FsCondition.ENOTEMPTY)
 
 
 def no_xattr(path: str | PathSpec) -> OSError:
-    code = getattr(errno, "ENOATTR", errno.ENODATA)
-    return OSError(code, os.strerror(code), virtual_of(path))
+    return fs_error(path, FsCondition.NO_XATTR)
 
 
 def exdev(path: str | PathSpec) -> OSError:
-    return OSError(errno.EXDEV, "Invalid cross-device link", virtual_of(path))
+    return fs_error(path, FsCondition.EXDEV)
 
 
-def einval(path: str | PathSpec, message: str = "Invalid argument") -> OSError:
-    return OSError(errno.EINVAL, message, virtual_of(path))
+def einval(path: str | PathSpec, message: str | None = None) -> OSError:
+    if message is None:
+        return fs_error(path, FsCondition.EINVAL)
+    return OSError(posix_errno(FsCondition.EINVAL), message, virtual_of(path))
 
 
 def eloop(path: str | PathSpec) -> DotWalkLoop:
@@ -129,7 +156,11 @@ def eloop(path: str | PathSpec) -> DotWalkLoop:
     Args:
         path (str | PathSpec): the path whose walk looped.
     """
-    return DotWalkLoop(errno.ELOOP, ELOOP_STRERROR, virtual_of(path))
+    return DotWalkLoop(
+        posix_errno(FsCondition.ELOOP),
+        posix_phrase(FsCondition.ELOOP),
+        virtual_of(path),
+    )
 
 
 async def readdir_error(
@@ -141,7 +172,7 @@ async def readdir_error(
     """The errno a failed directory listing should report.
 
     ``opendir`` reports ENOTDIR only when a component of the path exists and
-    is not a directory (GNU ``ls /f.txt/x`` -> "Not a directory"); a component
+    is not a directory (``ls /f.txt/x`` -> "Not a directory"); a component
     that does not exist at all is ENOENT (``ls /nope`` -> "No such file or
     directory"), however deep it is. Store-backed backends have no kernel to
     draw that line for them, so they walk the ancestors and ask here instead
@@ -244,15 +275,28 @@ def enotsup(
         path (object): The operand; ``virtual`` is the reported spelling.
     """
     return OperationNotSupportedError(
-        errno.ENOTSUP, f"{vfs}: no op {op_name!r}", virtual_of(path)
+        posix_errno(FsCondition.ENOTSUP),
+        f"{vfs}: no op {op_name!r}",
+        virtual_of(path),
     )
 
 
 def fs_strerror(exc: BaseException) -> str | None:
-    for exc_type, strerror in FS_STRERROR:
-        if isinstance(exc, exc_type):
-            return strerror
-    return None
+    """The phrase a command line ends with for a failed operand.
+
+    None for anything but an OSError naming a condition in
+    ``OPERAND_CONDITIONS``: the line then carries the exception's own
+    words. Mirrors TS ``fsStrerror``.
+
+    Args:
+        exc (BaseException): the failure.
+    """
+    if not isinstance(exc, OSError):
+        return None
+    condition = classify(exc)
+    if condition is None or condition not in OPERAND_CONDITIONS:
+        return None
+    return posix_phrase(condition)
 
 
 def error_path(exc: BaseException) -> str:
