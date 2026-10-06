@@ -1108,22 +1108,44 @@ async def test_a_saved_non_boolean_knob_is_refused(tmp_path):
 @pytest.mark.asyncio
 async def test_a_disk_state_loads_into_ram_without_following_a_link(tmp_path):
     # A disk state names each file by host path and the load reads it
-    # later; a link put in its place since must not carry a host file in.
+    # later: a link put in its place since must not carry a host file
+    # in, the refusal lands before any mount loads, and a mount keeping
+    # no content of its own reads none of the files.
     captured = tmp_path / "root" / "sub" / "f"
     captured.parent.mkdir(parents=True)
     captured.write_bytes(b"mine")
-    source = Workspace({"/d": DiskVFS(str(tmp_path / "root"))})
-    ws = Workspace({"/d": RAMVFS()})
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "g").write_bytes(b"unread")
+    source = Workspace(
+        {
+            "/a": RAMVFS(),
+            "/d": DiskVFS(str(tmp_path / "root")),
+            "/s": DiskVFS(str(tmp_path / "other")),
+        }
+    )
+    config = MinIOConfig(
+        bucket="b",
+        endpoint_url="http://localhost:9000",
+        access_key_id="k",
+        secret_access_key="s",
+    )
+    ws = Workspace(
+        {"/a": RAMVFS(), "/d": RAMVFS(), "/s": MinIOVFS(config)},
+        mode=MountMode.WRITE,
+    )
     try:
         state = await to_state_dict(source)
+        (tmp_path / "other" / "g").unlink()
         await apply_state_dict(ws, state)
         assert await ws.vfs.read("/d/sub/f") == b"mine"
+        await ws.vfs.write("/a/kept", b"live")
         secret = tmp_path / "secret"
         secret.write_bytes(b"host")
         captured.unlink()
         captured.symlink_to(secret)
         with pytest.raises(OSError):
             await apply_state_dict(ws, state)
+        assert await ws.vfs.read("/a/kept") == b"live"
         assert await ws.vfs.read("/d/sub/f") == b"mine"
     finally:
         await source.close()

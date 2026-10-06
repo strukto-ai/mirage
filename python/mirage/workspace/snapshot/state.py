@@ -496,7 +496,10 @@ async def apply_state_dict(
         await ws._cache.clear()
     # load_state runs for ALL mounts (overridden too), so disk content
     # is written into the new root, redis content into the new URL, etc.
-    # Cred-only mounts (S3 et al.) define load_state as no-op.
+    # Cred-only mounts (S3 et al.) define load_state as no-op. Every
+    # state is prepared before any mount loads, so a captured disk file
+    # that is gone or now a link fails the load with no mount changed.
+    loads = []
     for m in state[StateKey.MOUNTS]:
         mount = ws._registry.try_mount_for_prefix(m[MountKey.PREFIX])
         if mount is None:
@@ -511,13 +514,14 @@ async def apply_state_dict(
             )
             continue
         vfs_state = m[MountKey.VFS_STATE]
-        # A disk state loaded into a mount of another kind takes the
-        # disk's state in RAM's shape.
-        if (
-            vfs_state.get(VFSStateKey.TYPE) == VFSName.DISK
-            and mount.vfs.name != VFSName.DISK
+        # A disk state loaded into a RAM or redis mount takes the disk's
+        # state in RAM's shape; a mount keeping no content reads no file.
+        if vfs_state.get(VFSStateKey.TYPE) == VFSName.DISK and (
+            mount.vfs.name in (VFSName.RAM, VFSName.REDIS)
         ):
             vfs_state = await run_blocking(_disk_state_as_ram, vfs_state)
+        loads.append((mount, vfs_state))
+    for mount, vfs_state in loads:
         if mount.vfs.name in (VFSName.DISK, VFSName.REDIS):
             await run_blocking(mount.vfs.load_state, vfs_state)
         else:

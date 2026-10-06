@@ -205,23 +205,32 @@ describe('toStateDict / applyStateDict', () => {
 
   it('loads a disk state into RAM without following a link', async () => {
     // A disk state names each file by host path and the load reads it
-    // later; a link put in its place since must not carry a host file in.
+    // later: a link put in its place since must not carry a host file in,
+    // the refusal lands before any mount loads, and a mount keeping no
+    // content of its own reads none of the files.
     const captured = join(tempDir, 'captured')
     const secret = join(tempDir, 'secret')
     writeFileSync(captured, 'mine')
     writeFileSync(secret, 'host')
-    const ws = buildWorkspace()
+    const ws = new Workspace(
+      { '/a': new RAMVFS(), '/d': new RAMVFS(), '/s': new BoxVFS({ accessToken: 'fake' }) },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    const read = async (path: string): Promise<string> =>
+      new TextDecoder().decode(await ws.vfs.read(path))
     const state = await toStateDict(ws)
     for (const m of state.mounts) {
-      if (m.prefix === '/data/')
-        Object.assign(m.vfs_state, { type: 'disk', files: { 'sub/f': captured } })
+      const file = { '/d/': captured, '/s/': join(tempDir, 'gone') }[m.prefix]
+      if (file !== undefined) m.vfs_state = { type: 'disk', files: { 'sub/f': file } } as never
     }
     await applyStateDict(ws, state)
-    expect(new TextDecoder().decode(await ws.vfs.read('/data/sub/f'))).toBe('mine')
+    expect(await read('/d/sub/f')).toBe('mine')
+    await ws.vfs.write('/a/kept', 'live')
     rmSync(captured)
     symlinkSync(secret, captured)
     await expect(applyStateDict(ws, state)).rejects.toThrow()
-    expect(new TextDecoder().decode(await ws.vfs.read('/data/sub/f'))).toBe('mine')
+    expect(await read('/a/kept')).toBe('live')
+    expect(await read('/d/sub/f')).toBe('mine')
     await ws.close()
   })
 
