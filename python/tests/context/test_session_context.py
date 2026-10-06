@@ -23,13 +23,16 @@ from mirage.context import (
     get_current_session_for,
     get_current_session_unless_foreign,
     hidden_refusal,
+    program_invocation,
     readonly_below,
     require_mount_writable,
     reset_current_session,
     reset_mount_gate,
+    reset_program_invocation,
     session_visibility,
     set_current_session,
     set_mount_gate,
+    set_program_invocation,
     strongest_mode_under,
 )
 from mirage.errors.types import ReadOnlyError
@@ -472,3 +475,22 @@ def test_the_op_door_keeps_any_bind_but_another_owners():
         assert get_current_session_unless_foreign(theirs) is None
     finally:
         reset_current_session(token)
+
+
+def test_a_program_run_covers_the_child_evaluations_under_it():
+    parent = SessionState(session_id="parent")
+    child = parent.fork()
+    other = SessionState(session_id="other")
+    mark = set_program_invocation(parent)
+    try:
+        token = set_current_session(child, ancestors=(parent,))
+        try:
+            assert program_invocation(parent)
+            assert program_invocation(child)
+            assert not program_invocation(other)
+        finally:
+            reset_current_session(token)
+        assert not program_invocation(child)
+    finally:
+        reset_program_invocation(mark)
+    assert not program_invocation(parent)
