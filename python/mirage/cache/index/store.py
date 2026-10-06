@@ -177,6 +177,24 @@ class IndexCacheStore:
         """
         raise NotImplementedError
 
+    async def holds_subtree(self, vfs_path: str) -> bool:
+        """Whether a listing is cached at ``vfs_path`` or anywhere under it.
+
+        Asked when a removed path may be a folder, to avoid a subtree scan
+        for each plain-file delete. Only a retained listing counts, even
+        one past its ttl (expiry is checked when it is read). A row or
+        tombstone does not prove a listing remains below the path. A
+        children-first delete stream may already have removed every
+        listing before the folder's own event arrives.
+
+        A store that cannot tell answers True, so callers conservatively
+        drop the subtree and refetch it.
+
+        Args:
+            vfs_path (str): Mount-absolute path that was removed.
+        """
+        return True
+
     async def invalidate(self) -> None:
         """Mark every entry stale without discarding it.
 

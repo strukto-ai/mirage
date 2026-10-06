@@ -557,3 +557,114 @@ async def test_an_unversioned_seed_clears_the_version(store):
     listing = await store.list_dir("/dir")
     assert listing.entries == ["/dir/a"]
     assert listing.version is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "listings,row,state,probe,expected",
+    [
+        pytest.param(["/d/sub"], None, "normal", "/d", True, id="descendant"),
+        pytest.param(["/d"], None, "nonempty", "/d", True, id="own nonempty"),
+        pytest.param(["/d"], None, "normal", "/d", True, id="own empty"),
+        pytest.param(
+            ["/d/sub"], None, "expired", "/d", True, id="TTL expired"
+        ),
+        pytest.param(
+            ["/d/sub"],
+            None,
+            "invalidated",
+            "/d",
+            True,
+            id="generation expired",
+        ),
+        pytest.param([], ["/d", "file"], "normal", "/d", False, id="file row"),
+        pytest.param(
+            [], ["/d", "folder"], "normal", "/d", False, id="folder row"
+        ),
+        pytest.param(
+            [],
+            ["/d", "box/folder"],
+            "normal",
+            "/d",
+            False,
+            id="backend folder row",
+        ),
+        pytest.param(
+            ["/d/sub"],
+            ["/d", "file"],
+            "normal",
+            "/d",
+            True,
+            id="listing below file row",
+        ),
+        pytest.param(
+            ["/d/sub"],
+            ["/d", "box/folder"],
+            "normal",
+            "/d",
+            True,
+            id="listing below backend folder row",
+        ),
+        pytest.param(
+            ["/", "/d", "/d/sub"],
+            None,
+            "buried",
+            "/d",
+            False,
+            id="buried listings",
+        ),
+        pytest.param(
+            [], ["/d/sub/f", "file"], "normal", "/d", False, id="row below"
+        ),
+        pytest.param(
+            ["/d-old/sub", "/d.bak", "/dx"],
+            None,
+            "normal",
+            "/d",
+            False,
+            id="lookalikes",
+        ),
+        pytest.param([], None, "normal", "/", False, id="empty root"),
+        pytest.param(["/a"], None, "normal", "/", True, id="populated root"),
+        pytest.param(
+            ["/d/"], None, "normal", "/d", True, id="trailing listing"
+        ),
+        pytest.param(
+            ["/d/sub"], None, "normal", "/d/", True, id="trailing probe"
+        ),
+        pytest.param(["/d/sub"], None, "seeded", "/d", True, id="seeded"),
+        pytest.param(["/d/sub"], None, "partial", "/d", True, id="partial"),
+    ],
+)
+async def test_holds_subtree(store, listings, row, state, probe, expected):
+    if row is not None:
+        await store.put(
+            row[0], IndexEntry(id="row", name="row", resource_type=row[1])
+        )
+    if state == "seeded":
+        store.seed(
+            {},
+            dict.fromkeys(listings, []),
+            datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    else:
+        for path in listings:
+            if state == "partial":
+                await store.set_partial_dir(path, [("f", entry("f"))])
+            else:
+                deadline = (
+                    datetime.now(timezone.utc) - timedelta(seconds=1)
+                    if state == "expired"
+                    else None
+                )
+                await store.set_dir(
+                    path,
+                    [("f", entry("f"))] if state == "nonempty" else [],
+                    deadline,
+                )
+    if state == "invalidated":
+        await store.invalidate()
+    if state == "buried":
+        for path in reversed(listings):
+            await store.invalidate_dir(path)
+    assert await store.holds_subtree(probe) is expected

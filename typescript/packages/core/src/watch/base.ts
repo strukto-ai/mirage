@@ -17,7 +17,7 @@ import type { WatchQueue } from './queue/base.ts'
 
 export interface CacheInvalidator {
   invalidateAfterWrite(path: PathSpec): Promise<void>
-  invalidateAfterUnlink(path: PathSpec): Promise<void>
+  invalidateAfterRemove(path: PathSpec): Promise<void>
   invalidateSubtree(path: PathSpec): Promise<void>
   invalidateAncestors(path: PathSpec): Promise<void>
 }

@@ -95,6 +95,23 @@ export abstract class IndexCacheStore {
    */
   abstract invalidatePrefix(vfsPath: string, excluded?: readonly string[]): Promise<void>
   /**
+   * Whether a listing is cached at `vfsPath` or anywhere under it.
+   *
+   * Asked when a removed path may be a folder, to avoid a subtree scan for
+   * each plain-file delete. Only a retained listing counts, even one past its
+   * ttl (expiry is checked when it is read). A row or tombstone does not prove
+   * a listing remains below the path. A children-first delete stream may
+   * already have removed every listing before the folder's own event arrives.
+   *
+   * A store that cannot tell answers true, so callers conservatively drop
+   * the subtree and refetch it.
+   *
+   * Mirrors Python `IndexCacheStore.holds_subtree`.
+   */
+  holdsSubtree(_vfsPath: string): Promise<boolean> {
+    return Promise.resolve(true)
+  }
+  /**
    * Mark every entry stale without discarding it.
    *
    * The difference from `clear` is what a later lookup can tell. `clear`

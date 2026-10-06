@@ -269,6 +269,9 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         # so an existing tombstone survives for the next complete listing.
         self._drop_prefix(vfs_path, keep_tombstones=True, excluded=excluded)
 
+    async def holds_subtree(self, vfs_path: str) -> bool:
+        return any(under_path(key, vfs_path) for key in self._children)
+
     def _is_folder(self, key: str) -> bool:
         entry = self._entries.get(key)
         return entry is not None and is_folder_kind(entry.resource_type)

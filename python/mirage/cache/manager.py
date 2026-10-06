@@ -610,10 +610,7 @@ class CacheManager:
             path (PathSpec): Path that was written; only ``virtual`` is
                 read.
         """
-        self._retire()
-        key = self._cache_key(path)
-        if self._caches_reads and self._file_cache is not None:
-            await self._file_cache.remove(key)
+        key = await self._invalidate_path(path)
         await self._invalidate_parent(key)
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
@@ -623,12 +620,8 @@ class CacheManager:
             path (PathSpec): Path that was removed; only ``virtual`` is
                 read.
         """
-        self._retire()
-        key = self._cache_key(path)
-        if self._caches_reads and self._file_cache is not None:
-            await self._file_cache.remove(key)
-        await self._evict_dir(key)
-        await self._invalidate_parent(key)
+        key = await self._invalidate_path(path)
+        await self._invalidate_removed(key)
 
     async def invalidate_subtree(self, path: PathSpec) -> None:
         """Drop ``path`` and everything cached beneath it.
@@ -646,14 +639,47 @@ class CacheManager:
             path (PathSpec): Root of the stale subtree; only ``virtual``
                 is read.
         """
-        self._retire()
-        key = self._cache_key(path)
-        if self._caches_reads and self._file_cache is not None:
-            await self._file_cache.remove(key)
-            await self._file_cache.evict_prefix(key.rstrip("/") + "/")
-        await self._index.invalidate_prefix(key)
-        await self._evict_dir(key)
-        await self._invalidate_parent(key)
+        key = await self._invalidate_path(path)
+        await self._drop_below(key)
+        await self._invalidate_removed(key)
+
+    async def invalidate_after_remove(self, path: PathSpec) -> None:
+        """Invalidate caches after ``path`` was removed, folder or file.
+
+        For a remover that cannot say which it removed: a watched
+        DELETE, or the vacated side of a MOVE, names a path and nothing
+        more. A folder needs what was cached beneath it dropped, since
+        each nested listing and body was cached under its own key.
+        Every removal retires this manager's reads. The subtree drop
+        additionally invalidates the file store's pending fills and,
+        on a Redis file cache, scans the whole keyspace, which a plain
+        file must not pay on every event. So the index is asked whether a
+        listing is still cached at the path or under it, and only then
+        does the subtree go; otherwise this is
+        ``invalidate_after_unlink``.
+
+        The body goes before the index is asked, so an index that
+        cannot answer still leaves the removed file unserved. The own
+        and parent listing evictions are attempted even if the probe or
+        subtree drop fails; failures remain visible to the caller. A folder
+        with no listing cached at or under it keeps any bodies cached
+        beneath it until their ttl: nothing there was listed, or every
+        such listing was evicted since. Each event evicts the listing of
+        the changed path's folder and of every folder above it, not their
+        other subfolders, and a write evicts at least its own folder's
+        listing. A store that never caches holds no listing, so a removal
+        on it reads as a file.
+
+        Args:
+            path (PathSpec): Path that was removed; only ``virtual`` is
+                read.
+        """
+        key = await self._invalidate_path(path)
+        try:
+            if await self._index.holds_subtree(key):
+                await self._drop_below(key)
+        finally:
+            await self._invalidate_removed(key)
 
     async def invalidate_ancestors(self, path: PathSpec) -> None:
         """Evict the listing of every directory above ``path``'s parent.
@@ -691,6 +717,22 @@ class CacheManager:
         if not self._caches_reads or self._file_cache is None:
             return
         await self._file_cache.evict_prefix(self._prefix + "/")
+
+    async def _invalidate_path(self, path: PathSpec) -> str:
+        self._retire()
+        key = self._cache_key(path)
+        if self._caches_reads and self._file_cache is not None:
+            await self._file_cache.remove(key)
+        return key
+
+    async def _invalidate_removed(self, key: str) -> None:
+        await self._evict_dir(key)
+        await self._invalidate_parent(key)
+
+    async def _drop_below(self, key: str) -> None:
+        if self._caches_reads and self._file_cache is not None:
+            await self._file_cache.evict_prefix(key.rstrip("/") + "/")
+        await self._index.invalidate_prefix(key)
 
     async def _invalidate_parent(self, key: str) -> None:
         await self._evict_dir(key.rsplit("/", 1)[0] or "/")

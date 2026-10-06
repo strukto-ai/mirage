@@ -1,13 +1,16 @@
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.index.config import IndexEntry
+from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.index.config import IndexEntry, LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.types import FileChangeKind, FileEvent, PathSpec
+from mirage.watch.queue.ram import RAMWatchQueue
 from mirage.watch.source import Subscriber
 from mirage.watch.watcher import Watcher
 
@@ -21,8 +24,8 @@ class FakeCacheManager:
     async def invalidate_after_write(self, path):
         self._log.append(f"inv:{path.virtual}")
 
-    async def invalidate_after_unlink(self, path):
-        self._log.append(f"inv-unlink:{path.virtual}")
+    async def invalidate_after_remove(self, path):
+        self._log.append(f"inv-remove:{path.virtual}")
 
     async def invalidate_subtree(self, path):
         self._log.append(f"inv-subtree:{path.virtual}")
@@ -137,13 +140,13 @@ async def test_a_nested_create_drops_every_listing_to_the_mount_root():
 
 
 @pytest.mark.asyncio
-async def test_notify_delete_routes_to_unlink():
+async def test_notify_delete_routes_to_remove():
     log: list[str] = []
     w = _watcher(log=log)
     agen, task = await _start_blocked_watch(w)
     await w.notify(_change(FileChangeKind.DELETE, "/nc/data/x.txt"))
     await asyncio.wait_for(task, timeout=2)
-    assert log == ["inv-unlink:/nc/data/x.txt", "inv-ancestors:/nc/data/x.txt"]
+    assert log == ["inv-remove:/nc/data/x.txt", "inv-ancestors:/nc/data/x.txt"]
     await agen.aclose()
     await w.close()
 
@@ -180,7 +183,7 @@ async def test_notify_reframes_vfs_path():
         async def invalidate_after_write(self, path):
             seen.append(path.vfs_path)
 
-        async def invalidate_after_unlink(self, path):
+        async def invalidate_after_remove(self, path):
             seen.append(path.vfs_path)
 
         async def invalidate_ancestors(self, path):
@@ -200,7 +203,7 @@ async def test_notify_reframes_vfs_path():
 
 @pytest.mark.asyncio
 async def test_notify_move_evicts_both_sides():
-    # The vacated old path must be evicted as an unlink (plus its
+    # The vacated old path must be evicted as a removal (plus its
     # ancestors), or a consumer could cat the old path and get stale
     # cached bytes.
     log: list[str] = []
@@ -217,11 +220,50 @@ async def test_notify_move_evicts_both_sides():
     assert log == [
         "inv:/nc/data/new.txt",
         "inv-ancestors:/nc/data/new.txt",
-        "inv-unlink:/nc/old/orig.txt",
+        "inv-remove:/nc/old/orig.txt",
         "inv-ancestors:/nc/old/orig.txt",
     ]
     await agen.aclose()
     await w.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_removal_cleans_ancestors_without_delivery():
+    cache = RAMFileCacheStore()
+    index = RAMIndexCacheStore()
+    levels = ("/old", "/old/a", "/old/a/b", "/old/a/b/f")
+    for directory in levels:
+        await index.set_dir(directory, [])
+    await cache.set("/old/a/b/f", b"old")
+    old = FakeMountEntry(
+        "/old/", PlainVFS(), CacheManager(cache, index, "/old/", True)
+    )
+    watcher = Watcher(FakeRegistry(old))
+    event = _change(FileChangeKind.DELETE, "/old/a/b/f")
+    stream, pending = await _start_blocked_watch(watcher, "/old")
+    error = RuntimeError("registry recovery failed")
+    try:
+        with (
+            patch.object(index, "holds_subtree", AsyncMock(side_effect=error)),
+            patch.object(
+                RAMWatchQueue, "push", new_callable=AsyncMock
+            ) as pushed,
+        ):
+            with pytest.raises(RuntimeError) as caught:
+                await watcher.notify(event)
+            pushed.assert_not_awaited()
+        assert caught.value is error
+        assert not pending.done()
+        assert await cache.exists("/old/a/b/f") is False
+        for directory in levels:
+            assert (await index.list_dir(directory)).entries is None
+    finally:
+        await watcher.close()
+        try:
+            with pytest.raises(StopAsyncIteration):
+                await pending
+        finally:
+            await stream.aclose()
 
 
 @pytest.mark.asyncio
@@ -433,3 +475,98 @@ async def test_watch_empty_path_list_raises():
     with pytest.raises(ValueError):
         await agen.__anext__()
     await w.close()
+
+
+def _real_watcher() -> tuple[Watcher, RAMFileCacheStore, RAMIndexCacheStore]:
+    cache = RAMFileCacheStore()
+    index = RAMIndexCacheStore(ttl=600)
+    entry = FakeMountEntry(
+        prefix="/x/",
+        vfs=PlainVFS(),
+        cache_manager=CacheManager(cache, index, "/x/", True),
+    )
+    return Watcher(FakeRegistry(entry)), cache, index
+
+
+def _row(name: str, kind: str = "file") -> IndexEntry:
+    return IndexEntry(id=name, name=name, resource_type=kind)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [FileChangeKind.DELETE, FileChangeKind.MOVE])
+async def test_removing_a_folder_drops_its_cached_subtree(kind):
+    w, cache, index = _real_watcher()
+    try:
+        await index.set_dir("/x/dir/sub", [("f", _row("f"))])
+        await cache.set("/x/dir/sub/f", b"old\n")
+        await w.notify(
+            FileEvent(
+                kind=kind,
+                path=PathSpec.from_str_path(
+                    "/x/moved" if kind is FileChangeKind.MOVE else "/x/dir"
+                ),
+                previous_path=PathSpec.from_str_path("/x/dir")
+                if kind is FileChangeKind.MOVE
+                else None,
+                timestamp=_TS,
+            )
+        )
+        assert (
+            await index.list_dir("/x/dir/sub")
+        ).status == LookupStatus.NOT_FOUND
+        assert await cache.exists("/x/dir/sub/f") is False
+    finally:
+        await w.close()
+
+
+@pytest.mark.asyncio
+async def test_a_same_parent_rename_still_finds_the_folders_listing():
+    # The target is evicted first, which buries /x and pops the folder's
+    # row; the folder's own listing must still be found after that.
+    w, cache, index = _real_watcher()
+    await index.set_dir(
+        "/x", [("dir", _row("dir", "folder")), ("s", _row("s"))]
+    )
+    await index.set_dir("/x/dir", [("f", _row("f"))])
+    await cache.set("/x/dir/f", b"old\n")
+    await w.notify(
+        FileEvent(
+            kind=FileChangeKind.MOVE,
+            path=PathSpec.from_str_path("/x/renamed"),
+            previous_path=PathSpec.from_str_path("/x/dir"),
+            timestamp=_TS,
+        )
+    )
+    assert await cache.exists("/x/dir/f") is False
+    await w.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("paths", "expected"),
+    [
+        (("/x/t/s1/f", "/x/t/s1", "/x/t"), 0),
+        (("/x/t", "/x/t/s1", "/x/t/s1/f"), 1),
+    ],
+    ids=["children-first", "folder-first"],
+)
+async def test_delete_stream_drops_only_retained_subtrees(paths, expected):
+    w, cache, index = _real_watcher()
+    try:
+        await index.set_dir("/x/t", [("s1", _row("s1", "folder"))])
+        await index.set_dir("/x/t/s1", [("f", _row("f"))])
+        await cache.set("/x/t/s1/f", b"f")
+        with (
+            patch.object(
+                cache, "evict_prefix", wraps=cache.evict_prefix
+            ) as evict,
+            patch.object(
+                index, "invalidate_prefix", wraps=index.invalidate_prefix
+            ) as drop,
+        ):
+            for path in paths:
+                await w.notify(_change(FileChangeKind.DELETE, path))
+        assert evict.call_count == expected
+        assert drop.call_count == expected
+    finally:
+        await w.close()

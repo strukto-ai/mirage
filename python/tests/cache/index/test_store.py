@@ -16,7 +16,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mirage.cache.index import IndexEntry, LookupStatus, RAMIndexCacheStore
+from mirage.cache.index import (
+    IndexCacheStore,
+    IndexEntry,
+    LookupStatus,
+    RAMIndexCacheStore,
+)
 
 
 @pytest.fixture
@@ -161,3 +166,10 @@ async def test_clear(store, entry):
     assert result.status == LookupStatus.NOT_FOUND
     result = await store.list_dir("/folder")
     assert result.status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_cannot_tell_answers_that_it_holds_a_subtree():
+    # The conservative answer: a caller then drops the whole subtree,
+    # which costs a refetch but never serves a removed folder's contents.
+    assert await IndexCacheStore().holds_subtree("/a") is True

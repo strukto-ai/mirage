@@ -584,8 +584,8 @@ class BoxEventHook:
     do. The pull (``BoxDeltaHook``) is the truth path for both.
 
     A folder stands for everything below it, which Box sends no events
-    for, so a place a folder leaves or lands on is UNKNOWN, the one kind
-    the watcher evicts a whole subtree for; only a folder created empty
+    for, so a place a folder leaves or lands on is UNKNOWN, which takes
+    the whole subtree whatever the index holds; only a folder created empty
     (``ITEM_CREATE``) is a CREATE. The mount root has no path of its
     own, so its trash or restore is UNKNOWN on the whole mount.
 

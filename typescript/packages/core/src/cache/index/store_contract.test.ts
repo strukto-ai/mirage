@@ -305,6 +305,60 @@ for (const backend of ['ram', 'redis']) {
         }
       })
 
+      it.each<[string, string[], [string, string] | null, string, string, boolean]>([
+        ['descendant', ['/d/sub'], null, 'normal', '/d', true],
+        ['own nonempty', ['/d'], null, 'nonempty', '/d', true],
+        ['own empty', ['/d'], null, 'normal', '/d', true],
+        ['TTL expired', ['/d/sub'], null, 'expired', '/d', true],
+        ['generation expired', ['/d/sub'], null, 'invalidated', '/d', true],
+        ['file row', [], ['/d', 'file'], 'normal', '/d', false],
+        ['folder row', [], ['/d', 'folder'], 'normal', '/d', false],
+        ['backend folder row', [], ['/d', 'box/folder'], 'normal', '/d', false],
+        ['listing below file row', ['/d/sub'], ['/d', 'file'], 'normal', '/d', true],
+        [
+          'listing below backend folder row',
+          ['/d/sub'],
+          ['/d', 'box/folder'],
+          'normal',
+          '/d',
+          true,
+        ],
+        ['buried listings', ['/', '/d', '/d/sub'], null, 'buried', '/d', false],
+        ['row below', [], ['/d/sub/f', 'file'], 'normal', '/d', false],
+        ['lookalikes', ['/d-old/sub', '/d.bak', '/dx'], null, 'normal', '/d', false],
+        ['empty root', [], null, 'normal', '/', false],
+        ['populated root', ['/a'], null, 'normal', '/', true],
+        ['trailing listing', ['/d/'], null, 'normal', '/d', true],
+        ['trailing probe', ['/d/sub'], null, 'normal', '/d/', true],
+        ['seeded', ['/d/sub'], null, 'seeded', '/d', true],
+        ['partial', ['/d/sub'], null, 'partial', '/d', true],
+      ])('holdsSubtree: %s', async (_name, listings, row, state, probe, expected) => {
+        if (row !== null) {
+          await store.put(row[0], new IndexEntry({ id: 'row', name: 'row', resourceType: row[1] }))
+        }
+        if (state === 'seeded') {
+          store.seed(
+            new Map(),
+            new Map(listings.map((path) => [path, []])),
+            new Date(Date.now() + 3600000),
+          )
+        } else {
+          for (const path of listings) {
+            if (state === 'partial') {
+              await store.setPartialDir(path, [['f', entry('f')]])
+            } else {
+              const deadline = state === 'expired' ? new Date(Date.now() - 1000) : undefined
+              await store.setDir(path, state === 'nonempty' ? [['f', entry('f')]] : [], deadline)
+            }
+          }
+        }
+        if (state === 'invalidated') await store.invalidate()
+        if (state === 'buried') {
+          for (const path of [...listings].reverse()) await store.invalidateDir(path)
+        }
+        expect(await store.holdsSubtree(probe)).toBe(expected)
+      })
+
       it('evicts nothing on a first listing', async () => {
         expect(await store.setDir('/dir', [['a', entry()]])).toEqual([])
       })

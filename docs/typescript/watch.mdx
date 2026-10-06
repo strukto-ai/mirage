@@ -34,7 +34,7 @@ flowchart LR
     NC -->|delta pull| PL[Your poll loop]
     RX --> N["ws.notify(event)"]
     PL --> N
-    N --> INV[invalidate caches<br/>path + ancestor listings]
+    N --> INV[invalidate caches<br/>path + ancestor listings<br/>+ removed subtree if a listing is cached]
     INV --> Q[per-watch queues<br/>scope matching]
     Q --> W["for await (const event of ws.watch(...))"]
 ```
@@ -84,6 +84,10 @@ Events are **level-triggered**: an event says what is dirty, not every
 intermediate edit. Read current content through the workspace after receiving
 one. Mirage invalidates the changed path and every cached ancestor listing up
 to its mount root before the event reaches a subscriber.
+A `delete`, or the old path of a `move`, drops the cached subtree when a listing
+is retained at or below that path. Without one, descendant file bodies can
+remain cached until their TTL. An `unknown` event always invalidates the
+subtree, regardless of retained listings.
 
 `unknown` is the overflow signal. If a burst exceeds the queue cap, pending
 events collapse into one `unknown` event per watch root, meaning “re-inventory

@@ -39,3 +39,10 @@ export const PROBED_LIMIT = 4096
 // those no caller can trust any more. A dropped entry costs at most one more
 // check, never a stale listing.
 export const CHECKED_LIMIT = 4096
+
+// Path-registry members one Redis script reads before handing back a cursor,
+// in the scripts that page their walk under a path: the subtree probe and the
+// prefix delete. Members are every row, listing, tombstone and generation
+// path still registered, so a folder with a long history is walked in bounded
+// steps rather than in one atomic call that blocks the shared server.
+export const REGISTRY_PAGE = 128

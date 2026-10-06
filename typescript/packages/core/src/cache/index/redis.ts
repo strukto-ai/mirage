@@ -34,11 +34,24 @@ import {
   ENTRY_PREFIX,
   GENERATION_KEY,
   PATHS_KEY,
+  REGISTRY_PAGE,
   TOMBSTONE_PREFIX,
 } from './constants.ts'
 import { globEscape } from '../file/utils.ts'
 
-const PATH_REGISTRY = `
+const PATH_RANGE = `
+local function path_range(root)
+  root = string.gsub(root, '/+$', '')
+  if root == '' then root = '/' end
+  local lower = root == '/' and '/' or root .. '/'
+  local upper = root == '/' and '0' or root .. '0'
+  return root, lower, upper
+end
+`
+
+const PATH_REGISTRY =
+  PATH_RANGE +
+  `
 local function track(registry, prefixes, paths)
   for _, path in ipairs(paths) do redis.call('ZADD', registry, 0, path) end
 end
@@ -49,10 +62,7 @@ local function prune(registry, prefixes, path)
   redis.call('ZREM', registry, path)
 end
 local function subtree(registry, root)
-  root = string.gsub(root, '/+$', '')
-  if root == '' then root = '/' end
-  local lower = root == '/' and '/' or root .. '/'
-  local upper = root == '/' and '0' or root .. '0'
+  local root, lower, upper = path_range(root)
   local paths = redis.call('ZRANGEBYLEX', registry, '[' .. lower, '(' .. upper)
   paths[#paths + 1] = root
   return paths
@@ -105,14 +115,12 @@ end
 local prefixes = {ARGV[1], ARGV[2], ARGV[3], ARGV[4]}
 local removed = cjson.decode(ARGV[5])
 local excluded = cjson.decode(ARGV[7])
-local root = string.gsub(ARGV[6], '/+$', '')
-if root == '' then root = '/' end
-local lower = root == '/' and '/' or root .. '/'
-local upper = root == '/' and '0' or root .. '0'
+local root, lower, upper = path_range(ARGV[6])
+local page = tonumber(ARGV[9])
 local after = ARGV[8] == '' and '[' .. lower or '(' .. ARGV[8]
 local paths = redis.call('ZRANGEBYLEX', KEYS[1], after, '(' .. upper,
-  'LIMIT', 0, 128)
-local cursor = #paths == 128 and paths[#paths] or ''
+  'LIMIT', 0, page)
+local cursor = #paths == page and paths[#paths] or ''
 if ARGV[8] == '' then paths[#paths + 1] = root end
 for _, path in ipairs(paths) do
   local protected = false
@@ -129,6 +137,26 @@ for _, path in ipairs(paths) do
   end
 end
 return cursor
+`
+
+const HOLDS_SUBTREE =
+  PATH_RANGE +
+  `
+if not redis.call('ZSCORE', KEYS[1], '') then
+  error('MIRAGE_INDEX_REGISTRY_MISSING')
+end
+local key, lower, upper = path_range(ARGV[2])
+local cursor, page = ARGV[3], tonumber(ARGV[4])
+if cursor == '' and redis.call('EXISTS', ARGV[1] .. key) == 1 then
+  return {1, ''}
+end
+local after = cursor == '' and '[' .. lower or '(' .. cursor
+local paths = redis.call('ZRANGEBYLEX', KEYS[1], after, '(' .. upper,
+  'LIMIT', 0, page)
+for _, path in ipairs(paths) do
+  if redis.call('EXISTS', ARGV[1] .. path) == 1 then return {1, ''} end
+end
+return {0, #paths == page and paths[#paths] or ''}
 `
 
 const DELETE_ENTRY =
@@ -732,6 +760,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           vfsPath,
           JSON.stringify(excluded.map(rstripSlash)),
           cursor,
+          String(REGISTRY_PAGE),
         ],
       })) as string
     } while (cursor !== '')
@@ -742,6 +771,21 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     // Tombstones survive until the next complete listing proves removals.
     await this.deletePaths([this.entryPrefix], vfsPath, excluded)
     await this.deletePaths([this.childrenPrefix, `${this.generationKey}:`], vfsPath, excluded)
+  }
+
+  override async holdsSubtree(vfsPath: string): Promise<boolean> {
+    await this.flushSeed()
+    const c = await this.client()
+    let cursor = ''
+    do {
+      const [found, after] = (await this.evalComplete(c, HOLDS_SUBTREE, {
+        keys: [this.pathsKey],
+        arguments: [this.childrenPrefix, vfsPath, cursor, String(REGISTRY_PAGE)],
+      })) as [number, string]
+      if (found === 1) return true
+      cursor = after
+    } while (cursor !== '')
+    return false
   }
 
   async invalidate(): Promise<void> {
