@@ -24,7 +24,7 @@ const ROOT_COMMIT = '(root-commit) '
 // sniffing over the first 8000 bytes, and the 3/8 cap that splits the
 // line between the name column and the +/- graph (diff.c show_stats).
 const STAT_WIDTH = 80
-const BINARY_SNIFF = 8000
+export const BINARY_SNIFF = 8000
 const GRAPH_MIN = 6
 const ELLIPSIS = '...'
 

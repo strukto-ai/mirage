@@ -35,7 +35,8 @@ export async function blobData(repo: Repo, entry: TreeEntry | null): Promise<Uin
   return readBlobBytes(repo, entry.oid)
 }
 
-function lines(data: Uint8Array): string[] {
+/** A blob's lines, each keeping its newline, as xdiff splits them. */
+export function lines(data: Uint8Array): string[] {
   const text = DEC.decode(data)
   return text === '' ? [] : text.split(/(?<=\n)/)
 }

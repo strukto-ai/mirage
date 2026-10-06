@@ -14,10 +14,14 @@
 
 import asyncio
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, tzinfo
 from typing import Any
 
+from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
+from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.errors import CommandTimeoutError
 from mirage.context import program_invocation
 from mirage.io import IOResult
@@ -27,7 +31,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
-from mirage.process.types import ProcessInfo, ProcessView
+from mirage.process.types import ProcessInfo, ProcessState, ProcessView
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import (
@@ -49,6 +53,7 @@ from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import TSNodeLike
+from mirage.utils.timezone import zone_from_env
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.statement import failed_read, statement_stdin
@@ -1044,14 +1049,121 @@ _PS_USAGE = (
     "For more details see ps(1).\n"
 )
 
-# The -o columns a managed runner can answer, as procps-ng 4.0.4 lays them
-# out: header, width, right-aligned. The last column is never padded.
-_PS_COLUMNS = {
-    "pid": ("PID", 7, True),
-    "ppid": ("PPID", 7, True),
-    "cmd": ("CMD", 27, False),
-    "args": ("COMMAND", 27, False),
-    "comm": ("COMMAND", 15, False),
+# procps-ng 4.0.4's -o keys: header, width, right alignment and the fact
+# ``_ps_cell`` renders; accounting a runner lacks prints procps's none.
+_PS_COLUMNS: dict[str, tuple[str, int, bool, str]] = {
+    "pid": ("PID", 7, True, "pid"),
+    "tgid": ("TGID", 7, True, "pid"),
+    "lwp": ("LWP", 7, True, "pid"),
+    "spid": ("SPID", 7, True, "pid"),
+    "tid": ("TID", 7, True, "pid"),
+    "ppid": ("PPID", 7, True, "ppid"),
+    "pgid": ("PGID", 7, True, "pgid"),
+    "pgrp": ("PGRP", 7, True, "pgid"),
+    "sid": ("SID", 7, True, "sid"),
+    "sess": ("SESS", 7, True, "sid"),
+    "tpgid": ("TPGID", 7, True, "tpgid"),
+    "stat": ("STAT", 4, False, "stat"),
+    "state": ("S", 1, False, "state"),
+    "s": ("S", 1, False, "state"),
+    "cmd": ("CMD", 27, False, "args"),
+    "args": ("COMMAND", 27, False, "args"),
+    "command": ("COMMAND", 27, False, "args"),
+    "comm": ("COMMAND", 15, False, "comm"),
+    "ucmd": ("CMD", 15, False, "comm"),
+    "ucomm": ("COMMAND", 15, False, "comm"),
+    "user": ("USER", 8, False, "user"),
+    "euser": ("EUSER", 8, False, "user"),
+    "uname": ("USER", 8, False, "user"),
+    "ruser": ("RUSER", 8, False, "user"),
+    "suser": ("SUSER", 8, False, "user"),
+    "fuser": ("FUSER", 8, False, "user"),
+    "uid": ("UID", 5, True, "user"),
+    "euid": ("EUID", 5, True, "user"),
+    "ruid": ("RUID", 5, True, "user"),
+    "suid": ("SUID", 5, True, "user"),
+    "fuid": ("FUID", 5, True, "user"),
+    "gid": ("GID", 5, True, "group"),
+    "egid": ("EGID", 5, True, "group"),
+    "rgid": ("RGID", 5, True, "group"),
+    "group": ("GROUP", 8, False, "group"),
+    "egroup": ("EGROUP", 8, False, "group"),
+    "rgroup": ("RGROUP", 8, False, "group"),
+    "tty": ("TT", 8, False, "tty"),
+    "tt": ("TT", 8, False, "tty"),
+    "tname": ("TTY", 8, False, "tty"),
+    "time": ("TIME", 8, True, "time"),
+    "cputime": ("TIME", 8, True, "time"),
+    "cputimes": ("TIME", 8, True, "zero"),
+    "etime": ("ELAPSED", 11, True, "etime"),
+    "etimes": ("ELAPSED", 7, True, "etimes"),
+    "lstart": ("STARTED", 24, True, "lstart"),
+    "start": ("STARTED", 8, True, "start"),
+    "start_time": ("START", 5, False, "stime"),
+    "stime": ("STIME", 5, False, "stime"),
+    "bsdstart": ("START", 6, True, "bsdstart"),
+    "rss": ("RSS", 5, True, "zero"),
+    "rssize": ("RSS", 5, True, "zero"),
+    "rsz": ("RSZ", 5, True, "zero"),
+    "vsz": ("VSZ", 6, True, "zero"),
+    "vsize": ("VSZ", 6, True, "zero"),
+    "sz": ("SZ", 5, True, "zero"),
+    "trs": ("TRS", 4, True, "zero"),
+    "drs": ("DRS", 5, True, "zero"),
+    "dsiz": ("DSIZ", 4, True, "zero"),
+    "size": ("SIZE", 5, True, "zero"),
+    "pss": ("PSS", 5, True, "zero"),
+    "uss": ("USS", 5, True, "zero"),
+    "maj_flt": ("MAJFL", 6, True, "zero"),
+    "min_flt": ("MINFL", 6, True, "zero"),
+    "majflt": ("MAJFLT", 6, True, "zero"),
+    "minflt": ("MINFLT", 6, True, "zero"),
+    "%cpu": ("%CPU", 4, True, "percent"),
+    "pcpu": ("%CPU", 4, True, "percent"),
+    "%mem": ("%MEM", 4, True, "percent"),
+    "pmem": ("%MEM", 4, True, "percent"),
+    "c": ("C", 2, True, "zero"),
+    "cp": ("CP", 3, True, "zero"),
+    "ni": ("NI", 3, True, "zero"),
+    "nice": ("NI", 3, True, "zero"),
+    "pri": ("PRI", 3, True, "pri"),
+    "priority": ("PRI", 3, True, "priority"),
+    "opri": ("PRI", 3, True, "opri"),
+    "rtprio": ("RTPRIO", 6, True, "dash"),
+    "cls": ("CLS", 3, True, "cls"),
+    "class": ("CLS", 3, False, "cls"),
+    "policy": ("POL", 3, False, "cls"),
+    "psr": ("PSR", 3, True, "zero"),
+    "nlwp": ("NLWP", 4, True, "one"),
+    "thcount": ("THCNT", 5, True, "one"),
+    "f": ("F", 1, False, "zero"),
+    "flag": ("F", 1, False, "zero"),
+    "flags": ("F", 1, False, "zero"),
+    "wchan": ("WCHAN", 6, False, "dash"),
+    "nwchan": ("WCHAN", 6, True, "dash"),
+    "label": ("LABEL", 31, False, "dash"),
+}
+# The fixed answers for a runner: what procps prints for a process on no
+# terminal, never scheduled away from the default policy and priority.
+_PS_FIXED = {
+    "tpgid": "-1",
+    "tty": "?",
+    "time": "00:00:00",
+    "zero": "0",
+    "one": "1",
+    "percent": "0.0",
+    "pri": "19",
+    "priority": "20",
+    "opri": "80",
+    "dash": "-",
+    "cls": "TS",
+}
+# A runner's state letter: live, being cancelled (still unwinding), or
+# exited and not yet reaped.
+_PS_STATES = {
+    ProcessState.RUNNING: "R",
+    ProcessState.STOPPING: "R",
+    ProcessState.EXITED: "Z",
 }
 
 # Letters that select every process: SysV -e/-A/-a/-x, BSD a/x.
@@ -1183,7 +1295,7 @@ def _ps_row(keys: list[str], cells: list[str]) -> str:
     """
     out: list[str] = []
     for at, (key, cell) in enumerate(zip(keys, cells)):
-        _, width, right = _PS_COLUMNS[key]
+        _, width, right, _ = _PS_COLUMNS[key]
         if right:
             out.append(cell.rjust(width))
         elif at == len(keys) - 1:
@@ -1193,20 +1305,116 @@ def _ps_row(keys: list[str], cells: list[str]) -> str:
     return " ".join(out)
 
 
-def _ps_cell(key: str, info: ProcessInfo) -> str:
+@dataclass(frozen=True, slots=True)
+class _PsContext:
+    """What every row of one ps line reads besides its runner.
+
+    Args:
+        now (float): the moment ps runs, epoch seconds.
+        zone (tzinfo | None): the zone times print in, the session's TZ.
+        user (str | None): the workspace user, every runner's owner.
+        group (str | None): the session's profile, the runners' group.
+        session_id (str): the calling session.
+        shell_pid (int | None): the calling session's ``$$``.
+    """
+
+    now: float
+    zone: tzinfo | None
+    user: str | None
+    group: str | None
+    session_id: str
+    shell_pid: int | None
+
+
+def _elapsed(seconds: int) -> str:
+    """procps's etime: ``[[DD-]hh:]mm:ss``.
+
+    Args:
+        seconds (int): time since the runner started.
+    """
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    if days:
+        return f"{days}-{hours:02d}:{minutes:02d}:{secs:02d}"
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _started(fact: str, info: ProcessInfo, ctx: _PsContext) -> str:
+    """One start-time column, procps's pr_lstart, pr_start, pr_stime or
+    pr_bsdstart: a day-old start prints its date, a recent one its clock.
+
+    Args:
+        fact (str): lstart, start, stime or bsdstart.
+        info (ProcessInfo): the runner.
+        ctx (_PsContext): the line's shared facts.
+    """
+    start = datetime.fromtimestamp(info.started_at, ctx.zone)
+    if fact == "lstart":
+        return gnu_strftime(start, "%a %b %e %H:%M:%S %Y")
+    old = ctx.now - info.started_at > 86400
+    if fact == "start":
+        return gnu_strftime(start, "  %b %d" if old else "%H:%M:%S")
+    if fact == "bsdstart":
+        return gnu_strftime(start, "%b %e" if old else "%H:%M")
+    now = datetime.fromtimestamp(ctx.now, ctx.zone)
+    if now.year != start.year:
+        return gnu_strftime(start, "%Y")
+    if now.timetuple().tm_yday != start.timetuple().tm_yday:
+        return gnu_strftime(start, "%b%d")
+    return gnu_strftime(start, "%H:%M")
+
+
+def _ps_cell(key: str, info: ProcessInfo, ctx: _PsContext) -> str:
     """One -o cell for a managed runner.
+
+    The owner columns print the workspace user and the session's
+    profile, names in the id columns too, as ``id`` does, and ``-``
+    where nobody claimed one or the runner is another session's, whose
+    profile this one cannot name. A runner of the calling session belongs
+    to the session ``$$`` leads; another session's to its own group.
 
     Args:
         key (str): the column key.
         info (ProcessInfo): the runner.
+        ctx (_PsContext): the line's shared facts.
     """
-    if key == "pid":
+    fact = _PS_COLUMNS[key][3]
+    if fact in _PS_FIXED:
+        return _PS_FIXED[fact]
+    session = (
+        ctx.shell_pid
+        if info.session_id == ctx.session_id and ctx.shell_pid is not None
+        else info.group_id or info.pid
+    )
+    if fact == "pid":
         return str(info.pid)
-    if key == "ppid":
+    if fact == "ppid":
         return str(info.parent_pid or 0)
-    if key == "comm":
+    if fact == "pgid":
+        return str(info.group_id or info.pid)
+    if fact == "sid":
+        return str(session)
+    if fact in ("stat", "state"):
+        state = _PS_STATES[info.state]
+        return state + ("s" if fact == "stat" and info.pid == session else "")
+    if fact == "comm":
         head = info.command.split()[0] if info.command.split() else ""
         return head.rsplit("/", 1)[-1][:15]
+    if fact == "user":
+        return ctx.user or UNKNOWN_NAME
+    if fact == "group":
+        own = info.session_id == ctx.session_id
+        return (ctx.group if own else None) or UNKNOWN_NAME
+    elapsed = max(0, int(ctx.now - info.started_at))
+    if fact == "etime":
+        return _elapsed(elapsed)
+    if fact == "etimes":
+        return str(elapsed)
+    if fact in ("lstart", "start", "stime", "bsdstart"):
+        return _started(fact, info, ctx)
     return info.command
 
 
@@ -1215,21 +1423,24 @@ async def handle_ps(
     parts: list[str],
     session: SessionState | None = None,
     view: SessionView | None = None,
+    user: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """List managed runners with procps's selection and ``-o`` columns.
 
     A runner has no CPU, RSS or TTY accounting, so without ``-o`` the
     rows stay mirage's compact ``PID<TAB>COMMAND`` and never broaden the
-    profile's view. ``-o`` lays out the columns a runner can answer the
-    way procps-ng 4.0.4 does; a header row prints unless every header is
-    empty. Selecting nothing (``-p`` of an absent PID) exits 1, as
-    procps does, and an option error is procps's message and usage.
+    profile's view. ``-o`` lays out procps-ng 4.0.4's columns, every key
+    a runner can answer (``_PS_COLUMNS``); a header row prints unless
+    every header is empty. Selecting nothing (``-p`` of an absent PID)
+    exits 1, as procps does, and an option error is procps's message and
+    usage.
 
     Args:
         job_table (JobTable): the workspace's job table.
         parts (list[str]): the command words, `ps` first.
         session (SessionState | None): the shell session, if any.
         view (SessionView | None): the session plane's gated door.
+        user (str | None): the workspace user, who owns every runner.
     """
     cmd_str = " ".join(parts)
     try:
@@ -1243,8 +1454,16 @@ async def handle_ps(
     ]
     if options.columns:
         keys = [key for key, _ in options.columns]
+        ctx = _PsContext(
+            now=time.time(),
+            zone=zone_from_env(session.env) if session is not None else None,
+            user=user,
+            group=session.profile if session is not None else None,
+            session_id=_session_of(session),
+            shell_pid=session.shell_pid if session is not None else None,
+        )
         lines = [
-            _ps_row(keys, [_ps_cell(key, info) for key in keys])
+            _ps_row(keys, [_ps_cell(key, info, ctx) for key in keys])
             for info in processes
         ]
         if any(header for _, header in options.columns):

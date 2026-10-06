@@ -117,7 +117,7 @@
   },
   ".": {
    "typescript_only": {
-    "optional_peer": "node's re-export of utils/optional_peer for its own optional peers, excused there.",
+    "optional_peer": "node's re-export of utils/optional_peer for its own optional peers, excused there, and the redis client every node store connects with (node-redis needs an error listener; Python's redis.asyncio raises on the call).",
     "compression_codecs": "Node registers bzip2 and xz codecs from npm (seek-bzip, @napi-rs/lzma) into core's runtime-agnostic codec registry. Python's utils/compress.py calls the standard library's bz2 and lzma directly.",
     "workspace": "The per-runtime Workspace each npm runtime package exports (node and browser wire their own VFS registry, runtimes and, on node, FUSE over core's Workspace). Python has one runtime, so workspace/workspace/workspace.py is its only Workspace."
    }

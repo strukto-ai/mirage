@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "id": "mount_lists_the_data_mounts",
+      "seq": 16100241,
+      "targets": [
+        "ram"
+      ],
+      "command": "mount | grep -E ' on /(data|data2|res|ro) '",
+      "expect": {
+        "exit": 0,
+        "stdout": "ram on /data type ram (rw,noexec)\nram on /data2 type ram (rw,noexec)\nram on /res type ram (rw,noexec)\nram on /ro type ram (ro,noexec)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mount_session_hides_and_narrows",
+      "seq": 16100242,
+      "targets": [
+        "ram"
+      ],
+      "session": "reader",
+      "command": "mount | grep -E ' on /(data|data2|res|ro) '",
+      "expect": {
+        "exit": 0,
+        "stdout": "ram on /data type ram (ro,noexec)\nram on /res type ram (rw,noexec)\nram on /ro type ram (ro,noexec)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mount_type_filter",
+      "seq": 16100243,
+      "targets": [
+        "ram"
+      ],
+      "command": "mount -t nosuch | grep -c ' on /ro '; mount -t such | wc -l; mount -t RAM | grep -c ' on /res '; mount -t noram | grep -c ' type ram '; mount -l -t history,bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n0\n1\n0\nhistory on /.bash_history type history (ro,noexec)\nbin on /usr/bin type bin (ro,noexec)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mount_mounting_refused",
+      "seq": 16100244,
+      "targets": [
+        "ram"
+      ],
+      "command": "mount -B; echo $?; mount -o ro; echo $?; mount -x; echo $?; mount /mnt; echo $?; mount -a; echo $?; mount /dev/sda1 /mnt",
+      "expect": {
+        "exit": 32,
+        "stdout": "1\n1\n1\n1\n0\n",
+        "stderr": "mount: bad usage\nTry 'mount --help' for more information.\nmount: bad usage\nTry 'mount --help' for more information.\nmount: invalid option -- 'x'\nTry 'mount --help' for more information.\nmount: /mnt: can't find in /etc/fstab.\nmount: /mnt: must be superuser to use mount.\n       dmesg(1) may have more information after failed mount system call.\n"
+      }
+    },
+    {
+      "id": "mount_is_a_program",
+      "seq": 16100245,
+      "targets": [
+        "ram"
+      ],
+      "command": "command -v mount df chmod chown chgrp; type -t mount",
+      "expect": {
+        "exit": 0,
+        "stdout": "/usr/bin/mount\n/usr/bin/df\n/usr/bin/chmod\n/usr/bin/chown\n/usr/bin/chgrp\nfile\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

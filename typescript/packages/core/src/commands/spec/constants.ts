@@ -690,7 +690,8 @@ export const INT_VALUE = /^[+-]?\d+$/
 export const FLOAT_VALUE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
 
 // GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
-// (plus ripgrep and jq upstream docs). Everything else exits 1.
+// and hostname 3.25 (plus ripgrep and jq upstream docs). Everything else
+// exits 1.
 // Commands whose `Try '--help'` hint line is prefixed with the command
 // name (GNU diffutils style: `diff: Try 'diff --help' ...`).
 export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set(['diff', 'cmp', 'patch'])
@@ -726,6 +727,7 @@ export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
   patch: 2,
   tar: 64,
   timeout: 125,
+  hostname: 255,
   python: 2,
   python3: 2,
 })

@@ -42,6 +42,62 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
     rest: new Operand({ type: 'path' }),
   }),
+  mount: new CommandSpec({
+    description: 'Mount a filesystem.',
+    options: [
+      new Option({
+        short: '-a',
+        long: '--all',
+        description: 'Mount all filesystems mentioned in fstab.',
+      }),
+      new Option({
+        short: '-f',
+        long: '--fake',
+        description: 'Dry run; skip the mount(2) syscall.',
+      }),
+      new Option({
+        short: '-l',
+        long: '--show-labels',
+        description: 'Show also filesystem labels.',
+      }),
+      new Option({ short: '-n', long: '--no-mtab', description: "Don't write to /etc/mtab." }),
+      new Option({
+        short: '-o',
+        long: '--options',
+        type: 'str',
+        description: 'Comma-separated list of mount options.',
+      }),
+      new Option({
+        short: '-r',
+        long: '--read-only',
+        description: 'Mount the filesystem read-only.',
+      }),
+      new Option({
+        short: '-t',
+        long: '--types',
+        type: 'str',
+        description: 'Limit the set of filesystem types.',
+      }),
+      new Option({ short: '-v', long: '--verbose', description: 'Say what is being done.' }),
+      new Option({
+        short: '-w',
+        long: '--rw',
+        description: 'Mount the filesystem read-write (default).',
+      }),
+      new Option({ short: '-B', long: '--bind', description: 'Mount a subtree somewhere else.' }),
+      new Option({
+        short: '-M',
+        long: '--move',
+        description: 'Move a subtree to some other place.',
+      }),
+      new Option({
+        short: '-R',
+        long: '--rbind',
+        description: 'Mount a subtree and all submounts somewhere else.',
+      }),
+    ],
+    rest: new Operand({ type: 'str' }),
+  }),
   file: new CommandSpec({
     options: [
       new Option({ short: '-b' }),

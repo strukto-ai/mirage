@@ -34,6 +34,20 @@ describe.skipIf(skip)('RedisStore', () => {
     await store.close()
   })
 
+  it('connects afresh after the server drops its connection', async () => {
+    const first = await store.client()
+    await store.setFile('/kept.txt', new TextEncoder().encode('kept'))
+    const { createClient } = await import('redis')
+    const admin = createClient(REDIS_URL !== undefined ? { url: REDIS_URL } : {})
+    await admin.connect()
+    await admin.clientKill({ filter: 'ID', id: await first.clientId() })
+    await admin.quit()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const data = await store.getFile('/kept.txt')
+    expect(new TextDecoder().decode(data ?? new Uint8Array())).toBe('kept')
+    expect(await store.client()).not.toBe(first)
+  })
+
   it('seeds root dir on first client access', async () => {
     // a fresh store (fresh clientPromise) should seed /
     const fresh = new RedisStore(

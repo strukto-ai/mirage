@@ -36,6 +36,18 @@ export const NAMESPACE_COMMANDS: ReadonlySet<string> = new Set([
   'setfattr',
 ])
 
+// Programs the router answers by name from the mount table and the attr
+// overlay (node/command_dispatch), with spec-classified words like a mount
+// command's. No mount registers them, so lookup names them here for `type`,
+// `command -v` and the /usr/bin listing.
+export const ROUTED_COMMANDS: ReadonlySet<string> = new Set([
+  'chgrp',
+  'chmod',
+  'chown',
+  'df',
+  'mount',
+])
+
 // Interpreter names select runtime adapters; session builtins stay in Mirage.
 export const INTERPRETER_NAMES: ReadonlySet<string> = new Set(
   [...BUILTIN_GROUP]

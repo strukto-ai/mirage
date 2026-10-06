@@ -2427,7 +2427,7 @@
       "command": "gh help | head -1; gh help repo fork | grep -c -- --default-branch-only; gh help repo nosuch | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "usage: gh [-h] {auth,help,version (--version),api,issue,pr,repo,release,run,workflow,search} ...\n2\nusage: gh repo [-h] {list (ls),view,create,fork,rename,edit,delete} ...\n",
+        "stdout": "usage: gh [-h] {auth,help,version (--version),api,issue,pr,repo,release,run,workflow,search} ...\n2\nusage: gh repo [-h] {list (ls),clone,view,create,fork,rename,edit,delete} ...\n",
         "stderr": ""
       }
     },
@@ -2468,6 +2468,32 @@
         "exit": 0,
         "stdout": "true\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "gh_auth_token_is_refused_and_never_printed",
+      "seq": 569946,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh auth token --hostname github.com; echo $?; gh auth token 2>&1 | sed -E 's/for [^ ]+ stays/for HOST stays/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\ngh auth token: the token for HOST stays in Mirage configuration and is never printed; gh commands use it directly\n",
+        "stderr": "gh auth token: the token for github.com stays in Mirage configuration and is never printed; gh commands use it directly\n"
+      }
+    },
+    {
+      "id": "gh_repo_clone_refuses_before_git",
+      "seq": 569947,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo clone; echo $?; gh repo clone other.example/o/r /scratch/c; echo $?; test -e /scratch/c; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n1\n",
+        "stderr": "gh repo clone: cannot clone: repository argument required\ngh repo clone: error connecting to other.example\ncheck your internet connection or https://githubstatus.com\n"
       }
     }
   ]

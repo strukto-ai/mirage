@@ -12,30 +12,54 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
 import aioimaplib
 
 from mirage.accessor.base import Accessor
 from mirage.core.email.config import EmailConfig
 from mirage.vfs.secrets import reveal_secret
 
+logger = logging.getLogger(__name__)
+
 
 class EmailAccessor(Accessor):
     def __init__(self, config: EmailConfig) -> None:
         self.config = config
-        self._imap: aioimaplib.IMAP4_SSL | None = None
+        self._imap: aioimaplib.IMAP4 | None = None
 
-    async def get_imap(self) -> aioimaplib.IMAP4_SSL:
+    def _lost(self, client: aioimaplib.IMAP4, exc: Exception | None) -> None:
+        """Drop a client whose connection ended, so the next access
+        connects afresh instead of reusing a dead socket.
+
+        Args:
+            client (aioimaplib.IMAP4): the client whose connection ended.
+            exc (Exception | None): why, None for a clean close.
+        """
+        logger.debug(
+            "IMAP connection to %s ended: %r", self.config.imap_host, exc
+        )
+        if self._imap is client:
+            self._imap = None
+
+    async def get_imap(self) -> aioimaplib.IMAP4:
+        """The connected IMAP client, connecting on first use and again
+        after the last connection ended (a socket timeout or reset the
+        server's side caused included).
+        """
         if self._imap is None or self._imap.protocol is None:
-            if self.config.use_ssl:
-                self._imap = aioimaplib.IMAP4_SSL(
-                    host=self.config.imap_host,
-                    port=self.config.imap_port,
-                )
-            else:
-                self._imap = aioimaplib.IMAP4(
-                    host=self.config.imap_host,
-                    port=self.config.imap_port,
-                )
+            kind = (
+                aioimaplib.IMAP4_SSL
+                if self.config.use_ssl
+                else aioimaplib.IMAP4
+            )
+            client: aioimaplib.IMAP4
+            client = kind(
+                host=self.config.imap_host,
+                port=self.config.imap_port,
+                conn_lost_cb=lambda exc: self._lost(client, exc),
+            )
+            self._imap = client
             await self._imap.wait_hello_from_server()
             response = await self._imap.login(
                 self.config.username, reveal_secret(self.config.password)

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.general.hostname import HOSTNAME
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -29,7 +30,7 @@ from mirage.types import PathSpec
 # the same line and no host detail leaks.
 UNAME_FIELDS = (
     ("kernel_name", "Linux"),
-    ("nodename", "mirage"),
+    ("nodename", HOSTNAME),
     ("kernel_release", "mirage"),
     ("kernel_version", "#1 Mirage"),
     ("machine", "x86_64"),

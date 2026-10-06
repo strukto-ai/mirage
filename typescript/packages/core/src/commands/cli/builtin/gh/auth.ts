@@ -4,13 +4,13 @@ import { login } from '../../../../core/github/repo.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { ghTransport } from './accessor.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
+import { ghTransport, webOrigin } from './accessor.ts'
 
 /** Check the resolved config secret, whose original environment/file source is not retained. */
 export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
   const config = inv.config as GhConfig
-  let host = new URL(config.baseUrl ?? 'https://github.com').hostname
-  if (host === 'api.github.com') host = 'github.com'
+  const host = new URL(webOrigin(config)).hostname
   let account: string
   try {
     account = await login(ghTransport(config))
@@ -39,5 +39,23 @@ export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
       `${host}\n  ✓ Logged in to ${host} account ${account} (Mirage configuration)\n  - Active account: true\n`,
     ),
     new IOResult(),
+  ]
+}
+
+/**
+ * `gh auth token`, refused: the token stays in Mirage configuration, where
+ * every gh verb reads it, and is never printed. Mirrors Python's token.
+ */
+export function token(inv: CLIInvocation): CommandFnResult {
+  const config = inv.config as GhConfig
+  const host = new FlagView(inv.flags).asStr('hostname') ?? new URL(webOrigin(config)).hostname
+  return [
+    null,
+    new IOResult({
+      exitCode: 1,
+      stderr: new TextEncoder().encode(
+        `gh auth token: the token for ${host} stays in Mirage configuration and is never printed; gh commands use it directly\n`,
+      ),
+    }),
   ]
 }

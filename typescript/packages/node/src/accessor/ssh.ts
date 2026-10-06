@@ -88,6 +88,14 @@ export class SSHAccessor extends Accessor {
         })
       })
       c.on('error', rejectFn)
+      // A connection the server or the network ends leaves its SFTP channel
+      // dead, so it is dropped and the next call connects afresh.
+      c.on('close', () => {
+        if (this.client === c) {
+          this.client = null
+          this.sftpClient = null
+        }
+      })
       c.connect(opts as Parameters<Client['connect']>[0])
     })
   }

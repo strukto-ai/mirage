@@ -185,7 +185,15 @@ def test_registers_itself_under_the_grammar_gh_uses():
     repo = next(c for c in GH.subcommands if c.name == "repo")
     assert [c.name for c in repo.subcommands] == [
         "list",
+        "clone",
         "view",
+        "create",
+        "fork",
+        "rename",
+        "edit",
+        "delete",
+    ]
+    assert [c.name for c in repo.subcommands if c.write] == [
         "create",
         "fork",
         "rename",

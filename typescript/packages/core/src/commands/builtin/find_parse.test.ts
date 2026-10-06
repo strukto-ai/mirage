@@ -551,6 +551,15 @@ describe('action placement', () => {
   })
 })
 
+// GNU runs both actions on every row the tests keep; the -o sits in a test, so
+// no action is under it and the chain runs in order.
+it.each([
+  '! ( -name a -o -name b ) -print -ls',
+  '-type f ( -name a -o ( -name b -o -name c ) ) -print0 -print',
+])('an -o among tests keeps the action chain: %s', (line) => {
+  expect(parseFindExpression(line.split(' ')).actions).toHaveLength(2)
+})
+
 describe('time tests keep their place in the tree', () => {
   it('-newermt before -prune sits before it', () => {
     const expr = parseFindExpression(['-newermt', '2010-01-01', '-prune'])

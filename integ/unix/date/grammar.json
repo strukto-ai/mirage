@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "id": "date_d_zones",
+      "seq": 16100251,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '2026-10-06 09:32:40 UTC' +%s; date -u -d '2026-10-06 09:32:40 +0000' +%s; date -u -d '2026-10-06 09:32:40 -0500' +%s; date -u -d '2026-10-06 GMT' +%s; date -u -d '2026-10-06 09:32 PST' '+%F %T'; date -u -d '2026-10-06 09:32 CEST' '+%F %T'; date -u -d '2026-10-06 09:00 UTC+5' '+%F %T'; date -u -d 'TZ=\"Asia/Tokyo\" 2026-10-06 09:00' '+%F %T'; TZ=Europe/Berlin date -d '2026-10-06 09:32 CEST' +%s",
+      "expect": {
+        "exit": 0,
+        "stdout": "1791279160\n1791279160\n1791297160\n1791244800\n2026-10-06 17:32:00\n2026-10-06 07:32:00\n2026-10-06 04:00:00\n2026-10-06 00:00:00\n1791271920\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_d_forms",
+      "seq": 16100252,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d 'Tue Oct  6 09:32:40 PDT 2026' '+%F %T'; date -u -d 'Tue, 06 Oct 2026 09:32:40 +0000' +%s; date -u -d 'October 6, 2026 10:00' '+%F %T'; date -u -d '6-Oct-2026' +%F; date -u -d '10/06/26' +%F; date -u -d '2026-10-06 9:30pm' '+%F %T'; date -u -d '2026-10-06 12am' '+%F %T'; date -u -d '2026-03-31 -1 month +1 month' +%F; date -u -d '2026-10-06 1 year 2 months 3 days ago' +%F",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-10-06 16:32:40\n1791279160\n2026-10-06 10:00:00\n2026-10-06\n2026-10-06\n2026-10-06 21:30:00\n2026-10-06 00:00:00\n2026-03-31\n2027-12-03\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_d_grammar_refusals",
+      "seq": 16100253,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "TZ=Europe/Berlin date -d '2026-10-06 09:32 CET'; date -u -d '6 Oct 10:00'; date -u -d '2026-10-06 13pm'; date -u -d 'yesterday ago'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "date: invalid date '2026-10-06 09:32 CET'\ndate: invalid date '6 Oct 10:00'\ndate: invalid date '2026-10-06 13pm'\ndate: invalid date 'yesterday ago'\n"
+      }
+    }
+  ]
+}

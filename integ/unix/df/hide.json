@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "df_session_hides_a_mount",
+      "seq": 16100249,
+      "targets": [
+        "ram"
+      ],
+      "session": "reader",
+      "command": "df | grep -c ' /data2$'; df | grep -c ' /data$'; df /data2; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n1\n",
+        "stderr": "df: /data2: No such file or directory\n"
+      }
+    }
+  ]
+}

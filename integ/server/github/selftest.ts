@@ -735,10 +735,18 @@ async function fixtureTree(dir: string): Promise<Map<string, Buffer>> {
 // `git diff` itself over two trees, with no configuration of the machine it
 // runs on, which is the text GitHub serves as a diff. Renames are git's exact
 // ones only: a file moved and edited is a removal and an addition here, where
-// git would pair the two once they are half alike.
+// git would pair the two once they are half alike. Auto maintenance is off: a
+// commit starts it detached, and its lock in .git races the cleanup.
 async function gitDiff(before: Map<string, Buffer>, after: Map<string, Buffer>): Promise<Buffer> {
   const dir = await mkdtemp(join(tmpdir(), 'gh-diff-'))
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'maintenance.auto',
+    GIT_CONFIG_VALUE_0: 'false',
+  }
   const git = (...args: string[]): Promise<Buffer> =>
     new Promise((ok, bad) => {
       const child = spawn('git', ['-C', dir, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -764,7 +772,7 @@ async function gitDiff(before: Map<string, Buffer>, after: Map<string, Buffer>):
     await commit(after, 'after')
     return await git('diff', '-M100%', 'HEAD~1', 'HEAD')
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 3 })
   }
 }
 

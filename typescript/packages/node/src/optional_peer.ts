@@ -12,4 +12,34 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+import type { RedisClientType } from 'redis'
+import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+
+export { loadOptionalPeer }
+
+/**
+ * A connected node-redis client for `url`, reconnection off. node-redis throws
+ * an `error` nobody listens for, which would end the process, so `onError`
+ * hears it instead: the client is dead after one, and the caller drops it and
+ * connects afresh on its next call.
+ */
+export async function connectRedis(
+  url: string,
+  feature: string,
+  onError: () => void,
+): Promise<RedisClientType> {
+  const mod = await loadOptionalPeer(
+    () =>
+      import('redis') as unknown as Promise<{
+        createClient: (o: { url: string }) => RedisClientType
+      }>,
+    { feature, packageName: 'redis' },
+  )
+  const c = mod.createClient({
+    url,
+    socket: { reconnectStrategy: false },
+  } as Parameters<typeof mod.createClient>[0])
+  c.on('error', onError)
+  await c.connect()
+  return c
+}

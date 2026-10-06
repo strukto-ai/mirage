@@ -148,7 +148,7 @@ async def list_folder_entries(
     return entries
 
 
-async def select_folder(imap: aioimaplib.IMAP4_SSL, folder: str) -> None:
+async def select_folder(imap: aioimaplib.IMAP4, folder: str) -> None:
     """Select a mailbox, failing loudly when it does not exist.
 
     An unchecked SELECT leaves the session in AUTH state, and the next
@@ -157,7 +157,7 @@ async def select_folder(imap: aioimaplib.IMAP4_SSL, folder: str) -> None:
     problem.
 
     Args:
-        imap (aioimaplib.IMAP4_SSL): the connected client.
+        imap (aioimaplib.IMAP4): the connected client.
         folder (str): the mailbox to select.
 
     Raises:

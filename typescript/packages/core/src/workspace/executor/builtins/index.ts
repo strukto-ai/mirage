@@ -24,6 +24,7 @@ export {
   stripLinkOperands,
 } from './links/index.ts'
 export { handleDf } from './df/index.ts'
+export { handleMount } from './mount/index.ts'
 export {
   handleChgrp,
   handleChmod,

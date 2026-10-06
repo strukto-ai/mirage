@@ -1,5 +1,5 @@
 {
- "baseline": 4074,
+ "baseline": 4070,
  "modules": {
   "ops/registry": {
    "typescript_only": {
@@ -308,6 +308,32 @@
   "core/box/api": {
    "typescript_only": {
     "BoxFileInfo": "The shape of GET /files/{id} with the fields the fresh check asks for (path_collection, item_status) beside BoxItem's; Python reads the same answer as a plain dict, as it does every Box item."
+   }
+  },
+  "commands/cli/builtin/git/cat_file": {
+   "typescript_only": {
+    "raw": "isomorphic-git hands back a parsed object, so TypeScript reads the stored bytes in a helper; dulwich's as_raw_string gives them in Python."
+   }
+  },
+  "commands/cli/builtin/git/hash_object": {
+   "python_only": {
+    "OBJECT_CLASSES": "dulwich stores an object built from its class; isomorphic-git's writeObject takes the type name, so TypeScript needs no table.",
+    "TREE_ENTRY": "Python matches a tree entry with a bytes regex; TypeScript walks the latin-1 text by index in wellFormed."
+   }
+  },
+  "utils/dates": {
+   "python_only": {
+    "_fixed": "Python turns a naive wall clock at a fixed offset into epoch seconds through datetime; TypeScript subtracts the offset from utcFromWall inline.",
+    "_offset_seconds": "Python reads a datetime's utcoffset as seconds; TypeScript's Zone.parts already carries offsetSec."
+   },
+   "typescript_only": {
+    "DIGITS": "The lexer's ASCII digit set behind isDigit; Python tests str.isascii and str.isdigit inline.",
+    "isDigit": "The lexer's ASCII digit test; Python tests str.isascii and str.isdigit inline.",
+    "isLetter": "The lexer's ASCII letter test; Python tests str.isascii and str.isalpha inline.",
+    "at": "A bounds-checked token read for noUncheckedIndexedAccess; Python indexes the list.",
+    "noRel": "The zero relative offset; Python's _Rel dataclass defaults every field to zero.",
+    "trimSpaces": "String.trim takes no character set; Python strips _SPACES with str.strip.",
+    "wallOf": "The wall clock a zone shows for an instant, read off Zone.parts; Python's datetime.astimezone gives it directly."
    }
   },
   "workspace/node/explain": {

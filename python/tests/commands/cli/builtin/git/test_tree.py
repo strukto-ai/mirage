@@ -52,6 +52,8 @@ def test_tree_shape():
     assert [v.name for v in GIT.subcommands] == [
         "reflog",
         "for-each-ref",
+        "cat-file",
+        "hash-object",
         "ls-files",
         "fetch",
         "clone",
