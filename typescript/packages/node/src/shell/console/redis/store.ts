@@ -96,21 +96,30 @@ export class RedisConsoleStore implements ConsoleStore {
     // close() nulls the promise; building a new one here would open a
     // client that nothing quits, and in Node it holds the process alive.
     if (this.isClosed) throw new Error('RedisConsoleStore is closed')
-    this.clientPromise ??= (async () => {
-      const mod = await loadOptionalPeer(
-        () =>
-          import('redis') as unknown as Promise<{
-            createClient: (o: { url: string }) => RedisClientType
-          }>,
-        { feature: 'RedisConsoleStore', packageName: 'redis' },
-      )
-      const c = mod.createClient({
-        url: this.url,
-        socket: { reconnectStrategy: false },
-      } as Parameters<typeof mod.createClient>[0])
-      await c.connect()
-      return c
-    })()
+    if (this.clientPromise === null) {
+      const pending: Promise<RedisClientType> = (async () => {
+        const mod = await loadOptionalPeer(
+          () =>
+            import('redis') as unknown as Promise<{
+              createClient: (o: { url: string }) => RedisClientType
+            }>,
+          { feature: 'RedisConsoleStore', packageName: 'redis' },
+        )
+        const c = mod.createClient({
+          url: this.url,
+          socket: { reconnectStrategy: false },
+        } as Parameters<typeof mod.createClient>[0])
+        // node-redis throws an `error` nobody listens for, which would end the
+        // process; with reconnection off the client is dead after one, so it is
+        // dropped and the next call connects afresh.
+        c.on('error', () => {
+          if (this.clientPromise === pending) this.clientPromise = null
+        })
+        await c.connect()
+        return c
+      })()
+      this.clientPromise = pending
+    }
     return this.clientPromise
   }
 

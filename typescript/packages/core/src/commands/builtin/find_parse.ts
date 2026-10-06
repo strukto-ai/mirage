@@ -585,9 +585,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok !== '-o' && tok !== '-or') break
       advance()
       afterOperator(tok)
-      // Each arm reaches its own actions, and a window under one cannot be
-      // exact.
-      shape.positional = true
+      // A window under an -o cannot be exact.
       if (nested === 0) {
         inOr = true
         if (newerToken !== null) checkWindowPlacement(newerToken)
@@ -596,7 +594,14 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     }
     const [firstTerm, ...restTerms] = terms
     if (firstTerm === undefined) return { op: 'true' }
-    return restTerms.length === 0 ? firstTerm : { op: 'or', kids: terms }
+    if (restTerms.length === 0) return firstTerm
+    const node: PredNode = { op: 'or', kids: terms }
+    // Arms that reach actions leave the tree to decide which action a row
+    // reaches; an -o among tests alone is one more test, and the actions after
+    // it still run in order on every row it keeps (`( -name a -o -name b )
+    // -print -exec ...`).
+    if (treeHasAction(node)) shape.positional = true
+    return node
   }
 
   if (tokens.length === 0) return { tree: { op: 'true' }, ...g }

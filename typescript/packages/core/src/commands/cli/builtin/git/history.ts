@@ -24,6 +24,7 @@ import {
   IncompatibleLogOptionsError,
   InvalidDecorateError,
   UnrecognizedArgumentError,
+  UsageError,
 } from './errors.ts'
 import {
   MEDIUM,
@@ -32,7 +33,7 @@ import {
   type CommitFacts,
   type LogFormat,
 } from './format.ts'
-import { touches } from './pickaxe.ts'
+import { greps, touches } from './pickaxe.ts'
 import { loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -94,8 +95,10 @@ export interface LogFlags {
   readonly oneline: boolean
   /** `--reverse`, oldest first. */
   readonly reverse: boolean
-  /** `-S`, the pickaxe string. */
-  readonly search: string | null
+  /** `-S`, the pickaxe string, or its pattern under `--pickaxe-regex`. */
+  readonly search: string | RegExp | null
+  /** `-G`, the pattern an added or removed line must match. */
+  readonly changed: RegExp | null
   /** `--since` as an epoch second. */
   readonly since: number | null
   /** `--until` as an epoch second. */
@@ -267,6 +270,22 @@ function perlRegex(value: string, ignoreCase: boolean): RegExp {
 }
 
 /** Read the raw log flag kwargs into a frozen struct. */
+/**
+ * A `-G` or `--pickaxe-regex` pattern, compiled as git's diffcore-pickaxe
+ * compiles it: POSIX extended whatever -E, -F or -P say, `-i` folding case,
+ * and matched one line at a time (REG_NEWLINE).
+ */
+function pickaxePattern(value: string, ignoreCase: boolean): RegExp {
+  try {
+    return compilePosixRegex(translateEre(value, PosixSyntax.EXTENDED)[0], ignoreCase ? 'i' : '')
+  } catch (err) {
+    if (err instanceof BreError || err instanceof SyntaxError) {
+      throw new GitError(`invalid regex: ${err.message}`)
+    }
+    throw err
+  }
+}
+
 export function parseFlags(
   fl: FlagView,
   env: Readonly<Record<string, string>> | null = null,
@@ -293,6 +312,20 @@ export function parseFlags(
     .flatMap((values) =>
       values.split('\n').map((value) => pattern(value, syntax, ignoreCase, COMMAND_LINE_ORIGIN)),
     )
+  let search: string | RegExp | null = fl.asStr('S') ?? null
+  const changed = fl.asStr('G') ?? null
+  for (const [option, value] of [
+    ['-S', search],
+    ['-G', changed],
+  ] as const) {
+    if (value === '') throw new UsageError('', `error: ${option} requires a non-empty argument\n`)
+  }
+  if (search !== null && changed !== null) {
+    throw new IncompatibleLogOptionsError('-G', '-S', '--find-object')
+  }
+  if (typeof search === 'string' && fl.asBool('pickaxe_regex')) {
+    search = pickaxePattern(search, ignoreCase)
+  }
   const maxCount = fl.asInt('max_count') ?? null
   return {
     authors,
@@ -310,7 +343,8 @@ export function parseFlags(
     firstParent: fl.asBool('first_parent'),
     oneline,
     reverse: fl.asBool('reverse'),
-    search: fl.asStr('S') ?? null,
+    search,
+    changed: changed === null ? null : pickaxePattern(changed, ignoreCase),
     since: timestamp(fl.asStr('after') ?? fl.asStr('since') ?? null, '--since'),
     until: timestamp(fl.asStr('before') ?? fl.asStr('until') ?? null, '--until'),
     allRefs: fl.asBool('all'),
@@ -722,6 +756,19 @@ function filtersPass(commit: CommitFacts, flags: LogFlags): boolean {
  * @param flags the parsed invocation
  * @param hidden commits whose whole history is left out, the `A` of `A..B`
  */
+/**
+ * Whether the pickaxe, if any, keeps a commit: `-G`'s changed line, or `-S`'s
+ * change in the count of a string or pattern.
+ */
+async function picked(repo: Repo, commit: CommitFacts, flags: LogFlags): Promise<boolean> {
+  if (flags.changed !== null) return greps(repo, commit.oid, commit.parents, flags.changed)
+  if (flags.search === null) return true
+  if (typeof flags.search === 'string') {
+    return touches(repo, commit.oid, commit.parents, flags.search, flags.ignoreCase)
+  }
+  return touches(repo, commit.oid, commit.parents, flags.search)
+}
+
 export async function walked(
   repo: Repo,
   starts: readonly CommitFacts[],
@@ -746,9 +793,7 @@ export async function walked(
   let printed = 0
   for await (const commit of source) {
     if (!inWindow(commit, flags) || !filtersPass(commit, flags)) continue
-    const shown =
-      flags.search === null ||
-      (await touches(repo, commit.oid, commit.parents, flags.search, flags.ignoreCase))
+    const shown = await picked(repo, commit, flags)
     steps.push({ commit, shown })
     if (shown) printed += 1
     if (flags.maxCount !== null && printed >= flags.maxCount) break

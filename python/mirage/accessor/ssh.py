@@ -55,7 +55,13 @@ class SSHAccessor(Accessor):
         return self.config.root
 
     async def sftp(self) -> asyncssh.SFTPClient:
+        """The SFTP client, connecting on first use and again after the
+        server or the network ended the last connection.
+        """
         async with self._lock:
+            if self._conn is not None and self._conn.is_closed():
+                self._conn = None
+                self._sftp = None
             if self._sftp is None:
                 conn = await asyncssh.connect(**_connect_kwargs(self.config))
                 try:

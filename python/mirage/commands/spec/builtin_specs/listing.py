@@ -161,6 +161,75 @@ SPECS: dict[str, CommandSpec] = {
         ),
         rest=Operand(type="path"),
     ),
+    "mount": CommandSpec(
+        description="Mount a filesystem.",
+        options=(
+            Option(
+                short="-a",
+                long="--all",
+                description="Mount all filesystems mentioned in fstab.",
+            ),
+            Option(
+                short="-f",
+                long="--fake",
+                description="Dry run; skip the mount(2) syscall.",
+            ),
+            Option(
+                short="-l",
+                long="--show-labels",
+                description="Show also filesystem labels.",
+            ),
+            Option(
+                short="-n",
+                long="--no-mtab",
+                description="Don't write to /etc/mtab.",
+            ),
+            Option(
+                short="-o",
+                long="--options",
+                type="str",
+                description="Comma-separated list of mount options.",
+            ),
+            Option(
+                short="-r",
+                long="--read-only",
+                description="Mount the filesystem read-only.",
+            ),
+            Option(
+                short="-t",
+                long="--types",
+                type="str",
+                description="Limit the set of filesystem types.",
+            ),
+            Option(
+                short="-v",
+                long="--verbose",
+                description="Say what is being done.",
+            ),
+            Option(
+                short="-w",
+                long="--rw",
+                description="Mount the filesystem read-write (default).",
+            ),
+            Option(
+                short="-B",
+                long="--bind",
+                description="Mount a subtree somewhere else.",
+            ),
+            Option(
+                short="-M",
+                long="--move",
+                description="Move a subtree to some other place.",
+            ),
+            Option(
+                short="-R",
+                long="--rbind",
+                description="Mount a subtree and all submounts somewhere "
+                "else.",
+            ),
+        ),
+        rest=Operand(type="str"),
+    ),
     "file": CommandSpec(
         options=(
             Option(short="-b"),

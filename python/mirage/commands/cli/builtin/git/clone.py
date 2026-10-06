@@ -16,6 +16,7 @@ import asyncio
 import posixpath
 import re
 import time
+from collections.abc import Mapping
 
 from dulwich.objects import ObjectID
 
@@ -148,6 +149,7 @@ def remote_head(
 
 async def clone(
     inv: CLIInvocation[None],
+    headers: Mapping[str, str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Clone a repository into a new directory.
 
@@ -159,6 +161,9 @@ async def clone(
 
     Args:
         inv (CLIInvocation[None]): the parsed invocation.
+        headers (Mapping[str, str] | None): request headers on top of
+            ``http.extraHeader``, which ``gh repo clone`` authenticates
+            with; they are never written to the clone's config.
     """
     fl = FlagView(inv.flags)
     doors = inv.doors or CLIDoors()
@@ -191,7 +196,10 @@ async def clone(
                 "is not an empty directory."
             )
         transport = await open_transport(
-            url, start, doors, await configured_headers(inv, None)
+            url,
+            start,
+            doors,
+            {**await configured_headers(inv, None), **(headers or {})},
         )
     except GitError as exc:
         return fatal(exc)

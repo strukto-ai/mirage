@@ -89,7 +89,8 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
-// One handler per JOB_BUILTINS member; lookup already narrowed the name.
+// One handler per JOB_BUILTINS member but ps, which also takes the workspace
+// user; lookup already narrowed the name.
 const JOB_HANDLERS: Record<
   string,
   (
@@ -106,7 +107,6 @@ const JOB_HANDLERS: Record<
   kill: handleKill,
   jobs: handleJobs,
   disown: handleDisown,
-  ps: handlePs,
 }
 
 /**
@@ -195,6 +195,16 @@ export async function handleCommand(
 
   if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
     const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
+    if (cmdName === 'ps') {
+      // The one job builtin that names an owner: the workspace user.
+      return handlePs(
+        jobTable,
+        textParts,
+        session,
+        sessionView(session, registry.policies),
+        namespace?.user ?? null,
+      )
+    }
     const handler = JOB_HANDLERS[cmdName]
     if (handler !== undefined) {
       return handler(

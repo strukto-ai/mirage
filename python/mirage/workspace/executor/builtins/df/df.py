@@ -31,6 +31,7 @@ from mirage.utils.errors import (
     fs_error_line,
     walk_refusal,
 )
+from mirage.utils.hidden import path_visible
 from mirage.workspace.executor.builtins.df.constants import (
     BLOCK_SUFFIX,
     SI_UNITS,
@@ -232,8 +233,9 @@ async def _target_mounts(
 ) -> tuple[list[MountEntry], list[str]]:
     """Resolve df operands to the mounts to report, deduped and ordered.
 
-    No operand (or the workspace root ``/``) reports every mount; a path
-    operand reports the mount that contains it. GNU df maps each FILE to
+    No operand (or the workspace root ``/``) reports every mount the
+    session's profile leaves visible; a path operand reports the mount
+    that contains it. GNU df maps each FILE to
     its filesystem and lists all with no args; one it cannot reach is
     reported in its own words and the rest still print, exit 1.
 
@@ -247,7 +249,14 @@ async def _target_mounts(
         tuple[list[MountEntry], list[str]]: the mounts, then one stderr
         line per operand that could not be reached.
     """
-    ordered = sorted(registry.mounts(), key=lambda m: m.prefix)
+    ordered = sorted(
+        (
+            m
+            for m in registry.mounts()
+            if path_visible(session.visibility, m.prefix.rstrip("/") or "/")
+        ),
+        key=lambda m: m.prefix,
+    )
     if not operands:
         return ordered, []
     seen: set[str] = set()

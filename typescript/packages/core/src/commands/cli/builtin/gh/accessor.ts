@@ -45,7 +45,7 @@ export function ghTransport(config: unknown): GitHubTransport {
  * in gh's words (pinned against gh 2.85.0) rather than asking its own host for
  * a repository of the same name.
  */
-function checkHost(config: unknown, host: string | null): void {
+export function checkHost(config: unknown, host: string | null): void {
   if (host === null) return
   const name = host.toLowerCase()
   if (name === GITHUB_HOST || name.endsWith(`.${GITHUB_HOST}`)) return

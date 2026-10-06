@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "id": "id_default_format_and_one_id",
+      "seq": 16100211,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "id; id -u; id -un; id -G; id -uz | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "uid=mirage-agent gid=ops groups=ops\nmirage-agent\nmirage-agent\nops\n   m   i   r   a   g   e   -   a   g   e   n   t  \\0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "id_session_profile_is_the_group",
+      "seq": 16100212,
+      "targets": [
+        "statvfs"
+      ],
+      "session": "auditor",
+      "command": "id; id -gn",
+      "expect": {
+        "exit": 0,
+        "stdout": "uid=mirage-agent gid=auditor groups=auditor\nauditor\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "id_named_user",
+      "seq": 16100213,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "id mirage-agent; id -u nobody mirage-agent; id ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "uid=mirage-agent gid=ops groups=ops\nmirage-agent\n",
+        "stderr": "id: 'nobody': no such user\nid: '': no such user: No such file or directory\n"
+      }
+    },
+    {
+      "id": "id_refusals",
+      "seq": 16100214,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "id -Z -u -g; id -u -g; id -n; id -r; id -z",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "id: --context (-Z) works only on an SELinux-enabled kernel\nid: cannot print \"only\" of more than one choice\nid: printing only names or real IDs requires -u, -g, or -G\nid: printing only names or real IDs requires -u, -g, or -G\nid: option --zero not permitted in default format\n"
+      }
+    }
+  ]
+}

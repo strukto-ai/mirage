@@ -28,6 +28,7 @@ import {
   isMissingPath,
   walkRefusal,
 } from '../../../../utils/errors.ts'
+import { pathVisible } from '../../../../utils/hidden.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { MountEntry } from '../../../mount/mount.ts'
@@ -165,8 +166,8 @@ function pctCell(cap: CapacityResult, inodes: boolean): string {
 }
 
 // Resolve df operands to the mounts to report, deduped and ordered. No
-// operand (or the workspace root `/`) reports every mount; a path operand
-// reports the mount containing it. GNU df maps each FILE to its filesystem;
+// operand (or the workspace root `/`) reports every mount the session's
+// profile leaves visible; a path operand reports the mount containing it. GNU df maps each FILE to its filesystem;
 // one it cannot reach is reported in its own words and the rest still print,
 // exit 1. Mirrors Python's _target_mounts.
 async function targetMounts(
@@ -175,8 +176,9 @@ async function targetMounts(
   session: SessionState,
   operands: (string | PathSpec)[],
 ): Promise<[MountEntry[], string[]]> {
-  // Python is `sorted(registry.mounts(), key=lambda m: m.prefix)`.
-  const ordered = [...registry.allMounts()].sort((a, b) => compareCodePoints(a.prefix, b.prefix))
+  const ordered = [...registry.allMounts()]
+    .filter((m) => pathVisible(session.visibility, m.prefix.replace(/\/+$/, '') || '/'))
+    .sort((a, b) => compareCodePoints(a.prefix, b.prefix))
   if (operands.length === 0) return [ordered, []]
   const seen = new Set<string>()
   const out: MountEntry[] = []

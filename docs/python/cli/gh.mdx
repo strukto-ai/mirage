@@ -65,6 +65,9 @@ no mount. The token source is reported as `Mirage configuration`: configuration
 retains the resolved secret, not the environment variable or file that supplied
 it. The credential itself is never printed.
 
+`gh auth token` is refused with exit 1 for the same reason: the token stays
+in Mirage configuration, where every `gh` verb reads it.
+
 ## Reading is the mount, acting is the CLI
 
 ```bash
@@ -89,7 +92,7 @@ of the caller, and nothing on the spec names the mount.
 gh api       <ENDPOINT>
 gh issue     list | view | create | edit | close | reopen | comment
 gh pr        list | view | create | edit | merge | close | comment | diff | checks
-gh repo      list | view | create | fork | rename | edit | delete
+gh repo      list | clone | view | create | fork | rename | edit | delete
 gh release   list | view | create
 gh run       list | view | rerun
 gh workflow  list | view | run
@@ -171,6 +174,7 @@ gh repo view github.com/acme/tools  # the host segment is accepted
 gh repo view --json nameWithOwner,defaultBranchRef,url
 
 gh repo list acme --limit 50
+gh repo clone acme/tools /work/tools -- --branch dev
 gh repo create tools-next --private --description 'Next generation'
 
 gh repo fork acme/tools
@@ -191,6 +195,12 @@ The default `view` prints a `name:` line, a `description:` line, then `--`
 and the README, with the separator omitted when the repository has none.
 Use `--json` for any of gh's repository fields or `gh api` for the complete
 REST object.
+
+`clone` runs Mirage's own `git clone` into DIRECTORY, else a directory
+named after the repository, and the words after `--` are git's clone
+options. A bare `REPO` is the account's own. The token travels as the
+request's `Authorization` and never reaches the line, `.git/config` or the
+output; the `upstream` remote gh adds for a fork is not added.
 
 `rename` takes the **new name** as the operand and the repository to
 rename on `-R`, which is the reverse of what the shape of the line

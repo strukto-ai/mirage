@@ -16,13 +16,31 @@ from mirage.commands.builtin.general.bc import bc
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.general.date import date
 from mirage.commands.builtin.general.expr import expr
+from mirage.commands.builtin.general.getconf import getconf
+from mirage.commands.builtin.general.hostname import hostname
+from mirage.commands.builtin.general.id import id_cmd
 from mirage.commands.builtin.general.js import js, node
 from mirage.commands.builtin.general.python import python3, python_cmd
 from mirage.commands.builtin.general.seq import seq
 from mirage.commands.builtin.general.uname import uname
 from mirage.commands.builtin.general.wget import wget
 
-_FNS = [bc, curl, date, expr, js, node, python3, python_cmd, seq, uname, wget]
+_FNS = [
+    bc,
+    curl,
+    date,
+    expr,
+    getconf,
+    hostname,
+    id_cmd,
+    js,
+    node,
+    python3,
+    python_cmd,
+    seq,
+    uname,
+    wget,
+]
 
 COMMANDS = []
 for _fn in _FNS:

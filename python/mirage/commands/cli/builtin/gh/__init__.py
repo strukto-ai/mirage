@@ -19,6 +19,7 @@ from mirage.commands.cli.builtin.gh import release as release_commands
 from mirage.commands.cli.builtin.gh import repo as repo_commands
 from mirage.commands.cli.builtin.gh.api import api
 from mirage.commands.cli.builtin.gh.auth import status as auth_status
+from mirage.commands.cli.builtin.gh.auth import token as auth_token
 from mirage.commands.cli.builtin.gh.constants import (
     BOOLEAN,
     HELP_TOPICS,
@@ -377,6 +378,30 @@ def _repo() -> CLISpec:
                 options=(JSON, JQ, LIMIT_30),
             ),
             CLISpec(
+                name="clone",
+                description="Clone a repository locally",
+                fn=repo_commands.clone_cmd,
+                write=True,
+                positional=(
+                    Operand(type="str", name="REPOSITORY"),
+                    Operand(type="str", name="DIRECTORY"),
+                ),
+                rest=Operand(type="str", name="GITFLAGS"),
+                options=(
+                    Option(
+                        short="-u",
+                        long="--upstream-remote-name",
+                        type="str",
+                        description="Upstream remote name when cloning a fork",
+                    ),
+                    _flag(
+                        long="--no-upstream",
+                        description="Do not add an upstream remote when "
+                        "cloning a fork",
+                    ),
+                ),
+            ),
+            CLISpec(
                 name="view",
                 description="View a repository",
                 fn=repo_commands.view,
@@ -699,6 +724,26 @@ GH = CLISpec(
                     name="status",
                     description="Check the configured token",
                     fn=auth_status,
+                ),
+                CLISpec(
+                    name="token",
+                    description="Print the authentication token gh uses "
+                    "for a hostname and account",
+                    fn=auth_token,
+                    options=(
+                        Option(
+                            long="--hostname",
+                            type="str",
+                            description="The hostname of the GitHub instance "
+                            "authenticated with",
+                        ),
+                        Option(
+                            short="-u",
+                            long="--user",
+                            type="str",
+                            description="The account to output the token for",
+                        ),
+                    ),
                 ),
             ),
         ),

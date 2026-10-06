@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
 import os
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from mirage.commands.cli.builtin.gh import GH
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.transport import (
@@ -362,3 +364,28 @@ async def test_url_credentials_stay_with_the_origin_they_were_typed_for(repos):
         server.shutdown()
     assert result.exit_code == 0, result.stderr
     assert seen == [("GET", None), ("POST", None)]
+
+
+@pytest.mark.asyncio
+async def test_gh_repo_clone_sends_the_token_only_as_authorization(repos):
+    pytest.importorskip("httpx")
+    _, root = repos
+    shutil.copytree(root / "repo.git", root / "o" / "repo.git")
+    seen: list[tuple[str, str | None]] = []
+    server = _backend(root, seen=seen)
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with Workspace({"/w/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+            ws.register_cli("git", GIT)
+            ws.register_cli("gh", GH, {"token": "t0k", "base_url": base})
+            result = await ws.shell("cd /w && gh repo clone o/repo c -- -q")
+            log = await ws.shell("cd /w/c && git log --format=%s")
+            config = await ws.shell("cat /w/c/.git/config")
+    finally:
+        server.shutdown()
+    assert (result.exit_code, result.stderr) == (0, None)
+    assert log.stdout == b"second\nfirst\n"
+    assert f"url = {base}/o/repo.git".encode() in config.stdout
+    assert b"t0k" not in config.stdout
+    auth = "Basic " + base64.b64encode(b"x-access-token:t0k").decode()
+    assert seen == [("GET", auth), ("POST", auth)]

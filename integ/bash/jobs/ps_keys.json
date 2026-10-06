@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "job_ps_answers_the_procps_keys_a_runner_has",
+      "seq": 16100281,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(sleep 5 & p=$!; ps -o stat,state,tty,time,rss,vsz,%cpu,%mem,ni,pri,cls,nlwp,comm -p \"$p\" | tr ' ' .; kill \"$p\"; wait \"$p\" 2>/dev/null || :)",
+      "expect": {
+        "exit": 0,
+        "stdout": "STAT.S.TT...........TIME...RSS....VSZ.%CPU.%MEM..NI.PRI.CLS.NLWP.COMMAND\nR....R.?........00:00:00.....0......0..0.0..0.0...0..19..TS....1.sleep\n",
+        "stderr": ""
+      },
+      "note": "procps-ng 4.0.4 widths for the keys a runner answers; a runner has no terminal, CPU, memory or scheduler accounting, so those print procps's zero."
+    }
+  ]
+}

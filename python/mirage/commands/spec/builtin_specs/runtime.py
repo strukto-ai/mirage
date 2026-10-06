@@ -371,6 +371,114 @@ SPECS: dict[str, CommandSpec] = {
         ),
         rest=Operand(type="str"),
     ),
+    "hostname": CommandSpec(
+        description="Show or set the system's host name.",
+        options=(
+            Option(short="-a", long="--alias", description="Alias names."),
+            Option(
+                short="-A",
+                long="--all-fqdns",
+                description="All long host names (FQDNs).",
+            ),
+            Option(
+                short="-b",
+                long="--boot",
+                description="Set default hostname if none available.",
+            ),
+            Option(
+                short="-d", long="--domain", description="DNS domain name."
+            ),
+            Option(
+                short="-f",
+                long="--fqdn",
+                description="Long host name (FQDN).",
+            ),
+            Option(long="--long", description="Long host name (FQDN)."),
+            Option(
+                short="-F",
+                long="--file",
+                type="str",
+                description="Read host name or NIS domain name from given "
+                "file.",
+            ),
+            Option(
+                short="-i",
+                long="--ip-address",
+                description="Addresses for the host name.",
+            ),
+            Option(
+                short="-I",
+                long="--all-ip-addresses",
+                description="All addresses for the host.",
+            ),
+            Option(short="-s", long="--short", description="Short host name."),
+            Option(short="-y", long="--yp", description="NIS/YP domain name."),
+            Option(long="--nis", description="NIS/YP domain name."),
+        ),
+        rest=Operand(type="str"),
+    ),
+    "id": CommandSpec(
+        description="Print user and group information for each specified "
+        "USER, or (when USER omitted) for the current process.",
+        options=(
+            Option(
+                short="-a",
+                description="Ignore, for compatibility with other versions.",
+            ),
+            Option(
+                short="-Z",
+                long="--context",
+                description="Print only the security context of the process.",
+            ),
+            Option(
+                short="-g",
+                long="--group",
+                description="Print only the effective group ID.",
+            ),
+            Option(
+                short="-G", long="--groups", description="Print all group IDs."
+            ),
+            Option(
+                short="-n",
+                long="--name",
+                description="Print a name instead of a number, for -u,-g,-G.",
+            ),
+            Option(
+                short="-r",
+                long="--real",
+                description="Print the real ID instead of the effective ID, "
+                "with -u,-g,-G.",
+            ),
+            Option(
+                short="-u",
+                long="--user",
+                description="Print only the effective user ID.",
+            ),
+            Option(
+                short="-z",
+                long="--zero",
+                description="Delimit entries with NUL characters, not "
+                "whitespace; not permitted in default format.",
+            ),
+        ),
+        rest=Operand(type="str"),
+    ),
+    "getconf": CommandSpec(
+        description="Get the configuration value for variable VAR, or for "
+        "variable PATH_VAR for path PATH.",
+        options=(
+            Option(
+                short="-a",
+                description="Print every variable and its value.",
+            ),
+            Option(
+                short="-v",
+                type="str",
+                description="Give values for compilation environment SPEC.",
+            ),
+        ),
+        rest=Operand(type="str"),
+    ),
     "sleep": CommandSpec(
         description="Delay for a specified amount of time.",
         rest=Operand(type="str"),

@@ -342,6 +342,90 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
     rest: new Operand({ type: 'str' }),
   }),
+  hostname: new CommandSpec({
+    description: "Show or set the system's host name.",
+    options: [
+      new Option({ short: '-a', long: '--alias', description: 'Alias names.' }),
+      new Option({ short: '-A', long: '--all-fqdns', description: 'All long host names (FQDNs).' }),
+      new Option({
+        short: '-b',
+        long: '--boot',
+        description: 'Set default hostname if none available.',
+      }),
+      new Option({ short: '-d', long: '--domain', description: 'DNS domain name.' }),
+      new Option({ short: '-f', long: '--fqdn', description: 'Long host name (FQDN).' }),
+      new Option({ long: '--long', description: 'Long host name (FQDN).' }),
+      new Option({
+        short: '-F',
+        long: '--file',
+        type: 'str',
+        description: 'Read host name or NIS domain name from given file.',
+      }),
+      new Option({
+        short: '-i',
+        long: '--ip-address',
+        description: 'Addresses for the host name.',
+      }),
+      new Option({
+        short: '-I',
+        long: '--all-ip-addresses',
+        description: 'All addresses for the host.',
+      }),
+      new Option({ short: '-s', long: '--short', description: 'Short host name.' }),
+      new Option({ short: '-y', long: '--yp', description: 'NIS/YP domain name.' }),
+      new Option({ long: '--nis', description: 'NIS/YP domain name.' }),
+    ],
+    rest: new Operand({ type: 'str' }),
+  }),
+  id: new CommandSpec({
+    description:
+      'Print user and group information for each specified USER, or (when USER omitted) for the current process.',
+    options: [
+      new Option({ short: '-a', description: 'Ignore, for compatibility with other versions.' }),
+      new Option({
+        short: '-Z',
+        long: '--context',
+        description: 'Print only the security context of the process.',
+      }),
+      new Option({
+        short: '-g',
+        long: '--group',
+        description: 'Print only the effective group ID.',
+      }),
+      new Option({ short: '-G', long: '--groups', description: 'Print all group IDs.' }),
+      new Option({
+        short: '-n',
+        long: '--name',
+        description: 'Print a name instead of a number, for -u,-g,-G.',
+      }),
+      new Option({
+        short: '-r',
+        long: '--real',
+        description: 'Print the real ID instead of the effective ID, with -u,-g,-G.',
+      }),
+      new Option({ short: '-u', long: '--user', description: 'Print only the effective user ID.' }),
+      new Option({
+        short: '-z',
+        long: '--zero',
+        description:
+          'Delimit entries with NUL characters, not whitespace; not permitted in default format.',
+      }),
+    ],
+    rest: new Operand({ type: 'str' }),
+  }),
+  getconf: new CommandSpec({
+    description:
+      'Get the configuration value for variable VAR, or for variable PATH_VAR for path PATH.',
+    options: [
+      new Option({ short: '-a', description: 'Print every variable and its value.' }),
+      new Option({
+        short: '-v',
+        type: 'str',
+        description: 'Give values for compilation environment SPEC.',
+      }),
+    ],
+    rest: new Operand({ type: 'str' }),
+  }),
   sleep: new CommandSpec({
     description: 'Delay for a specified amount of time.',
     rest: new Operand({ type: 'str' }),

@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "hostname_is_mirage",
+      "seq": 16100201,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "hostname; hostname -s; hostname --fqdn; hostname -b; uname -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage\nmirage\nmirage\nmirage\nmirage\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hostname_display_options",
+      "seq": 16100202,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "hostname -d; hostname -s -d | wc -c; hostname -d -s; hostname -i; hostname -I | wc -c; hostname -a | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\nmirage\n127.0.1.1\n1\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hostname_refusals",
+      "seq": 16100203,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "hostname -y; echo $?; hostname box; echo $?; hostname -F /etc/hostname; echo $?; hostname a b 2>&1 | head -2; exit ${PIPESTATUS[0]}",
+      "expect": {
+        "exit": 255,
+        "stdout": "hostname: Local domain name not set\n1\n1\n1\nUsage: hostname [-b] {hostname|-F file}         set host name (from file)\n       hostname [-a|-A|-d|-f|-i|-I|-s|-y]       display formatted name\n",
+        "stderr": "hostname: you must be root to change the host name\nhostname: you must be root to change the host name\n"
+      }
+    }
+  ]
+}

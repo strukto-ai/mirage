@@ -84,6 +84,7 @@ if TYPE_CHECKING:
     from mirage.workspace.executor.builtins.metadata.setfattr import (
         handle_setfattr,
     )
+    from mirage.workspace.executor.builtins.mount import handle_mount
     from mirage.workspace.executor.builtins.printenv import handle_printenv
     from mirage.workspace.executor.builtins.printf import handle_printf
     from mirage.workspace.executor.builtins.read import handle_read
@@ -112,6 +113,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.executor.builtins.command": ("handle_command_builtin",),
     "mirage.workspace.executor.builtins.condition": ("handle_test",),
     "mirage.workspace.executor.builtins.df": ("handle_df",),
+    "mirage.workspace.executor.builtins.mount": ("handle_mount",),
     "mirage.workspace.executor.builtins.dirs": ("handle_cd",),
     "mirage.workspace.executor.builtins.echo": (
         "handle_echo",
@@ -225,6 +227,7 @@ __all__ = [
     "follow_directory_links",
     "follow_paths",
     "handle_df",
+    "handle_mount",
     "handle_chgrp",
     "handle_chmod",
     "handle_chown",

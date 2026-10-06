@@ -22,6 +22,7 @@ interface PgPoolLike {
     params?: readonly unknown[],
   ) => Promise<{ rows: unknown[]; rowCount: number | null }>
   end: () => Promise<void>
+  on: (event: 'error', listener: (err: Error) => void) => unknown
 }
 
 interface PgModule {
@@ -71,9 +72,16 @@ export class PostgresStore implements PgDriver {
     if (Pool === undefined) {
       throw new Error('postgres: pg package missing Pool export')
     }
-    return new Pool({
+    const pool = new Pool({
       connectionString: this.config.dsn,
       options: '-c default_transaction_read_only=on',
     })
+    // pg emits `error` for an idle connection the server or the network
+    // dropped, and Node throws an `error` event nobody listens for, which would
+    // end the process. The pool has already discarded that connection and the
+    // next query takes a fresh one, so the listener is all the handling it
+    // needs.
+    pool.on('error', () => undefined)
+    return pool
   }
 }

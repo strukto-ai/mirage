@@ -70,6 +70,7 @@ from mirage.workspace.executor.builtins import (
     handle_exec_path,
     handle_getfattr,
     handle_ln,
+    handle_mount,
     handle_readlink,
     handle_setfattr,
     handle_touch,
@@ -855,6 +856,8 @@ async def _route_argv(
     #    capacity; never fabricates numbers) ──
     if name == "df":
         return await handle_df(registry, session, dispatch, operands)
+    if name == "mount":
+        return await handle_mount(registry, session, operands)
 
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
     #    on the link entry itself (lstat semantics) ──

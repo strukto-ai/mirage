@@ -47,3 +47,23 @@ async def test_rejected_token_has_failure_status(monkeypatch):
         assert not result.stdout
         assert "HTTP 401" in await result.stderr_str()
         assert "secret-never-print" not in await result.stderr_str()
+
+
+@pytest.mark.asyncio
+async def test_token_is_refused_for_the_configured_host():
+    with Workspace({}) as ws:
+        ws.register_cli(
+            "gh",
+            GH,
+            {
+                "token": "secret-never-print",
+                "base_url": "https://ghe.test/api/v3",
+            },
+        )
+        result = await ws.shell("gh auth token")
+        assert (result.exit_code, result.stdout) == (1, b"")
+        assert await result.stderr_str() == (
+            "gh auth token: the token for ghe.test stays in Mirage "
+            "configuration and is never printed; gh commands use it "
+            "directly\n"
+        )

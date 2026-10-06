@@ -121,6 +121,10 @@ git -C /repo status -uall
 git -C /repo log --oneline -n 20
 git -C /repo log --reverse
 git -C /repo log -S delta
+git -C /repo log -G 'del.a' --oneline
+git -C /repo cat-file -p 'HEAD^{tree}'
+printf 'HEAD\n' | git -C /repo cat-file --batch-check
+git -C /repo hash-object -w notes.txt
 git -C /repo log --all --oneline --grep=fix -i --max-count=5
 git -C /repo log HEAD~2
 git -C /repo log --oneline main..topic
@@ -149,6 +153,14 @@ placeholder stays verbatim, exactly as git prints it. `log --all` walks
 every ref, tags peeled. `show` takes `--stat` (git's scaled diffstat
 table), `--name-only`, and `-s`/`--no-patch`, which suppresses every
 diff section just as it does in git.
+
+`log -G` keeps the commits whose diff adds or removes a line matching a
+POSIX extended regex, and `-S` with `--pickaxe-regex` counts regex
+matches. `cat-file` answers `-t`, `-s`, `-e`, `-p`, `<type> <object>` and
+`--batch`/`--batch-check` with git's format atoms. `hash-object` hashes
+files or stdin (`-t`, `--stdin-paths`, `--literally`) and `-w` writes the
+object; a malformed one is refused with git's last line only, not the
+fsck detail before it.
 
 `log` and `show` label each commit with the refs that point at it under
 `--decorate` (`short`, `full` or `no`), and `log.decorate` sets the same

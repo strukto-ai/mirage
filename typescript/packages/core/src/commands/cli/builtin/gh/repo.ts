@@ -21,8 +21,10 @@ import {
   listRepos,
   listRepositoryFields,
   login,
+  parseRepo,
   readReadme,
   renameRepo,
+  repoHost,
   repoTopics,
   repositoryFields,
   setRepoTopics,
@@ -35,6 +37,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CLIInvocation } from '../../types.ts'
 import {
   camel,
+  checkHost,
   csvValues,
   ghBool,
   ghRepo,
@@ -44,7 +47,14 @@ import {
   textValue,
   typedOut,
 } from './accessor.ts'
-import { REPO_EDIT_FIELDS } from './constants.ts'
+import { GITHUB_HOST, REPO_EDIT_FIELDS } from './constants.ts'
+import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
+import type { GhConfig } from '../../../../core/github/config.ts'
+import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
+import { findNode } from '../../walk.ts'
+import { GIT } from '../git/index.ts'
+import { clone as gitClone } from '../git/clone.ts'
+import { splitMarked } from '../git/util.ts'
 import { flagKwargName } from '../../../spec/constants.ts'
 import { exported, list, pointer, struct, type Shape } from './shape.ts'
 
@@ -415,6 +425,63 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   if (homepage !== undefined) body.homepage = homepage
   const created = repo(await createRepo(ghTransport(inv.config), owner, body))
   return textOut(`${textValue(created.url)}\n`)
+}
+
+/**
+ * Where the install's repositories are cloned from: github.com for GitHub's
+ * own API, else the API host's own origin, which a GitHub Enterprise server
+ * and a local stand-in serve git from.
+ */
+function cloneOrigin(config: GhConfig): string {
+  const base = config.baseUrl
+  if (base === undefined || base.replace(/\/+$/, '') === GITHUB_API_BASE) {
+    return `https://${GITHUB_HOST}`
+  }
+  return new URL(base).origin
+}
+
+/**
+ * The Authorization git sends GitHub for the install's token: Basic with the
+ * token as the password, what gh's credential helper hands git.
+ */
+function tokenHeader(config: GhConfig): Record<string, string> {
+  return { Authorization: `Basic ${btoa(`x-access-token:${config.token}`)}` }
+}
+
+/**
+ * `gh repo clone`: mirage's `git clone` of the repository, the words after `--`
+ * as git's options. The token rides only as the request's Authorization, never
+ * on the line, in the config or in the output; a fork's `upstream` remote is
+ * not added.
+ */
+export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
+  const config = inv.config as GhConfig
+  const [names, gitflags] = splitMarked(inv.texts, inv.argv)
+  const spec = names[0]
+  if (spec === undefined) throw new Error('cannot clone: repository argument required')
+  checkHost(config, repoHost(spec))
+  const ref: RepoRef =
+    !spec.includes('/') && !spec.includes(':')
+      ? { owner: await login(ghTransport(config)), repo: spec }
+      : parseRepo(spec)
+  const url = `${cloneOrigin(config)}/${ref.owner}/${ref.repo}.git`
+  const target = names[1] ?? ref.repo
+  const leaf = findNode(GIT, ['clone'])?.node ?? GIT
+  const cwd = inv.env.PWD ?? '/'
+  const words = [...gitflags, url, target]
+  const parsed = parseCommand(leaf, words, cwd, 'git clone', inv.env, true)
+  const git: CLIInvocation = {
+    config: null,
+    argv: ['clone', ...words],
+    paths: [],
+    texts: parsed.args.map(([word]) => word),
+    flags: { ...parseToKwargs(parsed), C: cwd },
+    stdin: inv.stdin,
+    env: inv.env,
+    ...(inv.doors !== undefined ? { doors: inv.doors } : {}),
+    spec: leaf,
+  }
+  return gitClone(git, tokenHeader(config))
 }
 
 /**

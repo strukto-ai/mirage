@@ -26,6 +26,7 @@ import { createShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
+import { GH } from '../gh/index.ts'
 import { GitError } from './errors.ts'
 import { GIT } from './index.ts'
 import { displayUrl, extraHeaders, parseAdvertisement, pktLine, pktLines } from './transport.ts'
@@ -312,5 +313,30 @@ it('keeps url credentials with the origin they were typed for', async () => {
   } finally {
     hop.close()
     target.close()
+  }
+})
+
+it('sends the gh token only as authorization on gh repo clone', async () => {
+  served('gh', 'true')
+  const seen: [string, string | null][] = []
+  const listener = backend(tmp, [], seen)
+  const base = await listen(listener)
+  try {
+    const ws = await workspace()
+    ws.registerCli('gh', GH, { token: 't0k', base_url: base })
+    const result = await ws.shell('cd /w && gh repo clone gh/repo c -- -q')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+    const log = await ws.shell('cd /w/c && git log --format=%s')
+    expect(DEC.decode(log.stdout)).toBe('first\n')
+    const config = DEC.decode((await ws.shell('cat /w/c/.git/config')).stdout)
+    expect(config).toContain(`url = ${base}/gh/repo.git`)
+    expect(config).not.toContain('t0k')
+    const auth = `Basic ${btoa('x-access-token:t0k')}`
+    expect(seen).toEqual([
+      ['GET', auth],
+      ['POST', auth],
+    ])
+  } finally {
+    listener.close()
   }
 })

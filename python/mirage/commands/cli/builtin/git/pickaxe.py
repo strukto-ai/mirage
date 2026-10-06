@@ -12,44 +12,120 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+from collections.abc import Iterator
+from difflib import SequenceMatcher
+
 from dulwich.diff_tree import tree_changes
 from dulwich.object_store import BaseObjectStore
 from dulwich.objects import Blob, Commit, ObjectID
 
+from mirage.commands.cli.builtin.git.patch import byte_lines
+from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
+
 EMPTY_TREE = None
 
 
-def _occurrences(
-    store: BaseObjectStore,
-    sha: ObjectID | None,
-    needle: bytes,
-    ignore_case: bool,
-) -> int:
-    """How many times a string appears in one blob, ASCII case folded
-    when asked.
+def _blob(store: BaseObjectStore, sha: ObjectID | None) -> bytes:
+    """A blob's bytes, empty for a side that does not exist.
 
     Args:
         store (BaseObjectStore): object database holding the blob.
         sha (ObjectID | None): blob id, None when the side does not
             exist.
-        needle (bytes): the string being counted, already folded under
-            ``ignore_case``.
+    """
+    if sha is None:
+        return b""
+    obj = store[sha]
+    return obj.data if isinstance(obj, Blob) else b""
+
+
+def _occurrences(
+    store: BaseObjectStore,
+    sha: ObjectID | None,
+    needle: bytes | re.Pattern[str],
+    ignore_case: bool,
+) -> int:
+    """How many times a string appears in one blob, or a pattern matches it
+    line by line as git counts under ``--pickaxe-regex``.
+
+    Args:
+        store (BaseObjectStore): object database holding the blob.
+        sha (ObjectID | None): blob id, None when the side does not
+            exist.
+        needle (bytes | re.Pattern[str]): the string being counted,
+            already folded under ``ignore_case``, or the pattern.
         ignore_case (bool): fold the blob's ASCII letters to lower case,
             the table git folds a ``-S`` string through under ``-i``.
     """
-    if sha is None:
-        return 0
-    obj = store[sha]
-    if not isinstance(obj, Blob):
-        return 0
-    data = obj.data.lower() if ignore_case else obj.data
-    return data.count(needle)
+    data = _blob(store, sha)
+    if not isinstance(needle, re.Pattern):
+        return (data.lower() if ignore_case else data).count(needle)
+    count = 0
+    for raw in byte_lines(data):
+        line = raw.decode("utf-8", "replace").removesuffix("\n")
+        at = 0
+        while at < len(line):
+            found = needle.search(line, at)
+            if found is None:
+                break
+            count += 1
+            at = found.end() + (found.end() == found.start())
+    return count
+
+
+def _changes(
+    store: BaseObjectStore, commit: Commit
+) -> Iterator[tuple[ObjectID | None, ObjectID | None]]:
+    """The old and new blob ids of every path a commit changed against
+    its first parent, or against nothing for a root commit.
+
+    Args:
+        store (BaseObjectStore): object database holding the trees.
+        commit (Commit): the commit.
+    """
+    parent_tree = EMPTY_TREE
+    if commit.parents:
+        parent = store[commit.parents[0]]
+        assert isinstance(parent, Commit)
+        parent_tree = parent.tree
+    for change in tree_changes(store, parent_tree, commit.tree):
+        old = change.old.sha if change.old is not None else None
+        new = change.new.sha if change.new is not None else None
+        yield old, new
+
+
+def greps(
+    store: BaseObjectStore, commit: Commit, pattern: re.Pattern[str]
+) -> bool:
+    """Whether a commit's diff adds or removes a line the pattern matches,
+    git's ``-G``; a binary side is skipped, as git does without ``--text``.
+
+    Args:
+        store (BaseObjectStore): object database holding the trees.
+        commit (Commit): the commit to test.
+        pattern (re.Pattern[str]): the compiled ``-G`` expression.
+    """
+    for old_sha, new_sha in _changes(store, commit):
+        old, new = _blob(store, old_sha), _blob(store, new_sha)
+        if b"\0" in old[:BINARY_SNIFF] or b"\0" in new[:BINARY_SNIFF]:
+            continue
+        before, after = byte_lines(old), byte_lines(new)
+        matcher = SequenceMatcher(a=before, b=after, autojunk=False)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            for line in (*before[i1:i2], *after[j1:j2]):
+                text = line.decode("utf-8", "replace").removesuffix("\n")
+                if pattern.search(text):
+                    return True
+    return False
 
 
 def touches(
     store: BaseObjectStore,
     commit: Commit,
-    needle: bytes,
+    needle: bytes | re.Pattern[str],
     ignore_case: bool = False,
 ) -> bool:
     """Whether a commit changed the number of occurrences of a string.
@@ -62,24 +138,20 @@ def touches(
 
     Compared against the first parent, or against nothing for a root
     commit, so the objects a root commit adds all count as introduced.
-    ``-i`` counts without regard to ASCII case.
+    ``-i`` counts without regard to ASCII case; under
+    ``--pickaxe-regex`` the needle is a compiled pattern, which carries
+    its own case folding.
 
     Args:
         store (BaseObjectStore): object database holding the trees.
         commit (Commit): the commit to test.
-        needle (bytes): the string being counted.
+        needle (bytes | re.Pattern[str]): the string being counted, or
+            the ``--pickaxe-regex`` pattern.
         ignore_case (bool): ``-i``.
     """
-    if ignore_case:
+    if ignore_case and isinstance(needle, bytes):
         needle = needle.lower()
-    parent_tree = EMPTY_TREE
-    if commit.parents:
-        parent = store[commit.parents[0]]
-        assert isinstance(parent, Commit)
-        parent_tree = parent.tree
-    for change in tree_changes(store, parent_tree, commit.tree):
-        old = change.old.sha if change.old is not None else None
-        new = change.new.sha if change.new is not None else None
+    for old, new in _changes(store, commit):
         if _occurrences(store, old, needle, ignore_case) != _occurrences(
             store, new, needle, ignore_case
         ):

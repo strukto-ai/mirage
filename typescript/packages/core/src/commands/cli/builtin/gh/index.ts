@@ -23,7 +23,7 @@ import type { CommandFnResult } from '../../../config.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { Operand, Option } from '../../../spec/types.ts'
 import { api } from './api.ts'
-import { status as authStatus } from './auth.ts'
+import { status as authStatus, token as authToken } from './auth.ts'
 import { version } from './version.ts'
 import {
   closeCmd as issueClose,
@@ -46,6 +46,7 @@ import {
   viewCmd as prView,
 } from './pull.ts'
 import {
+  cloneCmd as repoClone,
   createCmd as repoCreate,
   deleteCmd as repoDelete,
   editCmd as repoEdit,
@@ -347,6 +348,29 @@ function repo(): CLISpec {
         options: [JSON_FIELDS, JQ, LIMIT_30],
       }),
       new CLISpec({
+        name: 'clone',
+        description: 'Clone a repository locally',
+        fn: repoClone,
+        write: true,
+        positional: [
+          new Operand({ type: 'str', name: 'REPOSITORY' }),
+          new Operand({ type: 'str', name: 'DIRECTORY' }),
+        ],
+        rest: new Operand({ type: 'str', name: 'GITFLAGS' }),
+        options: [
+          new Option({
+            short: '-u',
+            long: '--upstream-remote-name',
+            type: 'str',
+            description: 'Upstream remote name when cloning a fork',
+          }),
+          flag({
+            long: '--no-upstream',
+            description: 'Do not add an upstream remote when cloning a fork',
+          }),
+        ],
+      }),
+      new CLISpec({
         name: 'view',
         description: 'View a repository',
         fn: repoView,
@@ -642,6 +666,24 @@ export const GH = new CLISpec({
       description: 'Manage authentication',
       subcommands: [
         new CLISpec({ name: 'status', description: 'Check the configured token', fn: authStatus }),
+        new CLISpec({
+          name: 'token',
+          description: 'Print the authentication token gh uses for a hostname and account',
+          fn: authToken,
+          options: [
+            new Option({
+              long: '--hostname',
+              type: 'str',
+              description: 'The hostname of the GitHub instance authenticated with',
+            }),
+            new Option({
+              short: '-u',
+              long: '--user',
+              type: 'str',
+              description: 'The account to output the token for',
+            }),
+          ],
+        }),
       ],
     }),
     new CLISpec({
