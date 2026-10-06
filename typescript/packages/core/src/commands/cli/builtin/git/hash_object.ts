@@ -107,7 +107,8 @@ async function content(dispatch: Dispatch, base: string, name: string): Promise<
   try {
     return await readFile(dispatch, posixNormpath(name.startsWith('/') ? name : `${base}/${name}`))
   } catch (err) {
-    if (isMissingPath(err) || isEisdir(err) || isEnotdir(err)) {
+    if (isEisdir(err)) throw new GitError(`Unable to hash ${name}`)
+    if (isMissingPath(err) || isEnotdir(err)) {
       const reason = fsStrerror(err) ?? 'No such file or directory'
       throw new GitError(`could not open '${name}' for reading: ${reason}`)
     }

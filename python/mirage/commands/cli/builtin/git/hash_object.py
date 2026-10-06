@@ -36,6 +36,7 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 
@@ -131,8 +132,10 @@ async def _content(dispatch: DispatchFn, base: str, name: str) -> bytes:
     """
     try:
         return await read_file(dispatch, posixpath.join(base, name))
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError) as exc:
-        reason = exc.strerror or "No such file or directory"
+    except IsADirectoryError as exc:
+        raise GitError(f"Unable to hash {name}") from exc
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        reason = fs_strerror(exc) or "No such file or directory"
         raise GitError(
             f"could not open '{name}' for reading: {reason}"
         ) from exc

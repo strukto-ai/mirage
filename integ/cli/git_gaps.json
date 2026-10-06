@@ -1255,11 +1255,11 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "printf 'hello\\n' | git -C /repo hash-object --stdin; git -C /repo hash-object numbers.txt docs/readme.md; printf 'numbers.txt\\n' | git -C /repo hash-object --stdin-paths; git -C /repo hash-object -t blob --stdin < /dev/null; git -C /repo cat-file commit HEAD | git -C /repo hash-object -t commit --stdin; git -C /repo cat-file tree HEAD | git -C /repo hash-object -t tree --stdin; id=$(printf 'integ\\n' | git -C /repo hash-object -w --stdin); git -C /repo cat-file -p $id; rm /repo/.git/objects/${id:0:2}/${id:2}; git -C /repo cat-file -e $id; echo $?; printf junk | git -C /repo hash-object -t tree --stdin 2>&1 | tail -1; printf junk | git -C /repo hash-object -t commit --literally --stdin; git -C /repo hash-object -t foo numbers.txt; echo $?; git -C /repo hash-object nope; echo $?",
+      "command": "printf 'hello\\n' | git -C /repo hash-object --stdin; git -C /repo hash-object numbers.txt docs/readme.md; printf 'numbers.txt\\n' | git -C /repo hash-object --stdin-paths; git -C /repo hash-object -t blob --stdin < /dev/null; git -C /repo cat-file commit HEAD | git -C /repo hash-object -t commit --stdin; git -C /repo cat-file tree HEAD | git -C /repo hash-object -t tree --stdin; id=$(printf 'integ\\n' | git -C /repo hash-object -w --stdin); git -C /repo cat-file -p $id; rm /repo/.git/objects/${id:0:2}/${id:2}; git -C /repo cat-file -e $id; echo $?; printf junk | git -C /repo hash-object -t tree --stdin 2>&1 | tail -1; printf junk | git -C /repo hash-object -t commit --literally --stdin; git -C /repo hash-object -t foo numbers.txt; echo $?; git -C /repo hash-object nope; echo $?; git -C /repo hash-object docs; echo $?",
       "expect": {
         "exit": 0,
-        "stdout": "ce013625030ba8dba906f756967f9e9ca394464a\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\nbfa655111293037a5564088d1a9bbca4cbcf446b\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\ne69de29bb2d1d6434b8b29ae775ad8c2e48c5391\n8ef25423772bbfe671c8e285ae1d63991d59db19\n213a314abdd4e23f24dccd80a763c4b533bdb01d\ninteg\n1\nfatal: refusing to create malformed object\naa8f6d33b71dd1c53dad83401248342aa8bb8851\n128\n128\n",
-        "stderr": "fatal: invalid object type \"foo\"\nfatal: could not open 'nope' for reading: No such file or directory\n"
+        "stdout": "ce013625030ba8dba906f756967f9e9ca394464a\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\nbfa655111293037a5564088d1a9bbca4cbcf446b\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\ne69de29bb2d1d6434b8b29ae775ad8c2e48c5391\n8ef25423772bbfe671c8e285ae1d63991d59db19\n213a314abdd4e23f24dccd80a763c4b533bdb01d\ninteg\n1\nfatal: refusing to create malformed object\naa8f6d33b71dd1c53dad83401248342aa8bb8851\n128\n128\n128\n",
+        "stderr": "fatal: invalid object type \"foo\"\nfatal: could not open 'nope' for reading: No such file or directory\nfatal: Unable to hash docs\n"
       }
     }
   ]
