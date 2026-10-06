@@ -10,4 +10,12 @@ class ExecutionFrame:
     cmdsub_status: int = 0
 
     def fork(self) -> "ExecutionFrame":
+        """A child evaluation's frame, which starts empty.
+
+        TypeScript's also carries the abort signal; here cancellation is
+        the asyncio task's and is ambient.
+
+        Args:
+            None
+        """
         return ExecutionFrame()

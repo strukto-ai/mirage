@@ -12,7 +12,12 @@ def _release_entries(entries: dict[str, Callable[[], None]]) -> None:
 
 
 class FunctionTable(MutableMapping[str, FunctionBody]):
-    """A session's independent leases on stored function programs."""
+    """A session's independent leases on stored function programs.
+
+    Args:
+        initial (Mapping[str, FunctionBody] | None): bodies to store, each
+            leased on its own.
+    """
 
     def __init__(
         self, initial: Mapping[str, FunctionBody] | None = None

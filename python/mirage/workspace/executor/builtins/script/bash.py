@@ -115,12 +115,12 @@ async def handle_bash(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a nested shell: inline text from ``-c``, or a script file.
 
-    A nested shell is a child shell, so it runs on a snapshot of the
-    session and the caller gets its state back afterwards:
-    ``bash -c 'cd /x'`` leaves the caller where it was, as it does in
-    bash, where the nested shell is a separate process. `source` is the
-    opposite case and deliberately does not snapshot, because a sourced
-    file is the caller.
+    A nested shell is a child shell, so it runs on a subshell of the
+    session and leaves the caller's state alone: ``bash -c 'cd /x'``
+    leaves the caller where it was, as it does in bash, where the nested
+    shell is a separate process. `source` is the opposite case and
+    deliberately runs on the caller's session, because a sourced file is
+    the caller.
 
     Args:
         dispatch (DispatchFn): op dispatcher, used to read a script file.

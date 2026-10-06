@@ -81,6 +81,9 @@ def set_current_session(
             to. None keeps the owner already bound, so a nested bind
             inside a line (a background job's fork) stays attributed to
             the workspace running it.
+        ancestors (tuple[SessionState, ...]): the sessions of the
+            evaluations this one runs under, nearest first, so a mark
+            made on a parent (a program run) covers its child shells.
     """
     if owner is None:
         current = _current_session.get()
@@ -577,9 +580,9 @@ def set_program_invocation(session: "SessionState") -> Token[Any]:
     ``find -exec`` hands its words to ``execvp``, so the head it runs is
     the coreutils program, not the shell's builtin of the same name:
     ``printf -v`` is a format string there, not an assignment. Keyed
-    by the session object, and cleared again by a nested shell the
-    line starts (``-exec sh -c ...``, which snapshots the same
-    session), so that shell's builtins are its own.
+    by the session object, which the child shells it starts inherit,
+    and cleared again by a nested shell the line starts (``-exec sh -c
+    ...``), so that shell's builtins are its own.
 
     Args:
         session (SessionState): the session the program line runs in.

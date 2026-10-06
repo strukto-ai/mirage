@@ -574,9 +574,9 @@ export function captureSessionContext(
  * Run a line as a program run in a session: `find -exec` hands its words
  * to `execvp`, so the head it runs is the coreutils program, not the
  * shell's builtin of the same name (`printf -v` is a format string there,
- * not an assignment). Keyed by the session object, and cleared again by
- * a nested shell the line starts (`-exec sh -c ...`, which snapshots the
- * same session), so that shell's builtins are its own.
+ * not an assignment). Keyed by the session object, which the child shells
+ * it starts inherit, and cleared again by a nested shell the line starts
+ * (`-exec sh -c ...`), so that shell's builtins are its own.
  */
 export function runAsProgram<T>(session: SessionState, fn: () => Promise<T>): Promise<T> {
   return Promise.resolve(programStorage.run(session, fn))

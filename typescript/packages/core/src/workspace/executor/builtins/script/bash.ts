@@ -112,11 +112,11 @@ export function parseBashArgs(args: string[]): BashArgs {
  * `name` is the head word (`bash` or `sh`). bash reports itself by
  * `argv[0]`, so the diagnostics follow the spelling the caller used.
  *
- * A nested shell is a child shell, so it runs on a snapshot of the session
- * and the caller gets its state back afterwards: `bash -c 'cd /x'` leaves the
- * caller where it was, as it does in bash, where the nested shell is a
- * separate process. `handleSource` is the opposite case and deliberately does
- * not snapshot, because a sourced file is the caller.
+ * A nested shell is a child shell, so it runs on a subshell of the session
+ * and leaves the caller's state alone: `bash -c 'cd /x'` leaves the caller
+ * where it was, as it does in bash, where the nested shell is a separate
+ * process. `handleSource` is the opposite case and deliberately runs on the
+ * caller's session, because a sourced file is the caller.
  */
 export async function handleBash(
   dispatch: DispatchFn,
