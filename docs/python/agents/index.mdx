@@ -32,7 +32,7 @@ Your program holds the workspace and hands it to the framework.
 | [Pydantic AI](/python/agents/pydantic-ai) | `MirageWorkspace(ws)` | its workspace, so every file and shell tool runs in Mirage |
 | [Haystack](/python/agents/haystack) | `MirageShellTool(...)` | a bash tool |
 
-Mirage's seven tools are the session's [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`. A session gets the ones its [profile](/home/policy-engine#which-door-enforces-what) leaves it (`session.tools.names()`), so an agent is never offered a tool every call of which would be refused.
+Mirage's seven tools are the session's [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`. A session gets the ones its [profile](/home/policy/overview#which-door-enforces-what) leaves it (`session.tools.names()`), so an agent is never offered a tool every call of which would be refused.
 
 Each framework is an extra: `claude-agent-sdk`, `agno`, `openai`, `deepagents`, `openhands` or `pydantic-ai`.
 
