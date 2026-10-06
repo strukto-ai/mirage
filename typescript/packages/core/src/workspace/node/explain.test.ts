@@ -259,6 +259,30 @@ describe('explain', () => {
     }
   })
 
+  it('refuses the whole line only for a verdict', async () => {
+    // A word the session cannot see fails where it stands and the rest of
+    // the line runs; a rule's refusal holds the whole line, whatever
+    // failed before it.
+    const w = await ws()
+    let said = await w.explain('gerp x; echo ok', 's')
+    let ran = await w.shell('gerp x; echo ok', { sessionId: 's' })
+    expect([ran.exitCode, said.outcome, said.exitCode]).toEqual([0, Outcome.ALLOW, 0])
+    const [gerp] = said.node.children
+    expect(
+      gerp !== undefined && 'command' in gerp
+        ? [gerp.outcome, gerp.exitCode, gerp.stderr, gerp.source]
+        : null,
+    ).toEqual([Outcome.DENY, 127, 'gerp: command not found\n', 'commands.allow'])
+    const line = 'gerp x; rm /data/prod/x.txt'
+    said = await w.explain(line, 's')
+    ran = await w.shell(line, { sessionId: 's' })
+    expect([said.exitCode, said.stderr, said.refusal?.reason]).toEqual([
+      ran.exitCode,
+      DEC.decode(ran.stderr),
+      ran.refusal?.reason,
+    ])
+  })
+
   it('spends nothing', async () => {
     // A dry run of an ask must not put the question to anyone, or the
     // host would field requests for lines nobody typed, and must not
@@ -1296,6 +1320,12 @@ class DenyRm implements Policy {
   }
 }
 
+class Broken implements Policy {
+  preCommand(): Action | null {
+    throw new Error('broken')
+  }
+}
+
 describe('explain answers and the op form', () => {
   it("shows every policy's answer in chain order", async () => {
     const ws = new Workspace(
@@ -1317,6 +1347,26 @@ describe('explain answers and the op form', () => {
       ])
       expect([said.exitCode, said.refusal?.reason]).toEqual([126, 'no'])
       expect(await new Session(ws, null).explain.shell('rm /data/x')).toEqual(said)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explains a policy that fails as a deny', async () => {
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser(), policies: [new Broken()] },
+    )
+    try {
+      const said = await ws.explain('echo hi')
+      const ran = await ws.shell('echo hi')
+      const [echo] = said.node.children
+      expect([
+        said.outcome,
+        echo !== undefined && 'command' in echo ? echo.outcome : null,
+        said.refusal?.kind,
+      ]).toEqual([Outcome.DENY, Outcome.DENY, 'failed'])
+      expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
     } finally {
       await ws.close()
     }

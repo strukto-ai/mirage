@@ -700,6 +700,10 @@ export interface CommandExplanation extends Explanation {
   readonly command: string
   /** The words after it. */
   readonly argv: readonly string[]
+  /** What the command would exit with where it stands, 0 to run. */
+  readonly exitCode: number
+  /** What the agent would read from it, empty to run. */
+  readonly stderr: string
   /** The runtime entry that would run it, empty when the workspace runs it itself. */
   readonly runtime: string
   /** Its path arguments, redirect targets included. */
@@ -712,13 +716,15 @@ export interface CommandExplanation extends Explanation {
 
 /**
  * A line, explained: what the agent would read, where the line would run
- * (its `preExecute` answers) and every command in it. The verdict is the
- * one the line's result carries: the first command the gate refuses, in
- * the order it reads them, or the placement's refusal; an allowed line
- * exits 0, and one an approval lets run carries the ask it covers.
- * `exitCode` and `stderr` come out of the one outcome table, so
- * a refused line's explanation is byte-identical to the refusal. Mirrors
- * the Python ShellExplanation.
+ * (its `preExecute` answers) and every command in it. The verdict is
+ * whether the line runs at all: a rule's refusal, or a question still
+ * waiting on the host, refuses the whole line before any of it runs, as
+ * does a placement's refusal; the first in the order the gate reads them
+ * is the line's, byte-identical to the refusal the run reports. A line
+ * that runs exits 0 here, and one an approval lets run carries the ask it
+ * covers. A command refused where it stands while the rest of the line
+ * runs (a word the session cannot see, a policy refusing one operand)
+ * says so on its own node. Mirrors the Python ShellExplanation.
  */
 export interface ShellExplanation extends Explanation {
   /**
@@ -729,9 +735,9 @@ export interface ShellExplanation extends Explanation {
   readonly answers: readonly (Deny | Route)[]
   /** The line as given. */
   readonly line: string
-  /** What the line would exit with, 0 to run. */
+  /** What the line is refused with, 0 when it runs. */
   readonly exitCode: number
-  /** What the agent would read, empty to run. */
+  /** What the agent would read then, empty when it runs. */
   readonly stderr: string
   /** The parsed line, of type `line`. */
   readonly node: ShellNode

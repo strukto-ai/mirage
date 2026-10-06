@@ -92,6 +92,8 @@ def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:
             "command": expl.command,
             "argv": list(expl.argv),
             **verdict,
+            "exit_code": expl.exit_code,
+            "stderr": expl.stderr,
             "runtime": expl.runtime,
             "operands": [
                 {"text": o.text, "path": o.path, "matched": o.matched}

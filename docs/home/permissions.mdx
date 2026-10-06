@@ -458,21 +458,30 @@ its class name) and `refusal`, the record a refused run carries. An ask
 an approval already covers stays `ask` with no refusal.
 
 `explain.shell` (also `ws.explain(line, session_id)`) runs the gate
-without running the line. The line's verdict is the one its result
-would carry, with the exact `exit_code` and `stderr` the agent would
-see, byte-identical to the real refusal. What a host reads in an
+without running the line. The line's verdict is whether it runs at
+all: a rule's refusal, or a question still waiting on the host, refuses
+the whole line before any of it runs, and the first in the order the
+gate reads them is the line's, with the exact `exit_code` and `stderr`
+the agent would see, byte-identical to the real refusal. What a host reads in an
 explanation and what an agent sees at the prompt cannot disagree,
 because they are the same computation. The line's `answers` are where
 it would run (`pre_execute`, the route policy's as `PlacementPolicy`).
 A line a rule refuses or asks about is never placed, and a placement
 that refuses the line gives it the placement's refusal.
 
+A line nothing holds runs, so its verdict is `allow` with `exit_code`
+0, or `ask` when an approval lets an asked command through. A command
+that fails only where it stands while the rest of the line runs (a word
+the session cannot see, a policy refusing one operand) carries that on
+its own node.
+
 `node` is the line as the shell parses it. Its nodes are `list` (`;`,
 `&&`, `||`, `&`), `pipeline`, `subshell`, `group` (braces and the bodies
 of `if`, `for`, `while`, `case` and functions), `substitution` (`$( )`,
 backticks, `<( )`), `line` (a line a command runs: `bash -c`, `eval`,
 `xargs`) and `command`. A command carries its own verdict with every
-`pre_command` answer, `command` and `argv`, its path `operands` (each
+`pre_command` answer, `command` and `argv`, the `exit_code` and
+`stderr` it would fail with where it stands, its path `operands` (each
 with the path it names and whether the deciding rule `matched` it) and
 the `runtime` that would run it, empty when the workspace runs it
 itself. `mirage workspace explain` prints the tree:
@@ -485,7 +494,7 @@ cat /data/a | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]
       wc -l  [allow]
     echo $(cat /data/keys/a)  [allow]
       substitution: cat /data/keys/a
-        cat /data/keys/a  [deny: sealed]  top
+        cat /data/keys/a  [deny, exit 1: sealed]  top
 ```
 
 `explain.vfs` is for the doors that see VFS calls and no command (the
@@ -494,7 +503,9 @@ path is resolved and links are followed as the call would, and stops at
 its gate. Its verdict holds every `pre_ops` answer, with `call`, its
 `paths` as given and `error`, the error the call would raise (`EACCES`,
 `EROFS`), empty when it would run. A rename is judged at its source and
-its destination.
+its destination. `list_files` is judged at its listing: the entries it
+would then stat are named only by the listing, a read a dry run does not
+make.
 
 With no policy speaking, a line explains as one that runs (`exit_code`
 0, `answers` empty) and a VFS call as one that runs (`error` empty). A

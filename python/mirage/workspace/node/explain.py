@@ -1453,11 +1453,14 @@ async def explain_line(
 def explained_line(
     line: str, judged: Sequence[Judged], runtime_of: Callable[[str], str]
 ) -> ShellExplanation:
-    """A line's public explanation: its verdict, which the first command
-    the gate refuses gives it (in the order the gate reads them), or the
-    first it asks about when an approval lets every one run, and its
-    parse tree, with every command's explanation where the command
-    stands.
+    """A line's public explanation: its verdict and its parse tree, with
+    every command's explanation where the command stands.
+
+    The verdict is the first command, in the order the gate reads them,
+    whose refusal holds the whole line (:func:`holds`), as the run
+    reports it; a line nothing holds runs, carrying the first ask an
+    approval lets through. A command refused only where it stands keeps
+    its refusal to its own node, since the rest of the line still runs.
 
     Every scope a command reads its words in (the typed line, a
     ``$( )`` body, a ``bash -c`` string) is parsed on its own, as the
@@ -1476,31 +1479,51 @@ def explained_line(
         scopes.setdefault((at.parent, at.source), []).append(one)
     root = next((key for key in scopes if key[0] is None), (None, line))
     node = _scope_node("line", root, scopes, runtime_of)
-    refused = next((one for one in judged if one.judgment.exit_code), None)
-    decider = refused or next(
-        (one for one in judged if _verdict_of(one.judgment)[0] is Outcome.ASK),
+    held = next(
+        (
+            one
+            for one in judged
+            if one.judgment.exit_code and _is_verdict(one.judgment)
+        ),
         None,
     )
-    if decider is None:
+    if held is not None:
+        judgment = held.judgment
+        outcome, reason, source = _verdict_of(judgment)
+        return ShellExplanation(
+            line=line,
+            node=node,
+            outcome=outcome,
+            reason=reason,
+            source=source,
+            refusal=judgment.refusal,
+            exit_code=judgment.exit_code,
+            stderr=judgment.stderr,
+        )
+    asked = next(
+        (
+            one
+            for one in judged
+            if not one.judgment.exit_code
+            and _verdict_of(one.judgment)[0] is Outcome.ASK
+        ),
+        None,
+    )
+    if asked is None:
         return ShellExplanation(line=line, node=node)
-    judgment = decider.judgment
-    outcome, reason, source = _verdict_of(judgment)
+    outcome, reason, source = _verdict_of(asked.judgment)
     return ShellExplanation(
-        line=line,
-        node=node,
-        outcome=outcome,
-        reason=reason,
-        source=source,
-        refusal=judgment.refusal,
-        exit_code=judgment.exit_code,
-        stderr=judgment.stderr,
+        line=line, node=node, outcome=outcome, reason=reason, source=source
     )
 
 
 def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
     """A command's outcome, reason and source as its explanation states
-    them: the answer that decided, which a coded policy may give over
-    the document's own.
+    them: the refusal it meets (``ASK`` for a question waiting on the
+    host, ``DENY`` for any other, a policy that failed included), else
+    the ask an approval lets through, else ``DENY`` for a word the allow
+    list refuses. The reason and source are the deciding answer's,
+    which a coded policy may give over the document's own.
 
     Args:
         judgment (Judgment): the command's judgment.
@@ -1517,10 +1540,12 @@ def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
         )
     refusal = judgment.refusal
     if refusal is not None:
-        outcome = Outcome.DENY if refusal.kind == "deny" else Outcome.ASK
+        outcome = Outcome.ASK if refusal.kind == "pending" else Outcome.DENY
         return outcome, refusal.reason, source
     if isinstance(decider, Ask):
         return Outcome.ASK, decider.reason, source
+    if judgment.exit_code:
+        return Outcome.DENY, "", source
     return Outcome.ALLOW, "", source
 
 
@@ -1629,6 +1654,8 @@ def _command_of(
     return CommandExplanation(
         command=judgment.command,
         argv=judgment.argv,
+        exit_code=judgment.exit_code,
+        stderr=judgment.stderr,
         outcome=outcome,
         reason=reason,
         source=source,

@@ -84,7 +84,9 @@ class VfsExplainer:
     the ones it was asked about, since what the door resolved a path to
     would tell a hidden one from a missing one. A rename passes
     two gates, its source and then its destination; its explanation is
-    the first that refuses, with the answers of both. A restore's
+    the first that refuses, with the answers of both. ``list_files``
+    is judged at its listing: the entries it would then stat are named
+    only by the listing, a read a dry run does not make. A restore's
     pending drift checks are no policy's answer either: the dry run
     leaves them to the first call that runs, so a policy reading while it
     decides reads the restored state.
@@ -187,7 +189,8 @@ class VfsExplainer:
 
     async def list_files(self, path: str) -> VfsExplanation:
         """Explain ``session.vfs.list_files``, judged as the readdir it
-        makes.
+        makes; the entries it would then stat are named only by that
+        read, which a dry run does not make.
 
         Args:
             path (str): the directory.

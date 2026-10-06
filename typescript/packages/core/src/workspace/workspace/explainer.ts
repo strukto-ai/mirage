@@ -70,7 +70,9 @@ export class Explainer {
  * asked about, since what the door resolved a path to would tell a hidden
  * one from a missing one. A rename passes two gates, its source and
  * then its destination; its explanation is the first that refuses, with
- * the answers of both. A restore's pending drift checks are no policy's
+ * the answers of both. `listFiles` is judged at its listing: the entries
+ * it would then stat are named only by the listing, a read a dry run does
+ * not make. A restore's pending drift checks are no policy's
  * answer either: the dry run leaves them to the first call that runs, so a
  * policy reading while it decides reads the restored state.
  * Mirrors the Python `VfsExplainer`.
@@ -126,7 +128,11 @@ export class VfsExplainer {
     return dry('cat', [path], () => this.ops.read(path))
   }
 
-  /** Explain `session.vfs.listFiles`, judged as the readdir it makes. */
+  /**
+   * Explain `session.vfs.listFiles`, judged as the readdir it makes; the
+   * entries it would then stat are named only by that read, which a dry run
+   * does not make.
+   */
   listFiles(path: string): Promise<VfsExplanation> {
     return dry('listFiles', [path], () => this.ops.readdir(path))
   }

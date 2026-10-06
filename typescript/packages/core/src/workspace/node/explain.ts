@@ -1180,11 +1180,13 @@ export async function explainLine(
 }
 
 /**
- * A line's public explanation: its verdict, which the first command the
- * gate refuses gives it (in the order the gate reads them), or the first
- * it asks about when an approval lets every one run, and its parse tree,
- * with every command's explanation where the command stands. Every
- * scope a command reads its words in (the typed line, a `$( )` body, a
+ * A line's public explanation: its verdict and its parse tree, with every
+ * command's explanation where the command stands. The verdict is the
+ * first command, in the order the gate reads them, whose refusal holds
+ * the whole line (`holds`), as the run reports it; a line nothing holds
+ * runs, carrying the first ask an approval lets through. A command
+ * refused only where it stands keeps its refusal to its own node, since
+ * the rest of the line still runs. Every scope a command reads its words in (the typed line, a `$( )` body, a
  * `bash -c` string) is parsed on its own with `reparse`, as the nested
  * line will be; a judgment is placed on the command at its span in that
  * scope, and a nested scope under the command holding it. Mirrors the
@@ -1208,24 +1210,27 @@ export function explainedLine(
   }
   const root = scopes.find((s) => s.parent === null) ?? { parent: null, source: line, judged: [] }
   const node = scopeNode('line', root, scopes, runtimeOf, reparse)
-  const decider =
-    judged.find((one) => one.judgment.exitCode !== 0) ??
-    judged.find((one) => verdictOf(one.judgment)[0] === Outcome.ASK)
-  if (decider === undefined) {
+  const held = judged.find((one) => one.judgment.exitCode !== 0 && isVerdict(one.judgment))
+  if (held !== undefined) {
+    const judgment = held.judgment
+    const [outcome, reason, source] = verdictOf(judgment)
     return {
       line,
       node,
-      outcome: Outcome.ALLOW,
-      reason: '',
-      source: '',
+      outcome,
+      reason,
+      source,
       answers: [],
-      refusal: null,
-      exitCode: 0,
-      stderr: '',
+      refusal: judgment.refusal,
+      exitCode: judgment.exitCode,
+      stderr: judgment.stderr,
     }
   }
-  const judgment = decider.judgment
-  const [outcome, reason, source] = verdictOf(judgment)
+  const asked = judged.find(
+    (one) => one.judgment.exitCode === 0 && verdictOf(one.judgment)[0] === Outcome.ASK,
+  )
+  const [outcome, reason, source] =
+    asked === undefined ? [Outcome.ALLOW, '', ''] : verdictOf(asked.judgment)
   return {
     line,
     node,
@@ -1233,9 +1238,9 @@ export function explainedLine(
     reason,
     source,
     answers: [],
-    refusal: judgment.refusal,
-    exitCode: judgment.exitCode,
-    stderr: judgment.stderr,
+    refusal: null,
+    exitCode: 0,
+    stderr: '',
   }
 }
 
@@ -1256,8 +1261,11 @@ function sameAt(a: Occurrence | null, b: Occurrence | null): boolean {
 
 /**
  * A command's outcome, reason and source as its explanation states them:
- * the answer that decided, which a coded policy may give over the
- * document's own. Mirrors the Python `_verdict_of`.
+ * the refusal it meets (`ASK` for a question waiting on the host, `DENY`
+ * for any other, a policy that failed included), else the ask an approval
+ * lets through, else `DENY` for a word the allow list refuses. The reason
+ * and source are the deciding answer's, which a coded policy may give over
+ * the document's own. Mirrors the Python `_verdict_of`.
  */
 function verdictOf(judgment: Judgment): [Outcome, string, string] {
   const decider =
@@ -1272,9 +1280,10 @@ function verdictOf(judgment: Judgment): [Outcome, string, string] {
         : ''
   const refusal = judgment.refusal
   if (refusal !== null) {
-    return [refusal.kind === 'deny' ? Outcome.DENY : Outcome.ASK, refusal.reason, source]
+    return [refusal.kind === 'pending' ? Outcome.ASK : Outcome.DENY, refusal.reason, source]
   }
   if (decider?.kind === 'ask') return [Outcome.ASK, decider.reason, source]
+  if (judgment.exitCode !== 0) return [Outcome.DENY, '', source]
   return [Outcome.ALLOW, '', source]
 }
 
@@ -1354,6 +1363,8 @@ function commandOf(
     type: 'command',
     command: judgment.command,
     argv: judgment.argv,
+    exitCode: judgment.exitCode,
+    stderr: judgment.stderr,
     outcome,
     reason,
     source,

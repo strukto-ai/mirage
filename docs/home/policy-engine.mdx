@@ -241,8 +241,9 @@ Scripts come in two jobs, and each job runs one way:
 ## Dry runs
 
 `session.explain` runs a session's doors as a dry run under the same
-names. `session.explain.shell(line)` gives the line with the exact
-`exit_code` and `stderr` the agent would see, every answer at
+names. `session.explain.shell(line)` gives whether the line runs (a
+line refused whole with the exact `exit_code` and `stderr` the agent
+would see), every answer at
 `pre_execute` (`answers`) and its parse tree, each command in it with
 every policy's answer to it (`pre_command`) and the runtime that would
 serve it (`runtime`). `session.explain.vfs.<call>(...)` walks the real

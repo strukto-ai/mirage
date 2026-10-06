@@ -886,6 +886,9 @@ class CommandExplanation(Explanation):
             command (``pre_command``).
         command (str): the program, as the gate read it.
         argv (tuple[str, ...]): the words after it.
+        exit_code (int): what the command would exit with where it
+            stands, 0 to run.
+        stderr (str): what the agent would read from it, empty to run.
         runtime (str): the runtime entry that would run it, empty when
             the workspace runs it itself.
         operands (tuple[ShellOperand, ...]): its path arguments,
@@ -901,6 +904,8 @@ class CommandExplanation(Explanation):
     answers: "tuple[Deny | Ask, ...]" = ()
     command: str
     argv: tuple[str, ...] = ()
+    exit_code: int = 0
+    stderr: str = ""
     runtime: str = ""
     operands: tuple[ShellOperand, ...] = ()
     text: str = ""
@@ -912,12 +917,14 @@ class ShellExplanation(Explanation):
     """A line, explained: what the agent would read, where the line
     would run (its ``pre_execute`` answers) and every command in it.
 
-    The verdict is the one the line's result carries: the first command
-    the gate refuses, in the order it reads them, or the placement's
-    refusal; an allowed line exits 0, and one an approval lets run
-    carries the ask it covers. ``exit_code`` and ``stderr`` come
-    out of the one outcome table, so a refused line's explanation is
-    byte-identical to the refusal.
+    The verdict is whether the line runs at all: a rule's refusal, or a
+    question still waiting on the host, refuses the whole line before
+    any of it runs, as does a placement's refusal; the first in the
+    order the gate reads them is the line's, byte-identical to the
+    refusal the run reports. A line that runs exits 0 here, and one an
+    approval lets run carries the ask it covers. A command refused
+    where it stands while the rest of the line runs (a word the session
+    cannot see, a policy refusing one operand) says so on its own node.
 
     Args:
         answers (tuple[Deny | Route, ...]): every policy's answer to
@@ -925,8 +932,9 @@ class ShellExplanation(Explanation):
             first; empty when nothing places it or a command refuses it
             first.
         line (str): the line as given.
-        exit_code (int): what the line would exit with, 0 to run.
-        stderr (str): what the agent would read, empty to run.
+        exit_code (int): what the line is refused with, 0 when it runs.
+        stderr (str): what the agent would read then, empty when it
+            runs.
         node (ShellNode): the parsed line, of type ``line``.
     """
 

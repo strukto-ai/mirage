@@ -172,6 +172,7 @@ interface ExplainedNode {
   type: string
   text: string
   outcome?: string
+  exit_code?: number
   reason?: string
   source?: string
   runtime?: string
@@ -202,6 +203,8 @@ function explainedLines(node: ExplainedNode, depth: number, out: string[]): void
     out.push(`${pad}${node.type}: ${node.text}`)
   } else {
     let line = `${pad}${node.text}  [${node.outcome}`
+    if (node.exit_code !== undefined && node.exit_code !== 0)
+      line += `, exit ${String(node.exit_code)}`
     line += node.reason !== undefined && node.reason !== '' ? `: ${node.reason}]` : ']'
     if (node.source !== undefined && node.source !== '') line += `  ${node.source}`
     if (node.runtime !== undefined && node.runtime !== '') line += `  on ${node.runtime}`

@@ -117,6 +117,8 @@ export function explanationToDict(
     command: expl.command,
     argv: [...expl.argv],
     ...verdict,
+    exit_code: expl.exitCode,
+    stderr: expl.stderr,
     runtime: expl.runtime,
     operands: expl.operands.map((o) => ({ text: o.text, path: o.path, matched: o.matched })),
     children: expl.children.map(nodeToDict),

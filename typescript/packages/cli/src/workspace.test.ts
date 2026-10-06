@@ -148,11 +148,12 @@ describe('mirage workspace snapshot and load', () => {
   })
 })
 
-function command(text: string, outcome: string, reason = '') {
+function command(text: string, outcome: string, reason = '', exitCode = 0) {
   return {
     type: 'command',
     text,
     outcome,
+    exit_code: exitCode,
     reason,
     source: reason === '' ? '' : 'top',
     runtime: '',
@@ -162,7 +163,7 @@ function command(text: string, outcome: string, reason = '') {
 
 describe('mirage workspace explain', () => {
   it('prints the line as its tree', () => {
-    const cat = command('cat /data/keys/a', 'deny', 'sealed')
+    const cat = command('cat /data/keys/a', 'deny', 'sealed', 1)
     const echo = {
       ...command('echo $(cat /data/keys/a)', 'allow'),
       children: [{ type: 'substitution', text: 'cat /data/keys/a', children: [cat] }],
@@ -199,7 +200,7 @@ describe('mirage workspace explain', () => {
       '      wc -l  [allow]',
       '    echo $(cat /data/keys/a)  [allow]',
       '      substitution: cat /data/keys/a',
-      '        cat /data/keys/a  [deny: sealed]  top',
+      '        cat /data/keys/a  [deny, exit 1: sealed]  top',
     ])
   })
 })

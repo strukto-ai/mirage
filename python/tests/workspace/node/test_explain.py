@@ -247,6 +247,37 @@ async def test_explain_says_exactly_what_the_run_would_say(ws):
 
 
 @pytest.mark.asyncio
+async def test_only_a_verdict_refuses_the_whole_line(ws):
+    # A word the session cannot see fails where it stands and the rest
+    # of the line runs; a rule's refusal holds the whole line, whatever
+    # failed before it.
+    said = await ws.explain("gerp x; echo ok", "s")
+    ran = await ws.shell("gerp x; echo ok", session_id="s")
+    assert (ran.exit_code, said.outcome, said.exit_code) == (
+        0,
+        Outcome.ALLOW,
+        0,
+    )
+    gerp, _ = said.node.children
+    assert isinstance(gerp, CommandExplanation)
+    assert (gerp.outcome, gerp.exit_code, gerp.stderr, gerp.source) == (
+        Outcome.DENY,
+        127,
+        "gerp: command not found\n",
+        "commands.allow",
+    )
+    line = "gerp x; rm /data/prod/x.txt"
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert ran.refusal is not None and said.refusal is not None
+    assert (said.exit_code, said.stderr, said.refusal.reason) == (
+        ran.exit_code,
+        await ran.stderr_str(),
+        ran.refusal.reason,
+    )
+
+
+@pytest.mark.asyncio
 async def test_explain_spends_nothing(ws):
     # A dry run of an ask must not put the question to anyone, or the
     # host would field requests for lines nobody typed, and must not
@@ -1521,6 +1552,11 @@ class _DenyRm(Policy):
         return Deny("no") if ctx.command == "rm" else None
 
 
+class _Broken(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        raise RuntimeError("broken")
+
+
 @pytest.mark.asyncio
 async def test_explain_shows_every_policys_answer_in_chain_order():
     ws = Workspace(
@@ -1543,5 +1579,29 @@ async def test_explain_shows_every_policys_answer_in_chain_order():
             "no",
         )
         assert await Session(ws, None).explain.shell("rm /data/x") == said
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_policy_that_fails_explains_as_a_deny():
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[_Broken()]
+    )
+    try:
+        said = await ws.explain("echo hi")
+        ran = await ws.shell("echo hi")
+        [echo] = said.node.children
+        assert isinstance(echo, CommandExplanation)
+        assert said.refusal is not None and ran.refusal is not None
+        assert (said.outcome, echo.outcome, said.refusal.kind) == (
+            Outcome.DENY,
+            Outcome.DENY,
+            "failed",
+        )
+        assert (said.exit_code, said.stderr) == (
+            ran.exit_code,
+            await ran.stderr_str(),
+        )
     finally:
         await ws.close()

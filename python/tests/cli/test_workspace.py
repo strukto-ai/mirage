@@ -155,11 +155,14 @@ def test_load_with_a_key_takes_only_a_config(fake, tmp_path):
     assert _invoke("load", "--key", "a.tar", str(config), "x").exit_code == 2
 
 
-def _command(text: str, outcome: str, reason: str = "") -> dict[str, Any]:
+def _command(
+    text: str, outcome: str, reason: str = "", exit_code: int = 0
+) -> dict[str, Any]:
     return {
         "type": "command",
         "text": text,
         "outcome": outcome,
+        "exit_code": exit_code,
         "reason": reason,
         "source": "top" if reason else "",
         "runtime": "",
@@ -168,7 +171,7 @@ def _command(text: str, outcome: str, reason: str = "") -> dict[str, Any]:
 
 
 def test_explain_prints_the_line_as_its_tree():
-    cat = _command("cat /data/keys/a", "deny", "sealed")
+    cat = _command("cat /data/keys/a", "deny", "sealed", 1)
     echo = _command("echo $(cat /data/keys/a)", "allow")
     echo["children"] = [
         {"type": "substitution", "text": "cat /data/keys/a", "children": [cat]}
@@ -208,5 +211,5 @@ def test_explain_prints_the_line_as_its_tree():
         "      wc -l  [allow]",
         "    echo $(cat /data/keys/a)  [allow]",
         "      substitution: cat /data/keys/a",
-        "        cat /data/keys/a  [deny: sealed]  top",
+        "        cat /data/keys/a  [deny, exit 1: sealed]  top",
     ]

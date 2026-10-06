@@ -427,6 +427,8 @@ def _explained_lines(node: dict[str, Any], depth: int, out: list[str]) -> None:
         out.append(f"{pad}{node['type']}: {node['text']}")
     else:
         line = f"{pad}{node['text']}  [{node['outcome']}"
+        if node["exit_code"]:
+            line += f", exit {node['exit_code']}"
         line += f": {node['reason']}]" if node["reason"] else "]"
         if node["source"]:
             line += f"  {node['source']}"
