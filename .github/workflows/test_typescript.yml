@@ -265,6 +265,11 @@ jobs:
       # pins were the only thing between a published advisory and this
       # tree, and nothing re-checked them. Informational like the Python
       # audit: a fresh CVE reports without blocking a merge.
+      # GHSA-hp3w-g68c-fv3c has no patched sprintf-js release. The exact
+      # advisory is ignored in package.json: it comes through js-yaml 3's
+      # argparse CLI; our consumers (read-yaml-file and gray-matter) use
+      # its library entry, which never loads argparse or sprintf-js.
+      # Revisit the exception when an upstream fix is available.
       # The registry's quick-audit endpoint stalls for minutes at a time,
       # and pnpm's defaults (a 60s socket timeout, two retries) reported
       # that stall as a failed audit three runs out of four. A longer
