@@ -47,6 +47,3 @@ class FunctionTable(MutableMapping[str, FunctionBody]):
     def clear(self) -> None:
         self._entries.clear()
         _release_entries(self._leases)
-
-    def copy(self) -> "FunctionTable":
-        return FunctionTable(self)

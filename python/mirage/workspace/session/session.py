@@ -76,7 +76,8 @@ def copy_state(value: Any) -> Any:
         value (Any): the field value.
     """
     if isinstance(value, FunctionTable):
-        return value.copy()
+        # The fork's own table leases the bodies when it is built.
+        return dict(value)
     if isinstance(value, ShellVar):
         # The record is frozen, but an indexed or associative value is
         # a live container, so the copy has to reach inside it.
