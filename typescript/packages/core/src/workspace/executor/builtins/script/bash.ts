@@ -172,6 +172,9 @@ export async function handleBash(
   // A child shell is outside every function and `source` its caller is
   // inside: it runs on a call stack of its own, and `FUNCNAME` is empty.
   session.functionNames = []
+  session.localVars = null
+  session.localFrames = []
+  session.localRandom = []
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
   // A nested shell is its own process, with its own jobs: its `jobs` and
   // `wait` see only them, its EXIT action's included, and they are not its

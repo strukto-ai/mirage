@@ -52,6 +52,7 @@ from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.evaluation import (
     EvaluationContext,
+    child_context,
     reset_current_evaluation,
     set_current_evaluation,
 )
@@ -190,7 +191,7 @@ async def handle_background(
     """
     session = context.session
     release_program = retain_programs([left])
-    child_evaluation = context.fork()
+    child_evaluation = child_context(context)
     bg_session = child_evaluation.session
 
     def release_job(_: asyncio.Task[Any] | None = None) -> None:

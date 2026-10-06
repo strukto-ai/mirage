@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
+import { childContext, runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { releaseFunctions } from '../session/functions.ts'
 
@@ -173,7 +173,7 @@ export async function handleBackground(
 ): Promise<JobHandlerResult> {
   const session = context.session
   const releaseProgram = retainPrograms([left])
-  const childEvaluation = context.fork()
+  const childEvaluation = childContext(context)
   const bgSession = childEvaluation.session
   inheritExitTrap(bgSession)
   const output = session.jobOutput ?? session.tty.jobs

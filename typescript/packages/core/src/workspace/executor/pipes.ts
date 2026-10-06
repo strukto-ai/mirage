@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
+import { childContext, runWithEvaluation, type EvaluationContext } from '../evaluation.ts'
 import { releaseFunctions } from '../session/functions.ts'
 
 import type { ProcessHandle } from '../../process/handle.ts'
@@ -97,7 +97,8 @@ export async function handlePipe(
   let failed = false
   const tasks: Promise<void>[] = []
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
-    const childEvaluation = context.fork()
+    // Each segment is a child shell: bash forks one per stage.
+    const childEvaluation = childContext(context)
     const child = childEvaluation.session
     inheritExitTrap(child)
     child.terminalOutput = session.terminalOutput && i === commands.length - 1

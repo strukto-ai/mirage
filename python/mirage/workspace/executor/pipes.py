@@ -48,6 +48,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import (
     EvaluationContext,
+    child_context,
     reset_current_evaluation,
     set_current_evaluation,
 )
@@ -98,7 +99,8 @@ async def handle_pipe(
     ios: list[IOResult] = [IOResult() for _ in commands]
     child_nodes: list[ExecutionNode] = [ExecutionNode() for _ in commands]
 
-    children = [context.fork() for _ in commands]
+    # Each segment is a child shell: bash forks one per stage.
+    children = [child_context(context) for _ in commands]
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child_evaluation = children[i]

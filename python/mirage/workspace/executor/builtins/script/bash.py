@@ -181,6 +181,9 @@ async def handle_bash(
     # A child shell is outside every function and `source` its caller is
     # inside: it runs on a call stack of its own, and `FUNCNAME` is empty.
     session.function_names = ()
+    session._local_vars = None
+    session._local_frames = []
+    session._local_random = []
     for option, enable in parsed.settings:
         session.shell_options[option] = enable
     # A nested shell is a program of its own: the builtins it runs are
