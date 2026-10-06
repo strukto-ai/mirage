@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import regex
+from dulwich.object_store import BaseObjectStore
 from dulwich.objects import Commit, ObjectID, Tag
 from dulwich.refs import HEADREF, LOCAL_BRANCH_PREFIX, LOCAL_TAG_PREFIX
 from dulwich.repo import BaseRepo
@@ -37,6 +38,7 @@ from mirage.commands.cli.builtin.git.errors import (
     IncompatibleLogOptionsError,
     InvalidDecorateError,
     UnrecognizedArgumentError,
+    UsageError,
 )
 from mirage.commands.cli.builtin.git.format import (
     DEFAULT_DATE,
@@ -46,7 +48,7 @@ from mirage.commands.cli.builtin.git.format import (
     parse_pretty,
 )
 from mirage.commands.cli.builtin.git.mailmap import mapped_identity
-from mirage.commands.cli.builtin.git.pickaxe import touches
+from mirage.commands.cli.builtin.git.pickaxe import greps, touches
 from mirage.commands.cli.builtin.git.repo import config_values
 from mirage.commands.cli.builtin.git.types import (
     DateMode,
@@ -83,7 +85,10 @@ class LogFlags:
             to print; None when unlimited.
         oneline (bool): ``--oneline``, one abbreviated row per commit.
         reverse (bool): ``--reverse``, oldest first.
-        search (str | None): ``-S``, the pickaxe string.
+        search (str | re.Pattern[str] | None): ``-S``, the pickaxe
+            string, or its pattern under ``--pickaxe-regex``.
+        changed (re.Pattern[str] | None): ``-G``, the pattern an added or
+            removed line must match.
         since (float | None): ``--since`` as an epoch second.
         until (float | None): ``--until`` as an epoch second.
         authors (tuple[re.Pattern[str], ...]): author patterns, ORed together.
@@ -115,7 +120,7 @@ class LogFlags:
     max_count: int | None
     oneline: bool
     reverse: bool
-    search: str | None
+    search: str | re.Pattern[str] | None
     since: float | None
     until: float | None
     authors: tuple[re.Pattern[str], ...] = ()
@@ -128,6 +133,7 @@ class LogFlags:
     decorate: Decoration = Decoration.NONE
     all_refs: bool = False
     pretty: LogFormat = MEDIUM
+    changed: re.Pattern[str] | None = None
     abbrev_commit: bool = False
 
     min_parents: int | None = None
@@ -250,6 +256,25 @@ def _pattern(
         raise GitError(f"{origin}, '{value}': {exc}") from exc
 
 
+def _pickaxe_pattern(value: str, ignore_case: bool) -> re.Pattern[str]:
+    """A ``-G`` or ``--pickaxe-regex`` pattern, compiled as git's
+    diffcore-pickaxe compiles it: POSIX extended whatever -E, -F or -P
+    say, ``-i`` folding case, and matched one line at a time
+    (REG_NEWLINE).
+
+    Args:
+        value (str): the pattern as typed.
+        ignore_case (bool): ``-i``/``--regexp-ignore-case``.
+    """
+    flags = re.IGNORECASE if ignore_case else 0
+    try:
+        return compile_posix_regex(
+            translate_ere(value, PosixSyntax.EXTENDED)[0], flags
+        )
+    except (BreError, re.error) as exc:
+        raise GitError(f"invalid regex: {exc}") from exc
+
+
 def parse_flags(
     fl: FlagView, env: Mapping[str, str] | None = None
 ) -> LogFlags:
@@ -287,6 +312,17 @@ def parse_flags(
         for values in fl.as_list("grep")
         for value in values.split("\n")
     )
+    search: str | re.Pattern[str] | None = fl.as_str("S")
+    changed = fl.as_str("G")
+    for option, value in (("-S", search), ("-G", changed)):
+        if value == "":
+            raise UsageError(
+                "", f"error: {option} requires a non-empty argument\n"
+            )
+    if search is not None and changed is not None:
+        raise IncompatibleLogOptionsError("-G", "-S", "--find-object")
+    if isinstance(search, str) and fl.as_bool("pickaxe_regex"):
+        search = _pickaxe_pattern(search, ignore_case)
     max_count = fl.as_int("max_count")
     return LogFlags(
         authors=authors,
@@ -303,7 +339,10 @@ def parse_flags(
         first_parent=fl.as_bool("first_parent"),
         oneline=oneline,
         reverse=fl.as_bool("reverse"),
-        search=fl.as_str("S"),
+        search=search,
+        changed=None
+        if changed is None
+        else _pickaxe_pattern(changed, ignore_case),
         since=_timestamp(fl.as_str("after") or fl.as_str("since"), "--since"),
         until=_timestamp(fl.as_str("before") or fl.as_str("until"), "--until"),
         all_refs=fl.as_bool("all"),
@@ -746,6 +785,24 @@ def _filters_pass(commit: Commit, flags: LogFlags) -> bool:
     )
 
 
+def _picked(store: BaseObjectStore, commit: Commit, flags: LogFlags) -> bool:
+    """Whether the pickaxe, if any, keeps a commit: ``-G``'s changed
+    line, or ``-S``'s change in the count of a string or pattern.
+
+    Args:
+        store (BaseObjectStore): object database holding the trees.
+        commit (Commit): the commit.
+        flags (LogFlags): the parsed invocation.
+    """
+    if flags.changed is not None:
+        return greps(store, commit, flags.changed)
+    if flags.search is None:
+        return True
+    if isinstance(flags.search, str):
+        return touches(store, commit, flags.search.encode(), flags.ignore_case)
+    return touches(store, commit, flags.search)
+
+
 def walked(
     repo: BaseRepo,
     starts: list[Commit],
@@ -775,7 +832,6 @@ def walked(
             left out, the ``A`` of ``A..B``.
     """
     store = repo.object_store
-    needle = flags.search.encode() if flags.search is not None else None
     if flags.max_count == 0:
         return Walk((), frozenset())
     source: Iterator[Commit] = (
@@ -795,9 +851,7 @@ def walked(
     for commit in source:
         if not _filters_pass(commit, flags):
             continue
-        shown = needle is None or touches(
-            store, commit, needle, flags.ignore_case
-        )
+        shown = _picked(store, commit, flags)
         steps.append(WalkStep(commit, shown))
         printed += shown
         if flags.max_count is not None and printed >= flags.max_count:

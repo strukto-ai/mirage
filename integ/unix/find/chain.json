@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "find_or_among_tests_runs_the_action_chain",
+      "seq": 16100271,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fchain && printf '# t\\n' > /data/fchain/a.md && printf '{}\\n' > /data/fchain/b.json && printf x > /data/fchain/c.txt && find /data/fchain -type f \\( -iname '*.md' -o -iname '*.JSON' \\) -print -exec echo found {} \\;; rm -rf /data/fchain",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fchain/a.md\nfound /data/fchain/a.md\n/data/fchain/b.json\nfound /data/fchain/b.json\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -25,6 +25,7 @@ import {
   INTERPRETER_NAMES,
   KEYWORDS,
   NAMESPACE_COMMANDS,
+  ROUTED_COMMANDS,
   SHELL_NAMES,
   SHELL_ONLY_BUILTINS,
 } from './constants.ts'
@@ -155,7 +156,7 @@ function* layers(
     found = true
     yield Consumer.EXTERNAL
   }
-  if (installed && registry.mountForCommand(name) !== null) {
+  if (installed && (ROUTED_COMMANDS.has(name) || registry.mountForCommand(name) !== null)) {
     found = true
     yield Consumer.MOUNT
   }
@@ -331,7 +332,12 @@ export function programNote(
  * would take cannot be listed, since that capture takes any word.
  */
 export function programs(session: SessionState, registry: MountRegistry): string[] {
-  const names = new Set<string>([...SHELL_NAMES, ...NAMESPACE_COMMANDS, ...registry.clis.names()])
+  const names = new Set<string>([
+    ...SHELL_NAMES,
+    ...NAMESPACE_COMMANDS,
+    ...ROUTED_COMMANDS,
+    ...registry.clis.names(),
+  ])
   for (const entry of registry.runtimeEntries) {
     for (const capture of entry.captures) if (capture !== EXTERNAL_COMMANDS) names.add(capture)
   }

@@ -31,7 +31,10 @@ import { abortable, mergeSignals } from '../abort.ts'
 import type { SessionView } from '../../ops/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
-import type { ProcessInfo, ProcessView } from '../../process/types.ts'
+import type { ProcessInfo, ProcessState, ProcessView } from '../../process/types.ts'
+import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
+import { gnuStrftime } from '../../commands/builtin/utils/strftime.ts'
+import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
 import type { SessionState } from '../session/session.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
 import { scanOptions } from './builtins/getopt.ts'
@@ -899,14 +902,123 @@ const PS_USAGE =
   ' for additional help text.\n\n' +
   'For more details see ps(1).\n'
 
-// The -o columns a managed runner can answer, as procps-ng 4.0.4 lays them
-// out: header, width, right-aligned. The last column is never padded.
-const PS_COLUMNS: Readonly<Record<string, readonly [string, number, boolean]>> = {
-  pid: ['PID', 7, true],
-  ppid: ['PPID', 7, true],
-  cmd: ['CMD', 27, false],
-  args: ['COMMAND', 27, false],
-  comm: ['COMMAND', 15, false],
+// procps-ng 4.0.4's -o keys: header, width, right alignment and the fact
+// `psCell` renders; accounting a runner lacks prints procps's none.
+const PS_COLUMNS: Readonly<Record<string, readonly [string, number, boolean, string]>> = {
+  pid: ['PID', 7, true, 'pid'],
+  tgid: ['TGID', 7, true, 'pid'],
+  lwp: ['LWP', 7, true, 'pid'],
+  spid: ['SPID', 7, true, 'pid'],
+  tid: ['TID', 7, true, 'pid'],
+  ppid: ['PPID', 7, true, 'ppid'],
+  pgid: ['PGID', 7, true, 'pgid'],
+  pgrp: ['PGRP', 7, true, 'pgid'],
+  sid: ['SID', 7, true, 'sid'],
+  sess: ['SESS', 7, true, 'sid'],
+  tpgid: ['TPGID', 7, true, 'tpgid'],
+  stat: ['STAT', 4, false, 'stat'],
+  state: ['S', 1, false, 'state'],
+  s: ['S', 1, false, 'state'],
+  cmd: ['CMD', 27, false, 'args'],
+  args: ['COMMAND', 27, false, 'args'],
+  command: ['COMMAND', 27, false, 'args'],
+  comm: ['COMMAND', 15, false, 'comm'],
+  ucmd: ['CMD', 15, false, 'comm'],
+  ucomm: ['COMMAND', 15, false, 'comm'],
+  user: ['USER', 8, false, 'user'],
+  euser: ['EUSER', 8, false, 'user'],
+  uname: ['USER', 8, false, 'user'],
+  ruser: ['RUSER', 8, false, 'user'],
+  suser: ['SUSER', 8, false, 'user'],
+  fuser: ['FUSER', 8, false, 'user'],
+  uid: ['UID', 5, true, 'user'],
+  euid: ['EUID', 5, true, 'user'],
+  ruid: ['RUID', 5, true, 'user'],
+  suid: ['SUID', 5, true, 'user'],
+  fuid: ['FUID', 5, true, 'user'],
+  gid: ['GID', 5, true, 'group'],
+  egid: ['EGID', 5, true, 'group'],
+  rgid: ['RGID', 5, true, 'group'],
+  group: ['GROUP', 8, false, 'group'],
+  egroup: ['EGROUP', 8, false, 'group'],
+  rgroup: ['RGROUP', 8, false, 'group'],
+  tty: ['TT', 8, false, 'tty'],
+  tt: ['TT', 8, false, 'tty'],
+  tname: ['TTY', 8, false, 'tty'],
+  time: ['TIME', 8, true, 'time'],
+  cputime: ['TIME', 8, true, 'time'],
+  cputimes: ['TIME', 8, true, 'zero'],
+  etime: ['ELAPSED', 11, true, 'etime'],
+  etimes: ['ELAPSED', 7, true, 'etimes'],
+  lstart: ['STARTED', 24, true, 'lstart'],
+  start: ['STARTED', 8, true, 'start'],
+  start_time: ['START', 5, false, 'stime'],
+  stime: ['STIME', 5, false, 'stime'],
+  bsdstart: ['START', 6, true, 'bsdstart'],
+  rss: ['RSS', 5, true, 'zero'],
+  rssize: ['RSS', 5, true, 'zero'],
+  rsz: ['RSZ', 5, true, 'zero'],
+  vsz: ['VSZ', 6, true, 'zero'],
+  vsize: ['VSZ', 6, true, 'zero'],
+  sz: ['SZ', 5, true, 'zero'],
+  trs: ['TRS', 4, true, 'zero'],
+  drs: ['DRS', 5, true, 'zero'],
+  dsiz: ['DSIZ', 4, true, 'zero'],
+  size: ['SIZE', 5, true, 'zero'],
+  pss: ['PSS', 5, true, 'zero'],
+  uss: ['USS', 5, true, 'zero'],
+  maj_flt: ['MAJFL', 6, true, 'zero'],
+  min_flt: ['MINFL', 6, true, 'zero'],
+  majflt: ['MAJFLT', 6, true, 'zero'],
+  minflt: ['MINFLT', 6, true, 'zero'],
+  '%cpu': ['%CPU', 4, true, 'percent'],
+  pcpu: ['%CPU', 4, true, 'percent'],
+  '%mem': ['%MEM', 4, true, 'percent'],
+  pmem: ['%MEM', 4, true, 'percent'],
+  c: ['C', 2, true, 'zero'],
+  cp: ['CP', 3, true, 'zero'],
+  ni: ['NI', 3, true, 'zero'],
+  nice: ['NI', 3, true, 'zero'],
+  pri: ['PRI', 3, true, 'pri'],
+  priority: ['PRI', 3, true, 'priority'],
+  opri: ['PRI', 3, true, 'opri'],
+  rtprio: ['RTPRIO', 6, true, 'dash'],
+  cls: ['CLS', 3, true, 'cls'],
+  class: ['CLS', 3, false, 'cls'],
+  policy: ['POL', 3, false, 'cls'],
+  psr: ['PSR', 3, true, 'zero'],
+  nlwp: ['NLWP', 4, true, 'one'],
+  thcount: ['THCNT', 5, true, 'one'],
+  f: ['F', 1, false, 'zero'],
+  flag: ['F', 1, false, 'zero'],
+  flags: ['F', 1, false, 'zero'],
+  wchan: ['WCHAN', 6, false, 'dash'],
+  nwchan: ['WCHAN', 6, true, 'dash'],
+  label: ['LABEL', 31, false, 'dash'],
+}
+
+// The fixed answers for a runner: what procps prints for a process on no
+// terminal, never scheduled away from the default policy and priority.
+const PS_FIXED: Readonly<Record<string, string>> = {
+  tpgid: '-1',
+  tty: '?',
+  time: '00:00:00',
+  zero: '0',
+  one: '1',
+  percent: '0.0',
+  pri: '19',
+  priority: '20',
+  opri: '80',
+  dash: '-',
+  cls: 'TS',
+}
+
+// A runner's state letter: live, being cancelled (still unwinding), or exited
+// and not yet reaped.
+const PS_STATES: Readonly<Record<ProcessState, string>> = {
+  running: 'R',
+  stopping: 'R',
+  exited: 'Z',
 }
 
 // Letters that select every process: SysV -e/-A/-a/-x, BSD a/x.
@@ -998,7 +1110,7 @@ function parsePs(words: string[]): PsOptions {
 function psRow(keys: readonly string[], cells: readonly string[]): string {
   return keys
     .map((key, at) => {
-      const [, width, right] = PS_COLUMNS[key] ?? ['', 0, false]
+      const [, width, right] = PS_COLUMNS[key] ?? ['', 0, false, '']
       const cell = cells[at] ?? ''
       if (right) return cell.padStart(width)
       return at === keys.length - 1 ? cell : cell.padEnd(width)
@@ -1006,14 +1118,84 @@ function psRow(keys: readonly string[], cells: readonly string[]): string {
     .join(' ')
 }
 
-/** One -o cell for a managed runner. */
-function psCell(key: string, info: ProcessInfo): string {
-  if (key === 'pid') return String(info.pid)
-  if (key === 'ppid') return String(info.parentPid ?? 0)
-  if (key === 'comm') {
+/**
+ * What every row of one ps line reads besides its runner: the moment ps runs
+ * (epoch seconds), the zone times print in (the session's TZ), the workspace
+ * user who owns every runner, the session's profile as their group, and the
+ * calling session with its `$$`.
+ */
+interface PsContext {
+  now: number
+  zone: Zone
+  user: string | null
+  group: string | null
+  sessionId: string
+  shellPid: number | null
+}
+
+/** procps's etime: `[[DD-]hh:]mm:ss`. */
+function elapsed(seconds: number): string {
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+  const two = (n: number): string => String(n).padStart(2, '0')
+  if (days > 0) return `${String(days)}-${two(hours)}:${two(minutes)}:${two(secs)}`
+  if (hours > 0) return `${two(hours)}:${two(minutes)}:${two(secs)}`
+  return `${two(minutes)}:${two(secs)}`
+}
+
+/**
+ * One start-time column, procps's pr_lstart, pr_start, pr_stime or
+ * pr_bsdstart: a day-old start prints its date, a recent one its clock.
+ */
+function started(fact: string, info: ProcessInfo, ctx: PsContext): string {
+  const start = new Date(info.startedAt * 1000)
+  if (fact === 'lstart') return gnuStrftime(start, '%a %b %e %H:%M:%S %Y', ctx.zone)
+  const old = ctx.now - info.startedAt > 86400
+  if (fact === 'start') return gnuStrftime(start, old ? '  %b %d' : '%H:%M:%S', ctx.zone)
+  if (fact === 'bsdstart') return gnuStrftime(start, old ? '%b %e' : '%H:%M', ctx.zone)
+  const now = ctx.zone.parts(new Date(ctx.now * 1000))
+  const then = ctx.zone.parts(start)
+  if (now.year !== then.year) return gnuStrftime(start, '%Y', ctx.zone)
+  if (now.month !== then.month || now.day !== then.day) {
+    return gnuStrftime(start, '%b%d', ctx.zone)
+  }
+  return gnuStrftime(start, '%H:%M', ctx.zone)
+}
+
+/**
+ * One -o cell for a managed runner. The owner columns print the workspace user
+ * and the session's profile, names in the id columns too, as `id` does, and
+ * `-` where nobody claimed one or the runner is another session's, whose
+ * profile this one cannot name. A runner of the calling session belongs to the
+ * session `$$` leads; another session's to its own group.
+ */
+function psCell(key: string, info: ProcessInfo, ctx: PsContext): string {
+  const fact = PS_COLUMNS[key]?.[3] ?? ''
+  const fixed = PS_FIXED[fact]
+  if (fixed !== undefined) return fixed
+  const session =
+    info.sessionId === ctx.sessionId && ctx.shellPid !== null
+      ? ctx.shellPid
+      : info.groupId || info.pid
+  if (fact === 'pid') return String(info.pid)
+  if (fact === 'ppid') return String(info.parentPid ?? 0)
+  if (fact === 'pgid') return String(info.groupId || info.pid)
+  if (fact === 'sid') return String(session)
+  if (fact === 'stat' || fact === 'state') {
+    return PS_STATES[info.state] + (fact === 'stat' && info.pid === session ? 's' : '')
+  }
+  if (fact === 'comm') {
     const head = info.command.split(/\s+/).find((w) => w !== '') ?? ''
     return (head.split('/').pop() ?? '').slice(0, 15)
   }
+  if (fact === 'user') return ctx.user ?? UNKNOWN_NAME
+  if (fact === 'group') return (info.sessionId === ctx.sessionId ? ctx.group : null) ?? UNKNOWN_NAME
+  const age = Math.max(0, Math.floor(ctx.now - info.startedAt))
+  if (fact === 'etime') return elapsed(age)
+  if (fact === 'etimes') return String(age)
+  if (['lstart', 'start', 'stime', 'bsdstart'].includes(fact)) return started(fact, info, ctx)
   return info.command
 }
 
@@ -1021,8 +1203,8 @@ function psCell(key: string, info: ProcessInfo): string {
  * List managed runners with procps's selection and `-o` columns. A runner
  * has no CPU, RSS or TTY accounting, so without `-o` the rows stay mirage's
  * compact `PID<TAB>COMMAND` and never broaden the profile's view. `-o` lays
- * out the columns a runner can answer the way procps-ng 4.0.4 does; a
- * header row prints unless every header is empty. Selecting nothing (`-p`
+ * out procps-ng 4.0.4's columns, every key a runner can answer (PS_COLUMNS);
+ * a header row prints unless every header is empty. Selecting nothing (`-p`
  * of an absent PID) exits 1, as procps does, and an option error is
  * procps's message and usage.
  */
@@ -1031,6 +1213,7 @@ export function handlePs(
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
+  user: string | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')
   let options: PsOptions
@@ -1045,10 +1228,18 @@ export function handlePs(
   let lines: string[]
   if (options.columns.length > 0) {
     const keys = options.columns.map(([key]) => key)
+    const ctx: PsContext = {
+      now: Date.now() / 1000,
+      zone: (session !== null ? zoneFromEnv(session.env) : null) ?? LOCAL_ZONE,
+      user,
+      group: session?.profile ?? null,
+      sessionId: sessionOf(session),
+      shellPid: session?.shellPid ?? null,
+    }
     lines = processes.map((info) =>
       psRow(
         keys,
-        keys.map((key) => psCell(key, info)),
+        keys.map((key) => psCell(key, info, ctx)),
       ),
     )
     if (options.columns.some(([, header]) => header !== ''))

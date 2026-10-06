@@ -14,6 +14,7 @@
 
 from mirage.commands.cli.builtin.git.add import add
 from mirage.commands.cli.builtin.git.branch import branch, branch_read_only
+from mirage.commands.cli.builtin.git.cat_file import cat_file
 from mirage.commands.cli.builtin.git.checkout import (
     checkout,
     checkout_read_only,
@@ -25,6 +26,10 @@ from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.fetch import fetch, fetch_read_only
 from mirage.commands.cli.builtin.git.for_each_ref import for_each_ref
 from mirage.commands.cli.builtin.git.fsck import fsck
+from mirage.commands.cli.builtin.git.hash_object import (
+    hash_object,
+    hash_object_read_only,
+)
 from mirage.commands.cli.builtin.git.init import init
 from mirage.commands.cli.builtin.git.inspect import (
     config,
@@ -285,6 +290,16 @@ LOG_OPTIONS = (
         type="str",
         description="Show commits that change the number of occurrences "
         "of the string",
+    ),
+    Option(
+        short="-G",
+        type="str",
+        description="Show commits whose diff adds or removes a line that "
+        "matches the extended regular expression",
+    ),
+    Option(
+        long="--pickaxe-regex",
+        description="Treat the -S string as an extended regular expression",
     ),
     Option(
         long="--since",
@@ -717,6 +732,72 @@ GIT = CLISpec(
             description="List references with a format",
             options=FOR_EACH_REF_OPTIONS,
             rest=REVISION,
+        ),
+        CLISpec(
+            name="cat-file",
+            fn=verb(cat_file),
+            description="Provide contents or details of repository objects",
+            options=(
+                Option(short="-t", description="Show the object type"),
+                Option(short="-s", description="Show the object size"),
+                Option(
+                    short="-e",
+                    description="Check if <object> exists",
+                ),
+                Option(
+                    short="-p",
+                    description="Pretty-print <object> content",
+                ),
+                Option(
+                    long="--batch",
+                    type="str",
+                    value_optional=True,
+                    description="Show full <object> or <rev> contents",
+                ),
+                Option(
+                    long="--batch-check",
+                    type="str",
+                    value_optional=True,
+                    description="Like --batch, but don't emit <contents>",
+                ),
+            ),
+            rest=REVISION,
+        ),
+        CLISpec(
+            name="hash-object",
+            fn=verb(hash_object, hash_object_read_only),
+            description="Compute object ID and optionally create an object "
+            "from a file",
+            options=(
+                Option(short="-t", type="str", description="Object type"),
+                Option(
+                    short="-w",
+                    description="Write the object into the object database",
+                ),
+                Option(
+                    long="--stdin",
+                    description="Read the object from stdin",
+                ),
+                Option(
+                    long="--stdin-paths",
+                    description="Read file names from stdin",
+                ),
+                Option(
+                    long="--no-filters",
+                    description="Store file as is without filters",
+                ),
+                Option(
+                    long="--literally",
+                    description="Just hash any random garbage to create "
+                    "corrupt objects for debugging Git",
+                ),
+                Option(
+                    long="--path",
+                    type="str",
+                    description="Process file as it were from this path",
+                ),
+            ),
+            rest=PATHSPEC,
         ),
         CLISpec(
             name="ls-files",

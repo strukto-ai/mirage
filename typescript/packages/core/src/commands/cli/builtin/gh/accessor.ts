@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { HttpGitHubTransport, type GitHubTransport } from '../../../../core/github/client.ts'
+import {
+  GITHUB_API_BASE,
+  HttpGitHubTransport,
+  type GitHubTransport,
+} from '../../../../core/github/client.ts'
 import type { GhConfig } from '../../../../core/github/config.ts'
 import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'
 import { jqRaised, jqRun, type JqRun } from '../../../../core/jq/index.ts'
@@ -44,13 +48,26 @@ export function ghTransport(config: unknown): GitHubTransport {
  * in gh's words (pinned against gh 2.85.0) rather than asking its own host for
  * a repository of the same name.
  */
-function checkHost(config: unknown, host: string | null): void {
+export function checkHost(config: unknown, host: string | null): void {
   if (host === null) return
   const name = host.toLowerCase()
   if (name === GITHUB_HOST || name.endsWith(`.${GITHUB_HOST}`)) return
   const base = (config as GhConfig).baseUrl
   if (base !== undefined && URL.canParse(base) && new URL(base).hostname === name) return
   throw new Error(`error connecting to ${name}\n${CONNECT_HINT}`)
+}
+
+/**
+ * The origin the install's GitHub serves its pages and git from: github.com
+ * for GitHub's own API, else the API host's own origin, as a GitHub Enterprise
+ * server and a local stand-in serve them.
+ */
+export function webOrigin(config: GhConfig): string {
+  const base = config.baseUrl
+  if (base === undefined || base.replace(/\/+$/, '') === GITHUB_API_BASE) {
+    return `https://${GITHUB_HOST}`
+  }
+  return new URL(base).origin
 }
 
 /**

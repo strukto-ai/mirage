@@ -70,7 +70,9 @@ async def test_ssh_shares_one_connection_and_closes_it_once(monkeypatch):
         return client
 
     conn = Mock(
-        start_sftp_client=AsyncMock(side_effect=start), wait_closed=AsyncMock()
+        start_sftp_client=AsyncMock(side_effect=start),
+        wait_closed=AsyncMock(),
+        is_closed=Mock(return_value=False),
     )
     connect = AsyncMock(return_value=conn)
     monkeypatch.setattr("mirage.accessor.ssh.asyncssh.connect", connect)
@@ -84,6 +86,29 @@ async def test_ssh_shares_one_connection_and_closes_it_once(monkeypatch):
     connect.assert_awaited_once()
     conn.close.assert_called_once()
     conn.wait_closed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ssh_reconnects_after_the_connection_ends(monkeypatch):
+    # The server or the network ending the connection leaves its SFTP
+    # channel dead; the next call connects afresh. Mirrors the
+    # TypeScript accessor's `close` listener.
+    dead, fresh = Mock(), Mock()
+    old = Mock(
+        start_sftp_client=AsyncMock(return_value=dead),
+        is_closed=Mock(return_value=False),
+    )
+    new = Mock(
+        start_sftp_client=AsyncMock(return_value=fresh),
+        is_closed=Mock(return_value=False),
+    )
+    connect = AsyncMock(side_effect=[old, new])
+    monkeypatch.setattr("mirage.accessor.ssh.asyncssh.connect", connect)
+    accessor = SSHAccessor(SSHConfig(host="unused"))
+    assert await accessor.sftp() is dead
+    old.is_closed.return_value = True
+    assert await accessor.sftp() is fresh
+    assert connect.await_count == 2
 
 
 @pytest.mark.asyncio

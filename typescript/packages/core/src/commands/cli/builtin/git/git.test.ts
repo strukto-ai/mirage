@@ -279,6 +279,15 @@ describe('git log', () => {
   })
 })
 
+it('peels a tag to what it tags under cat-file <type> <object>', async () => {
+  const result = await ws.shell(
+    'cd /repo && git tag -a v1 -m release && git cat-file -t v1 && ' +
+      'git cat-file commit v1 | git hash-object -t commit --stdin && ' +
+      'git cat-file tree v1 | git hash-object -t tree --stdin; git tag -d v1 > /dev/null',
+  )
+  expect(DEC.decode(result.stdout)).toBe(`tag\n${realGit(['rev-parse', 'HEAD', 'HEAD^{tree}'])}`)
+})
+
 describe('git show', () => {
   it('matches the real binary on the header block', async () => {
     const [, out] = await run('show HEAD')

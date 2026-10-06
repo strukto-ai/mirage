@@ -22,6 +22,7 @@ type AnyMock = Mock<(...args: never[]) => unknown>
 interface MockPool {
   query: AnyMock
   end: AnyMock
+  on: Mock<(event: string, listener: (err: Error) => void) => void>
   options: Record<string, unknown>
 }
 
@@ -33,6 +34,7 @@ const PoolCtor = vi.fn(function (options: Record<string, unknown>) {
       Promise.resolve({ rows: [{ x: 1 }], rowCount: 1 }),
     ),
     end: vi.fn(() => Promise.resolve()),
+    on: vi.fn(),
   }
   pools.push(pool)
   return pool
@@ -69,6 +71,16 @@ describe('PostgresStore', () => {
     expect(opts?.options).toBe('-c default_transaction_read_only=on')
   })
 
+  it('listens for an idle connection error, which would otherwise end the process', async () => {
+    const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
+    await store.query('SELECT 1')
+    const call = pools[0]?.on.mock.calls.find(([event]) => event === 'error')
+    expect(typeof call?.[1]).toBe('function')
+    expect(() => call?.[1](new Error('terminated'))).not.toThrow()
+    await store.query('SELECT 2')
+    expect(PoolCtor).toHaveBeenCalledTimes(1)
+  })
+
   it('forwards SQL and params to pg.Pool.query', async () => {
     const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
     const result = await store.query('SELECT $1::int AS x', [42])
@@ -95,6 +107,7 @@ describe('PostgresStore', () => {
         options,
         query: vi.fn(() => Promise.resolve({ rows: [{ db: 'acme' }], rowCount: 1 })),
         end: vi.fn(() => Promise.resolve()),
+        on: vi.fn(),
       }
       pools.push(pool)
       return pool

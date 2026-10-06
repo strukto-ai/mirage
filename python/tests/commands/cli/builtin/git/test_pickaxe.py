@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from pathlib import Path
 
+import pytest
 from dulwich import porcelain
 from dulwich.objects import Commit
 from dulwich.repo import Repo
 
-from mirage.commands.cli.builtin.git.pickaxe import touches
+from mirage.commands.cli.builtin.git.pickaxe import contains, touches
 from tests.commands.cli.builtin.git.conftest import AUTHOR, commit_file
 
 
@@ -96,3 +98,25 @@ def test_a_commit_touching_nothing_relevant_is_not_reported(repo_path):
     with Repo(str(repo_path)) as repo:
         second = commits_of(repo_path)[1]
         assert not touches(repo.object_store, second, b"absent-string")
+
+
+# git 2.47 on debian:stable-slim lists a commit under -S PATTERN
+# --pickaxe-regex when the count changes: a blank line counts, and ^ never
+# holds where a search resumes after an empty match, so a third blank line
+# in a row goes unseen.
+@pytest.mark.parametrize(
+    "old,new,pattern,listed",
+    [
+        ("a\n", "a\n\nb\n", "^$", True),
+        ("a\n\nb\n", "a\n\nc\n", "^$", False),
+        ("a\n\nc\n", "a\n\n\nc\n", "^$", False),
+        ("a\n\n\nc\n", "a\n\n\n\nc\n", "^$", True),
+        ("x", "", "$", True),
+        ("ab\nab\n", "ab\nab\nab", "^", False),
+        ("ab\nab\n", "ab\nab\nab", "$", True),
+        ("a\n\nc\n", "a\n\n\nc\n", "b*", True),
+    ],
+)
+def test_contains_counts_as_git_does(old, new, pattern, listed):
+    regex = re.compile(pattern)
+    assert (contains(old, regex) != contains(new, regex)) is listed

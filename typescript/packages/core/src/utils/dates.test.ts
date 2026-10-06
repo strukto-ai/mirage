@@ -127,11 +127,19 @@ describe('parseDateExpr', () => {
     )
   })
 
-  it('refuses a zone past a day, as GNU and Python do', () => {
-    for (const zone of ['+99:99', '+24:00', '+23:60']) {
-      expect(parseDateExpr(`2026-01-01T00:00${zone}`, UTC_ZONE)).toBeNull()
-    }
-    expect(parseDateExpr('2026-01-01T00:00+23:59', UTC_ZONE)).not.toBeNull()
+  // gnulib's time_zone_hhmm takes up to 24 hours either way, a minute field
+  // past 59 included; GNU refuses `+99:99` and `+24:01`.
+  it.each<[string, number | null]>([
+    ['+23:59', 1767139260],
+    ['+24:00', 1767139200],
+    ['+23:60', 1767139200],
+    ['-24:00', 1767312000],
+    ['+2400', 1767139200],
+    ['+99:99', null],
+    ['+24:01', null],
+  ])('reads the zone %s as GNU does', (zone, epoch) => {
+    const parsed = parseDateExpr(`2026-01-01T00:00${zone}`, UTC_ZONE)
+    expect(parsed === null ? null : parsed.getTime() / 1000).toBe(epoch)
   })
 
   it('truncates fractional seconds instead of rounding into the next second', () => {
@@ -146,8 +154,63 @@ describe('parseDateExpr', () => {
   it('returns null for anything it cannot parse', () => {
     expect(parseDateExpr('not a date', UTC_ZONE, NOW)).toBeNull()
     expect(parseDateExpr('24 hours agoo', UTC_ZONE, NOW)).toBeNull()
-    expect(parseDateExpr('', UTC_ZONE, NOW)).toBeNull()
     expect(parseDateExpr('@abc', UTC_ZONE, NOW)).toBeNull()
+  })
+
+  it('reads an empty expression as midnight today', () => {
+    const midnight = new Date(Date.UTC(2026, 7, 16))
+    expect(parseDateExpr('', UTC_ZONE, NOW)).toEqual(midnight)
+    expect(parseDateExpr('   ', UTC_ZONE, NOW)).toEqual(midnight)
+  })
+})
+
+// gnulib's parse-datetime grammar as coreutils 9.7 reads it, measured on
+// debian:stable-slim with the clock at 2026-10-06 09:32:40 UTC (faketime) and
+// the zone in TZ: null is GNU's `invalid date`. Mirrors test_gnu_grammar in
+// test_dates.py.
+describe('parseDateExpr grammar', () => {
+  const GNU_NOW = new Date(1791279160 * 1000)
+  it.each<[string, string, number | null]>([
+    ['Europe/Berlin', '2026-10-06 GMT', 1791244800],
+    ['UTC', '2026-10-06 09:32:40,5 +0100', 1791275560.5],
+    ['UTC', '2026-10-06 09:32 HKT', null],
+    ['UTC', '2026-10-06 09:32 EST DST', 1791293520],
+    ['UTC', '2026-10-06 09:00 UTC-1:30', 1791282600],
+    ['UTC', '2026-10-06 09:00 A', 1791273600],
+    ['UTC', '2026-10-06 09:00 T', 1791302400],
+    ['UTC', '2026-10-06 09:00 U.T.C.', 1791277200],
+    ['Europe/Berlin', '2026-10-06 9 a.m.', 1791270000],
+    ['UTC', '2026-10-06 9:30:15 PM', 1791322215],
+    ['UTC', 'JUN-17-1992', 708739200],
+    ['UTC', '10/06/69', -7516800],
+    ['UTC', 'monday', 1791763200],
+    ['UTC', 'next tuesday', 1791849600],
+    ['UTC', 'last tuesday', 1790640000],
+    ['UTC', 'third friday', 1792713600],
+    ['UTC', 'Wed,', 1791331200],
+    ['UTC', '3 days ago 10:00', 1791021600],
+    ['UTC', '1 year 2 months 3 days ago', 1827826360],
+    ['Europe/Berlin', '2 fortnights', 1793698360],
+    ['UTC', '2026-01-31 +1 month -1 day', 1772409600],
+    ['UTC', '20261006 0930', 1791279000],
+    ['UTC', '20261006 +2 days', 1791417600],
+    ['UTC', '2026', 1791318360],
+    ['UTC', '12345', null],
+    ['UTC', '10:00 -5 days', 1791385200],
+    ['UTC', '2026-10-06T0930', null],
+    ['UTC', '2026-10-06 T', null],
+    ['UTC', '2026-10-06 23:59:60', null],
+    ['UTC', 'noon', null],
+    ['UTC', 'monday tuesday', null],
+    ['UTC', '2026-10-06 10:00 UTC UTC', null],
+    ['UTC', '2026-10-06 (comment) 10:00', 1791280800],
+    ['Europe/Berlin', '2025-03-30 02:30', null],
+    ['Europe/Berlin', '2025-10-26 02:30', 1761442200],
+    ['UTC', '1969-12-31 23:00:00 -0100', 0],
+    ['Europe/Berlin', '', 1791237600],
+  ])('%s %s', (zone, text, epoch) => {
+    const parsed = parseDateExpr(text, zone === 'UTC' ? UTC_ZONE : resolveTz(zone), GNU_NOW)
+    expect(parsed === null ? null : parsed.getTime() / 1000).toBe(epoch)
   })
 })
 

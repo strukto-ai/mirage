@@ -1,6 +1,8 @@
 from urllib.parse import urlsplit
 
+from mirage.commands.cli.builtin.gh.accessor import web_origin
 from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import login
@@ -18,9 +20,7 @@ async def status(
     Args:
         inv (CLIInvocation[GhConfig]): configured GitHub invocation.
     """
-    host = urlsplit(inv.config.base_url or "https://github.com").hostname
-    if host == "api.github.com":
-        host = "github.com"
+    host = urlsplit(web_origin(inv.config)).hostname
     try:
         account = await login(inv.config)
     except GitHubApiError as exc:
@@ -41,3 +41,23 @@ async def status(
         "(Mirage configuration)\n  - Active account: true\n"
     )
     return text.encode(), IOResult()
+
+
+async def token(
+    inv: CLIInvocation[GhConfig],
+) -> tuple[bytes | None, IOResult]:
+    """``gh auth token``, refused: the token stays in Mirage
+    configuration, where every gh verb reads it, and is never printed.
+
+    Args:
+        inv (CLIInvocation[GhConfig]): configured GitHub invocation.
+    """
+    host = (
+        FlagView(inv.flags).as_str("hostname")
+        or urlsplit(web_origin(inv.config)).hostname
+    )
+    text = (
+        f"gh auth token: the token for {host} stays in Mirage "
+        "configuration and is never printed; gh commands use it directly\n"
+    )
+    return None, IOResult(exit_code=1, stderr=text.encode())

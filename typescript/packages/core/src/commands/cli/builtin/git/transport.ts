@@ -399,19 +399,21 @@ export function extraHeaders(values: readonly string[]): Record<string, string> 
  * `https://` and `http://` speak smart HTTP; a path, or a `file://` URL, is a
  * repository inside the workspace reached through the dispatcher. Anything
  * else names a remote helper mirage does not have, which git words the same
- * way.
+ * way. `scoped` is an Authorization for the URL's origin when it carries no
+ * userinfo, dropped with it on a redirect elsewhere.
  */
 export async function openTransport(
   url: string,
   start: PathSpec,
   doors: CLIDoors,
   headers: Record<string, string>,
+  scoped: Readonly<Record<string, string>> = {},
 ): Promise<Transport> {
   const scheme = REMOTE_HELPER.exec(url)
   const helper = scheme?.[1] ?? null
   if (helper === 'http' || helper === 'https') {
     const [bare, auth] = credentials(url)
-    return new HttpTransport(bare, headers, auth)
+    return new HttpTransport(bare, headers, Object.keys(auth).length > 0 ? auth : { ...scoped })
   }
   if (helper !== null && helper !== 'file')
     throw new GitError(`Unable to find remote helper for '${helper}'`)

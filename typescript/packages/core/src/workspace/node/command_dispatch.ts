@@ -74,6 +74,7 @@ import {
   handleChmod,
   handleChown,
   handleDf,
+  handleMount,
   handleExecPath,
   handleGetfattr,
   handleLn,
@@ -854,6 +855,9 @@ async function routeArgv(
   // never fabricates numbers).
   if (name === 'df') {
     return handleDf(registry, session, dispatch, operands)
+  }
+  if (name === 'mount') {
+    return handleMount(registry, session, operands)
   }
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on

@@ -35,6 +35,12 @@ UNSUPPORTED_BUILTINS = frozenset(
 
 NAMESPACE_COMMANDS = frozenset({"getfattr", "ln", "readlink", "setfattr"})
 
+# Programs the router answers by name from the mount table and the attr
+# overlay (node/command_dispatch), with spec-classified words like a
+# mount command's. No mount registers them, so lookup names them here
+# for `type`, `command -v` and the /usr/bin listing.
+ROUTED_COMMANDS = frozenset({"chgrp", "chmod", "chown", "df", "mount"})
+
 # bash reserved words that mirage's grammar implements. The parser, not
 # the executor, consumes them, so they never reach route; `type` reports
 # them and the CLI registry refuses them as head words. `coproc` is omitted

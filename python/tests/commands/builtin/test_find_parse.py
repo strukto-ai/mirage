@@ -632,6 +632,19 @@ def test_positional_actions_that_could_fire_twice_or_differ_are_refused(
     assert str(exc.value) == message
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "! ( -name a -o -name b ) -print -ls",
+        "-type f ( -name a -o ( -name b -o -name c ) ) -print0 -print",
+    ],
+)
+def test_an_or_among_tests_keeps_the_action_chain(line):
+    # GNU runs both actions on every row the tests keep; the -o sits in a
+    # test, so no action is under it and the chain runs in order.
+    assert len(parse_find_expression(line.split()).actions) == 2
+
+
 def test_actions_are_recorded_in_order():
     from mirage.commands.builtin.types import ExecAction, RowAction
 

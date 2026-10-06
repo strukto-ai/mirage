@@ -1458,12 +1458,19 @@ class IncompatibleLogOptionsError(GitError):
     Args:
         first (str): the first option as git names it.
         second (str): the second.
+        third (str | None): a third, where git names three (``-G``,
+            ``-S`` and ``--find-object``).
     """
 
-    def __init__(self, first: str, second: str) -> None:
-        super().__init__(
-            f"options '{first}' and '{second}' cannot be used together"
+    def __init__(
+        self, first: str, second: str, third: str | None = None
+    ) -> None:
+        names = (
+            f"'{first}' and '{second}'"
+            if third is None
+            else f"'{first}', '{second}', and '{third}'"
         )
+        super().__init__(f"options {names} cannot be used together")
 
 
 class AmbiguousObjectNameError(GitError):
@@ -1700,6 +1707,24 @@ class TagWriteReadOnlyError(GitError):
             "error: unable to create temporary file: Read-only file system\n"
             "error: unable to write tag file\n"
             "The tag message has been left in .git/TAG_EDITMSG"
+        )
+
+
+class ObjectWriteReadOnlyError(GitError):
+    """An object ``hash-object -w`` a read-only mount will not let it
+    write (pinned against git 2.47.3).
+
+    Args:
+        name (str): the file it hashed, as typed; git prints ``(null)``
+            for content read from stdin.
+    """
+
+    prefix = None
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            "error: unable to create temporary file: Read-only file system\n"
+            f"fatal: Unable to add {name} to database"
         )
 
 

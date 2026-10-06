@@ -26,6 +26,7 @@ from mirage.workspace.lookup.constants import (
     INTERPRETER_NAMES,
     KEYWORDS,
     NAMESPACE_COMMANDS,
+    ROUTED_COMMANDS,
     SHELL_NAMES,
     SHELL_ONLY_BUILTINS,
 )
@@ -182,7 +183,9 @@ def _layers(
     if installed and (native or refused) and name not in SHELL_NAMES:
         found = True
         yield Consumer.EXTERNAL
-    if installed and registry.mount_for_command(name) is not None:
+    if installed and (
+        name in ROUTED_COMMANDS or registry.mount_for_command(name) is not None
+    ):
         found = True
         yield Consumer.MOUNT
     fallback = (
@@ -392,6 +395,7 @@ def programs(session: SessionState, registry: "MountRegistry") -> list[str]:
         registry (MountRegistry): mount registry (command registration).
     """
     names = set(SHELL_NAMES) | NAMESPACE_COMMANDS | set(registry.clis.names())
+    names |= ROUTED_COMMANDS
     names |= {n for n in registry.runtime_bindings if n != EXTERNAL_COMMANDS}
     for mount in registry.mounts():
         names |= {cmd.name.split()[0] for cmd in mount.all_commands()}

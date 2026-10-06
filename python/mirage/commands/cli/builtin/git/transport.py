@@ -15,7 +15,7 @@
 import asyncio
 import base64
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from io import BytesIO
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -457,7 +457,11 @@ def extra_headers(values: list[bytes]) -> dict[str, str]:
 
 
 async def open_transport(
-    url: str, start: PathSpec, doors: CLIDoors, headers: dict[str, str]
+    url: str,
+    start: PathSpec,
+    doors: CLIDoors,
+    headers: dict[str, str],
+    credentials: Mapping[str, str] | None = None,
 ) -> LocalTransport | HttpTransport:
     """The transport a remote URL or workspace path names.
 
@@ -471,11 +475,14 @@ async def open_transport(
         start (PathSpec): the directory a relative path resolves against.
         doors (CLIDoors): the invocation's doors.
         headers (dict[str, str]): extra HTTP headers from config.
+        credentials (Mapping[str, str] | None): an Authorization for the
+            URL's origin when it carries no userinfo, dropped with it on a
+            redirect elsewhere.
     """
     scheme = REMOTE_HELPER.match(url)
     if scheme is not None and scheme.group(1) in ("http", "https"):
         bare, auth = _credentials(url)
-        return HttpTransport(bare, headers, auth)
+        return HttpTransport(bare, headers, auth or dict(credentials or {}))
     if scheme is not None and scheme.group(1) != "file":
         raise GitError(f"Unable to find remote helper for '{scheme.group(1)}'")
     if scheme is None and SCP_LIKE.match(url):

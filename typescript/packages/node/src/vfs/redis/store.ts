@@ -17,7 +17,7 @@ import { escapeGlob } from '@struktoai/mirage-core/vfs/redis/store'
 import type { RedisRestore, RedisStoreLike } from '@struktoai/mirage-core/vfs/redis/store'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { RedisClientType } from 'redis'
-import { loadOptionalPeer } from '../../optional_peer.ts'
+import { connectRedis } from '../../optional_peer.ts'
 
 export interface RedisStoreOptions {
   url?: string
@@ -55,22 +55,15 @@ export class RedisStore implements RedisStoreLike {
 
   async client(): Promise<RedisClientType> {
     if (this.providedClient !== null) return this.providedClient
-    this.clientPromise ??= (async () => {
-      const mod = await loadOptionalPeer(
-        () =>
-          import('redis') as unknown as Promise<{
-            createClient: (o: { url: string }) => RedisClientType
-          }>,
-        { feature: 'RedisVFS / RedisFileCacheStore', packageName: 'redis' },
-      )
-      const c = mod.createClient({
-        url: this.url,
-        socket: { reconnectStrategy: false },
-      } as Parameters<typeof mod.createClient>[0])
-      await c.connect()
-      await c.sAdd(this.dk(), '/')
-      return c
-    })()
+    if (this.clientPromise === null) {
+      const pending = connectRedis(this.url, 'RedisVFS / RedisFileCacheStore', () => {
+        if (this.clientPromise === pending) this.clientPromise = null
+      }).then(async (c) => {
+        await c.sAdd(this.dk(), '/')
+        return c
+      })
+      this.clientPromise = pending
+    }
     return this.clientPromise
   }
 
