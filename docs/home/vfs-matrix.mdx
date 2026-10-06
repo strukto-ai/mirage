@@ -8,7 +8,7 @@ icon: grid-2
 
 Use this page to pick the first VFS to try. If you want the fastest path, start with RAM or disk. If you need real integrations, jump from the setup guide to the VFS docs.
 
-The **Access** column separates filesystem access from API actions. `read`, `write`, and `exec` are `MountMode` values; `exec` allows commands to launch binaries from the mount and is typically used with Disk or RAM. `actions` means the VFS also exposes mutating commands such as sending a message or creating an issue; run those commands on a `WRITE` mount. The **Docs** column shows where each VFS is available, with one icon per supported runtime: <Icon icon="python" /> Python, <Icon icon="node-js" /> TypeScript (Node), and <Icon icon="globe" /> TypeScript (Browser). Click an icon to jump to that runtime's docs.
+The **Access** column separates filesystem access from API actions. `read`, `write`, and `exec` are `MountMode` values; `exec` also lets `python3` and `js` run code from the mount (see [per-session mount modes](/home/bash#per-session-mount-modes)) and is typically used with Disk or RAM. `actions` means the VFS also exposes mutating commands such as sending a message or creating an issue; run those commands on a `WRITE` mount. The **Docs** column shows where each VFS is available, with one icon per supported runtime: <Icon icon="python" /> Python, <Icon icon="node-js" /> TypeScript (Node), and <Icon icon="globe" /> TypeScript (Browser). Click an icon to jump to that runtime's docs.
 
 Sections below mirror the **Setup** sidebar so you can pick a category and follow the same path through credentials → VFS docs.
 

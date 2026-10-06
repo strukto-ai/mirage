@@ -36,7 +36,7 @@ describe('filePrompt', () => {
     )
     expect(sections.get('/data')).toContain('Mode: read-only; writes are refused.')
     expect(sections.get('/scratch')).toContain('Mode: read-write.')
-    expect(sections.get('/')).toContain('Mode: read-write; programs can run.')
+    expect(sections.get('/')).toContain('Mode: read-write; python3 and js can run code here.')
   })
 
   it('keeps literal braces', () => {

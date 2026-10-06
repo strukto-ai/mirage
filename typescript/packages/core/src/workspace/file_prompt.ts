@@ -22,7 +22,7 @@ const HELP_HINT =
 const MODE_LINES: Record<MountMode, string> = {
   [MountMode.READ]: '  Mode: read-only; writes are refused.',
   [MountMode.WRITE]: '  Mode: read-write.',
-  [MountMode.EXEC]: '  Mode: read-write; programs can run.',
+  [MountMode.EXEC]: '  Mode: read-write; python3 and js can run code here.',
 }
 
 export function buildFilePrompt(mounts: readonly MountEntry[]): string {
