@@ -91,7 +91,10 @@ export async function fileSize(path: string): Promise<number> {
 /**
  * Open a host file a state named, without following a link. A captured
  * file read later is refused when a link or anything but a regular file
- * has replaced it since its state named it. Mirrors node's openRegular.
+ * has replaced it since its state named it: O_NOFOLLOW makes the open
+ * fail on a link (ELOOP), and the handle's own stat refuses a directory,
+ * FIFO or device, so a swapped file cannot pull a host file from outside
+ * the mount into a workspace or a snapshot. Mirrors node's openRegular.
  */
 async function openRegular(path: string): Promise<FileHandle> {
   const fs = requireFs('openRegular')

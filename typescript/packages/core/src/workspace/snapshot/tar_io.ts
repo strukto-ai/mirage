@@ -41,8 +41,9 @@ export type CompressMode = null | 'gz'
 
 /**
  * The tar as one buffer, for a caller that needs bytes (an agents SDK that
- * stores snapshots as buffers). A blob that is a host path is read in;
- * `writeTar` streams to a file instead.
+ * stores snapshots as buffers). A blob that is a host path is read in
+ * through `readRegular`, refused if a link has replaced it, as `writeTar`
+ * refuses it while streaming to a file instead.
  */
 export async function writeSnapshotTar(
   manifest: Record<string, unknown>,

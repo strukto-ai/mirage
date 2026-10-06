@@ -490,6 +490,9 @@ export async function applyStateDict(
   checkFormatVersion(state)
   const [sessions, seed] = await gateRestoredState(ws, state)
   if (options.replaceCache === true) await ws.cache.clear()
+  // Every state is prepared before any mount loads, so a captured disk
+  // file that is gone or now a link fails the load with no mount changed.
+  const loads: [BaseVFS, VFSStateBase][] = []
   for (const m of state.mounts) {
     // Exact-prefix lookup, mirroring Python: a snapshot prefix the new
     // workspace does not mount is skipped, never resolved to an
@@ -507,15 +510,18 @@ export async function applyStateDict(
       continue
     }
     if (vfsStateRequiresOverride(m.vfs_state)) continue
-    // A disk restored into a fresh RAM mount (`restoresAsFreshRAM`) takes
-    // the disk's state in RAM's shape.
+    // A disk restored into a mount keeping content (the fresh RAM stand-in
+    // of `restoresAsFreshRAM`, or a RAM, redis or OPFS override) takes the
+    // disk's state in RAM's shape; a mount keeping none reads no file.
     const vfsState =
-      m.vfs_state.type === VFSName.DISK && mount.vfs.name !== VFSName.DISK
+      m.vfs_state.type === VFSName.DISK &&
+      ([VFSName.RAM, VFSName.REDIS, VFSName.OPFS] as string[]).includes(mount.vfs.name)
         ? await diskStateAsRam(m.vfs_state as unknown as Record<string, unknown>)
         : m.vfs_state
-    // No cast, for the same reason as toStateDict above.
-    await Promise.resolve(mount.vfs.loadState(vfsState as RAMVFSState))
+    loads.push([mount.vfs, vfsState])
   }
+  // No cast, for the same reason as toStateDict above.
+  for (const [vfs, vfsState] of loads) await Promise.resolve(vfs.loadState(vfsState as RAMVFSState))
   await restoreSessions(ws, state, sessions)
   // The env template is constructor state the rebuilt workspace was
   // never given: without it a session created after the load starts
@@ -682,7 +688,8 @@ function restoreJobs(ws: Workspace, state: WorkspaceStateDict): void {
 /**
  * A disk mount's state as a RAM mount takes it: absolute keys, every
  * parent directory, each mode as an attribute, and bytes for each file
- * the disk state names by host path.
+ * the disk state names by host path, read through `readRegular` so a
+ * file swapped for a link since capture is refused, never followed.
  */
 async function diskStateAsRam(vfsState: Record<string, unknown>): Promise<RAMVFSState> {
   const files: Record<string, Uint8Array> = {}
