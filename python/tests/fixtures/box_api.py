@@ -255,9 +255,10 @@ class FakeBox:
     async def content(self, req: web.Request) -> web.Response:
         file_id = req.match_info["id"]
         self.log.append(f"content:{file_id}")
-        if self._readable(file_id) is None:
+        item = self._readable(file_id)
+        if item is None:
             return web.json_response({"code": "not_found"}, status=404)
-        raise web.HTTPFound(f"{self.url}/dl/{file_id}")
+        raise web.HTTPFound(f"{self.url}/dl/{item.id}")
 
     async def dl(self, req: web.Request) -> web.Response:
         file_id = req.match_info["id"]
