@@ -56,7 +56,7 @@ const server = createMirageMcpServer(ws, { sessionId: 'agent' })
 await server.connect(new StdioServerTransport())
 ```
 
-`createMirageMcpServer(ws, { sessionId?, operations?, name?, version?, staleWriteProtection? })` returns the MCP SDK's `McpServer`.
+`createMirageMcpServer(ws, { sessionId?, operations?, name?, version?, staleWriteProtection?, allCalls? })` returns the MCP SDK's `McpServer`. `allCalls: true` adds the [VFS calls and explain](/home/access/mcp#vfs-calls-and-explain).
 
 ```ts
 import { MirageRpcServer } from '@struktoai/mirage-server/rpc'

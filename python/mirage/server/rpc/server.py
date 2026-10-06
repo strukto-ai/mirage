@@ -23,13 +23,12 @@ from typing import Any, TypeVar
 import jsonschema
 
 from mirage import __version__
-from mirage.errors.classify import classify, failure_text
+from mirage.errors.classify import failure_text
 from mirage.errors.types import FsCondition
-from mirage.policy.errors import PolicyDenied
 from mirage.server.io_serde import (
     explanation_to_dict,
+    failure_to_dict,
     io_result_to_dict,
-    refusal_to_dict,
 )
 from mirage.server.mcp.server import TOOLS
 from mirage.server.rpc.constants import (
@@ -267,17 +266,12 @@ class MirageRpcServer:
             raise
         except Exception as exc:
             logger.debug("rpc %s failed", method, exc_info=True)
-            condition = classify(exc)
+            data = failure_to_dict(exc)
             code = (
                 RPC_NOT_FOUND
-                if condition == FsCondition.ENOENT
+                if data.get("errno") == FsCondition.ENOENT.name
                 else RPC_INTERNAL_ERROR
             )
-            data: dict[str, JsonValue] = {"detail": failure_text(exc)}
-            if condition is not None:
-                data["errno"] = condition.name
-            if isinstance(exc, PolicyDenied):
-                data["refusal"] = refusal_to_dict(exc.refusal)
             return error_response(request_id, code, failure_text(exc), data)
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 

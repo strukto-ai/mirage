@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type {
   Ask,
   CommandExplanation,
@@ -56,6 +58,19 @@ export function refusalToDict(refusal: Refusal | null): IoResultDict['refusal'] 
         scope: refusal.scope,
         ask_id: refusal.askId,
       }
+}
+
+/**
+ * A failed call as the server's doors carry it: its text, the errno it
+ * names and, for a policy's refusal, its record. Mirrors Python's
+ * `failure_to_dict`.
+ */
+export function failureToDict(err: unknown): Record<string, JsonValue> {
+  const body: Record<string, JsonValue> = { detail: failureText(err) }
+  const condition = classify(err)
+  if (condition !== null) body.errno = condition
+  if (err instanceof PolicyDenied) body.refusal = refusalToDict(err.refusal)
+  return body
 }
 
 export function ioResultToDict(result: unknown): ResultDict & JsonValue {

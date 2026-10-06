@@ -19,12 +19,10 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from mirage.errors.classify import classify, failure_text
+from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition
-from mirage.policy.errors import PolicyDenied
-from mirage.server.io_serde import refusal_to_dict
+from mirage.server.io_serde import failure_to_dict
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
-from mirage.types import JsonValue
 from mirage.server.vfs_calls import (
     VFS_CALLS,
     CallArgsError,
@@ -102,13 +100,8 @@ def failure(exc: Exception) -> JSONResponse:
         exc (Exception): what the call raised.
     """
     condition = classify(exc)
-    body: dict[str, JsonValue] = {"detail": failure_text(exc)}
-    if isinstance(exc, PolicyDenied):
-        body["refusal"] = refusal_to_dict(exc.refusal)
-    if condition is None:
-        return JSONResponse(status_code=500, content=body)
-    body["errno"] = condition.name
-    return JSONResponse(status_code=STATUS.get(condition, 500), content=body)
+    status = 500 if condition is None else STATUS.get(condition, 500)
+    return JSONResponse(status_code=status, content=failure_to_dict(exc))
 
 
 def vfs_route(call: VfsCall) -> Callable[..., Awaitable[JSONResponse]]:

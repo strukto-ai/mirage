@@ -287,7 +287,7 @@ cat /data/a | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]
 - In TypeScript without async task isolation (a browser),
   `explain.vfs` throws and `explain.shell`'s policies act for real.
 
-Every door takes the same option: `?explain=true` on HTTP's `shell` and `vfs/<call>` routes, `explain: true` on RPC, `--explain` on `mirage shell` and `mirage vfs`, each answering the same fields as JSON.
+Every door takes the same option: `?explain=true` on HTTP's `shell` and `vfs/<call>` routes, `explain: true` on RPC and on MCP's `shell` and `vfs_<call>` tools with [all calls](/home/access/mcp#vfs-calls-and-explain), `--explain` on `mirage shell` and `mirage vfs`, each answering the same fields as JSON.
 
 ## Examples
 

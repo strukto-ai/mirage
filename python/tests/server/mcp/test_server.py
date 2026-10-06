@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from mcp import Client
 from mcp.shared.exceptions import MCPError
@@ -5,6 +7,7 @@ from mcp.types import INVALID_PARAMS, CallToolResult, Tool
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.server.mcp.server import MirageMcpServer
+from mirage.server.vfs_calls import VFS_CALLS
 
 
 async def list_tools(server: MirageMcpServer) -> list[Tool]:
@@ -223,3 +226,52 @@ async def test_the_tool_list_is_read_on_every_request():
     server = MirageMcpServer(ws, session_id="late")
     ws.create_session("late", profile={"mounts": {"/": "read"}})
     assert "write" not in [t.name for t in await list_tools(server)]
+
+
+@pytest.mark.asyncio
+async def test_all_calls_adds_each_vfs_call_and_explain(workspace):
+    tools = {
+        t.name: t.input_schema["properties"]
+        for t in await list_tools(MirageMcpServer(workspace, all_calls=True))
+    }
+    assert len(tools) == 7 + len(VFS_CALLS)
+    assert "explain" in tools["shell"]
+    assert "explain" in tools["vfs_pwrite"]
+    assert "explain" not in tools["read"]
+
+
+@pytest.mark.asyncio
+async def test_a_vfs_call_answers_json(workspace):
+    server = MirageMcpServer(workspace, all_calls=True)
+    wrote = await call_tool(
+        server, "vfs_write", {"path": "/a.txt", "data_base64": "aGk="}
+    )
+    read = await call_tool(server, "vfs_read", {"path": "/a.txt"})
+    missing = await call_tool(server, "vfs_read", {"path": "/nope"})
+    assert (wrote.is_error, wrote.content[0].text) == (False, "{}")
+    assert json.loads(read.content[0].text) == {"data_base64": "aGk="}
+    assert missing.is_error is True
+    assert json.loads(missing.content[0].text)["errno"] == "ENOENT"
+
+
+@pytest.mark.asyncio
+async def test_explain_runs_nothing(workspace):
+    server = MirageMcpServer(workspace, all_calls=True)
+    call = await call_tool(
+        server, "vfs_mkdir", {"path": "/d", "explain": True}
+    )
+    line = await call_tool(
+        server, "shell", {"command": "mkdir /e", "explain": True}
+    )
+    assert json.loads(call.content[0].text)["call"] == "mkdir"
+    assert json.loads(line.content[0].text)["outcome"] == "allow"
+    assert not await workspace.vfs.exists("/d")
+    assert not await workspace.vfs.exists("/e")
+
+
+@pytest.mark.asyncio
+async def test_the_vfs_calls_need_all_calls(server):
+    async with Client(server.server) as client:
+        with pytest.raises(MCPError) as caught:
+            await client.call_tool("vfs_read", {"path": "/a.txt"})
+    assert caught.value.message == "Tool vfs_read not found"

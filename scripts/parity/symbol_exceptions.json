@@ -357,6 +357,11 @@
     "xattrOpts": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart.",
     "row": "TypeScript reads each argument off the checked unknown record through a typed accessor and builds each row with row(), which folds the call and its answer into one function; Python's rows index the args dict directly and keep run and answer apart."
    }
+  },
+  "server/mcp/http": {
+   "python_only": {
+    "DaemonMcpServer": "A Python Session call runs on the workspace runner's loop, so the daemon serves MCP with a subclass whose hop does it, as DaemonRpcServer does for RPC; TypeScript has one loop and hands its tool table to createMirageMcpServer."
+   }
   }
  }
 }

@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import logging
-from typing import Any
+from collections.abc import Coroutine, Mapping
+from typing import Any, TypeVar
 
 import jsonschema
 from mcp.server import Server, ServerRequestContext
@@ -30,6 +32,16 @@ from mcp.types import (
 )
 
 from mirage import __version__
+from mirage.server.io_serde import explanation_to_dict, failure_to_dict
+from mirage.server.vfs_calls import (
+    VFS_CALLS,
+    CallArgsError,
+    VfsCall,
+    answered,
+    checked,
+    schema_of,
+)
+from mirage.types import JsonValue
 from mirage.workspace.tools.tool_descriptions import (
     EDIT_DESCRIPTION,
     EDIT_INPUT,
@@ -53,6 +65,8 @@ from mirage.workspace.tools.tool_operations import (
 from mirage.workspace.workspace import Session, Workspace
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 READ_ONLY = ToolAnnotations(read_only_hint=True)
 
@@ -99,11 +113,48 @@ TOOLS = [
 ]
 
 
+EXPLAIN: dict[str, JsonValue] = {
+    "type": "boolean",
+    "description": "Answer what the call would do instead of doing it.",
+}
+
+
+def _explainable(schema: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    properties = schema["properties"]
+    if not isinstance(properties, dict):
+        raise TypeError("an input schema lists its properties")
+    return {**schema, "properties": {**properties, "explain": EXPLAIN}}
+
+
+EXPLAINED_SHELL = Tool(
+    name="shell",
+    description=SHELL_DESCRIPTION,
+    input_schema=_explainable(SHELL_INPUT),
+)
+
+VFS_TOOLS: dict[str, tuple[Tool, VfsCall]] = {
+    f"vfs_{call.name}": (
+        Tool(
+            name=f"vfs_{call.name}",
+            description=call.description,
+            input_schema=_explainable(schema_of(call)),
+        ),
+        call,
+    )
+    for call in VFS_CALLS
+}
+
+
 def _to_mcp(result: ToolResult) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=result.text)],
         is_error=result.is_error,
     )
+
+
+def _json(value: JsonValue, is_error: bool = False) -> CallToolResult:
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return _to_mcp(ToolResult(text, is_error))
 
 
 class MirageMcpServer:
@@ -112,6 +163,9 @@ class MirageMcpServer:
     The handlers are bound methods handed to the SDK's constructor, so
     the tool table stays readable and nothing nests. The server runs
     with no lifespan, so its context is the default one's empty dict.
+    With ``all_calls`` it also serves each ``session.vfs`` call as a
+    ``vfs_<call>`` tool, and ``shell`` and every ``vfs_<call>`` take
+    ``explain``, as the HTTP routes do.
 
     Args:
         workspace (Workspace): The workspace to serve.
@@ -124,6 +178,7 @@ class MirageMcpServer:
         operations (MirageToolOperations | None): The tool table to
             serve; the session's own (``session.tools``) when None. The
             daemon passes one that runs each call through its API.
+        all_calls (bool): Also serve the VFS calls and explain.
     """
 
     def __init__(
@@ -134,8 +189,11 @@ class MirageMcpServer:
         version: str = __version__,
         session_id: str | None = None,
         operations: MirageToolOperations | None = None,
+        all_calls: bool = False,
     ) -> None:
         session = Session(workspace, session_id)
+        self._session = session
+        self._all_calls = all_calls
         if operations is not None:
             self._ops = operations
         elif stale_write_protection:
@@ -151,6 +209,26 @@ class MirageMcpServer:
             on_call_tool=self.call_tool,
         )
 
+    async def hop(self, work: Coroutine[Any, Any, T]) -> T:
+        """Run a Session call where the workspace lives.
+
+        Args:
+            work (Coroutine[Any, Any, T]): the call.
+
+        Returns:
+            T: its result.
+        """
+        return await work
+
+    async def _tools(self) -> list[Tool]:
+        names = await self._ops.offered()
+        tools = [t for t in TOOLS if t.name in names]
+        if not self._all_calls:
+            return tools
+        return [EXPLAINED_SHELL if t.name == "shell" else t for t in tools] + [
+            tool for tool, _ in VFS_TOOLS.values()
+        ]
+
     async def list_tools(
         self,
         ctx: ServerRequestContext[dict[str, Any]],
@@ -165,10 +243,10 @@ class MirageMcpServer:
                 every tool fits on one page.
 
         Returns:
-            ListToolsResult: The tools the session's profile leaves it.
+            ListToolsResult: The tools the session's profile leaves it,
+                then the VFS calls when this server serves them.
         """
-        names = await self._ops.offered()
-        return ListToolsResult(tools=[t for t in TOOLS if t.name in names])
+        return ListToolsResult(tools=await self._tools())
 
     async def call_tool(
         self,
@@ -181,7 +259,9 @@ class MirageMcpServer:
         does not leave it, is a protocol error, as the TypeScript twin
         answers it. Arguments outside the tool's input
         schema and a raised exception are the tool's answer, with
-        `is_error` set, so the agent reads them and can retry.
+        `is_error` set, so the agent reads them and can retry. A VFS
+        call and an explanation answer JSON, as the HTTP routes do; a
+        failed VFS call answers the HTTP route's error body.
 
         Args:
             ctx (ServerRequestContext[dict[str, Any]]): The request
@@ -194,8 +274,10 @@ class MirageMcpServer:
         Raises:
             MCPError: The tool name is not one this server serves.
         """
-        tool = next((t for t in TOOLS if t.name == params.name), None)
-        if tool is None or tool.name not in await self._ops.offered():
+        tool = next(
+            (t for t in await self._tools() if t.name == params.name), None
+        )
+        if tool is None:
             raise MCPError(INVALID_PARAMS, f"Tool {params.name} not found")
         arguments = params.arguments or {}
         try:
@@ -208,8 +290,35 @@ class MirageMcpServer:
                     True,
                 )
             )
+        explain = arguments.get("explain", False)
+        given = {k: v for k, v in arguments.items() if k != "explain"}
+        if params.name in VFS_TOOLS:
+            return await self._vfs(VFS_TOOLS[params.name][1], given, explain)
         try:
+            if tool is EXPLAINED_SHELL and explain:
+                said = await self.hop(
+                    self._session.explain.shell(given["command"])
+                )
+                return _json(explanation_to_dict(said))
+            if tool is EXPLAINED_SHELL:
+                arguments = given
             return _to_mcp(await self._ops.call(params.name, arguments))
         except Exception as exc:
             logger.debug("mcp tool %s failed", params.name, exc_info=True)
             return _to_mcp(ToolResult(str(exc), True))
+
+    async def _vfs(
+        self, call: VfsCall, given: dict[str, Any], explain: bool
+    ) -> CallToolResult:
+        try:
+            args = checked(call, given)
+        except CallArgsError as exc:
+            return _to_mcp(ToolResult(str(exc), True))
+        try:
+            answer = await self.hop(
+                answered(self._session, call, args, explain)
+            )
+        except Exception as exc:
+            logger.debug("mcp vfs_%s failed", call.name, exc_info=True)
+            return _json(failure_to_dict(exc), True)
+        return _json(answer)

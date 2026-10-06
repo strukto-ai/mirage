@@ -15,13 +15,12 @@
 import { Buffer } from 'node:buffer'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
+import { failureText } from '@struktoai/mirage-core/errors/classify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
-import { explanationToDict, ioResultToDict, refusalToDict } from '../io_serde.ts'
+import { explanationToDict, failureToDict, ioResultToDict } from '../io_serde.ts'
 import { TOOLS } from '../mcp/server.ts'
 import {
   RPC_INTERNAL_ERROR,
@@ -210,11 +209,8 @@ export class MirageRpcServer {
       if (signal?.aborted === true) {
         return errorResponse(requestId, RPC_REQUEST_CANCELLED, 'request cancelled')
       }
-      const condition = classify(err)
-      const code = condition === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
-      const data: Record<string, JsonValue> = { detail: failureText(err) }
-      if (condition !== null) data.errno = condition
-      if (err instanceof PolicyDenied) data.refusal = refusalToDict(err.refusal)
+      const data = failureToDict(err)
+      const code = data.errno === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
       return errorResponse(requestId, code, failureText(err), data)
     }
   }

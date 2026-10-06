@@ -60,7 +60,7 @@ mirage workspace delete demo
 
 ### `mirage mcp`
 
-`mirage mcp [CONFIG] [-w ID] [-s SESSION]` serves a session's [MCP](/home/access/mcp) tools on stdio. `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc). `mirage ssh-proxy ID` carries [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`.
+`mirage mcp [CONFIG] [-w ID] [-s SESSION] [--all-calls]` serves a session's [MCP](/home/access/mcp) tools on stdio; `--all-calls` adds the [VFS calls and explain](/home/access/mcp#vfs-calls-and-explain). `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc). `mirage ssh-proxy ID` carries [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`.
 
 With `-w`, it serves a workspace the server already holds. Otherwise it creates one from `CONFIG`, from `MIRAGE_MCP_CONFIG` (`MIRAGE_RPC_CONFIG`) or `MIRAGE_CONFIG`, or from a `workspace.yaml` found walking up from the working directory. It deletes that workspace when the client disconnects, unless the config names a `workspace_id`.
 

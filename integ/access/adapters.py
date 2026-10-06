@@ -32,6 +32,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 import httpx2
@@ -1757,18 +1758,25 @@ class Cli:
         return results[0] if results[0] == results[1] else " / ".join(results)
 
 
+ALL_CALLS = frozenset({"bytes", "explain"})
+
+
 class Mcp:
-    """MCP over the HTTP endpoint."""
+    """MCP over the HTTP endpoint. The ``bytes`` and ``explain`` suites
+    ask for every call (``?calls=all``); the rest take the default list."""
 
     name = "mcp"
-    OPS = frozenset({"shell", "tool", "cancel", "session"})
+    OPS = frozenset({"shell", "tool", "bytes", "explain", "cancel", "session"})
 
     def __init__(self, server: Server, scratch: Path) -> None:
         self.server = server
 
-    def client(self, wid: str, session: str | None) -> Any:
+    def client(self, wid: str, session: str | None, op: str) -> Any:
+        query = {"session_id": session} if session else {}
+        if op in ALL_CALLS:
+            query["calls"] = "all"
         url = f"{self.server.d.url}/v1/workspaces/{wid}/mcp" + (
-            f"?session_id={session}" if session else ""
+            f"?{urlencode(query)}" if query else ""
         )
         http = self.server.mcp_client(url)
         return http, Client(streamable_http_client(url, http_client=http))
@@ -1779,7 +1787,7 @@ class Mcp:
         wid = prefix.rstrip("-")
         await self.server.provision(suite, wid, config)
         session = (suite.get("session") or {}).get("id")
-        http, client = self.client(wid, session)
+        http, client = self.client(wid, session, suite["op"])
         async with http, client:
             return [
                 await mcp_case(
@@ -1801,7 +1809,11 @@ class McpStdio(Mcp):
         await self.server.provision(suite, wid, config)
         session = (suite.get("session") or {}).get("id")
         argv = self.server.cli(
-            "mcp", "-w", wid, *(["-s", session] if session else [])
+            "mcp",
+            "-w",
+            wid,
+            *(["-s", session] if session else []),
+            *(["--all-calls"] if suite["op"] in ALL_CALLS else []),
         )
         params = StdioServerParameters(
             command=argv[0],
@@ -1825,6 +1837,20 @@ async def mcp_case(
         tool, arguments = "shell", {"command": step["command"]}
     elif op == "tool":
         tool, arguments = step["tool"], step["arguments"]
+    elif op == "explain":
+        tool = "shell" if step["call"] == "shell" else f"vfs_{step['call']}"
+        result = await client.call_tool(
+            tool, {**call_params(step), "explain": True}
+        )
+        return explain_answer(json.loads(result.content[0].text))
+    elif op == "bytes":
+        result = await client.call_tool(
+            f"vfs_{step['call']}", call_params(step)
+        )
+        answer = json.loads(result.content[0].text)
+        if result.is_error:
+            answer = {"errno": answer.get("errno", answer["detail"])}
+        return bytes_answer(step, answer)
     elif op == "cancel":
         try:
             await asyncio.wait_for(

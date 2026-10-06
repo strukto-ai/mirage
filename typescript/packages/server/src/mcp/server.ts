@@ -42,7 +42,18 @@ import {
   MirageToolOperations,
   type MirageToolOperationsOptions,
 } from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import type { ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
+import { explanationToDict, failureToDict } from '../io_serde.ts'
+import {
+  VFS_CALLS,
+  CallArgsError,
+  answered,
+  checked,
+  schemaOf,
+  type VfsCall,
+} from '../vfs_calls.ts'
 
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true }
 
@@ -94,6 +105,43 @@ export const TOOLS: readonly {
   },
 ]
 
+const EXPLAIN = {
+  type: 'boolean',
+  description: 'Answer what the call would do instead of doing it.',
+}
+
+function explainable(schema: object): JsonSchemaType {
+  const { properties } = schema as { properties: object }
+  return { ...schema, properties: { ...properties, explain: EXPLAIN } } as JsonSchemaType
+}
+
+const EXPLAINED_SHELL: (typeof TOOLS)[number] = {
+  name: 'shell',
+  description: SHELL_DESCRIPTION,
+  inputSchema: explainable(SHELL_INPUT),
+}
+
+const VFS_TOOLS: ReadonlyMap<string, { tool: (typeof TOOLS)[number]; call: VfsCall }> = new Map(
+  VFS_CALLS.map((call) => [
+    `vfs_${call.name}`,
+    {
+      tool: {
+        name: `vfs_${call.name}`,
+        description: call.description,
+        inputSchema: explainable(schemaOf(call)),
+      },
+      call,
+    },
+  ]),
+)
+
+function json(value: JsonValue, isError = false): ToolResult {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(value) }],
+    ...(isError ? { isError } : {}),
+  }
+}
+
 export interface MirageMcpServerOptions extends MirageToolOperationsOptions {
   name?: string
   version?: string
@@ -102,6 +150,11 @@ export interface MirageMcpServerOptions extends MirageToolOperationsOptions {
    * absent. The HTTP door passes one that runs each call through its API.
    */
   operations?: MirageToolOperations
+  /**
+   * Also serve each `session.vfs` call as a `vfs_<call>` tool, and take
+   * `explain` on `shell` and on each of them, as the HTTP routes do.
+   */
+  allCalls?: boolean
 }
 
 export function createMirageMcpServer(
@@ -124,21 +177,45 @@ export function createMirageMcpServer(
   // what a call refuses and miss what a widened profile allows. A tool
   // the session is not offered is "not found", as Python's server says.
   server.server.registerCapabilities({ tools: { listChanged: true } })
-  server.server.setRequestHandler('tools/list', async () => {
-    const names = await operations.offered()
-    return {
-      tools: TOOLS.filter((tool) => names.includes(tool.name)).map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema as { type: 'object' },
-        ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
-      })),
+  const vfsCall = async (
+    call: VfsCall,
+    given: Record<string, unknown>,
+    explain: boolean,
+  ): Promise<ToolResult> => {
+    let args: Record<string, unknown>
+    try {
+      args = await checked(call, given)
+    } catch (err) {
+      if (!(err instanceof CallArgsError)) throw err
+      return { content: [{ type: 'text', text: err.message }], isError: true }
     }
-  })
+    try {
+      return json(await answered(session, call, args, explain))
+    } catch (err) {
+      return json(failureToDict(err), true)
+    }
+  }
+  const listed = async (): Promise<(typeof TOOLS)[number][]> => {
+    const names = await operations.offered()
+    const tools = TOOLS.filter((tool) => names.includes(tool.name))
+    if (options.allCalls !== true) return tools
+    return [
+      ...tools.map((tool) => (tool.name === 'shell' ? EXPLAINED_SHELL : tool)),
+      ...[...VFS_TOOLS.values()].map(({ tool }) => tool),
+    ]
+  }
+  server.server.setRequestHandler('tools/list', async () => ({
+    tools: (await listed()).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema as { type: 'object' },
+      ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
+    })),
+  }))
   server.server.setRequestHandler('tools/call', async (request, ctx) => {
     const name = request.params.name
-    const tool = TOOLS.find((candidate) => candidate.name === name)
-    if (tool === undefined || !(await operations.offered()).includes(name)) {
+    const tool = (await listed()).find((candidate) => candidate.name === name)
+    if (tool === undefined) {
       throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`)
     }
     const args = request.params.arguments ?? {}
@@ -148,8 +225,14 @@ export function createMirageMcpServer(
       const text = `Input validation error: Invalid arguments for tool ${name}: ${why}`
       return { content: [{ type: 'text', text }], isError: true }
     }
+    const { explain, ...given } = args
+    const vfs = VFS_TOOLS.get(name)
+    if (vfs !== undefined) return vfsCall(vfs.call, given, explain === true)
     try {
-      return await operations.call(name, args, ctx.mcpReq.signal)
+      if (tool === EXPLAINED_SHELL && explain === true) {
+        return json(explanationToDict(await session.explain.shell(String(given.command))))
+      }
+      return await operations.call(name, tool === EXPLAINED_SHELL ? given : args, ctx.mcpReq.signal)
     } catch (err) {
       // A call that failed is a tool result the agent reads, not a
       // protocol error.

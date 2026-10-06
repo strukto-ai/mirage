@@ -19,6 +19,7 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
+import { VFS_CALLS } from '../vfs_calls.ts'
 import { createMirageMcpServer } from './server.ts'
 
 function mkWs(): Workspace {
@@ -181,6 +182,77 @@ describe('createMirageMcpServer', () => {
     })
     expect(edit.isError).not.toBe(true)
     expect(await workspace.vfs.cat('/doc.txt')).toBe('changed')
+    await client.close()
+    await server.close()
+    await workspace.close()
+  })
+
+  it('adds each VFS call and explain with allCalls', async () => {
+    const workspace = mkWs()
+    const server = createMirageMcpServer(workspace, { allCalls: true })
+    const client = new Client({ name: 'mirage-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const tools = new Map(
+      (await client.listTools()).tools.map((tool) => [
+        tool.name,
+        tool.inputSchema.properties ?? {},
+      ]),
+    )
+    expect(tools.size).toBe(7 + VFS_CALLS.length)
+    expect(tools.get('shell')).toHaveProperty('explain')
+    expect(tools.get('vfs_pwrite')).toHaveProperty('explain')
+    expect(tools.get('read')).not.toHaveProperty('explain')
+    const wrote = await client.callTool({
+      name: 'vfs_write',
+      arguments: { path: '/a.txt', data_base64: 'aGk=' },
+    })
+    expect([wrote.isError, firstText(wrote.content)]).toEqual([undefined, '{}'])
+    const read = await client.callTool({ name: 'vfs_read', arguments: { path: '/a.txt' } })
+    expect(JSON.parse(firstText(read.content))).toEqual({ data_base64: 'aGk=' })
+    const missing = await client.callTool({ name: 'vfs_read', arguments: { path: '/nope' } })
+    expect(missing.isError).toBe(true)
+    expect(JSON.parse(firstText(missing.content))).toMatchObject({ errno: 'ENOENT' })
+    await client.close()
+    await server.close()
+    await workspace.close()
+  })
+
+  it('explains a call or a line and runs nothing', async () => {
+    const workspace = mkWs()
+    const server = createMirageMcpServer(workspace, { allCalls: true })
+    const client = new Client({ name: 'mirage-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const call = await client.callTool({
+      name: 'vfs_mkdir',
+      arguments: { path: '/d', explain: true },
+    })
+    const line = await client.callTool({
+      name: 'shell',
+      arguments: { command: 'mkdir /e', explain: true },
+    })
+    expect(JSON.parse(firstText(call.content))).toMatchObject({ call: 'mkdir' })
+    expect(JSON.parse(firstText(line.content))).toMatchObject({ outcome: 'allow' })
+    expect(await workspace.vfs.exists('/d')).toBe(false)
+    expect(await workspace.vfs.exists('/e')).toBe(false)
+    await client.close()
+    await server.close()
+    await workspace.close()
+  })
+
+  it('serves the VFS calls only with allCalls', async () => {
+    const workspace = mkWs()
+    const server = createMirageMcpServer(workspace)
+    const client = new Client({ name: 'mirage-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    await expect(
+      client.callTool({ name: 'vfs_read', arguments: { path: '/a.txt' } }),
+    ).rejects.toThrow('Tool vfs_read not found')
     await client.close()
     await server.close()
     await workspace.close()

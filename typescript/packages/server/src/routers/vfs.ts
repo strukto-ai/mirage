@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
+import { classify } from '@struktoai/mirage-core/errors/classify'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
-import { refusalToDict } from '../io_serde.ts'
+import { failureToDict } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { VFS_CALLS, CallArgsError, answered, checked } from '../vfs_calls.ts'
 
@@ -97,11 +96,8 @@ export function queryFlag(value: string | undefined, name: string): boolean {
 export function failure(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof RouteError) return reply.status(err.status).send({ detail: err.message })
   const condition = classify(err)
-  const body: Record<string, JsonValue> = { detail: failureText(err) }
-  if (err instanceof PolicyDenied) body.refusal = refusalToDict(err.refusal)
-  if (condition === null) return reply.status(500).send(body)
-  body.errno = condition
-  return reply.status(STATUS[condition] ?? 500).send(body)
+  const status = condition === null ? 500 : (STATUS[condition] ?? 500)
+  return reply.status(status).send(failureToDict(err))
 }
 
 /**

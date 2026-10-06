@@ -15,7 +15,9 @@
 from dataclasses import asdict
 from typing import Any
 
+from mirage.errors.classify import classify, failure_text
 from mirage.io.types import IOResult
+from mirage.policy.errors import PolicyDenied
 from mirage.policy.types import (
     Ask,
     CommandExplanation,
@@ -37,6 +39,22 @@ def refusal_to_dict(refusal: Refusal | None) -> dict[str, JsonValue] | None:
             refused.
     """
     return asdict(refusal) if refusal is not None else None
+
+
+def failure_to_dict(exc: Exception) -> dict[str, JsonValue]:
+    """A failed call as the server's doors carry it: its text, the errno
+    it names and, for a policy's refusal, its record.
+
+    Args:
+        exc (Exception): what the call raised.
+    """
+    body: dict[str, JsonValue] = {"detail": failure_text(exc)}
+    condition = classify(exc)
+    if condition is not None:
+        body["errno"] = condition.name
+    if isinstance(exc, PolicyDenied):
+        body["refusal"] = refusal_to_dict(exc.refusal)
+    return body
 
 
 async def io_result_to_dict(result: IOResult | None) -> dict[str, Any]:
