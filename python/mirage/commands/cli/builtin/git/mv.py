@@ -49,7 +49,6 @@ from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
-from mirage.utils.path import join_spec
 
 # git's own wording for each way a source can be refused, in the shape
 # ``fatal: <reason>, source=<src>, destination=<dst>``.
@@ -260,12 +259,12 @@ async def check(
         tuple: the refusal wording or None, the tracked paths that move,
         and whether the source is a directory.
     """
-    info = await lstat(stat_path, links, join_spec(location.worktree, source))
+    info = await lstat(stat_path, links, location.worktree.join(source))
     if info is None:
         return BAD_SOURCE, (), False
     if destination == source or destination.startswith(f"{source}/"):
         return INTO_ITSELF, (), False
-    landing = join_spec(location.worktree, destination)
+    landing = location.worktree.join(destination)
     if info.type is FileType.DIRECTORY:
         inside = tuple(sorted(path for path in tracked if under(path, source)))
         if any(path in conflicted for path in inside):
@@ -341,9 +340,7 @@ async def plan(
         flags (MvFlags): the parsed flags.
     """
     destination = repo_relative(location, start, operands[-1])
-    target = await lstat(
-        stat_path, links, join_spec(location.worktree, destination)
-    )
+    target = await lstat(stat_path, links, location.worktree.join(destination))
     into = destination == "" or (
         target is not None and target.type is FileType.DIRECTORY
     )
@@ -385,8 +382,8 @@ async def plan(
                 reason, named = MULTIPLE_SOURCES, clash
         if reason is None and spanning(
             mounts,
-            join_spec(location.worktree, source),
-            join_spec(location.worktree, landing),
+            location.worktree.join(source),
+            location.worktree.join(landing),
         ):
             # Last, after every check git itself makes, so a source git
             # would refuse anyway is refused in git's own words. ``-k``
@@ -435,8 +432,8 @@ async def apply(
         force (bool): whether ``-f`` was given, which removes a file
             already at the destination first.
     """
-    source = join_spec(location.worktree, move.source)
-    destination = join_spec(location.worktree, move.destination)
+    source = location.worktree.join(move.source)
+    destination = location.worktree.join(move.destination)
     if force and not move.directory:
         await remove_file(dispatch, destination)
     try:

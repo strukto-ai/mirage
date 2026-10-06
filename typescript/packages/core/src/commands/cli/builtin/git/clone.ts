@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { startPoint, checkSwitches, configSection, fatal, verbUsage } from './util.ts'
-import { type PathSpec, FileType } from '../../../../types.ts'
-import { typedSpec, joinSpec } from '../../../../utils/path.ts'
+import { PathSpec, FileType } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
@@ -115,7 +114,7 @@ export async function clone(inv: CLIInvocation): Promise<CommandFnResult> {
     const { dispatch, statPath } = doors
     if (dispatch === undefined || statPath === undefined) throw new NoWorkspaceError()
     start = startPoint(fl)
-    target = typedSpec(name, start)
+    target = PathSpec.fromStrPath(name, undefined, start)
     const info = await statPath(target)
     if (
       info !== null &&
@@ -144,7 +143,7 @@ export async function clone(inv: CLIInvocation): Promise<CommandFnResult> {
     else if (dispatch !== undefined)
       for (const entry of await readNames(dispatch, target)) {
         const child = entry.replace(/\/+$/, '').split('/').at(-1) ?? ''
-        if (child) await removeTree(dispatch, joinSpec(target, child), links, mounts)
+        if (child) await removeTree(dispatch, target.join(child), links, mounts)
       }
     const refusal = err.prefix === null ? err.message : `${err.prefix}: ${err.message}`
     return [null, new IOResult({ exitCode: err.code, stderr: ENC.encode(`${notes}${refusal}\n`) })]
@@ -165,7 +164,7 @@ async function populate(
   const { dispatch, statPath } = doors
   if (dispatch === undefined || statPath === undefined) throw new NoWorkspaceError()
   const mounts = doors.ns?.mounts ?? null
-  const gitdir = joinSpec(target, '.git')
+  const gitdir = target.join('.git')
   const remote = fl.asStr('origin') ?? 'origin'
   if (!validRefName(`refs/remotes/${remote}/test`))
     throw new GitError(`'${remote}' is not a valid remote name`)
@@ -175,7 +174,7 @@ async function populate(
     gitdir,
     commondir: gitdir,
     worktree: target,
-    mountRoot: typedSpec(mounts?.rootOf(target.virtual) ?? '/', '/'),
+    mountRoot: PathSpec.fromStrPath(mounts?.rootOf(target.virtual) ?? '/', undefined, '/'),
   }
   const [wants, funny] = ignoreFunny(
     [...advertised.refs]
@@ -227,12 +226,12 @@ async function populate(
     const tracking = `refs/remotes/${remote}/HEAD`
     await writeFile(
       dispatch,
-      joinSpec(gitdir, tracking),
+      gitdir.join(tracking),
       ENC.encode(`ref: refs/remotes/${remote}/${adv.head.slice(HEADS.length)}\n`),
     )
     await append(dispatch, gitdir, `logs/${tracking}`, entry(ZERO, headOid, IDENTITY, now, reason))
   }
-  await writeFile(dispatch, joinSpec(gitdir, 'config'), ENC.encode(config(url, remote, branch)))
+  await writeFile(dispatch, gitdir.join('config'), ENC.encode(config(url, remote, branch)))
   if (local) notes += 'done.\n'
   if (commit === null) {
     await setHead(dispatch, gitdir, `${HEADS}${branch ?? DEFAULT_BRANCH}`)

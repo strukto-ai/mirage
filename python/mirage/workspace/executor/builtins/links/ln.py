@@ -42,7 +42,7 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec, word_text
 from mirage.utils.errors import FS_ERRORS, DotWalkLoop, fs_strerror
 from mirage.utils.hidden import path_visible
-from mirage.utils.path import CycleError, dotted_spelling, typed_spec
+from mirage.utils.path import CycleError, dotted_spelling
 from mirage.workspace.executor.builtins.shared import abs_path, fail, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
@@ -456,7 +456,7 @@ async def plan_links(
             return [], f"ln: failed to access '{typed}': {why}\n"
         unwalked = await dot_refusal(
             partial(dispatch_stat, dispatch),
-            typed_spec(typed, cwd),
+            PathSpec.from_str_path(typed, cwd=cwd),
             namespace.follow,
         )
         if unwalked is not None:
@@ -638,7 +638,9 @@ async def make_link(
         return
     if not flags.symbolic:
         unwalked = await dot_refusal(
-            walker, typed_spec(plan.source, cwd), namespace.follow
+            walker,
+            PathSpec.from_str_path(plan.source, cwd=cwd),
+            namespace.follow,
         )
         if unwalked is not None:
             errors.append(
@@ -651,7 +653,7 @@ async def make_link(
     replaces = flags.force or flags.backup not in (None, "none")
     unwalked = await dot_refusal(
         walker,
-        typed_spec(typed, cwd),
+        PathSpec.from_str_path(typed, cwd=cwd),
         namespace.follow,
         creates=not replaces,
     )

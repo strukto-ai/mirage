@@ -62,7 +62,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.path import join_spec
 
 REFS_PREFIX = "refs/"
 LOGS_DIR = "logs"
@@ -171,11 +170,11 @@ async def set_symbolic(
     owner = owner_of(location, name)
     await write_file(
         dispatch,
-        join_spec(owner, name),
+        owner.join(name),
         f"{SYMREF_PREFIX}{target}\n".encode(),
     )
     after = await object_of(dispatch, gitdir, table, target)
-    log = join_spec(owner, LOGS_DIR, name)
+    log = owner.join(LOGS_DIR, name)
     if after is None or not await logged(dispatch, location, name, log):
         return
     await append(
@@ -232,7 +231,7 @@ async def symbolic_ref(
                 raise DeleteHeadError()
             owner = owner_of(location, name)
             await delete_ref(dispatch, owner, name)
-            await remove_file(dispatch, join_spec(owner, LOGS_DIR, name))
+            await remove_file(dispatch, owner.join(LOGS_DIR, name))
             return None, IOResult()
         if len(names) == 2:
             target = names[1]

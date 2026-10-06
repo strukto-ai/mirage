@@ -25,7 +25,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { typedSpec } from '../../../../utils/path.ts'
+
 import { configValues, gitFs } from './fs.ts'
 import { ensureDir } from './io.ts'
 import type { Dispatch } from './types.ts'
@@ -165,10 +165,10 @@ it('restores typed repository roots across the library string boundary', async (
     return Promise.resolve([new Uint8Array(), new IOResult()])
   }
   const fs = gitFs(source, {
-    gitdir: typedSpec('/hidden/../checkout', '/'),
-    commondir: typedSpec('/blocked/../shared', '/'),
-    worktree: typedSpec('/private/../work', '/'),
-    mountRoot: typedSpec('/', '/'),
+    gitdir: PathSpec.fromStrPath('/hidden/../checkout', undefined, '/'),
+    commondir: PathSpec.fromStrPath('/blocked/../shared', undefined, '/'),
+    worktree: PathSpec.fromStrPath('/private/../work', undefined, '/'),
+    mountRoot: PathSpec.fromStrPath('/'),
   })
   const read = fs.promises.readFile as unknown as (path: string) => Promise<unknown>
   await read('/checkout/HEAD')

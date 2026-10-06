@@ -17,7 +17,7 @@ import { FileSystem } from 'isomorphic-git/models'
 
 import { ResolveIndexError } from './errors.ts'
 import { exists } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import type { Repo } from './repo.ts'
 import type { ConflictedEntry, Dispatch, IndexEntry, IndexState } from './types.ts'
 
@@ -95,7 +95,7 @@ async function withIndex<T>(
  * already says.
  */
 export async function readIndex(repo: Repo, dispatch: Dispatch): Promise<IndexState> {
-  const merging = await exists(dispatch, joinSpec(repo.location.gitdir, MERGE_HEAD))
+  const merging = await exists(dispatch, repo.location.gitdir.join(MERGE_HEAD))
   const entries = new Map<string, IndexEntry>()
   const conflicts = new Map<string, ConflictedEntry>()
   const rows = await withIndex(repo, (index) => index.entriesFlat.map(toEntry))

@@ -17,7 +17,7 @@ import posixpath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import ELOOP_STRERROR, MISS_ERRORS, DotWalkLoop
-from mirage.utils.path import CycleError, typed_spec
+from mirage.utils.path import CycleError
 from mirage.workspace.mount.namespace import Namespace
 
 # What an existence probe reads as nothing there: every miss, and a link
@@ -85,7 +85,7 @@ async def path_stat(
         dispatch (DispatchFn): op dispatcher.
         virtual (str | PathSpec): absolute virtual path.
     """
-    spec = typed_spec(virtual, "/")
+    spec = PathSpec.from_str_path(virtual, cwd="/")
     return await resolve_path_stat(dispatch, spec)
 
 
@@ -103,7 +103,7 @@ async def miss_strerror(dispatch: DispatchFn, virtual: str | PathSpec) -> str:
         virtual (str | PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("stat", typed_spec(virtual, "/"))
+        await dispatch("stat", PathSpec.from_str_path(virtual, cwd="/"))
     except NotADirectoryError:
         return "Not a directory"
     except MISS_ERRORS:
@@ -127,7 +127,7 @@ async def path_readdir(
         dispatch (DispatchFn): op dispatcher.
         virtual (str | PathSpec): absolute virtual path of the directory.
     """
-    spec = typed_spec(virtual, "/")
+    spec = PathSpec.from_str_path(virtual, cwd="/")
     entries, _ = await dispatch("readdir", spec)
     return list(entries)
 

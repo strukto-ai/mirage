@@ -20,7 +20,6 @@ from dulwich.ignore import IgnoreFilter, read_ignore_patterns
 from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.path import join_spec
 
 GITIGNORE = ".gitignore"
 INFO_EXCLUDE = "info/exclude"
@@ -110,10 +109,10 @@ async def load_ignores(
         worktree (PathSpec): absolute virtual path of the working tree root.
     """
     stack = IgnoreStack([])
-    private = await read_optional(dispatch, join_spec(commondir, INFO_EXCLUDE))
+    private = await read_optional(dispatch, commondir.join(INFO_EXCLUDE))
     if private is not None:
         stack = stack.push("", private)
-    root = await read_optional(dispatch, join_spec(worktree, GITIGNORE))
+    root = await read_optional(dispatch, worktree.join(GITIGNORE))
     if root is not None:
         stack = stack.push("", root)
     return stack

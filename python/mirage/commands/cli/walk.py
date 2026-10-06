@@ -33,7 +33,6 @@ from mirage.commands.spec.help import (
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
-from mirage.utils.path import typed_spec
 
 
 def _verb_display(child: CLISpec) -> str:
@@ -589,9 +588,9 @@ def _resolve_group_paths(
                 for name, word in flags.occurrences
                 if name == cs.base_dest and isinstance(word, str)
             ]
-            scope = typed_spec(".", cwd)
+            scope = PathSpec.from_str_path(".", cwd=cwd)
             for word in values or [value]:
-                scope = typed_spec(word or ".", scope)
+                scope = PathSpec.from_str_path(word or ".", cwd=scope)
                 bases.append(scope)
             flags[cs.base_dest] = scope
             base = scope
@@ -600,9 +599,11 @@ def _resolve_group_paths(
             continue
         value = flags[dest]
         if isinstance(value, list):
-            flags[dest] = [typed_spec(part, base) for part in value]
+            flags[dest] = [
+                PathSpec.from_str_path(part, cwd=base) for part in value
+            ]
         elif isinstance(value, str):
-            flags[dest] = typed_spec(value, base)
+            flags[dest] = PathSpec.from_str_path(value, cwd=base)
 
 
 def _finish_node(

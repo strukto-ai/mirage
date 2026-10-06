@@ -35,7 +35,6 @@ from mirage.utils.path import (
     norm,
     parent,
     resolve_path,
-    typed_spec,
 )
 
 
@@ -65,7 +64,7 @@ def resolve_script(name: str, cwd: PathSpec | str | None) -> PathSpec:
             ``CommandOpts.cwd`` carries it; None resolves against the
             root.
     """
-    return typed_spec(name, cwd or "/")
+    return PathSpec.from_str_path(name, cwd=cwd or "/")
 
 
 def default_paths(

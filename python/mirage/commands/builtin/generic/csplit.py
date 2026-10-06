@@ -10,7 +10,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.path import resolve_path, typed_spec
+from mirage.utils.path import resolve_path
 
 
 def _is_regex(pattern: str) -> bool:
@@ -177,11 +177,11 @@ async def csplit_generic(
         data = ("\n".join(part) + "\n").encode() if part else b""
         virtual = prefix_virtual + suffix
         spec = replace(
-            typed_spec(
+            PathSpec.from_str_path(
                 (prefix.dotted or prefix.virtual) + suffix
                 if isinstance(prefix, PathSpec)
                 else virtual,
-                "/",
+                cwd="/",
             ),
             vfs_path=mount_key(virtual, mount_prefix),
             raw_path=name,

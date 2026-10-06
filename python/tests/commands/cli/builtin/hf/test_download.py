@@ -28,8 +28,7 @@ from mirage.core.hf_hub.client import HfHubError
 from mirage.core.hf_hub.repo import Absence
 from mirage.core.hf_hub.tree import parse_entry
 from mirage.io.types import materialize
-from mirage.types import FileStat, FileType
-from mirage.utils.path import typed_spec
+from mirage.types import FileStat, FileType, PathSpec
 from tests.commands.cli.builtin.hf.conftest import inv
 from tests.core.hf_hub.conftest import dir_row, file_row
 
@@ -89,7 +88,7 @@ async def test_download_still_names_the_absence_when_the_tree_refuses(
             await download_cmd(
                 inv(
                     texts=("acme/widget",),
-                    flags={"local_dir": typed_spec("/work/out", "/")},
+                    flags={"local_dir": PathSpec.from_str_path("/work/out")},
                     doors=record,
                 )
             )
@@ -108,7 +107,7 @@ async def test_download_lets_a_server_failure_through(mock_tree, doors):
             await download_cmd(
                 inv(
                     texts=("acme/widget",),
-                    flags={"local_dir": typed_spec("/work/out", "/")},
+                    flags={"local_dir": PathSpec.from_str_path("/work/out")},
                     doors=record,
                 )
             )
@@ -127,7 +126,7 @@ async def test_download_writes_through_the_workspace_door(
     await download_cmd(
         inv(
             texts=("acme/widget", "a.txt"),
-            flags={"local_dir": typed_spec("/work/out", "/")},
+            flags={"local_dir": PathSpec.from_str_path("/work/out")},
             doors=record,
         )
     )
@@ -150,7 +149,7 @@ async def test_download_creates_every_nested_level(
     await download_cmd(
         inv(
             texts=("acme/widget", "sub/b.json"),
-            flags={"local_dir": typed_spec("/work/out", "/")},
+            flags={"local_dir": PathSpec.from_str_path("/work/out")},
             doors=record,
         )
     )
@@ -174,7 +173,10 @@ async def test_download_requires_a_repo_id(doors):
     record, _, _, _ = doors
     with pytest.raises(UsageError, match="repo_id"):
         await download_cmd(
-            inv(flags={"local_dir": typed_spec("/work", "/")}, doors=record)
+            inv(
+                flags={"local_dir": PathSpec.from_str_path("/work")},
+                doors=record,
+            )
         )
 
 
@@ -184,7 +186,7 @@ async def test_download_needs_a_workspace():
         await download_cmd(
             inv(
                 texts=("acme/widget",),
-                flags={"local_dir": typed_spec("/work", "/")},
+                flags={"local_dir": PathSpec.from_str_path("/work")},
             )
         )
 
@@ -206,7 +208,7 @@ async def test_download_refuses_when_nothing_matched(mock_tree, doors):
                 inv(
                     texts=("acme/widget",),
                     flags={
-                        "local_dir": typed_spec("/work/out", "/"),
+                        "local_dir": PathSpec.from_str_path("/work/out"),
                         "include": ["zzz*"],
                     },
                     doors=record,
@@ -236,7 +238,9 @@ async def test_download_tells_the_three_absences_apart(mock_tree, doors):
                 await download_cmd(
                     inv(
                         texts=("acme/widget", *names),
-                        flags={"local_dir": typed_spec("/work/out", "/")},
+                        flags={
+                            "local_dir": PathSpec.from_str_path("/work/out")
+                        },
                         doors=record,
                     )
                 )
@@ -254,7 +258,7 @@ async def test_quiet_prints_only_the_directory(mock_tree, mock_bytes, doors):
             inv(
                 texts=("acme/widget", "a.txt"),
                 flags={
-                    "local_dir": typed_spec("/work/out", "/"),
+                    "local_dir": PathSpec.from_str_path("/work/out"),
                     "quiet": True,
                 },
                 doors=record,
@@ -293,7 +297,7 @@ async def test_download_refuses_the_upstream_variadic_line(
                 texts=("acme/widget", "*.json"),
                 flags={
                     "include": ["*.txt"],
-                    "local_dir": typed_spec("/work/out", "/"),
+                    "local_dir": PathSpec.from_str_path("/work/out"),
                 },
                 doors=record,
             )
@@ -316,7 +320,7 @@ async def test_download_fetches_with_a_bounded_pool(
         inv(
             texts=("acme/widget",),
             flags={
-                "local_dir": typed_spec("/work/out", "/"),
+                "local_dir": PathSpec.from_str_path("/work/out"),
                 "max_workers": 2,
             },
             doors=record,
@@ -351,7 +355,7 @@ async def test_ensure_dir_tolerates_a_parent_another_worker_just_made():
         raise AssertionError(f"unexpected op {op}")
 
     await asyncio.gather(
-        ensure_dir(dispatch, typed_spec("/work/out", "/")),
-        ensure_dir(dispatch, typed_spec("/work/out", "/")),
+        ensure_dir(dispatch, PathSpec.from_str_path("/work/out")),
+        ensure_dir(dispatch, PathSpec.from_str_path("/work/out")),
     )
     assert dirs == {"/work", "/work/out"}

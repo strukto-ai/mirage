@@ -25,7 +25,7 @@ import {
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { exists } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { isEnotdir } from '../../../../utils/errors.ts'
 import type { CommitFacts } from './format.ts'
 import { loadRefs, TAG_PREFIX } from './refs.ts'
@@ -369,7 +369,7 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
 async function onDisk(repo: Repo, path: string): Promise<boolean> {
   if (path === '') return false
   try {
-    return await exists(repo.dispatch, joinSpec(repo.location.worktree, path))
+    return await exists(repo.dispatch, repo.location.worktree.join(path))
   } catch (err) {
     if (isEnotdir(err)) return false
     throw err

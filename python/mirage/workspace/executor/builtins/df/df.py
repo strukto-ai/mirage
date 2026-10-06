@@ -27,7 +27,6 @@ from mirage.utils.errors import (
     fs_error_line,
     walk_refusal,
 )
-from mirage.utils.path import typed_spec
 from mirage.workspace.executor.builtins.df.constants import (
     BLOCK_SUFFIX,
     SI_UNITS,
@@ -251,7 +250,7 @@ async def _target_mounts(
     out: list[MountEntry] = []
     errors: list[str] = []
     for op in operands:
-        spec = typed_spec(op, session.cwd)
+        spec = PathSpec.from_str_path(op, cwd=session.cwd)
         if spec.walk_error is not None:
             # The empty name reads as the working directory in `virtual`,
             # which may well be a mount root, and a link loop reaches no

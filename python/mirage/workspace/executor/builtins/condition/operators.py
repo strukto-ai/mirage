@@ -26,7 +26,6 @@ from mirage.utils.path import (
     dotted_spelling,
     resolve_path,
     resolve_symlinks,
-    typed_spec,
 )
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY,
@@ -75,7 +74,7 @@ async def path_kind(
         ctx (CondContext): evaluation context.
         val (str | PathSpec): operand as typed or classified.
     """
-    walk = typed_spec(val, ctx.session.cwd)
+    walk = PathSpec.from_str_path(val, cwd=ctx.session.cwd)
     if (
         await dot_refusal(
             partial(dispatch_stat, ctx.dispatch), walk, ctx.namespace.follow

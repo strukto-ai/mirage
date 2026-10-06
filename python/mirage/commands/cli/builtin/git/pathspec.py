@@ -23,9 +23,9 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.shell.bytes import byte_view
+from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.hidden import path_visible
-from mirage.utils.path import join_spec
 
 T = TypeVar("T")
 
@@ -182,11 +182,13 @@ def visible_path(location: RepoLocation, relative: str) -> bool:
     ns = location.ns
     if ns is None or ns.visibility is None:
         return True
-    path = join_spec(location.worktree, relative)
+    path = location.worktree.join(relative)
     if not path_visible(ns.visibility, path.virtual):
         return False
     parent = ns.links.resolve(path.directory) if ns.links else path.directory
-    followed = join_spec(parent, posixpath.basename(path.virtual))
+    followed = PathSpec.from_str_path(parent, cwd="/").join(
+        posixpath.basename(path.virtual)
+    )
     return path_visible(ns.visibility, followed.virtual)
 
 

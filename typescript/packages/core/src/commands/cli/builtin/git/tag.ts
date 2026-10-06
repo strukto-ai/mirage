@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
@@ -40,7 +41,7 @@ import {
   UsageError,
 } from './errors.ts'
 import { short } from './format.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import type { ReadOnlyRefusal } from './types.ts'
 import { blockingRef, deleteRef, loadRefs, TAG_PREFIX, validRefName, writeRef } from './refs.ts'
 import { filterWords, listModeOption, refFilter, withoutFilterValues } from './ref_filter.ts'
@@ -304,7 +305,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
 export const tagReadOnly: ReadOnlyRefusal = (inv, location) => {
   const fl = new FlagView(inv.flags)
   const ref = `${TAG_PREFIX}${inv.texts[0] ?? ''}`
-  const path = joinSpec(location?.commondir ?? '.git', ref)
+  const path = (location?.commondir ?? PathSpec.fromStrPath('/.git')).join(ref)
   if (fl.asBool('delete')) return new RefDeleteReadOnlyError(ref, path.virtual)
   if (fl.asBool('annotate') || fl.raw('message') !== undefined) return new TagWriteReadOnlyError()
   return new RefReadOnlyError(ref, path.virtual)

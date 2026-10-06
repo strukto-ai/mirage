@@ -22,7 +22,6 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.errors import fs_error_line, fs_strerror, walk_refusal
-from mirage.utils.path import typed_spec
 from mirage.workspace.executor.builtins.links.ln import operand_abs
 from mirage.workspace.executor.builtins.shared import (
     fail,
@@ -105,7 +104,7 @@ async def handle_readlink(
     exit_code = 0
     for op in operands:
         abs_op = operand_abs(namespace, op, session.cwd)
-        spec = typed_spec(op, session.cwd)
+        spec = PathSpec.from_str_path(op, cwd=session.cwd)
         # The link entry is namespace state behind the op door: session
         # grants and admission policies decide whether this session may
         # read the target at all, so a link operand clears it even under

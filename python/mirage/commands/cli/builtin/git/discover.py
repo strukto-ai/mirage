@@ -28,7 +28,6 @@ from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.ops.types import MountRoot, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
-from mirage.utils.path import join_spec, parent_spec, typed_spec
 
 GITDIR_PREFIX = "gitdir:"
 COMMON_DIR = "commondir"
@@ -59,7 +58,7 @@ async def _follow_gitfile(
     target = line[len(GITDIR_PREFIX) :].strip()
     if not target:
         raise InvalidGitFileError(gitfile.virtual)
-    resolved = typed_spec(target, parent_spec(gitfile))
+    resolved = PathSpec.from_str_path(target, cwd=gitfile.parent)
     if await stat_path(resolved) is None:
         # An absolute pointer names a path on the backend's own
         # filesystem, which is only reachable when the mount happens to
@@ -82,11 +81,11 @@ async def _common_dir(dispatch: DispatchFn, gitdir: PathSpec) -> PathSpec:
         dispatch (DispatchFn): workspace op dispatcher.
         gitdir (PathSpec): absolute virtual path of the git directory.
     """
-    data = await read_optional(dispatch, join_spec(gitdir, COMMON_DIR))
+    data = await read_optional(dispatch, gitdir.join(COMMON_DIR))
     if data is None:
         return gitdir
     target = data.decode("utf-8", errors="replace").strip()
-    return typed_spec(target, gitdir) if target else gitdir
+    return PathSpec.from_str_path(target, cwd=gitdir) if target else gitdir
 
 
 async def _validated(
@@ -104,9 +103,9 @@ async def _validated(
     """
     common = await _common_dir(dispatch, gitdir)
     signatures = (
-        (join_spec(gitdir, "HEAD"), FileType.FILE),
-        (join_spec(common, "objects"), FileType.DIRECTORY),
-        (join_spec(common, "refs"), FileType.DIRECTORY),
+        (gitdir.join("HEAD"), FileType.FILE),
+        (common.join("objects"), FileType.DIRECTORY),
+        (common.join("refs"), FileType.DIRECTORY),
     )
     for path, kind in signatures:
         entry = await stat_path(path)
@@ -153,7 +152,7 @@ async def discover(
             spelling for refusals and skips upward discovery.
         worktree (PathSpec | None): explicit working tree, relative to start.
     """
-    root = typed_spec(mount_root(start.virtual), "/")
+    root = PathSpec.from_str_path(mount_root(start.virtual), cwd="/")
     if gitdir is not None:
         here = await stat_path(start)
         if here is None:
@@ -190,7 +189,7 @@ async def discover(
     current = start
     first = True
     while True:
-        candidate = join_spec(current, GIT_DIR)
+        candidate = current.join(GIT_DIR)
         info = await stat_path(candidate)
         if info is not None:
             gitdir = (
@@ -230,7 +229,7 @@ async def discover(
             first = False
         if current.virtual == root.virtual or current.virtual == "/":
             raise NotARepositoryError()
-        current = parent_spec(current)
+        current = current.parent
 
 
 async def _location(
@@ -278,7 +277,7 @@ async def _location(
     if not configured:
         return located
     spelled = configured[-1].decode("utf-8", errors="replace")
-    selected = typed_spec(spelled, gitdir)
+    selected = PathSpec.from_str_path(spelled, cwd=gitdir)
     if not spelled.startswith("/"):
         info = await stat_path(selected)
         if info is None:

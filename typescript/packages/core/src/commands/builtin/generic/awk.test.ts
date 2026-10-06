@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
-import { typedSpec } from '../../../utils/path.ts'
+
 import { awkGeneric } from './awk.ts'
 
 const ENC = new TextEncoder()
@@ -132,7 +132,10 @@ describe('awkGeneric', () => {
 
   it('resolves a relative -f program file against the cwd', async () => {
     const files = { '/data/prog.awk': '{print $1}\n', '/data/in.txt': 'hey there\n' }
-    const o = { ...opts({ f: typedSpec('prog.awk', '/data') }), cwd: '/data' } as CommandOpts
+    const o = {
+      ...opts({ f: PathSpec.fromStrPath('prog.awk', undefined, '/data') }),
+      cwd: '/data',
+    } as CommandOpts
     const result = await awkGeneric([spec('/data/in.txt')], [], o, makeStream(files))
     const [stdout] = result ?? [null, new IOResult()]
     expect(DEC.decode(await materialize(stdout))).toBe('hey\n')

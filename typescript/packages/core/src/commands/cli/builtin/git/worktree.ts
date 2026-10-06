@@ -17,7 +17,7 @@ import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import { GIT_DIR } from './constants.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
 import { basename, readNames, readOptional } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import type { Dispatch, RepoLocation, WorkTree } from './types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -73,7 +73,7 @@ class Scanner {
 
   /** The virtual path a repository-relative path names. */
   private absolute(relative: string): PathSpec {
-    return relative === '' ? this.worktree : joinSpec(this.worktree, relative)
+    return relative === '' ? this.worktree : this.worktree.join(relative)
   }
 
   /**
@@ -123,7 +123,7 @@ class Scanner {
   /** The ignore rules inside a directory, given the ones outside. */
   private async descend(relative: string, ignores: IgnoreStack): Promise<IgnoreStack> {
     if (relative === '') return ignores
-    const local = await readOptional(this.dispatch, joinSpec(this.absolute(relative), GITIGNORE))
+    const local = await readOptional(this.dispatch, this.absolute(relative).join(GITIGNORE))
     return local === null ? ignores : ignores.push(relative, local)
   }
 

@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { humanScaled, humanSize } from '../../../../commands/builtin/utils/formatting.ts'
-import { CapacityState, type CapacityResult, type PathSpec } from '../../../../types.ts'
+import { CapacityState, type CapacityResult, PathSpec } from '../../../../types.ts'
 import { dispatchStat, nearestAncestor } from '../../../../commands/builtin/utils/paths.ts'
-import { typedSpec } from '../../../../utils/path.ts'
+
 import {
   enoent,
   enotdir,
@@ -178,7 +178,7 @@ async function targetMounts(
   const out: MountEntry[] = []
   const errors: string[] = []
   for (const op of operands) {
-    const spec = typedSpec(op, session.cwd)
+    const spec = PathSpec.fromStrPath(op, undefined, session.cwd)
     if (spec.walkError !== null) {
       // The empty name reads as the working directory in `virtual`, which
       // may well be a mount root, and a link loop reaches no filesystem

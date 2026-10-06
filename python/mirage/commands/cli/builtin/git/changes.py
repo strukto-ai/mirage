@@ -43,7 +43,6 @@ from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
-from mirage.utils.path import join_spec
 
 UNCHANGED = " "
 MODIFIED = "M"
@@ -387,7 +386,7 @@ async def _differs(
     if info.size is not None and entry.size and info.size != entry.size:
         return True
     try:
-        data = await entry_bytes(dispatch, join_spec(worktree, path), info)
+        data = await entry_bytes(dispatch, worktree.join(path), info)
     except MISS_ERRORS:
         return True
     return Blob.from_string(data).id != entry.sha
@@ -498,9 +497,7 @@ async def work_entries(
             del entries[path]
             continue
         blob = Blob.from_string(
-            await entry_bytes(
-                dispatch, join_spec(location.worktree, name), info
-            )
+            await entry_bytes(dispatch, location.worktree.join(name), info)
         )
         store.hold(blob)
         entries[path] = (entry_mode(info), blob.id)

@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import posixpath
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import (
@@ -34,6 +35,8 @@ from pydantic import (
     NonNegativeInt,
     model_validator,
 )
+
+from mirage.utils.path import dotted_spelling, resolve_path
 
 if TYPE_CHECKING:
     import aiohttp
@@ -956,19 +959,69 @@ class PathSpec:
     def child(self, name: str) -> str:
         return self.virtual.rstrip("/") + "/" + name
 
-    @staticmethod
-    def from_str_path(path: str, vfs_path: str | None = None) -> "PathSpec":
-        """Wrap a path string; defaults to a root-mounted vfs_path.
+    def join(self, *parts: str) -> "PathSpec":
+        """Join components for workspace dispatch, preserving the unproven walk.
 
         Args:
-            path (str): virtual path string.
-            vfs_path (str | None): backend key; when None the path is
-                assumed root-mounted (no mount prefix to strip).
+            parts (str): Components; an absolute component resets the base.
         """
+        word = posixpath.join(*parts) if parts else ""
+        path = PathSpec.from_str_path(word or ".", cwd=self)
+        return replace(path, raw_path=path.dotted or path.virtual)
+
+    @property
+    def parent(self) -> "PathSpec":
+        """Lexical parent with its spelled ancestors, for workspace dispatch."""
+        return PathSpec.from_str_path(
+            posixpath.dirname((self.dotted or self.virtual).rstrip("/"))
+            or "/",
+            cwd="/",
+        )
+
+    @staticmethod
+    def from_str_path(
+        path: "str | PathSpec",
+        vfs_path: str | None = None,
+        *,
+        cwd: "str | PathSpec | None" = None,
+    ) -> "PathSpec":
+        """Wrap a resolved path, or resolve a supplied spelling against cwd.
+
+        Args:
+            path (str | PathSpec): Path string or an existing spec to retain.
+            vfs_path (str | None): Explicit backend key; defaults to the
+                virtual path without surrounding slashes for strings.
+            cwd (str | PathSpec | None): When supplied, resolve relative
+                strings and retain spelling, dotted walks and inherited
+                errors. Omit for an already resolved virtual path.
+        """
+        if isinstance(path, PathSpec):
+            return (
+                path if vfs_path is None else replace(path, vfs_path=vfs_path)
+            )
+        base = (
+            (cwd.dotted or cwd.virtual) if isinstance(cwd, PathSpec) else cwd
+        )
+        virtual = resolve_path(path, base) if base is not None else path
+        dotted = None
+        walk_error: WalkErrno | None = None
+        if base is not None:
+            dotted = (
+                dotted_spelling(posixpath.join(base, path))
+                if isinstance(cwd, PathSpec) and cwd.dotted
+                else dotted_spelling(path, base)
+            )
+            if path == "":
+                walk_error = "ENOENT"
+            elif isinstance(cwd, PathSpec) and not path.startswith("/"):
+                walk_error = cwd.walk_error
         return PathSpec(
-            virtual=path,
-            directory=path[: path.rfind("/") + 1] or "/",
-            vfs_path=(path.strip("/") if vfs_path is None else vfs_path),
+            virtual=virtual,
+            directory=virtual[: virtual.rfind("/") + 1] or "/",
+            vfs_path=virtual.strip("/") if vfs_path is None else vfs_path,
+            raw_path=path,
+            dotted=dotted,
+            walk_error=walk_error,
         )
 
 

@@ -35,7 +35,6 @@ from mirage.commands.cli.builtin.git.io import (
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.path import join_spec
 
 OBJECTS_DIR = "objects"
 PACK_DIR = "objects/pack"
@@ -59,9 +58,7 @@ def loose_path(commondir: PathSpec, oid: ObjectID) -> PathSpec:
         oid (ObjectID): hex object id.
     """
     name = oid.decode()
-    return join_spec(
-        commondir, OBJECTS_DIR, name[:FANOUT_LEN], name[FANOUT_LEN:]
-    )
+    return commondir.join(OBJECTS_DIR, name[:FANOUT_LEN], name[FANOUT_LEN:])
 
 
 async def store_blob(
@@ -110,7 +107,7 @@ class LooseObjects:
     ) -> None:
         self._dispatch = dispatch
         self._gitdir = gitdir
-        self._root = join_spec(gitdir, OBJECTS_DIR)
+        self._root = gitdir.join(OBJECTS_DIR)
         self._loop = loop
         self._cache: dict[ObjectID, ShaFile | None] = {}
 
@@ -144,7 +141,7 @@ class LooseObjects:
             fanout (str): the two-character directory name.
         """
         names = run_async_from_sync(
-            read_names(self._dispatch, join_spec(self._root, fanout)),
+            read_names(self._dispatch, self._root.join(fanout)),
             self._loop,
         )
         found = []
@@ -379,16 +376,16 @@ async def load_packs(
         gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
     """
-    root = join_spec(gitdir, PACK_DIR)
+    root = gitdir.join(PACK_DIR)
     packs: list[Pack] = []
     for entry in await read_names(dispatch, root):
         name = basename(entry)
         if not name.endswith(IDX_SUFFIX):
             continue
         stem = name[: -len(IDX_SUFFIX)]
-        idx_bytes = await read_file(dispatch, join_spec(root, name))
+        idx_bytes = await read_file(dispatch, root.join(name))
         index = load_pack_index_file(name, BytesIO(idx_bytes), SHA1)
-        pack_path = join_spec(root, f"{stem}{PACK_SUFFIX}")
+        pack_path = root.join(f"{stem}{PACK_SUFFIX}")
         size = await file_size(dispatch, pack_path)
         if size is None:
             raw = await read_file(dispatch, pack_path)
@@ -453,10 +450,10 @@ async def store_pack(
     index, checksum = await asyncio.to_thread(_index_pack, data)
     stem = f"pack-{checksum.hex()}"
     await write_once(
-        dispatch, join_spec(commondir, PACK_DIR, f"{stem}{PACK_SUFFIX}"), data
+        dispatch, commondir.join(PACK_DIR, f"{stem}{PACK_SUFFIX}"), data
     )
     await write_once(
-        dispatch, join_spec(commondir, PACK_DIR, f"{stem}{IDX_SUFFIX}"), index
+        dispatch, commondir.join(PACK_DIR, f"{stem}{IDX_SUFFIX}"), index
     )
 
 

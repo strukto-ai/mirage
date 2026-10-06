@@ -36,7 +36,6 @@ from mirage.io.stream import materialize, yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.errors import fs_strerror
-from mirage.utils.path import typed_spec
 
 
 def check_host(config: GhConfig, host: str | None) -> None:
@@ -189,7 +188,7 @@ async def read_cli_file(
         if inv.stdin is None:
             raise ValueError(f"{option} needs standard input")
         return await materialize(inv.stdin)
-    spec = typed_spec(raw, inv.env.get("PWD", "/"))
+    spec = PathSpec.from_str_path(raw, cwd=inv.env.get("PWD", "/"))
     if inv.doors is None or inv.doors.dispatch is None:
         raise ValueError(f"{option} needs a workspace to read files from")
     try:

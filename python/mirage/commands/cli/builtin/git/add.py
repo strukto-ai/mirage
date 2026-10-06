@@ -64,7 +64,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType
-from mirage.utils.path import join_spec
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,7 +239,7 @@ async def _resolve(
             stage |= hits if force else keep_addable(hits, tracked, ignores)
             remove |= gone
             continue
-        info = await stat_path(join_spec(location.worktree, target))
+        info = await stat_path(location.worktree.join(target))
         if info is None or info.type is FileType.DIRECTORY:
             raise PathspecError(operand)
         found.files[target] = info
@@ -278,7 +277,7 @@ async def stage_changes(
     for path in sorted(stage):
         data = await entry_bytes(
             dispatch,
-            join_spec(location.worktree, path),
+            location.worktree.join(path),
             found.files[path],
         )
         sha = await store_blob(dispatch, location.commondir, data)

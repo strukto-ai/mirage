@@ -34,7 +34,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.path import join_spec
 
 LOGS_DIR = "logs"
 HEAD_LOG = "logs/HEAD"
@@ -86,7 +85,7 @@ async def append(
         path (str): log path relative to it, e.g. ``logs/HEAD``.
         line (bytes): the line to add, newline included.
     """
-    target = join_spec(gitdir, path)
+    target = gitdir.join(path)
     existing = await read_optional(dispatch, target)
     await write_file(dispatch, target, (existing or b"") + line)
 
@@ -170,7 +169,7 @@ async def _log_of(
         ref (str): the ref name, ``HEAD`` or a full ``refs/`` name.
     """
     root = location.gitdir if ref == HEAD else location.commondir
-    return await read_optional(dispatch, join_spec(root, LOGS_DIR, ref))
+    return await read_optional(dispatch, root.join(LOGS_DIR, ref))
 
 
 async def _named_log(

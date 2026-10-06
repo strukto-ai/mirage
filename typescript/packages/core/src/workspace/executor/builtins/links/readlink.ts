@@ -15,7 +15,7 @@
 import { canonicalize } from '../../../../commands/builtin/generic/realpath.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import { typedSpec } from '../../../../utils/path.ts'
+
 import { gnuPhrase } from '../../../../errors/posix.ts'
 import { PathSpec } from '../../../../types.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
@@ -99,7 +99,7 @@ export async function handleReadlink(
   let exitCode = 0
   for (const op of operands) {
     const absOp = operandAbs(namespace, op, session.cwd)
-    const spec = typedSpec(op, session.cwd)
+    const spec = PathSpec.fromStrPath(op, undefined, session.cwd)
     // The link entry is namespace state behind the op door: session grants
     // and admission policies decide whether this session may read the
     // target at all, so a link operand clears it even under -f, -e and -m.

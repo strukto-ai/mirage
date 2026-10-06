@@ -112,7 +112,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
-from mirage.utils.path import join_spec
 
 HEADS_PREFIX = b"refs/heads/"
 REMOTES_PREFIX = b"refs/remotes/"
@@ -211,7 +210,7 @@ async def _create(
     if held is not None:
         raise RefLockError(ref, held)
     await write_ref(dispatch, location.commondir, ref, commit.id)
-    log = join_spec(location.commondir, "logs", ref)
+    log = location.commondir.join("logs", ref)
     if await logged(dispatch, location, ref, log):
         line = entry(
             ZERO,
@@ -391,7 +390,7 @@ async def set_up_tracking(
         )
     if ref is None:
         return "", ""
-    path = join_spec(location.commondir, "config")
+    path = location.commondir.join("config")
     data = await read_optional(dispatch, path) or b""
     if data and not data.endswith(b"\n"):
         data += b"\n"
@@ -502,7 +501,7 @@ async def _delete(
     ):
         raise UnmergedBranchError(name)
     await delete_ref(dispatch, location.commondir, ref.decode())
-    path = join_spec(location.commondir, "config")
+    path = location.commondir.join("config")
     data = await read_optional(dispatch, path)
     if data is not None:
         dropped = without_section(data, "branch", name)
@@ -831,9 +830,7 @@ async def branch_upstream(
     """
     if head.branch is None or no_commits:
         return None
-    data = await read_optional(
-        dispatch, join_spec(location.commondir, "config")
-    )
+    data = await read_optional(dispatch, location.commondir.join("config"))
     cfg = ConfigFile.from_file(BytesIO(data or b""))
     ref = Ref(f"refs/heads/{head.branch}".encode())
     if (

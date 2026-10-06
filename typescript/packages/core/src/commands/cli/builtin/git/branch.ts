@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 import { DWIM_RULES, HEAD } from './constants.ts'
 import { dateClock } from './dates.ts'
@@ -42,7 +43,7 @@ import {
 import { parseFlags, select } from './history.ts'
 import { short } from './format.ts'
 import { readOptional, writeFile } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { blockingRef, deleteRef, loadRefs, readHead, validRefName, writeRef } from './refs.ts'
 import { filterWords, refFilter, withoutFilterValues, type RefFilter } from './ref_filter.ts'
 import { displayWidth, formatRefs, listingFormat, usedFields } from './ref_format.ts'
@@ -144,7 +145,7 @@ async function create(
   const held = blockingRef(new Set(refs.keys()), ref)
   if (held !== null) throw new RefLockError(ref, held)
   await writeRef(dispatch, repo.location.commondir, ref, oid)
-  const log = joinSpec(repo.location.commondir, 'logs', ref)
+  const log = repo.location.commondir.join('logs', ref)
   if (await logged(dispatch, repo.location, ref, log)) {
     const when = Math.floor(Date.now() / 1000)
     const line = entry(ZERO, oid, IDENTITY, when, `branch: Created from ${from}`)
@@ -268,7 +269,7 @@ export async function setUpTracking(
   if (ref === null || ref === undefined) return ['', '']
   const [remote, merges, prefix, warning] = await tracked(repo, ref, branch, mode)
   if (remote === null) return ['', warning]
-  const path = joinSpec(repo.location.commondir, 'config')
+  const path = repo.location.commondir.join('config')
   const data = (await readOptional(repo.dispatch, path)) ?? new Uint8Array()
   const section = configSection('branch', branch, [
     ['remote', remote],
@@ -330,7 +331,7 @@ async function remove(
     throw new UnmergedBranchError(name)
   }
   await deleteRef(dispatch, repo.location.commondir, ref)
-  const path = joinSpec(repo.location.commondir, 'config')
+  const path = repo.location.commondir.join('config')
   const data = await readOptional(dispatch, path)
   if (data !== null) {
     const text = DEC.decode(data)
@@ -570,7 +571,7 @@ export async function branchUpstream(
 export const branchReadOnly: ReadOnlyRefusal = (inv, location) => {
   const fl = new FlagView(inv.flags)
   const ref = `${HEADS_PREFIX}${inv.texts[0] ?? ''}`
-  const path = joinSpec(location?.commondir ?? '.git', ref)
+  const path = (location?.commondir ?? PathSpec.fromStrPath('/.git')).join(ref)
   if (fl.asBool('delete') || fl.asBool('D')) return new RefDeleteReadOnlyError(ref, path.virtual)
   return new RefReadOnlyError(ref, path.virtual)
 }

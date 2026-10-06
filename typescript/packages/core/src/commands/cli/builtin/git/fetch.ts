@@ -30,7 +30,7 @@ import { configLines, configValues } from './fs.ts'
 import { resolvedRefs } from './history.ts'
 import { globalSources } from './inspect.ts'
 import { writeFile } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
 import {
   deleteRef,
@@ -531,7 +531,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     const [rows, rejected] = await updateRefs(fetched, taken, reason, !bare)
     await writeFile(
       repo.dispatch,
-      joinSpec(location.gitdir, FETCH_HEAD).virtual,
+      location.gitdir.join(FETCH_HEAD).virtual,
       ENC.encode(fetchHead(url, taken)),
     )
     const shown = [...pruned, ...rows.filter((line) => line.code !== '=' || fl.asBool('verbose'))]
@@ -549,7 +549,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
  */
 export const fetchReadOnly: ReadOnlyRefusal = (_inv, location) =>
   new FetchHeadReadOnlyError(
-    location === null || location.gitdir.virtual === joinSpec(location.worktree, '.git').virtual
+    location === null || location.gitdir.virtual === location.worktree.join('.git').virtual
       ? `.git/${FETCH_HEAD}`
-      : joinSpec(location.gitdir, FETCH_HEAD).virtual,
+      : location.gitdir.join(FETCH_HEAD).virtual,
   )

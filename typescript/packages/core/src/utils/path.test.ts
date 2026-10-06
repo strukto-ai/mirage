@@ -15,9 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   ancestors,
-  typedSpec,
-  joinSpec,
-  parentSpec,
   CycleError,
   expandTilde,
   globPrefixMatch,
@@ -235,25 +232,4 @@ it.each([
     ['/data/root', '/'],
   ])
   expect(resolveSymlinks(path, links)).toBe(expected)
-})
-
-it.each([
-  ['/hidden/../repo', ['.git', 'HEAD'], '/repo/.git/HEAD', '/hidden/../repo/.git/HEAD', null],
-  ['/hidden/../repo', ['unused', '/other', 'file'], '/other/file', null, null],
-  ['/repo', [], '/repo', null, null],
-  ['/repo', [''], '/repo', null, null],
-  ['', ['file'], '/file', null, 'ENOENT'],
-  ['', ['/other'], '/other', null, null],
-] as const)(
-  'derives paths from %s and %j without losing the walk',
-  (base, parts, virtual, dotted, error) => {
-    const child = joinSpec(typedSpec(base, '/'), ...parts)
-    expect([child.virtual, child.dotted, child.walkError]).toEqual([virtual, dotted, error])
-    expect(typedSpec(child, '/elsewhere')).toBe(child)
-  },
-)
-
-it('keeps spelled ancestors in a parent path', () => {
-  const child = joinSpec(typedSpec('/hidden/../repo', '/'), '.git', 'HEAD')
-  expect(parentSpec(child).dotted).toBe('/hidden/../repo/.git')
 })

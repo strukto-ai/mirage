@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import {
-  typedSpec,
-  dottedSpelling,
-  resolvePath,
-  CycleError,
-  posixNormpath,
-} from '../../../../utils/path.ts'
+import { dottedSpelling, resolvePath, CycleError, posixNormpath } from '../../../../utils/path.ts'
 import { fsStrerror } from '../../../../utils/errors.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PathSpec, type StatFn, FileType } from '../../../../types.ts'
@@ -103,7 +97,7 @@ export async function handleCd(
     // front of one is proved a directory, the check its own
     // canonicalization makes; `cd nope/..` does not reach the cwd.
     if (dotted !== null) {
-      const walk = typedSpec(dotted, '/')
+      const walk = PathSpec.fromStrPath(dotted, undefined, '/')
       let refusal: Error | null
       try {
         refusal = await dotRefusal(linkedStat(dispatch, table), walk)

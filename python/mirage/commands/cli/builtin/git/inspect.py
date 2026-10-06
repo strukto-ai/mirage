@@ -60,7 +60,6 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.path import join_spec
 from mirage.utils.posix import compile_posix_regex
 from mirage.version import __version__
 
@@ -78,9 +77,7 @@ async def repo_config(inv: CLIInvocation[None], fl: FlagView) -> ConfigFile:
     assert doors.dispatch is not None
     return ConfigFile.from_file(
         BytesIO(
-            await read_file(
-                doors.dispatch, join_spec(location.commondir, "config")
-            )
+            await read_file(doors.dispatch, location.commondir.join("config"))
         )
     )
 
@@ -164,7 +161,7 @@ async def config(
             doors = inv.doors or CLIDoors()
             _, location = await opened(fl, doors)
             assert doors.dispatch is not None
-            source = join_spec(location.commondir, "config").virtual
+            source = location.commondir.join("config").virtual
             data = await read_file(doors.dispatch, source)
             ordinary = (
                 location.commondir.virtual

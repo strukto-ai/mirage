@@ -48,7 +48,7 @@ from mirage.shell.bytes import (
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line, fs_strerror
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import resolve_path, typed_spec
+from mirage.utils.path import resolve_path
 
 ReadBytes = Callable[..., Awaitable[bytes]]
 WriteBytes = Callable[..., Awaitable[None]]
@@ -73,7 +73,7 @@ class _Doors:
     def spec(self, name: str) -> PathSpec:
         resolved = resolve_path(name, self.cwd)
         if self.dispatch is not None:
-            return typed_spec(name, self.cwd)
+            return PathSpec.from_str_path(name, cwd=self.cwd)
         slash = resolved.rfind("/")
         return PathSpec(
             virtual=resolved,

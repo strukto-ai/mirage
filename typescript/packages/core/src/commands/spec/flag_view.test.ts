@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { specOf } from './builtins.ts'
 import { flagKwargName, OPERAND, REFUSED } from './constants.ts'
 import { CommandSpec, Option } from './types.ts'
-import { typedSpec } from '../../utils/path.ts'
+
 import { FlagView, specFlagNames } from './flag_view.ts'
 import { parseCommand, parseToKwargs } from './parser.ts'
 
@@ -24,7 +25,7 @@ import { parseCommand, parseToKwargs } from './parser.ts'
 
 describe('FlagView', () => {
   it('reads each flag shape at its declared type', () => {
-    const path = typedSpec('hidden/../file', '/repo')
+    const path = PathSpec.fromStrPath('hidden/../file', undefined, '/repo')
     const fl = new FlagView({
       i: true,
       m: '5',

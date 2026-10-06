@@ -18,7 +18,7 @@ import { CommandName } from '../../spec/types.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
-import { resolvePath, typedSpec } from '../../../utils/path.ts'
+import { resolvePath } from '../../../utils/path.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -196,7 +196,11 @@ export async function csplitGeneric(
     const name = typedPrefix + suffix
     const data = part.length > 0 ? ENC.encode(part.join('\n') + '\n') : new Uint8Array(0)
     const virtual = prefixVirtual + suffix
-    const scope = typedSpec((prefixSpec?.dotted ?? prefixVirtual) + suffix, '/')
+    const scope = PathSpec.fromStrPath(
+      (prefixSpec?.dotted ?? prefixVirtual) + suffix,
+      undefined,
+      '/',
+    )
     const spec = new PathSpec({
       virtual: scope.virtual,
       directory: scope.directory,

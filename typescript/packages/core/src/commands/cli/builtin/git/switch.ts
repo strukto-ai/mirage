@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
@@ -36,7 +37,7 @@ import {
 } from './errors.ts'
 import { short } from './format.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import type { ReadOnlyRefusal } from './types.ts'
 import {
   BRANCH_PREFIX,
@@ -267,5 +268,8 @@ export const switchReadOnly: ReadOnlyRefusal = (inv, location) => {
   const name = new FlagView(inv.flags).asStr('create')
   if (name === undefined) return indexLocked(inv, location)
   const ref = `${BRANCH_PREFIX}${name}`
-  return new RefReadOnlyError(ref, joinSpec(location?.commondir ?? '.git', ref).virtual)
+  return new RefReadOnlyError(
+    ref,
+    (location?.commondir ?? PathSpec.fromStrPath('/.git')).join(ref).virtual,
+  )
 }

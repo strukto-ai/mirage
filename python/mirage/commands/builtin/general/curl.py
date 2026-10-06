@@ -37,7 +37,6 @@ from mirage.utils.errors import (
     OperationNotSupportedError,
     fs_strerror,
 )
-from mirage.utils.path import typed_spec
 
 # Exit codes real curl uses for the failures mirage can hit. An HTTP error
 # status is deliberately absent: curl treats 4xx/5xx as a successful transfer
@@ -84,7 +83,7 @@ DATA_STRIPPED = b"\r\n\0"
 
 
 def resolve_target(o: str | PathSpec, cwd: PathSpec | str | None) -> PathSpec:
-    return typed_spec(o, cwd or "/")
+    return PathSpec.from_str_path(o, cwd=cwd or "/")
 
 
 def header_lines(

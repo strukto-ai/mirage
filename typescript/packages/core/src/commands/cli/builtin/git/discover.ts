@@ -12,12 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { typedSpec, parentSpec, joinSpec } from '../../../../utils/path.ts'
-
 import { configValues } from './fs.ts'
 import type { MountRoot, StatPath } from '../../../../ops/types.ts'
 import { GIT_DIR } from './constants.ts'
-import { FileType, type PathSpec } from '../../../../types.ts'
+import { FileType, PathSpec } from '../../../../types.ts'
 import {
   InvalidGitFileError,
   NotARepositoryError,
@@ -51,7 +49,7 @@ async function followGitfile(
   if (!line.startsWith(GITDIR_PREFIX)) throw new InvalidGitFileError(gitfile.virtual)
   const target = line.slice(GITDIR_PREFIX.length).trim()
   if (target === '') throw new InvalidGitFileError(gitfile.virtual)
-  const resolved = typedSpec(target, parentSpec(gitfile))
+  const resolved = PathSpec.fromStrPath(target, undefined, gitfile.parent)
   if ((await statPath(resolved)) === null) {
     // An absolute pointer names a path on the backend's own filesystem, which
     // is only reachable when the mount happens to span it: a worktree mounted
@@ -71,10 +69,10 @@ async function followGitfile(
  * ordinary checkout has no such file and is its own common directory.
  */
 async function commonDir(dispatch: Dispatch, gitdir: PathSpec): Promise<PathSpec> {
-  const data = await readOptional(dispatch, joinSpec(gitdir, COMMON_DIR))
+  const data = await readOptional(dispatch, gitdir.join(COMMON_DIR))
   if (data === null) return gitdir
   const target = DEC.decode(data).trim()
-  return target === '' ? gitdir : typedSpec(target, gitdir)
+  return target === '' ? gitdir : PathSpec.fromStrPath(target, undefined, gitdir)
 }
 
 /**
@@ -90,9 +88,9 @@ async function validated(
 ): Promise<PathSpec | null> {
   const common = await commonDir(dispatch, gitdir)
   for (const [path, kind] of [
-    [joinSpec(gitdir, 'HEAD'), FileType.FILE],
-    [joinSpec(common, 'objects'), FileType.DIRECTORY],
-    [joinSpec(common, 'refs'), FileType.DIRECTORY],
+    [gitdir.join('HEAD'), FileType.FILE],
+    [common.join('objects'), FileType.DIRECTORY],
+    [common.join('refs'), FileType.DIRECTORY],
   ] as const) {
     const entry = await statPath(path)
     if (entry?.type !== kind) return null
@@ -135,7 +133,7 @@ export async function discover(
   gitdir: PathSpec | null = null,
   worktree: PathSpec | null = null,
 ): Promise<RepoLocation> {
-  const root = typedSpec(mountRoot(start.virtual), '/')
+  const root = PathSpec.fromStrPath(mountRoot(start.virtual), undefined, '/')
   if (gitdir !== null) {
     const here = await statPath(start)
     if (here === null)
@@ -163,7 +161,7 @@ export async function discover(
   let current = start
   let first = true
   for (;;) {
-    const candidate = joinSpec(current, GIT_DIR)
+    const candidate = current.join(GIT_DIR)
     const info = await statPath(candidate)
     if (info !== null) {
       const gitdir =
@@ -200,7 +198,7 @@ export async function discover(
       first = false
     }
     if (current.virtual === root.virtual || current.virtual === '/') throw new NotARepositoryError()
-    current = parentSpec(current)
+    current = current.parent
   }
 }
 
@@ -237,7 +235,7 @@ async function location(
   if (gitdir.virtual !== common.virtual || bare) return located
   const configured = (await configValues(dispatch, located, 'core.worktree')).at(-1)
   if (configured === undefined) return located
-  const selected = typedSpec(configured, gitdir)
+  const selected = PathSpec.fromStrPath(configured, undefined, gitdir)
   if (!configured.startsWith('/')) {
     const info = await statPath(selected)
     if (info === null) throw new WorkTreeChdirError(configured)

@@ -23,7 +23,7 @@ from mirage.commands.cli.builtin.git.objects import (
     load_object_store,
     load_packs,
 )
-from mirage.utils.path import typed_spec
+from mirage.types import PathSpec
 
 from .conftest import mounted, pack_everything
 
@@ -37,7 +37,9 @@ async def loose_of(workspace) -> LooseObjects:
         workspace (Workspace): the workspace under test.
     """
     return LooseObjects(
-        workspace.dispatch, typed_spec(GITDIR, "/"), asyncio.get_running_loop()
+        workspace.dispatch,
+        PathSpec.from_str_path(GITDIR, cwd="/"),
+        asyncio.get_running_loop(),
     )
 
 
@@ -67,7 +69,9 @@ async def test_an_absent_id_reads_as_absent_rather_than_raising(workspace):
 @pytest.mark.asyncio
 async def test_pack_directory_is_empty_before_packing(workspace):
     packs = await load_packs(
-        workspace.dispatch, typed_spec(GITDIR, "/"), asyncio.get_running_loop()
+        workspace.dispatch,
+        PathSpec.from_str_path(GITDIR, cwd="/"),
+        asyncio.get_running_loop(),
     )
     assert packs == []
 
@@ -78,7 +82,7 @@ async def test_packed_objects_are_served_from_the_pack(repo_path, workspace):
     with mounted(repo_path) as packed_ws:
         packs = await load_packs(
             packed_ws.dispatch,
-            typed_spec(GITDIR, "/"),
+            PathSpec.from_str_path(GITDIR, cwd="/"),
             asyncio.get_running_loop(),
         )
         assert len(packs) == 1
@@ -90,7 +94,7 @@ async def test_the_store_serves_the_same_objects_either_way(
     repo_path, workspace
 ):
     before = await load_object_store(
-        workspace.dispatch, typed_spec(GITDIR, "/")
+        workspace.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
     )
     shas = await asyncio.to_thread(lambda: set(before))
     # Read them out before packing, not after: a lazy store reflects
@@ -101,7 +105,7 @@ async def test_the_store_serves_the_same_objects_either_way(
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
         after = await load_object_store(
-            packed_ws.dispatch, typed_spec(GITDIR, "/")
+            packed_ws.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
         )
         assert await asyncio.to_thread(lambda: set(after)) == shas
         for sha in shas:
@@ -111,7 +115,7 @@ async def test_the_store_serves_the_same_objects_either_way(
 @pytest.mark.asyncio
 async def test_missing_object_raises_key_error(workspace):
     store = await load_object_store(
-        workspace.dispatch, typed_spec(GITDIR, "/")
+        workspace.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
     )
     with pytest.raises(KeyError):
         await asyncio.to_thread(store.get_raw, b"0" * 40)
@@ -122,14 +126,14 @@ async def test_contains_loose_distinguishes_the_two_forms(
     repo_path, workspace
 ):
     store = await load_object_store(
-        workspace.dispatch, typed_spec(GITDIR, "/")
+        workspace.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
     )
     sha = (await asyncio.to_thread(lambda: list(store)))[0]
     assert await asyncio.to_thread(store.contains_loose, sha)
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
         packed = await load_object_store(
-            packed_ws.dispatch, typed_spec(GITDIR, "/")
+            packed_ws.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
         )
         assert not await asyncio.to_thread(packed.contains_loose, sha)
         assert await asyncio.to_thread(lambda: sha in packed)
@@ -140,7 +144,7 @@ async def test_prefix_search_narrows_to_one_fanout_directory(workspace):
     # The inherited iter_prefix walks the whole store, which on a lazy
     # database means fetching every object to resolve an abbreviated id.
     store = await load_object_store(
-        workspace.dispatch, typed_spec(GITDIR, "/")
+        workspace.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
     )
     sha = (await asyncio.to_thread(lambda: list(store)))[0]
     found = await asyncio.to_thread(lambda: list(store.iter_prefix(sha[:7])))
@@ -150,13 +154,13 @@ async def test_prefix_search_narrows_to_one_fanout_directory(workspace):
 @pytest.mark.asyncio
 async def test_prefix_search_finds_packed_ids_too(repo_path, workspace):
     store = await load_object_store(
-        workspace.dispatch, typed_spec(GITDIR, "/")
+        workspace.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
     )
     sha = (await asyncio.to_thread(lambda: list(store)))[0]
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
         packed = await load_object_store(
-            packed_ws.dispatch, typed_spec(GITDIR, "/")
+            packed_ws.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
         )
         found = await asyncio.to_thread(
             lambda: list(packed.iter_prefix(sha[:7]))
@@ -174,7 +178,7 @@ async def test_packed_prefix_search_reads_the_fanout_bucket(
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
         packed = await load_object_store(
-            packed_ws.dispatch, typed_spec(GITDIR, "/")
+            packed_ws.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
         )
         every = await asyncio.to_thread(lambda: list(packed))
         prefix = every[0][:width]
@@ -193,7 +197,7 @@ async def test_a_prefix_search_never_walks_a_whole_pack(
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
         packed = await load_object_store(
-            packed_ws.dispatch, typed_spec(GITDIR, "/")
+            packed_ws.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
         )
         sha = (await asyncio.to_thread(lambda: list(packed)))[0]
 
@@ -215,7 +219,7 @@ async def test_a_prefix_that_is_not_lowercase_hex_names_nothing(
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
         packed = await load_object_store(
-            packed_ws.dispatch, typed_spec(GITDIR, "/")
+            packed_ws.dispatch, PathSpec.from_str_path(GITDIR, cwd="/")
         )
         found = await asyncio.to_thread(
             lambda: list(packed.iter_prefix(prefix))

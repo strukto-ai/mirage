@@ -17,7 +17,7 @@ import { isStdin, resolveSource } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { type PathSpec, FileType } from '../../../types.ts'
+import { PathSpec, FileType } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import {
@@ -34,7 +34,7 @@ import {
 } from '../../../core/awk/index.ts'
 import { USAGE, type AwkFlags } from './awk_types.ts'
 import { dispatchStat } from '../utils/paths.ts'
-import { typedSpec } from '../../../utils/path.ts'
+
 import {
   eisdir,
   fsStrerror,
@@ -136,7 +136,7 @@ export class AwkStreams implements AwkHost {
   private async *readPath(name: string | PathSpec): AsyncIterable<Uint8Array> {
     const dispatch = this.opts.dispatch
     if (dispatch === undefined) throw new AwkIOError('No such file or directory')
-    const path = typedSpec(name, this.opts.cwd)
+    const path = PathSpec.fromStrPath(name, undefined, this.opts.cwd)
     // A keyed store reads a directory as nothing at all, and other backends
     // fail it in their own words, so the stat goes first to fail it the way
     // a POSIX read does.
@@ -167,7 +167,7 @@ export class AwkStreams implements AwkHost {
   async writeFile(name: string, body: string, append: boolean): Promise<void> {
     const dispatch = this.opts.dispatch
     if (dispatch === undefined) throw new AwkRuntimeError('awk: file output requires a workspace')
-    const path = typedSpec(textView(name), this.opts.cwd)
+    const path = PathSpec.fromStrPath(textView(name), undefined, this.opts.cwd)
     try {
       await dispatch(append ? 'append' : 'write', path, [fromByteView(body)])
     } catch (error) {

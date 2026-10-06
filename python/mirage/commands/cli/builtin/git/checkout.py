@@ -123,7 +123,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType
-from mirage.utils.path import join_spec
 
 # git's word-for-word warning when HEAD leaves a branch, kept verbatim.
 # It is the only thing telling a caller that commits made from here
@@ -390,7 +389,7 @@ async def switch_to(
     notes: list[str] = []
     for path in sorted(set(before) - set(after)):
         name = path.decode("utf-8", errors="replace")
-        where = join_spec(location.worktree, name)
+        where = location.worktree.join(name)
         # A gitlink the target tree drops is a directory, not a file:
         # git rmdirs it and warns rather than failing when something is
         # still in it, where the unlink here died on it with the
@@ -411,7 +410,7 @@ async def switch_to(
             await keep_gitlink(
                 dispatch,
                 stat_path,
-                join_spec(location.worktree, name),
+                location.worktree.join(name),
                 links,
             )
             continue
@@ -426,7 +425,7 @@ async def switch_to(
         )
         if above is not None:
             await remove_file(dispatch, above)
-        where = join_spec(location.worktree, name)
+        where = location.worktree.join(name)
         # And the same thing standing on the name itself rather than
         # above it: a directory holding only ignored files is in no
         # collision list either, since the check that refuses one is
@@ -514,7 +513,7 @@ async def _attach(
     when = int(time.time())
     if creating and ref is not None:
         await write_ref(dispatch, location.commondir, ref.decode(), commit.id)
-        log = join_spec(location.commondir, "logs", ref.decode())
+        log = location.commondir.join("logs", ref.decode())
         if await logged(dispatch, location, ref.decode(), log):
             line = log_entry(
                 ZERO,

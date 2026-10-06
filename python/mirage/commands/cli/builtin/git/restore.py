@@ -76,7 +76,6 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType
-from mirage.utils.path import join_spec
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,7 +367,7 @@ async def restore_paths(
         # sits. Nothing is read back from the working tree, so
         # emptying it first is free.
         for name in dropped:
-            path = join_spec(location.worktree, name)
+            path = location.worktree.join(name)
             # A component above the entry that is not a directory
             # is not a way through to it: the unlink would resolve
             # past it and delete a file inside whatever it points
@@ -396,7 +395,7 @@ async def restore_paths(
             )
         for name in sorted(present):
             mode, sha = tree[name.encode()]
-            where = join_spec(location.worktree, name)
+            where = location.worktree.join(name)
             if mode == GITLINK:
                 await keep_gitlink(dispatch, stat_path, where, links)
                 continue

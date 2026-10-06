@@ -27,7 +27,6 @@ from mirage.commands.cli.builtin.git.errors import (
     WorkTreeChdirError,
 )
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.utils.path import typed_spec
 
 
 def _stat_over(present: set[str], files: set[str] = frozenset()):
@@ -95,7 +94,7 @@ def _root(prefix: str):
     ],
 )
 async def test_discovers_the_nearest_repository(start, expected):
-    scope = typed_spec(start, "/")
+    scope = PathSpec.from_str_path(start, cwd="/")
     repo = await discover(
         _no_reads(),
         _stat_over({"/repo/.git", "/repo/vendor/.git", scope.virtual}),
@@ -123,7 +122,7 @@ async def test_discovery_stops_at_the_mount_boundary(root, start, present):
             _no_reads(),
             _stat_over(present),
             _root(root),
-            typed_spec(start, "/"),
+            PathSpec.from_str_path(start, cwd="/"),
         )
     assert str(excinfo.value) == (
         "not a git repository (or any of the parent directories): .git"
@@ -144,7 +143,10 @@ async def test_a_linked_worktree_follows_its_gitdir_pointer():
         }
     )
     repo = await discover(
-        dispatch, stat_path, _root("/repo/"), typed_spec("/repo/wt", "/")
+        dispatch,
+        stat_path,
+        _root("/repo/"),
+        PathSpec.from_str_path("/repo/wt"),
     )
     assert repo.gitdir.virtual == "/repo/.git/worktrees/wt"
     assert repo.commondir.virtual == "/repo/.git"
@@ -160,7 +162,10 @@ async def test_a_relative_pointer_resolves_against_the_file():
     )
     dispatch = _reads({"/repo/lib/.git": b"gitdir: ../.git/modules/lib\n"})
     repo = await discover(
-        dispatch, stat_path, _root("/repo/"), typed_spec("/repo/lib", "/")
+        dispatch,
+        stat_path,
+        _root("/repo/"),
+        PathSpec.from_str_path("/repo/lib"),
     )
     assert repo.gitdir.virtual == "/repo/.git/modules/lib"
     assert repo.commondir.virtual == "/repo/.git/modules/lib"
@@ -177,7 +182,10 @@ async def test_a_pointer_out_of_the_mount_is_gits_unquoted_fatal():
     )
     with pytest.raises(NotARepositoryError) as excinfo:
         await discover(
-            dispatch, stat_path, _root("/repo/"), typed_spec("/repo", "/")
+            dispatch,
+            stat_path,
+            _root("/repo/"),
+            PathSpec.from_str_path("/repo"),
         )
     assert str(excinfo.value) == (
         "not a git repository: /elsewhere/.git/worktrees/wt"
@@ -192,7 +200,7 @@ async def test_invalid_gitfile_is_refused(contents):
             _reads({"/repo/.git": contents}),
             _stat_over(set(), files={"/repo/.git"}),
             _root("/repo/"),
-            typed_spec("/repo", "/"),
+            PathSpec.from_str_path("/repo"),
         )
     assert str(excinfo.value) == "invalid gitfile format: /repo/.git"
 
@@ -222,7 +230,7 @@ async def test_bad_start_precedes_discovery(start, present, files, reason):
             _no_reads(),
             _stat_over(present, files),
             _root("/repo/"),
-            typed_spec(start, "/"),
+            PathSpec.from_str_path(start, cwd="/"),
         )
     assert str(excinfo.value) == f"cannot change to '{start}': {reason}"
 
@@ -232,7 +240,10 @@ async def test_core_worktree_is_relative_to_the_git_directory():
     stat_path = _stat_over({"/repo/.git", "/repo/src"})
     dispatch = _reads({"/repo/.git/config": b"[core]\n\tworktree = ../src\n"})
     repo = await discover(
-        dispatch, stat_path, _root("/repo/"), typed_spec("/repo", "/")
+        dispatch,
+        stat_path,
+        _root("/repo/"),
+        PathSpec.from_str_path("/repo"),
     )
     assert repo.worktree.virtual == "/repo/src"
 
@@ -253,7 +264,10 @@ async def test_a_linked_worktree_ignores_its_repositorys_core_worktree():
         }
     )
     repo = await discover(
-        dispatch, stat_path, _root("/repo/"), typed_spec("/repo/wt", "/")
+        dispatch,
+        stat_path,
+        _root("/repo/"),
+        PathSpec.from_str_path("/repo/wt"),
     )
     assert repo.worktree.virtual == "/repo/wt"
 
@@ -266,7 +280,7 @@ async def test_a_relative_core_worktree_git_cannot_enter_fails_every_verb():
             dispatch,
             _stat_over({"/repo/.git"}),
             _root("/repo/"),
-            typed_spec("/repo", "/"),
+            PathSpec.from_str_path("/repo"),
         )
     assert str(excinfo.value) == (
         "cannot chdir to 'gone': No such file or directory"
@@ -284,9 +298,9 @@ async def test_a_named_work_tree_beats_the_config():
         dispatch,
         _stat_over({"/repo/.git"}),
         _root("/repo/"),
-        typed_spec("/repo", "/"),
+        PathSpec.from_str_path("/repo"),
         None,
-        typed_spec("../elsewhere", "/repo"),
+        PathSpec.from_str_path("../elsewhere", cwd="/repo"),
     )
     assert repo.worktree.virtual == "/elsewhere"
 
@@ -302,8 +316,8 @@ async def test_a_named_git_file_leading_nowhere_names_its_target():
             dispatch,
             stat_path,
             _root("/"),
-            typed_spec("/", "/"),
-            typed_spec("/repo/stray", "/"),
+            PathSpec.from_str_path("/"),
+            PathSpec.from_str_path("/repo/stray"),
         )
     assert str(excinfo.value) == "not a git repository: /repo/docs"
 
@@ -313,7 +327,10 @@ async def test_a_bare_repository_has_no_work_tree_to_enter():
     dispatch = _reads({"/repo/.git/config": b"[core]\n\tbare = true\n"})
     stat_path = _stat_over({"/repo", "/repo/.git"})
     repo = await discover(
-        dispatch, stat_path, _root("/repo/"), typed_spec("/repo", "/")
+        dispatch,
+        stat_path,
+        _root("/repo/"),
+        PathSpec.from_str_path("/repo"),
     )
     with pytest.raises(NotAWorkTreeError):
         await require_work_tree(dispatch, stat_path, repo, False)
@@ -328,9 +345,9 @@ async def test_a_named_work_tree_must_be_a_directory(worktree):
         _no_reads(),
         stat_path,
         _root("/repo/"),
-        typed_spec("/repo", "/"),
+        PathSpec.from_str_path("/repo"),
         None,
-        typed_spec(worktree, "/"),
+        PathSpec.from_str_path(worktree, cwd="/"),
     )
     with pytest.raises(NotAWorkTreeError):
         await require_work_tree(_no_reads(), stat_path, repo, True)
@@ -349,7 +366,10 @@ async def test_core_bare_is_read_as_git_reads_a_boolean(config):
     dispatch = _reads({"/repo/.git/config": config})
     stat_path = _stat_over({"/repo", "/repo/.git"})
     repo = await discover(
-        dispatch, stat_path, _root("/repo/"), typed_spec("/repo", "/")
+        dispatch,
+        stat_path,
+        _root("/repo/"),
+        PathSpec.from_str_path("/repo"),
     )
     with pytest.raises(NotAWorkTreeError):
         await require_work_tree(dispatch, stat_path, repo, False)
@@ -367,9 +387,9 @@ async def test_an_unreadable_core_bare_fails_even_a_named_work_tree():
             dispatch,
             _stat_over({"/repo", "/repo/.git"}),
             _root("/repo/"),
-            typed_spec("/repo", "/"),
+            PathSpec.from_str_path("/repo"),
             None,
-            typed_spec(".", "/repo"),
+            PathSpec.from_str_path(".", cwd="/repo"),
         )
     assert str(excinfo.value) == (
         "bad boolean config value 'maybe' for 'core.bare'"
@@ -390,7 +410,7 @@ async def test_a_linked_worktree_ignores_core_bare_but_still_parses_it():
         _reads(contents),
         stat_path,
         _root("/repo/"),
-        typed_spec("/repo/wt", "/"),
+        PathSpec.from_str_path("/repo/wt"),
     )
     await require_work_tree(_reads(contents), stat_path, repo, False)
     contents["/repo/.git/config"] += b"\tbare = maybe\n"
@@ -399,5 +419,5 @@ async def test_a_linked_worktree_ignores_core_bare_but_still_parses_it():
             _reads(contents),
             stat_path,
             _root("/repo/"),
-            typed_spec("/repo/wt", "/"),
+            PathSpec.from_str_path("/repo/wt"),
         )

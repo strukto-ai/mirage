@@ -33,7 +33,7 @@ import {
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import { entryBytes } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { EXECUTABLE, OWNER_EXECUTE, REGULAR, SYMLINK } from './constants.ts'
@@ -166,7 +166,7 @@ async function resolve(
       for (const path of gone) remove.add(path)
       continue
     }
-    const info = await statPath(joinSpec(location.worktree, target))
+    const info = await statPath(location.worktree.join(target))
     if (info === null || info.type === FileType.DIRECTORY) throw new PathspecError(operand)
     found.files.set(target, info)
     stage.add(target)
@@ -197,7 +197,7 @@ export async function stageChanges(
   for (const path of [...stage].sort(compareCodePoints)) {
     const info = found.files.get(path)
     if (info === undefined) continue
-    const data = await entryBytes(dispatch, joinSpec(repo.location.worktree, path), info)
+    const data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
     const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
     const entry = stagedEntry(oid, info, data.length)
     const before = entries.get(path)

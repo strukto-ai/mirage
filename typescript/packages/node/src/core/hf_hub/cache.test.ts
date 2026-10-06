@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { typedSpec } from '@struktoai/mirage-core/utils/path'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import {
   blobPath,
@@ -63,10 +63,16 @@ describe('layout paths', () => {
   const folder = repoFolderName('acme/w', 'model')
 
   it('places blobs, refs and snapshots the way upstream does', () => {
-    expect(blobPath('/c', folder, 'e1').virtual).toBe('/c/models--acme--w/blobs/e1')
-    expect(refPath('/c', folder, 'main').virtual).toBe('/c/models--acme--w/refs/main')
-    expect(snapshotDir('/c', folder, 'sha').virtual).toBe('/c/models--acme--w/snapshots/sha')
-    expect(snapshotPath('/c', folder, 'sha', 'sub/b.json').virtual).toBe(
+    expect(blobPath(PathSpec.fromStrPath('/c'), folder, 'e1').virtual).toBe(
+      '/c/models--acme--w/blobs/e1',
+    )
+    expect(refPath(PathSpec.fromStrPath('/c'), folder, 'main').virtual).toBe(
+      '/c/models--acme--w/refs/main',
+    )
+    expect(snapshotDir(PathSpec.fromStrPath('/c'), folder, 'sha').virtual).toBe(
+      '/c/models--acme--w/snapshots/sha',
+    )
+    expect(snapshotPath(PathSpec.fromStrPath('/c'), folder, 'sha', 'sub/b.json').virtual).toBe(
       '/c/models--acme--w/snapshots/sha/sub/b.json',
     )
   })
@@ -100,7 +106,7 @@ describe('cacheRoot', () => {
 })
 
 it('keeps the cache roots directory walk', () => {
-  const root = typedSpec('/hidden/../cache', '/')
+  const root = PathSpec.fromStrPath('/hidden/../cache', undefined, '/')
   const blob = blobPath(root, 'models--acme--w', 'e1')
   expect(blob.virtual).toBe('/cache/models--acme--w/blobs/e1')
   expect(blob.dotted).toBe('/hidden/../cache/models--acme--w/blobs/e1')

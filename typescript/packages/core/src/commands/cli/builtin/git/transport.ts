@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
-import { parentSpec, typedSpec } from '../../../../utils/path.ts'
+import { PathSpec } from '../../../../types.ts'
+
 import git from 'isomorphic-git'
 
 import { HttpConnectError } from '../../../builtin/errors.ts'
@@ -422,9 +422,13 @@ export async function openTransport(
   if (dispatch === undefined || statPath === undefined || mounts === undefined)
     throw new NoWorkspaceError()
   const raw = helper === null ? url : decodeURIComponent(new URL(url).pathname)
-  const path = typedSpec(raw, start)
+  const path = PathSpec.fromStrPath(raw, undefined, start)
   for (const suffix of REPO_SUFFIXES) {
-    const candidate = typedSpec((path.dotted ?? path.virtual).replace(/\/+$/, '') + suffix, '/')
+    const candidate = PathSpec.fromStrPath(
+      (path.dotted ?? path.virtual).replace(/\/+$/, '') + suffix,
+      undefined,
+      '/',
+    )
     if ((await statPath(candidate)) === null) continue
     let location
     try {
@@ -432,7 +436,7 @@ export async function openTransport(
         dispatch,
         statPath,
         (where) => mounts.rootOf(where),
-        parentSpec(candidate),
+        candidate.parent,
         candidate,
       )
     } catch (err) {

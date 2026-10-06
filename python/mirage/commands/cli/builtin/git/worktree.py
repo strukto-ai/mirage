@@ -28,7 +28,6 @@ from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.path import join_spec
 
 # git's three untracked modes. "normal" names an untracked directory
 # once instead of everything inside it, "all" names every file, and "no"
@@ -98,9 +97,7 @@ class Scanner:
         Args:
             relative (str): repository-relative path, empty at the root.
         """
-        return (
-            join_spec(self._worktree, relative) if relative else self._worktree
-        )
+        return self._worktree.join(relative) if relative else self._worktree
 
     async def _entry_stat(self, relative: str) -> FileStat | None:
         """What the walk sees at one path, without following a link.
@@ -171,7 +168,7 @@ class Scanner:
         if not relative:
             return ignores
         local = await read_optional(
-            self._dispatch, join_spec(self._absolute(relative), GITIGNORE)
+            self._dispatch, self._absolute(relative).join(GITIGNORE)
         )
         return ignores if local is None else ignores.push(relative, local)
 

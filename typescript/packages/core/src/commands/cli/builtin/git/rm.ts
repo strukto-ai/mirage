@@ -30,7 +30,7 @@ import {
 } from './errors.ts'
 import { readIndex, updateIndex } from './index_file.ts'
 import { removeEmptyParents, removeFile } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import type { Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { TreeEntry } from './tree.ts'
@@ -129,7 +129,7 @@ export async function shadowed(
   if (links === null) return found
   for (const path of paths) {
     if (missing.get(path) !== DELETED) continue
-    const absolute = joinSpec(worktree, path)
+    const absolute = worktree.join(path)
     if (links.resolve(absolute.virtual) === absolute.virtual) continue
     if (await links.exists(absolute.virtual)) found.add(path)
   }
@@ -220,7 +220,7 @@ export async function clearWorktree(
 ): Promise<void> {
   let removed = false
   for (const path of selected) {
-    const absolute = joinSpec(worktree, path)
+    const absolute = worktree.join(path)
     if ((links?.statAt(absolute.virtual) ?? null) === null) {
       const info = await statPath(absolute)
       if (info !== null && info.type === FileType.DIRECTORY) {

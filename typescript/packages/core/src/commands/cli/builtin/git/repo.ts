@@ -18,7 +18,7 @@ import git from 'isomorphic-git'
 import { abbrevLength, type CommitFacts } from './format.ts'
 import { configValues, gitFs } from './fs.ts'
 import { basename, exists, readNames, readRange, writeFile } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
@@ -91,12 +91,12 @@ export function repoArgs(repo: Repo): {
  * abbreviated id agree with real git.
  */
 async function packedCount(dispatch: Dispatch, commondir: PathSpec): Promise<number> {
-  const root = joinSpec(commondir, PACK_DIR)
+  const root = commondir.join(PACK_DIR)
   let total = 0
   for (const entry of await readNames(dispatch, root)) {
     const name = basename(entry)
     if (!name.endsWith(IDX_SUFFIX)) continue
-    const head = await readRange(dispatch, joinSpec(root, name), FANOUT_END - 4, 4)
+    const head = await readRange(dispatch, root.join(name), FANOUT_END - 4, 4)
     if (head.byteLength < 4) continue
     total += new DataView(head.buffer, head.byteOffset, 4).getUint32(0, false)
   }
@@ -146,13 +146,13 @@ async function packedUnder(dispatch: Dispatch, path: PathSpec, byte: number): Pr
 export async function idsUnder(repo: Repo, fanout: string): Promise<string[]> {
   const found = new Set<string>()
   const byte = parseInt(fanout, 16)
-  const root = joinSpec(repo.location.commondir, PACK_DIR)
+  const root = repo.location.commondir.join(PACK_DIR)
   for (const entry of await readNames(repo.dispatch, root)) {
     const name = basename(entry)
     if (!name.endsWith(IDX_SUFFIX)) continue
-    for (const oid of await packedUnder(repo.dispatch, joinSpec(root, name), byte)) found.add(oid)
+    for (const oid of await packedUnder(repo.dispatch, root.join(name), byte)) found.add(oid)
   }
-  const loose = joinSpec(repo.location.commondir, `${OBJECTS_DIR}/${fanout}`)
+  const loose = repo.location.commondir.join(`${OBJECTS_DIR}/${fanout}`)
   for (const entry of await readNames(repo.dispatch, loose)) {
     const name = basename(entry)
     if (name.length === LOOSE_NAME_LENGTH) found.add(`${fanout}${name}`)
@@ -185,10 +185,10 @@ export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
   const checksum = [...data.subarray(data.length - 20)]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')
-  const dir = joinSpec(repo.location.commondir, PACK_DIR)
+  const dir = repo.location.commondir.join(PACK_DIR)
   const name = `pack-${checksum}.pack`
-  if (await exists(repo.dispatch, joinSpec(dir, name.replace(/\.pack$/, IDX_SUFFIX)))) return
-  await writeFile(repo.dispatch, joinSpec(dir, name), data)
+  if (await exists(repo.dispatch, dir.join(name.replace(/\.pack$/, IDX_SUFFIX)))) return
+  await writeFile(repo.dispatch, dir.join(name), data)
   await git.indexPack({ ...repoArgs(repo), dir: dir.virtual, filepath: name })
 }
 

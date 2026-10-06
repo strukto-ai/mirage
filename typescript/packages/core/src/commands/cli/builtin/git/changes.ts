@@ -23,7 +23,7 @@ import { entryMode } from './add.ts'
 import { GITLINK_MODE, SYMLINK } from './constants.ts'
 import { readIndex } from './index_file.ts'
 import { entryBytes } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { readBlobBytes, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { similarityScore } from './similarity.ts'
@@ -342,7 +342,7 @@ async function differs(
   if (info.size !== null && entry.size !== 0 && info.size !== entry.size) return true
   let data: Uint8Array
   try {
-    data = await entryBytes(dispatch, joinSpec(worktree, path), info)
+    data = await entryBytes(dispatch, worktree.join(path), info)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return true
     throw err
@@ -421,7 +421,7 @@ export async function workEntries(
       entries.delete(path)
       continue
     }
-    const data = await entryBytes(dispatch, joinSpec(repo.location.worktree, path), info)
+    const data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
     const { oid } = await git.hashBlob({ object: data })
     repo.held.set(oid, data)
     entries.set(path, { oid, mode: entryMode(info).toString(8).padStart(6, '0') })

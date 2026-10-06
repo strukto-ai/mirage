@@ -22,7 +22,7 @@ import type { FlagValue } from '../../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import { fsStrerror, isEnoent, isEnotdir } from '../../../../utils/errors.ts'
-import { typedSpec } from '../../../../utils/path.ts'
+
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -146,7 +146,7 @@ export async function readCliFile(
   }
   const dispatch = inv.doors?.dispatch
   if (dispatch === undefined) throw new Error(`${option} needs a workspace to read files from`)
-  const spec = typedSpec(raw, inv.env.PWD ?? '/')
+  const spec = PathSpec.fromStrPath(raw, undefined, inv.env.PWD ?? '/')
   try {
     const [data] = await dispatch('read', spec)
     return await materialize(data as ByteSource)

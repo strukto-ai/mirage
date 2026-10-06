@@ -24,14 +24,7 @@ import {
   type FsError,
 } from '../../../utils/errors.ts'
 import { mountKey, rekey, respelled } from '../../../utils/key_prefix.ts'
-import {
-  CycleError,
-  typedSpec,
-  dotPrefixes,
-  norm,
-  parent,
-  resolvePath,
-} from '../../../utils/path.ts'
+import { CycleError, dotPrefixes, norm, parent, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 // Stat via dispatch in the shape the generics' probes take: destKind and
@@ -252,7 +245,7 @@ export function hasUnresolvedGlob(paths: PathSpec[]): boolean {
 // The spelling as typed rides along in rawPath, which is the name an
 // interpreter gives its program.
 export function resolveScript(name: string, cwd: string): PathSpec {
-  return typedSpec(name, cwd)
+  return PathSpec.fromStrPath(name, undefined, cwd)
 }
 
 // Default a command's path operands the way the shell would: explicit

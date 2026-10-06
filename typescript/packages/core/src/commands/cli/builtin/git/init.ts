@@ -1,5 +1,4 @@
-import { typedSpec, joinSpec } from '../../../../utils/path.ts'
-import { type PathSpec, FileType } from '../../../../types.ts'
+import { PathSpec, FileType } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
 import { isEexist, isErofs } from '../../../../utils/errors.ts'
@@ -28,14 +27,14 @@ export async function layOut(
   config: string,
 ): Promise<void> {
   for (const directory of ['objects/info', 'objects/pack', 'refs/heads', 'refs/tags', 'info'])
-    await ensureDir(dispatch, joinSpec(gitdir, directory))
+    await ensureDir(dispatch, gitdir.join(directory))
   const files = {
     HEAD: `ref: refs/heads/${branch}\n`,
     config,
     description: "Unnamed repository; edit this file 'description' to name the repository.\n",
   }
   for (const [name, text] of Object.entries(files)) {
-    const path = joinSpec(gitdir, name)
+    const path = gitdir.join(name)
     if ((await readOptional(dispatch, path)) === null)
       await writeFile(dispatch, path, new TextEncoder().encode(text))
   }
@@ -49,8 +48,8 @@ function namedGitdir(fl: FlagView, texts: readonly string[]): PathSpec {
   const start = startPoint(fl)
   const explicit = fl.asPath('git_dir')
   if (explicit !== undefined) return explicit
-  const target = typedSpec(texts[0] ?? '.', start)
-  return fl.asBool('bare') ? target : joinSpec(target, '.git')
+  const target = PathSpec.fromStrPath(texts[0] ?? '.', undefined, start)
+  return fl.asBool('bare') ? target : target.join('.git')
 }
 
 /**
@@ -82,7 +81,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
         start.rawPath,
         here === null ? 'No such file or directory' : 'Not a directory',
       )
-    const target = typedSpec(inv.texts[0] ?? '.', start)
+    const target = PathSpec.fromStrPath(inv.texts[0] ?? '.', undefined, start)
     if (target.walkError === 'ENOENT')
       throw new CannotMkdirError(target.rawPath, 'No such file or directory')
     const bare = fl.asBool('bare')
@@ -94,7 +93,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     if (
       info !== null &&
       (info.type !== FileType.DIRECTORY ||
-        (await readOptional(dispatch, joinSpec(gitdir, 'HEAD'))) !== null)
+        (await readOptional(dispatch, gitdir.join('HEAD'))) !== null)
     ) {
       const location = await discover(
         dispatch,
@@ -106,10 +105,10 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
       )
       gitdir = location.commondir
     }
-    const existing = (await readOptional(dispatch, joinSpec(gitdir, 'HEAD'))) !== null
+    const existing = (await readOptional(dispatch, gitdir.join('HEAD'))) !== null
     const [typed] = inv.texts
     const made = typed !== undefined && (await doors.statPath(target)) === null
-    const settings = joinSpec(gitdir, 'config')
+    const settings = gitdir.join('config')
     try {
       await layOut(
         dispatch,

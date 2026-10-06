@@ -64,7 +64,6 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
-from mirage.utils.path import join_spec
 
 SYMREF_PREFIX = "ref: "
 # git follows a chain of symbolic refs this deep before it gives up.
@@ -451,9 +450,7 @@ async def read_config(
         dispatch (DispatchFn): workspace op dispatcher.
         location (RepoLocation): the discovered repository.
     """
-    data = await read_optional(
-        dispatch, join_spec(location.commondir, "config")
-    )
+    data = await read_optional(dispatch, location.commondir.join("config"))
     return ConfigFile.from_file(BytesIO(data or b""))
 
 
@@ -489,7 +486,7 @@ async def worktree_heads(
     heads: dict[str, str] = {}
 
     async def note(gitdir: PathSpec, path: str) -> None:
-        data = await read_optional(dispatch, join_spec(gitdir, f"{HEAD_FILE}"))
+        data = await read_optional(dispatch, gitdir.join(f"{HEAD_FILE}"))
         text = (data or b"").decode("utf-8", "replace").strip()
         if text.startswith(SYMREF_PREFIX) and path:
             heads.setdefault(text[len(SYMREF_PREFIX) :].strip(), path)
@@ -504,10 +501,10 @@ async def worktree_heads(
             else ""
         )
     await note(common, main)
-    root = join_spec(common, WORKTREES)
+    root = common.join(WORKTREES)
     for entry in await read_names(dispatch, root):
-        linked = join_spec(root, posixpath.basename(entry))
-        data = await read_optional(dispatch, join_spec(linked, GITDIR_FILE))
+        linked = root.join(posixpath.basename(entry))
+        data = await read_optional(dispatch, linked.join(GITDIR_FILE))
         if data is None:
             continue
         path = data.decode("utf-8", "replace").strip()
@@ -568,9 +565,7 @@ async def detached_line(
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
     """
-    log = await read_optional(
-        dispatch, join_spec(location.gitdir, "logs/HEAD")
-    )
+    log = await read_optional(dispatch, location.gitdir.join("logs/HEAD"))
     for row in reversed((log or b"").splitlines()):
         record, _, message = row.partition(b"\t")
         text = message.decode("utf-8", "replace")
@@ -718,7 +713,7 @@ async def ref_listing(
             if name == HEAD_FILE or not is_root_ref(name):
                 continue
             data = await read_optional(
-                dispatch, join_spec(location.gitdir, f"{name}")
+                dispatch, location.gitdir.join(f"{name}")
             )
             if data:
                 table[name] = data.decode("utf-8", "replace").split("\n", 1)[0]

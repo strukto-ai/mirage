@@ -27,7 +27,6 @@ from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.path import join_spec
 
 INDEX_FILE = "index"
 MERGE_HEAD = "MERGE_HEAD"
@@ -55,8 +54,8 @@ async def read_index(dispatch: DispatchFn, gitdir: PathSpec) -> IndexState:
         gitdir (PathSpec): absolute virtual path of this checkout's git
             directory.
     """
-    data = await read_optional(dispatch, join_spec(gitdir, INDEX_FILE))
-    merging = await read_optional(dispatch, join_spec(gitdir, MERGE_HEAD))
+    data = await read_optional(dispatch, gitdir.join(INDEX_FILE))
+    merging = await read_optional(dispatch, gitdir.join(MERGE_HEAD))
     if data is None:
         return IndexState(
             entries={}, conflicts={}, merging=merging is not None
@@ -100,9 +99,7 @@ async def write_index(
     merged.update(state.conflicts)
     buffer = BytesIO()
     write_index_dict(cast(IO[bytes], buffer), merged)
-    await write_file(
-        dispatch, join_spec(gitdir, INDEX_FILE), buffer.getvalue()
-    )
+    await write_file(dispatch, gitdir.join(INDEX_FILE), buffer.getvalue())
 
 
 def refuse_unresolved(state: IndexState) -> None:

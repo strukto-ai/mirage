@@ -18,7 +18,7 @@ import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
 import { argparseHelp, clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
 import { CommandSpec, UsageStyle, Option } from '../spec/types.ts'
 import { PathSpec } from '../../types.ts'
-import { typedSpec } from '../../utils/path.ts'
+
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
@@ -474,9 +474,9 @@ function resolveGroupPaths(
         .filter(([name]) => name === cs.baseDest)
         .map(([, value]) => value)
         .filter((value): value is string => typeof value === 'string')
-      let scope = typedSpec('.', cwd)
+      let scope = PathSpec.fromStrPath('.', undefined, cwd)
       for (const word of values.length > 0 ? values : [value]) {
-        scope = typedSpec(word || '.', scope)
+        scope = PathSpec.fromStrPath(word || '.', undefined, scope)
         bases.push(scope)
       }
       flags[cs.baseDest] = scope
@@ -486,8 +486,9 @@ function resolveGroupPaths(
   for (const [dest, kind] of cs.kindByDest) {
     if (kind !== 'path' || !(dest in flags) || dest === cs.baseDest) continue
     const value = flags[dest]
-    if (Array.isArray(value)) flags[dest] = value.map((part) => typedSpec(part, base))
-    else if (typeof value === 'string') flags[dest] = typedSpec(value, base)
+    if (Array.isArray(value))
+      flags[dest] = value.map((part) => PathSpec.fromStrPath(part, undefined, base))
+    else if (typeof value === 'string') flags[dest] = PathSpec.fromStrPath(value, undefined, base)
   }
 }
 

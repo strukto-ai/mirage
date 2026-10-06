@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, LINK_TARGET_KEY, type FileStat, type PathSpec } from '../../../../types.ts'
-import { typedSpec, parentSpec, joinSpec } from '../../../../utils/path.ts'
+import { FileType, LINK_TARGET_KEY, type FileStat, PathSpec } from '../../../../types.ts'
+
 import { eexist, isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
@@ -24,7 +24,7 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 
 /** Read one virtual path through the workspace dispatcher. */
 export async function readFile(dispatch: Dispatch, path: string | PathSpec): Promise<Uint8Array> {
-  const [data] = await dispatch('read', typedSpec(path, '/'))
+  const [data] = await dispatch('read', PathSpec.fromStrPath(path, undefined, '/'))
   return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
 }
 
@@ -90,7 +90,7 @@ export async function restoreEntry(
     await removeFile(dispatch, path)
     // symlink(2) needs the directory above the entry, as the write below
     // does, so a link alone in a new directory gets one too.
-    await ensureDir(dispatch, parentSpec(path))
+    await ensureDir(dispatch, path.parent)
     await dispatch('symlink', path, [], {
       target: new TextDecoder().decode(blob),
     })
@@ -185,7 +185,10 @@ export async function readRange(
   offset: number,
   size: number,
 ): Promise<Uint8Array> {
-  const [data] = await dispatch('read', typedSpec(path, '/'), [], { offset, size })
+  const [data] = await dispatch('read', PathSpec.fromStrPath(path, undefined, '/'), [], {
+    offset,
+    size,
+  })
   return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
 }
 
@@ -210,7 +213,7 @@ export async function readOptional(
 /** List a directory, empty when it does not exist. */
 export async function readNames(dispatch: Dispatch, path: string | PathSpec): Promise<string[]> {
   try {
-    const [entries] = await dispatch('readdir', typedSpec(path, '/'))
+    const [entries] = await dispatch('readdir', PathSpec.fromStrPath(path, undefined, '/'))
     return [...((entries as string[] | null) ?? [])]
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return []
@@ -248,7 +251,7 @@ export function basename(entry: string): string {
  */
 export async function ensureDir(dispatch: Dispatch, path: string | PathSpec): Promise<void> {
   const missing: PathSpec[] = []
-  let current = typedSpec(path, '/')
+  let current = PathSpec.fromStrPath(path, undefined, '/')
   while (current.virtual !== '/') {
     try {
       await dispatch('stat', current)
@@ -256,7 +259,7 @@ export async function ensureDir(dispatch: Dispatch, path: string | PathSpec): Pr
     } catch (err) {
       if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
       missing.push(current)
-      current = parentSpec(current)
+      current = current.parent
     }
   }
   for (const target of missing.reverse()) {
@@ -273,7 +276,7 @@ export async function ensureDir(dispatch: Dispatch, path: string | PathSpec): Pr
  */
 export async function isDirectory(dispatch: Dispatch, path: string | PathSpec): Promise<boolean> {
   try {
-    const [stat] = await dispatch('stat', typedSpec(path, '/'))
+    const [stat] = await dispatch('stat', PathSpec.fromStrPath(path, undefined, '/'))
     return (stat as { type?: string } | null)?.type === FileType.DIRECTORY
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return false
@@ -284,7 +287,7 @@ export async function isDirectory(dispatch: Dispatch, path: string | PathSpec): 
 /** Whether a point lookup finds anything at a path. */
 export async function exists(dispatch: Dispatch, path: string | PathSpec): Promise<boolean> {
   try {
-    await dispatch('stat', typedSpec(path, '/'))
+    await dispatch('stat', PathSpec.fromStrPath(path, undefined, '/'))
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return false
     throw err
@@ -304,8 +307,8 @@ export async function exists(dispatch: Dispatch, path: string | PathSpec): Promi
  * ops, since the door has no exclusive create.
  */
 export async function takeLock(dispatch: Dispatch, path: string | PathSpec): Promise<void> {
-  const scope = typedSpec(path, '/')
-  const lock = typedSpec(`${scope.dotted ?? scope.virtual}.lock`, '/')
+  const scope = PathSpec.fromStrPath(path, undefined, '/')
+  const lock = PathSpec.fromStrPath(`${scope.dotted ?? scope.virtual}.lock`, undefined, '/')
   if (await exists(dispatch, lock)) throw eexist(lock.virtual)
   await dispatch('write', lock, [new Uint8Array()])
   await removeFile(dispatch, lock)
@@ -317,8 +320,9 @@ export async function writeFile(
   path: string | PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  await ensureDir(dispatch, parentSpec(path))
-  await dispatch('write', typedSpec(path, '/'), [data])
+  const scope = PathSpec.fromStrPath(path, undefined, '/')
+  await ensureDir(dispatch, scope.parent)
+  await dispatch('write', scope, [data])
 }
 
 /**
@@ -330,7 +334,7 @@ export async function writeFile(
  */
 export async function removeFile(dispatch: Dispatch, path: string | PathSpec): Promise<void> {
   try {
-    await dispatch('unlink', typedSpec(path, '/'))
+    await dispatch('unlink', PathSpec.fromStrPath(path, undefined, '/'))
   } catch (err) {
     if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
   }
@@ -371,7 +375,7 @@ export async function blockingAncestor(
 ): Promise<PathSpec | null> {
   let current = worktree
   for (const part of name.split('/').slice(0, -1)) {
-    current = joinSpec(current, part)
+    current = current.join(part)
     if ((links?.statAt(current.virtual) ?? null) !== null) return current
     const info = await statPath(current)
     if (info !== null && info.type !== FileType.DIRECTORY) return current
@@ -392,7 +396,9 @@ export async function renamePath(
   source: string | PathSpec,
   target: string | PathSpec,
 ): Promise<void> {
-  await dispatch('rename', typedSpec(source, '/'), [typedSpec(target, '/')])
+  await dispatch('rename', PathSpec.fromStrPath(source, undefined, '/'), [
+    PathSpec.fromStrPath(target, undefined, '/'),
+  ])
 }
 
 /**
@@ -421,7 +427,7 @@ export async function refuseReplacedMounts(
 ): Promise<void> {
   if (mounts === null) return
   for (const name of [...names].sort(compareCodePoints)) {
-    const where = joinSpec(worktree, name)
+    const where = worktree.join(name)
     if ((links?.statAt(where.virtual) ?? null) !== null) continue
     const info = await statPath(where)
     if (info !== null && info.type === FileType.DIRECTORY) refuseMount(mounts, where)
@@ -504,7 +510,7 @@ export async function removeTree(
     // basename the way every other walk here does.
     const name = basename(entry)
     if (name === '') continue
-    const child = joinSpec(path, name)
+    const child = path.join(name)
     if ((links?.statAt(child.virtual) ?? null) !== null) {
       await removeFile(dispatch, child)
       continue
@@ -542,7 +548,7 @@ export async function removeEmptyParents(
   mounts: MountView | null,
 ): Promise<void> {
   const root = rstripSlash(stop.virtual) || '/'
-  let current = parentSpec(path)
+  let current = path.parent
   while (current.virtual !== root && current.virtual.startsWith(root)) {
     // A mount root is not a directory git made, and an empty one is still a
     // whole backend: removing it here would destroy the store behind it as a
@@ -556,6 +562,6 @@ export async function removeEmptyParents(
       if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
       return
     }
-    current = parentSpec(current)
+    current = current.parent
   }
 }

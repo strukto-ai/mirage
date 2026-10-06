@@ -198,6 +198,15 @@ as an attachment. That is different from treating a mount as the CLI's service
 client. Such a leaf opts into workspace access through `inv.doors`; do not
 assume those doors exist outside a workspace.
 
+Declare file operands and options with `type="path"`. The handler receives
+`PathSpec` objects in `inv.paths` and through `FlagView.as_path()` /
+`as_paths()`; pass those objects directly to `inv.doors.dispatch` or
+`stat_path`. For a path string read from configuration, use
+`PathSpec.from_str_path(filename, cwd=base)`. Derive workspace paths with
+`path.join("subdir", "file")` and `path.parent`. These retain the spelling
+and directory walk needed for profile checks; converting back to a string
+before filesystem access discards that information.
+
 If a CLI and a Mirage VFS back the same service, neither names the other.
 A write verb on a CLI with a config model expires every mount's cached reads
 after it runs, and a write that throws may already have reached the service, so

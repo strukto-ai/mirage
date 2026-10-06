@@ -38,7 +38,6 @@ from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.types import CLIDoors
 from mirage.types import PathSpec
-from mirage.utils.path import parent_spec, typed_spec
 
 FLUSH = b"0000"
 SERVICE = "git-upload-pack"
@@ -486,10 +485,10 @@ async def open_transport(
     if dispatch is None or stat_path is None or mounts is None:
         raise NoWorkspaceError()
     path = urlsplit(url).path if scheme is not None else url
-    scope = typed_spec(unquote(path), start)
+    scope = PathSpec.from_str_path(unquote(path), cwd=start)
     for suffix in REPO_SUFFIXES:
-        candidate = typed_spec(
-            (scope.dotted or scope.virtual).rstrip("/") + suffix, "/"
+        candidate = PathSpec.from_str_path(
+            (scope.dotted or scope.virtual).rstrip("/") + suffix, cwd="/"
         )
         info = await stat_path(candidate)
         if info is None:
@@ -499,7 +498,7 @@ async def open_transport(
                 dispatch,
                 stat_path,
                 mounts.root_of,
-                parent_spec(candidate),
+                candidate.parent,
                 candidate,
             )
         except GitError:

@@ -33,7 +33,6 @@ import {
   dotRefusal,
 } from '../../../../commands/builtin/utils/paths.ts'
 import {
-  typedSpec,
   CycleError,
   dottedSpelling,
   gnuBasename,
@@ -355,8 +354,10 @@ export async function planLinks(
     const typed = targetTyped ?? targetDir
     const why = walkVerdict(namespace, typed, cwd, true)
     if (why !== null) return [[], `ln: failed to access '${typed}': ${why}\n`]
-    const unwalked = await dotRefusal(dispatchStat(dispatch), typedSpec(typed, cwd), (v) =>
-      namespace.follow(v),
+    const unwalked = await dotRefusal(
+      dispatchStat(dispatch),
+      PathSpec.fromStrPath(typed, undefined, cwd),
+      (v) => namespace.follow(v),
     )
     if (unwalked !== null) {
       return [[], `ln: failed to access '${typed}': ${fsStrerror(unwalked) ?? ENOENT_TEXT}\n`]
@@ -509,8 +510,10 @@ export async function makeLink(
     return
   }
   if (!flags.symbolic) {
-    const unwalked = await dotRefusal(walker, typedSpec(plan.source, cwd), (v) =>
-      namespace.follow(v),
+    const unwalked = await dotRefusal(
+      walker,
+      PathSpec.fromStrPath(plan.source, undefined, cwd),
+      (v) => namespace.follow(v),
     )
     if (unwalked !== null) {
       errors.push(`ln: failed to access '${targetTyped}': ${fsStrerror(unwalked) ?? ENOENT_TEXT}\n`)
@@ -522,7 +525,7 @@ export async function makeLink(
   const replaces = flags.force || (flags.backup !== null && flags.backup !== 'none')
   const unwalked = await dotRefusal(
     walker,
-    typedSpec(typed, cwd),
+    PathSpec.fromStrPath(typed, undefined, cwd),
     (v) => namespace.follow(v),
     !replaces,
   )

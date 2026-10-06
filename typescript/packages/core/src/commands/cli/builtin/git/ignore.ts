@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '../../../../types.ts'
 import { readOptional } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import type { Dispatch } from './types.ts'
 
 const GITIGNORE = '.gitignore'
@@ -215,9 +215,9 @@ export async function loadIgnores(
   worktree: PathSpec,
 ): Promise<IgnoreStack> {
   let stack = new IgnoreStack()
-  const private_ = await readOptional(dispatch, joinSpec(commondir, INFO_EXCLUDE))
+  const private_ = await readOptional(dispatch, commondir.join(INFO_EXCLUDE))
   if (private_ !== null) stack = stack.push('', private_)
-  const root = await readOptional(dispatch, joinSpec(worktree, GITIGNORE))
+  const root = await readOptional(dispatch, worktree.join(GITIGNORE))
   if (root !== null) stack = stack.push('', root)
   return stack
 }

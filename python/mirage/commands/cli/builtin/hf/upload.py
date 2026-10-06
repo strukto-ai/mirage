@@ -34,7 +34,6 @@ from mirage.core.hf_hub.constants import DEFAULT_COMMIT_MESSAGE
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import fs_strerror
-from mirage.utils.path import join_spec, typed_spec
 
 
 async def collect(
@@ -82,7 +81,7 @@ async def collect(
         current = pending.pop()
         entries, _ = await dispatch("readdir", current)
         for entry in entries:
-            child = join_spec(current, entry)
+            child = current.join(entry)
             child_stat, _ = await dispatch("stat", child)
             if getattr(child_stat, "type", None) is FileType.DIRECTORY:
                 pending.append(child)
@@ -173,7 +172,7 @@ async def upload_cmd(
     local = operands[0] if operands else "."
     in_repo = operands[1] if len(operands) > 1 else ""
     collected, from_dir = await collect(
-        inv.doors, typed_spec(local, inv.env.get("PWD", "/"))
+        inv.doors, PathSpec.from_str_path(local, cwd=inv.env.get("PWD", "/"))
     )
     rows = keep(collected, include, exclude)
     if not rows:

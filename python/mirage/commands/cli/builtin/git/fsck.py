@@ -25,7 +25,6 @@ from mirage.ops.types import StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import WALK_ERRORS, fs_strerror
-from mirage.utils.path import join_spec
 
 PACK_BLOCK = 1 << 18
 
@@ -78,12 +77,12 @@ async def check_packs(dispatch: DispatchFn, commondir: PathSpec) -> None:
         dispatch (DispatchFn): repository dispatcher.
         commondir (PathSpec): shared Git directory.
     """
-    root = join_spec(commondir, "objects/pack")
+    root = commondir.join("objects/pack")
     for entry in await read_names(dispatch, root):
         name = basename(entry)
         if not name.endswith(".idx"):
             continue
-        path = join_spec(root, name)
+        path = root.join(name)
         try:
             data = await read_file(dispatch, path)
         except WALK_ERRORS as exc:
@@ -96,7 +95,7 @@ async def check_packs(dispatch: DispatchFn, commondir: PathSpec) -> None:
         if hashlib.sha1(data[:-20]).digest() != data[-20:]:
             raise GitError(f"pack index checksum mismatch: {path.virtual}")
         await check_pack(
-            dispatch, join_spec(root, f"{name[:-4]}.pack"), data[-40:-20]
+            dispatch, root.join(f"{name[:-4]}.pack"), data[-40:-20]
         )
 
 
@@ -113,7 +112,7 @@ async def log_roots(
     found: set[bytes] = set()
     for entry in await read_names(dispatch, path):
         name = basename(entry)
-        target = join_spec(path, name)
+        target = path.join(name)
         info = await stat_path(target)
         if info is not None and info.type is FileType.DIRECTORY:
             found.update(await log_roots(dispatch, stat_path, target))
@@ -214,7 +213,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 await log_roots(
                     doors.dispatch,
                     doors.stat_path,
-                    join_spec(directory, "logs"),
+                    directory.join("logs"),
                 )
             )
         out, io = await asyncio.to_thread(
@@ -222,7 +221,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         )
         if not roots:
             head = await read_optional(
-                doors.dispatch, join_spec(location.gitdir, "HEAD")
+                doors.dispatch, location.gitdir.join("HEAD")
             )
             branch = (
                 (head or b"").decode().strip().removeprefix("ref: refs/heads/")

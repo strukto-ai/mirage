@@ -22,7 +22,6 @@ from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
-from mirage.utils.path import join_spec, parent_spec, typed_spec
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ async def read_file(dispatch: DispatchFn, path: str | PathSpec) -> bytes:
         dispatch (DispatchFn): workspace op dispatcher.
         path (str | PathSpec): absolute virtual path.
     """
-    data, _ = await dispatch("read", typed_spec(path, "/"))
+    data, _ = await dispatch("read", PathSpec.from_str_path(path, cwd="/"))
     return data if isinstance(data, bytes) else bytes(data)
 
 
@@ -112,7 +111,7 @@ async def restore_entry(
         await remove_file(dispatch, path)
         # symlink(2) needs the directory above the entry, as the write
         # below does, so a link alone in a new directory gets one too.
-        await ensure_dir(dispatch, parent_spec(path))
+        await ensure_dir(dispatch, path.parent)
         await dispatch(
             "symlink",
             path,
@@ -219,7 +218,7 @@ async def read_range(
         size (int): how many bytes to read.
     """
     data, _ = await dispatch(
-        "read", typed_spec(path, "/"), offset=offset, size=size
+        "read", PathSpec.from_str_path(path, cwd="/"), offset=offset, size=size
     )
     return data if isinstance(data, bytes) else bytes(data)
 
@@ -231,7 +230,7 @@ async def file_size(dispatch: DispatchFn, path: str | PathSpec) -> int | None:
         dispatch (DispatchFn): workspace op dispatcher.
         path (str | PathSpec): absolute virtual path.
     """
-    stat, _ = await dispatch("stat", typed_spec(path, "/"))
+    stat, _ = await dispatch("stat", PathSpec.from_str_path(path, cwd="/"))
     return getattr(stat, "size", None)
 
 
@@ -261,7 +260,9 @@ async def read_names(dispatch: DispatchFn, path: str | PathSpec) -> list[str]:
         path (str | PathSpec): absolute virtual path of the directory.
     """
     try:
-        entries, _ = await dispatch("readdir", typed_spec(path, "/"))
+        entries, _ = await dispatch(
+            "readdir", PathSpec.from_str_path(path, cwd="/")
+        )
     except MISS_ERRORS:
         return []
     return list(entries or [])
@@ -299,14 +300,14 @@ async def ensure_dir(dispatch: DispatchFn, path: str | PathSpec) -> None:
         path (str | PathSpec): absolute virtual path of the directory.
     """
     missing: list[PathSpec] = []
-    current = typed_spec(path, "/")
+    current = PathSpec.from_str_path(path, cwd="/")
     while current.virtual != "/":
         try:
             await dispatch("stat", current)
             break
         except MISS_ERRORS:
             missing.append(current)
-            current = parent_spec(current)
+            current = current.parent
     for target in reversed(missing):
         await dispatch("mkdir", target)
 
@@ -319,7 +320,7 @@ async def exists(dispatch: DispatchFn, path: str | PathSpec) -> bool:
         path (str | PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("stat", typed_spec(path, "/"))
+        await dispatch("stat", PathSpec.from_str_path(path, cwd="/"))
     except MISS_ERRORS:
         return False
     return True
@@ -335,8 +336,9 @@ async def write_file(
         path (str | PathSpec): absolute virtual path.
         data (bytes): the whole contents.
     """
-    await ensure_dir(dispatch, parent_spec(path))
-    await dispatch("write", typed_spec(path, "/"), data=data)
+    scope = PathSpec.from_str_path(path, cwd="/")
+    await ensure_dir(dispatch, scope.parent)
+    await dispatch("write", scope, data=data)
 
 
 async def take_lock(dispatch: DispatchFn, path: str | PathSpec) -> None:
@@ -358,8 +360,10 @@ async def take_lock(dispatch: DispatchFn, path: str | PathSpec) -> None:
     Raises:
         FileExistsError: the lock is already there.
     """
-    scope = typed_spec(path, "/")
-    lock = typed_spec(f"{scope.dotted or scope.virtual}.lock", "/")
+    scope = PathSpec.from_str_path(path, cwd="/")
+    lock = PathSpec.from_str_path(
+        f"{scope.dotted or scope.virtual}.lock", cwd="/"
+    )
     if await exists(dispatch, lock):
         raise FileExistsError(
             errno.EEXIST, os.strerror(errno.EEXIST), lock.virtual
@@ -426,7 +430,7 @@ async def blocking_ancestor(
     """
     current = worktree
     for part in name.split("/")[:-1]:
-        current = join_spec(current, part)
+        current = current.join(part)
         if links is not None and links.stat_at(current.virtual) is not None:
             return current
         info = await stat_path(current)
@@ -447,7 +451,7 @@ async def remove_file(dispatch: DispatchFn, path: str | PathSpec) -> None:
         path (str | PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("unlink", typed_spec(path, "/"))
+        await dispatch("unlink", PathSpec.from_str_path(path, cwd="/"))
     except MISS_ERRORS as exc:
         logger.debug("nothing to remove at %s: %s", path, exc)
 
@@ -469,8 +473,8 @@ async def rename_path(
     """
     await dispatch(
         "rename",
-        typed_spec(source, "/"),
-        dst=typed_spec(target, "/"),
+        PathSpec.from_str_path(source, cwd="/"),
+        dst=PathSpec.from_str_path(target, cwd="/"),
     )
 
 
@@ -537,7 +541,7 @@ async def refuse_replaced_mounts(
     if mounts is None:
         return
     for name in sorted(names):
-        where = join_spec(worktree, name)
+        where = worktree.join(name)
         if links is not None and links.stat_at(where.virtual) is not None:
             continue
         info = await stat_path(where)
@@ -592,7 +596,7 @@ async def remove_tree(
         name = basename(entry)
         if not name:
             continue
-        child = join_spec(path, name)
+        child = path.join(name)
         if links is not None and links.stat_at(child.virtual) is not None:
             await remove_file(dispatch, child)
             continue
@@ -629,7 +633,7 @@ async def remove_empty_parents(
             None when no namespace is wired.
     """
     root = stop.virtual.rstrip("/") or "/"
-    current = parent_spec(path)
+    current = path.parent
     while current.virtual != root and current.virtual.startswith(root):
         # A mount root is not a directory git made, and an empty one is
         # still a whole backend: removing it here would destroy the
@@ -645,4 +649,4 @@ async def remove_empty_parents(
         except MISS_ERRORS as exc:
             logger.debug("no directory to remove at %s: %s", current, exc)
             return
-        current = parent_spec(current)
+        current = current.parent

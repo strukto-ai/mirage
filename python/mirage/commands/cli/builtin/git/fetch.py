@@ -67,7 +67,6 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
-from mirage.utils.path import join_spec
 
 HEADS = "refs/heads/"
 TAGS = "refs/tags/"
@@ -649,9 +648,7 @@ async def fetch(
         if dispatch is None:
             raise NoWorkspaceError()
         config = _config(
-            await read_optional(
-                dispatch, join_spec(location.commondir, "config")
-            )
+            await read_optional(dispatch, location.commondir.join("config"))
         )
         head = await read_head(dispatch, location.gitdir)
         texts = list(inv.texts)
@@ -727,7 +724,7 @@ async def fetch(
         )
         await write_file(
             dispatch,
-            join_spec(location.gitdir, FETCH_HEAD),
+            location.gitdir.join(FETCH_HEAD),
             fetch_head(url, taken),
         )
         shown = pruned + [
@@ -755,10 +752,6 @@ def fetch_read_only(
         inv (CLIInvocation[None]): the line's invocation record.
         location (RepoLocation | None): the repository it opened.
     """
-    if location is None or location.gitdir == join_spec(
-        location.worktree, ".git"
-    ):
+    if location is None or location.gitdir == location.worktree.join(".git"):
         return FetchHeadReadOnlyError(f".git/{FETCH_HEAD}")
-    return FetchHeadReadOnlyError(
-        join_spec(location.gitdir, FETCH_HEAD).virtual
-    )
+    return FetchHeadReadOnlyError(location.gitdir.join(FETCH_HEAD).virtual)

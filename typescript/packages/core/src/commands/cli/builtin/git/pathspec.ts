@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { joinSpec, posixNormpath } from '../../../../utils/path.ts'
+import { PathSpec } from '../../../../types.ts'
+import { posixNormpath } from '../../../../utils/path.ts'
 import { byteView } from '../../../../shell/bytes.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
@@ -149,10 +150,12 @@ function selects(path: string, pattern: string, directory: boolean): boolean {
 export function visiblePath(location: RepoLocation, relative: string): boolean {
   const ns = location.ns
   if (ns?.visibility === undefined) return true
-  const path = joinSpec(location.worktree, relative)
+  const path = location.worktree.join(relative)
   if (!pathVisible(ns.visibility, path.virtual)) return false
   const parent = ns.links?.resolve(path.directory) ?? path.directory
-  const followed = joinSpec(parent, path.virtual.slice(path.virtual.lastIndexOf('/') + 1))
+  const followed = PathSpec.fromStrPath(parent, undefined, '/').join(
+    path.virtual.slice(path.virtual.lastIndexOf('/') + 1),
+  )
   return pathVisible(ns.visibility, followed.virtual)
 }
 

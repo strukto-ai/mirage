@@ -11,7 +11,6 @@ from mirage.commands.cli.builtin.git.util import fatal
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.utils.path import join_spec
 
 
 async def stash_list(
@@ -27,7 +26,7 @@ async def stash_list(
         _, location = await opened(FlagView(inv.flags), doors)
         assert doors.dispatch is not None
         data = await read_optional(
-            doors.dispatch, join_spec(location.commondir, "logs/refs/stash")
+            doors.dispatch, location.commondir.join("logs/refs/stash")
         )
         lines = (data or b"").splitlines()
         text = b"".join(
@@ -56,7 +55,7 @@ async def stash_show(
         if match is not None:
             data = await read_optional(
                 doors.dispatch,
-                join_spec(location.commondir, "logs/refs/stash"),
+                location.commondir.join("logs/refs/stash"),
             )
             rows = list(reversed((data or b"").splitlines()))
             index = int(match.group(1) or match.group(2))

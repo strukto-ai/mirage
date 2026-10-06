@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from mirage.commands.cli.builtin.git.reflog import ZERO, entry, record
-from mirage.utils.path import typed_spec
+from mirage.types import PathSpec
 
 WHO = b"Test Author <test@example.com>"
 OLD = b"1" * 40
@@ -70,8 +70,8 @@ async def test_both_logs_gain_the_same_line_when_head_is_on_a_branch(
 ):
     await record(
         git_rw.dispatch,
-        typed_spec("/repo/.git", "/"),
-        typed_spec("/repo/.git", "/"),
+        PathSpec.from_str_path("/repo/.git"),
+        PathSpec.from_str_path("/repo/.git"),
         "refs/heads/main",
         OLD,
         NEW,
@@ -92,8 +92,8 @@ async def test_a_detached_head_leaves_the_branch_log_alone(
     before = lines(repo_path, "logs", "refs", "heads", "main")
     await record(
         git_rw.dispatch,
-        typed_spec("/repo/.git", "/"),
-        typed_spec("/repo/.git", "/"),
+        PathSpec.from_str_path("/repo/.git"),
+        PathSpec.from_str_path("/repo/.git"),
         None,
         OLD,
         NEW,
@@ -112,8 +112,8 @@ async def test_entries_accumulate_rather_than_replace(git_rw, repo_path: Path):
     before = len(lines(repo_path, "logs", "HEAD"))
     await record(
         git_rw.dispatch,
-        typed_spec("/repo/.git", "/"),
-        typed_spec("/repo/.git", "/"),
+        PathSpec.from_str_path("/repo/.git"),
+        PathSpec.from_str_path("/repo/.git"),
         None,
         OLD,
         NEW,
@@ -123,8 +123,8 @@ async def test_entries_accumulate_rather_than_replace(git_rw, repo_path: Path):
     )
     await record(
         git_rw.dispatch,
-        typed_spec("/repo/.git", "/"),
-        typed_spec("/repo/.git", "/"),
+        PathSpec.from_str_path("/repo/.git"),
+        PathSpec.from_str_path("/repo/.git"),
         None,
         NEW,
         OLD,
@@ -143,8 +143,8 @@ async def test_a_linked_worktree_logs_its_branch_in_the_repository(
     # directory, so `git reflog main` reads one log from every worktree.
     await record(
         git_rw.dispatch,
-        typed_spec("/repo/.git/worktrees/wt", "/"),
-        typed_spec("/repo/.git", "/"),
+        PathSpec.from_str_path("/repo/.git/worktrees/wt"),
+        PathSpec.from_str_path("/repo/.git"),
         "refs/heads/main",
         OLD,
         NEW,

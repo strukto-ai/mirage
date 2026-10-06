@@ -28,7 +28,7 @@ import {
 import { UsageError } from '../../errors.ts'
 import { gnuStrerror, isFsError, isWalkError, enotsup } from '../../../utils/errors.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { typedSpec } from '../../../utils/path.ts'
+
 import { FlagView } from '../../spec/flag_view.ts'
 import { encodeBase64 } from '../../../utils/base64.ts'
 
@@ -77,7 +77,7 @@ const DATA_STRIPPED = new Set([0x0d, 0x0a, 0x00])
 const UNRESERVED = /^[A-Za-z0-9\-._~]$/
 
 export function resolveTarget(o: string | PathSpec, cwd: string): PathSpec {
-  return typedSpec(o, cwd)
+  return PathSpec.fromStrPath(o, undefined, cwd)
 }
 
 /**

@@ -35,7 +35,7 @@ import { stageTracked } from './add.ts'
 import { commitSummary } from './diff_output.ts'
 import { readIndex, updateIndex } from './index_file.ts'
 import { takeLock } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { record } from './reflog.ts'
 import { detachHead, readHead, writeRef } from './refs.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
@@ -222,7 +222,7 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
     const repo = await opened(fl, doors, true)
     // git takes the index's lock before it looks for anything to commit, so a
     // read-only repository refuses an empty commit too.
-    const index = joinSpec(repo.location.gitdir, 'index')
+    const index = repo.location.gitdir.join('index')
     try {
       await takeLock(dispatch, index)
     } catch (err) {

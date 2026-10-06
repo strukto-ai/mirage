@@ -43,7 +43,7 @@ import {
   removeTree,
   restoreEntry,
 } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { repoArgs, type Repo } from './repo.ts'
 import { BRANCH_PREFIX, loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { opened } from './session.ts'
@@ -286,7 +286,7 @@ export async function restorePaths(
     // where the directory still sits. Nothing is read back from the
     // working tree, so emptying it first is free.
     for (const name of dropped) {
-      const path = joinSpec(repo.location.worktree, name)
+      const path = repo.location.worktree.join(name)
       // A component above the entry that is not a directory is not a way
       // through to it: the unlink would resolve past it and delete a file
       // inside whatever it points at, which no branch named. git checks the
@@ -309,7 +309,7 @@ export async function restorePaths(
     for (const name of present) {
       const entry = tree.get(name)
       if (entry === undefined) continue
-      const where = joinSpec(repo.location.worktree, name)
+      const where = repo.location.worktree.join(name)
       if (entry.mode === GITLINK_MODE) {
         await keepGitlink(dispatch, statPath, where, links)
         continue

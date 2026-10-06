@@ -33,7 +33,6 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.path import join_spec
 
 HEAD_FILE = "HEAD"
 PACKED_REFS = "packed-refs"
@@ -57,7 +56,7 @@ async def read_head(dispatch: DispatchFn, gitdir: PathSpec) -> HeadRef:
         dispatch (DispatchFn): workspace op dispatcher.
         gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
     """
-    raw = await read_file(dispatch, join_spec(gitdir, HEAD_FILE))
+    raw = await read_file(dispatch, gitdir.join(HEAD_FILE))
     text = raw.decode("utf-8", errors="replace").strip()
     if not text.startswith(SYMREF_PREFIX):
         return HeadRef(branch=None, ref=None, commit=text or None)
@@ -87,7 +86,7 @@ async def _walk_loose_refs(
         name = basename(entry)
         if not name:
             continue
-        child = join_spec(root, name)
+        child = root.join(name)
         data = await read_optional(dispatch, child)
         if data is None:
             await _walk_loose_refs(dispatch, child, f"{prefix}/{name}", refs)
@@ -118,7 +117,7 @@ async def write_ref(
         ref (str): full ref name, e.g. ``refs/heads/main``.
         sha (bytes): hex object id the ref should name.
     """
-    await write_file(dispatch, join_spec(commondir, ref), sha + b"\n")
+    await write_file(dispatch, commondir.join(ref), sha + b"\n")
 
 
 def without_packed(data: bytes, ref: str) -> bytes | None:
@@ -171,8 +170,8 @@ async def delete_ref(
             directory.
         ref (str): full ref name.
     """
-    await remove_file(dispatch, join_spec(commondir, ref))
-    path = join_spec(commondir, PACKED_REFS)
+    await remove_file(dispatch, commondir.join(ref))
+    path = commondir.join(PACKED_REFS)
     data = await read_optional(dispatch, path)
     if data is None:
         return
@@ -192,7 +191,7 @@ async def set_head(dispatch: DispatchFn, gitdir: PathSpec, ref: str) -> None:
     """
     await write_file(
         dispatch,
-        join_spec(gitdir, HEAD_FILE),
+        gitdir.join(HEAD_FILE),
         f"{SYMREF_PREFIX}{ref}\n".encode(),
     )
 
@@ -208,7 +207,7 @@ async def detach_head(
             directory.
         sha (bytes): hex object id to check out.
     """
-    await write_file(dispatch, join_spec(gitdir, HEAD_FILE), sha + b"\n")
+    await write_file(dispatch, gitdir.join(HEAD_FILE), sha + b"\n")
 
 
 async def load_refs(
@@ -245,19 +244,15 @@ async def load_refs(
     """
     shared = commondir or gitdir
     refs: dict[Ref, bytes] = {}
-    packed = await read_optional(dispatch, join_spec(shared, PACKED_REFS))
+    packed = await read_optional(dispatch, shared.join(PACKED_REFS))
     if packed is not None:
         for sha, name, _peeled in read_packed_refs_with_peeled(
             BytesIO(packed)
         ):
             refs[name] = sha
-    await _walk_loose_refs(
-        dispatch, join_spec(shared, REFS_DIR), REFS_DIR, refs
-    )
+    await _walk_loose_refs(dispatch, shared.join(REFS_DIR), REFS_DIR, refs)
     if gitdir.virtual != shared.virtual:
-        await _walk_loose_refs(
-            dispatch, join_spec(gitdir, REFS_DIR), REFS_DIR, refs
-        )
+        await _walk_loose_refs(dispatch, gitdir.join(REFS_DIR), REFS_DIR, refs)
     head = await read_head(dispatch, gitdir)
     if head.ref is not None:
         refs[HEAD_REF] = f"{SYMREF_PREFIX}{head.ref}".encode()
@@ -366,7 +361,7 @@ async def raw_ref(
         return known.decode("utf-8", errors="replace")
     if name.startswith(f"{REFS_DIR}/"):
         return None
-    data = await read_optional(dispatch, join_spec(gitdir, name))
+    data = await read_optional(dispatch, gitdir.join(name))
     return None if data is None else data.decode(errors="replace").strip()
 
 

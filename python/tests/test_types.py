@@ -155,6 +155,71 @@ def test_pathspec_dir_at_mount_root():
     assert p.dir.vfs_path == ""
 
 
+@pytest.mark.parametrize(
+    "word,cwd,virtual,dotted,error",
+    [
+        ("file", "/repo", "/repo/file", None, None),
+        ("../file", "/repo/sub", "/repo/file", None, None),
+        (
+            "hidden/../file",
+            "/repo",
+            "/repo/file",
+            "/repo/hidden/../file",
+            None,
+        ),
+        ("dir/", "/repo", "/repo/dir", "/repo/dir/", None),
+        ("", "/repo", "/repo", None, "ENOENT"),
+        (
+            "file",
+            PathSpec.from_str_path("/hidden/../repo", cwd="/"),
+            "/repo/file",
+            "/hidden/../repo/file",
+            None,
+        ),
+        (
+            "/other",
+            PathSpec.from_str_path("/hidden/../repo", cwd="/"),
+            "/other",
+            None,
+            None,
+        ),
+        (
+            "file",
+            PathSpec.from_str_path("", cwd="/repo"),
+            "/repo/file",
+            None,
+            "ENOENT",
+        ),
+        (
+            "/other",
+            PathSpec.from_str_path("", cwd="/repo"),
+            "/other",
+            None,
+            None,
+        ),
+    ],
+)
+def test_pathspec_from_str_path_resolves_user_spelling(
+    word, cwd, virtual, dotted, error
+):
+    path = PathSpec.from_str_path(word, cwd=cwd)
+    assert (path.virtual, path.raw_path, path.dotted, path.walk_error) == (
+        virtual,
+        word,
+        dotted,
+        error,
+    )
+    assert PathSpec.from_str_path(path, cwd="/elsewhere") is path
+    keyed = PathSpec.from_str_path(word, "backend/key", cwd=cwd)
+    assert keyed.vfs_path == "backend/key"
+    assert (keyed.raw_path, keyed.dotted, keyed.walk_error) == (
+        word,
+        dotted,
+        error,
+    )
+    assert PathSpec.from_str_path(path, "backend/key") == keyed
+
+
 def test_pathspec_from_str_path_defaults_to_root_mounted():
     p = PathSpec.from_str_path("/a/b/c.txt")
     assert p.vfs_path == "a/b/c.txt"
@@ -208,3 +273,45 @@ def test_cache_facts_is_frozen():
     assert (facts.cacheable, facts.ttl) == (True, 30)
     with pytest.raises(FrozenInstanceError):
         facts.ttl = 1
+
+
+@pytest.mark.parametrize(
+    "base, parts, virtual, dotted, error",
+    [
+        (
+            "/hidden/../repo",
+            (".git", "HEAD"),
+            "/repo/.git/HEAD",
+            "/hidden/../repo/.git/HEAD",
+            None,
+        ),
+        (
+            "/hidden/../repo",
+            ("unused", "/other", "file"),
+            "/other/file",
+            None,
+            None,
+        ),
+        ("/repo", (), "/repo", None, None),
+        ("/repo", ("",), "/repo", None, None),
+        ("", ("file",), "/file", None, "ENOENT"),
+        ("", ("/other",), "/other", None, None),
+    ],
+)
+def test_derived_paths_preserve_or_reset_the_base_walk(
+    base, parts, virtual, dotted, error
+):
+    child = PathSpec.from_str_path(base, cwd="/").join(*parts)
+    assert (child.virtual, child.dotted, child.walk_error) == (
+        virtual,
+        dotted,
+        error,
+    )
+    assert PathSpec.from_str_path(child, cwd="/elsewhere") is child
+
+
+def test_parent_retains_spelled_ancestors():
+    child = PathSpec.from_str_path("/hidden/../repo", cwd="/").join(
+        ".git", "HEAD"
+    )
+    assert child.parent.dotted == "/hidden/../repo/.git"

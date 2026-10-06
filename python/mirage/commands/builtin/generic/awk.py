@@ -44,7 +44,6 @@ from mirage.shell.bytes import (
 from mirage.shell.join import shell_join
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, WALK_ERRORS, eisdir, fs_strerror
-from mirage.utils.path import typed_spec
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
 
@@ -168,7 +167,7 @@ class AwkStreams:
     async def read_path(self, name: str | PathSpec) -> AsyncIterator[bytes]:
         if self.dispatch is None:
             raise AwkIOError("No such file or directory")
-        path = typed_spec(name, self.cwd.virtual)
+        path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
         # A keyed store reads a directory as nothing at all, and other
         # backends fail it in their own words, so the stat goes first to
         # fail it the way a POSIX read does.
@@ -209,7 +208,7 @@ class AwkStreams:
         """
         if self.dispatch is None:
             raise AwkRuntimeError("awk: file output requires a workspace")
-        path = typed_spec(text_view(name), self.cwd.virtual)
+        path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
         try:
             await self.dispatch(
                 "append" if append else "write",

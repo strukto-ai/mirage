@@ -18,11 +18,11 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.constants import OPERAND, REFUSED
 from mirage.commands.spec.flag_view import FlagBag, FlagView, spec_flag_names
 from mirage.commands.spec.types import CommandSpec, Option
-from mirage.utils.path import typed_spec
+from mirage.types import PathSpec
 
 
 def test_flag_view_typed_reads():
-    path = typed_spec("hidden/../file", "/repo")
+    path = PathSpec.from_str_path("hidden/../file", cwd="/repo")
     fl = FlagView(
         {
             "i": True,

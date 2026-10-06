@@ -8,8 +8,7 @@ from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.fsck import check_pack
 from mirage.io.types import IOResult
-from mirage.types import FileStat, FileType
-from mirage.utils.path import typed_spec
+from mirage.types import FileStat, FileType, PathSpec
 
 from .conftest import mounted, pack_everything
 
@@ -102,7 +101,7 @@ async def test_pack_checksum_uses_bounded_ranges(length, known_size):
 
     await check_pack(
         dispatch,
-        typed_spec("/repo/.git/objects/pack/large.pack", "/"),
+        PathSpec.from_str_path("/repo/.git/objects/pack/large.pack"),
         checksum,
     )
     assert len(reads) >= (len(data) + (1 << 18) - 1) // (1 << 18)
@@ -125,5 +124,7 @@ async def test_pack_permission_failure_keeps_path_and_git_error(failed_op):
         GitError, match="cannot read pack /repo/denied.pack: Permission denied"
     ):
         await check_pack(
-            dispatch, typed_spec("/repo/denied.pack", "/"), b"0" * 20
+            dispatch,
+            PathSpec.from_str_path("/repo/denied.pack"),
+            b"0" * 20,
         )

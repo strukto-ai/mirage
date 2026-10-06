@@ -18,10 +18,10 @@ import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
 import { boundedMap } from '@struktoai/mirage-core/concurrency/limiter'
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/utils/errors'
 import { fnmatch } from '@struktoai/mirage-core/utils/fnmatch'
-import { typedSpec, joinSpec, parentSpec } from '@struktoai/mirage-core/utils/path'
+
 import type { HfHubAccessor } from '../../../../accessor/hf_hub.ts'
 import {
   blobPath,
@@ -91,7 +91,7 @@ export async function ensureDir(dispatch: DispatchFn, path: PathSpec): Promise<v
     } catch (err) {
       if (!isMissingPath(err)) throw err
       missing.push(current)
-      current = parentSpec(current)
+      current = current.parent
     }
   }
   for (const target of missing.reverse()) {
@@ -123,8 +123,8 @@ async function writeFile(
     repoPath,
   )
   const data = await hubBytes(accessor.token, url, undefined, accessor.timeoutMs)
-  const target = joinSpec(localDir, repoPath)
-  await ensureDir(dispatch, parentSpec(target))
+  const target = localDir.join(repoPath)
+  await ensureDir(dispatch, target.parent)
   await dispatch('write', target, [data])
   return target.virtual
 }
@@ -169,12 +169,12 @@ async function cacheFile(
       entry.path,
     )
     const data = await hubBytes(accessor.token, url, undefined, accessor.timeoutMs)
-    await ensureDir(dispatch, parentSpec(blob))
+    await ensureDir(dispatch, blob.parent)
     await dispatch('write', blob, [data])
   }
   const link = snapshotPath(cacheDir, folder, sha, entry.path)
   if (force || !(await pathExists(dispatch, link))) {
-    await ensureDir(dispatch, parentSpec(link))
+    await ensureDir(dispatch, link.parent)
     try {
       await dispatch('unlink', link)
     } catch (err) {
@@ -207,7 +207,7 @@ async function fetchIntoCache(
   // behind.
   if (accessor.revision !== sha) {
     const ref = refPath(cacheDir, folder, accessor.revision)
-    await ensureDir(dispatch, parentSpec(ref))
+    await ensureDir(dispatch, ref.parent)
     await dispatch('write', ref, [new TextEncoder().encode(sha)])
   }
   const written = await boundedMap(
@@ -342,7 +342,8 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
   const localDir = fl.asPath('local_dir')
   const cacheWord = cacheRoot(inv.env)
   const cacheDir =
-    fl.asPath('cache_dir') ?? (cacheWord ? typedSpec(cacheWord, inv.env.PWD ?? '/') : undefined)
+    fl.asPath('cache_dir') ??
+    (cacheWord ? PathSpec.fromStrPath(cacheWord, undefined, inv.env.PWD ?? '/') : undefined)
   if (localDir === undefined && cacheDir === undefined) {
     throw new UsageError(
       'nothing to download into: pass --local-dir, or --cache-dir (or set ' +
@@ -378,7 +379,7 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
       accessor,
       tree,
       paths,
-      cacheDir ?? typedSpec('/', '/'),
+      cacheDir ?? PathSpec.fromStrPath('/'),
       fl.asBool('force_download'),
       workers,
     )

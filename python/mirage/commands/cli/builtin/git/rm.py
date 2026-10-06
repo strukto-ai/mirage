@@ -60,7 +60,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
-from mirage.utils.path import join_spec
 
 Tree = dict[bytes, tuple[int, bytes]]
 
@@ -172,7 +171,7 @@ async def shadowed(
     for path in paths:
         if missing.get(path) != DELETED:
             continue
-        absolute = join_spec(worktree, path)
+        absolute = worktree.join(path)
         if links.resolve(absolute.virtual) == absolute.virtual:
             continue
         if await links.exists(absolute.virtual):
@@ -279,7 +278,7 @@ async def clear_worktree(
     """
     removed = False
     for path in selected:
-        absolute = join_spec(location.worktree, path)
+        absolute = location.worktree.join(path)
         if links is None or links.stat_at(absolute.virtual) is None:
             info = await stat_path(absolute)
             if info is not None and info.type is FileType.DIRECTORY:

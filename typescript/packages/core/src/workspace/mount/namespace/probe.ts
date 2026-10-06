@@ -14,7 +14,7 @@
 
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { ELOOP_STRERROR, isEnotdir, isMissError } from '../../../utils/errors.ts'
-import { gnuBasename, posixNormpath, typedSpec } from '../../../utils/path.ts'
+import { gnuBasename, posixNormpath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -89,7 +89,7 @@ export async function pathStat(
   virtual: string | PathSpec,
   overlay: StatOverlay | null = null,
 ): Promise<FileStat | null> {
-  const spec = typedSpec(virtual, '/')
+  const spec = PathSpec.fromStrPath(virtual, undefined, '/')
   const stat = await resolvePathStat(dispatch, spec)
   if (stat === null) return null
   return overlay !== null ? overlay(spec.virtual, stat) : stat
@@ -106,7 +106,7 @@ export async function missStrerror(
   virtual: string | PathSpec,
 ): Promise<string> {
   try {
-    await dispatch('stat', typedSpec(virtual, '/'))
+    await dispatch('stat', PathSpec.fromStrPath(virtual, undefined, '/'))
   } catch (err) {
     if (isEnotdir(err)) return 'Not a directory'
     if (isMissError(err)) return 'No such file or directory'
@@ -130,7 +130,7 @@ export async function pathReaddir(
   dispatch: DispatchFn,
   virtual: string | PathSpec,
 ): Promise<string[]> {
-  const spec = typedSpec(virtual, '/')
+  const spec = PathSpec.fromStrPath(virtual, undefined, '/')
   const [entries] = await dispatch('readdir', spec)
   return entries as string[]
 }

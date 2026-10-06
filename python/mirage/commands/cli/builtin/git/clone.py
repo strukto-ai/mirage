@@ -77,7 +77,6 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-from mirage.utils.path import join_spec, typed_spec
 
 DEFAULT_BRANCH = "master"
 
@@ -181,7 +180,7 @@ async def clone(
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
         start = start_point(fl)
-        target = join_spec(start, name)
+        target = start.join(name)
         info = await stat_path(target)
         if info is not None and (
             info.type is not FileType.DIRECTORY
@@ -219,7 +218,7 @@ async def clone(
                 child = posixpath.basename(entry.rstrip("/"))
                 await remove_tree(
                     dispatch,
-                    join_spec(target, child),
+                    target.join(child),
                     links_of(doors),
                     mounts_of(doors),
                 )
@@ -255,7 +254,7 @@ async def _populate(
     dispatch, stat_path = doors.dispatch, doors.stat_path
     assert dispatch is not None and stat_path is not None
     mounts = doors.ns.mounts if doors.ns is not None else None
-    gitdir = join_spec(target, ".git")
+    gitdir = target.join(".git")
     remote = fl.as_str("origin") or "origin"
     if not valid_ref_name(f"refs/remotes/{remote}/test"):
         raise GitError(f"'{remote}' is not a valid remote name")
@@ -265,7 +264,9 @@ async def _populate(
         gitdir,
         gitdir,
         target,
-        typed_spec(mounts.root_of(target.virtual) if mounts else "/", "/"),
+        PathSpec.from_str_path(
+            mounts.root_of(target.virtual) if mounts else "/", cwd="/"
+        ),
     )
     wanted, notes = ignore_funny(
         [
@@ -319,7 +320,7 @@ async def _populate(
         tracking = f"refs/remotes/{remote}/HEAD"
         await write_file(
             dispatch,
-            join_spec(gitdir, tracking),
+            gitdir.join(tracking),
             f"ref: refs/remotes/{remote}/{adv.head[len(HEADS) :]}\n".encode(),
         )
         await append(
@@ -330,7 +331,7 @@ async def _populate(
         )
     await write_file(
         dispatch,
-        join_spec(gitdir, "config"),
+        gitdir.join("config"),
         _config(url, remote, branch).encode(),
     )
     if local:

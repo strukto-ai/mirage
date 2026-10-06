@@ -22,7 +22,7 @@ import { resolveCommit } from './revparse.ts'
 import { opened } from './session.ts'
 import { checkOperands, fatal, maybeBool } from './util.ts'
 import { readOptional, writeFile } from './io.ts'
-import { joinSpec } from '../../../../utils/path.ts'
+
 import { HEAD } from './constants.ts'
 import { isBare } from './discover.ts'
 import { configValues } from './fs.ts'
@@ -77,7 +77,7 @@ export async function append(
   path: string,
   line: Uint8Array,
 ): Promise<void> {
-  const target = joinSpec(gitdir, path)
+  const target = gitdir.join(path)
   const existing = (await readOptional(dispatch, target)) ?? new Uint8Array(0)
   const merged = new Uint8Array(existing.length + line.length)
   merged.set(existing)
@@ -153,7 +153,7 @@ async function logOf(
   ref: string,
 ): Promise<Uint8Array | null> {
   const root = ref === HEAD ? location.gitdir : location.commondir
-  return readOptional(dispatch, joinSpec(root, LOGS_DIR, ref))
+  return readOptional(dispatch, root.join(LOGS_DIR, ref))
 }
 
 /**

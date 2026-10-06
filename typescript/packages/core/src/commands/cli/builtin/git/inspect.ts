@@ -1,4 +1,3 @@
-import { joinSpec } from '../../../../utils/path.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { loadRefs, resolveSymbolic } from './refs.ts'
 import { shortenRef } from './ref_fields.ts'
@@ -122,7 +121,7 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
     if (fl.asBool('global')) sources = await globalSources(inv, fl.asBool('list'))
     else {
       const repo = await opened(fl, inv.doors ?? {})
-      const path = joinSpec(repo.location.commondir, `config`)
+      const path = repo.location.commondir.join(`config`)
       const ordinary =
         repo.location.commondir.virtual === repo.location.worktree.virtual + '/.git' &&
         startPoint(fl).virtual === repo.location.worktree.virtual
@@ -262,7 +261,7 @@ async function placeAnswers(repo: Repo, start: string): Promise<Map<string, stri
     start === location.gitdir.virtual
       ? '.'
       : start === location.worktree.virtual &&
-          location.gitdir.virtual === joinSpec(location.worktree, '.git').virtual
+          location.gitdir.virtual === location.worktree.join('.git').virtual
         ? '.git'
         : location.gitdir.virtual
   return new Map([

@@ -55,7 +55,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.errors import MISS_ERRORS
-from mirage.utils.path import join_spec, parent_spec, typed_spec
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +118,7 @@ async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
             break
         except MISS_ERRORS:
             missing.append(current)
-            current = parent_spec(current)
+            current = current.parent
     for target in reversed(missing):
         try:
             await dispatch("mkdir", target)
@@ -157,8 +156,8 @@ async def write_file(
         repo_path,
     )
     data = await hub_bytes(accessor.token, url, session=accessor.pool)
-    target = join_spec(local_dir, repo_path)
-    await ensure_dir(dispatch, parent_spec(target))
+    target = local_dir.join(repo_path)
+    await ensure_dir(dispatch, target.parent)
     await dispatch("write", target, data=data)
     return target.virtual
 
@@ -253,11 +252,11 @@ async def cache_file(
             entry.path,
         )
         data = await hub_bytes(accessor.token, url, session=accessor.pool)
-        await ensure_dir(dispatch, parent_spec(blob))
+        await ensure_dir(dispatch, blob.parent)
         await dispatch("write", blob, data=data)
     link = snapshot_path(cache_dir, folder, sha, entry.path)
     if force or not await path_exists(dispatch, link):
-        await ensure_dir(dispatch, parent_spec(link))
+        await ensure_dir(dispatch, link.parent)
         target = link_target(cache_dir, folder, sha, entry.path, etag)
         try:
             await dispatch("unlink", link)
@@ -301,7 +300,7 @@ async def fetch_into_cache(
     # binary never leaves behind.
     if accessor.revision != sha:
         ref = ref_path(cache_dir, folder, accessor.revision)
-        await ensure_dir(dispatch, parent_spec(ref))
+        await ensure_dir(dispatch, ref.parent)
         await dispatch("write", ref, data=sha.encode())
 
     async def one(path: str) -> str:
@@ -414,7 +413,9 @@ async def download_cmd(
     local_dir = fl.as_path("local_dir")
     cache_word = cache_root(dict(inv.env))
     cache_dir = fl.as_path("cache_dir") or (
-        typed_spec(cache_word, inv.env.get("PWD", "/")) if cache_word else None
+        PathSpec.from_str_path(cache_word, cwd=inv.env.get("PWD", "/"))
+        if cache_word
+        else None
     )
     if not local_dir and not cache_dir:
         raise UsageError(
@@ -462,7 +463,7 @@ async def download_cmd(
                 accessor,
                 tree,
                 paths,
-                cache_dir or typed_spec("/", "/"),
+                cache_dir or PathSpec.from_str_path("/"),
                 bool(fl.as_bool("force_download")),
                 workers,
             )

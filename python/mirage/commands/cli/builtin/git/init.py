@@ -23,7 +23,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
-from mirage.utils.path import join_spec, typed_spec
 
 
 async def lay_out(
@@ -44,16 +43,16 @@ async def lay_out(
         "refs/tags",
         "info",
     ):
-        await ensure_dir(dispatch, join_spec(gitdir, f"{directory}"))
+        await ensure_dir(dispatch, gitdir.join(f"{directory}"))
     await write_once(
         dispatch,
-        join_spec(gitdir, "HEAD"),
+        gitdir.join("HEAD"),
         f"ref: refs/heads/{branch}\n".encode(),
     )
-    await write_once(dispatch, join_spec(gitdir, "config"), config.encode())
+    await write_once(dispatch, gitdir.join("config"), config.encode())
     await write_once(
         dispatch,
-        join_spec(gitdir, "description"),
+        gitdir.join("description"),
         b"Unnamed repository; edit this file 'description' "
         b"to name the repository.\n",
     )
@@ -71,8 +70,8 @@ def named_gitdir(fl: FlagView, texts: tuple[str, ...]) -> PathSpec:
     explicit = fl.as_path("git_dir")
     if explicit:
         return explicit
-    target = typed_spec(texts[0] if texts else ".", start)
-    return target if fl.as_bool("bare") else join_spec(target, ".git")
+    target = PathSpec.from_str_path(texts[0] if texts else ".", cwd=start)
+    return target if fl.as_bool("bare") else target.join(".git")
 
 
 async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
@@ -110,7 +109,9 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 if here is None
                 else "Not a directory",
             )
-        target = typed_spec(inv.texts[0] if inv.texts else ".", start)
+        target = PathSpec.from_str_path(
+            inv.texts[0] if inv.texts else ".", cwd=start
+        )
         if target.walk_error == "ENOENT":
             raise CannotMkdirError(
                 target.raw_path, "No such file or directory"
@@ -125,8 +126,7 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         info = await doors.stat_path(gitdir)
         if info is not None and (
             info.type is not FileType.DIRECTORY
-            or await read_optional(dispatch, join_spec(gitdir, "HEAD"))
-            is not None
+            or await read_optional(dispatch, gitdir.join("HEAD")) is not None
         ):
             location = await discover(
                 dispatch,
@@ -138,15 +138,14 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             )
             gitdir = location.commondir
         existing = (
-            await read_optional(dispatch, join_spec(gitdir, "HEAD"))
-            is not None
+            await read_optional(dispatch, gitdir.join("HEAD")) is not None
         )
         made = bool(inv.texts) and await doors.stat_path(target) is None
         config = (
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
             f"\tbare = {'true' if bare else 'false'}\n"
         )
-        settings = join_spec(gitdir, "config")
+        settings = gitdir.join("config")
         try:
             await lay_out(dispatch, gitdir, branch, config)
             if existing:

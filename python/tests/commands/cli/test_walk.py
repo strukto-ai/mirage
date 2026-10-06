@@ -28,7 +28,7 @@ from mirage.commands.cli.walk import (
 )
 from mirage.commands.spec.types import Option, UsageStyle
 from mirage.runtime.types import ScriptSource
-from mirage.utils.path import typed_spec
+from mirage.types import PathSpec
 
 
 async def _verb(config, paths, *texts, **flags):
@@ -462,9 +462,11 @@ def test_path_typed_group_option_resolves_against_cwd():
         subcommands=(CLISpec(name="run", fn=_verb),),
     )
     relative = walk("tool", tree, ["-C", "build", "run"], "/repo/src")
-    assert relative.group_flags == {"-C": typed_spec("build", "/repo/src")}
+    assert relative.group_flags == {
+        "-C": PathSpec.from_str_path("build", cwd="/repo/src")
+    }
     absolute = walk("tool", tree, ["-C", "/other", "run"], "/repo/src")
-    assert absolute.group_flags == {"-C": typed_spec("/other", "/repo/src")}
+    assert absolute.group_flags == {"-C": PathSpec.from_str_path("/other")}
 
 
 def test_path_typed_group_default_lands_as_the_cwd():
@@ -474,7 +476,7 @@ def test_path_typed_group_default_lands_as_the_cwd():
         subcommands=(CLISpec(name="run", fn=_verb),),
     )
     assert walk("tool", tree, ["run"], "/repo/src").group_flags == {
-        "-C": typed_spec(".", "/repo/src")
+        "-C": PathSpec.from_str_path(".", cwd="/repo/src")
     }
 
 
@@ -486,7 +488,10 @@ def test_repeated_path_group_option_resolves_every_value():
     )
     result = walk("tool", tree, ["--dir", "a", "--dir", "/b", "run"], "/w")
     assert result.group_flags == {
-        "--dir": [typed_spec("a", "/w"), typed_spec("/b", "/w")]
+        "--dir": [
+            PathSpec.from_str_path("a", cwd="/w"),
+            PathSpec.from_str_path("/b"),
+        ]
     }
 
 

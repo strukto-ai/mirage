@@ -29,13 +29,13 @@ from mirage.commands.cli.builtin.git.rm import (
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.spec.flag_view import FlagView
-from mirage.utils.path import typed_spec
+from mirage.types import PathSpec
 
 LOCATION = RepoLocation(
-    gitdir=typed_spec("/repo/.git", "/"),
-    commondir=typed_spec("/repo/.git", "/"),
-    worktree=typed_spec("/repo", "/"),
-    mount_root=typed_spec("/repo", "/"),
+    gitdir=PathSpec.from_str_path("/repo/.git"),
+    commondir=PathSpec.from_str_path("/repo/.git"),
+    worktree=PathSpec.from_str_path("/repo"),
+    mount_root=PathSpec.from_str_path("/repo"),
 )
 TRACKED = {"a.txt", "docs/one.md", "docs/two.md"}
 
@@ -322,7 +322,7 @@ class Hiding:
 async def test_a_link_above_a_deleted_path_makes_it_a_local_change():
     hidden = await shadowed(
         Hiding(),
-        typed_spec("/repo", "/"),
+        PathSpec.from_str_path("/repo"),
         ["slot/child"],
         {"slot/child": DELETED},
     )
@@ -335,7 +335,7 @@ async def test_a_link_pointing_at_nothing_leaves_the_path_deleted():
     # no local change to lose and the removal goes through.
     hidden = await shadowed(
         Hiding(present=False),
-        typed_spec("/repo", "/"),
+        PathSpec.from_str_path("/repo"),
         ["slot/child"],
         {"slot/child": DELETED},
     )
@@ -346,7 +346,7 @@ async def test_a_link_pointing_at_nothing_leaves_the_path_deleted():
 async def test_a_path_the_walk_found_is_never_shadowed():
     hidden = await shadowed(
         Hiding(),
-        typed_spec("/repo", "/"),
+        PathSpec.from_str_path("/repo"),
         ["slot/child"],
         {"slot/child": MODIFIED},
     )
@@ -358,7 +358,7 @@ async def test_without_a_namespace_nothing_is_shadowed():
     assert (
         await shadowed(
             None,
-            typed_spec("/repo", "/"),
+            PathSpec.from_str_path("/repo"),
             ["slot/child"],
             {"slot/child": DELETED},
         )

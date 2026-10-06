@@ -18,7 +18,7 @@ import { FileSystem } from 'isomorphic-git/models'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { enoent } from '../../../../utils/errors.ts'
 import { basename, ensureDir, exists, readNames, removeFile } from './io.ts'
-import { joinSpec, posixNormpath } from '../../../../utils/path.ts'
+import { posixNormpath } from '../../../../utils/path.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 
 const ENC = new TextEncoder()
@@ -162,7 +162,7 @@ export function gitFs(
         (name) => relative === name || relative.startsWith(`${name}/`),
       )
       const base = root === location.gitdir && shared && !local ? location.commondir : root
-      return source(op, relative ? joinSpec(base, relative) : base, args, kwargs)
+      return source(op, relative ? base.join(relative) : base, args, kwargs)
     }
     return source(op, path, args, kwargs)
   }

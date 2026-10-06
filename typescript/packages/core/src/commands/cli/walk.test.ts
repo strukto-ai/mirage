@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { typedSpec } from '../../utils/path.ts'
-
+import { PathSpec } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../../runtime/types.ts'
 import { Option, UsageStyle } from '../spec/types.ts'
@@ -463,9 +462,13 @@ describe('walk path-typed group options', () => {
       subcommands: [new CLISpec({ name: 'run', fn: verb })],
     })
     const relative = walk('tool', spec, ['-C', 'build', 'run'], '/repo/src')
-    expect(relative.groupFlags).toEqual({ '-C': typedSpec('build', '/repo/src') })
+    expect(relative.groupFlags).toEqual({
+      '-C': PathSpec.fromStrPath('build', undefined, '/repo/src'),
+    })
     const absolute = walk('tool', spec, ['-C', '/other', 'run'], '/repo/src')
-    expect(absolute.groupFlags).toEqual({ '-C': typedSpec('/other', '/repo/src') })
+    expect(absolute.groupFlags).toEqual({
+      '-C': PathSpec.fromStrPath('/other'),
+    })
   })
 
   it('lands a default as the working directory', () => {
@@ -475,7 +478,7 @@ describe('walk path-typed group options', () => {
       subcommands: [new CLISpec({ name: 'run', fn: verb })],
     })
     expect(walk('tool', spec, ['run'], '/repo/src').groupFlags).toEqual({
-      '-C': typedSpec('.', '/repo/src'),
+      '-C': PathSpec.fromStrPath('.', undefined, '/repo/src'),
     })
   })
 
@@ -486,7 +489,9 @@ describe('walk path-typed group options', () => {
       subcommands: [new CLISpec({ name: 'run', fn: verb })],
     })
     const result = walk('tool', spec, ['--dir', 'a', '--dir', '/b', 'run'], '/w')
-    expect(result.groupFlags).toEqual({ '--dir': [typedSpec('a', '/w'), typedSpec('/b', '/w')] })
+    expect(result.groupFlags).toEqual({
+      '--dir': [PathSpec.fromStrPath('a', undefined, '/w'), PathSpec.fromStrPath('/b')],
+    })
   })
 })
 

@@ -17,8 +17,8 @@ import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
-import { typedSpec, joinSpec } from '@struktoai/mirage-core/utils/path'
-import { FileType, type PathSpec } from '@struktoai/mirage-core/types'
+
+import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/utils/errors'
 import { fnmatch } from '@struktoai/mirage-core/utils/fnmatch'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -83,7 +83,7 @@ async function collect(
     if (current === undefined) break
     const [entries] = await dispatch('readdir', current)
     for (const entry of entries as string[]) {
-      const child = joinSpec(current, entry)
+      const child = current.join(entry)
       if (await isDir(dispatch, child)) {
         pending.push(child)
         continue
@@ -161,7 +161,10 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   const local = operands[0] ?? '.'
   const inRepo = operands[1] ?? ''
-  const collected = await collect(dispatch, typedSpec(local, inv.env.PWD ?? '/'))
+  const collected = await collect(
+    dispatch,
+    PathSpec.fromStrPath(local, undefined, inv.env.PWD ?? '/'),
+  )
   const rows = keep(collected.rows, include, exclude)
   if (rows.length === 0) throw new UsageError(`no files matched under ${local}`)
   const base = inRepoBase(inRepo)

@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import {
-  typedSpec,
-  CycleError,
-  dottedSpelling,
-  resolvePath,
-  resolveSymlinks,
-} from '../../../../utils/path.ts'
+import { CycleError, dottedSpelling, resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import { ArithError, ExitSignal } from '../../../../shell/errors.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
@@ -56,7 +50,7 @@ async function pathKind(
 ): Promise<['dir' | 'file' | 'char' | null, FileStat | null]> {
   // A path whose `.` and `..` do not resolve names nothing, which is what
   // every file test reads as false.
-  const walk = typedSpec(val, ctx.session.cwd)
+  const walk = PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
   if (
     (await dotRefusal(dispatchStat(ctx.dispatch), walk, (v) => ctx.namespace.follow(v))) !== null
   ) {
