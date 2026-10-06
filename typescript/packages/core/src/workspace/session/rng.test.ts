@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { executionSession } from '../evaluation.ts'
+import { childSession, executionSession } from '../evaluation.ts'
 
 import { describe, expect, it } from 'vitest'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
@@ -102,29 +102,29 @@ describe('RANDOM generator', () => {
     expect(nextRandom(again, '7')).toBe(first)
   })
 
-  it('reseeds in a child shell and hands the parent its state back', () => {
+  it('reseeds in a child shell without advancing the parent', () => {
     const s = executionSession(new SessionState({ sessionId: 's' }))
     const parent = [nextRandom(s, '42'), nextRandom(s, stored(s))]
-    const saved = s.snapshot()
-    const child = nextRandom(s, stored(s))
-    expect(s.randomState).not.toBeNull()
-    s.restore(saved)
+    const child = childSession(s)
+    expect(child.randomSeed).toBe(stored(s))
+    expect(child.randomState).toBeNull()
+    const drawn = nextRandom(child, stored(child))
+    expect(child.randomState).not.toBeNull()
     expect(nextRandom(s, stored(s))).toBe(1435)
     expect(parent).toEqual([17772, 26794])
-    expect(child).not.toBe(1435)
+    expect(drawn !== null && drawn >= 0 && drawn <= RANDOM_MAX).toBe(true)
   })
 
   it('does not replay a pending seed in the child, and keeps unset unset', () => {
     const s = executionSession(new SessionState({ sessionId: 's' }))
     s.vars[RANDOM] = makeVar('42')
-    s.snapshot()
-    expect(s.randomSeed).toBe('42')
-    expect(s.randomState).toBeNull()
+    const child = childSession(s)
+    expect(child.randomSeed).toBe('42')
+    expect(child.randomState).toBeNull()
     const unset = executionSession(new SessionState({ sessionId: 'u' }))
     nextRandom(unset, undefined)
     expect(nextRandom(unset, undefined)).toBeNull()
-    unset.snapshot()
-    expect(nextRandom(unset, undefined)).toBeNull()
+    expect(nextRandom(childSession(unset), undefined)).toBeNull()
   })
 
   it('unset after a read strips the meaning', () => {

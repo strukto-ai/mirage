@@ -240,6 +240,9 @@ suite are covered by `integ/**`. No new filter is needed for those modules.
 In #1438's assignment example, substitution stderr precedes the assignment's
 redirect: stdout is `value\n` and stderr is `err\n`. The issue's originally
 proposed empty stderr does not match Bash.
+The ownership follow-ups in `bash/jobs/bg.json` (substitutions after `eval`
+returns) and `bash/cmdsub/scope.json` (child local and temporary environment
+scopes) are pinned to the same image and included in the Chrome battery.
 
 ## Running locally
 

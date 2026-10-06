@@ -32,7 +32,6 @@ from mirage.shell.console import JobOutput, Terminal
 from mirage.shell.constants import (
     BIN_PREFIX,
     IFS_DEFAULT,
-    RANDOM,
     RANDOM_UNSET,
     SHELL_ARGV0,
 )
@@ -44,8 +43,8 @@ from mirage.shell.variable import (
     ShellVar,
     VarAttr,
     attrs_from_letters,
+    copy_var,
     stored_attrs,
-    with_value,
 )
 from mirage.types import (
     DEFAULT_VISIBILITY,
@@ -58,10 +57,7 @@ from mirage.types import (
     Visibility,
 )
 from mirage.workspace.abort import StatusWriter
-from mirage.workspace.session.constants import (
-    CHILD_SHELL_FIELDS,
-    INHERITED_FIELDS,
-)
+from mirage.workspace.session.constants import INHERITED_FIELDS
 from mirage.workspace.session.functions import FunctionTable
 from mirage.workspace.session.serialize import (
     commands_from_dict,
@@ -84,7 +80,7 @@ def copy_state(value: Any) -> Any:
     if isinstance(value, ShellVar):
         # The record is frozen, but an indexed or associative value is
         # a live container, so the copy has to reach inside it.
-        return with_value(value, copy_state(value.value))
+        return copy_var(value)
     if isinstance(value, dict):
         return {k: copy_state(v) for k, v in value.items()}
     if isinstance(value, set):
@@ -391,7 +387,7 @@ class SessionState:
     )
     # `$RANDOM`'s generator state and the seed word it last consumed
     # (`session/rng.py`). A child shell reseeds, as bash's does, and the
-    # parent gets its own state back (`snapshot` / `restore`).
+    # parent retains its own state while the child runs.
     _random_state: int | None = field(default=None, repr=False)
     _random_seed: str | None = field(default=None, repr=False)
     _random_last: int = field(default=0, repr=False)
@@ -801,39 +797,3 @@ class SessionState:
         if self._random_seed == RANDOM_UNSET:
             forked._random_seed = RANDOM_UNSET
         return forked
-
-    def snapshot(self) -> dict[str, Any]:
-        """Copy the state a child shell runs on top of.
-
-        Args:
-            None
-        """
-        saved = {
-            name: copy_state(getattr(self, name))
-            for name in CHILD_SHELL_FIELDS
-        }
-        # A child shell reseeds `$RANDOM`, as bash's does: the generator
-        # starts fresh, and the seed word follows the stored value so an
-        # assignment the parent made is not replayed as a reseed. `unset
-        # RANDOM` stays unset.
-        if self._random_seed != RANDOM_UNSET:
-            var = self.vars.get(RANDOM)
-            self._random_seed = (
-                var.value
-                if var is not None and isinstance(var.value, str)
-                else None
-            )
-            self._random_state = None
-            self._random_last = 0
-        return saved
-
-    def restore(self, state: dict[str, Any]) -> None:
-        """Put back a snapshot, ending a child shell.
-
-        Args:
-            state (dict[str, Any]): what ``snapshot`` returned.
-        """
-        for name, value in state.items():
-            if name == "functions":
-                self.functions.clear()
-            setattr(self, name, value)

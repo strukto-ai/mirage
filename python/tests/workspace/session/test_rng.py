@@ -18,7 +18,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.shell.constants import RANDOM, RANDOM_MAX, RANDOM_UNSET
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
-from mirage.workspace.evaluation import execution_session
+from mirage.workspace.evaluation import child_session, execution_session
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     conversion_scalar,
@@ -123,27 +123,28 @@ def test_unset_after_a_read_strips_the_meaning():
     assert next_random(s, None) is None
 
 
-def test_a_child_shell_reseeds_and_the_parent_gets_its_state_back():
+def test_a_child_shell_reseeds_without_advancing_the_parent():
     s = execution_session(SessionState(session_id="s"))
     parent = [next_random(s, "42"), next_random(s, s.vars[RANDOM].value)]
-    saved = s.snapshot()
-    child = next_random(s, s.vars[RANDOM].value)
-    assert s._random_state is not None
-    s.restore(saved)
+    child = child_session(s)
+    assert child._random_seed == s.vars[RANDOM].value
+    assert child._random_state is None
+    drawn = next_random(child, child.vars[RANDOM].value)
+    assert child._random_state is not None
     assert next_random(s, s.vars[RANDOM].value) == 1435
-    assert parent == [17772, 26794] and child != 1435
+    assert parent == [17772, 26794]
+    assert drawn is not None and 0 <= drawn <= RANDOM_MAX
 
 
 def test_a_child_shell_does_not_replay_a_pending_seed():
     s = execution_session(SessionState(session_id="s"))
     seed_var(s, RANDOM, "42")
-    s.snapshot()
-    assert s._random_seed == "42" and s._random_state is None
+    child = child_session(s)
+    assert child._random_seed == "42" and child._random_state is None
     unset = execution_session(SessionState(session_id="u"))
     next_random(unset, None)
     assert next_random(unset, None) is None
-    unset.snapshot()
-    assert next_random(unset, None) is None
+    assert next_random(child_session(unset), None) is None
 
 
 @pytest.mark.asyncio

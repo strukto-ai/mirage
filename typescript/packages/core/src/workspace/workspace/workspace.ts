@@ -2058,6 +2058,7 @@ export class Workspace {
     this.stateDropped = dropState
     try {
       await closeWorkspace({
+        sessions: this.sessionManager,
         watch: this.watchManager,
         cache: this.cache,
         ownsStateStore: this.ownsStateStore,

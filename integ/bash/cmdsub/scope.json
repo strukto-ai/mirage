@@ -33,6 +33,74 @@
         "stdout": "child\nparent\nparent\n0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "child_unset_keeps_current_local_hidden",
+      "seq": 940086,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=global; f() { local x=local; (unset x; echo \"${x-unset}\"); v=$(unset x; echo \"${x-unset}\"); echo \"$v:$x\"; }; f; echo \"$x\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "unset\nunset:local\nglobal\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "child_inherits_saved_scope_without_call_environment",
+      "seq": 940087,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=global; f() { (export x; unset x; echo \"${x-unset}\"); echo \"$x\"; }; x=temp f; echo \"$x\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "global\ntemp\nglobal\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -1,6 +1,8 @@
 import { ExecutionFrame, frames, states } from './frame.ts'
-export { persistentSession } from './frame.ts'
+import { RANDOM, RANDOM_UNSET } from '../shell/constants.ts'
+import { copyVar, type ShellVar } from '../shell/variable.ts'
 import type { SessionState, SessionInit } from './session/session.ts'
+export { persistentSession } from './frame.ts'
 
 const FIELDS = new Set(['diagnostics', 'cmdsubSeq', 'cmdsubStatus', 'abortSignal'])
 
@@ -37,8 +39,23 @@ export function childSession(parent: SessionState): SessionState {
   child.parseCurrent = parent.parseCurrent
   child.aliasMarks = new Map(parent.aliasMarks)
   child.aliasStack = [...parent.aliasStack]
-  child.localVars = parent.localVars === null ? null : new Map(parent.localVars)
-  child.localFrames = parent.localFrames.map((frame) => new Map(frame))
+  child.localVars = parent.localVars === null ? null : copyLocals(parent.localVars)
+  child.localFrames = parent.localFrames.map((frame) =>
+    frame === parent.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),
+  )
   child.localRandom = [...parent.localRandom]
+  // The child reseeds on its first draw instead of replaying the parent's seed.
+  if (child.randomSeed !== RANDOM_UNSET) {
+    const word = parent.vars[RANDOM]?.value
+    child.randomSeed = typeof word === 'string' ? word : null
+  }
   return child
+}
+
+/** Copy locals; temporary call environments become ordinary saved scopes in the child. */
+function copyLocals(frame: Map<string, ShellVar | null>): Map<string, ShellVar | null> {
+  const copied = new Map<string, ShellVar | null>()
+  for (const [name, variable] of frame)
+    copied.set(name, variable === null ? null : copyVar(variable))
+  return copied
 }

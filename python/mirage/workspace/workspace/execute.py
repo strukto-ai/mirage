@@ -36,7 +36,6 @@ from mirage.shell.literal import literal_tree
 from mirage.shell.parse import (
     find_syntax_error,
     find_unterminated_backtick,
-    parse,
     syntax_error_result,
 )
 from mirage.shell.parse.scope import ParseScope
@@ -187,108 +186,117 @@ async def recurse(
         session = ws._session_mgr.get(
             opts.get("session_id") or ws._session_mgr.default_id
         )
-    tree = None
-    if substitution and node.type == NT.COMMAND_SUBSTITUTION:
-        tree = parse(cmd)
-    if tree is not None and input_substitution_redirect(tree) is not None:
-        evaluate = partial(
-            recurse,
-            ws,
-            cancel=cancel,
-            routing_decision=routing_decision,
-            agent_id=agent_id,
-            nested=nested,
-            execution_scope=execution_scope,
-            handed=inner,
-        )
-        io, _ = await run_command_tree(
-            ws.dispatch,
-            ws._registry,
-            ws._namespace,
-            ws.job_table,
-            evaluate,
-            agent_id or "",
-            tree,
-            session,
-            None,
-            cancel,
-            routing_decision=routing_decision,
-            handed=inner,
-            command_substitution=True,
-            execution_scope=execution_scope,
-        )
-        record_status(session, io.exit_code, transparent=True)
-    else:
-        child_token = None
-        if substitution:
-            session = child_session(session)
-            child_token = set_current_session(session, owner=ws._session_mgr)
-        capture = Terminal()
-        waits = JobWaits(capture.jobs)
-        rest = session.job_output or session.tty.jobs
-        if substitution:
-            session.terminal_output = False
-            inherit_exit_trap(session)
-            # A substitution reads its pipe until every writer has closed
-            # it, so what a job it started writes is part of its value,
-            # and it ends when its jobs do. They are its own jobs.
-            session.job_output = capture.jobs
-            session.job_waits = waits
-            caller = opts.get("job_table") or ws.job_table
-            opts["job_table"] = caller.child(caller)
-            opts["sink"] = capture
+    if (
+        substitution
+        and node is not None
+        and node.type == NT.COMMAND_SUBSTITUTION
+    ):
+        parser = ParseScope()
         try:
-            try:
-                io = await ws.shell(
-                    cmd,
+            tree = parser.parse(cmd)
+            if input_substitution_redirect(tree) is not None:
+                evaluate = partial(
+                    recurse,
+                    ws,
                     cancel=cancel,
-                    record=False,
-                    execution_scope=execution_scope,
                     routing_decision=routing_decision,
                     agent_id=agent_id,
+                    nested=nested,
+                    execution_scope=execution_scope,
                     handed=inner,
-                    **opts,
                 )
-            except UNWINDING as sig:
-                # A substitution runs on a copy of the caller's frames,
-                # and it is a child shell: whatever unwinds out of it
-                # ends it.
-                if not substitution:
-                    raise
-                io = ended(sig)
-            if substitution:
-                io = await finish_shell(
-                    partial(
-                        recurse,
-                        ws,
-                        node=node,
-                        handed=handed,
-                        cancel=cancel,
-                        routing_decision=routing_decision,
-                        agent_id=agent_id,
-                        nested=nested,
-                        execution_scope=execution_scope,
-                        job_table=opts["job_table"],
-                    ),
+                io, _ = await run_command_tree(
+                    ws.dispatch,
+                    ws._registry,
+                    ws._namespace,
+                    ws.job_table,
+                    evaluate,
+                    agent_id or "",
+                    tree,
                     session,
-                    io,
-                    opts.get("stdin"),
-                    opts.get("call_stack"),
+                    None,
+                    cancel,
+                    routing_decision=routing_decision,
+                    handed=inner,
+                    command_substitution=True,
+                    execution_scope=execution_scope,
                 )
-                for channel, data in (
-                    (Channel.STDOUT, await io.materialize_stdout()),
-                    (Channel.STDERR, await io.materialize_stderr()),
-                ):
-                    await capture.emit(channel, data)
-                await waits.join(rest)
-                out, err = capture.take()
-                io.stdout = out or None
-                io.stderr = err or None
+                record_status(session, io.exit_code, transparent=True)
+                if io.refusal is not None:
+                    nested.latest = io.refusal
+                return io
         finally:
-            if substitution:
-                session.functions.clear()
-                if child_token is not None:
-                    reset_current_session(child_token)
+            parser.release()
+    child_token = None
+    if substitution:
+        session = child_session(session)
+        child_token = set_current_session(session, owner=ws._session_mgr)
+    capture = Terminal()
+    waits = JobWaits(capture.jobs)
+    rest = session.job_output or session.tty.jobs
+    if substitution:
+        session.terminal_output = False
+        inherit_exit_trap(session)
+        # A substitution reads its pipe until every writer has closed
+        # it, so what a job it started writes is part of its value,
+        # and it ends when its jobs do. They are its own jobs.
+        session.job_output = capture.jobs
+        session.job_waits = waits
+        caller = opts.get("job_table") or ws.job_table
+        opts["job_table"] = caller.child(caller)
+        opts["sink"] = capture
+    try:
+        try:
+            io = await ws.shell(
+                cmd,
+                cancel=cancel,
+                record=False,
+                execution_scope=execution_scope,
+                routing_decision=routing_decision,
+                agent_id=agent_id,
+                handed=inner,
+                **opts,
+            )
+        except UNWINDING as sig:
+            # A substitution runs on a copy of the caller's frames,
+            # and it is a child shell: whatever unwinds out of it
+            # ends it.
+            if not substitution:
+                raise
+            io = ended(sig)
+        if substitution:
+            io = await finish_shell(
+                partial(
+                    recurse,
+                    ws,
+                    node=node,
+                    handed=handed,
+                    cancel=cancel,
+                    routing_decision=routing_decision,
+                    agent_id=agent_id,
+                    nested=nested,
+                    execution_scope=execution_scope,
+                    job_table=opts["job_table"],
+                ),
+                session,
+                io,
+                opts.get("stdin"),
+                opts.get("call_stack"),
+            )
+            for channel, data in (
+                (Channel.STDOUT, await io.materialize_stdout()),
+                (Channel.STDERR, await io.materialize_stderr()),
+            ):
+                await capture.emit(channel, data)
+            await waits.join(rest)
+            out, err = capture.take()
+            io.stdout = out or None
+            io.stderr = err or None
+    finally:
+        if substitution:
+            session.functions.clear()
+            if child_token is not None:
+                reset_current_session(child_token)
     if io.refusal is not None:
         nested.latest = io.refusal
     return io

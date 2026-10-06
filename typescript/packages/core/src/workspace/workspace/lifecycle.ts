@@ -16,6 +16,7 @@ import type { FileCache } from '../../cache/file/mixin.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { SessionManager } from '../session/manager.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 import { ABORT_JOIN_MS } from '../abort.ts'
 import type { WatchManager } from './watch.ts'
@@ -27,6 +28,7 @@ export interface CloseDeps {
   stateStore: WorkspaceStateStore
   closers: (() => Promise<void>)[]
   jobTable: JobTable
+  sessions: SessionManager
   registry: MountRegistry
   sharedMounts: Set<BaseVFS>
   /** Delete the workspace's state from its store before the store closes. */
@@ -78,6 +80,11 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       }
     },
   ])
+  try {
+    deps.sessions.release()
+  } catch (err) {
+    failures.push(err)
+  }
   await settle([() => deps.jobTable.closeConsoles()])
   await settle([...deps.registry.retiringMounts.values()].map((task) => () => task))
   await settle([...(deps.cache.drainTasks?.values() ?? [])].map((task) => () => task))

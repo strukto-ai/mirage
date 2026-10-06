@@ -1,10 +1,12 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from mirage import Workspace
 from mirage.commands.cli.types import CLISpec
 from mirage.io import IOResult
+from mirage.shell.console import Channel
 from mirage.shell.parse import scope
 from mirage.shell.parse.program import ProgramNode
 from mirage.workspace.evaluation import child_session, execution_session
@@ -27,10 +29,8 @@ def test_execution_frames_do_not_live_on_persistent_sessions():
     assert "_diagnostics" not in vars(state)
 
 
-@pytest.mark.asyncio
-async def test_background_and_functions_release_programs_after_teardown(
-    monkeypatch,
-):
+@pytest_asyncio.fixture
+async def owned_workspace(monkeypatch):
     programs = []
     original = scope.parse_program
 
@@ -41,6 +41,14 @@ async def test_background_and_functions_release_programs_after_teardown(
 
     monkeypatch.setattr(scope, "parse_program", parse)
     ws = Workspace({})
+    try:
+        yield ws, programs
+    finally:
+        await ws.close()
+        assert all(program.references == 0 for program in programs)
+
+
+def install_stall(ws):
     entered, gate = asyncio.Event(), asyncio.Event()
 
     async def stall(inv):
@@ -49,42 +57,84 @@ async def test_background_and_functions_release_programs_after_teardown(
         return None, IOResult()
 
     ws.register_cli("stall", CLISpec(name="stall", fn=stall))
+    return entered, gate
+
+
+@pytest.mark.asyncio
+async def test_background_function_survives_late_substitutions_and_unset(
+    owned_workspace,
+):
+    ws, programs = owned_workspace
+    entered, gate = install_stall(ws)
     try:
         await ws.shell("f() { echo retained; }")
         stored = ws.get_session(ws.default_session_id).functions["f"]
         assert isinstance(stored[0], ProgramNode)
         defining = stored[0].program
-        references = defining.references
-        await ws.explain("cd /; f")
-        assert defining.references == references
-        await ws.shell("{ stall; f; } &")
-        await entered.wait()
+        await ws.shell('{ stall; echo "$(f):$(</dev/null)"; } &')
+        await asyncio.wait_for(entered.wait(), 5)
         await ws.shell("unset -f f")
         assert defining.references > 0
+        job = ws.job_table.get(1, ws.default_session_id)
+        assert job is not None
         gate.set()
         await ws.shell("wait")
+        assert job.exit_code == 0
+        assert await job.console.snapshot(Channel.STDERR) == b""
+        assert await job.console.snapshot(Channel.STDOUT) == b"retained:\n"
         assert defining.references == 0
-        await ws.shell("f() { unset -f f; echo alive; }; f")
-        await ws.shell(
-            "f() { :; }; f | f; echo x | xargs -P 2 -n 1 f; (f); bash -c f; unset -f f"
-        )
     finally:
         gate.set()
-        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_borrows_function_programs(owned_workspace):
+    ws, programs = owned_workspace
+    await ws.shell("f() { echo retained; }")
+    before = [program.references for program in programs]
+    await ws.explain("cd /; f")
+    assert [
+        program.references for program in programs[: len(before)]
+    ] == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "stdout"),
+    [
+        ("f() { unset -f f; echo alive; }; f", b"alive\n"),
+        ("f() { echo alive; }; f | cat", b"alive\n"),
+        (
+            'f() { echo "$1"; }; printf "x\\nx\\n" | xargs -P 2 -n 1 f',
+            b"x\nx\n",
+        ),
+        ("(f() { echo alive; }; f)", b"alive\n"),
+        ("bash -c 'f() { echo alive; }; f'", b"alive\n"),
+    ],
+    ids=[
+        "self-unset",
+        "pipeline",
+        "parallel-xargs",
+        "subshell",
+        "nested-bash",
+    ],
+)
+async def test_function_programs_release_after_execution(
+    owned_workspace, command, stdout
+):
+    ws, programs = owned_workspace
+    io = await ws.shell(command)
+    assert io.exit_code == 0
+    assert await io.materialize_stdout() == stdout
+    assert await io.materialize_stderr() == b""
+    await ws.shell("unset -f f")
     assert all(program.references == 0 for program in programs)
 
 
 @pytest.mark.asyncio
 async def test_substitution_does_not_mutate_parent_while_suspended():
     ws = Workspace({})
-    entered, gate = asyncio.Event(), asyncio.Event()
-
-    async def stall(inv):
-        entered.set()
-        await gate.wait()
-        return None, IOResult()
-
-    ws.register_cli("stall", CLISpec(name="stall", fn=stall))
+    entered, gate = install_stall(ws)
     pending = asyncio.create_task(
         ws.shell(
             'X=parent; value=$(X=child; stall; echo "$X"); echo "$X:$value"'

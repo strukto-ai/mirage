@@ -543,9 +543,13 @@ class SessionManager:
             await self.close(sid)
 
     async def close_store(self) -> None:
+        self.release()
+        await self._store.close()
+
+    def release(self) -> None:
+        """Release session-owned runtime resources without closing shared storage."""
         for session in self._sessions.values():
             session.functions.clear()
-        await self._store.close()
 
     def lock_for(self, session_id: str) -> asyncio.Lock:
         return self._locks[session_id]

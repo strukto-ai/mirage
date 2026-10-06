@@ -511,34 +511,40 @@ async function runPreparedLine(
             const jobs = opts.jobTable ?? options.jobTable
             if (jobs !== undefined) innerOpts.jobTable = jobs
             let session = opts.session ?? effectiveSession
-            const substitutionTree =
-              opts.substitution === true && opts.node?.type === NT.COMMAND_SUBSTITUTION
-                ? parser.parse(cmd)
-                : null
-            if (substitutionTree !== null && inputSubstitutionRedirect(substitutionTree) !== null) {
-              // The file is the substitution's value, never what the line
-              // shows: the read runs with no sink, the line's terminal least
-              // of all.
-              const [stdout, io] = await runCommandTree(
-                withHandOff(
-                  {
-                    ...lineDeps,
-                    ...(innerSignal !== undefined ? { signal: innerSignal } : {}),
-                    ...(opts.executionScope !== undefined
-                      ? { executionScope: opts.executionScope }
-                      : {}),
-                  },
-                  innerOpts.handed ?? handed,
-                ),
-                substitutionTree,
-                session,
-                null,
-                true,
-              )
-              io.stdout = stdout
-              recordStatus(session, io.exitCode, true)
-              if (io.refusal !== null) nested.latest = io.refusal
-              return io
+            if (opts.substitution === true && opts.node?.type === NT.COMMAND_SUBSTITUTION) {
+              // A background evaluation can outlive the line that created this door.
+              const substitutionParser = parser.fork()
+              try {
+                const substitutionTree = substitutionParser.parse(cmd)
+                if (inputSubstitutionRedirect(substitutionTree) !== null) {
+                  // The file is the substitution's value, never what the line
+                  // shows: the read runs with no sink, the line's terminal least
+                  // of all.
+                  const [stdout, io] = await runCommandTree(
+                    withHandOff(
+                      {
+                        ...lineDeps,
+                        parser: substitutionParser,
+                        ...(innerSignal !== undefined ? { signal: innerSignal } : {}),
+                        ...(opts.executionScope !== undefined
+                          ? { executionScope: opts.executionScope }
+                          : {}),
+                      },
+                      innerOpts.handed ?? handed,
+                    ),
+                    substitutionTree,
+                    session,
+                    null,
+                    true,
+                  )
+                  io.stdout = stdout
+                  recordStatus(session, io.exitCode, true)
+                  if (io.refusal !== null) nested.latest = io.refusal
+                  return io
+                }
+              } finally {
+                substitutionParser.release()
+              }
             }
             const substitution = opts.substitution === true
             if (substitution) {

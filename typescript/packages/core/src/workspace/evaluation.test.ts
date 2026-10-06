@@ -1,7 +1,8 @@
 import * as executionTree from './node/run_tree.ts'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, assert, expect, it, vi } from 'vitest'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { Channel } from '../shell/console/index.ts'
 import { ProgramNode, type ParsedProgram } from '../shell/parse/program.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { SessionState } from './session/session.ts'
@@ -28,56 +29,63 @@ it('keeps temporary frames off persistent state and child writes off the parent'
   expect(Object.hasOwn(state, 'abortSignal')).toBe(false)
 })
 
-it('retains trees through background output and releases them after teardown', async () => {
-  const parser = await getTestParser()
-  const programs: ParsedProgram[] = []
-  const original = parser.parseProgram.bind(parser)
-  vi.spyOn(parser, 'parseProgram').mockImplementation((source) => {
-    const program = original(source)
-    programs.push(program)
-    return program
-  })
-  const ws = new Workspace({}, { shellParser: parser })
-  let enter!: () => void, release!: () => void
-  const entered = new Promise<void>((resolve) => {
-    enter = resolve
-  })
-  const gate = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  ws.registerCli(
-    'stall',
-    new CLISpec({
-      name: 'stall',
-      fn: async () => {
-        enter()
-        await gate
-        return [null, new IOResult()]
-      },
-    }),
-  )
+it('retains a background function through late substitutions and foreground unset', async () => {
+  const { ws, programs } = await trackedWorkspace()
+  const gate = barrier()
+  installStall(ws, gate)
   try {
     await ws.shell('f() { echo retained; }')
     const stored = ws.getSession(ws.defaultSessionId).functions.f as TSNodeLike[]
-    expect(stored[0]).toBeInstanceOf(ProgramNode)
-    const defining = (stored[0] as ProgramNode).program
-    const references = defining.references
-    await ws.explain('cd /; f')
-    expect(defining.references).toBe(references)
-    await ws.shell('{ stall; f; } &')
-    await entered
+    assert(stored[0] instanceof ProgramNode)
+    const defining = stored[0].program
+    await ws.shell('{ stall; echo "$(f):$(</dev/null)"; } &')
+    await gate.entered
     await ws.shell('unset -f f')
     expect(defining.references).toBeGreaterThan(0)
-    release()
+    const job = ws.jobTable.get(1, ws.defaultSessionId)
+    assert(job)
+    gate.release()
     await ws.shell('wait')
+    expect(job.exitCode).toBe(0)
+    expect(new TextDecoder().decode(await job.console.snapshot(Channel.STDERR))).toBe('')
+    expect(new TextDecoder().decode(await job.console.snapshot(Channel.STDOUT))).toBe('retained:\n')
     expect(defining.references).toBe(0)
-    await ws.shell('f() { unset -f f; echo alive; }; f')
-    await ws.shell('f() { :; }; f | f; echo x | xargs -P 2 -n 1 f; (f); bash -c f; unset -f f')
   } finally {
-    release()
+    gate.release()
     await ws.close()
   }
-  expect(programs.filter((program) => program.references !== 0)).toEqual([])
+  expect(programs.every((program) => program.references === 0)).toBe(true)
+})
+
+it('explain borrows function programs without retaining another session', async () => {
+  const { ws, programs } = await trackedWorkspace()
+  try {
+    await ws.shell('f() { echo retained; }')
+    const before = programs.map((program) => program.references)
+    await ws.explain('cd /; f')
+    expect(programs.slice(0, before.length).map((program) => program.references)).toEqual(before)
+  } finally {
+    await ws.close()
+  }
+  expect(programs.every((program) => program.references === 0)).toBe(true)
+})
+
+it.each([
+  ['self-unset', 'f() { unset -f f; echo alive; }; f', 'alive\n'],
+  ['pipeline', 'f() { echo alive; }; f | cat', 'alive\n'],
+  ['parallel xargs', 'f() { echo "$1"; }; printf "x\\nx\\n" | xargs -P 2 -n 1 f', 'x\nx\n'],
+  ['subshell', '(f() { echo alive; }; f)', 'alive\n'],
+  ['nested bash', "bash -c 'f() { echo alive; }; f'", 'alive\n'],
+])('releases function programs after %s', async (_name, command, stdout) => {
+  const { ws, programs } = await trackedWorkspace()
+  try {
+    const io = await ws.shell(command)
+    expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, stdout, ''])
+    await ws.shell('unset -f f')
+    expect(programs.every((program) => program.references === 0)).toBe(true)
+  } finally {
+    await ws.close()
+  }
 })
 
 it('closing one workspace leaves its injected parser usable by another', async () => {
@@ -96,40 +104,56 @@ it('closing one workspace leaves its injected parser usable by another', async (
 
 it('keeps substitution writes off its parent while suspended', async () => {
   const ws = new Workspace({}, { shellParser: await getTestParser() })
-  let enter!: () => void, release!: () => void
-  const entered = new Promise<void>((resolve) => {
-    enter = resolve
-  })
-  const gate = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  ws.registerCli(
-    'stall',
-    new CLISpec({
-      name: 'stall',
-      fn: async () => {
-        enter()
-        await gate
-        return [null, new IOResult()]
-      },
-    }),
-  )
+  const gate = barrier()
+  installStall(ws, gate)
   const pending = ws.shell('X=parent; value=$(X=child; stall; echo "$X"); echo "$X:$value"')
   try {
-    await entered
+    await gate.entered
     expect(ws.getSession(ws.defaultSessionId).env.X).toBe('parent')
-    release()
+    gate.release()
     const io = await pending
     expect(io.stdoutText).toBe('parent:child\n')
     expect(io.exitCode).toBe(0)
   } finally {
-    release()
+    gate.release()
     await pending
     await ws.close()
   }
 })
 
 it('keeps a cancelled tree alive until a blocked leaf actually settles', async () => {
+  const { ws, programs } = await trackedWorkspace()
+  const gate = barrier()
+  const run = executionTree.runCommandTree
+  let borrowed = ''
+  vi.spyOn(executionTree, 'runCommandTree').mockImplementation(async (...args) => {
+    await gate.pause()
+    borrowed = args[1].text
+    return run(...args)
+  })
+  const abort = new AbortController()
+  const pending = ws.shell('echo forbidden', { signal: abort.signal })
+  const cancelled = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  try {
+    await gate.entered
+    abort.abort()
+    await cancelled
+    expect(programs.some((program) => program.references > 0)).toBe(true)
+    gate.release()
+    await vi.waitFor(() => {
+      expect(programs.every((program) => program.references === 0)).toBe(true)
+    })
+    expect(borrowed).toBe('echo forbidden')
+    vi.restoreAllMocks()
+    expect((await ws.shell('echo alive')).stdoutText).toBe('alive\n')
+  } finally {
+    gate.release()
+    await cancelled
+    await ws.close()
+  }
+})
+
+async function trackedWorkspace(): Promise<{ ws: Workspace; programs: ParsedProgram[] }> {
   const parser = await getTestParser()
   const programs: ParsedProgram[] = []
   const original = parser.parseProgram.bind(parser)
@@ -138,7 +162,10 @@ it('keeps a cancelled tree alive until a blocked leaf actually settles', async (
     programs.push(program)
     return program
   })
-  const ws = new Workspace({}, { shellParser: parser })
+  return { ws: new Workspace({}, { shellParser: parser }), programs }
+}
+
+function barrier(): { entered: Promise<void>; pause: () => Promise<void>; release: () => void } {
   let enter!: () => void, release!: () => void
   const entered = new Promise<void>((resolve) => {
     enter = resolve
@@ -146,32 +173,25 @@ it('keeps a cancelled tree alive until a blocked leaf actually settles', async (
   const gate = new Promise<void>((resolve) => {
     release = resolve
   })
-  const run = executionTree.runCommandTree
-  let borrowed = ''
-  vi.spyOn(executionTree, 'runCommandTree').mockImplementation(async (...args) => {
-    enter()
-    await gate
-    borrowed = args[1].text
-    return run(...args)
-  })
-  const abort = new AbortController()
-  const pending = ws.shell('echo forbidden', { signal: abort.signal })
-  const cancelled = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
-  try {
-    await entered
-    abort.abort()
-    await cancelled
-    expect(programs.some((program) => program.references > 0)).toBe(true)
-    release()
-    await vi.waitFor(() => {
-      expect(programs.every((program) => program.references === 0)).toBe(true)
-    })
-    expect(borrowed).toBe('echo forbidden')
-    vi.restoreAllMocks()
-    expect((await ws.shell('echo alive')).stdoutText).toBe('alive\n')
-  } finally {
-    release()
-    await cancelled
-    await ws.close()
+  return {
+    entered,
+    release,
+    pause: async () => {
+      enter()
+      await gate
+    },
   }
-})
+}
+
+function installStall(ws: Workspace, gate: ReturnType<typeof barrier>): void {
+  ws.registerCli(
+    'stall',
+    new CLISpec({
+      name: 'stall',
+      fn: async () => {
+        await gate.pause()
+        return [null, new IOResult()]
+      },
+    }),
+  )
+}

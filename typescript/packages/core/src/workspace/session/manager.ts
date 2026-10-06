@@ -445,8 +445,13 @@ export class SessionManager {
   }
 
   closeStore(): Promise<void> {
-    for (const session of this.sessions.values()) releaseFunctions(session.functions)
+    this.release()
     return this.sessionStore.close()
+  }
+
+  /** Release session-owned runtime resources without closing shared storage. */
+  release(): void {
+    for (const session of this.sessions.values()) releaseFunctions(session.functions)
   }
 
   private defaultSession(): SessionState {

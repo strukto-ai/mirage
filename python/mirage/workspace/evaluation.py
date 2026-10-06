@@ -1,5 +1,7 @@
 from typing import Any
 
+from mirage.shell.constants import RANDOM, RANDOM_UNSET
+from mirage.shell.variable import ShellVar, copy_var
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.frame import persistent_session as persistent_session
 from mirage.workspace.session.session import SessionState
@@ -58,8 +60,37 @@ def child_session(parent: SessionState) -> SessionState:
     child._alias_marks = dict(parent._alias_marks)
     child._alias_stack = list(parent._alias_stack)
     child._local_vars = (
-        None if parent._local_vars is None else dict(parent._local_vars)
+        None if parent._local_vars is None else copy_locals(parent._local_vars)
     )
-    child._local_frames = [dict(frame) for frame in parent._local_frames]
+    child._local_frames = [
+        child._local_vars
+        if frame is parent._local_vars and child._local_vars is not None
+        else copy_locals(frame)
+        for frame in parent._local_frames
+    ]
     child._local_random = list(parent._local_random)
+    # The child reseeds on its first draw instead of replaying the parent's seed.
+    if child._random_seed != RANDOM_UNSET:
+        var = parent.vars.get(RANDOM)
+        child._random_seed = (
+            var.value
+            if var is not None and isinstance(var.value, str)
+            else None
+        )
     return child
+
+
+def copy_locals(
+    frame: dict[str, ShellVar | None],
+) -> dict[str, ShellVar | None]:
+    """Copy saved locals into child-owned frames.
+
+    Temporary call environments become ordinary saved scopes in the child.
+
+    Args:
+        frame (dict[str, ShellVar | None]): the parent's saved variables.
+    """
+    return {
+        name: None if var is None else copy_var(var)
+        for name, var in frame.items()
+    }

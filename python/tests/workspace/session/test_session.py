@@ -22,7 +22,6 @@ from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.constants import (
-    CHILD_SHELL_FIELDS,
     INHERITED_FIELDS,
     TRANSIENT_FIELDS,
 )
@@ -259,35 +258,9 @@ def test_every_field_is_classified_as_inherited_or_transient():
     assert declared == classified
 
 
-def test_child_shell_fields_are_a_subset_of_the_declared_fields():
-    declared = {f.name for f in dataclasses.fields(SessionState)}
-    assert set(CHILD_SHELL_FIELDS) <= declared
-
-
 def test_fork_carries_every_inherited_field():
     original = SessionState(session_id="orig", script_name="/data/run.sh")
     assert original.fork().script_name == "/data/run.sh"
-
-
-def test_snapshot_and_restore_undo_a_child_shell():
-    session = SessionState(
-        session_id="s", cwd="/data", vars=vars_from_env({"A": "1"})
-    )
-    saved = session.snapshot()
-    session.cwd = "/other"
-    seed_var(session, "A", "2")
-    session.functions["f"] = []
-    session.script_name = "run.sh"
-    session.restore(saved)
-    assert session.cwd == "/data"
-    assert session.env == {
-        "A": "1",
-        "PWD": "/data",
-        "PATH": "/usr/bin",
-        "IFS": " \t\n",
-    }
-    assert session.functions == {}
-    assert session.script_name is None
 
 
 def test_argv0_keeps_an_empty_script_name():

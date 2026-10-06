@@ -148,6 +148,18 @@ def var_kind(var: ShellVar) -> VarKind:
     return VarKind.SCALAR
 
 
+def copy_var(var: ShellVar) -> ShellVar:
+    """Copy a variable and its mutable array value for a child shell.
+
+    Args:
+        var (ShellVar): the variable to copy.
+    """
+    value = var.value
+    if isinstance(value, (list, dict)):
+        return with_value(var, value.copy())
+    return var
+
+
 def with_value(var: ShellVar, value: ShellValue | None) -> ShellVar:
     """The variable with a new value and the same attributes.
 

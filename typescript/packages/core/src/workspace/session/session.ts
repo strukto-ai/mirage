@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { functionTable, releaseFunctions } from './functions.ts'
+import { functionTable } from './functions.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 
 import {
@@ -23,17 +23,11 @@ import {
 import type { Limit } from '../../types.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
 import { parseCommandLimits, commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
-import {
-  BIN_PREFIX,
-  IFS_DEFAULT,
-  RANDOM,
-  RANDOM_UNSET,
-  SHELL_ARGV0,
-} from '../../shell/constants.ts'
+import { BIN_PREFIX, IFS_DEFAULT, RANDOM_UNSET, SHELL_ARGV0 } from '../../shell/constants.ts'
 import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
-import { attrsFromLetters, makeVar, storedAttrs, VarAttr, withValue } from '../../shell/variable.ts'
+import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
 import type { AdmissionRules, Decision, HideReason, ProfileScript } from '../../policy/types.ts'
 import {
   commandsFromJSON,
@@ -51,54 +45,6 @@ import { type JobOutput, Terminal } from '../../shell/console/index.ts'
 import type { JobWaits } from '../../shell/job_table/index.ts'
 import type { MountMode } from '../../types.ts'
 import type { StatusWriter } from '../abort.ts'
-
-/**
- * What a child shell gets its own copy of, and the parent gets back
- * afterwards. A `( … )` subshell and a nested `bash`/`sh` are both child
- * shells and both read this shape, so neither can drift into isolating a
- * field the other leaks, and adding a field here is a compile error
- * until `snapshot` and `restore` both carry it. `lastExitCode` is
- * deliberately absent: `$?` after a child shell is the child's status,
- * which is the one thing it reports back. `functionNames` is here because a
- * child shell starts outside every function and `source` its caller is
- * inside.
- */
-export interface ChildShellState {
-  cwd: string
-  logicalCwd: string | undefined
-  functionNames: readonly string[] | null
-  vars: Record<string, ShellVar>
-  functions: Record<string, unknown>
-  readonlyFunctions: Set<string>
-  shellOptions: Record<string, boolean>
-  positionalArgs: string[]
-  scriptName: string | null
-  exitTrap: string | null
-  exitTrapInherited: boolean
-  trapStatus: number | null
-  jobOutput: JobOutput | null
-  jobWaits: JobWaits | null
-  lastBgJobId: number | null
-  getoptsPos: number
-  getoptsOptind: number | null
-  shopts: Record<string, boolean>
-  aliases: Record<string, string>
-  umask: number
-  descriptors: Map<number, Descriptor>
-  execStdout: string | null
-  execStdoutAppend: boolean
-  execStdoutInput: SharedInput | null
-  execStderr: string | null
-  execStderrAppend: boolean
-  execStderrInput: SharedInput | null
-  execStdin: SharedInput | null
-  execStdinUnreadable: boolean
-  execStdinIdentity: string | null
-  randomState: number | null
-  randomSeed: string | null
-  randomLast: number
-  pipeStatus: readonly number[]
-}
 
 /**
  * Read one entry of a session record, ignoring anything inherited from
@@ -377,10 +323,7 @@ function copyVars(vars: Record<string, ShellVar>): Record<string, ShellVar> {
   for (const [name, v] of Object.entries(vars)) {
     // The record is frozen, but an indexed or associative value is a
     // live container, so the copy has to reach inside it.
-    if (Array.isArray(v.value)) out[name] = withValue(v, [...v.value])
-    else if (v.value !== null && typeof v.value === 'object')
-      out[name] = withValue(v, { ...v.value })
-    else out[name] = v
+    out[name] = copyVar(v)
   }
   return out
 }
@@ -435,7 +378,7 @@ export class SessionState {
   statusWriter: StatusWriter | null = null
   // `$RANDOM`'s generator state and the seed word it last consumed
   // (`session/rng.ts`). A child shell reseeds, as bash's does, and the
-  // parent gets its own state back (`snapshot` / `restore`).
+  // parent retains its own state while the child runs.
   randomState: number | null = null
   randomSeed: string | null = null
   randomLast = 0
@@ -728,102 +671,6 @@ export class SessionState {
       if (v.attrs.has(VarAttr.Readonly)) out.add(name)
     }
     return out
-  }
-
-  /**
-   * Copy the state a child shell runs on top of. The records go through
-   * `ownRecord` because they hold script-controlled names and must keep
-   * their null prototype across the round trip.
-   */
-  snapshot(): ChildShellState {
-    const saved: ChildShellState = {
-      cwd: this.cwd,
-      logicalCwd: this.logicalCwd,
-      functionNames: this.functionNames,
-      vars: copyVars(this.vars),
-      functions: functionTable(this.functions),
-      readonlyFunctions: new Set(this.readonlyFunctions),
-      shellOptions: { ...this.shellOptions },
-      positionalArgs: [...this.positionalArgs],
-      scriptName: this.scriptName,
-      exitTrap: this.exitTrap,
-      exitTrapInherited: this.exitTrapInherited,
-      trapStatus: this.trapStatus,
-      jobOutput: this.jobOutput,
-      jobWaits: this.jobWaits,
-      lastBgJobId: this.lastBgJobId,
-      getoptsPos: this.getoptsPos,
-      getoptsOptind: this.getoptsOptind,
-      shopts: { ...this.shopts },
-      aliases: { ...this.aliases },
-      umask: this.umask,
-      descriptors: new Map(this.descriptors),
-      execStdout: this.execStdout,
-      execStdoutAppend: this.execStdoutAppend,
-      execStdoutInput: this.execStdoutInput,
-      execStderr: this.execStderr,
-      execStderrAppend: this.execStderrAppend,
-      execStderrInput: this.execStderrInput,
-      execStdin: this.execStdin,
-      execStdinUnreadable: this.execStdinUnreadable,
-      execStdinIdentity: this.execStdinIdentity,
-      randomState: this.randomState,
-      randomSeed: this.randomSeed,
-      randomLast: this.randomLast,
-      // Every pipeline segment sees the statuses of the pipeline before
-      // this one, however many statements of its own it runs.
-      pipeStatus: [...this.pipeStatus],
-    }
-    // A child shell reseeds `$RANDOM`, as bash's does: the generator
-    // starts fresh, and the seed word follows the stored value so an
-    // assignment the parent made is not replayed as a reseed. `unset
-    // RANDOM` stays unset.
-    if (this.randomSeed !== RANDOM_UNSET) {
-      const word = this.vars[RANDOM]?.value
-      this.randomSeed = typeof word === 'string' ? word : null
-      this.randomState = null
-      this.randomLast = 0
-    }
-    return saved
-  }
-
-  /** Put back a snapshot, ending a child shell. */
-  restore(state: ChildShellState): void {
-    this.cwd = state.cwd
-    this.logicalCwd = state.logicalCwd
-    this.functionNames = state.functionNames
-    this.vars = state.vars
-    releaseFunctions(this.functions)
-    this.functions = state.functions
-    this.readonlyFunctions = state.readonlyFunctions
-    this.shellOptions = state.shellOptions
-    this.positionalArgs = state.positionalArgs
-    this.scriptName = state.scriptName
-    this.exitTrap = state.exitTrap
-    this.exitTrapInherited = state.exitTrapInherited
-    this.trapStatus = state.trapStatus
-    this.jobOutput = state.jobOutput
-    this.jobWaits = state.jobWaits
-    this.lastBgJobId = state.lastBgJobId
-    this.getoptsPos = state.getoptsPos
-    this.getoptsOptind = state.getoptsOptind
-    this.shopts = state.shopts
-    this.aliases = state.aliases
-    this.umask = state.umask
-    this.descriptors = state.descriptors
-    this.execStdout = state.execStdout
-    this.execStdoutAppend = state.execStdoutAppend
-    this.execStdoutInput = state.execStdoutInput
-    this.execStderr = state.execStderr
-    this.execStderrAppend = state.execStderrAppend
-    this.execStderrInput = state.execStderrInput
-    this.execStdin = state.execStdin
-    this.execStdinUnreadable = state.execStdinUnreadable
-    this.execStdinIdentity = state.execStdinIdentity
-    this.randomState = state.randomState
-    this.randomSeed = state.randomSeed
-    this.randomLast = state.randomLast
-    this.pipeStatus = state.pipeStatus
   }
 
   /**
