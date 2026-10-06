@@ -543,11 +543,8 @@ async def apply_state_dict(
 
 
 def _disk_state_as_ram(vfs_state: dict[str, Any]) -> dict[str, Any]:
-    """A disk mount's state as a RAM mount takes it.
-
-    Absolute keys, every parent directory, each mode as an attribute,
-    and the bytes of each file the disk state names by host path, read
-    without following a link (``open_regular``).
+    """A disk mount's state as a RAM mount takes it, each host file read
+    through ``open_regular``.
 
     Args:
         vfs_state (dict[str, Any]): a disk mount's captured state.

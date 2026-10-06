@@ -1111,18 +1111,8 @@ async def test_a_disk_state_loads_into_ram_without_following_a_link(tmp_path):
     # later: a link put in its place since must not carry a host file
     # in, the refusal lands before any mount loads, and a mount keeping
     # no content of its own reads none of the files.
-    captured = tmp_path / "root" / "sub" / "f"
-    captured.parent.mkdir(parents=True)
+    captured = tmp_path / "captured"
     captured.write_bytes(b"mine")
-    (tmp_path / "other").mkdir()
-    (tmp_path / "other" / "g").write_bytes(b"unread")
-    source = Workspace(
-        {
-            "/a": RAMVFS(),
-            "/d": DiskVFS(str(tmp_path / "root")),
-            "/s": DiskVFS(str(tmp_path / "other")),
-        }
-    )
     config = MinIOConfig(
         bucket="b",
         endpoint_url="http://localhost:9000",
@@ -1134,19 +1124,25 @@ async def test_a_disk_state_loads_into_ram_without_following_a_link(tmp_path):
         mode=MountMode.WRITE,
     )
     try:
-        state = await to_state_dict(source)
-        (tmp_path / "other" / "g").unlink()
+        state = await to_state_dict(ws)
+        for m in state[StateKey.MOUNTS]:
+            file = {"/d/": captured, "/s/": tmp_path / "gone"}.get(
+                m[MountKey.PREFIX]
+            )
+            if file is not None:
+                m[MountKey.VFS_STATE] = {
+                    "type": "disk",
+                    "files": {"sub/f": file},
+                }
         await apply_state_dict(ws, state)
         assert await ws.vfs.read("/d/sub/f") == b"mine"
         await ws.vfs.write("/a/kept", b"live")
-        secret = tmp_path / "secret"
-        secret.write_bytes(b"host")
+        (tmp_path / "secret").write_bytes(b"host")
         captured.unlink()
-        captured.symlink_to(secret)
+        captured.symlink_to(tmp_path / "secret")
         with pytest.raises(OSError):
             await apply_state_dict(ws, state)
         assert await ws.vfs.read("/a/kept") == b"live"
         assert await ws.vfs.read("/d/sub/f") == b"mine"
     finally:
-        await source.close()
         await ws.close()

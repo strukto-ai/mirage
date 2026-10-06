@@ -93,8 +93,8 @@ export async function fileSize(path: string): Promise<number> {
  * file read later is refused when a link or anything but a regular file
  * has replaced it since its state named it. Mirrors node's openRegular.
  */
-async function openRegular(caller: string, path: string): Promise<FileHandle> {
-  const fs = requireFs(caller)
+async function openRegular(path: string): Promise<FileHandle> {
+  const fs = requireFs('openRegular')
   const handle = await fs.open(path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0))
   try {
     if (!(await handle.stat()).isFile()) throw new Error(`not a regular file: ${path}`)
@@ -107,7 +107,7 @@ async function openRegular(caller: string, path: string): Promise<FileHandle> {
 
 /** The bytes of a host file a state named, opened as `openRegular` opens it. */
 export async function readRegular(path: string): Promise<Uint8Array> {
-  const handle = await openRegular('readRegular', path)
+  const handle = await openRegular(path)
   try {
     return await handle.readFile()
   } finally {
@@ -124,7 +124,7 @@ export async function copyFileInto(
   sink: WritableStreamDefaultWriter<Uint8Array>,
   size: number,
 ): Promise<void> {
-  const handle = await openRegular('copyFileInto', path)
+  const handle = await openRegular(path)
   try {
     let left = size
     while (left > 0) {
