@@ -17,6 +17,8 @@ interface Case {
   command: string
   finish: 'release' | 'cancel'
   gate?: 'slack' | 'file'
+  parent_cwd?: string
+  stdout?: string
 }
 interface Job {
   jobId: string
@@ -28,6 +30,10 @@ interface Job {
 interface Result {
   stdout: string
   exitCode: number
+}
+interface Session {
+  sessionId: string
+  cwd: string
 }
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
@@ -126,6 +132,11 @@ async function run(
       return normalize(result) as T
     }
 
+    async function sessionCwd(workspaceId: string, sessionId: string): Promise<string | undefined> {
+      const sessions = await request<Session[]>('GET', `/v1/workspaces/${workspaceId}/sessions`)
+      return sessions.find((session) => session.sessionId === sessionId)?.cwd
+    }
+
     for (const wid of ['a', 'b']) {
       await request(
         'POST',
@@ -211,6 +222,14 @@ async function run(
               : undefined,
           )
         }
+        if (scenario.parent_cwd !== undefined) {
+          assert.equal(
+            await sessionCwd(a, running.sessionId),
+            scenario.parent_cwd,
+            'a suspended substitution must not change its parent session',
+          )
+          assert.equal(settled, false, 'the substitution must still be held at its HTTP read')
+        }
         const queued = await Promise.all(
           ['discard', 'keep'].map((tag) =>
             request<Job>(
@@ -267,6 +286,14 @@ async function run(
         const completed = await foreground
         if (scenario.finish === 'release')
           assert.equal(completed.exitCode, 0, JSON.stringify(completed))
+        if (scenario.stdout !== undefined) assert.equal(completed.stdout, scenario.stdout)
+        if (scenario.parent_cwd !== undefined) {
+          assert.equal(
+            await sessionCwd(a, running.sessionId),
+            scenario.parent_cwd,
+            'the parent session must remain unchanged after completion or cancellation',
+          )
+        }
         assert.equal((await request<Job>('POST', `/v1/jobs/${keep.jobId}/wait`, {})).status, 'done')
         const tail = scenario.finish === 'cancel' ? '! -e' : '-e'
         const check = await request<Result>('POST', path, {
@@ -287,7 +314,7 @@ async function run(
           assert.equal(isolated.exitCode, 0, JSON.stringify(isolated))
         }
         console.log(
-          `ok ${host}/${scenario.id}: same-session queue, independent requests, ${scenario.finish}, no canceled writes${mounted ? ', Monty + RAM/S3/Redis/Slack + recovery + isolation' : ''}`,
+          `ok ${host}/${scenario.id}: same-session queue, independent requests, ${scenario.finish}, no canceled writes${scenario.parent_cwd !== undefined ? ', parent isolated during and after await' : ''}${mounted ? ', Monty + RAM/S3/Redis/Slack + recovery + isolation' : ''}`,
         )
       } finally {
         gate?.release()

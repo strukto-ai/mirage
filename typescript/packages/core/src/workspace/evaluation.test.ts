@@ -118,23 +118,6 @@ it('closing one workspace leaves its injected parser usable by another', async (
   }
 })
 
-it('keeps substitution writes off its parent while suspended', async ({ owned: { ws } }) => {
-  const gate = barrier()
-  installStall(ws, gate)
-  const pending = ws.shell('X=parent; value=$(X=child; stall; echo "$X"); echo "$X:$value"')
-  try {
-    await gate.entered
-    expect(ws.getSession(ws.defaultSessionId).env.X).toBe('parent')
-    gate.release()
-    const io = await pending
-    expect(io.stdoutText).toBe('parent:child\n')
-    expect(io.exitCode).toBe(0)
-  } finally {
-    gate.release()
-    await pending
-  }
-})
-
 it('keeps a cancelled tree alive until a blocked leaf actually settles', async ({
   owned: { ws, programs },
 }) => {

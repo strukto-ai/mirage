@@ -14,6 +14,8 @@
 
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_context'
+import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import { IOResult } from '@struktoai/mirage-core/io/types'
 import { JobConsole, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import {
   bindMount,
@@ -111,6 +113,49 @@ const CHECKS: [string, Check][] = [
     'a page has no task-local async context',
     async () => {
       equal(asyncContextIsolatesTasks, false)
+    },
+  ],
+  [
+    'a suspended substitution keeps its writes off the parent',
+    async (ws) => {
+      let enter!: () => void, release!: () => void
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve
+      })
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      ws.registerCli(
+        'stall',
+        new CLISpec({
+          name: 'stall',
+          fn: async () => {
+            enter()
+            await gate
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      const abort = new AbortController()
+      const timeout = setTimeout(() => abort.abort(), 5000)
+      const running = shell(ws, 'X=parent; value=$(X=child; stall; echo "$X"); echo "$X:$value"', {
+        signal: abort.signal,
+      })
+      try {
+        await Promise.race([
+          entered,
+          running.then(() => {
+            throw new Error('substitution finished before reaching its gate')
+          }),
+        ])
+        equal(ws.getSession(ws.defaultSessionId).env.X, 'parent')
+        release()
+        equal(await running, [0, 'parent:child\n', ''])
+      } finally {
+        release()
+        clearTimeout(timeout)
+        await running
+      }
     },
   ],
   [

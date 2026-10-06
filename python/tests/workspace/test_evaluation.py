@@ -134,25 +134,3 @@ async def test_function_programs_release_after_execution(
     assert await io.materialize_stderr() == b""
     await ws.shell("unset -f f")
     assert all(program.references == 0 for program in programs)
-
-
-@pytest.mark.asyncio
-async def test_substitution_does_not_mutate_parent_while_suspended():
-    ws = Workspace({})
-    entered, gate = install_stall(ws)
-    pending = asyncio.create_task(
-        ws.shell(
-            'X=parent; value=$(X=child; stall; echo "$X"); echo "$X:$value"'
-        )
-    )
-    try:
-        await asyncio.wait_for(entered.wait(), 5)
-        assert ws.get_session(ws.default_session_id).env["X"] == "parent"
-        gate.set()
-        io = await pending
-        assert await io.materialize_stdout() == b"parent:child\n"
-        assert io.exit_code == 0
-    finally:
-        gate.set()
-        await pending
-        await ws.close()

@@ -199,6 +199,13 @@ duration or throughput estimate is not the assertion. The normal `python/**`,
 suite. Run it locally with `cd integ && pnpm exec tsx hosting/run.ts` after
 building TypeScript; append `python` or `typescript` to select one host.
 
+The substitution release/cancel cases hold `$(cd /; curl ...)` at that same
+HTTP gate and query the public session API while it is suspended. The parent
+must remain at `/work` both during the await and after completion or
+cancellation; a released substitution must also return its captured output.
+These cases fail with the old mutate-and-restore implementation, which exposed
+the child's `/` while waiting even though its final shell output looked correct.
+
 CI also passes `--mounts` to run `hosting/monty.json` on both hosts. Every
 scenario creates two workspaces with explicit Monty runtimes and RAM, S3,
 Redis and Slack mounts. One Monty call waits on a gated Slack read or spins
@@ -258,10 +265,13 @@ Chrome imports these same files rather than maintaining another set of goldens:
 | Shared diagnostic formatting preserves quote errors and nested syntax errors | Existing `bash/syntax/quoting.json` and `bash/quoted/nested_subshell.json` |
 
 The added unset/function cases and extended background case are pinned to the
-same Bash image. Native-tree release counts, suspended-parent inspection and
-late cancellation require host-controlled unit tests in the mirrored parser
-and evaluation suites. The existing browser host checks also cover cancellation
-and workspace shutdown; shell-output goldens cannot prove memory cleanup.
+same Bash image. Suspended-parent isolation is checked through the real HTTP
+hosting suite on both languages and a gated registered CLI in real Chrome,
+which inspects the parent's variable before releasing the substitution. These
+replace the equivalent suspended-state unit checks. Native-tree release counts
+and a cancelled evaluator that settles late remain in the mirrored parser and
+evaluation unit suites; shell-output goldens cannot prove memory cleanup.
+The browser host checks also cover cancellation and workspace shutdown.
 
 ## Running locally
 
