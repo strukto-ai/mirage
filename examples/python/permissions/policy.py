@@ -14,7 +14,14 @@
 
 import asyncio
 
-from mirage import Deny, MountMode, Policy, SessionContext, Workspace
+from mirage import (
+    CommandExplanation,
+    Deny,
+    MountMode,
+    Policy,
+    SessionContext,
+    Workspace,
+)
 from mirage.runtime.types import ScriptSource
 from mirage.vfs.ram import RAMVFS
 
@@ -158,6 +165,24 @@ async def main() -> None:
             )
             print(f"{who:9} {line:30} {outcome}")
             print(f"{'':9} {'':30} {note}")
+
+        # A dry run names who would speak, through the session's own
+        # doors: a line, as the tree of its commands, and one VFS call of
+        # a door that sees no command (a file tool, FUSE).
+        explain = (await ws.session("reviewer")).explain
+        shell_res = await explain.shell("cat /repo/flagged.txt")
+        for cmd in shell_res.node.children:
+            if not isinstance(cmd, CommandExplanation):
+                continue
+            for a in cmd.answers:
+                print(
+                    f"{'explain':9} {'cat /repo/flagged.txt':30} {a.policy}: {a.reason}"
+                )
+        vfs_res = await explain.vfs.write("/scratch/cold/f", b"draft")
+        for a in vfs_res.answers:
+            print(
+                f"{'explain':9} {'write /scratch/cold/f':30} {a.policy}: {a.reason}"
+            )
     finally:
         await ws.close()
 

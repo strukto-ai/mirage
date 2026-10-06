@@ -17,6 +17,8 @@ import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/works
 import {
   fromJsonSchema,
   McpServer,
+  ProtocolError,
+  ProtocolErrorCode,
   type JsonSchemaType,
   type ToolAnnotations,
 } from '@modelcontextprotocol/server'
@@ -116,16 +118,44 @@ export function createMirageMcpServer(
     name: options.name ?? 'mirage',
     version: options.version ?? VERSION,
   })
-  for (const tool of TOOLS) {
-    server.registerTool(
-      tool.name,
-      {
+  // The session's profile leaves it these tools, read on every request:
+  // a stored session loads after the server is built and a profile can
+  // change while it serves, so a list fixed at construction would offer
+  // what a call refuses and miss what a widened profile allows. A tool
+  // the session is not offered is "not found", as Python's server says.
+  server.server.registerCapabilities({ tools: { listChanged: true } })
+  server.server.setRequestHandler('tools/list', async () => {
+    const names = await operations.offered()
+    return {
+      tools: TOOLS.filter((tool) => names.includes(tool.name)).map((tool) => ({
+        name: tool.name,
         description: tool.description,
-        inputSchema: fromJsonSchema<Record<string, unknown>>(tool.inputSchema),
+        inputSchema: tool.inputSchema as { type: 'object' },
         ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
-      },
-      (args, ctx) => operations.call(tool.name, args, ctx.mcpReq.signal),
-    )
-  }
+      })),
+    }
+  })
+  server.server.setRequestHandler('tools/call', async (request, ctx) => {
+    const name = request.params.name
+    const tool = TOOLS.find((candidate) => candidate.name === name)
+    if (tool === undefined || !(await operations.offered()).includes(name)) {
+      throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`)
+    }
+    const args = request.params.arguments ?? {}
+    const checked = await fromJsonSchema(tool.inputSchema)['~standard'].validate(args)
+    if (checked.issues !== undefined) {
+      const why = checked.issues.map((issue) => issue.message).join('; ')
+      const text = `Input validation error: Invalid arguments for tool ${name}: ${why}`
+      return { content: [{ type: 'text', text }], isError: true }
+    }
+    try {
+      return await operations.call(name, args, ctx.mcpReq.signal)
+    } catch (err) {
+      // A call that failed is a tool result the agent reads, not a
+      // protocol error.
+      const text = err instanceof Error ? err.message : String(err)
+      return { content: [{ type: 'text', text }], isError: true }
+    }
+  })
   return server
 }

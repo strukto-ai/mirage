@@ -24,8 +24,8 @@ from mirage.context import reset_refusal_sink, set_refusal_sink
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
-from mirage.policy import HandOff
-from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
+from mirage.policy import Deny, HandOff
+from mirage.runtime.routing import RouteDecision, RouteError
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
@@ -61,7 +61,14 @@ from mirage.workspace.node.admission import (
     is_pending,
     is_pending_refusal,
 )
-from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
+from mirage.workspace.node.explain import (
+    Judged,
+    Walked,
+    line_held,
+    line_judgments,
+    prejudge_line,
+    unrefused_nodes,
+)
 from mirage.workspace.node.occurrence import evaluated_from
 from mirage.workspace.node.run_tree import run_command_tree
 from mirage.workspace.session import (
@@ -71,7 +78,10 @@ from mirage.workspace.session import (
     set_current_session,
 )
 from mirage.workspace.snapshot import ContentDriftError
-from mirage.workspace.workspace.failure import failure_result
+from mirage.workspace.workspace.failure import (
+    failure_result,
+    placement_refused,
+)
 from mirage.workspace.workspace.fill import (
     cli_env_names,
     fill_env,
@@ -577,16 +587,6 @@ async def run_prepared_line(
             io = syntax_error_result(offending, ast)
             record_status(session, io.exit_code)
             return io
-        decision = await ws._router.decide(
-            ast,
-            command,
-            runtime,
-            effective_session,
-            session_id,
-            agent or "",
-            ws._route_policy,
-            routing_decision,
-        )
         nested = NestedRefusal()
 
         def note(refusal: Refusal) -> None:
@@ -594,7 +594,9 @@ async def run_prepared_line(
 
         # An op a policy refuses inside a command prints the command's
         # own GNU line, so the door notes the record here, for the line
-        # to carry on its result.
+        # to carry on its result. Bound before placement, so an op a
+        # policy script makes while the line is judged is inside the
+        # line, never a question of its own.
         sink_token = set_refusal_sink(note)
         # The line's hand-off: the grants its passes and gates claim
         # for its commands, which the gates run on and the line's end
@@ -604,21 +606,60 @@ async def run_prepared_line(
         # job's subtree runs on a hand-off of the job's own.
         if handed is None:
             handed = HandOff()
-        # Bound by keyword so the walker can rebind it per node: a
-        # background job's nested lines run without the caller's event,
-        # as the job itself does.
-        exec_recursion = partial(
-            recurse,
-            ws,
-            cancel=cancel,
-            routing_decision=decision,
-            agent_id=agent,
-            nested=nested,
-            execution_scope=execution_scope,
-            job_table=job_table,
-        )
+        line_handed = handed
+        judgments: list[list[tuple[Walked, list[Judged]]]] = []
+
+        async def judged() -> list[tuple[Walked, list[Judged]]]:
+            # The line's commands judged once, for placement and the
+            # pass that refuses the line alike.
+            if not judgments:
+                judgments.append(
+                    await line_judgments(
+                        ast,
+                        effective_session,
+                        ws._registry,
+                        ws._namespace,
+                        line_handed,
+                        agent or "",
+                    )
+                )
+            return judgments[0]
+
+        async def admission_holds() -> bool:
+            return await line_held(
+                await judged(), ws._registry, line_handed, cancel
+            )
+
         held = False
         try:
+            placed = await ws._router.decide(
+                ast,
+                command,
+                runtime,
+                effective_session,
+                session_id,
+                agent or "",
+                routing_decision,
+                admission_holds,
+            )
+            if isinstance(placed, Deny):
+                io = placement_refused(placed, command)
+                record_status(session, io.exit_code)
+                return io
+            decision = placed
+            # Bound by keyword so the walker can rebind it per node: a
+            # background job's nested lines run without the caller's
+            # event, as the job itself does.
+            exec_recursion = partial(
+                recurse,
+                ws,
+                cancel=cancel,
+                routing_decision=decision,
+                agent_id=agent,
+                nested=nested,
+                execution_scope=execution_scope,
+                job_table=job_table,
+            )
             line_runtime = ws._runtimes.whole_line(decision)
             if line_runtime is not None:
                 # A whole line is a command like any other: the same
@@ -702,6 +743,7 @@ async def run_prepared_line(
                 handed,
                 agent or "",
                 cancel,
+                await judged(),
             )
             if refused is not None:
                 # A question left waiting holds the line for its retry,
@@ -848,10 +890,6 @@ async def run_prepared_line(
         logger.debug(
             "command %r timed out after %ss", exc.command, exc.seconds
         )
-        io = failure_result(exc, command)
-        record_status(session, io.exit_code)
-        return io
-    except RouteDeny as exc:
         io = failure_result(exc, command)
         record_status(session, io.exit_code)
         return io

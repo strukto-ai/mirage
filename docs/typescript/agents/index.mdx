@@ -38,7 +38,7 @@ Your program holds the workspace and hands it to the framework.
 | [OpenAI Agents](/typescript/agents/openai) | `mirageTools(ws)`, or `MirageShell`, `MirageEditor` and `MirageSandboxClient` | Mirage's seven tools, or its shell, patch and sandbox tools run in Mirage |
 | [LangChain Deep Agents](/typescript/agents/langchain) | `new LangchainWorkspace(ws)` | its file and shell tools, run in Mirage |
 
-Mirage's seven tools are the session's [`session.tools`](/typescript/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`.
+Mirage's seven tools are the session's [`session.tools`](/typescript/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`. A session gets the ones its [profile](/home/policy-engine#which-door-enforces-what) leaves it (`session.tools.names()`), so an agent is never offered a tool every call of which would be refused.
 
 Each framework is a subpath of `@struktoai/mirage-agents`, such as `@struktoai/mirage-agents/vercel`, so a bundle carries only what it imports.
 

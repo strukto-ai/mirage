@@ -16,6 +16,10 @@ import { CommandTimeoutError } from '../../commands/errors.ts'
 import { UsageError } from '../../commands/errors.ts'
 import { ContentDriftError } from '../snapshot/drift.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { refusalOf, renderDeny } from '../../policy/policies.ts'
+import type { Deny } from '../../policy/types.ts'
+import { ExecuteResult } from './types.ts'
+import { commandName } from './utils.ts'
 
 /**
  * True for the errors that are the caller's problem, not the line's:
@@ -46,4 +50,17 @@ export function failureResult(err: unknown): { stderr: Uint8Array; exitCode: num
   }
   const msg = err instanceof Error ? err.message : String(err)
   return { stderr: encodeText(`${msg}\n`), exitCode: 1 }
+}
+
+/**
+ * The line's result when the placement stage refused it. A deny is a
+ * policy outcome, not a mistake: it folds into the line's result through
+ * the outcome table admission renders with, never a throw. The denied
+ * party is the command, so the message carries its name like every
+ * per-command error, in bash's voice; the reason rides `refusal`. Mirrors
+ * Python's `placement_refused`.
+ */
+export function placementRefused(deny: Deny, command: string): ExecuteResult {
+  const [stderr, exitCode] = renderDeny(commandName(command) || command, deny)
+  return new ExecuteResult(new Uint8Array(), stderr, exitCode, refusalOf(deny))
 }

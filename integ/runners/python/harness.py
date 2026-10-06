@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from mirage.policy import Scope
+from mirage.policy import CommandExplanation, Scope, ShellNode
 from mirage.policy.match import Outcome
 from mirage.types import FileStat, PathSpec
 
@@ -486,11 +486,24 @@ async def predicted_refusal(ws, case: dict) -> tuple[int, str] | None:
         case (dict): the case as loaded from disk.
     """
     said = await ws.explain(case["command"], case.get("session") or "")
-    refused = [expl for expl in said if expl.exit_code != 0]
-    held = next((expl for expl in refused if expl.rule is not None), None)
-    if held is None and len(said) == 1:
-        held = next(iter(refused), None)
-    return None if held is None else (held.exit_code, held.stderr)
+    if said.exit_code:
+        return said.exit_code, said.stderr
+    commands = commands_of(said.node)
+    if len(commands) == 1 and commands[0].exit_code:
+        return commands[0].exit_code, commands[0].stderr
+    return None
+
+
+def commands_of(
+    node: ShellNode | CommandExplanation,
+) -> list[CommandExplanation]:
+    """Every command under a node of an explained line, in source order.
+
+    Args:
+        node (ShellNode | CommandExplanation): the node.
+    """
+    mine = [node] if isinstance(node, CommandExplanation) else []
+    return mine + [c for child in node.children for c in commands_of(child)]
 
 
 def rule_reasons(doc: dict) -> tuple[str, ...]:

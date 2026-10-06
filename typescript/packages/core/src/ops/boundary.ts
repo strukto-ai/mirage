@@ -13,31 +13,35 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
+import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
 import { postOpsGate, preOpsGate } from '../policy/policies.ts'
 import type { MountMode, PathSpec } from '../types.ts'
 
 /** The POSIX policy boundary for dispatched filesystem operations: the
  * ordered builtin and user policies, the owning mount prefix, its
- * configured mode (the authorization ceiling) and the session whose grants
- * govern the op. Mirrors Python's OpBoundary. */
+ * configured mode (the authorization ceiling), the session whose grants
+ * govern the op, and the approval ledger a path rule that asks is put to
+ * where no line is running. Mirrors Python's OpBoundary. */
 export class OpBoundary {
   constructor(
     readonly policies: Policies,
     readonly prefix = '',
     readonly mode?: MountMode | undefined,
     readonly sessionId = '',
+    readonly decisions: Decisions | null = null,
   ) {}
 
   async admit(
     op: string,
     path: PathSpec,
     write: boolean,
-    access: { create?: boolean; subtree?: boolean; checkHidden?: boolean } = {},
+    access: { create?: boolean; subtree?: boolean; checkHidden?: boolean; final?: boolean } = {},
     issuer?: symbol,
   ): Promise<void> {
     await preOpsGate(this.policies, op, path, write, this.prefix, this.sessionId, issuer, {
       ...(this.mode === undefined ? {} : { mode: this.mode }),
+      decisions: this.decisions,
       ...access,
     })
   }

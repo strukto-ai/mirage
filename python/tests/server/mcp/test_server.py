@@ -195,3 +195,31 @@ async def test_stale_write_protection_reaches_the_tools(workspace):
         {"path": "/a.txt", "old_string": "hello", "new_string": "goodbye"},
     )
     assert result.is_error is False
+
+
+@pytest.mark.asyncio
+async def test_a_profile_narrows_the_tool_list():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session("ro", profile={"mounts": {"/": "read"}})
+    server = MirageMcpServer(ws, session_id="ro")
+    assert [t.name for t in await list_tools(server)] == [
+        "shell",
+        "read",
+        "ls",
+        "grep",
+        "glob",
+    ]
+    async with Client(server.server) as client:
+        with pytest.raises(MCPError) as caught:
+            await client.call_tool("write", {"path": "/x", "content": "y"})
+    assert caught.value.message == "Tool write not found"
+
+
+@pytest.mark.asyncio
+async def test_the_tool_list_is_read_on_every_request():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    # The server is built before the session exists, as it is for a
+    # stored session that loads later: the list still follows its profile.
+    server = MirageMcpServer(ws, session_id="late")
+    ws.create_session("late", profile={"mounts": {"/": "read"}})
+    assert "write" not in [t.name for t in await list_tools(server)]

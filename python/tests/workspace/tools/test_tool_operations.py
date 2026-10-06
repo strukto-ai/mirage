@@ -8,9 +8,9 @@ from mirage.context.session_context import (
     set_current_session,
 )
 from mirage.ops.ops import Ops
-from mirage.policy import OpsContext
+from mirage.policy import OpsContext, Outcome
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
-from mirage.workspace.tools.tool_operations import number_lines
+from mirage.workspace.tools.tool_operations import TOOL_NAMES, number_lines
 
 
 @pytest.fixture
@@ -435,3 +435,88 @@ async def test_a_stored_session_serves_the_first_call():
         await writer.close()
         await attached.close()
     assert written.text == "Written: /a.txt"
+
+
+@pytest.mark.parametrize(
+    "profile,mode,names",
+    [
+        (None, MountMode.WRITE, TOOL_NAMES),
+        (None, MountMode.READ, ("shell", "read", "ls", "grep", "glob")),
+        (
+            {"commands": {"allow": ["cat"]}},
+            MountMode.WRITE,
+            ("shell", "read", "write", "edit", "glob"),
+        ),
+        (
+            {"commands": {"allow": []}},
+            MountMode.WRITE,
+            ("read", "write", "edit", "glob"),
+        ),
+        (
+            {"commands": {"deny": [{"reason": "no", "commands": ["grep"]}]}},
+            MountMode.WRITE,
+            ("shell", "read", "write", "edit", "ls", "glob"),
+        ),
+        (
+            {"mounts": {"/": "read"}},
+            MountMode.WRITE,
+            ("shell", "read", "ls", "grep", "glob"),
+        ),
+        (
+            {"mounts": {"/": "read"}, "paths": {"show": {"/out": "rw"}}},
+            MountMode.WRITE,
+            TOOL_NAMES,
+        ),
+    ],
+)
+def test_the_tool_list_follows_the_profile(profile, mode, names):
+    ws = Workspace({"/": RAMVFS()}, mode=mode)
+    if profile is not None:
+        ws.create_session("agent", profile=profile)
+    session = Session(ws, "agent" if profile is not None else None)
+    assert session.tools.names() == names
+
+
+@pytest.mark.asyncio
+async def test_a_tool_the_profile_does_not_offer_is_no_tool():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session("ro", profile={"mounts": {"/": "read"}})
+    with pytest.raises(KeyError):
+        await Session(ws, "ro").tools.call(
+            "write", {"path": "/x", "content": "y"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_path_ask_waits_on_the_host_outside_a_line():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session(
+        "agent",
+        profile={
+            "commands": {
+                "ask": [
+                    {"reason": "outbox needs a nod", "paths": ["/data/out/*"]}
+                ]
+            }
+        },
+    )
+    tools = Session(ws, "agent").tools
+    asked = await tools.write("/data/out/a.txt", "hi")
+    assert asked.is_error
+    [record] = ws.decisions.pending("agent")
+    assert (record.command, record.paths) == ("", ("/data/out/a.txt",))
+    assert asked.text == (
+        "Error: [Errno 13] Permission denied: '/data/out/a.txt'\n"
+        f"requires approval: outbox needs a nod (ask {record.id})\n"
+    )
+    # Asking again quotes the same question.
+    await tools.write("/data/out/a.txt", "hi")
+    assert [r.id for r in ws.decisions.pending("agent")] == [record.id]
+    await ws.decisions.answer(record.id, Outcome.ALLOW)
+    assert not (await tools.write("/data/out/a.txt", "hi")).is_error
+    # The nod was for one op on that path, and it is spent.
+    assert (await tools.write("/data/out/a.txt", "again")).is_error
+    # A line holds no question for its ops: the redirect is the line's
+    # to ask about, at the command door.
+    io = await ws.shell("echo hi > /data/out/b.txt", session_id="agent")
+    assert io.exit_code != 0

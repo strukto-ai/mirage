@@ -4,12 +4,10 @@ description: Script which runtime serves each command line; route-policy scripts
 icon: route
 ---
 
-A workspace can hold several runtimes for the same command, with different
-trade-offs. `monty` runs `python3` in-process, sandboxed, stdlib-only:
-perfect for quick one-liners and pipe transforms, useless for a script that
-imports `pandas`. A `docker` entry is the opposite: your container, your
-installed packages, but every line pays the exec round-trip. The **route policy**
-decides per line which one serves it:
+When several runtimes can run the same command, the **route policy**
+picks one per line. Here `monty` runs `python3` in-process (fast,
+stdlib-only) and `docker` runs it in your container (your packages, an
+exec round-trip):
 
 ```yaml
 mode: exec
@@ -32,15 +30,12 @@ in_jobs = any(p.startswith("/jobs/") for p in stage["paths"])
 "docker" if in_jobs else "monty"
 ```
 
-So `python3 /jobs/train.py --epochs 3` runs in the container, while
-`cat data.csv | python3 -c "import sys; print(len(sys.stdin.read()))"`
-stays on monty.
+`python3 /jobs/train.py` runs in the container; `cat data.csv | python3
+-c ...` stays on monty.
 
 ## Input: the line's context
 
-The script sees one global, `ctx`, the parsed line before any routing.
-This payload is captured from a live run of the config above, routing
-`python3 /jobs/train.py --epochs 3`:
+The script reads one global, `ctx`:
 
 ```json
 {
@@ -63,38 +58,20 @@ This payload is captured from a live run of the config above, routing
 }
 ```
 
-- `commands`: one entry per pipeline stage (`cat x | python3 -` has two),
-  each with its full words and its absolute-path operands.
-- `command`, `builtin`: mirror the first stage. `builtin` means mirage has
-  a builtin spec for the command (`python3` is a builtin that hands its
-  code to a runtime), as opposed to an unknown name.
-- `env`: the session environment (empty here, no `export` yet).
-- `session_id`: the executing session's id. `agent_id` is empty until an
-  agent identity is attached.
-- `mounts`: the workspace's mount prefixes, including built-ins like
-  `/dev/`.
-
-The payload round-trips through JSON (`RouteContext.from_dict`), so you
-can store one and replay a decision in tests.
+`commands` has one entry per pipeline stage; `command` and `builtin`
+mirror the first. It round-trips through JSON (`RouteContext.from_dict`)
+for tests.
 
 ## Output: the verdict
 
-- **A runtime name** (`"docker"`): that entry serves every command it
-  captures on this line.
-- **`None`**: no opinion; the first capturer in the `runtimes` list order
-  serves each command (here, `monty`).
-- **`{"deny": reason}`**: the line is refused before anything runs. It
-  exits 126 with `<command>: Permission denied` on stderr and the reason
-  in the result's `refusal` record.
-- Anything else is a routing error; the line fails rather than guessing.
+| Verdict | Effect |
+| --- | --- |
+| `"docker"` or `{"runtime": "docker"}` | that runtime serves every command it captures |
+| `None` | the first capturer in `runtimes` order serves each command |
+| `{"deny": reason}` | refused before it runs: `<cmd>: Permission denied`, exit 126 |
+| anything else | the line fails with a routing error |
 
-`{"runtime": "docker"}` is the dict spelling of a name, and the dict is
-where the verdict grows: new powers arrive as new keys, never as new
-return types.
-
-In code, the same two arms have a typed spelling, `RouteResult` and
-`DenyResult`; the dict is their wire form, the only shape a script can
-return from inside the evaluator sandbox:
+In code the typed forms are `RouteResult` and `DenyResult`:
 
 ```python
 from mirage.runtime.routing import (DenyResult, RouteContext, RouteOutcome,
@@ -106,47 +83,43 @@ def policy(ctx: RouteContext) -> RouteOutcome | None:
     return RouteResult("docker") if "/jobs/" in ctx.line else None
 ```
 
-Besides the global `route_policy`, each runtime entry can carry its own `script:`
-with the same `ctx` input but a boolean verdict: am I willing to serve this
-line? Unwilling entries step aside and the first willing capturer wins.
+A runtime entry's own `script:` answers a yes or no: will it serve this
+line? With no placement, the first willing capturer wins. A runtime a
+policy places the line on must also say yes, or the line is refused with
+`runtimes.<name>` as the refusal's policy. The caller's `runtime=`
+argument skips the scripts.
 
-## Route, then admit
+## Admit, then route
 
-Routing is the first of two judgments a typed line clears, and the only
-one that sees the line whole. The order is fixed: the syntax gate (an
-unparsable line exits 2 and no policy hears about it), then the route
-decision, then the [policy engine](/home/policy-engine) admits each
-command — whichever lane routing picked, since a whole line handed to a
-runtime clears the same per-command gate before the runtime sees a byte
-of it, and every VFS op the runtime performs still clears `pre_ops`.
+The route policy is the built-in answer to the
+[policy engine's](/home/policy-engine) `pre_execute` hook, asked before
+any coded policy. A coded policy places a line the same way:
 
-A route deny therefore short-circuits: the line dies whole and the
-admission hooks are never consulted, so one line produces at most one
-refusal. Both layers refuse in the same voice, `<command>: Permission denied` at exit 126 with the reason in the `refusal` record, on purpose: an agent reads one
-grammar, and the host tells the layers apart by what they judge (the
-route policy speaks once per line; the policy engine per command, per
-op, per env write, and only it can [ask](/home/permissions#asks) instead
-of denying). Nested lines (`$()`, `eval`, `source`, `xargs`) inherit the
-outer line's route decision and never re-route, but every nested
-command clears admission itself.
+```python
+from mirage.policy import Deny, Policy, Route
+from mirage.runtime.routing import RouteContext
+
+class HeavyOnDocker(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Route | Deny | None:
+        return Route("docker") if "/jobs/" in ctx.line else None
+```
+
+A line the rules refuse is never placed. A Deny beats any Route, and two
+policies naming different runtimes refuse the line. Nested lines (`$( )`,
+`eval`, `source`, `xargs`) keep the outer line's placement.
+`ws.explain(line)` shows each placement answer and each command's
+runtime.
 
 ## What runs the scripts
 
-`policy.py` is never imported: the workspace evaluates its source on an
-**evaluator runtime**, an entry in the `runtimes` list with the evaluator
-capability. The script's file extension picks the engine: `route_policy:
-./policy.py` runs on the first python evaluator (monty, or pyodide in
-TypeScript) and `route_policy: ./policy.js` on the first JS evaluator
-(quickjs), even when an evaluator of the other language sits earlier in
-the list; with no language match the first evaluator serves. A config
-with policy scripts but no evaluator entry fails at the first decision.
+A script runs on an **evaluator runtime** from the `runtimes` list: a
+`.py` script on the first Python evaluator (monty, or pyodide in
+TypeScript), a `.js` one on the first JavaScript evaluator (quickjs).
+With no evaluator the first decision fails. A script that runs past 10
+seconds fails the line.
 
-Evaluation is bounded: a policy script that hangs fails the line with a
-policy error after 10 seconds instead of freezing the workspace.
-
-When you build the workspace in code rather than from a config file,
-`route_policy=` also accepts a plain function with the same decision contract,
-sync or async. It is called directly, so no evaluator is involved:
+In code, `route_policy=` also takes a plain function, sync or async,
+called directly; a runtime's `script=` takes `(ctx) -> bool`:
 
 ```python
 from mirage.runtime.routing import RouteContext
@@ -159,15 +132,11 @@ def policy(ctx: RouteContext) -> str | None:
 ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
 ```
 
-A per-entry `script=` likewise accepts `(ctx) -> bool` in code.
-
 ## Bring your own
 
-The capability is open: inherit `EvaluatorMixin` (Python) or implement
-`Evaluator` with the `EVALUATOR` brand (TypeScript) on your own runtime,
-and it becomes eligible to evaluate the scripts. `eval(code, inputs=...)`
-returns the last expression's value; how the value travels is your
-runtime's choice. The docker examples give a stock container the
-capability by piping a harness to `python3 -`:
+Inherit `EvaluatorMixin` (Python) or implement `Evaluator` with the
+`EVALUATOR` brand (TypeScript) on your runtime, and it can evaluate
+scripts: `eval(code, inputs=...)` returns the last expression's value.
+The docker examples do it by piping a harness to `python3 -`:
 [python](https://github.com/strukto-ai/mirage/blob/main/examples/python/runtimes/docker/docker_eval.py),
 [typescript](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/runtimes/docker/docker_eval.ts).

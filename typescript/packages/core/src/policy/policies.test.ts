@@ -37,14 +37,17 @@ import {
   renderPending,
 } from './policies.ts'
 import { RulePolicy } from './rule.ts'
+import type { RouteContext } from '../runtime/routing/index.ts'
 import type {
   Action,
+  Ask,
   CommandContext,
   Deny,
   ExecuteResultContext,
   CommandRule,
   OpsContext,
   OpsResultContext,
+  Route,
 } from './types.ts'
 
 const require = createRequire(import.meta.url)
@@ -713,18 +716,58 @@ describe('Ask in the chain', () => {
     }
     // With nothing refusing, the first Ask is the answer.
     const policies = new Policies([new AskRm(), new AskAll()])
-    expect(await policies.preCommand(ctx('rm'))).toEqual({ kind: 'ask', reason: 'sign-off' })
+    expect(await policies.preCommand(ctx('rm'))).toEqual({
+      kind: 'ask',
+      reason: 'sign-off',
+      policy: 'AskRm',
+    })
     expect(await policies.preCommand(ctx('ls'))).toEqual({
       kind: 'ask',
       reason: 'second opinion',
+      policy: 'AskAll',
     })
   })
 
-  it('an ask is illegal off the command plane', async () => {
+  it('an op ask with no ledger refuses like a deny', async () => {
+    // A door that cannot put the question (no ledger) refuses it, in the
+    // deny voice, with the reason on the record.
     const policies = new Policies([new AskOnOps()])
-    await expect(
-      policies.preOps({ op: 'write', path: path('/data/x'), write: true, prefix: '/data/' }),
-    ).rejects.toThrow(/AskOnOps/)
+    const refused = await preOpsGate(policies, 'write', path('/data/x'), true, '/data/').catch(
+      (err: unknown) => err,
+    )
+    expect(refused).toBeInstanceOf(PolicyDenied)
+    expect((refused as PolicyDenied).refusal?.kind).toBe('deny')
+  })
+
+  it('preExecute routes agree and an ask is illegal', async () => {
+    class OnBeta implements Policy {
+      preExecute(): Route {
+        return { kind: 'route', runtime: 'beta' }
+      }
+    }
+    class AskToPlace implements Policy {
+      preExecute(): Ask {
+        return { kind: 'ask', reason: 'where?' }
+      }
+    }
+    const line: RouteContext = {
+      line: 'python3 x',
+      commands: [],
+      command: 'python3',
+      builtin: false,
+      cwd: '/',
+      env: {},
+      sessionId: '',
+      agentId: '',
+      mounts: [],
+    }
+    // Two policies naming one runtime agree; the first names the line.
+    expect(await new Policies([new OnBeta(), new OnBeta()]).preExecute(line)).toEqual({
+      kind: 'route',
+      runtime: 'beta',
+      policy: 'OnBeta',
+    })
+    await expect(new Policies([new AskToPlace()]).preExecute(line)).rejects.toThrow(/AskToPlace/)
   })
 
   it('renderPending names the approval', () => {

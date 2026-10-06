@@ -79,8 +79,12 @@ class MirageToolkit(Toolkit):
             (self.agrep, "grep"),
             (self.aglob, "glob"),
         ]
+        names = self._ops.names()
         super().__init__(
-            name="mirage", tools=tools, async_tools=async_tools, **kwargs
+            name="mirage",
+            tools=[t for t in tools if t.__name__ in names],
+            async_tools=[(t, n) for t, n in async_tools if n in names],
+            **kwargs,
         )
 
     def _run(self, coro: Awaitable[T]) -> T:

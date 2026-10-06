@@ -12,16 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
 import logging
 import posixpath
 import shlex
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar
 
+from mirage.context import strongest_under_session
 from mirage.io.types import IOResult
 from mirage.ops.ops import Ops
+from mirage.policy.match.pattern import pattern_matches
+from mirage.types import MOUNT_MODE_RANK, MountMode
+from mirage.utils.hidden import path_visible
 from mirage.utils.path import gnu_dirname
+from mirage.workspace.lookup import command_visible
+from mirage.workspace.mount.registry import DEV_PREFIX
 from mirage.workspace.tools.file_version import (
     FileVersionTracker,
     StaleMirageFileError,
@@ -34,11 +41,19 @@ from mirage.workspace.tools.io_text import (
 )
 
 if TYPE_CHECKING:
+    from mirage.workspace.mount.registry import MountEntry
+    from mirage.workspace.session import SessionState
     from mirage.workspace.workspace.handle import Session
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_READ_LIMIT = 2000
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+# Every tool, in the order the doors list them.
+TOOL_NAMES = ("shell", "read", "write", "edit", "ls", "grep", "glob")
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +146,73 @@ async def missing(vfs: Ops, path: str) -> bool:
         return False
 
 
+def runs(name: str, session: "SessionState") -> bool:
+    """Whether a session can run a command at all: its allow list
+    installs the name and no rule refuses the bare command whole.
+
+    Args:
+        name (str): the command name.
+        session (SessionState): the session.
+    """
+    if not command_visible(name, session):
+        return False
+    rules = session.commands
+    if rules is None:
+        return True
+    return not any(
+        not rule.paths
+        and (
+            not rule.commands
+            or any(pattern_matches(p, (name,)) for p in rule.commands)
+        )
+        for rule in rules.deny
+    )
+
+
+def writes(session: "SessionState", mounts: list["MountEntry"]) -> bool:
+    """Whether a session may write anywhere: a mount it can see whose
+    mode, narrowed by the profile or opened by a show entry below it,
+    reaches write. ``/dev`` is left out: its null sink takes a write
+    from anyone and stores nothing.
+
+    Args:
+        session (SessionState): the session.
+        mounts (list[MountEntry]): the workspace's mounts.
+    """
+    return any(
+        mount.prefix != DEV_PREFIX
+        and path_visible(session.visibility, mount.prefix)
+        and MOUNT_MODE_RANK[
+            strongest_under_session(session, mount.prefix, mount.mode)
+        ]
+        >= MOUNT_MODE_RANK[MountMode.WRITE]
+        for mount in mounts
+    )
+
+
+def one_call(
+    method: Callable[Concatenate["MirageToolOperations", P], Awaitable[R]],
+) -> Callable[Concatenate["MirageToolOperations", P], Awaitable[R]]:
+    """A file tool's call as the unit an op-level answer covers
+    (``Decisions.within_call``): an approval for a path runs every op
+    the call makes on it, and the call's end spends it.
+
+    Args:
+        method (Callable): the tool method.
+    """
+
+    @functools.wraps(method)
+    async def call(
+        self: "MirageToolOperations", *args: P.args, **kwargs: P.kwargs
+    ) -> R:
+        session = self._session
+        return await session.decisions.within_call(
+            session.session_id, lambda: method(self, *args, **kwargs)
+        )
+
+    return call
+
+
 class MirageToolOperations:
     """The agent tools for one session, independent of any agent
     framework.
@@ -157,6 +239,51 @@ class MirageToolOperations:
             else FileVersionTracker(session.vfs, False)
         )
 
+    def names(self) -> tuple[str, ...]:
+        """The tools this session can use, in the order the doors list
+        them.
+
+        Read off the session's profile, so no door offers a tool every
+        call of which would be refused: ``shell`` needs a command the
+        allow list installs, ``ls`` and ``grep`` run those commands and
+        need them, and ``write`` and ``edit`` need somewhere the session
+        may write. ``read`` and ``glob`` are always offered; what they
+        cannot reach answers as the error it is.
+
+        A session not loaded yet (a stored one before its first call) is
+        offered every tool, since its profile is not known here; the
+        policies still judge each call, and ``offered`` loads it first.
+
+        Returns:
+            tuple[str, ...]: the tool names, a subset of ``TOOL_NAMES``.
+        """
+        try:
+            session = self._session.state
+        except KeyError:
+            return TOOL_NAMES
+        allow = session.visibility.commands
+        offered = {
+            "shell": allow is None or len(allow) > 0,
+            "read": True,
+            "write": writes(session, self._session.mounts()),
+            "ls": runs("ls", session),
+            "grep": runs("grep", session),
+            "glob": True,
+        }
+        offered["edit"] = offered["write"]
+        return tuple(name for name in TOOL_NAMES if offered[name])
+
+    async def offered(self) -> tuple[str, ...]:
+        """The tools this session can use, its sessions loaded first, so a
+        stored session answers with its own profile: what an async door
+        lists and calls by.
+
+        Returns:
+            tuple[str, ...]: the tool names, a subset of ``TOOL_NAMES``.
+        """
+        await self._session._loaded()
+        return self.names()
+
     async def _versions(self) -> FileVersionTracker:
         """The read history this call uses: the session's, which every
         guarded table of the session shares, or this table's own when
@@ -177,6 +304,7 @@ class MirageToolOperations:
         """
         return _io_result(await self._session.shell(command))
 
+    @one_call
     async def read(
         self, path: str, offset: int = 0, limit: int = DEFAULT_READ_LIMIT
     ) -> ToolResult:
@@ -203,6 +331,7 @@ class MirageToolOperations:
             versions.mark_seen(path)
         return ToolResult(number_lines(text, offset, limit))
 
+    @one_call
     async def write(self, path: str, content: str) -> ToolResult:
         """Write a file; an existing one must have been read in full first.
 
@@ -236,6 +365,7 @@ class MirageToolOperations:
             return ToolResult(error_text(exc), True)
         return ToolResult(f"Written: {path}")
 
+    @one_call
     async def edit(
         self,
         path: str,
@@ -348,6 +478,7 @@ class MirageToolOperations:
         io = await self._session.shell(" ".join(words))
         return ToolResult(io_to_str(io), io.exit_code > 1)
 
+    @one_call
     async def glob(self, pattern: str, path: str = "/") -> ToolResult:
         """Find files, not directories, whose path matches a pattern.
 
@@ -399,8 +530,11 @@ class MirageToolOperations:
             ToolResult: The tool's answer.
 
         Raises:
-            KeyError: No tool has the name.
+            KeyError: No tool has the name, or the session's profile does
+                not offer it (``offered``).
         """
+        if name in TOOL_NAMES and name not in await self.offered():
+            raise KeyError(name)
         if name == "shell":
             return await self.shell(arguments["command"])
         if name == "read":
