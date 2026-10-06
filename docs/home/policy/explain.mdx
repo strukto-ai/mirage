@@ -1,10 +1,10 @@
 ---
 title: Explain
 description: What a line or a VFS call would do under a session's policies, without running it.
-icon: magnifying-glass
+icon: lightbulb
 ---
 
-Explain asks every [policy](/home/policy/overview) and
+Explain asks every [policy](/home/policy/policies) and
 [profile](/home/permissions) rule about a line or a VFS call and returns
 their answer. Nothing runs, nothing is written and no
 [ask](/home/permissions#asks) is spent.
@@ -97,7 +97,7 @@ rm /data/a; echo done  [allow, exit 0]
 - A hidden path explains like any path no rule names, so explain never
   reveals a hide.
 - On a line, explain asks `pre_command`, `pre_execute` and the profile's
-  rules. A coded `pre_ops` answers only when a file is touched; explain
+  rules. A coded `pre_vfs` answers only when a file is touched; explain
   the VFS call to see it.
 - A policy that reads a file to decide still reads it.
 - In a browser, `explain.vfs` throws and `explain.shell` runs its

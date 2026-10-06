@@ -87,6 +87,7 @@
             "group": "Policy",
             "pages": [
               "home/policy/overview",
+              "home/policy/policies",
               "home/policy/explain"
             ]
           },
@@ -673,7 +674,7 @@
   "redirects": [
     {
       "source": "/home/policy-engine",
-      "destination": "/home/policy/overview"
+      "destination": "/home/policy/policies"
     },
     {
       "source": "/home/explain",

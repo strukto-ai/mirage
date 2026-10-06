@@ -1,139 +1,37 @@
 ---
 title: Policy
 sidebarTitle: Overview
-description: Code that refuses, asks about, places or bounds what an agent does.
-icon: gavel
+description: Code that refuses, asks about, places or bounds what an agent does, at every way in.
+icon: /images/policy-icon.svg
 ---
 
 A policy is a class with hooks. Each hook sees one thing an agent is about
 to do and returns an answer, or `None` to stay out of it. Add policies to
 the workspace and every session goes through them.
 
-```python
-from mirage import Workspace
-from mirage.policy import CommandContext, Deny, Policy
+## Why not a harness hook
 
-class NoRm(Policy):
-    async def pre_command(self, ctx: CommandContext) -> Deny | None:
-        if ctx.command == "rm":
-            return Deny("rm goes through review")
-        return None
+A harness hook, such as Claude Code's `PreToolUse` or an SDK's
+`can_use_tool`, sees one tool call: a tool name and a string such as
+`cat $(ls /data | head -1)`. A Mirage policy runs inside the shell and the
+filesystem, so it sees what that string only implies.
 
-ws = Workspace(mounts, policies=[NoRm()])
-ws.policies.add(other)
-ws.policies.remove(other)
-```
+| | Harness hook | Mirage policy |
+| --- | --- | --- |
+| Commands | the raw string; `$( )`, `xargs`, `find -exec`, `eval` and variables hide what runs | every command after expansion, nested ones included |
+| Files | the paths written in the string | every file a command reads or writes, such as each one `grep -r`, `tar` or `cp -r` reaches |
+| Ways in | that harness's own tools | every session and door: the SDK, MCP, HTTP, RPC, SSH, FUSE |
+| What the agent reads | whatever text the hook returns | the terminal's own error, `rm: Permission denied`, exit 126 |
 
-```typescript
-import { Workspace, type Policy } from '@struktoai/mirage-node'
+## In this section
 
-const noRm: Policy = {
-  async preCommand(ctx) {
-    return ctx.command === 'rm' ? { kind: 'deny', reason: 'rm goes through review' } : null
-  },
-}
-const ws = new Workspace(mounts, { policies: [noRm] })
-ws.policies.add(other)
-ws.policies.remove(other)
-```
+- [Policies](/home/policy/policies): write one. The hooks, what each can
+  answer, and what the agent gets back.
+- [Explain](/home/policy/explain): ask what a line or a VFS call would
+  do, without running it.
 
-```text
-$ rm /data/a
-rm: Permission denied          exit 126
-```
+Related:
 
-For allow lists, path rules and hides, write a
-[profile](/home/permissions) instead; no code needed. To check what your
-policies would do without running anything, use
-[Explain](/home/policy/explain).
-
-## Hooks
-
-Override only the hooks you need.
-
-| Hook | Fires | Reads | May answer |
-| --- | --- | --- | --- |
-| `pre_command` | before each command | `command`, `argv`, `paths`, `operands`, `program`, `cwd`, `session_id` | Deny, Ask |
-| `pre_execute` | once per line, before it runs | the [route policy](/home/route-policy) context | Deny, Route |
-| `pre_ops` | before each VFS call | `op`, `path`, `write`, `create`, `session_id` | Deny, Ask |
-| `post_ops` | after each VFS call | `op`, `path`, `result` | Deny, Limit |
-| `pre_session` | before each env write (`export`, `X=1`) | `verb`, `key`, `value`, `session_id` | Deny |
-| `post_execute` | after each line | `producer`, `exit_code` | Limit |
-
-TypeScript uses camelCase: `preCommand`, `ctx.sessionId`.
-
-- Every command on a line passes `pre_command` before any of them runs,
-  so a line refused whole never runs halfway.
-- `pre_ops` also fires for every file a command touches: thousands of
-  times under one `grep -r`. Keep it cheap.
-- `post_ops` sees VFS calls, not the reads inside a command. Bound a
-  line's output with `post_execute`.
-
-## Answers
-
-| Return | The agent gets |
-| --- | --- |
-| `None` | nothing changes |
-| `Deny(reason)` | `rm: Permission denied`, exit 126 |
-| `Deny(reason, DenyScope.OPERAND, path=p)` | the command's own error for `p`: `cat: /data/k: Permission denied`, exit 1; the rest of the line still runs |
-| `Ask(reason)` | `cp: Permission denied`, exit 126, until a host answers; see [Asks](/home/permissions#asks) |
-| `Route(runtime)` | the line runs on that runtime |
-| `Limit(max_lines=2)` | output cut to 2 lines; `max_bytes` cuts by size. With `on_exceed=OnExceed.ERROR`, exit 1 and `output truncated at limit (2 lines); ...` |
-
-TypeScript returns plain objects: `{ kind: 'deny', reason }`, with
-`scope: 'operand', path` for an operand, `{ kind: 'ask', reason }`,
-`{ kind: 'route', runtime }`, and `new Limit({ maxLines: 2 })`.
-
-A Deny in other hooks speaks in that place's own words:
-
-| Hook | The agent gets |
-| --- | --- |
-| `pre_ops`, in a command | the command's own error: `cat: /data/vault/s: Permission denied`, exit 1 |
-| `pre_ops`, a VFS call | `EACCES` |
-| `pre_session` | `export TOKEN=x` gets `TOKEN: permission denied`, exit 1 |
-
-An Ask from `pre_ops` reaches a host only from `session.vfs` or a file
-tool; inside a line it refuses. A hook that raises refuses too.
-
-The reason never goes to stderr. It is on the result's `refusal`:
-
-```python
-r = await ws.shell("rm /data/a")
-r.refusal
-# Refusal(kind='deny', reason='rm goes through review', policy='NoRm', scope='command', ask_id=None)
-```
-
-The [agent tools](/python/access/in-app#session-tools) add one line to
-their text: `policy denied: <reason>`, or
-`requires approval: <reason> (ask <id>)`.
-
-## When policies disagree
-
-- Any Deny beats any Ask, so answering an ask never reopens a refusal.
-- The first Deny speaks. Built-ins come first, then the session's
-  profile, then `policies=`, then `add()`.
-- Limits merge to the tightest value of each field.
-- Two Routes to different runtimes refuse the line.
-
-## Which door enforces what
-
-| Door | Hooks that fire |
-| --- | --- |
-| A line: `ws.shell`, `session.shell`, the `shell`, `ls` and `grep` tools, `mirage shell`, HTTP `/shell`, RPC `shell`, SSH | all |
-| A VFS call: `session.vfs`, the `read`, `write`, `edit` and `glob` tools, `mirage vfs`, HTTP `/vfs/<call>`, FUSE, FSKit, SFTP | `pre_ops`, `post_ops` |
-
-So a profile rule that names a command holds only on a line; a rule that
-names only paths holds on both. `session.tools.names()` lists only the
-tools the session's profile leaves it, and MCP, RPC and the agent
-adapters offer exactly those.
-
-## Related
-
-- [Permissions](/home/permissions): profiles in YAML, asks and how a host
-  answers them.
-- A profile's `policy:` runs hooks as a script, in Python or JavaScript;
-  see [Permissions](/home/permissions#cwd-env-policy).
+- [Permissions](/home/permissions): allow lists, path rules, hides and
+  asks, written in YAML with no code.
 - [Route policy](/home/route-policy): which runtime runs a line.
-- Examples:
-  [policy.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/policy.py),
-  [policy.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy.ts).
