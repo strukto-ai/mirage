@@ -1077,6 +1077,7 @@ async function runParsedLine(
     executionFailure !== undefined &&
     (isControlFlowError(executionFailure.error) || killed?.aborted === true)
   let stdoutBytes: Uint8Array
+  let stderrBytes: Uint8Array
   try {
     // The program loop stamped each statement; the line as a whole is a
     // wrapper around them, like a group.
@@ -1116,18 +1117,20 @@ async function runParsedLine(
         stdoutBytes = new Uint8Array()
       }
     }
+    stderrBytes = await materialize(io.stderr)
   } finally {
     // The marks were only for this line's applyIo, so they go however it
-    // ends; the seal stops a background command that returns later from
-    // marking a record persisted here, which nothing outside FUSE ever
-    // trims. A line whose recording scope threw returned no records: they
-    // are neither applied nor persisted.
+    // ends, after the line's last await, so a background job cannot mark
+    // a record between the seal and the persist below; the seal stops a
+    // background command that returns later from marking a record
+    // persisted here, which nothing outside FUSE ever trims. A line whose
+    // recording scope threw returned no records: they are neither applied
+    // nor persisted.
     for (const rec of opRecords) {
       rec.claimed = null
       rec.sealed = true
     }
   }
-  const stderrBytes = await materialize(io.stderr)
 
   // One rule on every path: an op that happened is always accounted, in
   // byte accounting (which feeds snapshot fingerprints/drift) and as

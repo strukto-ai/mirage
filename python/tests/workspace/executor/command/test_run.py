@@ -166,6 +166,36 @@ async def test_a_failed_session_save_still_clears_and_seals_the_marks():
 
 
 @pytest.mark.asyncio
+async def test_a_background_write_marked_during_the_session_save_is_cleared():
+    ws = caching_ram_workspace()
+    applied: list[list[OpRecord]] = []
+    orig_apply = ws._dispatcher.apply_io
+    orig_flush = ws._session_mgr.flush
+
+    async def keep_records(result, records=None, cache_facts=None):
+        applied.append(records)
+        await orig_apply(result, records=records, cache_facts=cache_facts)
+
+    async def flush_after_the_mark(session_id: str) -> None:
+        if len(applied) == 1:
+            for _ in range(500):
+                if any(r.claimed is not None for r in applied[0]):
+                    break
+                await asyncio.sleep(0.01)
+        await orig_flush(session_id)
+
+    ws._dispatcher.apply_io = keep_records
+    ws._session_mgr.flush = flush_after_the_mark
+    try:
+        assert (await ws.shell("echo a | tee /r/f &")).exit_code == 0
+        assert (await ws.shell("wait")).exit_code == 0
+        assert _writes_of(ws, "/r/f")
+        assert all(r.claimed is None and r.sealed for r in ws.vfs.records)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_background_claimer_ending_after_the_line_marks_nothing(
     monkeypatch,
 ):

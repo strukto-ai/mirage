@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type * as cacheContextModule from '../../../cache/context.ts'
+import type * as ioTypesModule from '../../../io/types.ts'
 import { CLISpec } from '../../../commands/cli/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { OpRecord } from '../../../observe/record.ts'
@@ -41,6 +42,25 @@ vi.mock('../../../cache/context.ts', async (importOriginal) => {
       if (gate !== null) await gate
       await real.invalidateAfterWrite(path)
       if (gate !== null) slowWrite.returned += 1
+    },
+  }
+})
+
+const holdMaterialize = vi.hoisted(() => ({ hold: null as (() => Promise<void>) | null }))
+
+// The line materializes its stderr between the seal and persisting its
+// records; holding that once lets a background write land in the gap.
+vi.mock('../../../io/types.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof ioTypesModule>()
+  return {
+    ...real,
+    async materialize(source: Parameters<typeof real.materialize>[0]): Promise<Uint8Array> {
+      const hold = holdMaterialize.hold
+      if (hold !== null) {
+        holdMaterialize.hold = null
+        await hold()
+      }
+      return real.materialize(source)
     },
   }
 })
@@ -261,6 +281,37 @@ describe('the provenance mark', () => {
       await ws.close()
     }
   })
+
+  it('clears a background write marked after the seal', async () => {
+    const [ws, ram] = warmWorkspace()
+    const applied: (readonly OpRecord[])[] = []
+    const dispatcher = (
+      ws as unknown as {
+        dispatcher: { applyIo: (io: IOResult, records?: readonly OpRecord[]) => Promise<void> }
+      }
+    ).dispatcher
+    const orig = dispatcher.applyIo.bind(dispatcher)
+    dispatcher.applyIo = async (io, records) => {
+      await orig(io, records)
+      applied.push(records ?? [])
+      if (applied.length !== 1) return
+      holdMaterialize.hold = async () => {
+        await ops(ram).write(PathSpec.fromStrPath('/go'), ENC.encode('go'))
+        for (let i = 0; i < 500 && !applied[0]?.some((r) => r.claimed != null); i++)
+          await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    try {
+      const line = '{ until [ -e /r/go ]; do sleep 0.01; done; echo a | tee /r/f; } &'
+      expect((await within(ws.shell(line), 10_000)).exitCode).toBe(0)
+      expect((await ws.shell('wait')).exitCode).toBe(0)
+      expect(writesOf(ws, '/r/f').length).toBeGreaterThan(0)
+      expect(claimedOf(ws)).toEqual(ws.records.map(() => null))
+    } finally {
+      holdMaterialize.hold = null
+      await ws.close()
+    }
+  }, 15_000)
 
   it('a background claimer ending after the line marks nothing', async () => {
     // The background tee's write records while the line still runs (RAM
