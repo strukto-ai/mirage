@@ -55,4 +55,4 @@ async def explain_shell(
     said = await entry.runner.call(
         ws.explain(req.command, req.session_id or "")
     )
-    return {"explanations": [explanation_to_dict(e) for e in said]}
+    return explanation_to_dict(said)

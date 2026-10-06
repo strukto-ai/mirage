@@ -21,6 +21,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { formatExplanation } from './workspace.ts'
+
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'bin', 'mirage.js')
 const tempDirs: string[] = []
 
@@ -143,5 +145,61 @@ describe('mirage workspace snapshot and load', () => {
     } finally {
       server.close()
     }
+  })
+})
+
+function command(text: string, outcome: string, reason = '') {
+  return {
+    type: 'command',
+    text,
+    outcome,
+    reason,
+    source: reason === '' ? '' : 'top',
+    runtime: '',
+    children: [],
+  }
+}
+
+describe('mirage workspace explain', () => {
+  it('prints the line as its tree', () => {
+    const cat = command('cat /data/keys/a', 'deny', 'sealed')
+    const echo = {
+      ...command('echo $(cat /data/keys/a)', 'allow'),
+      children: [{ type: 'substitution', text: 'cat /data/keys/a', children: [cat] }],
+    }
+    const said = {
+      line: 'ls | wc -l && echo $(cat /data/keys/a)',
+      outcome: 'deny',
+      reason: 'sealed',
+      exit_code: 1,
+      node: {
+        type: 'line',
+        text: 'ls | wc -l && echo $(cat /data/keys/a)',
+        children: [
+          {
+            type: 'list',
+            text: 'ls | wc -l && echo $(cat /data/keys/a)',
+            children: [
+              {
+                type: 'pipeline',
+                text: 'ls | wc -l',
+                children: [command('ls', 'allow'), command('wc -l', 'allow')],
+              },
+              echo,
+            ],
+          },
+        ],
+      },
+    }
+    expect(formatExplanation(said).split('\n')).toEqual([
+      'ls | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]',
+      '  list: ls | wc -l && echo $(cat /data/keys/a)',
+      '    pipeline: ls | wc -l',
+      '      ls  [allow]',
+      '      wc -l  [allow]',
+      '    echo $(cat /data/keys/a)  [allow]',
+      '      substitution: cat /data/keys/a',
+      '        cat /data/keys/a  [deny: sealed]  top',
+    ])
   })
 })

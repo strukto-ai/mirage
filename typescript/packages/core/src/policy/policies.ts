@@ -21,6 +21,7 @@ import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
 import { Explained, PolicyDenied, PolicyError } from './errors.ts'
+import { sourceOf } from './match/decide.ts'
 import { isSessionScoped } from './mixin.ts'
 import type { Decisions } from './decisions.ts'
 import {
@@ -31,13 +32,13 @@ import {
   type CommandContext,
   type Deny,
   type ExecuteResultContext,
-  type Explanation,
   type Hide,
   type OpsContext,
   type OpsResultContext,
   type Pending,
   type Route,
   type SessionContext,
+  type VfsExplanation,
 } from './types.ts'
 import type { RouteContext } from '../runtime/routing/types.ts'
 
@@ -187,7 +188,7 @@ export function policyDenied(
 }
 
 /**
- * What the gate would answer one op, as `preOpsGate` decides it and
+ * What the gate would answer one VFS call, as `preOpsGate` decides it and
  * without its consequences: every policy's answer, the one that wins,
  * and the error the door would throw. A question reads the ledger's
  * settled records and records nothing. Mirrors the Python `_explained_op`.
@@ -196,26 +197,19 @@ async function explainedOp(
   policies: Policies,
   ctx: OpsContext,
   decisions: Decisions | null,
-): Promise<Explanation> {
+): Promise<VfsExplanation> {
   const answers = (await policies.answers('preOps', ctx)).filter(
     (a): a is Deny | Ask => a.kind !== 'route',
   )
   const winner = answers.find((a) => a.kind === 'deny') ?? answers[0] ?? null
-  const base: Explanation = {
-    command: ctx.op,
-    argv: [ctx.path.virtual],
+  const base: VfsExplanation = {
+    call: ctx.op,
+    paths: [ctx.path.virtual],
     outcome: Outcome.ALLOW,
-    rule: null,
     reason: '',
     source: '',
-    matchedPath: null,
-    paths: [ctx.path.virtual],
-    exitCode: 0,
-    stderr: '',
-    refusal: null,
     answers,
-    placement: [],
-    runtime: '',
+    refusal: null,
     error: '',
   }
   if (winner === null) return base
@@ -230,14 +224,17 @@ async function explainedOp(
           }
         : await decisions.heldOp(ctx, winner)
   }
-  const outcome = winner.kind === 'ask' ? Outcome.ASK : Outcome.DENY
-  if (action === null) return { ...base, outcome, reason: winner.reason }
+  const decided: VfsExplanation = {
+    ...base,
+    outcome: winner.kind === 'ask' ? Outcome.ASK : Outcome.DENY,
+    reason: winner.reason,
+    source: winner.rule === undefined ? '' : sourceOf(winner.rule),
+  }
+  if (action === null) return decided
   const error = action.kind === 'deny' ? action.error : undefined
   const code: unknown = (error as { code?: unknown } | undefined)?.code
   return {
-    ...base,
-    outcome,
-    reason: winner.reason,
+    ...decided,
     refusal: error !== undefined ? null : refusalOf(action),
     error: typeof code === 'string' && code !== '' ? code : 'EACCES',
   }

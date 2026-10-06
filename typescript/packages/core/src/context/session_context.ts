@@ -22,7 +22,7 @@ import { eacces, enoent, erofsReadOnly } from '../utils/errors.ts'
 import { parent } from '../utils/path.ts'
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
-import type { DryRun, Explanation, HandOff } from '../policy/types.ts'
+import type { DryRun, HandOff, VfsExplanation } from '../policy/types.ts'
 import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
@@ -429,7 +429,7 @@ export function getOpCall(owner: Decisions): HandOff | null {
   return call?.[0] === owner ? call[1] : null
 }
 
-const explainingStorage = createAsyncContext<Explanation[] | DryRun | null>()
+const explainingStorage = createAsyncContext<VfsExplanation[] | DryRun | null>()
 
 /**
  * Run `fn` as a dry run: the op gate notes on `trace` what it would
@@ -439,7 +439,7 @@ const explainingStorage = createAsyncContext<Explanation[] | DryRun | null>()
  * real. Mirrors Python's `set_explaining`.
  */
 export function runExplaining<T>(
-  trace: Explanation[] | DryRun | null,
+  trace: VfsExplanation[] | DryRun | null,
   fn: () => Promise<T>,
 ): Promise<T> {
   return Promise.resolve(explainingStorage.run(trace, fn))
@@ -449,7 +449,7 @@ export function runExplaining<T>(
  * The dry run's trace when the calls in this context only explain,
  * DECIDING while its policies decide, null when they run.
  */
-export function explaining(): Explanation[] | DryRun | null {
+export function explaining(): VfsExplanation[] | DryRun | null {
   return explainingStorage.getStore() ?? null
 }
 

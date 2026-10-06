@@ -73,7 +73,7 @@ export class Session {
 
   /**
    * This session's calls explained instead of run, under the same names:
-   * `explain.shell(line)`, `explain.vfs.<op>(...)`.
+   * `explain.shell(line)`, `explain.vfs.<call>(...)`.
    */
   get explain(): Explainer {
     return new Explainer(this.ws, this.id, this.vfs)

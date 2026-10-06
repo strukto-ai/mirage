@@ -254,15 +254,18 @@ const paths = await session.glob('/src/**/*.ts')
 ### session.explain
 
 ```ts
-session.explain.shell(line): Promise<Explanation[]>
-session.explain.vfs.<op>(...): Promise<Explanation>
+session.explain.shell(line): Promise<ShellExplanation>
+session.explain.vfs.<call>(...): Promise<VfsExplanation>
 ```
 
-The session's doors as a dry run, under the same names: what a line, or one file op, would do as the session, without running it. A line gets the refusal the agent would read, every policy's answer and the line's placement; an op gets every policy's answer and the error the call would throw. `explain.vfs` needs a runtime whose async context isolates tasks (a working `AsyncLocalStorage`, as in Node); in a browser it throws rather than let its dry run reach another task's ops. See [Dry runs](/home/permissions#dry-runs).
+The session's doors as a dry run, under the same names: what a line, or one POSIX-shaped VFS call, would do as the session, without running it. A line gets the refusal the agent would read, its placement and its parse tree, each command in it with every policy's answer; a VFS call gets every policy's answer and the error the call would throw. The dry run needs a runtime whose async context isolates tasks (a working `AsyncLocalStorage`, as in Node). In a browser `explain.vfs` throws rather than reach another task's VFS calls, and a policy deciding `explain.shell` acts for real. See [Dry runs](/home/permissions#dry-runs).
 
 ```ts
-const [shellRes] = await session.explain.shell('rm /data/x')
-console.log(shellRes?.exitCode, shellRes?.answers.map((a) => a.policy))
+const shellRes = await session.explain.shell('rm /data/x')
+console.log(shellRes.exitCode, shellRes.reason)
+for (const node of shellRes.node.children) {
+  if ('command' in node) console.log(node.command, node.answers.map((a) => a.policy))
+}
 const vfsRes = await session.explain.vfs.write('/data/x', 'hi')
 console.log(vfsRes.error, vfsRes.answers.map((a) => a.policy))
 ```

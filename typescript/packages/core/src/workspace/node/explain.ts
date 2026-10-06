@@ -13,18 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { refusalOf, renderDeny, renderPending } from '../../policy/index.ts'
-import { decide } from '../../policy/match/decide.ts'
+import { decide, sourceOf } from '../../policy/match/decide.ts'
 import { hasRules } from '../../policy/match/reads.ts'
 import {
   Outcome,
   type Ask,
   type Claimant,
   type CommandContext,
+  type CommandExplanation,
+  type CommandRule,
   type Deny,
-  type Explanation,
   type HandOff,
   type Occurrence,
   type Pending,
+  type ShellExplanation,
+  type ShellNode,
+  type ShellOperand,
 } from '../../policy/types.ts'
 import {
   inputSubstitutionRedirect,
@@ -35,7 +39,7 @@ import {
 } from '../../shell/helpers.ts'
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type Refusal } from '../../types.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { makeAbortError } from '../abort.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
@@ -78,6 +82,67 @@ const FORK_SCOPES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * How the explanation tree names a parse node that shapes a line; a node
+ * not here (a redirected or negated statement) is read through. Mirrors
+ * the Python SHAPES.
+ */
+const SHAPES: ReadonlyMap<string, string> = new Map([
+  [NodeType.LIST, 'list'],
+  [NodeType.PIPELINE, 'pipeline'],
+  [NodeType.SUBSHELL, 'subshell'],
+  [NodeType.COMPOUND_STATEMENT, 'group'],
+  [NodeType.IF_STATEMENT, 'group'],
+  [NodeType.FOR_STATEMENT, 'group'],
+  [NodeType.WHILE_STATEMENT, 'group'],
+  [NodeType.CASE_STATEMENT, 'group'],
+  [NodeType.FUNCTION_DEFINITION, 'group'],
+])
+
+/** The nodes whose body a nested line evaluates on its own. Mirrors the Python SUBSTITUTIONS. */
+const SUBSTITUTIONS: ReadonlySet<string> = new Set([
+  NodeType.COMMAND_SUBSTITUTION,
+  NodeType.PROCESS_SUBSTITUTION,
+])
+
+/**
+ * What the gate decides about one command of a line, as the pass reads
+ * it: the per-command record `explain` and the admission pass share,
+ * which `explainedLine` turns into the public tree. `outcome` is the
+ * document's answer and `rule` says who gave it; the two refusals the
+ * allow list produces both arrive as `DENY` with no rule, and `exitCode`
+ * separates them (127 for a head word the session cannot see, 126 for a
+ * visible head no allow entry covers). Mirrors the Python Judgment.
+ */
+export interface Judgment {
+  /** The head word, as the gate read it. */
+  readonly command: string
+  /** The words after it. */
+  readonly argv: readonly string[]
+  /** What the profile's rules say. */
+  readonly outcome: Outcome
+  /** The rule that spoke, null when the allow list did or nothing did. */
+  readonly rule: CommandRule | null
+  /** The rule's reason, empty when there is no rule. */
+  readonly reason: string
+  /** Where in the document the rule was written. */
+  readonly source: string
+  /** The operand a path-scoped rule matched, as typed. */
+  readonly matchedPath: string | null
+  /** The paths the rules were shown, after the session's hides. */
+  readonly paths: readonly string[]
+  /** What the line would exit with, 0 to run. */
+  readonly exitCode: number
+  /** What the agent would read, empty to run. */
+  readonly stderr: string
+  /** The record the refused result would carry, null when the line would run. */
+  readonly refusal: Refusal | null
+  /** Every policy's answer to the command, in the order the chain asks them. */
+  readonly answers: readonly (Deny | Ask)[]
+  /** Its path arguments and redirect targets, as typed and as the paths they name. */
+  readonly operands: readonly ShellOperand[]
+}
+
+/**
  * One command of a walked line, as both readers of the line see it: its
  * words, the redirect targets of its statement, the session it is
  * judged in, and where it stands. Mirrors the Python Walked. `lost`
@@ -110,7 +175,7 @@ export interface Walked {
  * this explanation judged.
  */
 export interface Judged {
-  readonly explanation: Explanation
+  readonly judgment: Judgment
   readonly occurrence: Occurrence
   readonly intrinsic?: boolean
   readonly stated: boolean
@@ -130,6 +195,22 @@ export interface Judged {
  * shell it ran in.
  */
 type Walk = Generator<Walked, [SessionState, boolean]>
+
+/**
+ * A judgment with its path operands, each as typed and the path it
+ * names, marked when the rule that decided matched it. Mirrors the
+ * Python `_with_operands`.
+ */
+function withOperands(judgment: Judgment, operands: readonly [string, string][]): Judgment {
+  return {
+    ...judgment,
+    operands: operands.map(([text, path]) => ({
+      text,
+      path,
+      matched: text === judgment.matchedPath,
+    })),
+  }
+}
 
 /**
  * The paths a command's words may name that the pass cannot vouch for:
@@ -160,7 +241,7 @@ function unreadPaths(
   return unread
 }
 
-function unreadableWord(raw: string): Explanation {
+function unreadableWord(raw: string): Judgment {
   const reason = `cannot read ${raw} before the runtime expands it`
   const deny: Deny = { kind: 'deny', reason, scope: 'command' }
   const [stderr, exitCode] = renderDeny(raw, deny)
@@ -177,9 +258,7 @@ function unreadableWord(raw: string): Explanation {
     stderr: decodeText(stderr),
     refusal: refusalOf(deny),
     answers: [],
-    placement: [],
-    runtime: '',
-    error: '',
+    operands: [],
   }
 }
 
@@ -193,7 +272,7 @@ function fromRefusal(
   args: readonly string[],
   refusal: Refused,
   missing: string | null = null,
-): Explanation {
+): Judgment {
   return {
     command: name,
     argv: args,
@@ -207,9 +286,7 @@ function fromRefusal(
     stderr: missing ?? decodeText(refusal.stderr),
     refusal: refusal.refusal,
     answers: [],
-    placement: [],
-    runtime: '',
-    error: '',
+    operands: [],
   }
 }
 
@@ -229,9 +306,9 @@ async function explained(
   registry: MountRegistry,
   asked: Deny | Ask | null,
   answers: readonly (Deny | Ask)[],
-): Promise<Explanation> {
+): Promise<Judgment> {
   const decision = decide(ctx, session.commands)
-  const base: Explanation = {
+  const base: Judgment = {
     command: ctx.command,
     argv: ctx.argv,
     outcome: decision.outcome,
@@ -244,9 +321,7 @@ async function explained(
     stderr: '',
     refusal: null,
     answers,
-    placement: [],
-    runtime: '',
-    error: '',
+    operands: [],
   }
   const action: Deny | Pending | null =
     asked !== null && asked.kind === 'ask' ? await registry.decisions.held(ctx, asked) : asked
@@ -304,7 +379,7 @@ async function judgeWords(
   if (head === undefined) return []
   if (head.text === null) {
     if (wholeLine && hasRules(session.commands)) {
-      return [{ explanation: unreadableWord(head.raw), occurrence, stated: false }]
+      return [{ judgment: unreadableWord(head.raw), occurrence, stated: false }]
     }
     return []
   }
@@ -312,15 +387,17 @@ async function judgeWords(
   const name = wordValue(head)
   const args = words.slice(1).map(wordValue)
   const classified = classifiedWords(name, args, session, registry)
-  const unread = unreadPaths(
-    [...words.slice(1), ...redirectWords],
-    [
-      ...classified.slice(1),
-      ...redirectWords.map((w) => classifyBarePath(wordValue(w), registry, session.cwd)),
-    ],
-    session.cwd,
-    lost,
-  )
+  const readWords = [...words.slice(1), ...redirectWords]
+  const kinds = [
+    ...classified.slice(1),
+    ...redirectWords.map((w) => classifyBarePath(wordValue(w), registry, session.cwd)),
+  ]
+  const unread = unreadPaths(readWords, kinds, session.cwd, lost)
+  const operands: [string, string][] = []
+  readWords.forEach((w, i) => {
+    const kind = kinds[i]
+    if (kind instanceof PathSpec) operands.push([kind.rawPath || wordValue(w), kind.virtual])
+  })
   const gated = await gate(
     name,
     args,
@@ -338,7 +415,7 @@ async function judgeWords(
   if (!Array.isArray(gated)) {
     return [
       {
-        explanation: fromRefusal(name, args, gated, missing),
+        judgment: withOperands(fromRefusal(name, args, gated, missing), operands),
         occurrence,
         stated: literal,
         intrinsic,
@@ -348,7 +425,7 @@ async function judgeWords(
   const [ctx, asked, answers] = gated
   const out: Judged[] = [
     {
-      explanation: await explained(ctx, session, registry, asked, answers),
+      judgment: withOperands(await explained(ctx, session, registry, asked, answers), operands),
       occurrence,
       stated: literal,
       intrinsic,
@@ -596,7 +673,7 @@ function* walkedLine(
  * one. What stays out is the rule-less DENY, which `isVerdict` explains
  * is answered where it happens.
  */
-function isJudged(expl: Explanation): boolean {
+function isJudged(expl: Judgment): boolean {
   return expl.exitCode === 0 || isVerdict(expl)
 }
 
@@ -605,7 +682,7 @@ function isJudged(expl: Explanation): boolean {
  * reporting a line that would run or a question the host has not
  * answered.
  */
-function refuses(expl: Explanation): boolean {
+function refuses(expl: Judgment): boolean {
   return expl.exitCode !== 0 && !isPendingRefusal(expl.refusal)
 }
 
@@ -618,10 +695,10 @@ function refuses(expl: Explanation): boolean {
  * words that never run.
  */
 function asksFor(one: Judged): boolean {
-  return one.stated || refuses(one.explanation)
+  return one.stated || refuses(one.judgment)
 }
 
-function isVerdict(expl: Explanation): boolean {
+function isVerdict(expl: Judgment): boolean {
   if (expl.exitCode === 0) return false
   if (expl.rule !== null && expl.outcome === Outcome.DENY) return true
   // Filesystem refusals use the live cwd and fail only their command.
@@ -761,7 +838,7 @@ export async function prejudgeLine(
     const walked = item.session
     const targets = redirectPaths(item.redirects, registry, walked.cwd)
     for (const [index, one] of explained.entries()) {
-      const expl = one.explanation
+      const expl = one.judgment
       if (!isJudged(expl) || !asksFor(one)) continue
       const args = [...expl.argv]
       const classified = classifiedWords(expl.command, args, walked, registry)
@@ -801,7 +878,7 @@ export async function prejudgeLine(
  * unanswered ask's question to the host.
  *
  * The chain is asked again rather than the explanation re-read,
- * because `Explanation.outcome` is the document's answer: a coded
+ * because `Judgment.outcome` is the document's answer: a coded
  * policy's ask arrives with whatever the document said, so only the
  * chain's own answer separates a deny from an ask. A deny refuses
  * outright. An ask's settled record is read without being spent
@@ -822,7 +899,7 @@ async function verdictRefuses(
   handed: HandOff,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const expl = judged.explanation
+  const expl = judged.judgment
   const claimant: Claimant = { line: handed, occurrence: judged.occurrence }
   const args = [...expl.argv]
   const classified = classifiedWords(expl.command, args, walked, registry)
@@ -932,7 +1009,7 @@ async function commandRefused(
     // A question about a spelling the runtime completes is the gate's
     // (`asksFor`); the node is kept, and over-keeping only ever
     // over-fetches.
-    if (!isVerdict(judged.explanation) || !asksFor(judged)) continue
+    if (!isVerdict(judged.judgment) || !asksFor(judged)) continue
     // judgeWords lists the statement's own command first and the
     // lines it runs after it, so only the first explanation is the
     // command the redirects belong to.
@@ -1034,7 +1111,7 @@ export async function lineHeld(
 ): Promise<boolean> {
   for (const [, explained] of judged) {
     for (const one of explained) {
-      const expl = one.explanation
+      const expl = one.judgment
       if (!isVerdict(expl) || expl.exitCode === 0) continue
       if (refuses(expl)) return true
       const asked = expl.answers.find((a): a is Ask => a.kind === 'ask')
@@ -1053,17 +1130,18 @@ export async function lineHeld(
 }
 
 /**
- * Whether some command's explanation is a verdict that refuses it or
- * waits on the host (`isVerdict`), the line-level answer placement waits
- * on. Mirrors the Python `holds`.
+ * Whether some command's judgment is a verdict that refuses it or waits
+ * on the host (`isVerdict`), the line-level answer placement waits on.
+ * Mirrors the Python `holds`.
  */
-export function holds(explanations: readonly Explanation[]): boolean {
-  return explanations.some((expl) => isVerdict(expl) && expl.exitCode !== 0)
+export function holds(judgments: readonly Judgment[]): boolean {
+  return judgments.some((one) => isVerdict(one) && one.exitCode !== 0)
 }
 
 /**
  * What every command of a line would do, in the order the gate reads
- * them, without running any of it.
+ * them, each where it stands, without running any of it (`explainedLine`
+ * turns them into the public tree).
  *
  * The dry run of the gate: the same visibility check, the same context,
  * the same policy chain and the same outcome table, so a host reading
@@ -1085,8 +1163,8 @@ export async function explainLine(
   agentId: string,
   reparse: (line: string) => TSNodeLike,
   wholeLine = false,
-): Promise<Explanation[]> {
-  const judged = await judgeLine(
+): Promise<Judged[]> {
+  return judgeLine(
     root,
     session,
     registry,
@@ -1099,7 +1177,193 @@ export async function explainLine(
     false,
     true,
   )
-  return judged.map((one) => one.explanation)
+}
+
+/**
+ * A line's public explanation: its verdict, which the first command the
+ * gate refuses gives it (in the order the gate reads them), or the first
+ * it asks about when an approval lets every one run, and its parse tree,
+ * with every command's explanation where the command stands. Every
+ * scope a command reads its words in (the typed line, a `$( )` body, a
+ * `bash -c` string) is parsed on its own with `reparse`, as the nested
+ * line will be; a judgment is placed on the command at its span in that
+ * scope, and a nested scope under the command holding it. Mirrors the
+ * Python `explained_line`.
+ */
+export function explainedLine(
+  line: string,
+  judged: readonly Judged[],
+  runtimeOf: (command: string) => string,
+  reparse: (line: string) => TSNodeLike,
+): ShellExplanation {
+  const scopes: Scope[] = []
+  for (const one of judged) {
+    const at = one.occurrence
+    let scope = scopes.find((s) => s.source === at.source && sameAt(s.parent, at.parent))
+    if (scope === undefined) {
+      scope = { parent: at.parent, source: at.source, judged: [] }
+      scopes.push(scope)
+    }
+    scope.judged.push(one)
+  }
+  const root = scopes.find((s) => s.parent === null) ?? { parent: null, source: line, judged: [] }
+  const node = scopeNode('line', root, scopes, runtimeOf, reparse)
+  const decider =
+    judged.find((one) => one.judgment.exitCode !== 0) ??
+    judged.find((one) => verdictOf(one.judgment)[0] === Outcome.ASK)
+  if (decider === undefined) {
+    return {
+      line,
+      node,
+      outcome: Outcome.ALLOW,
+      reason: '',
+      source: '',
+      answers: [],
+      refusal: null,
+      exitCode: 0,
+      stderr: '',
+    }
+  }
+  const judgment = decider.judgment
+  const [outcome, reason, source] = verdictOf(judgment)
+  return {
+    line,
+    node,
+    outcome,
+    reason,
+    source,
+    answers: [],
+    refusal: judgment.refusal,
+    exitCode: judgment.exitCode,
+    stderr: judgment.stderr,
+  }
+}
+
+/** One scope of a line: the occurrence its text was evaluated from, the text, and its judgments. */
+interface Scope {
+  readonly parent: Occurrence | null
+  readonly source: string
+  readonly judged: Judged[]
+}
+
+/** Whether two occurrences name the same place, as Python's dataclass equality reads them. */
+function sameAt(a: Occurrence | null, b: Occurrence | null): boolean {
+  if (a === null || b === null) return a === b
+  return (
+    a.source === b.source && a.start === b.start && a.end === b.end && sameAt(a.parent, b.parent)
+  )
+}
+
+/**
+ * A command's outcome, reason and source as its explanation states them:
+ * the answer that decided, which a coded policy may give over the
+ * document's own. Mirrors the Python `_verdict_of`.
+ */
+function verdictOf(judgment: Judgment): [Outcome, string, string] {
+  const decider =
+    judgment.answers.find((a) => a.kind === 'deny') ??
+    judgment.answers.find((a) => a.kind === 'ask') ??
+    null
+  const source =
+    decider?.rule !== undefined
+      ? sourceOf(decider.rule)
+      : judgment.source === 'commands.allow'
+        ? judgment.source
+        : ''
+  const refusal = judgment.refusal
+  if (refusal !== null) {
+    return [refusal.kind === 'deny' ? Outcome.DENY : Outcome.ASK, refusal.reason, source]
+  }
+  if (decider?.kind === 'ask') return [Outcome.ASK, decider.reason, source]
+  return [Outcome.ALLOW, '', source]
+}
+
+/**
+ * One scope of a line as a node: its text parsed, the commands judged in
+ * it placed by span, and the scopes evaluated from it placed under the
+ * command holding them. Mirrors the Python `_scope_node`.
+ */
+function scopeNode(
+  kind: string,
+  scope: Scope,
+  scopes: readonly Scope[],
+  runtimeOf: (command: string) => string,
+  reparse: (line: string) => TSNodeLike,
+): ShellNode {
+  const text = scope.source
+  const mine = new Map<string, Judged[]>()
+  for (const one of scope.judged) {
+    const span = `${String(one.occurrence.start)}:${String(one.occurrence.end)}`
+    mine.set(span, [...(mine.get(span) ?? []), one])
+  }
+  const nested = scopes
+    .filter(
+      (s): s is Scope & { parent: Occurrence } =>
+        s.parent !== null && s.parent.source === text && sameAt(s.parent.parent, scope.parent),
+    )
+    .sort((a, b) => a.parent.start - b.parent.start || a.parent.end - b.parent.end)
+  const take = (start: number, end: number): ShellNode[] => {
+    const inside = nested.filter((s) => start <= s.parent.start && s.parent.end <= end)
+    for (const s of inside) nested.splice(nested.indexOf(s), 1)
+    return inside.map((s) =>
+      scopeNode(
+        s.parent.start === start && s.parent.end === end ? 'line' : 'substitution',
+        s,
+        scopes,
+        runtimeOf,
+        reparse,
+      ),
+    )
+  }
+  const convert = (node: TSNodeLike): (ShellNode | CommandExplanation)[] => {
+    const start = node.startIndex ?? 0
+    const end = node.endIndex ?? 0
+    if (node.type === NodeType.COMMAND) {
+      const kids = take(start, end)
+      const span = `${String(start)}:${String(end)}`
+      const ones = mine.get(span) ?? []
+      mine.delete(span)
+      if (ones.length === 0) return [{ type: 'command', text: getText(node), children: kids }]
+      return ones.map((one, i) => commandOf(one, getText(node), i === 0 ? kids : [], runtimeOf))
+    }
+    if (SUBSTITUTIONS.has(node.type)) return take(start, end)
+    const inner = node.namedChildren.flatMap(convert)
+    const shape = SHAPES.get(node.type)
+    return shape === undefined ? inner : [{ type: shape, text: getText(node), children: inner }]
+  }
+  const children = convert(reparse(text))
+  for (const [span, ones] of mine) {
+    const [start, end] = span.split(':').map(Number)
+    const spoken = text.slice(start, end)
+    children.push(...ones.map((one) => commandOf(one, spoken, [], runtimeOf)))
+  }
+  children.push(...take(0, Number.MAX_SAFE_INTEGER))
+  return { type: kind, text, children }
+}
+
+/** One command's public explanation. Mirrors the Python `_command_of`. */
+function commandOf(
+  one: Judged,
+  text: string,
+  children: readonly ShellNode[],
+  runtimeOf: (command: string) => string,
+): CommandExplanation {
+  const judgment = one.judgment
+  const [outcome, reason, source] = verdictOf(judgment)
+  return {
+    type: 'command',
+    command: judgment.command,
+    argv: judgment.argv,
+    outcome,
+    reason,
+    source,
+    answers: judgment.answers,
+    refusal: judgment.refusal,
+    runtime: runtimeOf(judgment.command),
+    operands: judgment.operands,
+    text,
+    children,
+  }
 }
 
 /**

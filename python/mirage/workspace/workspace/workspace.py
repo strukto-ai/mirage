@@ -66,14 +66,15 @@ from mirage.policy import (
     AskHandler,
     Decisions,
     Deny,
-    Explanation,
     HandOff,
+    Outcome,
     PermissionsPolicy,
     Policies,
     Policy,
     PolicyError,
     ScriptPolicy,
     SessionProfile,
+    ShellExplanation,
 )
 from mirage.policy.builtin import PlacementPolicy
 from mirage.policy.types import DryRun
@@ -133,7 +134,11 @@ from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.mount.read_policy import check_read_capability
 from mirage.workspace.mount.spec import Mount
-from mirage.workspace.node.explain import explain_line, holds
+from mirage.workspace.node.explain import (
+    explain_line,
+    explained_line,
+    holds,
+)
 from mirage.workspace.session import SessionManager, SessionState, SessionStore
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (
@@ -517,7 +522,7 @@ class Workspace:
 
     async def explain(
         self, line: str, session_id: str = ""
-    ) -> list[Explanation]:
+    ) -> ShellExplanation:
         """What a line would do under a session's profile, without
         running any of it.
 
@@ -526,15 +531,15 @@ class Workspace:
         cannot disagree. It runs no command, expands nothing, spends no
         grant and puts no question to a host, which is what makes it
         safe to call about a line nobody typed; a policy deciding it
-        reads for real but changes nothing (``DryRun``). Each explanation
-        carries
-        every policy's answer to its command and the line's placement:
-        every answer at ``pre_execute`` and the runtime that would run
-        the command. A line a rule refuses, or that waits on the host,
-        is never placed, as it is never placed when it runs, and a
-        placement that refuses the line refuses it on its first command.
-        A hidden path is no path to any of it. ``session.explain`` is
-        the same dry run for each of a session's doors.
+        reads for real but changes nothing (``DryRun``). The line
+        carries the verdict its result would, every answer at
+        ``pre_execute`` and its parse tree, each command with every
+        policy's answer to it and the runtime that would run it. A line
+        a rule refuses, or that waits on the host, is never placed, as
+        it is never placed when it runs, and a placement that refuses
+        the line gives it the placement's refusal. A hidden path is no
+        path to any of it. ``session.explain`` is the same dry run for
+        each of a session's doors.
 
         Host-side only. The structure of a profile's rules is an
         operator's business, so there is no builtin an agent can type
@@ -546,8 +551,7 @@ class Workspace:
                 default session when empty.
 
         Returns:
-            list[Explanation]: one per command the gate reads, in gate
-            order, nested lines included.
+            ShellExplanation: the line's verdict and tree.
         """
         await self.ensure_sessions_loaded()
         # Judged inside a line, as the line runs: an ask a deciding
@@ -560,9 +564,7 @@ class Workspace:
             reset_explaining(token)
             reset_refusal_sink(sink_token)
 
-    async def _explained(
-        self, line: str, session_id: str
-    ) -> list[Explanation]:
+    async def _explained(self, line: str, session_id: str) -> ShellExplanation:
         """:meth:`explain`'s judging, run with its policies deciding.
 
         Args:
@@ -572,15 +574,15 @@ class Workspace:
         """
         session = self.get_session(session_id or self.default_session_id)
         ast = parse(line)
-        said = await explain_line(
+        judged = await explain_line(
             ast,
             session,
             self._registry,
             self._namespace,
             whole_line=self._runtimes.whole_line(None) is not None,
         )
-        if holds(said):
-            return said
+        if holds([one.judgment for one in judged]):
+            return explained_line(line, judged, lambda command: "")
         answers, placed = await self._router.placement(
             ast,
             line,
@@ -588,24 +590,25 @@ class Workspace:
             session.session_id,
             self._default_agent_id or "",
         )
-        decision = placed if isinstance(placed, RouteDecision) else None
-        out = [
-            dataclasses.replace(
-                expl,
-                placement=answers,
-                runtime=self._router.runtime_for(expl.command, decision),
-            )
-            for expl in said
-        ]
-        if isinstance(placed, Deny) and out:
+        if isinstance(placed, Deny):
             refused = placement_refused(placed, line)
-            out[0] = dataclasses.replace(
-                out[0],
+            said = explained_line(line, judged, lambda command: "")
+            return dataclasses.replace(
+                said,
+                answers=answers,
+                outcome=Outcome.DENY,
+                reason=placed.reason,
+                source="",
+                refusal=refused.refusal,
                 exit_code=refused.exit_code,
                 stderr=decode_text(await refused.materialize_stderr()),
-                refusal=refused.refusal,
             )
-        return out
+        said = explained_line(
+            line,
+            judged,
+            lambda command: self._router.runtime_for(command, placed),
+        )
+        return dataclasses.replace(said, answers=answers)
 
     @property
     def declared_sources(self) -> Mapping[str, SecretSource]:

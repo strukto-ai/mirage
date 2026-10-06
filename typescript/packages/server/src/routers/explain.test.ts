@@ -14,12 +14,19 @@
 import { describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
 
-interface ExplainRow {
+interface ExplainedLine {
   outcome: string
   exit_code: number
   stderr: string
   refusal: { kind: string } | null
-  answers: { kind: string; reason: string; policy: string }[]
+  node: {
+    children: {
+      type: string
+      command: string
+      argv: string[]
+      answers: { kind: string; reason: string; policy: string }[]
+    }[]
+  }
 }
 
 describe('explain routes', () => {
@@ -51,13 +58,15 @@ describe('explain routes', () => {
       payload: { command: 'rm /f.txt', session_id: 'agent' },
     })
     expect(r.statusCode).toBe(200)
-    const [rm] = r.json<{ explanations: ExplainRow[] }>().explanations
-    expect([rm?.outcome, rm?.exit_code, rm?.stderr, rm?.refusal?.kind]).toEqual([
+    const said = r.json<ExplainedLine>()
+    expect([said.outcome, said.exit_code, said.stderr, said.refusal?.kind]).toEqual([
       'ask',
       126,
       'rm: Permission denied\n',
       'pending',
     ])
+    const [rm] = said.node.children
+    expect([rm?.type, rm?.command, rm?.argv]).toEqual(['command', 'rm', ['/f.txt']])
     expect(rm?.answers).toEqual([{ kind: 'ask', reason: 'sign-off', policy: 'PermissionsPolicy' }])
     r = await app.inject({ method: 'GET', url: '/v1/workspaces/ex/asks' })
     expect(r.json()).toEqual([])

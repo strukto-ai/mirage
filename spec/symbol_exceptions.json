@@ -150,6 +150,9 @@
     "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
     "close_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
     "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands."
+   },
+   "typescript_only": {
+    "ExplainedNode": "The shape of one node of the explain/shell answer, typed for the printer; Python's printer reads the same JSON as a dict."
    }
   },
   "server/auth/middleware": {
@@ -283,6 +286,12 @@
   "config": {
    "typescript_only": {
     "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same door."
+   }
+  },
+  "workspace/node/explain": {
+   "typescript_only": {
+    "Scope": "explainedLine groups judgments by the scope they were evaluated from; Python keys a dict by (parent occurrence, text), which needs no named shape.",
+    "sameAt": "Occurrences compare by reference in TypeScript, so finding a scope compares them field by field; Python's frozen dataclass equality does it."
    }
   }
  }

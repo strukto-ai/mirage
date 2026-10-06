@@ -64,8 +64,8 @@ import {
   PathSpec,
   parseMountMode,
 } from '../../types.ts'
-import type { Explanation, Policies } from '../../policy/index.ts'
-import { DryRun } from '../../policy/types.ts'
+import type { Policies } from '../../policy/index.ts'
+import { DryRun, Outcome, type ShellExplanation } from '../../policy/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { Ops } from '../../ops/ops.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -103,7 +103,7 @@ import type { EvalResult } from '../../runtime/types.ts'
 import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
-import { explainLine, holds } from '../node/explain.ts'
+import { explainLine, explainedLine, holds } from '../node/explain.ts'
 import { buildFilePrompt } from '../file_prompt.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
 import { abortable, hasAborted, makeAbortError } from '../abort.ts'
@@ -1112,27 +1112,26 @@ export class Workspace {
 
   /**
    * What a line would do under a session's profile, without running any of
-   * it: one Explanation per command the gate reads, in gate order, nested
-   * lines included.
+   * it: the line's verdict and its parse tree.
    *
    * The dry run of the gate every command passes through, so this and the
    * refusal an agent would read come out of one place and cannot disagree.
    * It runs no command, expands nothing, spends no grant and puts no
    * question to a host, which is what makes it safe to call about a line
    * nobody typed; a policy deciding it reads for real but changes nothing
-   * (`DryRun`), where the runtime isolates async tasks. Each explanation
-   * carries every policy's answer to its
-   * command and the line's placement: every answer at `preExecute` and the
-   * runtime that would run the command. A line a rule refuses, or that
-   * waits on the host, is never placed, as it is never placed when it
-   * runs, and a placement that refuses the line refuses it on its first
-   * command. A hidden path is no path to any of it. `session.explain` is
+   * (`DryRun`), where the runtime isolates async tasks. The line carries
+   * the verdict its result would, every answer at `preExecute` and its
+   * parse tree, each command with every policy's answer to it and the
+   * runtime that would run it. A line a rule refuses, or that waits on the
+   * host, is never placed, as it is never placed when it runs, and a
+   * placement that refuses the line gives it the placement's refusal. A
+   * hidden path is no path to any of it. `session.explain` is
    * the same dry run for each of a session's doors.
    *
    * Host-side only. The structure of a profile's rules is an operator's
    * business, so there is no builtin an agent can type to read it.
    */
-  async explain(line: string, sessionId = ''): Promise<Explanation[]> {
+  async explain(line: string, sessionId = ''): Promise<ShellExplanation> {
     await this.ensureSessionsLoaded()
     // Without task isolation the bindings would reach other tasks' ops.
     if (!asyncContextIsolatesTasks) return this.explained(line, sessionId)
@@ -1145,12 +1144,12 @@ export class Workspace {
   }
 
   /** `explain`'s judging, run with its policies deciding. */
-  private async explained(line: string, sessionId: string): Promise<Explanation[]> {
+  private async explained(line: string, sessionId: string): Promise<ShellExplanation> {
     const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
     const parser = await this.getShellParser()
     const reparse = (text: string): TSNodeLike => parser.parse(text)
     const root = parser.parse(line)
-    const said = await explainLine(
+    const judged = await explainLine(
       root,
       session,
       this.registry,
@@ -1159,25 +1158,30 @@ export class Workspace {
       reparse,
       this.runtimeWorld.wholeLineFor(null) !== null,
     )
-    if (holds(said)) return said
+    if (holds(judged.map((one) => one.judgment))) {
+      return explainedLine(line, judged, () => '', reparse)
+    }
     const [answers, placed] = await this.router.placement(root, line, session)
-    const decision = placed !== null && !('kind' in placed) ? placed : null
-    const out = said.map((expl) => ({
-      ...expl,
-      placement: answers,
-      runtime: this.router.runtimeFor(expl.command, decision),
-    }))
-    const first = out[0]
-    if (placed !== null && 'kind' in placed && first !== undefined) {
+    if (placed !== null && 'kind' in placed) {
       const refused = placementRefused(placed, line)
-      out[0] = {
-        ...first,
+      return {
+        ...explainedLine(line, judged, () => '', reparse),
+        answers,
+        outcome: Outcome.DENY,
+        reason: placed.reason,
+        source: '',
+        refusal: refused.refusal,
         exitCode: refused.exitCode,
         stderr: refused.stderrText,
-        refusal: refused.refusal,
       }
     }
-    return out
+    const said = explainedLine(
+      line,
+      judged,
+      (command) => this.router.runtimeFor(command, placed),
+      reparse,
+    )
+    return { ...said, answers }
   }
 
   get workspaceId(): string {

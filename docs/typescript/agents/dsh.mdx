@@ -242,11 +242,12 @@ Through `ctx.fs`, a rule refusal arrives as `FS_SANDBOX_DENIED` rather than `FS_
 `explain` runs a line through the same gate the dispatcher uses, without running it:
 
 ```ts
-const [what] = await ctx.mirage.explain('rm /data/notes.txt')
+const what = await ctx.mirage.explain('rm /data/notes.txt')
 // what.outcome  'ask'
 // what.reason   'deletes are reviewed'
-// what.rule     the rule that spoke, and what.source where it was written
+// what.source   where the rule that spoke is written
 // what.exitCode / what.stderr  exactly what the agent would get
+// what.node     the parsed line, each command with its own verdict
 ```
 
 It spends no approval, records no question and never reaches the human, so it is safe to call about a line nobody typed — a pre-execute check, or an operator asking why a command was refused. Because it is the same gate, an explanation of a refused line is byte-identical to the refusal.

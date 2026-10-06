@@ -423,59 +423,87 @@ real operands.
 
 `session.explain` is a session's doors as a dry run, under the same
 names: `session.explain.shell(line)` is `session.shell(line)` and
-`session.explain.vfs.<op>(...)` is `session.vfs.<op>(...)`, each taking
-the arguments the real call does. Nothing runs: no command, no backend
-or cache read, no grant spent and no question recorded. A policy that
+`session.explain.vfs.<call>(...)` is `session.vfs.<call>(...)` for each
+POSIX-shaped VFS call (`read`, `write`, `pwrite`, `stat`, `readdir`,
+`mkdir`, `rename`, `symlink`, `setxattr`, ...), each taking the
+arguments the real call does. Nothing runs: no command, no backend or
+cache read, no grant spent and no question recorded. A policy that
 reads a file to decide (a profile script checking a flag) reads it for
 real, but changes nothing: a write it makes fails with `EROFS`, and a
 read that would ask fails without recording a question unless an
-approval the session already holds covers it. In TypeScript,
-`explain.vfs` needs a runtime whose async context isolates tasks (a working
-`AsyncLocalStorage`, as in Node); elsewhere it throws rather than reach another task's ops.
+approval the session already holds covers it. In TypeScript that guard
+needs a runtime whose async context isolates tasks (a working
+`AsyncLocalStorage`, as in Node). Elsewhere `explain.vfs` throws rather
+than reach another task's VFS calls, and `explain.shell` runs without
+the guard, so a policy deciding it reads and writes for real.
 
 ```python
 explain = (await ws.session("reviewer")).explain
-[shell_res] = await explain.shell("rm /data/x")
+shell_res = await explain.shell("rm /data/x")
 vfs_res = await explain.vfs.write("/vault/key", b"x")
 ```
 
 ```typescript
 const explain = (await ws.session('reviewer')).explain
-const [shellRes] = await explain.shell('rm /data/x')
+const shellRes = await explain.shell('rm /data/x')
 const vfsRes = await explain.vfs.write('/vault/key', 'x')
 ```
 
-`explain.shell` (also `ws.explain(line, session_id)`) runs the gate
-without running the line: one `Explanation` per command, with the
-outcome, the rule that spoke and where it was written, the matched
-operand, and the exact `exit_code` and `stderr` the agent would see,
-byte-identical to the real refusal. What a host reads in an explanation
-and what an agent sees at the prompt cannot disagree, because they are
-the same computation. Each explanation also carries every policy's
-answer to the command in chain order (`answers`: the document's rules
-answer as `PermissionsPolicy`, a coded policy by its class name), every
-answer at the placement stage (`placement`, the route policy's as
-`PlacementPolicy`) and the runtime that would serve the command
-(`runtime`, empty when the workspace runs it itself). A line a rule
-refuses or asks about is never placed, and a placement that refuses the
-line refuses it on its first command.
+Every explanation carries a verdict: `outcome` (`allow`, `deny` or
+`ask`), `reason` in the deciding policy's words, `source` (where the
+deciding rule is written: `top`, `mounts./runbook`, or `commands.allow`
+for the allow list), `answers` (every policy's answer in chain order;
+the document's rules answer as `PermissionsPolicy`, a coded policy by
+its class name) and `refusal`, the record a refused run carries. An ask
+an approval already covers stays `ask` with no refusal.
 
-`explain.vfs` is for the doors that see ops and no command (the file
-tools, `session.vfs`, FUSE). Each op walks the real door, so the path is
-resolved and links are followed as the call would, and stops at the op
-gate: `command` is the op, `argv` its paths, `answers` every policy's
-answer, and `error` the error the call would raise (`EACCES`, `EROFS`),
-empty when it would run. A rename is judged at its source and its
-destination.
+`explain.shell` (also `ws.explain(line, session_id)`) runs the gate
+without running the line. The line's verdict is the one its result
+would carry, with the exact `exit_code` and `stderr` the agent would
+see, byte-identical to the real refusal. What a host reads in an
+explanation and what an agent sees at the prompt cannot disagree,
+because they are the same computation. The line's `answers` are where
+it would run (`pre_execute`, the route policy's as `PlacementPolicy`).
+A line a rule refuses or asks about is never placed, and a placement
+that refuses the line gives it the placement's refusal.
+
+`node` is the line as the shell parses it. Its nodes are `list` (`;`,
+`&&`, `||`, `&`), `pipeline`, `subshell`, `group` (braces and the bodies
+of `if`, `for`, `while`, `case` and functions), `substitution` (`$( )`,
+backticks, `<( )`), `line` (a line a command runs: `bash -c`, `eval`,
+`xargs`) and `command`. A command carries its own verdict with every
+`pre_command` answer, `command` and `argv`, its path `operands` (each
+with the path it names and whether the deciding rule `matched` it) and
+the `runtime` that would run it, empty when the workspace runs it
+itself. `mirage workspace explain` prints the tree:
+
+```text
+cat /data/a | wc -l && echo $(cat /data/keys/a)  [deny, exit 1: sealed]
+  list: cat /data/a | wc -l && echo $(cat /data/keys/a)
+    pipeline: cat /data/a | wc -l
+      cat /data/a  [allow]
+      wc -l  [allow]
+    echo $(cat /data/keys/a)  [allow]
+      substitution: cat /data/keys/a
+        cat /data/keys/a  [deny: sealed]  top
+```
+
+`explain.vfs` is for the doors that see VFS calls and no command (the
+file tools, `session.vfs`, FUSE). Each call walks the real door, so the
+path is resolved and links are followed as the call would, and stops at
+its gate. Its verdict holds every `pre_ops` answer, with `call`, its
+`paths` as given and `error`, the error the call would raise (`EACCES`,
+`EROFS`), empty when it would run. A rename is judged at its source and
+its destination.
 
 With no policy speaking, a line explains as one that runs (`exit_code`
-0, `answers` empty) and an op as one that runs (`error` empty). A
+0, `answers` empty) and a VFS call as one that runs (`error` empty). A
 hidden path is no path to any of it: it explains like a path no policy
 refuses, so no explanation ever names a hide. Whether a path exists is
 not a dry run's question either. Over the server, `POST
 /v1/workspaces/{id}/explain/shell`, `mirage workspace explain ID LINE`
-and the RPC methods `explain/shell` and `explain/vfs/<op>` are the same
-dry runs.
+and the RPC methods `explain/shell` and `explain/vfs/<call>` are the
+same dry runs, answering the same fields as JSON.
 
 ## The worked example
 

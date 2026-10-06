@@ -97,8 +97,9 @@ async def test_explain_methods_are_the_dry_runs_of_their_doors():
     rpc = MirageRpcServer(ws, "agent")
     assert "explain/vfs/rename" in rpc.methods
     shell = await call(rpc, "explain/shell", {"command": "rm /sec/k"})
-    [rm] = shell["result"]["explanations"]
-    assert (rm["command"], rm["outcome"], rm["exit_code"]) == (
+    said = shell["result"]
+    [rm] = said["node"]["children"]
+    assert (rm["command"], said["outcome"], said["exit_code"]) == (
         "rm",
         "deny",
         1,
@@ -106,9 +107,12 @@ async def test_explain_methods_are_the_dry_runs_of_their_doors():
     assert rm["answers"] == [
         {"kind": "deny", "reason": "sealed", "policy": "PermissionsPolicy"}
     ]
+    assert (said["line"], said["source"]) == ("rm /sec/k", "top")
     written = await call(
         rpc, "explain/vfs/write", {"path": "/sec/k", "data_base64": b64("x")}
     )
+    assert written["result"]["call"] == "write"
+    assert written["result"]["paths"] == ["/sec/k"]
     assert (written["result"]["outcome"], written["result"]["error"]) == (
         "deny",
         "EACCES",

@@ -57,12 +57,12 @@ The same bearer token as the [HTTP API](/home/access/http#auth). `mirage rpc` re
 | `vfs/mkdir`, `vfs/rmdir`, `vfs/unlink` | `path` | `{}` |
 | `vfs/rename` | `src`, `dst` | `{}` |
 | `vfs/truncate` | `path`, `length` | `{}` |
-| `explain/shell` | `command` | `explanations`, one per command |
-| `explain/vfs/<op>` | the params of `vfs/<op>` | one explanation |
+| `explain/shell` | `command` | the line's verdict, `exit_code`, `stderr` and `node`, its parse tree |
+| `explain/vfs/<call>` | the params of `vfs/<call>` | the call's verdict, `call`, `paths` and `error` |
 | `tools/list` | | `tools`, as MCP lists them |
 | `tools/call` | `name`, `arguments` | `text`, `is_error` |
 
-`?` marks an optional param. The `explain/` methods are the dry runs of `shell` and `vfs/<op>` (`session.explain`): they run nothing and answer what the policies would decide, each policy's answer included; see [Dry runs](/home/permissions#dry-runs). `initialize` creates nothing and is optional: it reports the server and the workspace and session this connection is bound to. Bytes travel base64 in the `*_base64` fields, and a message is at most 4 MiB, so stream larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH. A non-zero exit is a result, not an error. The [tools](/home/access/mcp#tools) take the inputs listed under [Call a tool](/home/access/http#call-a-tool).
+`?` marks an optional param. The `explain/` methods are the dry runs of `shell` and `vfs/<call>` (`session.explain`): they run nothing and answer what the policies would decide, each policy's answer included; see [Dry runs](/home/permissions#dry-runs). `initialize` creates nothing and is optional: it reports the server and the workspace and session this connection is bound to. Bytes travel base64 in the `*_base64` fields, and a message is at most 4 MiB, so stream larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH. A non-zero exit is a result, not an error. The [tools](/home/access/mcp#tools) take the inputs listed under [Call a tool](/home/access/http#call-a-tool).
 
 ## Sessions
 

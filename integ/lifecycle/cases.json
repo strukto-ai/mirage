@@ -3814,21 +3814,24 @@
           "session": "agent",
           "command": "rm /x",
           "expect": {
-            "value": [
-              {
-                "command": "rm",
-                "outcome": "deny",
-                "exit_code": 126,
-                "answers": [
-                  {
-                    "kind": "deny",
-                    "policy": "PermissionsPolicy",
-                    "reason": "no deletes"
-                  }
-                ],
-                "placement": []
-              }
-            ]
+            "value": {
+              "outcome": "deny",
+              "exit_code": 126,
+              "answers": [],
+              "commands": [
+                {
+                  "command": "rm",
+                  "outcome": "deny",
+                  "answers": [
+                    {
+                      "kind": "deny",
+                      "policy": "PermissionsPolicy",
+                      "reason": "no deletes"
+                    }
+                  ]
+                }
+              ]
+            }
           }
         },
         {
@@ -3836,19 +3839,17 @@
           "session": "agent",
           "command": "echo blocked",
           "expect": {
-            "value": [
-              {
-                "command": "echo",
-                "exit_code": 126,
-                "stderr": "echo: Permission denied\n",
-                "placement": [
-                  {
-                    "kind": "deny",
-                    "reason": "blocked here"
-                  }
-                ]
-              }
-            ]
+            "value": {
+              "outcome": "deny",
+              "exit_code": 126,
+              "stderr": "echo: Permission denied\n",
+              "answers": [
+                {
+                  "kind": "deny",
+                  "reason": "blocked here"
+                }
+              ]
+            }
           }
         },
         {
@@ -3856,14 +3857,17 @@
           "session": "agent",
           "command": "echo hi",
           "expect": {
-            "value": [
-              {
-                "command": "echo",
-                "exit_code": 0,
-                "placement": [],
-                "runtime": ""
-              }
-            ]
+            "value": {
+              "outcome": "allow",
+              "exit_code": 0,
+              "answers": [],
+              "commands": [
+                {
+                  "command": "echo",
+                  "runtime": ""
+                }
+              ]
+            }
           }
         },
         {
@@ -3874,7 +3878,6 @@
           "expect": {
             "value": {
               "outcome": "deny",
-              "exit_code": 0,
               "error": "EACCES",
               "refusal": "deny",
               "answers": [
@@ -3907,7 +3910,7 @@
           "args": ["/a", "/sec/b"],
           "expect": {
             "value": {
-              "command": "rename",
+              "call": "rename",
               "outcome": "deny",
               "error": "EACCES"
             }

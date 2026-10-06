@@ -92,15 +92,21 @@ describe('MirageRpcServer', () => {
     })
     const rpc = new MirageRpcServer(ws, { sessionId: 'agent' })
     expect(rpc.methods).toContain('explain/vfs/rename')
-    const shell = (await call(rpc, 'explain/shell', { command: 'rm /sec/k' })).result as {
-      explanations: { command: string; outcome: string; exit_code: number; answers: unknown[] }[]
+    const said = (await call(rpc, 'explain/shell', { command: 'rm /sec/k' })).result as {
+      line: string
+      outcome: string
+      source: string
+      exit_code: number
+      node: { children: { command: string; answers: unknown[] }[] }
     }
-    const [rm] = shell.explanations
-    expect([rm?.command, rm?.outcome, rm?.exit_code]).toEqual(['rm', 'deny', 1])
+    const [rm] = said.node.children
+    expect([rm?.command, said.outcome, said.exit_code]).toEqual(['rm', 'deny', 1])
     expect(rm?.answers).toEqual([{ kind: 'deny', reason: 'sealed', policy: 'PermissionsPolicy' }])
+    expect([said.line, said.source]).toEqual(['rm /sec/k', 'top'])
     const written = (
       await call(rpc, 'explain/vfs/write', { path: '/sec/k', data_base64: b64('x') })
-    ).result as { outcome: string; error: string }
+    ).result as { call: string; paths: string[]; outcome: string; error: string }
+    expect([written.call, written.paths]).toEqual(['write', ['/sec/k']])
     expect([written.outcome, written.error]).toEqual(['deny', 'EACCES'])
     const free = (await call(rpc, 'explain/vfs/write', { path: '/f', data_base64: '' })).result as {
       outcome: string

@@ -80,7 +80,7 @@ class Session:
     @property
     def explain(self) -> Explainer:
         """This session's calls explained instead of run, under the same
-        names: ``explain.shell(line)``, ``explain.vfs.<op>(...)``."""
+        names: ``explain.shell(line)``, ``explain.vfs.<call>(...)``."""
         return Explainer(self._ws, self._id, self.vfs)
 
     @property

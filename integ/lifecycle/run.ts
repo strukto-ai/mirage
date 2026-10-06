@@ -40,9 +40,12 @@ import {
   Outcome,
   Scope,
   type Ask,
+  type CommandExplanation,
   type Deny,
-  type Explanation,
   type Route,
+  type ShellExplanation,
+  type ShellNode,
+  type VfsExplanation,
 } from '@struktoai/mirage-core/policy/types'
 import type { RouteContext } from '@struktoai/mirage-core/runtime/routing/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
@@ -186,13 +189,12 @@ function answered(answers: readonly (Deny | Ask | Route)[]): Record<string, stri
   }))
 }
 
-/** An explanation as a case pins it. */
-// One op of `session.explain.vfs`, its arguments as a case spells them:
+// One call of `session.explain.vfs`, its arguments as a case spells them:
 // the paths, then the bytes a write or an append carries.
 function explainVfs(
   vfs: VfsExplainer,
   step: { name: string; args: string[] },
-): Promise<Explanation> {
+): Promise<VfsExplanation> {
   const [first = '', second = ''] = step.args
   switch (step.name) {
     case 'write':
@@ -216,18 +218,35 @@ function explainVfs(
   }
 }
 
-function explained(expl: Explanation): Record<string, unknown> {
-  return {
-    command: expl.command,
+/**
+ * An explanation as a case pins it: a VFS call's verdict, or a line's with
+ * its commands in the order the line reads them.
+ */
+function explained(expl: ShellExplanation | VfsExplanation): Record<string, unknown> {
+  const verdict = {
     outcome: expl.outcome,
+    reason: expl.reason,
+    answers: answered(expl.answers),
+    refusal: expl.refusal?.kind ?? null,
+  }
+  if ('call' in expl) return { call: expl.call, ...verdict, error: expl.error }
+  return {
+    ...verdict,
     exit_code: expl.exitCode,
     stderr: expl.stderr,
-    answers: answered(expl.answers),
-    placement: answered(expl.placement),
-    runtime: expl.runtime,
-    refusal: expl.refusal?.kind ?? null,
-    error: expl.error,
+    commands: commandsOf(expl.node).map((c) => ({
+      command: c.command,
+      outcome: c.outcome,
+      answers: answered(c.answers),
+      runtime: c.runtime,
+    })),
   }
+}
+
+/** Every command under a node of a line's tree, in source order. */
+function commandsOf(node: ShellNode | CommandExplanation): CommandExplanation[] {
+  const mine = 'command' in node ? [node] : []
+  return [...mine, ...node.children.flatMap(commandsOf)]
 }
 
 // What earlier steps put aside for later ones: `snapshot` stores the
@@ -427,9 +446,7 @@ async function action(
       }
       break
     case 'explain':
-      return (await new Session(ws, step.session ?? null).explain.shell(step.command)).map(
-        explained,
-      )
+      return explained(await new Session(ws, step.session ?? null).explain.shell(step.command))
     case 'explain_vfs':
       return explained(await explainVfs(new Session(ws, step.session ?? null).explain.vfs, step))
     default:

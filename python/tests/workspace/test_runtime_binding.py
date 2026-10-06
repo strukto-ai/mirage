@@ -18,7 +18,13 @@ import pytest_asyncio
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
-from mirage.policy import Deny, Policy, Route
+from mirage.policy import (
+    CommandExplanation,
+    Deny,
+    Policy,
+    Route,
+    ShellExplanation,
+)
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.mixin import LineExecutorMixin
@@ -421,6 +427,20 @@ class NoSecrets(Policy):
         return Deny("secrets stay put") if "secret" in ctx.line else None
 
 
+def _runtimes(said: ShellExplanation) -> list[str]:
+    """The runtime each top-level command of an explained line would
+    run on.
+
+    Args:
+        said (ShellExplanation): the explained line.
+    """
+    return [
+        node.runtime
+        for node in said.node.children
+        if isinstance(node, CommandExplanation)
+    ]
+
+
 @pytest.mark.asyncio
 async def test_a_coded_policy_places_the_line():
     ws = Workspace(
@@ -518,8 +538,8 @@ async def test_a_runtime_that_declines_its_placement_refuses_the_line():
         # The caller's own argument forces its runtime.
         io = await ws.shell("python3 -c 'light'", runtime="beta")
         assert await materialize(io.stdout) == b"ran-beta\n"
-        [said] = await ws.explain("python3 -c 'light'")
-        assert said.placement[-1] == Deny(
+        said = await ws.explain("python3 -c 'light'")
+        assert said.answers[-1] == Deny(
             "runtime beta declines this line", policy="runtimes.beta"
         )
         assert said.exit_code == 126
@@ -573,22 +593,22 @@ async def test_explain_names_the_policy_that_placed_the_line():
         policies=[NoSecrets()],
     )
     try:
-        [heavy] = await ws.explain("python3 -c 'heavy'")
-        assert heavy.placement == (Route("beta", policy="PlacementPolicy"),)
-        assert (heavy.runtime, heavy.exit_code) == ("beta", 0)
-        [light] = await ws.explain("python3 -c 'light'")
-        assert (light.placement, light.runtime) == ((), "alpha")
-        # A placement deny refuses the line on its first command, in the
-        # words the run would print.
-        [secret, echo] = await ws.explain("python3 -c 'secret'; echo x")
-        assert secret.placement == (
+        heavy = await ws.explain("python3 -c 'heavy'")
+        assert heavy.answers == (Route("beta", policy="PlacementPolicy"),)
+        assert (_runtimes(heavy), heavy.exit_code) == (["beta"], 0)
+        light = await ws.explain("python3 -c 'light'")
+        assert (light.answers, _runtimes(light)) == ((), ["alpha"])
+        # A placement deny refuses the line in the words the run would
+        # print, and places none of it.
+        secret = await ws.explain("python3 -c 'secret'; echo x")
+        assert secret.answers == (
             Deny("secrets stay put", policy="NoSecrets"),
         )
         assert (secret.exit_code, secret.stderr) == (
             126,
             "python3: Permission denied\n",
         )
-        assert (echo.exit_code, echo.runtime) == (0, "")
+        assert _runtimes(secret) == ["", ""]
     finally:
         await ws.close()
 

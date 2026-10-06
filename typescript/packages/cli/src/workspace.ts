@@ -168,25 +168,46 @@ function formatAsks(items: AskRecord[]): string {
   )
 }
 
-interface ExplanationRecord {
-  command: string
-  argv: string[]
-  outcome: string
-  exit_code: number
-  answers: { kind: string; policy: string }[]
+interface ExplainedNode {
+  type: string
+  text: string
+  outcome?: string
+  reason?: string
+  source?: string
+  runtime?: string
+  children: ExplainedNode[]
 }
 
-function formatExplanations(data: { explanations: ExplanationRecord[] }): string {
-  if (data.explanations.length === 0) return 'Nothing to explain.'
-  return formatTable(
-    ['COMMAND', 'OUTCOME', 'EXIT', 'ANSWERS'],
-    data.explanations.map((e) => [
-      [e.command, ...e.argv].join(' '),
-      e.outcome,
-      String(e.exit_code),
-      e.answers.map((a) => `${a.policy} ${a.kind}`).join(', '),
-    ]),
-  )
+export interface ExplanationRecord {
+  line: string
+  outcome: string
+  reason: string
+  exit_code: number
+  node: ExplainedNode
+}
+
+/** An explained line as a tree, one node a row, each command with its verdict. */
+export function formatExplanation(data: ExplanationRecord): string {
+  let verdict = `${data.outcome}, exit ${String(data.exit_code)}`
+  if (data.reason !== '') verdict += `: ${data.reason}`
+  const out = [`${data.line}  [${verdict}]`]
+  for (const child of data.node.children) explainedLines(child, 1, out)
+  return out.join('\n')
+}
+
+/** Append one node of an explained line, and what it holds, as rows. */
+function explainedLines(node: ExplainedNode, depth: number, out: string[]): void {
+  const pad = '  '.repeat(depth)
+  if (node.outcome === undefined) {
+    out.push(`${pad}${node.type}: ${node.text}`)
+  } else {
+    let line = `${pad}${node.text}  [${node.outcome}`
+    line += node.reason !== undefined && node.reason !== '' ? `: ${node.reason}]` : ']'
+    if (node.source !== undefined && node.source !== '') line += `  ${node.source}`
+    if (node.runtime !== undefined && node.runtime !== '') line += `  on ${node.runtime}`
+    out.push(line)
+  }
+  for (const child of node.children) explainedLines(child, depth + 1, out)
 }
 
 export function registerWorkspaceCommands(program: Command): void {
@@ -336,7 +357,7 @@ export function registerWorkspaceCommands(program: Command): void {
 
   ws.command('explain')
     .description(
-      "What a line would do, without running it: each command's outcome and every policy's answer.",
+      "What a line would do, without running it: the line's verdict and each command's, as the line parses.",
     )
     .argument('<id>')
     .argument('<command>', 'The line, as the agent would type it')
@@ -349,7 +370,7 @@ export function registerWorkspaceCommands(program: Command): void {
       const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/explain/shell`, {
         body: JSON.stringify(body),
       })
-      emit((await handleResponse(r)) as { explanations: ExplanationRecord[] }, formatExplanations)
+      emit((await handleResponse(r)) as ExplanationRecord, formatExplanation)
     })
 
   ws.command('allow')

@@ -75,8 +75,13 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         if decision.outcome is Outcome.ASK:
             return Ask(rule.reason, rule, decision.asks)
         if decision.matched_path is None:
-            return Deny(rule.reason)
-        return Deny(rule.reason, DenyScope.OPERAND, path=decision.matched_path)
+            return Deny(rule.reason, rule=rule)
+        return Deny(
+            rule.reason,
+            DenyScope.OPERAND,
+            path=decision.matched_path,
+            rule=rule,
+        )
 
     async def pre_ops(self, ctx: OpsContext) -> Action | None:
         if redirect_target_judged(ctx.path.virtual):
@@ -95,7 +100,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
         rule, asks = ruled
         if asks and gate is None and not line_running():
             return Ask(rule.reason, rule)
-        return Deny(rule.reason)
+        return Deny(rule.reason, rule=rule)
 
     async def wants_for(self, hook: str, session_id: str) -> bool:
         """Whether this session's rules speak at ``hook``: always at the

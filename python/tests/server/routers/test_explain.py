@@ -51,13 +51,19 @@ async def test_explain_shell_is_the_dry_run_of_shell():
             json={"command": "rm /f.txt", "session_id": "agent"},
         )
         assert r.status_code == 200, r.text
-        [rm] = r.json()["explanations"]
-        assert (rm["outcome"], rm["exit_code"], rm["stderr"]) == (
+        said = r.json()
+        assert (said["outcome"], said["exit_code"], said["stderr"]) == (
             "ask",
             126,
             "rm: Permission denied\n",
         )
-        assert rm["refusal"]["kind"] == "pending"
+        assert said["refusal"]["kind"] == "pending"
+        [rm] = said["node"]["children"]
+        assert (rm["type"], rm["command"], rm["argv"]) == (
+            "command",
+            "rm",
+            ["/f.txt"],
+        )
         assert rm["answers"] == [
             {
                 "kind": "ask",

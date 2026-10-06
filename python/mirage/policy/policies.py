@@ -32,6 +32,7 @@ from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.errors import Explained, PolicyDenied, PolicyError
+from mirage.policy.match.decide import source_of
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
     VALIDITY,
@@ -41,7 +42,6 @@ from mirage.policy.types import (
     DenyScope,
     DryRun,
     ExecuteResultContext,
-    Explanation,
     Hide,
     OpsContext,
     OpsResultContext,
@@ -49,6 +49,7 @@ from mirage.policy.types import (
     Pending,
     Route,
     SessionContext,
+    VfsExplanation,
 )
 from mirage.runtime.routing.types import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Refusal
@@ -319,15 +320,15 @@ async def pre_ops_gate(
 
 async def _explained_op(
     policies: "Policies", ctx: OpsContext, decisions: "Decisions | None"
-) -> Explanation:
-    """What the gate would answer one op, as ``pre_ops_gate`` decides it
-    and without its consequences: every policy's answer, the one that
-    wins, and the error the door would raise. A question reads the
-    ledger's settled records and records nothing.
+) -> VfsExplanation:
+    """What the gate would answer one VFS call, as ``pre_ops_gate``
+    decides it and without its consequences: every policy's answer, the
+    one that wins, and the error the door would raise. A question reads
+    the ledger's settled records and records nothing.
 
     Args:
         policies (Policies): the workspace's admission policies.
-        ctx (OpsContext): the op the gate sees.
+        ctx (OpsContext): the call the gate sees.
         decisions (Decisions | None): the approval ledger, None at a
             door that cannot ask.
     """
@@ -335,11 +336,8 @@ async def _explained_op(
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
     first = answers[0] if answers else None
     winner = next((a for a in answers if isinstance(a, Deny)), first)
-    base = Explanation(
-        command=ctx.op,
-        argv=(ctx.path.virtual,),
-        paths=(ctx.path.virtual,),
-        answers=answers,
+    base = VfsExplanation(
+        call=ctx.op, paths=(ctx.path.virtual,), answers=answers
     )
     if winner is None:
         return base
@@ -352,14 +350,17 @@ async def _explained_op(
             if decisions is None or line_running()
             else decisions.held_op(ctx, winner)
         )
-    outcome = Outcome.ASK if isinstance(winner, Ask) else Outcome.DENY
+    decided = replace(
+        base,
+        outcome=Outcome.ASK if isinstance(winner, Ask) else Outcome.DENY,
+        reason=winner.reason,
+        source="" if winner.rule is None else source_of(winner.rule),
+    )
     if action is None:
-        return replace(base, outcome=outcome, reason=winner.reason)
+        return decided
     error = action.error if isinstance(action, Deny) else None
     return replace(
-        base,
-        outcome=outcome,
-        reason=winner.reason,
+        decided,
         refusal=None if error is not None else refusal_of(action),
         error=errno.errorcode.get(
             error.errno if error is not None and error.errno else errno.EACCES,

@@ -80,6 +80,9 @@ export interface Deny {
    * the command's own line for it and `Permission denied`, the reason
    * riding the record. Absent leaves the reason as the diagnostic. */
   path?: string
+  /** The profile rule that refused, as an Ask carries the rule that asked;
+   * absent for a coded condition. */
+  rule?: CommandRule
 }
 
 /**
@@ -626,63 +629,126 @@ export enum DryRun {
 }
 
 /**
- * What one command of a line, or one call on a session's file ops, would
- * do, without doing it.
- *
- * Produced by the same gate the dispatcher runs, so a host reading this
- * and an agent typing the line cannot be told different things.
- * Everything the agent would see is here as it would arrive: `exitCode`
- * and `stderr` come out of the one outcome table, so an explanation of a
- * refused line is byte-identical to the refusal. A file op has no
- * terminal of its own: `command` is the op, `argv` its paths as given,
- * and `error` names the error the call would throw, while `exitCode`,
- * `stderr`, `rule`, `source` and `matchedPath` stay empty: `answers` says
- * who spoke.
- *
- * `outcome` is the document's answer and `rule` says who gave it. The
- * two refusals the allow list produces both arrive as `DENY` with no
- * rule, and `exitCode` separates them: 127 for a head word the session
- * cannot see, which reads as bash's "command not found" so an unlisted
- * tool never leaks that it exists, and 126 for a line whose head was
- * visible but which no allow entry covers.
+ * What the policies decide about one thing a session would do, without
+ * doing it: the verdict every explanation carries. Produced by the same
+ * gates the dispatcher runs, so a host reading one and an agent running
+ * the call cannot be told different things. A line (`ShellExplanation`),
+ * each of its commands (`CommandExplanation`) and a VFS call
+ * (`VfsExplanation`) extend it with what is theirs; `answers` holds what
+ * the hook judging that level said. Mirrors the Python Explanation.
  */
 export interface Explanation {
-  /** The head word, as the gate read it. */
+  /** `ALLOW`, `DENY` or `ASK` (an ask an approval already covers stays `ASK` with no refusal). */
+  readonly outcome: Outcome
+  /** Why, in the deciding policy's words; empty when nothing refuses or asks. */
+  readonly reason: string
+  /**
+   * Where in the profile the deciding rule is written (`top`,
+   * `mounts./runbook`, `commands.allow` for the allow list); empty when no
+   * rule decided.
+   */
+  readonly source: string
+  /**
+   * Every policy's answer, in the order the chain asks them, each naming
+   * its policy; the profile's rules answer as `PermissionsPolicy`. A hide
+   * is never among them.
+   */
+  readonly answers: readonly (Deny | Ask | Route)[]
+  /** The record a refused run carries, null when it would run. */
+  readonly refusal: Refusal | null
+}
+
+/**
+ * One path argument of a command, as the rules read it. A path the
+ * session cannot see is listed like any path no rule matches: `path` is
+ * resolved from the cwd alone, links unfollowed. Mirrors the Python
+ * ShellOperand.
+ */
+export interface ShellOperand {
+  /** The argument as typed. */
+  readonly text: string
+  /** The absolute path it names. */
+  readonly path: string
+  /** Whether the deciding rule matched it. */
+  readonly matched: boolean
+}
+
+/**
+ * One piece of a line's structure, as the shell parses it: `list` (`;`
+ * `&&` `||` `&`), `pipeline`, `subshell`, `group` (braces and the bodies
+ * of `if`, `for`, `while`, `case` and functions), `line` (a line a command
+ * runs: `bash -c`, `eval`, `xargs`) or `substitution` (`$( )`, backticks,
+ * `<( )`). Mirrors the Python ShellNode.
+ */
+export interface ShellNode {
+  readonly type: string
+  /** The node's source text. */
+  readonly text: string
+  /** What it holds, in source order. */
+  readonly children: readonly (ShellNode | CommandExplanation)[]
+}
+
+/**
+ * One command of a line, explained: whether it may run (its `preCommand`
+ * answers) and where it would run. Mirrors the Python CommandExplanation.
+ */
+export interface CommandExplanation extends Explanation {
+  readonly type: 'command'
+  /** Every policy's answer to the command (`preCommand`). */
+  readonly answers: readonly (Deny | Ask)[]
+  /** The program, as the gate read it. */
   readonly command: string
   /** The words after it. */
   readonly argv: readonly string[]
-  /** What the profile's rules say. */
-  readonly outcome: Outcome
-  /** The rule that spoke, null when the allow list did or nothing did. */
-  readonly rule: CommandRule | null
-  /** The rule's reason, empty when there is no rule. */
-  readonly reason: string
-  /** Where in the document the rule was written. */
-  readonly source: string
-  /** The operand a path-scoped rule matched, as typed. */
-  readonly matchedPath: string | null
-  /** The paths the rules were shown, after the session's hides. */
-  readonly paths: readonly string[]
+  /** The runtime entry that would run it, empty when the workspace runs it itself. */
+  readonly runtime: string
+  /** Its path arguments, redirect targets included. */
+  readonly operands: readonly ShellOperand[]
+  /** The command's source text. */
+  readonly text: string
+  /** The lines it runs in turn (`$( )` in its words, a `bash -c` string), in source order. */
+  readonly children: readonly ShellNode[]
+}
+
+/**
+ * A line, explained: what the agent would read, where the line would run
+ * (its `preExecute` answers) and every command in it. The verdict is the
+ * one the line's result carries: the first command the gate refuses, in
+ * the order it reads them, or the placement's refusal; an allowed line
+ * exits 0, and one an approval lets run carries the ask it covers.
+ * `exitCode` and `stderr` come out of the one outcome table, so
+ * a refused line's explanation is byte-identical to the refusal. Mirrors
+ * the Python ShellExplanation.
+ */
+export interface ShellExplanation extends Explanation {
+  /**
+   * Every policy's answer to where the line runs (`preExecute`), the route
+   * policy's first; empty when nothing places it or a command refuses it
+   * first.
+   */
+  readonly answers: readonly (Deny | Route)[]
+  /** The line as given. */
+  readonly line: string
   /** What the line would exit with, 0 to run. */
   readonly exitCode: number
   /** What the agent would read, empty to run. */
   readonly stderr: string
-  /** The record the refused result would carry, null when the line would run. */
-  readonly refusal: Refusal | null
-  /**
-   * Every policy's answer to the command, in the order the chain asks
-   * them, each naming its policy; the document's rules answer as
-   * `PermissionsPolicy`. A hide is never among them.
-   */
+  /** The parsed line, of type `line`. */
+  readonly node: ShellNode
+}
+
+/**
+ * A VFS call, explained: the POSIX-shaped call on `session.vfs` (`read`,
+ * `pwrite`, `rename`, `setxattr`, ...) and what its gate (`preOps`) would
+ * answer. Mirrors the Python VfsExplanation.
+ */
+export interface VfsExplanation extends Explanation {
+  /** Every policy's answer to the call (`preOps`). */
   readonly answers: readonly (Deny | Ask)[]
-  /**
-   * Every policy's answer to the line at `preExecute`, the route policy's
-   * first (as `PlacementPolicy`); empty when nothing places the line, or
-   * when a rule refuses it first.
-   */
-  readonly placement: readonly (Deny | Route)[]
-  /** The runtime entry that would run the command, empty when the workspace runs it itself. */
-  readonly runtime: string
-  /** For a file op, the errno name the call would throw (`EACCES`, `EROFS`), empty when it would run. */
+  /** The call's name. */
+  readonly call: string
+  /** Its path arguments, as given. */
+  readonly paths: readonly string[]
+  /** The errno name the call would throw (`EACCES`, `EROFS`), empty when it would run. */
   readonly error: string
 }

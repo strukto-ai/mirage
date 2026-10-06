@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from mirage.context import reset_explaining, set_explaining
 from mirage.ops import Ops
-from mirage.policy import Explanation
+from mirage.policy import ShellExplanation, VfsExplanation
 from mirage.policy.errors import Explained
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class Explainer:
     """A session's calls explained instead of run, under the session's
     own names: ``explain.shell(line)`` is ``session.shell(line)`` and
-    ``explain.vfs.<op>(...)`` is ``session.vfs.<op>(...)``, each
+    ``explain.vfs.<call>(...)`` is ``session.vfs.<call>(...)``, each
     answering what the policies would decide.
 
     Nothing runs: no command, no backend or cache read, no grant spent
@@ -44,7 +44,7 @@ class Explainer:
     Args:
         ws (Workspace): the workspace the session lives in.
         session_id (str | None): the session; None for the default one.
-        vfs (Ops): the session's op facade.
+        vfs (Ops): the session's VFS facade.
     """
 
     def __init__(
@@ -54,10 +54,9 @@ class Explainer:
         self._session_id = session_id
         self._vfs = vfs
 
-    async def shell(self, line: str) -> list[Explanation]:
-        """What a line would do: one explanation per command the gate
-        reads, with every policy's answer and the line's placement
-        (``Workspace.explain``).
+    async def shell(self, line: str) -> ShellExplanation:
+        """What a line would do: its verdict, where it would run and
+        every command in it, as a tree (``Workspace.explain``).
 
         Args:
             line (str): the line, as the agent would type it.
@@ -66,31 +65,32 @@ class Explainer:
 
     @property
     def vfs(self) -> "VfsExplainer":
-        """The session's file ops, explained."""
+        """The session's VFS calls, explained."""
         return VfsExplainer(self._vfs)
 
 
 class VfsExplainer:
-    """``session.vfs`` explained: each op takes the arguments the real
-    one does and walks the same door (the path resolved, links followed,
-    hides, the mount mode, every policy), which stops at the op gate
-    with what it would answer.
+    """``session.vfs`` explained: each VFS call (the POSIX-shaped calls:
+    ``read``, ``pwrite``, ``rename``, ``setxattr``, ...) takes the
+    arguments the real one does and walks the same door (the path
+    resolved, links followed, hides, the mount mode, every policy),
+    which stops at the gate with what it would answer.
 
-    An op the door answers before any policy is asked (a path that is
-    hidden or missing, a rename across mounts) explains as an op no
+    A call the door answers before any policy is asked (a path that is
+    hidden or missing, a rename across mounts) explains as a call no
     policy refuses: a dry run says what the policies decide, not whether
     the call would otherwise succeed, which is what keeps a hide from
-    surfacing; for the same reason an op's explanation names no paths
-    beyond the ``argv`` it was asked about, since what the door resolved
-    a path to would tell a hidden one from a missing one. A rename passes
+    surfacing; for the same reason an explanation names no paths beyond
+    the ones it was asked about, since what the door resolved a path to
+    would tell a hidden one from a missing one. A rename passes
     two gates, its source and then its destination; its explanation is
     the first that refuses, with the answers of both. A restore's
     pending drift checks are no policy's answer either: the dry run
-    leaves them to the first op that runs, so a policy reading while it
+    leaves them to the first call that runs, so a policy reading while it
     decides reads the restored state.
 
     Args:
-        vfs (Ops): the session's op facade.
+        vfs (Ops): the session's VFS facade.
     """
 
     def __init__(self, vfs: Ops) -> None:
@@ -98,7 +98,7 @@ class VfsExplainer:
 
     async def read(
         self, path: str, offset: int = 0, size: int | None = None
-    ) -> Explanation:
+    ) -> VfsExplanation:
         """Explain ``session.vfs.read``.
 
         Args:
@@ -110,7 +110,7 @@ class VfsExplainer:
             "read", (path,), lambda: self._vfs.read(path, offset, size)
         )
 
-    async def write(self, path: str, data: bytes) -> Explanation:
+    async def write(self, path: str, data: bytes) -> VfsExplanation:
         """Explain ``session.vfs.write``.
 
         Args:
@@ -121,7 +121,7 @@ class VfsExplainer:
             "write", (path,), lambda: self._vfs.write(path, data)
         )
 
-    async def append(self, path: str, data: bytes) -> Explanation:
+    async def append(self, path: str, data: bytes) -> VfsExplanation:
         """Explain ``session.vfs.append``.
 
         Args:
@@ -132,7 +132,9 @@ class VfsExplainer:
             "append", (path,), lambda: self._vfs.append(path, data)
         )
 
-    async def stat(self, path: str, *, nofollow: bool = False) -> Explanation:
+    async def stat(
+        self, path: str, *, nofollow: bool = False
+    ) -> VfsExplanation:
         """Explain ``session.vfs.stat``.
 
         Args:
@@ -143,7 +145,7 @@ class VfsExplainer:
             "stat", (path,), lambda: self._vfs.stat(path, nofollow=nofollow)
         )
 
-    async def readdir(self, path: str) -> Explanation:
+    async def readdir(self, path: str) -> VfsExplanation:
         """Explain ``session.vfs.readdir``.
 
         Args:
@@ -151,7 +153,7 @@ class VfsExplainer:
         """
         return await _dry("readdir", (path,), lambda: self._vfs.readdir(path))
 
-    async def exists(self, path: str) -> Explanation:
+    async def exists(self, path: str) -> VfsExplanation:
         """Explain ``session.vfs.exists``, judged as the stat it makes.
 
         Args:
@@ -159,7 +161,201 @@ class VfsExplainer:
         """
         return await _dry("exists", (path,), lambda: self._vfs.stat(path))
 
-    async def mkdir(self, path: str) -> Explanation:
+    async def is_dir(self, path: str) -> VfsExplanation:
+        """Explain ``session.vfs.is_dir``, judged as the stat it makes.
+
+        Args:
+            path (str): the path.
+        """
+        return await _dry("is_dir", (path,), lambda: self._vfs.stat(path))
+
+    async def is_file(self, path: str) -> VfsExplanation:
+        """Explain ``session.vfs.is_file``, judged as the stat it makes.
+
+        Args:
+            path (str): the path.
+        """
+        return await _dry("is_file", (path,), lambda: self._vfs.stat(path))
+
+    async def cat(self, path: str) -> VfsExplanation:
+        """Explain ``session.vfs.cat``, judged as the read it makes.
+
+        Args:
+            path (str): the path.
+        """
+        return await _dry("cat", (path,), lambda: self._vfs.read(path))
+
+    async def list_files(self, path: str) -> VfsExplanation:
+        """Explain ``session.vfs.list_files``, judged as the readdir it
+        makes.
+
+        Args:
+            path (str): the directory.
+        """
+        return await _dry(
+            "list_files", (path,), lambda: self._vfs.readdir(path)
+        )
+
+    async def pwrite(
+        self, path: str, data: bytes, offset: int
+    ) -> VfsExplanation:
+        """Explain ``session.vfs.pwrite``.
+
+        Args:
+            path (str): the path.
+            data (bytes): what would be written.
+            offset (int): where it would land.
+        """
+        return await _dry(
+            "pwrite", (path,), lambda: self._vfs.pwrite(path, data, offset)
+        )
+
+    async def create(self, path: str) -> VfsExplanation:
+        """Explain ``session.vfs.create``.
+
+        Args:
+            path (str): the file it would create.
+        """
+        return await _dry("create", (path,), lambda: self._vfs.create(path))
+
+    async def symlink(self, path: str, target: str) -> VfsExplanation:
+        """Explain ``session.vfs.symlink``.
+
+        Args:
+            path (str): where the link would be made.
+            target (str): what it would point to.
+        """
+        return await _dry(
+            "symlink", (path,), lambda: self._vfs.symlink(path, target)
+        )
+
+    async def readlink(self, path: str) -> VfsExplanation:
+        """Explain ``session.vfs.readlink``.
+
+        Args:
+            path (str): the link.
+        """
+        return await _dry(
+            "readlink", (path,), lambda: self._vfs.readlink(path)
+        )
+
+    async def setattr(
+        self,
+        path: str,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+        nofollow: bool = False,
+    ) -> VfsExplanation:
+        """Explain ``session.vfs.setattr``.
+
+        Args:
+            path (str): the path.
+            mode (int | None): permission bits it would set.
+            uid (int | str | None): owner it would set.
+            gid (int | str | None): group it would set.
+            atime (str | None): ISO access time it would set.
+            mtime (str | None): ISO modification time it would set.
+            nofollow (bool): set a link entry's own attributes.
+        """
+        return await _dry(
+            "setattr",
+            (path,),
+            lambda: self._vfs.setattr(
+                path,
+                mode=mode,
+                uid=uid,
+                gid=gid,
+                atime=atime,
+                mtime=mtime,
+                nofollow=nofollow,
+            ),
+        )
+
+    async def getxattr(
+        self, path: str, name: str, *, nofollow: bool = False
+    ) -> VfsExplanation:
+        """Explain ``session.vfs.getxattr``.
+
+        Args:
+            path (str): the path.
+            name (str): the attribute.
+            nofollow (bool): read a link entry's own attributes.
+        """
+        return await _dry(
+            "getxattr",
+            (path,),
+            lambda: self._vfs.getxattr(path, name, nofollow=nofollow),
+        )
+
+    async def listxattr(
+        self, path: str, *, nofollow: bool = False
+    ) -> VfsExplanation:
+        """Explain ``session.vfs.listxattr``.
+
+        Args:
+            path (str): the path.
+            nofollow (bool): list a link entry's own attributes.
+        """
+        return await _dry(
+            "listxattr",
+            (path,),
+            lambda: self._vfs.listxattr(path, nofollow=nofollow),
+        )
+
+    async def setxattr(
+        self,
+        path: str,
+        name: str,
+        value: bytes,
+        *,
+        create: bool = False,
+        replace: bool = False,
+        nofollow: bool = False,
+    ) -> VfsExplanation:
+        """Explain ``session.vfs.setxattr``.
+
+        Args:
+            path (str): the path.
+            name (str): the attribute.
+            value (bytes): what it would store.
+            create (bool): only if the attribute is not set.
+            replace (bool): only if the attribute is set.
+            nofollow (bool): set on a link entry itself.
+        """
+        return await _dry(
+            "setxattr",
+            (path,),
+            lambda: self._vfs.setxattr(
+                path,
+                name,
+                value,
+                create=create,
+                replace=replace,
+                nofollow=nofollow,
+            ),
+        )
+
+    async def removexattr(
+        self, path: str, name: str, *, nofollow: bool = False
+    ) -> VfsExplanation:
+        """Explain ``session.vfs.removexattr``.
+
+        Args:
+            path (str): the path.
+            name (str): the attribute.
+            nofollow (bool): drop from a link entry itself.
+        """
+        return await _dry(
+            "removexattr",
+            (path,),
+            lambda: self._vfs.removexattr(path, name, nofollow=nofollow),
+        )
+
+    async def mkdir(self, path: str) -> VfsExplanation:
         """Explain ``session.vfs.mkdir``.
 
         Args:
@@ -167,7 +363,7 @@ class VfsExplainer:
         """
         return await _dry("mkdir", (path,), lambda: self._vfs.mkdir(path))
 
-    async def rmdir(self, path: str) -> Explanation:
+    async def rmdir(self, path: str) -> VfsExplanation:
         """Explain ``session.vfs.rmdir``.
 
         Args:
@@ -175,7 +371,7 @@ class VfsExplainer:
         """
         return await _dry("rmdir", (path,), lambda: self._vfs.rmdir(path))
 
-    async def unlink(self, path: str) -> Explanation:
+    async def unlink(self, path: str) -> VfsExplanation:
         """Explain ``session.vfs.unlink``.
 
         Args:
@@ -183,7 +379,7 @@ class VfsExplainer:
         """
         return await _dry("unlink", (path,), lambda: self._vfs.unlink(path))
 
-    async def rename(self, src: str, dst: str) -> Explanation:
+    async def rename(self, src: str, dst: str) -> VfsExplanation:
         """Explain ``session.vfs.rename``.
 
         Args:
@@ -194,7 +390,7 @@ class VfsExplainer:
             "rename", (src, dst), lambda: self._vfs.rename(src, dst)
         )
 
-    async def truncate(self, path: str, length: int) -> Explanation:
+    async def truncate(self, path: str, length: int) -> VfsExplanation:
         """Explain ``session.vfs.truncate``.
 
         Args:
@@ -207,42 +403,41 @@ class VfsExplainer:
 
 
 async def _dry(
-    op: str, argv: tuple[str, ...], call: Callable[[], Awaitable[Any]]
-) -> Explanation:
-    """Walk one op through its door as a dry run and say what its gates
-    answered.
+    call: str, paths: tuple[str, ...], run: Callable[[], Awaitable[Any]]
+) -> VfsExplanation:
+    """Walk one VFS call through its door as a dry run and say what its
+    gates answered.
 
     Args:
-        op (str): the op's name.
-        argv (tuple[str, ...]): its paths, as given.
-        call (Callable[[], Awaitable[Any]]): the op on the session's
+        call (str): the call's name.
+        paths (tuple[str, ...]): its path arguments, as given.
+        run (Callable[[], Awaitable[Any]]): the call on the session's
             facade.
 
     Raises:
-        RuntimeError: the op returned, so it ran past its gate, which
+        RuntimeError: the call returned, so it ran past its gate, which
             no door may let it do.
     """
-    trace: list[Explanation] = []
+    trace: list[VfsExplanation] = []
     token = set_explaining(trace)
     try:
-        await call()
+        await run()
     except Explained:
         pass
     except OSError as exc:
         if trace:
             raise
-        logger.debug("%s answered before its gate: %s", op, exc)
+        logger.debug("%s answered before its gate: %s", call, exc)
     else:
-        raise RuntimeError(f"{op} ran past its gate in a dry run")
+        raise RuntimeError(f"{call} ran past its gate in a dry run")
     finally:
         reset_explaining(token)
     if not trace:
-        return Explanation(command=op, argv=argv)
+        return VfsExplanation(call=call, paths=paths)
     shown = next((e for e in trace if e.error), trace[-1])
     return dataclasses.replace(
         shown,
-        command=op,
-        argv=argv,
-        paths=(),
+        call=call,
+        paths=paths,
         answers=tuple(a for e in trace for a in e.answers),
     )

@@ -70,8 +70,14 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     if (decision.outcome === Outcome.ASK) {
       return { kind: 'ask', reason: rule.reason, rule, rules: decision.asks }
     }
-    if (decision.matchedPath === null) return { kind: 'deny', reason: rule.reason }
-    return { kind: 'deny', reason: rule.reason, scope: 'operand', path: decision.matchedPath }
+    if (decision.matchedPath === null) return { kind: 'deny', reason: rule.reason, rule }
+    return {
+      kind: 'deny',
+      reason: rule.reason,
+      scope: 'operand',
+      path: decision.matchedPath,
+      rule,
+    }
   }
 
   preOps(ctx: OpsContext): Action | null {
@@ -85,7 +91,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     if (ruled === null) return null
     const [rule, asks] = ruled
     if (asks && gate === null && !lineRunning()) return { kind: 'ask', reason: rule.reason, rule }
-    return { kind: 'deny', reason: rule.reason }
+    return { kind: 'deny', reason: rule.reason, rule }
   }
 
   /**

@@ -501,13 +501,13 @@ class HttpSteps:
 
     async def explain(
         self, wid: str, session: str, command: str
-    ) -> list[tuple[str, int]]:
+    ) -> tuple[str, int]:
         said = await self._ok(
             "POST",
             f"/v1/workspaces/{wid}/explain/shell",
             json={"command": command, "session_id": session},
         )
-        return [(e["outcome"], e["exit_code"]) for e in said["explanations"]]
+        return said["outcome"], said["exit_code"]
 
     async def allow(self, wid: str, ask: str) -> None:
         await self._ok(
@@ -678,11 +678,11 @@ class CliSteps:
 
     async def explain(
         self, wid: str, session: str, command: str
-    ) -> list[tuple[str, int]]:
+    ) -> tuple[str, int]:
         said = await self._json(
             "workspace", "explain", wid, command, "--session", session
         )
-        return [(e["outcome"], e["exit_code"]) for e in said["explanations"]]
+        return said["outcome"], said["exit_code"]
 
     async def allow(self, wid: str, ask: str) -> None:
         await self._json("workspace", "allow", wid, ask)
@@ -819,12 +819,10 @@ class InAppSteps:
 
     async def explain(
         self, wid: str, session: str, command: str
-    ) -> list[tuple[str, int]]:
+    ) -> tuple[str, int]:
         explain = (await self.workspaces[wid].session(session)).explain
-        return [
-            (e.outcome.value, e.exit_code)
-            for e in await explain.shell(command)
-        ]
+        said = await explain.shell(command)
+        return said.outcome.value, said.exit_code
 
     async def allow(self, wid: str, ask: str) -> None:
         from mirage.policy.types import Outcome
@@ -937,10 +935,10 @@ async def run_steps(
                     )
                 }
             elif kind == "explain":
-                said = await steps.explain(
+                outcome, code = await steps.explain(
                     wid, step["session"], step["command"]
                 )
-                answer = {"text": " ".join(f"{o} {c}" for o, c in said)}
+                answer = {"text": f"{outcome} {code}"}
             elif kind in ("allow", "deny"):
                 pending = await steps.asks(wid)
                 await getattr(steps, kind)(wid, pending[0][0])

@@ -38,7 +38,7 @@ import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import type { WorkspaceOptions } from './workspace/types.ts'
 import type { Policy } from '../policy/base.ts'
-import type { Deny, Route } from '../policy/types.ts'
+import type { Deny, Route, ShellExplanation } from '../policy/types.ts'
 import type { RouteContext } from '../runtime/routing/index.ts'
 
 const ENC = new TextEncoder()
@@ -585,6 +585,11 @@ class NoSecrets implements Policy {
   }
 }
 
+/** The runtime each top-level command of an explained line would run on. */
+function runtimes(said: ShellExplanation): string[] {
+  return said.node.children.flatMap((node) => ('command' in node ? [node.runtime] : []))
+}
+
 async function placed(options: Partial<WorkspaceOptions>): Promise<Workspace> {
   return new Workspace(
     { '/': new RAMVFS() },
@@ -667,13 +672,13 @@ describe('the placement stage', () => {
       // The caller's own argument forces its runtime.
       const forced = await ws.shell('python3 -c "light"', { runtime: 'beta' })
       expect(DEC.decode(forced.stdout)).toBe('ran-beta\n')
-      const [said] = await ws.explain('python3 -c "light"')
-      expect(said?.placement.at(-1)).toEqual({
+      const said = await ws.explain('python3 -c "light"')
+      expect(said.answers.at(-1)).toEqual({
         kind: 'deny',
         reason: 'runtime beta declines this line',
         policy: 'runtimes.beta',
       })
-      expect(said?.exitCode).toBe(126)
+      expect(said.exitCode).toBe(126)
     } finally {
       await ws.close()
     }
@@ -685,21 +690,19 @@ describe('the placement stage', () => {
       policies: [new NoSecrets()],
     })
     try {
-      const [heavy] = await ws.explain('python3 -c "heavy"')
-      expect(heavy?.placement).toEqual([
-        { kind: 'route', runtime: 'beta', policy: 'PlacementPolicy' },
-      ])
-      expect([heavy?.runtime, heavy?.exitCode]).toEqual(['beta', 0])
-      const [light] = await ws.explain('python3 -c "light"')
-      expect([light?.placement, light?.runtime]).toEqual([[], 'alpha'])
-      // A placement deny refuses the line on its first command, in the
-      // words the run would print.
-      const [secret, echo] = await ws.explain('python3 -c "secret"; echo x')
-      expect(secret?.placement).toEqual([
+      const heavy = await ws.explain('python3 -c "heavy"')
+      expect(heavy.answers).toEqual([{ kind: 'route', runtime: 'beta', policy: 'PlacementPolicy' }])
+      expect([runtimes(heavy), heavy.exitCode]).toEqual([['beta'], 0])
+      const light = await ws.explain('python3 -c "light"')
+      expect([light.answers, runtimes(light)]).toEqual([[], ['alpha']])
+      // A placement deny refuses the line in the words the run would
+      // print, and places none of it.
+      const secret = await ws.explain('python3 -c "secret"; echo x')
+      expect(secret.answers).toEqual([
         { kind: 'deny', reason: 'secrets stay put', policy: 'NoSecrets' },
       ])
-      expect([secret?.exitCode, secret?.stderr]).toEqual([126, 'python3: Permission denied\n'])
-      expect([echo?.exitCode, echo?.runtime]).toEqual([0, ''])
+      expect([secret.exitCode, secret.stderr]).toEqual([126, 'python3: Permission denied\n'])
+      expect(runtimes(secret)).toEqual(['', ''])
     } finally {
       await ws.close()
     }

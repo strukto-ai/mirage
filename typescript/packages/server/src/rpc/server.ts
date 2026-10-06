@@ -20,7 +20,7 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { Explanation } from '@struktoai/mirage-core/policy/types'
+import type { VfsExplanation } from '@struktoai/mirage-core/policy/types'
 import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import { TOOLS } from '../mcp/server.ts'
 import {
@@ -192,11 +192,8 @@ export class MirageRpcServer {
         await vfs().truncate(text(params, 'path'), length)
         return {}
       },
-      'explain/shell': async (params) => ({
-        explanations: (await this.session.explain.shell(text(params, 'command'))).map(
-          explanationToDict,
-        ),
-      }),
+      'explain/shell': async (params) =>
+        explanationToDict(await this.session.explain.shell(text(params, 'command'))),
       ...Object.fromEntries(
         VFS_OPS.map((op) => [
           `explain/vfs/${op}`,
@@ -345,7 +342,7 @@ export class MirageRpcServer {
    * One op's dry run off its params, read as `vfs/<op>` reads them.
    * Mirrors Python's `_explain_vfs`.
    */
-  private explainVfs(op: (typeof VFS_OPS)[number], params: Params): Promise<Explanation> {
+  private explainVfs(op: (typeof VFS_OPS)[number], params: Params): Promise<VfsExplanation> {
     const explain = this.session.explain.vfs
     const path = (): string => text(params, 'path')
     switch (op) {

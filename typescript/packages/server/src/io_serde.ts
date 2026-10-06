@@ -12,7 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Ask, Deny, Explanation, Route } from '@struktoai/mirage-core/policy/types'
+import type {
+  Ask,
+  CommandExplanation,
+  Deny,
+  Route,
+  ShellExplanation,
+  ShellNode,
+  VfsExplanation,
+} from '@struktoai/mirage-core/policy/types'
 import type { JsonValue, Refusal } from '@struktoai/mirage-core/types'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
@@ -67,18 +75,18 @@ function answerToDict(action: Deny | Ask | Route): Record<string, JsonValue> {
   return { kind: action.kind, reason: action.reason, policy: action.policy ?? '' }
 }
 
-/** An explanation as the server's doors answer it. Mirrors Python's `explanation_to_dict`. */
-export function explanationToDict(expl: Explanation): Record<string, JsonValue> {
-  return {
-    command: expl.command,
-    argv: [...expl.argv],
+/**
+ * An explanation as the server's doors answer it: a line with its tree
+ * (`explain/shell`) or a VFS call (`explain/vfs/<call>`). Mirrors Python's
+ * `explanation_to_dict`.
+ */
+export function explanationToDict(
+  expl: ShellExplanation | VfsExplanation | CommandExplanation,
+): Record<string, JsonValue> {
+  const verdict: Record<string, JsonValue> = {
     outcome: expl.outcome,
     reason: expl.reason,
     source: expl.source,
-    matched_path: expl.matchedPath,
-    paths: [...expl.paths],
-    exit_code: expl.exitCode,
-    stderr: expl.stderr,
     refusal:
       expl.refusal === null
         ? null
@@ -90,8 +98,33 @@ export function explanationToDict(expl: Explanation): Record<string, JsonValue> 
             ask_id: expl.refusal.askId,
           },
     answers: expl.answers.map(answerToDict),
-    placement: expl.placement.map(answerToDict),
-    runtime: expl.runtime,
-    error: expl.error,
   }
+  if ('line' in expl) {
+    return {
+      line: expl.line,
+      ...verdict,
+      exit_code: expl.exitCode,
+      stderr: expl.stderr,
+      node: nodeToDict(expl.node),
+    }
+  }
+  if ('call' in expl) {
+    return { call: expl.call, paths: [...expl.paths], ...verdict, error: expl.error }
+  }
+  return {
+    type: expl.type,
+    text: expl.text,
+    command: expl.command,
+    argv: [...expl.argv],
+    ...verdict,
+    runtime: expl.runtime,
+    operands: expl.operands.map((o) => ({ text: o.text, path: o.path, matched: o.matched })),
+    children: expl.children.map(nodeToDict),
+  }
+}
+
+/** One node of a line's tree as the doors carry it. Mirrors Python's `_node_to_dict`. */
+function nodeToDict(node: ShellNode | CommandExplanation): Record<string, JsonValue> {
+  if ('command' in node) return explanationToDict(node)
+  return { type: node.type, text: node.text, children: node.children.map(nodeToDict) }
 }

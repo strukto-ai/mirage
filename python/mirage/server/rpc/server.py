@@ -465,7 +465,7 @@ class MirageRpcServer:
         said = await self.hop(
             self._session.explain.shell(_text(params, "command"))
         )
-        return {"explanations": [explanation_to_dict(e) for e in said]}
+        return explanation_to_dict(said)
 
     async def _explain_vfs(self, op: str, params: Params) -> JsonValue:
         args, kwargs = _vfs_args(op, params)

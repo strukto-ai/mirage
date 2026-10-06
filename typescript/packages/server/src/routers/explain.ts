@@ -50,7 +50,7 @@ export function registerExplainRoutes(app: FastifyInstance, deps: ExplainRoutesD
         return reply.status(404).send({ detail: 'session not found' })
       }
       const said = await ws.explain(body.command, sessionId)
-      return { explanations: said.map(explanationToDict) }
+      return explanationToDict(said)
     },
   )
 }

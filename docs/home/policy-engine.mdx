@@ -241,12 +241,12 @@ Scripts come in two jobs, and each job runs one way:
 ## Dry runs
 
 `session.explain` runs a session's doors as a dry run under the same
-names: `session.explain.shell(line)` gives one `Explanation` per command
-with the exact `exit_code` and `stderr` the agent would see, every
-policy's answer to the command (`answers`), every answer at
-`pre_execute` (`placement`) and the runtime that would serve the
-command (`runtime`); `session.explain.vfs.<op>(...)` walks the real op
-door and stops at its gate, with every `pre_ops` answer and the error
-the call would raise. Each is asked once: the answers shown are the
-ones the outcome came from. A hide is never among the answers; see
-[Dry runs](/home/permissions#dry-runs).
+names. `session.explain.shell(line)` gives the line with the exact
+`exit_code` and `stderr` the agent would see, every answer at
+`pre_execute` (`answers`) and its parse tree, each command in it with
+every policy's answer to it (`pre_command`) and the runtime that would
+serve it (`runtime`). `session.explain.vfs.<call>(...)` walks the real
+door of a POSIX-shaped VFS call and stops at its gate, with every
+`pre_ops` answer and the error the call would raise. Each is asked
+once: the answers shown are the ones the outcome came from. A hide is
+never among the answers; see [Dry runs](/home/permissions#dry-runs).

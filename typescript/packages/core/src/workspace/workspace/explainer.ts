@@ -15,7 +15,8 @@
 import { runExplaining } from '../../context/session_context.ts'
 import type { Ops } from '../../ops/ops.ts'
 import { Explained } from '../../policy/errors.ts'
-import { Outcome, type Explanation } from '../../policy/types.ts'
+import { Outcome, type ShellExplanation, type VfsExplanation } from '../../policy/types.ts'
+import type { SetAttrFields } from '../../types.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { isFsError } from '../../utils/errors.ts'
 import type { Workspace } from './workspace.ts'
@@ -23,7 +24,7 @@ import type { Workspace } from './workspace.ts'
 /**
  * A session's calls explained instead of run, under the session's own
  * names: `explain.shell(line)` is `session.shell(line)` and
- * `explain.vfs.<op>(...)` is `session.vfs.<op>(...)`, each answering what
+ * `explain.vfs.<call>(...)` is `session.vfs.<call>(...)`, each answering what
  * the policies would decide.
  *
  * Nothing runs: no command, no backend or cache read, no grant spent and
@@ -41,36 +42,36 @@ export class Explainer {
   ) {}
 
   /**
-   * What a line would do: one explanation per command the gate reads,
-   * with every policy's answer and the line's placement
-   * (`Workspace.explain`).
+   * What a line would do: its verdict, where it would run and every
+   * command in it, as a tree (`Workspace.explain`).
    */
-  shell(line: string): Promise<Explanation[]> {
+  shell(line: string): Promise<ShellExplanation> {
     return this.ws.explain(line, this.sessionId ?? '')
   }
 
-  /** The session's file ops, explained. */
+  /** The session's VFS calls, explained. */
   get vfs(): VfsExplainer {
     return new VfsExplainer(this.ops)
   }
 }
 
 /**
- * `session.vfs` explained: each op takes the arguments the real one does
- * and walks the same door (the path resolved, links followed, hides, the
- * mount mode, every policy), which stops at the op gate with what it
+ * `session.vfs` explained: each VFS call (the POSIX-shaped calls: `read`,
+ * `pwrite`, `rename`, `setxattr`, ...) takes the arguments the real one
+ * does and walks the same door (the path resolved, links followed, hides,
+ * the mount mode, every policy), which stops at the gate with what it
  * would answer.
  *
- * An op the door answers before any policy is asked (a path that is
- * hidden or missing, a rename across mounts) explains as an op no policy
+ * A call the door answers before any policy is asked (a path that is
+ * hidden or missing, a rename across mounts) explains as a call no policy
  * refuses: a dry run says what the policies decide, not whether the call
  * would otherwise succeed, which is what keeps a hide from surfacing; for
- * the same reason an op's explanation names no paths beyond the `argv` it
- * was asked about, since what the door resolved a path to would tell a
- * hidden one from a missing one. A rename passes two gates, its source and
+ * the same reason an explanation names no paths beyond the ones it was
+ * asked about, since what the door resolved a path to would tell a hidden
+ * one from a missing one. A rename passes two gates, its source and
  * then its destination; its explanation is the first that refuses, with
  * the answers of both. A restore's pending drift checks are no policy's
- * answer either: the dry run leaves them to the first op that runs, so a
+ * answer either: the dry run leaves them to the first call that runs, so a
  * policy reading while it decides reads the restored state.
  * Mirrors the Python `VfsExplainer`.
  */
@@ -81,109 +82,171 @@ export class VfsExplainer {
   read(
     path: string,
     options: { offset?: number; size?: number | null } = {},
-  ): Promise<Explanation> {
+  ): Promise<VfsExplanation> {
     return dry('read', [path], () => this.ops.read(path, options))
   }
 
   /** Explain `session.vfs.write`. */
-  write(path: string, data: Uint8Array | string): Promise<Explanation> {
+  write(path: string, data: Uint8Array | string): Promise<VfsExplanation> {
     return dry('write', [path], () => this.ops.write(path, data))
   }
 
   /** Explain `session.vfs.append`. */
-  append(path: string, data: Uint8Array): Promise<Explanation> {
+  append(path: string, data: Uint8Array): Promise<VfsExplanation> {
     return dry('append', [path], () => this.ops.append(path, data))
   }
 
   /** Explain `session.vfs.stat`; `nofollow` stats a link itself, not its target. */
-  stat(path: string, opts: { nofollow?: boolean } = {}): Promise<Explanation> {
+  stat(path: string, opts: { nofollow?: boolean } = {}): Promise<VfsExplanation> {
     return dry('stat', [path], () => this.ops.stat(path, undefined, opts))
   }
 
   /** Explain `session.vfs.readdir`. */
-  readdir(path: string): Promise<Explanation> {
+  readdir(path: string): Promise<VfsExplanation> {
     return dry('readdir', [path], () => this.ops.readdir(path))
   }
 
   /** Explain `session.vfs.exists`, judged as the stat it makes. */
-  exists(path: string): Promise<Explanation> {
+  exists(path: string): Promise<VfsExplanation> {
     return dry('exists', [path], () => this.ops.stat(path))
   }
 
+  /** Explain `session.vfs.isDir`, judged as the stat it makes. */
+  isDir(path: string): Promise<VfsExplanation> {
+    return dry('isDir', [path], () => this.ops.stat(path))
+  }
+
+  /** Explain `session.vfs.isFile`, judged as the stat it makes. */
+  isFile(path: string): Promise<VfsExplanation> {
+    return dry('isFile', [path], () => this.ops.stat(path))
+  }
+
+  /** Explain `session.vfs.cat`, judged as the read it makes. */
+  cat(path: string): Promise<VfsExplanation> {
+    return dry('cat', [path], () => this.ops.read(path))
+  }
+
+  /** Explain `session.vfs.listFiles`, judged as the readdir it makes. */
+  listFiles(path: string): Promise<VfsExplanation> {
+    return dry('listFiles', [path], () => this.ops.readdir(path))
+  }
+
+  /** Explain `session.vfs.pwrite`. */
+  pwrite(path: string, data: Uint8Array, offset: number): Promise<VfsExplanation> {
+    return dry('pwrite', [path], () => this.ops.pwrite(path, data, offset))
+  }
+
+  /** Explain `session.vfs.create`. */
+  create(path: string): Promise<VfsExplanation> {
+    return dry('create', [path], () => this.ops.create(path))
+  }
+
+  /** Explain `session.vfs.symlink`: a link at `path` pointing to `target`. */
+  symlink(path: string, target: string): Promise<VfsExplanation> {
+    return dry('symlink', [path], () => this.ops.symlink(path, target))
+  }
+
+  /** Explain `session.vfs.readlink`. */
+  readlink(path: string): Promise<VfsExplanation> {
+    return dry('readlink', [path], () => this.ops.readlink(path))
+  }
+
+  /** Explain `session.vfs.setattr`. */
+  setattr(path: string, attrs: SetAttrFields = {}): Promise<VfsExplanation> {
+    return dry('setattr', [path], () => this.ops.setattr(path, attrs))
+  }
+
+  /** Explain `session.vfs.getxattr`. */
+  getxattr(path: string, name: string, opts: { nofollow?: boolean } = {}): Promise<VfsExplanation> {
+    return dry('getxattr', [path], () => this.ops.getxattr(path, name, opts))
+  }
+
+  /** Explain `session.vfs.listxattr`. */
+  listxattr(path: string, opts: { nofollow?: boolean } = {}): Promise<VfsExplanation> {
+    return dry('listxattr', [path], () => this.ops.listxattr(path, opts))
+  }
+
+  /** Explain `session.vfs.setxattr`. */
+  setxattr(
+    path: string,
+    name: string,
+    value: Uint8Array,
+    opts: { create?: boolean; replace?: boolean; nofollow?: boolean } = {},
+  ): Promise<VfsExplanation> {
+    return dry('setxattr', [path], () => this.ops.setxattr(path, name, value, opts))
+  }
+
+  /** Explain `session.vfs.removexattr`. */
+  removexattr(
+    path: string,
+    name: string,
+    opts: { nofollow?: boolean } = {},
+  ): Promise<VfsExplanation> {
+    return dry('removexattr', [path], () => this.ops.removexattr(path, name, opts))
+  }
+
   /** Explain `session.vfs.mkdir`. */
-  mkdir(path: string): Promise<Explanation> {
+  mkdir(path: string): Promise<VfsExplanation> {
     return dry('mkdir', [path], () => this.ops.mkdir(path))
   }
 
   /** Explain `session.vfs.rmdir`. */
-  rmdir(path: string): Promise<Explanation> {
+  rmdir(path: string): Promise<VfsExplanation> {
     return dry('rmdir', [path], () => this.ops.rmdir(path))
   }
 
   /** Explain `session.vfs.unlink`. */
-  unlink(path: string): Promise<Explanation> {
+  unlink(path: string): Promise<VfsExplanation> {
     return dry('unlink', [path], () => this.ops.unlink(path))
   }
 
   /** Explain `session.vfs.rename`. */
-  rename(src: string, dst: string): Promise<Explanation> {
+  rename(src: string, dst: string): Promise<VfsExplanation> {
     return dry('rename', [src, dst], () => this.ops.rename(src, dst))
   }
 
   /** Explain `session.vfs.truncate`. */
-  truncate(path: string, length: number): Promise<Explanation> {
+  truncate(path: string, length: number): Promise<VfsExplanation> {
     return dry('truncate', [path], () => this.ops.truncate(path, length))
   }
 }
 
 /**
- * Walk one op through its door as a dry run and say what its gates
- * answered. Throws when the op returned, since it then ran past its gate,
- * which no door may let it do, and on a runtime whose async context does
- * not isolate tasks, where the dry run would reach another task's ops.
+ * Walk one VFS call through its door as a dry run and say what its gates
+ * answered. Throws when the call returned, since it then ran past its
+ * gate, which no door may let it do, and on a runtime whose async context
+ * does not isolate tasks, where the dry run would reach another task's
+ * calls.
  */
 async function dry(
-  op: string,
-  argv: readonly string[],
-  call: () => Promise<unknown>,
-): Promise<Explanation> {
+  call: string,
+  paths: readonly string[],
+  run: () => Promise<unknown>,
+): Promise<VfsExplanation> {
   if (!asyncContextIsolatesTasks) {
-    throw new Error(`explain.vfs.${op} needs a runtime that isolates async tasks`)
+    throw new Error(`explain.vfs.${call} needs a runtime that isolates async tasks`)
   }
-  const trace: Explanation[] = []
+  const trace: VfsExplanation[] = []
   let ran = false
   try {
-    await runExplaining(trace, call)
+    await runExplaining(trace, run)
     ran = true
   } catch (err) {
     if (!(err instanceof Explained) && (trace.length > 0 || !isFsError(err))) throw err
   }
-  if (ran) throw new Error(`${op} ran past its gate in a dry run`)
+  if (ran) throw new Error(`${call} ran past its gate in a dry run`)
   const shown = trace.find((e) => e.error !== '') ?? trace[trace.length - 1]
   if (shown === undefined) {
     return {
-      command: op,
-      argv,
+      call,
+      paths,
       outcome: Outcome.ALLOW,
-      rule: null,
       reason: '',
       source: '',
-      matchedPath: null,
-      paths: [],
-      exitCode: 0,
-      stderr: '',
-      refusal: null,
       answers: [],
-      placement: [],
-      runtime: '',
+      refusal: null,
       error: '',
     }
   }
-  return {
-    ...shown,
-    command: op,
-    argv,
-    paths: [],
-    answers: trace.flatMap((e) => e.answers),
-  }
+  return { ...shown, call, paths, answers: trace.flatMap((e) => e.answers) }
 }

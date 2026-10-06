@@ -20,18 +20,63 @@ import pytest_asyncio
 from pydantic import BaseModel, ConfigDict
 
 from mirage import Session, Workspace
-from mirage.policy import Action, Ask, CommandContext, Deny, Policy
+from mirage.context.session_context import (
+    reset_explaining,
+    reset_refusal_sink,
+    set_explaining,
+    set_refusal_sink,
+)
+from mirage.policy import (
+    Action,
+    Ask,
+    CommandContext,
+    CommandExplanation,
+    Deny,
+    Policy,
+)
 from mirage.policy.match import Outcome
-from mirage.policy.types import Scope
+from mirage.policy.types import DryRun, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.secrets import registry as secrets_registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
+from mirage.shell import parse
 from mirage.shell.console import JobConsole
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.node.explain import Judgment, explain_line
+
+
+async def _judged(
+    ws: Workspace, line: str, session_id: str = ""
+) -> list[Judgment]:
+    """A line's per-command judgments, read as ``Workspace.explain``
+    reads them.
+
+    Args:
+        ws (Workspace): the workspace to judge the line in.
+        line (str): the line to judge.
+        session_id (str): whose profile to judge it under; the default
+            session when empty.
+    """
+    await ws.ensure_sessions_loaded()
+    session = ws.get_session(session_id or ws.default_session_id)
+    sink_token = set_refusal_sink(lambda refusal: None)
+    token = set_explaining(DryRun.DECIDING)
+    try:
+        judged = await explain_line(
+            parse(line),
+            session,
+            ws._registry,
+            ws._namespace,
+            whole_line=ws._runtimes.whole_line(None) is not None,
+        )
+    finally:
+        reset_explaining(token)
+        reset_refusal_sink(sink_token)
+    return [one.judgment for one in judged]
 
 
 class _FakeConfig(BaseModel):
@@ -119,20 +164,20 @@ async def ws():
 
 @pytest.mark.asyncio
 async def test_explain_answers_each_verb_and_names_the_rule(ws):
-    (allowed,) = await ws.explain("cat /data/a.txt", "s")
+    (allowed,) = await _judged(ws, "cat /data/a.txt", "s")
     assert allowed.outcome is Outcome.ALLOW
     assert allowed.exit_code == 0
     assert allowed.stderr == ""
     assert allowed.rule is None
 
-    (denied,) = await ws.explain("rm /data/prod/x.txt", "s")
+    (denied,) = await _judged(ws, "rm /data/prod/x.txt", "s")
     assert denied.outcome is Outcome.DENY
     assert denied.rule is not None
     assert denied.reason == "production data is protected"
     assert denied.source == "top"
     assert denied.matched_path == "/data/prod/x.txt"
 
-    (asked,) = await ws.explain("git push origin main", "s")
+    (asked,) = await _judged(ws, "git push origin main", "s")
     assert asked.outcome is Outcome.ASK
     assert asked.reason == "pushes need sign-off"
 
@@ -142,7 +187,7 @@ async def test_a_word_the_session_cannot_see_is_deny_at_127(ws):
     # Both refusals the allow list produces are DENY with no rule; the
     # exit code is what separates a head word the session cannot see
     # from a line no allow entry covers.
-    (missing,) = await ws.explain("gerp x", "s")
+    (missing,) = await _judged(ws, "gerp x", "s")
     assert missing.outcome is Outcome.DENY
     assert missing.rule is None
     assert missing.source == "commands.allow"
@@ -175,7 +220,7 @@ async def test_a_hidden_word_a_builtin_runs_is_reported_in_its_words(
     workspace.create_session("s", profile="r")
     try:
         ran = await workspace.shell(line, session_id="s")
-        missing = (await workspace.explain(line, "s"))[-1]
+        missing = (await _judged(workspace, line, "s"))[-1]
     finally:
         await workspace.close()
     assert (ran.exit_code, ran.stderr) == (127, said.encode())
@@ -185,8 +230,8 @@ async def test_a_hidden_word_a_builtin_runs_is_reported_in_its_words(
 
 @pytest.mark.asyncio
 async def test_explain_reads_every_command_of_a_line(ws):
-    first, second = await ws.explain(
-        "cat /data/a.txt && rm /data/prod/x.txt", "s"
+    first, second = await _judged(
+        ws, "cat /data/a.txt && rm /data/prod/x.txt", "s"
     )
     assert (first.command, first.outcome) == ("cat", Outcome.ALLOW)
     assert (second.command, second.outcome) == ("rm", Outcome.DENY)
@@ -196,7 +241,7 @@ async def test_explain_reads_every_command_of_a_line(ws):
 async def test_explain_says_exactly_what_the_run_would_say(ws):
     for line in ("rm /data/prod/x.txt", "git push origin main", "gerp x"):
         ran = await ws.shell(line, session_id="s")
-        (said,) = await ws.explain(line, "s")
+        (said,) = await _judged(ws, line, "s")
         assert said.exit_code == ran.exit_code
         assert said.stderr == (ran.stderr or b"").decode()
 
@@ -280,7 +325,7 @@ async def test_explain_reads_a_cd_the_same_way_the_run_does(ws):
     # host asking about a line and the agent typing it cannot be told
     # different things about where the line ends up.
     line = "cd /data/prod && rm x.txt"
-    _, removed = await ws.explain(line, "s")
+    _, removed = await _judged(ws, line, "s")
     assert removed.outcome is Outcome.DENY
     ran = await ws.shell(line, session_id="s")
     assert removed.exit_code == ran.exit_code
@@ -321,10 +366,17 @@ async def test_a_grant_the_session_holds_shows_the_line_running(ws):
     await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.SESSION)
     # The document still says ask, because that is what it says; the
     # exit code says 0, because that is what the line would now do.
-    (asked,) = await ws.explain("git push origin main", "s")
+    (asked,) = await _judged(ws, "git push origin main", "s")
     assert asked.outcome is Outcome.ASK
     assert asked.exit_code == 0
     assert asked.stderr == ""
+    said = await ws.explain("git push origin main", "s")
+    assert (said.outcome, said.reason, said.exit_code, said.refusal) == (
+        Outcome.ASK,
+        "pushes need sign-off",
+        0,
+        None,
+    )
 
 
 SEALED = {
@@ -359,7 +411,7 @@ async def test_explain_reads_the_statements_redirect_target(sealed):
     # command's own gate covers, so admission reads the target as a word
     # of the command. The dry run has to read it the same way or it
     # answers ALLOW for a line the run refuses.
-    (said,) = await sealed.explain("echo x > /data/prod/x.txt", "s")
+    (said,) = await _judged(sealed, "echo x > /data/prod/x.txt", "s")
     assert said.outcome is Outcome.DENY
     assert said.reason == "sealed until review"
 
@@ -646,7 +698,7 @@ async def test_an_out_of_band_grant_stays_with_a_nested_background_job(ws):
     ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert len(ws.decisions.list("s")) == 1
-    (elsewhere,) = await ws.explain("cat /data/secret.txt", "s")
+    (elsewhere,) = await _judged(ws, "cat /data/secret.txt", "s")
     assert elsewhere.outcome is Outcome.ASK
     waited = await ws.shell("wait", session_id="s")
     assert waited.exit_code == 0
@@ -878,7 +930,7 @@ async def test_an_expanded_name_is_explained_as_the_route_reads_it():
         )
         try:
             ws.create_session("s", profile="r")
-            said = await ws.explain(line, "s")
+            said = await _judged(ws, line, "s")
             ran = await ws.shell(line, session_id="s")
             assert ran.exit_code == code
             assert [(e.exit_code, e.stderr) for e in said if e.exit_code] == (
@@ -936,7 +988,7 @@ async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
                 0,
             ),
         ):
-            said = await ws.explain(line, session)
+            said = await _judged(ws, line, session)
             ran = await ws.shell(line, session_id=session)
             err = await ran.stderr_str()
             assert ran.exit_code == code, err
@@ -1477,17 +1529,19 @@ async def test_explain_shows_every_policys_answer_in_chain_order():
         policies=[_AskRm(), _DenyRm()],
     )
     try:
-        [expl] = await ws.explain("rm /data/x")
+        said = await ws.explain("rm /data/x")
+        [rm] = said.node.children
+        assert isinstance(rm, CommandExplanation)
         # The Ask comes first and is still shown: no answer stops the
         # loop, and the Deny is what the line meets.
-        assert expl.answers == (
+        assert rm.answers == (
             Ask("sign-off", policy="_AskRm"),
             Deny("no", policy="_DenyRm"),
         )
-        assert (expl.exit_code, expl.refusal and expl.refusal.reason) == (
+        assert (said.exit_code, said.refusal and said.refusal.reason) == (
             126,
             "no",
         )
-        assert await Session(ws, None).explain.shell("rm /data/x") == [expl]
+        assert await Session(ws, None).explain.shell("rm /data/x") == said
     finally:
         await ws.close()

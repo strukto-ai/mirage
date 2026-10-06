@@ -67,6 +67,7 @@ from mirage.policy.types import (
     Claim,
     Claimant,
     CommandContext,
+    CommandExplanation,
     CommandRule,
     Decision,
     Deny,
@@ -88,6 +89,10 @@ from mirage.policy.types import (
     SessionContext,
     SessionDecisionsQuery,
     SessionScriptsQuery,
+    ShellExplanation,
+    ShellNode,
+    ShellOperand,
+    VfsExplanation,
 )
 
 __all__ = [
@@ -98,6 +103,7 @@ __all__ = [
     "ask_rule",
     "AskHandler",
     "CommandContext",
+    "CommandExplanation",
     "CommandRule",
     "CommandsBlock",
     "CompiledProfile",
@@ -155,6 +161,10 @@ __all__ = [
     "SessionDecisionsQuery",
     "SessionProfile",
     "SessionScriptsQuery",
+    "ShellExplanation",
+    "ShellNode",
+    "ShellOperand",
     "VALIDITY",
     "VarsBlock",
+    "VfsExplanation",
 ]

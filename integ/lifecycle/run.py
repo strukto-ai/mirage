@@ -33,12 +33,15 @@ from mirage.policy.match import Outcome
 from mirage.policy.types import (
     Ask,
     CommandContext,
+    CommandExplanation,
     Deny,
-    Explanation,
     OpsContext,
     Route,
     Scope,
     SessionContext,
+    ShellExplanation,
+    ShellNode,
+    VfsExplanation,
 )
 from mirage.process.types import SpawnRequest
 from mirage.runtime.routing import RouteContext
@@ -117,19 +120,39 @@ def answered(answers: tuple[Deny | Ask | Route, ...]) -> list[dict[str, Any]]:
     ]
 
 
-def explained(expl: Explanation) -> dict[str, Any]:
-    """An explanation as a case pins it."""
-    return {
-        "command": expl.command,
+def explained(expl: ShellExplanation | VfsExplanation) -> dict[str, Any]:
+    """An explanation as a case pins it: a VFS call's verdict, or a
+    line's with its commands in the order the line reads them."""
+    verdict = {
         "outcome": expl.outcome.value,
+        "reason": expl.reason,
+        "answers": answered(expl.answers),
+        "refusal": expl.refusal.kind if expl.refusal is not None else None,
+    }
+    if isinstance(expl, VfsExplanation):
+        return {"call": expl.call, **verdict, "error": expl.error}
+    return {
+        **verdict,
         "exit_code": expl.exit_code,
         "stderr": expl.stderr,
-        "answers": answered(expl.answers),
-        "placement": answered(expl.placement),
-        "runtime": expl.runtime,
-        "refusal": expl.refusal.kind if expl.refusal is not None else None,
-        "error": expl.error,
+        "commands": [
+            {
+                "command": c.command,
+                "outcome": c.outcome.value,
+                "answers": answered(c.answers),
+                "runtime": c.runtime,
+            }
+            for c in commands_of(expl.node)
+        ],
     }
+
+
+def commands_of(
+    node: ShellNode | CommandExplanation,
+) -> list[CommandExplanation]:
+    """Every command under a node of a line's tree, in source order."""
+    mine = [node] if isinstance(node, CommandExplanation) else []
+    return mine + [c for child in node.children for c in commands_of(child)]
 
 
 class SlowSink(JobConsole):
@@ -331,7 +354,7 @@ async def action(
             )
     elif op == "explain":
         explain = Session(ws, step.get("session")).explain
-        return [explained(e) for e in await explain.shell(step["command"])]
+        return explained(await explain.shell(step["command"]))
     elif op == "explain_vfs":
         vfs = Session(ws, step.get("session")).explain.vfs
         args = [

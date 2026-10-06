@@ -59,9 +59,14 @@ describe('session.explain.vfs', () => {
   it('explains each op as the door answers', async () => {
     const explain = new Session(ws, 'agent').explain
     const sealed = await explain.vfs.read('/data/sec/k')
-    expect([sealed.command, sealed.outcome, sealed.error]).toEqual(['read', Outcome.DENY, 'EACCES'])
+    expect([sealed.call, sealed.outcome, sealed.source, sealed.error]).toEqual([
+      'read',
+      Outcome.DENY,
+      'top',
+      'EACCES',
+    ])
     expect(sealed.refusal?.reason).toBe('sealed')
-    expect(sealed.answers).toEqual([
+    expect(sealed.answers).toMatchObject([
       { kind: 'deny', reason: 'sealed', policy: 'PermissionsPolicy' },
     ])
     const asked = await explain.vfs.write('/data/out/a', 'x')
@@ -84,13 +89,13 @@ describe('session.explain.vfs', () => {
   it('follows the door’s own path', async () => {
     const explain = new Session(ws, 'agent').explain
     const linked = await explain.vfs.read('/data/link')
-    expect([linked.argv, linked.error, linked.refusal?.reason]).toEqual([
+    expect([linked.paths, linked.error, linked.refusal?.reason]).toEqual([
       ['/data/link'],
       'EACCES',
       'sealed',
     ])
     const moved = await explain.vfs.rename('/data/a', '/data/sec/b')
-    expect([moved.argv, moved.error, moved.refusal?.reason]).toEqual([
+    expect([moved.paths, moved.error, moved.refusal?.reason]).toEqual([
       ['/data/a', '/data/sec/b'],
       'EACCES',
       'sealed',
@@ -101,10 +106,10 @@ describe('session.explain.vfs', () => {
     const explain = new Session(ws, 'agent').explain
     const hidden = await explain.vfs.read('/data/vault/k')
     const missing = await explain.vfs.read('/data/nothing')
-    expect(hidden).toEqual({ ...missing, argv: ['/data/vault/k'] })
+    expect(hidden).toEqual({ ...missing, paths: ['/data/vault/k'] })
     expect([missing.outcome, missing.error]).toEqual([Outcome.ALLOW, ''])
     const exists = await explain.vfs.exists('/data/nothing')
-    expect([exists.command, exists.argv]).toEqual(['exists', ['/data/nothing']])
+    expect([exists.call, exists.paths]).toEqual(['exists', ['/data/nothing']])
   })
 
   it('leaves the drift checks pending', async () => {

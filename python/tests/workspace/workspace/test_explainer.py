@@ -52,13 +52,16 @@ async def ws():
 async def test_vfs_explains_each_op_as_the_door_answers(ws):
     explain = Session(ws, "agent").explain
     sealed = await explain.vfs.read("/data/sec/k")
-    assert (sealed.command, sealed.outcome, sealed.error) == (
+    assert (sealed.call, sealed.outcome, sealed.source, sealed.error) == (
         "read",
         Outcome.DENY,
+        "top",
         "EACCES",
     )
     assert sealed.refusal is not None and sealed.refusal.reason == "sealed"
-    assert sealed.answers == (Deny("sealed", policy="PermissionsPolicy"),)
+    [answer] = sealed.answers
+    assert isinstance(answer, Deny)
+    assert (answer.reason, answer.policy) == ("sealed", "PermissionsPolicy")
     asked = await explain.vfs.write("/data/out/a", b"x")
     assert (asked.outcome, asked.error) == (Outcome.ASK, "EACCES")
     assert asked.refusal is not None and asked.refusal.kind == "pending"
@@ -78,14 +81,14 @@ async def test_vfs_follows_the_doors_own_path(ws):
     explain = Session(ws, "agent").explain
     linked = await explain.vfs.read("/data/link")
     assert linked.refusal is not None
-    assert (linked.argv, linked.error, linked.refusal.reason) == (
+    assert (linked.paths, linked.error, linked.refusal.reason) == (
         ("/data/link",),
         "EACCES",
         "sealed",
     )
     moved = await explain.vfs.rename("/data/a", "/data/sec/b")
     assert moved.refusal is not None
-    assert (moved.argv, moved.error, moved.refusal.reason) == (
+    assert (moved.paths, moved.error, moved.refusal.reason) == (
         ("/data/a", "/data/sec/b"),
         "EACCES",
         "sealed",
@@ -97,10 +100,10 @@ async def test_a_hidden_path_explains_like_one_nothing_refuses(ws):
     explain = Session(ws, "agent").explain
     hidden = await explain.vfs.read("/data/vault/k")
     missing = await explain.vfs.read("/data/nothing")
-    assert hidden == dataclasses.replace(missing, argv=("/data/vault/k",))
+    assert hidden == dataclasses.replace(missing, paths=("/data/vault/k",))
     assert (missing.outcome, missing.error) == (Outcome.ALLOW, "")
     exists = await explain.vfs.exists("/data/nothing")
-    assert (exists.command, exists.argv) == ("exists", ("/data/nothing",))
+    assert (exists.call, exists.paths) == ("exists", ("/data/nothing",))
 
 
 @pytest.mark.asyncio

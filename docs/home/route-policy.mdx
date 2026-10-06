@@ -146,8 +146,9 @@ lines (`$()`, `eval`, `source`, `xargs`) inherit the outer line's
 placement and never re-route, but every nested command clears admission
 itself.
 
-`ws.explain(line)` shows every placement answer and the runtime that
-would serve each command, without running anything.
+`ws.explain(line)` shows every placement answer (the line's `answers`)
+and the runtime that would serve each command in its tree, without
+running anything.
 
 ## What runs the scripts
 
