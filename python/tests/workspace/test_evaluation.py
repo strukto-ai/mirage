@@ -92,6 +92,30 @@ async def test_background_function_survives_late_substitutions_and_unset(
 
 
 @pytest.mark.asyncio
+async def test_alias_expansions_release_when_each_ends(owned_workspace):
+    ws, programs = owned_workspace
+    live = []
+
+    async def probe(inv):
+        live.append(sum(program.references > 0 for program in programs))
+        return None, IOResult()
+
+    ws.register_cli("probe", CLISpec(name="probe", fn=probe))
+    await ws.shell("alias a='true'")
+    await ws.shell(f"for i in {'x ' * 50}; do a; done; probe")
+    assert live == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_job_killed_before_it_runs_releases_its_program(
+    owned_workspace,
+):
+    ws, programs = owned_workspace
+    await ws.shell("{ :; } & kill %1; wait")
+    assert all(program.references == 0 for program in programs)
+
+
+@pytest.mark.asyncio
 async def test_explain_borrows_function_programs(owned_workspace):
     ws, programs = owned_workspace
     await ws.shell("f() { echo retained; }")

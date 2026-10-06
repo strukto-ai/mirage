@@ -192,6 +192,11 @@ async def handle_background(
     release_program = retain_programs([left])
     child_evaluation = context.fork()
     bg_session = child_evaluation.session
+
+    def release_job(_: asyncio.Task[Any] | None = None) -> None:
+        release_program()
+        bg_session.functions.clear()
+
     inherit_exit_trap(bg_session)
     output = session.job_output or session.tty.jobs
     # A job is a shell of its own: what jobs it starts write into the
@@ -283,8 +288,7 @@ async def handle_background(
                 await console.emit(Channel.STDERR, stderr)
             return io, exec_node
         finally:
-            release_program()
-            bg_session.functions.clear()
+            release_job()
             reset_current_evaluation(token)
             if job_handed is not None and decisions is not None:
                 await decisions.revoke(session.session_id, job_handed)
@@ -304,8 +308,7 @@ async def handle_background(
             limit=session.processes.max,
         )
     except Exception as exc:
-        release_program()
-        bg_session.functions.clear()
+        release_job()
         # A submission that fails (a console the table cannot build, a
         # session at its process cap) starts no runner, so nothing would
         # ever revoke the job's hand-off: its grants would stay reserved
@@ -315,6 +318,10 @@ async def handle_background(
         if isinstance(exc, BlockingIOError):
             raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
         raise
+    # A job killed before its runner starts never enters _run_bg, so its
+    # leases also go when its task ends.
+    if job.task is not None:
+        job.task.add_done_callback(release_job)
     bg_session.process_id = (
         job.process.info.pid if job.process is not None else None
     )

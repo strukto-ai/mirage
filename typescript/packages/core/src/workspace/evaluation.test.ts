@@ -84,6 +84,25 @@ it('retains a background function through late substitutions and foreground unse
   }
 })
 
+it('releases each alias expansion when it ends, not when the line does', async ({
+  owned: { ws, programs },
+}) => {
+  let live = -1
+  ws.registerCli(
+    'probe',
+    new CLISpec({
+      name: 'probe',
+      fn: () => {
+        live = programs.filter((program) => program.references > 0).length
+        return Promise.resolve([null, new IOResult()])
+      },
+    }),
+  )
+  await ws.shell("alias a='true'")
+  await ws.shell(`for i in ${'x '.repeat(50)}; do a; done; probe`)
+  expect(live).toBe(1)
+})
+
 it('explain borrows function programs without retaining another session', async ({
   owned: { ws, programs },
 }) => {
