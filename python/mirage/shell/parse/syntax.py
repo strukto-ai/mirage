@@ -20,6 +20,9 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse.constants import (
     BASH_KEYWORDS,
     CASE_TERMINATORS,
+    CLOSING_TOKENS,
+    CONSTRUCT_CLOSERS,
+    OPENER_CLOSERS,
     SEPARATOR_TOKENS,
     STRUCTURAL_TOKENS,
 )
@@ -414,29 +417,44 @@ def find_syntax_issue(
 
 
 def find_unterminated_quote(node: TSNodeLike) -> str | None:
-    """Find a missing quote in the parser's erroneous regions.
+    """Find what the input ended inside: a quote, or a substitution or
+    expansion still waiting for its closer.
 
     Complete strings, comments and heredoc bodies remain opaque. The
     grammar represents an open double quote as a missing token or an
     ERROR child, and an open single quote as a leaf ERROR span. An ANSI-C
     string ending in an escaped quote can parse cleanly, so check its
-    closing delimiter as well.
+    closing delimiter as well. An unclosed ``$(``, ``$((``, ``<(``,
+    ``>(``, ``${`` or ``$[`` is an opener token in an ERROR, or a
+    substitution or expansion whose closer the grammar marks missing.
 
     Args:
         node (TSNodeLike): the parsed command being refused.
+
+    Returns:
+        str | None: the character bash reports it was looking for.
     """
-    stack = [(node, False)]
+    stack = [(node, False, False)]
     while stack:
-        current, visited = stack.pop()
+        current, visited, quoted = stack.pop()
         if visited:
             # Diagnose an ERROR span only after its children, as before.
             if not current.children and (current.text or b"").startswith(b"'"):
                 return "'"
-            if sum(child.type == '"' for child in current.children) % 2:
-                return '"'
+            unclosed = _innermost_unclosed(current.children)
+            if unclosed is not None:
+                return unclosed
             continue
         if current.is_missing and current.type in ("'", '"'):
             return current.type
+        closer = CONSTRUCT_CLOSERS.get(current.type)
+        if closer is not None and any(
+            child.is_missing and child.type in CLOSING_TOKENS
+            for child in current.children
+        ):
+            # Inside a double-quoted string, bash reads the string's own
+            # closing quote into the construct, where it opens another.
+            return '"' if quoted else closer
         if current.type == "ansi_c_string":
             source = decode_text(current.text or b"")
             before = source[:-1]
@@ -444,9 +462,41 @@ def find_unterminated_quote(node: TSNodeLike) -> str | None:
                 return "'"
             continue
         if current.type == "ERROR":
-            stack.append((current, True))
-        stack.extend((child, False) for child in reversed(current.children))
+            stack.append((current, True, quoted))
+        inner = quoted or current.type == "string"
+        stack.extend(
+            (child, False, inner) for child in reversed(current.children)
+        )
     return None
+
+
+def _innermost_unclosed(children: list[TSNodeLike]) -> str | None:
+    """What the innermost construct an ERROR's tokens open still waits for.
+
+    A double quote nests inside a substitution as bash reads it (``"$("``
+    waits for a quote), a lone ``)`` inside ``$((`` groups rather than
+    closes, and any other closer that does not match the innermost opener
+    is an unexpected token rather than the end of input.
+
+    Args:
+        children (list[TSNodeLike]): the ERROR node's children, in order.
+    """
+    pending: list[tuple[str, str]] = []
+    for child in children:
+        if child.type == '"':
+            if pending and pending[-1][0] == '"':
+                pending.pop()
+            else:
+                pending.append(('"', '"'))
+        elif child.type in OPENER_CLOSERS:
+            pending.append(OPENER_CLOSERS[child.type])
+        elif child.type in CLOSING_TOKENS and pending:
+            if child.type == ")" and pending[-1][0] == "))":
+                continue
+            if child.type != pending[-1][0]:
+                return None
+            pending.pop()
+    return pending[-1][1] if pending else None
 
 
 def syntax_error_result(

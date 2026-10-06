@@ -21,37 +21,77 @@ import type { TSNodeLike } from '../types.ts'
 import {
   BASH_KEYWORDS,
   CASE_TERMINATORS,
+  CLOSING_TOKENS,
+  CONSTRUCT_CLOSERS,
+  OPENER_CLOSERS,
   SEPARATOR_TOKENS,
   STRUCTURAL_TOKENS,
 } from './constants.ts'
 
-/** Locate an open quote only in erroneous AST regions, leaving complete
- * strings, comments and heredoc bodies opaque. Mirrors Python. */
+/** Find what the input ended inside, only in erroneous AST regions: a quote,
+ * or a substitution or expansion still waiting for its closer (an opener
+ * token in an ERROR, or a closer the grammar marks missing). Complete
+ * strings, comments and heredoc bodies stay opaque. Returns the character
+ * bash reports it was looking for. Mirrors Python. */
 export function findUnterminatedQuote(node: TSNodeLike): string | null {
-  const stack: [TSNodeLike, boolean][] = [[node, false]]
+  const stack: [TSNodeLike, boolean, boolean][] = [[node, false, false]]
   for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
-    const [current, visited] = entry
+    const [current, visited, quoted] = entry
     if (visited) {
       // Diagnose an ERROR span only after its children, as before.
       if (current.children.length === 0 && current.text.startsWith("'")) return "'"
-      if (current.children.filter((child) => child.type === '"').length % 2 !== 0) return '"'
+      const unclosed = innermostUnclosed(current.children)
+      if (unclosed !== null) return unclosed
       continue
     }
     if (current.isMissing && (current.type === "'" || current.type === '"')) return current.type
+    const closer = CONSTRUCT_CLOSERS.get(current.type)
+    // Inside a double-quoted string, bash reads the string's own closing
+    // quote into the construct, where it opens another.
+    if (
+      closer !== undefined &&
+      current.children.some((child) => child.isMissing && CLOSING_TOKENS.has(child.type))
+    )
+      return quoted ? '"' : closer
     if (current.type === 'ansi_c_string') {
       const before = current.text.slice(0, -1)
       const slashes = /\\+$/.exec(before)?.[0].length ?? 0
       if (slashes % 2 !== 0) return "'"
       continue
     }
-    if (current.type === 'ERROR') stack.push([current, true])
+    if (current.type === 'ERROR') stack.push([current, true, quoted])
+    const inner = quoted || current.type === 'string'
     const children = current.children
     for (let i = children.length - 1; i >= 0; i -= 1) {
       const child = children[i]
-      if (child !== undefined) stack.push([child, false])
+      if (child !== undefined) stack.push([child, false, inner])
     }
   }
   return null
+}
+
+/** What the innermost construct an ERROR's tokens open still waits for. A
+ * double quote nests inside a substitution as bash reads it (`"$("` waits for
+ * a quote), a lone `)` inside `$((` groups rather than closes, and any other
+ * closer that does not match the innermost opener is an unexpected token
+ * rather than the end of input. */
+function innermostUnclosed(children: readonly TSNodeLike[]): string | null {
+  const pending: (readonly [string, string])[] = []
+  for (const child of children) {
+    if (child.type === '"') {
+      if (pending.at(-1)?.[0] === '"') pending.pop()
+      else pending.push(['"', '"'])
+      continue
+    }
+    const opened = OPENER_CLOSERS.get(child.type)
+    if (opened !== undefined) pending.push(opened)
+    else if (CLOSING_TOKENS.has(child.type) && pending.length > 0) {
+      if (child.type === ')' && pending.at(-1)?.[0] === '))') continue
+      if (child.type !== pending.at(-1)?.[0]) return null
+      pending.pop()
+    }
+  }
+  return pending.at(-1)?.[1] ?? null
 }
 
 /** Exit 2 with the bash-style diagnostic for an unparsable line. */
