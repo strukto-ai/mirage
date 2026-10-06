@@ -496,23 +496,14 @@ export class CacheManager {
 
   /** Invalidate caches after a write to `path`; only `virtual` is read. */
   async invalidateAfterWrite(path: string | PathSpec): Promise<void> {
-    this.retire()
-    const key = this.cacheKey(path)
-    if (this.cachesReads && this.fileCache !== null) {
-      await this.fileCache.remove(key)
-    }
+    const key = await this.invalidatePath(path)
     await this.invalidateParent(key)
   }
 
   /** Invalidate caches after a deletion of `path`; only `virtual` is read. */
   async invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
-    this.retire()
-    const key = this.cacheKey(path)
-    if (this.cachesReads && this.fileCache !== null) {
-      await this.fileCache.remove(key)
-    }
-    await this.evictDir(key)
-    await this.invalidateParent(key)
+    const key = await this.invalidatePath(path)
+    await this.invalidateRemoved(key)
   }
 
   /**
@@ -529,15 +520,50 @@ export class CacheManager {
    * Mirrors Python `CacheManager.invalidate_subtree`.
    */
   async invalidateSubtree(path: string | PathSpec): Promise<void> {
-    this.retire()
-    const key = this.cacheKey(path)
-    if (this.cachesReads && this.fileCache !== null) {
-      await this.fileCache.remove(key)
-      await this.fileCache.evictPrefix(rstripSlash(key) + '/')
+    const key = await this.invalidatePath(path)
+    await this.dropBelow(key)
+    await this.invalidateRemoved(key)
+  }
+
+  /**
+   * Invalidate caches after `path` was removed, folder or file.
+   *
+   * For a remover that cannot say which it removed: a watched DELETE, or the
+   * vacated side of a MOVE, names a path and nothing more. A folder needs what
+   * was cached beneath it dropped, since each nested listing and body was
+   * cached under its own key. Every removal retires this manager's reads. The
+   * subtree drop additionally invalidates the file store's pending fills and,
+   * on a Redis file cache, scans the whole keyspace, which a plain file must
+   * not pay on every event. So the index is asked whether a listing
+   * is still cached at the path or under it, and only then does the subtree go;
+   * otherwise this is `invalidateAfterUnlink`.
+   *
+   * The body goes before the index is asked, so an index that cannot answer
+   * still leaves the removed file unserved. The own and parent listing
+   * evictions are attempted even if the probe or subtree drop fails; failures
+   * remain visible to the caller. A folder with no listing cached at
+   * or under it keeps any bodies cached beneath it until their ttl: nothing
+   * there was listed, or every such listing was evicted since. Each event
+   * evicts the listing of the changed path's folder and of every folder above
+   * it, not their other subfolders, and a write evicts at least its own
+   * folder's listing. Without an index no listing is known, so a removal reads
+   * as a file and bodies beneath it stay until their ttl.
+   *
+   * Mirrors Python `CacheManager.invalidate_after_remove`.
+   */
+  async invalidateAfterRemove(path: string | PathSpec): Promise<void> {
+    const key = await this.invalidatePath(path)
+    try {
+      if (this.index !== null && (await this.index.holdsSubtree(key))) await this.dropBelow(key)
+    } catch (error) {
+      try {
+        await this.invalidateRemoved(key)
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'removal invalidation and cleanup failed')
+      }
+      throw error
     }
-    if (this.index !== null) await this.index.invalidatePrefix(key)
-    await this.evictDir(key)
-    await this.invalidateParent(key)
+    await this.invalidateRemoved(key)
   }
 
   /**
@@ -576,6 +602,27 @@ export class CacheManager {
     this.retire()
     if (!this.cachesReads || this.fileCache === null) return
     await this.fileCache.evictPrefix(this.prefix + '/')
+  }
+
+  private async invalidatePath(path: string | PathSpec): Promise<string> {
+    this.retire()
+    const key = this.cacheKey(path)
+    if (this.cachesReads && this.fileCache !== null) {
+      await this.fileCache.remove(key)
+    }
+    return key
+  }
+
+  private async invalidateRemoved(key: string): Promise<void> {
+    await this.evictDir(key)
+    await this.invalidateParent(key)
+  }
+
+  private async dropBelow(key: string): Promise<void> {
+    if (this.cachesReads && this.fileCache !== null) {
+      await this.fileCache.evictPrefix(rstripSlash(key) + '/')
+    }
+    if (this.index !== null) await this.index.invalidatePrefix(key)
   }
 
   private async invalidateParent(key: string): Promise<void> {

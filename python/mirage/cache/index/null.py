@@ -84,6 +84,9 @@ class NullIndexCacheStore(IndexCacheStore):
     ) -> None:
         return None
 
+    async def holds_subtree(self, vfs_path: str) -> bool:
+        return False
+
     async def invalidate(self) -> None:
         return None
 

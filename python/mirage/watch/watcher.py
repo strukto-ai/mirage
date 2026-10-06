@@ -32,9 +32,10 @@ class Watcher:
     from whatever detection the consumer runs: a webhook receiver, a
     queue bridge, or their own poll loop over a VFS's
     ``delta_hook()`` (see ``integ/watch/run.py`` for the ~10-line
-    poller). The one guarantee: cache invalidation for a change
-    completes before it reaches any subscriber queue, so a consumer
-    reacting to a change always reads fresh content.
+    poller). Cache invalidation for a change completes before it
+    reaches any subscriber queue. Folder removal drops descendants
+    only when a listing remains at or below the folder; cached bodies
+    without such a listing can survive until their ttl.
     """
 
     def __init__(
@@ -115,7 +116,7 @@ class Watcher:
     async def _evict(
         self, entry: WatchMount, path: PathSpec, kind: FileChangeKind
     ) -> None:
-        """Evict one path and every cached ancestor listing above it.
+        """Evict a changed path, its affected subtree and ancestor listings.
 
         The whole ancestor chain is invalidated, not just the path: an
         external change is often the only signal mirage gets, and a
@@ -132,8 +133,12 @@ class Watcher:
         means precision was lost and everything under the path must be
         re-inventoried, which is what a push notification that can name
         only a scope reports (IMAP IDLE says a mailbox changed, not
-        which message), so it takes the subtree. Every other kind names
-        a path and evicts that path alone.
+        which message), so it takes the subtree. A DELETE names a path
+        but not whether it was a folder, so it is a removal: the path
+        alone, plus whatever is cached beneath it when a listing at or
+        under it is still cached (a disk watcher's ``mv dir`` or a feed
+        naming only a folder). Every other kind names a path and evicts
+        that path alone.
 
         Args:
             entry (WatchMount): Mount owning the path.
@@ -143,20 +148,23 @@ class Watcher:
         manager = entry.cache_manager
         if manager is None:
             return
-        if kind is FileChangeKind.DELETE:
-            await manager.invalidate_after_unlink(path)
-        elif kind is FileChangeKind.UNKNOWN:
-            await manager.invalidate_subtree(path)
-        else:
-            await manager.invalidate_after_write(path)
-        await manager.invalidate_ancestors(path)
+        try:
+            if kind is FileChangeKind.DELETE:
+                await manager.invalidate_after_remove(path)
+            elif kind is FileChangeKind.UNKNOWN:
+                await manager.invalidate_subtree(path)
+            else:
+                await manager.invalidate_after_write(path)
+        finally:
+            await manager.invalidate_ancestors(path)
 
     async def _invalidate(self, entry: WatchMount, change: FileEvent) -> None:
         """Evict cache for one change before it is delivered.
 
         A MOVE evicts both sides: the target as a write and the
-        vacated ``previous_path`` as an unlink (on its own mount), so
-        neither the old nor the new location can serve stale bytes.
+        vacated ``previous_path`` as a removal (on its own mount). The
+        removal drops descendants only when a listing is still cached
+        at or under that path; body-only descendants keep their ttl.
 
         Args:
             entry (WatchMount): Mount owning the change path.

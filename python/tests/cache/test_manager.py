@@ -13,15 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 
 from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import NULL_INDEX
-from mirage.cache.index.config import IndexEntry
+from mirage.cache.index.config import IndexEntry, LookupStatus
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.view import IndexView
 from mirage.cache.manager import CacheManager
@@ -454,6 +457,103 @@ def test_write_does_not_reach_into_the_subtree():
     assert _run(_write_leaves_subtree_case()) is True
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["ram", "ram-no-bodies", "redis"])
+async def test_removing_a_folder_drops_what_is_cached_beneath_it(kind):
+    client = FakeRedis() if kind == "redis" else None
+    index = (
+        RedisIndexCacheStore(client=client, key_prefix="remove:")
+        if client is not None
+        else RAMIndexCacheStore(ttl=600)
+    )
+    cache = None if kind == "ram-no-bodies" else RAMFileCacheStore()
+    try:
+        if cache is not None:
+            await cache.set("/data/dir/sub/f", b"old\n")
+            await cache.set("/data/dir2/x", b"keep\n")
+        await index.set_dir("/data/dir/sub", [("f", _entry("f"))])
+        await index.set_dir("/data/dirx", [("y", _entry("y"))])
+        await index.set_dir("/data", [("other", _entry("other"))])
+        manager = CacheManager(cache, index, "/data/", cache is not None)
+        await manager.invalidate_after_remove(
+            PathSpec.from_str_path("/data/dir")
+        )
+        assert (
+            await index.list_dir("/data/dir/sub")
+        ).status == LookupStatus.NOT_FOUND
+        assert (await index.list_dir("/data")).entries is None
+        assert (await index.list_dir("/data/dirx")).entries == ["/data/dirx/y"]
+        if cache is not None:
+            assert await cache.exists("/data/dir/sub/f") is False
+            assert await cache.exists("/data/dir2/x") is True
+    finally:
+        if client is not None:
+            await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_removing_a_file_does_unlink_work_and_nothing_more():
+    cache, index = _stores()
+    await cache.set("/data/d/f", b"f")
+    await cache.set("/data/d/g", b"g")
+    await cache.set("/data/e/h", b"h")
+    await index.set_dir(
+        "/data",
+        [
+            (name, IndexEntry(id=name, name=name, resource_type="folder"))
+            for name in ("d", "e")
+        ],
+    )
+    await index.set_dir("/data/d", [("f", _entry("f")), ("g", _entry("g"))])
+    await index.set_dir("/data/e", [("h", _entry("h"))])
+    manager = CacheManager(cache, index, "/data/", True)
+    with (
+        patch.object(cache, "evict_prefix", wraps=cache.evict_prefix) as evict,
+        patch.object(
+            index, "invalidate_prefix", wraps=index.invalidate_prefix
+        ) as drop,
+        patch.object(
+            index, "holds_subtree", wraps=index.holds_subtree
+        ) as probe,
+    ):
+        await manager.invalidate_after_remove(
+            PathSpec.from_str_path("/data/d/f")
+        )
+    assert await cache.exists("/data/d/f") is False
+    assert await cache.exists("/data/d/g") is True
+    assert await cache.exists("/data/e/h") is True
+    assert (await index.list_dir("/data")).entries == ["/data/d", "/data/e"]
+    assert {
+        key: row.resource_type for key, row in (await index.entries()).items()
+    } == {"/data/d": "folder", "/data/e": "folder", "/data/e/h": "file"}
+    assert (await index.list_dir("/data/d")).entries is None
+    assert (await index.list_dir("/data/e")).entries == ["/data/e/h"]
+    assert evict.call_count == 0
+    assert drop.call_count == 0
+    assert probe.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["probe", "drop"])
+async def test_a_failed_removal_still_drops_the_body_and_listings(stage):
+    cache, index = _stores()
+    await cache.set("/data/d/f", b"f")
+    for directory in ("/data/d", "/data/d/f"):
+        await index.set_dir(directory, [])
+    method = "holds_subtree" if stage == "probe" else "invalidate_prefix"
+    error = RuntimeError("registry recovery failed")
+    manager = CacheManager(cache, index, "/data/", True)
+    with patch.object(index, method, AsyncMock(side_effect=error)):
+        with pytest.raises(RuntimeError) as caught:
+            await manager.invalidate_after_remove(
+                PathSpec.from_str_path("/data/d/f")
+            )
+    assert caught.value is error
+    assert await cache.exists("/data/d/f") is False
+    for directory in ("/data/d", "/data/d/f"):
+        assert (await index.list_dir(directory)).entries is None
+
+
 async def _prefix_lookalike_case() -> bool:
     cache, index = _stores()
     entry = IndexEntry(id="1", name="f", resource_type="file")
@@ -735,6 +835,12 @@ async def _subtree(manager: CacheManager, index) -> None:
     await manager.invalidate_subtree(PathSpec.from_str_path("/data/elsewhere"))
 
 
+async def _remove(manager: CacheManager, index) -> None:
+    await manager.invalidate_after_remove(
+        PathSpec.from_str_path("/data/elsewhere")
+    )
+
+
 async def _external(manager: CacheManager, index) -> None:
     await manager.clear_index(index)
 
@@ -760,7 +866,8 @@ async def _relisted_gone(manager: CacheManager, index) -> None:
 # means the backend may no longer match what the probe saw.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "drop", [_write, _unlink, _subtree, _external, _prefix, _relisted_gone]
+    "drop",
+    [_write, _unlink, _subtree, _remove, _external, _prefix, _relisted_gone],
 )
 async def test_every_cache_drop_in_the_command_retires_its_probed_stats(drop):
     cache, index = _stores()

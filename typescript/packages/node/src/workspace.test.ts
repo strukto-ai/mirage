@@ -13,11 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chmodSync, statSync, writeFileSync } from 'node:fs'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { MountMode, ReadPolicy } from '@struktoai/mirage-core/types'
+import { MountMode, PathSpec, ReadPolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { DiskAccessor } from './accessor/disk.ts'
+import { DiskEventHook } from './core/disk/watch/hook.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'
 import { InlineGitHub } from './vfs/fixtures/github.ts'
 import { buildVfs } from './vfs/registry.ts'
@@ -184,4 +188,53 @@ it('checks a fresh github mount by its head once per command', async () => {
     vi.unstubAllGlobals()
     await ws.close()
   }
+})
+
+describe('a host folder removal reported by the disk watcher', () => {
+  const decoder = new TextDecoder()
+  let root: string
+  let ws: Workspace
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'mirage-watch-push-'))
+    ws = new Workspace({ '/d': new DiskVFS({ root }) }, { mode: MountMode.READ })
+  })
+
+  afterEach(async () => {
+    await ws.close()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('leaves nothing listed after a host rm -r reported children first', async () => {
+    // A host `rm -r` arrives as one `deleted` per path, children first; each
+    // level's listing is gone by the time its own event arrives, except an
+    // empty folder's, which only its own event clears.
+    await mkdir(join(root, 'day', 'sub'), { recursive: true })
+    await mkdir(join(root, 'day', 'empty'))
+    await writeFile(join(root, 'day', 'sub', 'a.txt'), 'a')
+    await writeFile(join(root, 'day', 'b.txt'), 'b')
+    expect(decoder.decode((await ws.shell('ls /d/day/sub')).stdout)).toContain('a.txt')
+    expect((await ws.shell('ls /d/day/empty')).exitCode).toBe(0)
+    expect(decoder.decode((await ws.shell('ls /d/day')).stdout)).toContain('b.txt')
+
+    const removed = [
+      join(root, 'day', 'sub', 'a.txt'),
+      join(root, 'day', 'sub'),
+      join(root, 'day', 'empty'),
+      join(root, 'day', 'b.txt'),
+      join(root, 'day'),
+    ]
+    await rm(join(root, 'day'), { recursive: true, force: true })
+    const hook = new DiskEventHook(new DiskAccessor(root))
+    const mountRoot = new PathSpec({ virtual: '/d', directory: '/d', vfsPath: '' })
+    for (const removedPath of removed) {
+      for (const change of await hook.toEvents(mountRoot, 'deleted', { src_path: removedPath })) {
+        await ws.notify(change)
+      }
+    }
+
+    expect((await ws.shell('ls /d/day/sub')).exitCode).not.toBe(0)
+    expect((await ws.shell('ls /d/day/empty')).exitCode).not.toBe(0)
+    expect((await ws.shell('ls /d/day')).exitCode).not.toBe(0)
+  })
 })
