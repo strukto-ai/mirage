@@ -24,7 +24,7 @@ import {
   copyFileInto,
   fileReadable,
   fileSize,
-  readFileBytes,
+  readRegular,
   stagedPath,
   writeStreamToFile,
 } from './fs.ts'
@@ -54,7 +54,7 @@ export async function writeSnapshotTar(
   for (const [path, data] of Object.entries(blobs)) {
     entries.push({
       name: path,
-      data: typeof data === 'string' ? await readFileBytes(data) : data,
+      data: typeof data === 'string' ? await readRegular(data) : data,
       isFile: true,
     })
   }

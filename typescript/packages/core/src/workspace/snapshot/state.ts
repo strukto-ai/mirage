@@ -58,7 +58,7 @@ import {
   exitOutcome,
 } from '../../shell/console/index.ts'
 import { type ReadSpec, DEFAULT_READ_SPEC, MountMode, VFSName } from '../../types.ts'
-import { readFileBytes } from './fs.ts'
+import { readRegular } from './fs.ts'
 import { resolveReadSpec } from '../mount/read_policy.ts'
 import { Mount } from '../mount/spec.ts'
 import { VERSION } from '../../version.ts'
@@ -693,7 +693,7 @@ async function diskStateAsRam(vfsState: Record<string, unknown>): Promise<RAMVFS
     (vfsState.files as Record<string, Uint8Array | string> | undefined) ?? {},
   )) {
     const key = `/${rel}`
-    files[key] = typeof data === 'string' ? await readFileBytes(data) : data
+    files[key] = typeof data === 'string' ? await readRegular(data) : data
     const mode = modes[rel]
     if (mode !== undefined) attrs[key] = { mode }
     for (let at = key.lastIndexOf('/'); at > 0; at = key.lastIndexOf('/', at - 1)) {

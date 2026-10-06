@@ -18,7 +18,7 @@ import { IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
 import { Mount } from './mount/spec.ts'
 import { REDACTED_SECRET } from '../vfs/secrets.ts'
 import { seedVar } from './session/state.ts'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -201,6 +201,28 @@ describe('toStateDict / applyStateDict', () => {
     expect(cacheKeys.length).toBe(state.cache.entries.length)
     await ws.close()
     await restored.close()
+  })
+
+  it('loads a disk state into RAM without following a link', async () => {
+    // A disk state names each file by host path and the load reads it
+    // later; a link put in its place since must not carry a host file in.
+    const captured = join(tempDir, 'captured')
+    const secret = join(tempDir, 'secret')
+    writeFileSync(captured, 'mine')
+    writeFileSync(secret, 'host')
+    const ws = buildWorkspace()
+    const state = await toStateDict(ws)
+    for (const m of state.mounts) {
+      if (m.prefix === '/data/')
+        Object.assign(m.vfs_state, { type: 'disk', files: { 'sub/f': captured } })
+    }
+    await applyStateDict(ws, state)
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/sub/f'))).toBe('mine')
+    rmSync(captured)
+    symlinkSync(secret, captured)
+    await expect(applyStateDict(ws, state)).rejects.toThrow()
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/sub/f'))).toBe('mine')
+    await ws.close()
   })
 
   it('skips the .bash_history/ view mount from the snapshot', async () => {

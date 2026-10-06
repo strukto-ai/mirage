@@ -15,6 +15,7 @@
 import importlib
 import logging
 import tempfile
+from pathlib import Path, PurePosixPath
 from typing import Any, cast, get_args
 
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ from pydantic import BaseModel
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLISpec
 from mirage.concurrency.limiter import run_blocking
+from mirage.core.disk.utils import open_regular
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
@@ -508,10 +510,18 @@ async def apply_state_dict(
                 m[MountKey.PREFIX],
             )
             continue
+        vfs_state = m[MountKey.VFS_STATE]
+        # A disk state loaded into a mount of another kind takes the
+        # disk's state in RAM's shape.
+        if (
+            vfs_state.get(VFSStateKey.TYPE) == VFSName.DISK
+            and mount.vfs.name != VFSName.DISK
+        ):
+            vfs_state = await run_blocking(_disk_state_as_ram, vfs_state)
         if mount.vfs.name in (VFSName.DISK, VFSName.REDIS):
-            await run_blocking(mount.vfs.load_state, m[MountKey.VFS_STATE])
+            await run_blocking(mount.vfs.load_state, vfs_state)
         else:
-            mount.vfs.load_state(m[MountKey.VFS_STATE])
+            mount.vfs.load_state(vfs_state)
 
     await _restore_sessions(ws, state, sessions)
     # The env template is constructor state the rebuilt workspace was
@@ -526,6 +536,37 @@ async def apply_state_dict(
     await _restore_history(ws, state)
     _restore_jobs(ws, state)
     await _restore_nodes(ws, state)
+
+
+def _disk_state_as_ram(vfs_state: dict[str, Any]) -> dict[str, Any]:
+    """A disk mount's state as a RAM mount takes it.
+
+    Absolute keys, every parent directory, each mode as an attribute,
+    and the bytes of each file the disk state names by host path, read
+    without following a link (``open_regular``).
+
+    Args:
+        vfs_state (dict[str, Any]): a disk mount's captured state.
+    """
+    files: dict[str, bytes] = {}
+    attrs: dict[str, dict[str, int]] = {}
+    dirs = {"/"}
+    modes = vfs_state.get("modes") or {}
+    for rel, data in (vfs_state.get(VFSStateKey.FILES) or {}).items():
+        key = "/" + rel
+        if isinstance(data, Path):
+            with open_regular(data) as f:
+                data = f.read()
+        files[key] = data
+        if rel in modes:
+            attrs[key] = {"mode": modes[rel]}
+        dirs.update(str(p) for p in PurePosixPath(key).parents)
+    return {
+        VFSStateKey.TYPE: VFSName.RAM,
+        VFSStateKey.FILES: files,
+        VFSStateKey.DIRS: sorted(dirs),
+        "attrs": attrs,
+    }
 
 
 async def _restore_nodes(ws, state: dict[str, Any]) -> None:

@@ -182,11 +182,6 @@
     "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal."
    }
   },
-  "workspace/snapshot/state": {
-   "typescript_only": {
-    "diskStateAsRam": "Only TypeScript restores a disk mount into a fresh RAM mount (restoresAsFreshRAM, where no disk root can be rebuilt), so only it converts a disk state to RAM's shape."
-   }
-  },
   "workspace/snapshot/tar_io": {
    "python_only": {
     "_stage_disk_files": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
