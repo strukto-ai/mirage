@@ -269,7 +269,7 @@
       "command": "man gh | head -8",
       "expect": {
         "exit": 0,
-        "stdout": "gh: GitHub CLI\n\nUsage: gh [flags] <command> [<args>]\n\nCommands:\n  api                  Make an authenticated GitHub API request\n  auth                 Manage authentication\n  help                 Help about any command\n",
+        "stdout": "usage: gh [-h] {auth,help,version (--version),api,issue,pr,repo,release,run,workflow,search} ...\n\nGitHub CLI\n\ncommands:\n  auth                 Manage authentication\n  help                 Help about any command\n  version (--version)  Show the Mirage GitHub CLI implementation version\n",
         "stderr": ""
       }
     },
@@ -282,7 +282,7 @@
       "command": "man gh api | head -4",
       "expect": {
         "exit": 0,
-        "stdout": "gh api: Make an authenticated GitHub API request\n\nUsage: gh api [flags] <ENDPOINT>\n\n",
+        "stdout": "usage: gh api [-X METHOD] [-f RAW_FIELD] [-F FIELD] [-H HEADER] [-i[={true,false}]] [--input INPUT] [-q JQ] [--paginate[={true,false}]] [--slurp[={true,false}]] [--silent[={true,false}]] [-h] ENDPOINT\n\nMake an authenticated GitHub API request\n\n",
         "stderr": ""
       }
     },
@@ -295,7 +295,7 @@
       "command": "gh repo rename --help | head -4",
       "expect": {
         "exit": 0,
-        "stdout": "gh repo rename: Rename a repository\n\nUsage: gh repo rename [flags] <NEW-NAME>\n\n",
+        "stdout": "usage: gh repo rename [-R REPO] [-h] NEW-NAME\n\nRename a repository\n\n",
         "stderr": ""
       }
     },
@@ -2427,7 +2427,7 @@
       "command": "gh help | head -1; gh help repo fork | grep -c -- --default-branch-only; gh help repo nosuch | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "gh: GitHub CLI\n1\ngh repo: Manage repositories\n",
+        "stdout": "usage: gh [-h] {auth,help,version (--version),api,issue,pr,repo,release,run,workflow,search} ...\n2\nusage: gh repo [-h] {list (ls),view,create,fork,rename,edit,delete} ...\n",
         "stderr": ""
       }
     },

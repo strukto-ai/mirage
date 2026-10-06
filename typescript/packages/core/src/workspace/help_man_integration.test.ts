@@ -174,7 +174,7 @@ describe('--help and man through the executor', () => {
     expect(stdoutStr(await ws.shell('type -t linear'))).toBe('file\n')
     expect(stdoutStr(await ws.shell('which linear'))).toBe('/usr/bin/linear\n')
     expect(stdoutStr(await ws.shell('cat /usr/bin/linear'))).toContain('command linear')
-    expect(stdoutStr(await ws.shell('man linear'))).toContain('Usage: linear')
+    expect(stdoutStr(await ws.shell('man linear'))).toContain('usage: linear')
     expect(stdoutStr(await ws.shell('man'))).toContain('# clis')
   })
 
@@ -213,9 +213,9 @@ describe('--help and man through the executor', () => {
     )
   })
 
-  it('workspace filePrompt mentions --help and man (with and without args)', async () => {
+  it('workspace vfsMd mentions --help and man (with and without args)', async () => {
     const ws = await makeWs()
-    const prompt = ws.filePrompt
+    const prompt = await ws.vfsMd()
     expect(prompt).toContain('--help')
     expect(prompt).toContain('man <cmd>')
     expect(prompt).toContain('`man`')

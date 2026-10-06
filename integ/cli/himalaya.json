@@ -9,7 +9,7 @@
       "command": "himalaya --help | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "himalaya: IMAP/SMTP mail client\n",
+        "stdout": "usage: himalaya [-h] {envelope,message} ...\n",
         "stderr": ""
       }
     },
@@ -22,7 +22,7 @@
       "command": "himalaya message --help | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "himalaya message: Manage messages\n",
+        "stdout": "usage: himalaya message [-h] {read,compose (write, new),send,reply,forward (fwd)} ...\n",
         "stderr": ""
       }
     },
@@ -35,7 +35,7 @@
       "command": "himalaya message compose --help | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "himalaya message compose: Compose a new message from flags\n",
+        "stdout": "usage: himalaya message compose [--from FROM] [-t TO] [--cc CC] [--bcc BCC] [-s SUBJECT] [--body BODY] [--attach ATTACH] [--signature SIGNATURE] [--send] [--save MAILBOX] [-h]\n",
         "stderr": ""
       }
     },
@@ -48,7 +48,7 @@
       "command": "himalaya message write --help | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "himalaya message compose: Compose a new message from flags\n",
+        "stdout": "usage: himalaya message compose [--from FROM] [-t TO] [--cc CC] [--bcc BCC] [-s SUBJECT] [--body BODY] [--attach ATTACH] [--signature SIGNATURE] [--send] [--save MAILBOX] [-h]\n",
         "stderr": ""
       }
     },
@@ -931,10 +931,10 @@
       "targets": [
         "cli-himalaya"
       ],
-      "command": "himalaya message compose --to integ@example.com --subject 'R\u00e9sum\u00e9 d\u00e9taill\u00e9' --body 'na\u00efve r\u00e9sum\u00e9 body'",
+      "command": "himalaya message compose --to integ@example.com --subject 'Résumé détaillé' --body 'naïve résumé body'",
       "expect": {
         "exit": 0,
-        "stdout": "From: integ@example.com\r\nTo: integ@example.com\r\nSubject: =?utf-8?b?UsOpc3Vtw6kgZMOpdGFpbGzDqQ==?=\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 8bit\r\nMIME-Version: 1.0\r\n\r\nna\u00efve r\u00e9sum\u00e9 body\r\n",
+        "stdout": "From: integ@example.com\r\nTo: integ@example.com\r\nSubject: =?utf-8?b?UsOpc3Vtw6kgZMOpdGFpbGzDqQ==?=\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 8bit\r\nMIME-Version: 1.0\r\n\r\nnaïve résumé body\r\n",
         "stderr": ""
       }
     },
@@ -1055,7 +1055,7 @@
       "command": "h1 --help | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "h1: IMAP/SMTP mail client\n",
+        "stdout": "usage: h1 [-h] {envelope,message} ...\n",
         "stderr": ""
       }
     },

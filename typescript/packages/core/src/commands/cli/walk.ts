@@ -15,10 +15,9 @@
 import { HELP_OPTION } from '../spec/constants.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
 import { FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
-import { clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
-import { UsageStyle } from '../spec/types.ts'
+import { argparseHelp, clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
+import { CommandSpec, UsageStyle, Option } from '../spec/types.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
@@ -255,13 +254,14 @@ export function nodeHelp(
   style: UsageStyle = UsageStyle.ARGPARSE,
   visible?: (verb: string) => boolean,
 ): string {
-  return renderHelp(name, listedNode(node), rowsOf(node, visible), style)
+  if (style === UsageStyle.ARGPARSE)
+    return argparseHelp(name, listedNode(node, style), rowsOf(node, visible))
+  return renderHelp(name, listedNode(node, style), rowsOf(node, visible), style)
 }
 
 // The node's child rows, as the renderer lists them. `visible` filters on
-// a child's canonical name; only `man` passes one, since it renders for a
-// session, and a line that reaches `--help` or the bare-group refusal was
-// admitted whole, so there is nothing left to filter there.
+// a child's canonical name for the reading session: help, man and
+// generated skills all pass one.
 function rowsOf(node: CLISpec, visible?: (verb: string) => boolean): [string, string][] {
   return node.subcommands
     .filter((child) => visible === undefined || visible(child.name))
@@ -274,10 +274,16 @@ function rowsOf(node: CLISpec, visible?: (verb: string) => boolean): [string, st
 // declares its own or answers the flag itself (ownsArgv), where advertising it
 // would promise a page mirage no longer renders. A refusal renders the same
 // node a help page would, or its usage line would disagree with `--help`'s.
-function listedNode(node: CLISpec): CommandSpec {
+// It is the grammar alone: a rebuilt CLISpec is validated again, and the
+// added `--help` would collide with a child that declares its own.
+export function listedNode(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): CommandSpec {
   if (node.options.some((option) => option.long === '--help') || ownsArgv(node)) return node
+  const help =
+    style === UsageStyle.ARGPARSE && !node.options.some((o) => o.short === '-h')
+      ? new Option({ long: '--help', short: '-h', description: 'Show this help and exit' })
+      : HELP_OPTION
   // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
-  return new CommandSpec({ ...node, options: [...node.options, HELP_OPTION] })
+  return new CommandSpec({ ...node, options: [...node.options, help] })
 }
 
 /**
@@ -304,7 +310,7 @@ function usageError(
   if (style === UsageStyle.CLAP) {
     const first = token === undefined ? message : clapUnexpectedArgument(token)
     return new WalkResult({
-      output: encodeText(clapGroupRefusal(name, listedNode(node), rowsOf(node), first)),
+      output: encodeText(clapGroupRefusal(name, listedNode(node, style), rowsOf(node), first)),
       stream: 'stderr',
       exitCode: CLAP_EXIT,
     })
@@ -558,6 +564,7 @@ export function walk(
   argv: readonly string[],
   cwd = '/',
   env: Readonly<Record<string, string>> | null = null,
+  visible?: (path: readonly string[]) => boolean,
 ): WalkResult {
   let node = spec
   // Read once off the root and never off a node: a program answers in one
@@ -566,6 +573,7 @@ export function walk(
   let path: string[] = []
   const flags: WalkFlagBag = {}
   let i = 0
+  const shown = (child: string): boolean => visible?.([...path, child]) ?? true
   for (;;) {
     // A script node terminates the walk exactly like an fn leaf: its
     // remaining argv rides the ordinary spec machinery for validation,
@@ -592,6 +600,11 @@ export function walk(
         i += 1
         descended = true
         break
+      }
+      if (!optionsEnded && token === '-h' && style === UsageStyle.ARGPARSE && !cs.dest.has('-h')) {
+        return new WalkResult({
+          output: encodeText(nodeHelp(name, node, style, shown)),
+        })
       }
       if (!optionsEnded && token === '--') {
         if (style === UsageStyle.GIT && path.length === 0)
@@ -649,7 +662,9 @@ export function walk(
           if (attached !== null) {
             return usageError(name, node, `error: option '${spelling}' takes no value`, style)
           }
-          return new WalkResult({ output: encodeText(nodeHelp(name, node, style)) })
+          return new WalkResult({
+            output: encodeText(nodeHelp(name, node, style, shown)),
+          })
         } else {
           return usageError(
             name,
@@ -724,7 +739,7 @@ export function walk(
     const refused = finishNode(name, node, cs, flags, cwd, style, env)
     if (refused !== null) return refused
     return new WalkResult({
-      output: encodeText(nodeHelp(name, node, style)),
+      output: encodeText(nodeHelp(name, node, style, shown)),
       stream: 'stdout',
       exitCode: 1,
     })

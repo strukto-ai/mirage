@@ -17,6 +17,8 @@ The extra brings Pydantic AI and the console tools without a model provider; add
 ## Usage
 
 ```python
+import asyncio
+
 from pydantic_ai import Agent
 from pydantic_ai_backends import PERMISSIVE_RULESET, ConsoleCapability
 
@@ -26,19 +28,23 @@ from mirage.vfs.ram import RAMVFS
 
 ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
-agent = Agent(
-    "openai:gpt-4.1",
-    system_prompt=build_system_prompt(
-        mount_info={"/": "In-memory filesystem (read/write)"},
-    ),
-    capabilities=[
-        MirageWorkspace(ws),
-        ConsoleCapability(permissions=PERMISSIVE_RULESET),
-    ],
-)
 
-result = agent.run_sync("Create /hello.txt with 'hi' and cat it.")
-print(result.output)
+async def main() -> None:
+    agent = Agent(
+        "openai:gpt-4.1",
+        system_prompt=await build_system_prompt(
+            mount_info={"/": "In-memory filesystem (read/write)"},
+        ),
+        capabilities=[
+            MirageWorkspace(ws),
+            ConsoleCapability(permissions=PERMISSIVE_RULESET),
+        ],
+    )
+    result = await agent.run("Create /hello.txt with 'hi' and cat it.")
+    print(result.output)
+
+
+asyncio.run(main())
 ```
 
 `ConsoleCapability`'s default ruleset asks before every write and command. Mirage already judges each call through the session's mount modes and profile, so the example allows them in the console and leaves the policy to Mirage.

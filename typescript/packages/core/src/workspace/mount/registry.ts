@@ -23,6 +23,7 @@ import type { Evicted } from '../../cache/index/config.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
+import { DocumentVFS } from '../../vfs/document/document.ts'
 import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
 import { Decisions, MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.ts'
 import {
@@ -354,7 +355,7 @@ export class MountRegistry {
   ): IndexCacheStore {
     const alias = siblings.find((existing) => existing.vfs === vfs)
     if (alias !== undefined) return alias.indexStore
-    if (vfs instanceof DevVFS) return new DevIndex()
+    if (vfs instanceof DevVFS || vfs instanceof DocumentVFS) return new DevIndex()
     return buildIndex(config ?? this.indexConfig, vfs.indexTtl)
   }
 
@@ -441,9 +442,9 @@ export class MountRegistry {
   }
 
   /** The mount at exactly this prefix, or null when none matches. */
-  tryMountForPrefix(prefix: string): MountEntry | null {
+  tryMountForPrefix(prefix: string, includeHidden = false): MountEntry | null {
     const norm = normalizePrefix(prefix)
-    for (const m of this.mountList) {
+    for (const m of includeHidden ? this.mountList : this.visibleMounts()) {
       if (m.prefix === norm) return m
     }
     return null
@@ -470,7 +471,7 @@ export class MountRegistry {
   descendantMounts(path: string): MountEntry[] {
     const norm = normalizePrefix(path)
     const out: MountEntry[] = []
-    for (const m of this.mountList) {
+    for (const m of this.visibleMounts()) {
       if (m.prefix === norm) continue
       if (!m.prefix.startsWith(norm)) continue
       out.push(m)
@@ -479,7 +480,7 @@ export class MountRegistry {
   }
 
   mountPrefixes(): string[] {
-    return this.mountList.map((m) => m.prefix)
+    return this.visibleMounts().map((m) => m.prefix)
   }
 
   opsMounts(): OpsMountInfo[] {
@@ -565,11 +566,15 @@ export class MountRegistry {
   /** The mount that handles this path, or null when none does. */
   tryMountFor(path: string): MountEntry | null {
     const owner = ownerPrefix(
-      this.mountList.map((m) => m.prefix),
+      this.visibleMounts().map((m) => m.prefix),
       path,
     )
     if (owner === null) return null
-    return this.mountList.find((m) => m.prefix === owner) ?? null
+    return this.visibleMounts().find((m) => m.prefix === owner) ?? null
+  }
+
+  visibleMounts(): MountEntry[] {
+    return this.mountList.filter((m) => m.visible === null || m.visible())
   }
 
   allMounts(): readonly MountEntry[] {
@@ -589,7 +594,10 @@ export class MountRegistry {
   /**
    * Whether code may be loaded from this path: the per-script form of
    * `isExecAllowed`, read by an interpreter running a file operand
-   * (`python3 path.py`, `bash script.sh`).
+   * (`python3 path.py`, `js app.js`, or a `./script` whose shebang names
+   * one). Shell scripts (`bash script.sh`, `source`, a `./script` with no
+   * shebang or an sh one) never ask: they run in the shell, which checks
+   * each of their commands like a typed one.
    */
   execAllowedAt = (virtual: string): boolean => {
     const m = this.tryMountFor(virtual)
@@ -602,7 +610,7 @@ export class MountRegistry {
       const cmd = this.rootRef.resolveCommand(cmdName)
       if (cmd !== null) return this.rootRef
     }
-    for (const m of this.mountList) {
+    for (const m of this.visibleMounts()) {
       if (m.prefix === DEV_PREFIX) continue
       const cmd = m.resolveCommand(cmdName)
       if (cmd === null) continue

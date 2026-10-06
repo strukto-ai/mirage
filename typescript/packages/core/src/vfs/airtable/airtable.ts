@@ -67,8 +67,4 @@ export class AirtableVFS extends BaseVFS {
   override getState(): AirtableVFSState {
     return { type: this.name, config: redactAirtableConfig(this.config) }
   }
-
-  override loadState(_state: AirtableVFSState): Promise<void> {
-    return Promise.resolve()
-  }
 }

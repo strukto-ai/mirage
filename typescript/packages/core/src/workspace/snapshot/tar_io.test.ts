@@ -130,8 +130,8 @@ describe('snapshot tars of disk files', () => {
   })
 
   it('refuses a captured file replaced by a link', async () => {
-    // The tar reads a disk file after the state named it; a link put in
-    // its place since must not carry a host file into the snapshot.
+    // The tar reads a disk file after the state named it, streamed or in
+    // memory; a link put in its place since must not carry a host file in.
     const dir = await mkdtemp(join(tmpdir(), 'mirage-tar-'))
     try {
       const secret = join(dir, 'secret')
@@ -141,6 +141,7 @@ describe('snapshot tars of disk files', () => {
       await expect(
         writeFileTar(join(dir, 's.tar'), diskManifest('b/f'), { 'b/f': captured }),
       ).rejects.toThrow()
+      await expect(writeSnapshotTar(diskManifest('b/f'), { 'b/f': captured })).rejects.toThrow()
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

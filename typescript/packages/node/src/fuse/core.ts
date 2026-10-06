@@ -47,6 +47,7 @@ export interface Handle {
   key: string
   data?: Uint8Array
   writeBuf?: [number, Uint8Array][]
+  live?: boolean
   /** A large file reads a chunk at a time rather than hydrating whole. */
   chunked?: ChunkedHandle
 }
@@ -440,6 +441,8 @@ export class MountCore {
 
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
     const ctx = this.handles.get(fd)
+    if (ctx?.live === true)
+      return this.op(() => this.ops.read(this.resolve(ctx.path), { offset: pos, size: len }))
     // Filetype-aware read: no `raw: true`, so an extension with a
     // registered renderer surfaces as rendered text. Mirage registers
     // none by default, so this reads raw bytes until a mount adds one.
@@ -717,7 +720,7 @@ export class MountCore {
   async open(path: string, flags = 0): Promise<number> {
     await this.removals.get(this.identity(path))
     const s = await this.op(() => this.ops.stat(this.resolve(path)))
-    const ctx: Handle = { path, key: this.identity(path) }
+    const ctx: Handle = { path, key: this.identity(path), live: s.extra['mirage.live'] === true }
     if (s.type === FileType.DIRECTORY) return this.handles.add(ctx)
     if ((flags & fsConstants.O_TRUNC) !== 0) {
       // libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the
@@ -729,6 +732,7 @@ export class MountCore {
       // (#1032). Mirrors Python's MountCore.open.
       await this.truncate(path, 0)
     }
+    if (ctx.live === true) return this.handles.add(ctx)
     if (s.size === null) {
       // Hydrate through the rendered read path, after an O_TRUNC too: an
       // extension whose renderer gives an empty file a body is honored

@@ -27,25 +27,25 @@ function mkWs(): Workspace {
 }
 
 describe('buildOptions', () => {
-  it('registers the mirage MCP server', () => {
-    const options = buildOptions(mkWs())
+  it('registers the mirage MCP server', async () => {
+    const options = await buildOptions(mkWs())
     expect(options.mcpServers).toBeDefined()
     expect(options.mcpServers?.mirage).toBeDefined()
   })
 
-  it('allows only mirage tools', () => {
-    const options = buildOptions(mkWs())
+  it('allows only mirage tools', async () => {
+    const options = await buildOptions(mkWs())
     expect(options.allowedTools).toContain('mcp__mirage__*')
   })
 
-  it('uses the default system prompt', () => {
-    const options = buildOptions(mkWs())
+  it('uses the default system prompt', async () => {
+    const options = await buildOptions(mkWs())
     expect(typeof options.systemPrompt).toBe('string')
     expect((options.systemPrompt as string).length).toBeGreaterThan(0)
   })
 
-  it('honors a custom system prompt', () => {
-    const options = buildOptions(mkWs(), { systemPrompt: 'custom prompt' })
+  it('honors a custom system prompt', async () => {
+    const options = await buildOptions(mkWs(), { systemPrompt: 'custom prompt' })
     expect(options.systemPrompt).toBe('custom prompt')
   })
 })

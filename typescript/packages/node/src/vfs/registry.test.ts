@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -36,18 +36,7 @@ const BUILTIN_VFS_NAMES = knownVfsNames()
 // The committed dump scripts/check_spec_parity.py diffs against Python. This
 // used to be nine hand-written `toContain` spot-checks, which could not
 // notice that chroma/dify/lancedb/qdrant had no factory at all.
-const SPEC_VFS_NAMES = resolve(
-  fileURLToPath(import.meta.url),
-  '../../../../../../spec/typescript/node/vfs.json',
-)
-
 describe('node VFS registry', () => {
-  it('matches the committed spec manifest, sorted', () => {
-    const manifest = JSON.parse(readFileSync(SPEC_VFS_NAMES, 'utf8')) as { registry: string[] }
-    expect(BUILTIN_VFS_NAMES).toEqual([...manifest.registry].sort())
-    expect(BUILTIN_VFS_NAMES).toEqual([...BUILTIN_VFS_NAMES].sort())
-  })
-
   // The four Drive-family VFS used to redeclare core's GoogleConfig
   // without apiBase and hand-pick TokenManager fields, so a mount pointed
   // at a fake server still refreshed its token at Google's real endpoint.
@@ -183,7 +172,7 @@ describe('node VFS registry', () => {
       })
       const ws = new Workspace({ '/gh': vfs })
       try {
-        expect(ws.filePrompt).toContain('/gh\n  Mirrors the GitHub repository file tree.')
+        expect(await ws.vfsMd()).toContain('/gh\n  Mirrors the GitHub repository file tree.')
       } finally {
         await ws.close()
       }
@@ -206,7 +195,7 @@ describe('node VFS registry', () => {
     })
     const ws = new Workspace({ '/mail': vfs }, { mode: MountMode.WRITE })
     try {
-      expect(ws.filePrompt).toContain('himalaya message compose --to')
+      expect(await ws.vfsMd()).toContain('himalaya message compose --to')
     } finally {
       await ws.close()
     }

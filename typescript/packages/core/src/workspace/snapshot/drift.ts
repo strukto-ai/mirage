@@ -278,6 +278,9 @@ export function liveOnlyMountPrefixes(registry: RegistryLike): string[] {
   const out: string[] = []
   for (const m of registry.allMounts()) {
     if (m.prefix === '/dev/' || m.prefix === '/.bash_history/' || m.prefix === '/usr/bin/') continue
+    // A document binding is not saved at all, so a load never serves it
+    // live either.
+    if (m.vfs.name === 'document') continue
     if (!m.vfs.supportsSnapshot) out.push(m.prefix)
   }
   return out

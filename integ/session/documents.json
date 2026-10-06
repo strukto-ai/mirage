@@ -1,0 +1,211 @@
+{
+  "cases": [
+    {
+      "id": "documents_default_absent",
+      "seq": 960000,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "command": "test ! -e /VFS.md && test ! -e /SKILL.md && echo absent; mkdir -p /data/mirage-guides",
+      "expect": {
+        "exit": 0,
+        "stdout": "absent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "documents_create_session_view",
+      "seq": 960001,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c '^# Virtual filesystem' /VFS.md; test ! -e /SKILL.md && echo independent; grep -c '/data2' /VFS.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\nindependent\n0\n",
+        "stderr": ""
+      },
+      "session": "docs-a",
+      "session_profiles": {
+        "docs-a": {
+          "paths": {
+            "hide": [
+              "/data2"
+            ]
+          }
+        },
+        "docs-b": {}
+      },
+      "documents": [
+        {
+          "kind": "vfs",
+          "path": "/VFS.md",
+          "session": "docs-a"
+        }
+      ]
+    },
+    {
+      "id": "documents_other_session_cannot_discover",
+      "seq": 960002,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "command": "test ! -e /VFS.md && ls / | grep -c '^VFS.md$'",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      },
+      "session": "docs-b"
+    },
+    {
+      "id": "documents_global_view_renders_for_reader",
+      "seq": 960003,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c '^## `/data2`' /VFS.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "session": "docs-b",
+      "documents": [
+        {
+          "kind": "vfs",
+          "path": "/VFS.md"
+        }
+      ]
+    },
+    {
+      "id": "documents_session_skill_and_file",
+      "seq": 960004,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -n 3 /SKILL.md; grep -c '/data2' /VFS.md; if { echo overwrite > /VFS.md; } 2>/dev/null; then echo wrote; else echo readonly; fi; head -n 1 /VFS.md; test \"$(stat -c %s /VFS.md)\" -eq \"$(cat /VFS.md | wc -c)\" && echo exact; cat /VFS.md > /data/copied-vfs.md; cmp /VFS.md /data/copied-vfs.md && echo copied",
+      "expect": {
+        "exit": 0,
+        "stdout": "---\nname: mirage\ndescription: Work with data and registered commands inside a MIRAGE workspace.\n0\nreadonly\n# Virtual filesystem\nexact\ncopied\n",
+        "stderr": ""
+      },
+      "session": "docs-a",
+      "documents": [
+        {
+          "kind": "skill",
+          "path": "/SKILL.md",
+          "session": "docs-a"
+        }
+      ]
+    },
+    {
+      "id": "documents_live_profile_update",
+      "seq": 960005,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c '/data2' /VFS.md; test ! -e /SKILL.md && echo hidden",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\nhidden\n",
+        "stderr": ""
+      },
+      "session": "docs-b",
+      "session_profiles": {
+        "docs-b": {
+          "paths": {
+            "hide": [
+              "/data2"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "documents_custom_path_on_backend",
+      "seq": 960006,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -n 1 /data/mirage-guides/VFS.md; ls /data/mirage-guides",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Virtual filesystem\nVFS.md\n",
+        "stderr": ""
+      },
+      "documents": [
+        {
+          "kind": "vfs",
+          "path": "/data/mirage-guides/VFS.md"
+        }
+      ]
+    },
+    {
+      "id": "documents_subtree_mode",
+      "seq": 960007,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "s3-prefix",
+        "redis",
+        "opfs"
+      ],
+      "session": "docs-a",
+      "session_profiles": {
+        "docs-a": {
+          "paths": {
+            "hide": [
+              "/data2"
+            ],
+            "show": {
+              "/data/mirage-guides": "r"
+            }
+          }
+        }
+      },
+      "command": "grep -F -c -- '- `/data/mirage-guides`: read-only.' /VFS.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

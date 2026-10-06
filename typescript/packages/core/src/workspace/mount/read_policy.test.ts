@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_READ_SPEC, DEFAULT_READ_TTL, ReadPolicy, type ReadSpec } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -75,17 +74,24 @@ interface SpecCaps {
   index_ttl?: number
 }
 
-// The real verdict over each backend's committed capability facts, so the
-// roster is judged by the function that judges a mount.
+// The capability facts scripts/gen-specs.ts dumps for the parity gate, read
+// live from source the same way. Imported by URL: the scripts package sits
+// outside this package's rootDir.
+const FACTS = resolve(fileURLToPath(import.meta.url), '../../../../../../scripts/vfs_facts.ts')
+const { registryCapabilities } = (await import(pathToFileURL(FACTS).href)) as {
+  registryCapabilities: (root: string, pkgs: readonly string[]) => Record<string, SpecCaps | null>
+}
+const CAPABILITIES: Record<string, Record<string, SpecCaps | null>> = Object.fromEntries(
+  ['node', 'browser'].map((host) => [
+    host,
+    registryCapabilities(resolve(FACTS, '../../packages'), ['core', host]),
+  ]),
+)
+
+// The real verdict over each backend's capability facts, so the roster is
+// judged by the function that judges a mount.
 function freshRoster(host: string): string[] {
-  const path = resolve(
-    fileURLToPath(import.meta.url),
-    `../../../../../../../spec/typescript/${host}/vfs.json`,
-  )
-  const caps = (
-    JSON.parse(readFileSync(path, 'utf8')) as { capabilities: Record<string, SpecCaps | null> }
-  ).capabilities
-  return Object.entries(caps)
+  return Object.entries(CAPABILITIES[host] ?? {})
     .filter(([kind, c]) => {
       if (c === null) return false
       try {
@@ -243,21 +249,7 @@ describe('checkReadCapability', () => {
   ])(
     'allows fresh on the %s roster: the revalidatable ones plus listing caches',
     (host, listing) => {
-      const known = new Set(
-        Object.keys(
-          (
-            JSON.parse(
-              readFileSync(
-                resolve(
-                  fileURLToPath(import.meta.url),
-                  `../../../../../../../spec/typescript/${host}/vfs.json`,
-                ),
-                'utf8',
-              ),
-            ) as { capabilities: Record<string, unknown> }
-          ).capabilities,
-        ),
-      )
+      const known = new Set(Object.keys(CAPABILITIES[host] ?? {}))
       expect(freshRoster(host)).toEqual(
         [...REVALIDATABLE.filter((n) => known.has(n)), ...listing].sort(),
       )

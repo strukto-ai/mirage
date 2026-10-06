@@ -48,6 +48,7 @@ from mirage.server.paths import (
 from mirage.server.registry import OWNERS_PREFIX, WorkspaceRegistry
 from mirage.server.routers import (
     asks,
+    documents,
     explain,
     health,
     jobs,
@@ -253,6 +254,7 @@ def build_app(
     )
     app.state.ssh = None
     app.include_router(workspaces.router)
+    app.include_router(documents.router)
     app.include_router(sessions.router)
     app.include_router(asks.router)
     app.include_router(shell.router)

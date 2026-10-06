@@ -138,6 +138,10 @@ jobs:
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-uv/action.yml'
             fuse:
+              - 'python/mirage/{accessor,core,commands/builtin,vfs}/document{.py,/**}'
+              - 'python/mirage/workspace/documentation/**'
+              - 'typescript/packages/core/src/{accessor,core,commands/builtin,vfs}/document{.ts,/**}'
+              - 'typescript/packages/core/src/workspace/documentation/**'
               - 'integ/fuse/**'
               - 'integ/check_json.py'
               - 'integ/package.json'

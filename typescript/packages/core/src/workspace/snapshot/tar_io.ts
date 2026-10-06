@@ -24,7 +24,7 @@ import {
   copyFileInto,
   fileReadable,
   fileSize,
-  readFileBytes,
+  readRegular,
   stagedPath,
   writeStreamToFile,
 } from './fs.ts'
@@ -41,8 +41,9 @@ export type CompressMode = null | 'gz'
 
 /**
  * The tar as one buffer, for a caller that needs bytes (an agents SDK that
- * stores snapshots as buffers). A blob that is a host path is read in;
- * `writeTar` streams to a file instead.
+ * stores snapshots as buffers). A blob that is a host path is read in
+ * through `readRegular`, refused if a link has replaced it, as `writeTar`
+ * refuses it while streaming to a file instead.
  */
 export async function writeSnapshotTar(
   manifest: Record<string, unknown>,
@@ -54,7 +55,7 @@ export async function writeSnapshotTar(
   for (const [path, data] of Object.entries(blobs)) {
     entries.push({
       name: path,
-      data: typeof data === 'string' ? await readFileBytes(data) : data,
+      data: typeof data === 'string' ? await readRegular(data) : data,
       isFile: true,
     })
   }

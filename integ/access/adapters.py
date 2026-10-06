@@ -457,6 +457,32 @@ class HttpSteps:
         reply = await self._ok("POST", f"{self._scope(wid, session)}/kill")
         return reply["killed"]
 
+    async def document(
+        self,
+        wid: str,
+        kind: str,
+        session: str | None,
+        profile: str | None,
+        path: str | None,
+    ) -> str:
+        route = f"{self._scope(wid, session)}/{kind}-md"
+        if path is None:
+            params = {} if profile is None else {"profile": profile}
+            reply = await self.http.get(route, params=params)
+        else:
+            reply = await self.http.put(route, json={"path": path})
+        reply.raise_for_status()
+        return reply.text
+
+    async def session_update(
+        self, wid: str, session: str, profile: str | None
+    ) -> None:
+        await self._ok(
+            "PATCH",
+            f"/v1/workspaces/{wid}/sessions/{session}",
+            json={"profile": profile},
+        )
+
     async def close_workspace(self, wid: str) -> None:
         await self._ok("POST", f"/v1/workspaces/{wid}/close")
 
@@ -651,6 +677,35 @@ class CliSteps:
         reply = await self._json(args[0], "kill", *args[1:])
         return reply["killed"]
 
+    async def document(
+        self,
+        wid: str,
+        kind: str,
+        session: str | None,
+        profile: str | None,
+        path: str | None,
+    ) -> str:
+        args = ["workspace", f"{kind}-md", wid]
+        for flag, value in (
+            ("--session", session),
+            ("--profile", profile),
+            ("--path", path),
+        ):
+            if value is not None:
+                args += [flag, value]
+        code, out, err = await run(self.server.cli(*args), self.server.env())
+        if code != 0:
+            raise RuntimeError(f"mirage {' '.join(args)} exited {code}: {err}")
+        return out
+
+    async def session_update(
+        self, wid: str, session: str, profile: str | None
+    ) -> None:
+        chosen = (
+            ["-p", profile] if profile is not None else ["--default-profile"]
+        )
+        await self._json("session", "update", wid, session, *chosen)
+
     async def close_workspace(self, wid: str) -> None:
         await self._json("workspace", "close", wid)
 
@@ -720,6 +775,19 @@ class CliSteps:
         await self._json("job", "cancel", job)
 
 
+def _headings(markdown: str) -> str:
+    """The mount paths a VFS.md names, one per ``## `/path` `` heading.
+
+    Args:
+        markdown (str): the rendered document.
+    """
+    return " ".join(
+        line[4:-1]
+        for line in markdown.splitlines()
+        if line.startswith("## `") and line.endswith("`")
+    )
+
+
 def _prefix(path: str) -> str:
     return path.rstrip("/") or "/"
 
@@ -787,6 +855,23 @@ class InAppSteps:
 
     async def kill_jobs(self, wid: str, session: str | None) -> int:
         return await self.workspaces[wid].kill(session)
+
+    async def document(
+        self,
+        wid: str,
+        kind: str,
+        session: str | None,
+        profile: str | None,
+        path: str | None,
+    ) -> str:
+        ws = self.workspaces[wid]
+        method = ws.vfs_md if kind == "vfs" else ws.skill_md
+        return await method(path, session_id=session, profile=profile)
+
+    async def session_update(
+        self, wid: str, session: str, profile: str | None
+    ) -> None:
+        await self.workspaces[wid].set_session_profile(session, profile)
 
     async def close_workspace(self, wid: str) -> None:
         await self.workspaces.pop(wid).close()
@@ -911,6 +996,25 @@ async def run_steps(
             elif kind == "kill_jobs":
                 killed = await steps.kill_jobs(wid, step.get("session"))
                 answer = {"text": str(killed)}
+            elif kind == "document":
+                markdown = await steps.document(
+                    wid,
+                    step["kind"],
+                    step.get("session"),
+                    step.get("profile"),
+                    None,
+                )
+                answer = {"text": _headings(markdown)}
+            elif kind == "expose":
+                await steps.document(
+                    wid, step["kind"], step.get("session"), None, step["path"]
+                )
+                answer = {"text": "exposed"}
+            elif kind == "session_update":
+                await steps.session_update(
+                    wid, step["session"], step.get("profile")
+                )
+                answer = {"text": step["session"]}
             elif kind == "close_workspace":
                 await steps.close_workspace(wid)
                 answer = {"text": "closed"}

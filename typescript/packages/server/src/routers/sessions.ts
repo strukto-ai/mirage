@@ -97,6 +97,31 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
     },
   )
 
+  /** Replace the session's profile; its cwd, env and history stay. */
+  app.patch<{ Params: WsSessionParams; Body: { profile: string | null } }>(
+    '/v1/workspaces/:wsId/sessions/:sessionId',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['profile'],
+          properties: { profile: { type: ['string', 'null'] } },
+          additionalProperties: false,
+        },
+      },
+    },
+    async (req, reply) => {
+      const ws = await sessionWorkspace(req.params, req.account)
+      if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
+      try {
+        const session = await ws.setSessionProfile(req.params.sessionId, req.body.profile)
+        return { session_id: session.sessionId, cwd: session.cwd }
+      } catch (err) {
+        return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  )
+
   /**
    * Cancel the session's running and queued lines, from every door. The
    * session stays open; answers once those lines have ended.

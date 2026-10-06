@@ -29,7 +29,7 @@ from check_layout_parity import (
     canonical_dir,
 )
 
-EXCEPTIONS = ROOT / "spec" / "symbol_exceptions.json"
+EXCEPTIONS = ROOT / "scripts" / "parity" / "symbol_exceptions.json"
 
 
 class Exceptions(TypedDict, total=False):

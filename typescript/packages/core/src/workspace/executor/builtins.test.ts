@@ -1908,14 +1908,14 @@ describe('handleMan for installed CLIs', () => {
     const [out, io] = handleMan(['linear'], cliRegistry(), MAN_SESSION)
     expect(io.exitCode).toBe(0)
     const text = await readBody(out)
-    expect(text).toContain('Usage: linear')
+    expect(text).toContain('usage: linear')
     expect(text).toContain('issue')
   })
 
   it('descends a verb path and resolves aliases', async () => {
     const reg = cliRegistry()
     const text = await readBody(handleMan(['linear', 'issue', 'create'], reg, MAN_SESSION)[0])
-    expect(text).toContain('Usage: linear issue create')
+    expect(text).toContain('usage: linear issue create')
     expect(await readBody(handleMan(['linear', 'i', 'create'], reg, MAN_SESSION)[0])).toBe(text)
   })
 

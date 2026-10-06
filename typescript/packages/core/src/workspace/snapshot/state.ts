@@ -16,7 +16,7 @@ import { indexConfigDump, restoreIndexConfig } from './config.ts'
 import { tokenOrNull } from '../../cache/file/utils.ts'
 import { CacheEntry } from '../../cache/file/entry.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
@@ -58,7 +58,7 @@ import {
   exitOutcome,
 } from '../../shell/console/index.ts'
 import { type ReadSpec, DEFAULT_READ_SPEC, MountMode, VFSName } from '../../types.ts'
-import { readFileBytes } from './fs.ts'
+import { readRegular } from './fs.ts'
 import { resolveReadSpec } from '../mount/read_policy.ts'
 import { Mount } from '../mount/spec.ts'
 import { VERSION } from '../../version.ts'
@@ -86,7 +86,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   const skip = new Set(['/dev/', normMountPrefix(HISTORY_PREFIX), normMountPrefix(BIN_PREFIX)])
   const mounted = [...ws.registry.allMounts()]
   for (const mount of mounted) await mount.ensureReady()
-  const mounts = mounted.filter((m) => !skip.has(m.prefix))
+  const mounts = mounted.filter((m) => !skip.has(m.prefix) && m.vfs.name !== 'document')
   const mountSnapshots: MountSnapshot[] = []
   for (let i = 0; i < mounts.length; i++) {
     const m = mounts[i]
@@ -480,7 +480,8 @@ export async function withRebuiltMounts(
  * the state has nothing to drop. It sits behind the gate because the
  * callers used to clear before calling, and a refused checkout then
  * still sent every cached read back to an origin that may have moved.
- * Mirrors Python `apply_state_dict`.
+ * The target's VFS.md and SKILL.md bindings are dropped, since a
+ * snapshot never carries them. Mirrors Python `apply_state_dict`.
  */
 export async function applyStateDict(
   ws: Workspace,
@@ -489,7 +490,14 @@ export async function applyStateDict(
 ): Promise<void> {
   checkFormatVersion(state)
   const [sessions, seed] = await gateRestoredState(ws, state)
+  // A snapshot holds no document bindings, so a load into a live
+  // workspace drops its own: one left in place would shadow a file the
+  // snapshot restores at the same path.
+  await ws.documents.clear()
   if (options.replaceCache === true) await ws.cache.clear()
+  // Every state is prepared before any mount loads, so a captured disk
+  // file that is gone or now a link fails the load with no mount changed.
+  const loads: [BaseVFS, VFSStateBase][] = []
   for (const m of state.mounts) {
     // Exact-prefix lookup, mirroring Python: a snapshot prefix the new
     // workspace does not mount is skipped, never resolved to an
@@ -507,15 +515,20 @@ export async function applyStateDict(
       continue
     }
     if (vfsStateRequiresOverride(m.vfs_state)) continue
-    // A disk restored into a fresh RAM mount (`restoresAsFreshRAM`) takes
-    // the disk's state in RAM's shape.
+    // A disk restored into another mount that keeps content (one
+    // overriding loadState, as the fresh RAM stand-in of
+    // `restoresAsFreshRAM`, redis and OPFS do, under any name) takes the
+    // disk's state in RAM's shape; a mount keeping none reads no file.
     const vfsState =
-      m.vfs_state.type === VFSName.DISK && mount.vfs.name !== VFSName.DISK
+      m.vfs_state.type === VFSName.DISK &&
+      mount.vfs.name !== VFSName.DISK &&
+      mount.vfs.loadState !== BaseVFS.prototype.loadState
         ? await diskStateAsRam(m.vfs_state as unknown as Record<string, unknown>)
         : m.vfs_state
-    // No cast, for the same reason as toStateDict above.
-    await Promise.resolve(mount.vfs.loadState(vfsState as RAMVFSState))
+    loads.push([mount.vfs, vfsState])
   }
+  // No cast, for the same reason as toStateDict above.
+  for (const [vfs, vfsState] of loads) await Promise.resolve(vfs.loadState(vfsState as RAMVFSState))
   await restoreSessions(ws, state, sessions)
   // The env template is constructor state the rebuilt workspace was
   // never given: without it a session created after the load starts
@@ -682,7 +695,8 @@ function restoreJobs(ws: Workspace, state: WorkspaceStateDict): void {
 /**
  * A disk mount's state as a RAM mount takes it: absolute keys, every
  * parent directory, each mode as an attribute, and bytes for each file
- * the disk state names by host path.
+ * the disk state names by host path, read through `readRegular` so a
+ * file swapped for a link since capture is refused, never followed.
  */
 async function diskStateAsRam(vfsState: Record<string, unknown>): Promise<RAMVFSState> {
   const files: Record<string, Uint8Array> = {}
@@ -693,7 +707,7 @@ async function diskStateAsRam(vfsState: Record<string, unknown>): Promise<RAMVFS
     (vfsState.files as Record<string, Uint8Array | string> | undefined) ?? {},
   )) {
     const key = `/${rel}`
-    files[key] = typeof data === 'string' ? await readFileBytes(data) : data
+    files[key] = typeof data === 'string' ? await readRegular(data) : data
     const mode = modes[rel]
     if (mode !== undefined) attrs[key] = { mode }
     for (let at = key.lastIndexOf('/'); at > 0; at = key.lastIndexOf('/', at - 1)) {

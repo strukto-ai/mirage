@@ -186,3 +186,55 @@ export function clapGroupRefusal(
   const usage = usageLine(name, spec, subcommands, UsageStyle.CLAP)
   return `${message}\n\n${usage}\n\nFor more information, try '--help'.\n`
 }
+
+/** Render the declared CLI grammar without serializing internal spec objects. */
+export function argparseHelp(
+  name: string,
+  spec: CommandSpec,
+  subcommands: readonly [string, string][] = [],
+): string {
+  const usage = [name]
+  const rows: [string, string][] = []
+  for (const opt of spec.options) {
+    const value =
+      opt.metavar ?? (opt.choices.length > 0 ? `{${opt.choices.join(',')}}` : optionMetavar(opt))
+    let suffix = opt.type === 'bool' ? '' : ` ${value}`
+    if (opt.pair) suffix = ` NAME ${value}`
+    if (opt.valueOptional) suffix = `[=${value}]`
+    const flags = [opt.short, opt.long]
+      .filter((flag) => flag !== null)
+      .map((flag) => `${flag}${suffix}`)
+      .join(', ')
+    const slot = `${opt.short ?? opt.long ?? ''}${suffix}`
+    usage.push(opt.required ? slot : `[${slot}]`)
+    const details = [opt.description ?? '']
+    if (opt.default !== null) details.push(`(default: ${opt.default})`)
+    if (opt.env !== null) details.push(`(env: ${opt.env})`)
+    if (opt.required) details.push('(required)')
+    if (opt.multiple) details.push('(repeatable)')
+    rows.push([flags, details.filter(Boolean).join(' ')])
+  }
+  const operands: [string, string][] = []
+  for (const operand of [...spec.positional, ...(spec.rest === null ? [] : [spec.rest])]) {
+    const label = operand.name || (operand.type === 'path' ? 'PATH' : 'ARG')
+    const slot = label + (operand === spec.rest ? ' ...' : '')
+    usage.push(operand.required ? slot : `[${slot}]`)
+    operands.push([label, operand.type === 'path' ? 'Virtual path' : ''])
+  }
+  if (subcommands.length > 0) usage.push(`{${subcommands.map(([sub]) => sub).join(',')}} ...`)
+  const lines = [`usage: ${usage.join(' ')}`]
+  if (spec.description) lines.push('', spec.description)
+  for (const [title, table] of [
+    ['positional arguments:', operands],
+    ['commands:', subcommands],
+    ['options:', rows],
+  ] as const) {
+    if (table.length === 0) continue
+    lines.push('', title)
+    const width = Math.max(...table.map(([label]) => label.length))
+    for (const [label, description] of table)
+      lines.push(`  ${label.padEnd(width)}  ${description}`.trimEnd())
+  }
+  if (spec.epilog) lines.push('', spec.epilog.replace(/\n+$/, ''))
+  return lines.join('\n') + '\n'
+}

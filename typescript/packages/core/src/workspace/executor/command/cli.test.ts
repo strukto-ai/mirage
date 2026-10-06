@@ -103,7 +103,7 @@ describe('handleCli', () => {
     )
     expect(io.exitCode).toBe(1)
     const out = dec.decode(await materialize(stdout))
-    expect(out).toContain('Usage: prog message')
+    expect(out).toContain('usage: prog message')
     expect(out).toContain('send')
   })
 
@@ -116,7 +116,7 @@ describe('handleCli', () => {
     )
     expect(io.exitCode).toBe(0)
     const out = dec.decode(await materialize(stdout))
-    expect(out.startsWith('renamed message send\n')).toBe(true)
+    expect(out.startsWith('usage: renamed message send ')).toBe(true)
     expect(out).toContain('--help')
   })
 
@@ -504,7 +504,7 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(0)
     const out = dec.decode(await materialize(stdout))
-    expect(out.startsWith('pager\n')).toBe(true)
+    expect(out.startsWith('usage: pager ')).toBe(true)
     expect(out).toContain('--lines')
     expect(py.seen).toEqual([])
   })

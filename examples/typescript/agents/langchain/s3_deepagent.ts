@@ -57,7 +57,7 @@ const ws = new Workspace({ '/s3/': s3 }, { mode: MountMode.READ, ops })
 
 const agent = createDeepAgent({
   model: new ChatAnthropic({ model: 'claude-sonnet-4-6' }),
-  systemPrompt: buildSystemPrompt({
+  systemPrompt: await buildSystemPrompt({
     mountInfo: { '/s3/': 'S3 bucket (CSV, Parquet, HDF5, JSONL)' },
   }),
   backend: new LangchainWorkspace(ws),

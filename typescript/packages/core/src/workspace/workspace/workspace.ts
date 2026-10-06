@@ -104,7 +104,7 @@ import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { explainLine, explainedLine, holds } from '../node/explain.ts'
-import { buildFilePrompt } from '../file_prompt.ts'
+import { Documents } from '../documentation/documents.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
 import { abortable, hasAborted, makeAbortError } from '../abort.ts'
 import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
@@ -124,6 +124,7 @@ import {
 import { applyProfile, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import type { WatchRuntime } from '../../watch/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
@@ -183,6 +184,7 @@ export class Workspace {
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
   private closed = false
+  readonly documents: Documents
   private readonly lineLock = new KeyLock()
   private readonly lines = new Map<
     AbortController,
@@ -477,6 +479,17 @@ export class Workspace {
         return mount === null ? null : { prefix: mount.prefix, kind: mount.vfs.name }
       },
       { bind: (sessionId, run) => this.bindSession(sessionId, run) },
+    )
+    this.documents = new Documents(
+      this.registry,
+      this.opsRegistry,
+      this.vfs,
+      this.sessionManager,
+      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.opSession(),
+      (name) => compileProfile(this.baseProfile(name), name),
+      () => this.ensureSessionsLoaded(),
+      (path) => this.unmount(path),
+      (path) => this.namespace.followParent(path),
     )
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
@@ -1083,6 +1096,7 @@ export class Workspace {
     // ends a terminal's foreground job.
     if (sessionId !== this.defaultSessionId) await this.cancel(sessionId)
     await this.sessionManager.close(sessionId)
+    await this.documents.releaseSession(sessionId)
     await this.jobTable.closeSession(sessionId)
     this.toolTables.delete(sessionId)
     this.reads.delete(sessionId)
@@ -1094,6 +1108,7 @@ export class Workspace {
       .filter((id) => id !== this.defaultSessionId)
     await this.sessionManager.closeAll()
     for (const id of closed) {
+      await this.documents.releaseSession(id)
       await this.jobTable.closeSession(id)
       this.toolTables.delete(id)
       this.reads.delete(id)
@@ -1314,6 +1329,7 @@ export class Workspace {
       },
       prefix,
     )
+    this.documents.views.delete(rstripSlash(prefix) || '/')
   }
 
   /**
@@ -1362,8 +1378,20 @@ export class Workspace {
     return this.vfs.cacheBytes
   }
 
-  get filePrompt(): string {
-    return buildFilePrompt(this.registry.allMounts())
+  /** Render VFS Markdown, optionally exposing a live, profile-aware workspace file. */
+  vfsMd(
+    path?: string | PathSpec,
+    options: { profile?: string | undefined; sessionId?: string | undefined } = {},
+  ): Promise<string> {
+    return this.documents.get('vfs', path, options.profile, options.sessionId)
+  }
+
+  /** Render a self-contained CLI skill, optionally exposing a live workspace file. */
+  skillMd(
+    path?: string | PathSpec,
+    options: { profile?: string | undefined; sessionId?: string | undefined } = {},
+  ): Promise<string> {
+    return this.documents.get('skill', path, options.profile, options.sessionId)
   }
 
   /**
@@ -1845,7 +1873,10 @@ export class Workspace {
    * console reports and keeps going); only a missing/incapable
    * runtime throws.
    */
-  async executePythonRepl(code: string, options: { sessionId?: string } = {}): Promise<EvalResult> {
+  async executePythonRepl(
+    code: string,
+    options: { sessionId?: string | undefined } = {},
+  ): Promise<EvalResult> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const sessionId = options.sessionId ?? this.sessionManager.defaultId
     const bound = this.runtimeWorld.bindings.python3

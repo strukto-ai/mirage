@@ -29,7 +29,7 @@ class _FakeRegistry:
     def __init__(self, prefixes: list[str]) -> None:
         self._prefixes = prefixes
 
-    def mounts(self) -> list[_FakeMount]:
+    def visible_mounts(self) -> list[_FakeMount]:
         return [_FakeMount(p) for p in self._prefixes]
 
 

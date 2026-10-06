@@ -107,7 +107,7 @@ describe('CLI dispatch e2e', () => {
     expect(dec.decode(bogus.stderr)).toBe("sl: 'bogus' is not a sl command. See 'sl --help'.\n")
     const help = await ws.shell('sl message send --help')
     expect(help.exitCode).toBe(0)
-    expect(dec.decode(help.stdout).startsWith('sl message send\n')).toBe(true)
+    expect(dec.decode(help.stdout).startsWith('usage: sl message send ')).toBe(true)
   })
 
   it('command tiers key on the installed name', async () => {
@@ -285,7 +285,7 @@ describe('script CLI e2e', () => {
       const res = await ws.shell('man pager')
       const out = dec.decode(res.stdout)
       expect(res.exitCode).toBe(0)
-      expect(out.startsWith('pager\n')).toBe(true)
+      expect(out.startsWith('usage: pager\n')).toBe(true)
       expect(out).not.toContain('--help')
     } finally {
       await ws.close()

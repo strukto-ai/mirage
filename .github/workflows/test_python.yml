@@ -119,7 +119,7 @@ jobs:
 
       # Bare, not `mypy mirage`: pyproject's `[tool.mypy] files` already
       # names both roots -- `mirage` and the repo-root `scripts/` that
-      # generate `spec/` -- and this is the repo's only mypy run, so it is
+      # generate parity manifests -- and this is the repo's only mypy run, so it is
       # spelled exactly as the py-mypy hook spells it locally.
       - name: Type check (mypy)
         working-directory: python

@@ -785,3 +785,31 @@ describe('MountCore chunks', () => {
     }
   })
 })
+
+it('refreshes generated documents through an already open handle', async () => {
+  const ws = new Workspace(
+    { '/': new RAMVFS(), '/secret': new RAMVFS() },
+    { mode: MountMode.WRITE },
+  )
+  const session = ws.createSession('reader')
+  await ws.skillMd('/SKILL.md', { sessionId: 'reader' })
+  await ws.vfsMd('/VFS.md')
+  const core = new MountCore(ws.vfs, { session })
+  const skill = await core.open('/SKILL.md')
+  expect(new TextDecoder().decode(await core.read('/SKILL.md', skill, 0, 100000))).toContain(
+    'name: mirage',
+  )
+  await core.release(skill)
+  const fd = await core.open('/VFS.md')
+  const dec = new TextDecoder()
+  expect(dec.decode(await core.read('/VFS.md', fd, 0, 100000))).toContain('/secret')
+  await ws.setSessionProfile('reader', { paths: { hide: ['/secret'] } })
+  const changed = await core.read('/VFS.md', fd, 0, 100000)
+  expect(dec.decode(changed)).not.toContain('/secret')
+  expect(dec.decode(changed)).toBe(await ws.vfsMd(undefined, { sessionId: 'reader' }))
+  expect((await core.fgetattr('/VFS.md', fd)).size).toBe(changed.length)
+  await ws.setSessionProfile('reader', { paths: { hide: ['/VFS.md'] } })
+  await expect(core.read('/VFS.md', fd, 0, 100000)).rejects.toThrow()
+  await core.release(fd)
+  await ws.close()
+})

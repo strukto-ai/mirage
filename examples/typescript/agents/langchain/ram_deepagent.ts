@@ -35,7 +35,7 @@ const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 
 const agent = createDeepAgent({
   model: new ChatAnthropic({ model: 'claude-sonnet-4-6' }),
-  systemPrompt: buildSystemPrompt({
+  systemPrompt: await buildSystemPrompt({
     mountInfo: { '/': 'In-memory filesystem (read/write)' },
   }),
   backend: new LangchainWorkspace(ws),

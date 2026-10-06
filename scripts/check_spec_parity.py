@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-SPEC = ROOT / "spec"
+SPEC = Path(os.environ.get("MIRAGE_SPEC_DIR", ROOT / ".cache" / "spec"))
 PYTHON = SPEC / "python" / "general"
 TYPESCRIPT = [
     SPEC / "typescript" / "node" / "general",
@@ -29,7 +30,7 @@ TYPESCRIPT_VFS_COMMANDS = [
     SPEC / "typescript" / "node" / "vfs_commands",
     SPEC / "typescript" / "browser" / "vfs_commands",
 ]
-EXCEPTIONS = SPEC / "parity_exceptions.json"
+EXCEPTIONS = ROOT / "scripts" / "parity" / "parity_exceptions.json"
 
 BY_VFS = "_meta.by_vfs"
 BY_VFS_KEYS = "_meta.by_vfs.keys"
@@ -607,7 +608,7 @@ def compare_variants(variants: list[dict[str, Any]]) -> list[str]:
     differ — a backend registers in only one runtime — but everything else
     describes the command itself and must match. Python is compared against
     the node variant, so without this check nothing ever reads
-    ``spec/typescript/browser`` beyond its per-VFS metadata.
+    ``.cache/spec/typescript/browser`` beyond its per-VFS metadata.
 
     Args:
         variants (list[dict[str, Any]]): one loaded spec tree per variant,

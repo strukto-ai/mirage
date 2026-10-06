@@ -34,24 +34,30 @@ Use read/write/edit for simple file operations.
 """
 
 
-def build_system_prompt(
+async def build_system_prompt(
     mount_info: dict[str, str] | None = None,
     extra_instructions: str = "",
     workspace: Workspace | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Build a system prompt with optional mount info and extra instructions.
 
     Args:
         mount_info (dict[str, str] | None): Map of mount prefix to description.
         extra_instructions (str): Additional instructions to append.
-        workspace (Workspace | None): If provided, uses workspace.file_prompt.
+        workspace (Workspace | None): If provided, generates the current
+            session's VFS Markdown.
+        session_id (str | None): The workspace session described to the agent.
 
     Returns:
         str: The complete system prompt.
     """
     parts = [MIRAGE_SYSTEM_PROMPT]
     if workspace is not None:
-        parts.append("Mounted data sources:\n" + workspace.file_prompt)
+        parts.append(
+            "Mounted data sources:\n"
+            + await workspace.vfs_md(session_id=session_id)
+        )
     elif mount_info:
         parts.append("\nMounted data sources:")
         for prefix, description in mount_info.items():

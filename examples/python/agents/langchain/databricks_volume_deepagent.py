@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 from databricks_langchain import ChatDatabricks
@@ -45,29 +46,36 @@ vfs = DatabricksVolumeVFS(
 
 ws = Workspace({"/dbx/": vfs}, mode=MountMode.READ)
 
-agent = create_deep_agent(
-    model=ChatDatabricks(
-        endpoint=os.environ["DATABRICKS_CHAT_ENDPOINT"],
-    ),
-    system_prompt=build_system_prompt(workspace=ws),
-    backend=LangchainWorkspace(ws),
-)
 
-task = (
-    "Inspect /dbx/, identify the most relevant text or markdown files, "
-    "and summarize their contents. Use head for large files."
-)
-result = agent.invoke({"messages": [{"role": "user", "content": task}]})
+async def main():
+    agent = create_deep_agent(
+        model=ChatDatabricks(
+            endpoint=os.environ["DATABRICKS_CHAT_ENDPOINT"],
+        ),
+        system_prompt=await build_system_prompt(workspace=ws),
+        backend=LangchainWorkspace(ws),
+    )
 
-for text in extract_text(result["messages"][-1:]):
-    print(text)
+    task = (
+        "Inspect /dbx/, identify the most relevant text or markdown files, "
+        "and summarize their contents. Use head for large files."
+    )
+    result = await agent.ainvoke(
+        {"messages": [{"role": "user", "content": task}]}
+    )
 
-records = ws.vfs.records
-if records:
-    total = sum(record.bytes for record in records)
-    print(f"\n--- {len(records)} ops, {total:,} bytes ---")
-    for record in records:
-        print(
-            f"  {record.op:<8} {record.source:<18} {record.bytes:>10,} B "
-            f"{record.duration_ms:>5} ms  {record.path}"
-        )
+    for text in extract_text(result["messages"][-1:]):
+        print(text)
+
+    records = ws.vfs.records
+    if records:
+        total = sum(record.bytes for record in records)
+        print(f"\n--- {len(records)} ops, {total:,} bytes ---")
+        for record in records:
+            print(
+                f"  {record.op:<8} {record.source:<18} {record.bytes:>10,} B "
+                f"{record.duration_ms:>5} ms  {record.path}"
+            )
+
+
+asyncio.run(main())

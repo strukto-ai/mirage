@@ -216,6 +216,25 @@ Cancels the session's running and queued lines, from every way in, and answers `
 
 Kills the session's background jobs and the processes its runtimes started, and answers `{"killed": 1}`. The session stays open.
 
+### Change a session's profile
+
+<Badge color="orange">PATCH</Badge> `/v1/workspaces/{id}/sessions/{session_id}`
+
+<ParamField body="profile" type="string | null" required>A [profile](/home/permissions) from the workspace's `profiles`; `null` for the workspace default.</ParamField>
+
+Replaces the session's modes, hides and rules. Its cwd, env and history stay.
+
+### VFS.md and SKILL.md
+
+<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/vfs-md` · `/v1/workspaces/{id}/sessions/{session_id}/vfs-md`
+
+<Badge color="orange">PUT</Badge> the same routes
+
+<ParamField query="profile" type="string">GET only, on the workspace route: preview this profile.</ParamField>
+<ParamField body="path" type="string" required>PUT only: expose the document as a live, read-only file at this path.</ParamField>
+
+Answers the [document](/home/workspace#vfs-md-and-skill-md) as `text/markdown`. `skill-md` in place of `vfs-md` serves SKILL.md. A missing session or parent is `404`, a path that is taken `409`, a bad path or profile `422`.
+
 ## Shell and tools
 
 ### Run a shell line

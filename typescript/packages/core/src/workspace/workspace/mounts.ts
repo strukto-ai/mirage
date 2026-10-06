@@ -148,14 +148,14 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   if (norm === BIN_PREFIX + '/') {
     throw new Error(`cannot unmount program view: ${BIN_PREFIX}`)
   }
-  const entry = deps.registry.tryMountForPrefix(prefix)
+  const entry = deps.registry.tryMountForPrefix(prefix, true)
   if (entry === null) throw new Error(`no mount at prefix: ${norm}`)
   if (entry.retiring) throw new Error(`mount is being unmounted: ${norm}`)
   entry.retiring = true
   try {
     await clearMountCache(deps.registry.fileCache, norm, [entry.indexStore])
     if (deps.isShuttingDown()) throw new Error('Workspace is closed')
-    if (deps.registry.tryMountForPrefix(prefix) !== entry) {
+    if (deps.registry.tryMountForPrefix(prefix, true) !== entry) {
       throw new Error(`mount changed while unmounting: ${prefix}`)
     }
     deps.registry.unmount(prefix)

@@ -14,9 +14,9 @@
 
 // The config-plane suite, TypeScript host. See run.py for what it proves.
 // State keys come back camelCase here and are folded to python's wire
-// spelling through the rename map `spec/typescript/node/vfs.json`
+// spelling through the rename map `.cache/spec/typescript/node/vfs.json`
 // records for the VFS, so one expectation serves both hosts and the
-// committed spec is exercised rather than trusted.
+// live registry metadata is exercised rather than trusted.
 
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -26,7 +26,12 @@ import { buildVfs } from '@struktoai/mirage-node'
 const HOST = 'typescript'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SUITE = join(HERE, 'cases.json')
-const SPEC = join(HERE, '..', '..', 'spec', 'typescript', 'node', 'vfs.json')
+const SPEC = join(
+  process.env.MIRAGE_SPEC_DIR ?? join(HERE, '..', '..', '.cache', 'spec'),
+  'typescript',
+  'node',
+  'vfs.json',
+)
 
 interface Case {
   id: string

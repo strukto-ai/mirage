@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -35,30 +36,34 @@ s3 = S3VFS(config)
 ws = Workspace({"/s3/": s3}, mode=MountMode.READ)
 
 
-agent = Agent(
-    "openai:gpt-4.1",
-    system_prompt=build_system_prompt(
-        mount_info={"/s3/": "S3 bucket (CSV, Parquet, JSONL)"}
-    ),
-    capabilities=[
-        MirageWorkspace(ws),
-        ConsoleCapability(permissions=PERMISSIVE_RULESET),
-    ],
-)
+async def main():
+    agent = Agent(
+        "openai:gpt-4.1",
+        system_prompt=await build_system_prompt(
+            mount_info={"/s3/": "S3 bucket (CSV, Parquet, JSONL)"}
+        ),
+        capabilities=[
+            MirageWorkspace(ws),
+            ConsoleCapability(permissions=PERMISSIVE_RULESET),
+        ],
+    )
 
-task = (
-    "Explore and summarize the data in /s3/data/."
-    " Use head command for large files and do not write anything."
-)
-result = agent.run_sync(task)
-print(result.output)
+    task = (
+        "Explore and summarize the data in /s3/data/."
+        " Use head command for large files and do not write anything."
+    )
+    result = await agent.run(task)
+    print(result.output)
 
-records = ws.vfs.records
-if records:
-    total = sum(r.bytes for r in records)
-    print(f"\n--- {len(records)} ops, {total:,} bytes ---")
-    for r in records:
-        print(
-            f"  {r.op:<8} {r.source:<8} {r.bytes:>10,} B "
-            f"{r.duration_ms:>5} ms  {r.path}"
-        )
+    records = ws.vfs.records
+    if records:
+        total = sum(r.bytes for r in records)
+        print(f"\n--- {len(records)} ops, {total:,} bytes ---")
+        for r in records:
+            print(
+                f"  {r.op:<8} {r.source:<8} {r.bytes:>10,} B "
+                f"{r.duration_ms:>5} ms  {r.path}"
+            )
+
+
+asyncio.run(main())

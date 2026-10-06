@@ -64,6 +64,8 @@ describe('mirage CLI program', () => {
         'list-asks',
         'load',
         'snapshot',
+        'vfs-md',
+        'skill-md',
       ].sort(),
     )
   })

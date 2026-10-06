@@ -18,7 +18,7 @@ import { IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
 import { Mount } from './mount/spec.ts'
 import { REDACTED_SECRET } from '../vfs/secrets.ts'
 import { seedVar } from './session/state.ts'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -33,7 +33,8 @@ import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
 import { secretStr } from '../vfs/secrets.ts'
-import { OpsRegistry } from '../ops/registry.ts'
+import { OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
+import type { RegisteredCommand } from '../commands/config.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { type JobResult } from '../shell/job_table/index.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
@@ -201,6 +202,51 @@ describe('toStateDict / applyStateDict', () => {
     expect(cacheKeys.length).toBe(state.cache.entries.length)
     await ws.close()
     await restored.close()
+  })
+
+  it('loads a disk state into RAM without following a link', async () => {
+    // A disk state names each file by host path and the load reads it
+    // later: a link put in its place since must not carry a host file in,
+    // the refusal lands before any mount loads, a RAM mount under its own
+    // name still takes the files, and a mount keeping no content of its
+    // own reads none of them.
+    const captured = join(tempDir, 'captured')
+    const secret = join(tempDir, 'secret')
+    writeFileSync(captured, 'mine')
+    writeFileSync(secret, 'host')
+    class NotesRAM extends RAMVFS {
+      constructor() {
+        super()
+        Object.defineProperty(this, 'name', { value: 'notes' })
+      }
+      override ops(): readonly RegisteredOp[] {
+        return super.ops().map((op) => ({ ...op, vfs: 'notes' }))
+      }
+      override commands(): readonly RegisteredCommand[] {
+        return []
+      }
+    }
+    const notes = new NotesRAM()
+    const ws = new Workspace(
+      { '/a': new RAMVFS(), '/d': notes, '/s': new BoxVFS({ accessToken: 'fake' }) },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    const read = async (path: string): Promise<string> =>
+      new TextDecoder().decode(await ws.vfs.read(path))
+    const state = await toStateDict(ws)
+    for (const m of state.mounts) {
+      const file = { '/d/': captured, '/s/': join(tempDir, 'gone') }[m.prefix]
+      if (file !== undefined) m.vfs_state = { type: 'disk', files: { 'sub/f': file } } as never
+    }
+    await applyStateDict(ws, state)
+    expect(await read('/d/sub/f')).toBe('mine')
+    await ws.vfs.write('/a/kept', 'live')
+    rmSync(captured)
+    symlinkSync(secret, captured)
+    await expect(applyStateDict(ws, state)).rejects.toThrow()
+    expect(await read('/a/kept')).toBe('live')
+    expect(await read('/d/sub/f')).toBe('mine')
+    await ws.close()
   })
 
   it('skips the .bash_history/ view mount from the snapshot', async () => {

@@ -13,10 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { Readable } from 'node:stream'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ContextModule from '@struktoai/mirage-core/observe/context'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
@@ -586,10 +585,17 @@ const FAMILY_ROWS: Partial<Record<Family, Row[]>> = {
   gslides: ['bytes', 'stream'],
 }
 
-const SPEC_VFS = resolve(
-  fileURLToPath(import.meta.url),
-  '../../../../../../spec/typescript/node/vfs.json',
-)
+// The capability facts scripts/gen-specs.ts dumps for the parity gate, read
+// live from source the same way. Imported by URL: the scripts package sits
+// outside this package's rootDir.
+const FACTS = resolve(fileURLToPath(import.meta.url), '../../../../../scripts/vfs_facts.ts')
+const { registryCapabilities } = (await import(pathToFileURL(FACTS).href)) as {
+  registryCapabilities: (
+    root: string,
+    pkgs: readonly string[],
+  ) => Record<string, { read_revalidatable?: unknown } | null>
+}
+const CAPABILITIES = registryCapabilities(resolve(FACTS, '../../packages'), ['core', 'node'])
 
 interface Fake {
   vfs: BaseVFS
@@ -1220,18 +1226,15 @@ describe('the read-token contract', () => {
    * and an ordinary read stamp the same kind of content token. For a long
    * time nothing checked the read half: a backend could set the flag, stamp
    * nothing on reads, and the suite stayed green while every fresh read
-   * refetched (#1165). The roster is read from the committed spec, so a new
+   * refetched (#1165). The roster is read from the live capability facts, so a new
    * declarer fails this test until it has a harness, and a harness
    * outliving its flag fails it too; each harness also asserts the flag on
    * the instance it builds.
    */
   it('every declaring backend has a harness', () => {
-    const manifest = JSON.parse(readFileSync(SPEC_VFS, 'utf8')) as {
-      capabilities: Record<string, { read_revalidatable?: boolean }>
-    }
     const known = new Set(knownVfsNames())
-    const declared = Object.entries(manifest.capabilities)
-      .filter(([name, caps]) => caps.read_revalidatable === true && known.has(name))
+    const declared = Object.entries(CAPABILITIES)
+      .filter(([name, caps]) => caps?.read_revalidatable === true && known.has(name))
       .map(([name]) => name)
     expect(declared.length).toBeGreaterThan(0)
     expect(Object.keys(HARNESSES).sort()).toEqual(declared.sort())

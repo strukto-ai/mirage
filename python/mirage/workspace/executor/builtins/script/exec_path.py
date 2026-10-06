@@ -101,17 +101,18 @@ async def handle_exec_path(
     builtin, function, or install can claim it, and the file either
     runs or the shell reports why not. Two deliberate divergences from
     bash, both consequences of the VFS: there is no exec bit to check
-    (``chmod`` is stored, not enforced; mount mode does real access
-    control), so an existing file runs without ``+x``; and the shell
-    prefix bash puts on the diagnostic is dropped, matching every other
-    mirage diagnostic.
+    (``chmod`` is stored, not enforced), so an existing file runs
+    without ``+x``; and the shell prefix bash puts on the diagnostic is
+    dropped, matching every other mirage diagnostic.
 
     A shebang naming sh or bash (directly or via env) runs through the
-    nested-shell machinery, as does a script with none. Any other
-    interpreter word is re-dispatched as a command line, so
-    ``#!/usr/bin/env python3`` reaches the python3 command wherever the
-    workspace routes it, and an interpreter nobody registers answers
-    with its own "command not found".
+    nested-shell machinery, as does a script with none: the shell checks
+    each command it runs like a typed one, so a mount's ``exec`` mode is
+    never asked. Any other interpreter word is re-dispatched as a
+    command line, so ``#!/usr/bin/env python3`` reaches the python3
+    command wherever the workspace routes it, ``exec`` check included,
+    and an interpreter nobody registers answers with its own "command
+    not found".
 
     Args:
         dispatch (DispatchFn): op dispatcher, used to read the file.

@@ -156,18 +156,13 @@ jobs:
             exit "$rc"
           }
 
-      - name: Spec drift
+      # Writes the manifests to `.cache/spec/`, where the config door
+      # parity step below reads the rename map.
+      - name: Live spec parity
         run: |
           ./python/.venv/bin/python scripts/gen_specs.py
           node --experimental-strip-types typescript/scripts/gen-specs.ts
-          git diff --exit-code spec/
-          # git diff never reports an untracked file, so a newly
-          # registered command's spec would pass as no drift.
-          untracked=$(git status --porcelain --untracked-files=all spec/)
-          if [ -n "$untracked" ]; then
-            echo "$untracked"
-            exit 1
-          fi
+          ./python/.venv/bin/python scripts/check_spec_parity.py
 
       - name: Dropbox longpoll example
         working-directory: typescript
@@ -175,9 +170,6 @@ jobs:
 
       - name: VFS prompt parity
         run: ./python/.venv/bin/python scripts/check_prompt_parity.py --selftest
-
-      - name: Spec parity
-        run: ./python/.venv/bin/python scripts/check_spec_parity.py
 
       # One snake_case config block through both registries' doors. The
       # shell-line battery never crosses them: its runners construct every
