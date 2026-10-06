@@ -117,7 +117,7 @@ def parse_spec_for(
         return replace(leaf, rest=PASSTHROUGH_REST), False
     if any(option.long == "--help" for option in leaf.options):
         return leaf, False
-    return listed_node(leaf, style), True
+    return replace(leaf, options=listed_node(leaf, style).options), True
 
 
 def _select_runtime(

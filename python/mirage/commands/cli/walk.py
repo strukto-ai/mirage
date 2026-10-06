@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import fields, replace
 
 from mirage.commands.cli.constants import CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT
 from mirage.commands.cli.refusal import HELP_SWITCH, git_option_refusal
@@ -30,7 +30,7 @@ from mirage.commands.spec.help import (
     clap_unexpected_argument,
     render_help,
 )
-from mirage.commands.spec.types import UsageStyle
+from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.shell.bytes import encode_text
 from mirage.utils.path import resolve_path
 
@@ -333,7 +333,7 @@ def _rows(
 
 def listed_node(
     node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE
-) -> CLISpec:
+) -> CommandSpec:
     """The node as the renderer shows it, with `--help` filled in.
 
     --help is a registered option everywhere (argparse add_help, click
@@ -341,7 +341,9 @@ def listed_node(
     it unless the node declares its own or answers the flag itself
     (owns_argv), where advertising it would promise a page mirage no
     longer renders. A refusal renders the same node a help page would,
-    or its usage line would disagree with `--help`'s.
+    or its usage line would disagree with `--help`'s. It is the grammar
+    alone: a rebuilt CLISpec is validated again, and the added `--help`
+    would collide with a child that declares its own.
 
     Args:
         node (CLISpec): the node; a leaf parses against this form too.
@@ -357,7 +359,8 @@ def listed_node(
         and not any(o.short == "-h" for o in node.options)
         else HELP_OPTION
     )
-    return replace(node, options=node.options + (help_option,))
+    grammar = {f.name: getattr(node, f.name) for f in fields(CommandSpec)}
+    return CommandSpec(**{**grammar, "options": node.options + (help_option,)})
 
 
 def _usage_error(

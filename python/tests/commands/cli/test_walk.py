@@ -444,6 +444,14 @@ def test_manual_of_a_grammarless_script_omits_the_help_row():
     assert "--help" not in text
 
 
+def test_group_help_lists_a_child_that_declares_its_own_help():
+    # The listed group is grammar only; a rebuilt CLISpec would refuse
+    # the added --help as colliding with the child's own.
+    child = CLISpec(name="run", fn=_verb, options=(Option(long="--help"),))
+    tree = CLISpec(name="tool", subcommands=(child,))
+    assert "run" in node_help("tool", tree)
+
+
 def test_path_typed_group_option_resolves_against_cwd():
     # A group option declared "path" has to mean what it means on a
     # leaf, or the type is a lie at exactly one level of the tree.

@@ -16,9 +16,9 @@ import { HELP_OPTION } from '../spec/constants.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
 import { FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
 import { argparseHelp, clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
-import { UsageStyle, Option } from '../spec/types.ts'
+import { CommandSpec, UsageStyle, Option } from '../spec/types.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { CLISpec, WalkResult, type WalkFlagBag } from './types.ts'
+import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
@@ -274,14 +274,16 @@ function rowsOf(node: CLISpec, visible?: (verb: string) => boolean): [string, st
 // declares its own or answers the flag itself (ownsArgv), where advertising it
 // would promise a page mirage no longer renders. A refusal renders the same
 // node a help page would, or its usage line would disagree with `--help`'s.
-export function listedNode(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): CLISpec {
+// It is the grammar alone: a rebuilt CLISpec is validated again, and the
+// added `--help` would collide with a child that declares its own.
+export function listedNode(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): CommandSpec {
   if (node.options.some((option) => option.long === '--help') || ownsArgv(node)) return node
   const help =
     style === UsageStyle.ARGPARSE && !node.options.some((o) => o.short === '-h')
       ? new Option({ long: '--help', short: '-h', description: 'Show this help and exit' })
       : HELP_OPTION
   // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
-  return new CLISpec({ ...node, options: [...node.options, help] })
+  return new CommandSpec({ ...node, options: [...node.options, help] })
 }
 
 /**

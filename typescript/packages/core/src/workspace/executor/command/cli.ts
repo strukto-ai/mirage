@@ -69,7 +69,8 @@ function parseSpecFor(leaf: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): [
   // eslint-disable-next-line @typescript-eslint/no-misused-spread
   if (ownsArgv(leaf)) return [new CLISpec({ ...leaf, rest: PASSTHROUGH_REST }), false]
   if (leaf.options.some((option) => option.long === '--help')) return [leaf, false]
-  return [listedNode(leaf, style), true]
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread
+  return [new CLISpec({ ...leaf, options: listedNode(leaf, style).options }), true]
 }
 
 /**

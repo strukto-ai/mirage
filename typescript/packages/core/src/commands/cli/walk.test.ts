@@ -444,6 +444,13 @@ describe('a script root', () => {
   })
 })
 
+it('lists a child that declares its own --help in the group help', () => {
+  // The listed group is grammar only; a rebuilt CLISpec would refuse the
+  // added --help as colliding with the child's own.
+  const child = new CLISpec({ name: 'run', fn: verb, options: [new Option({ long: '--help' })] })
+  expect(nodeHelp('tool', new CLISpec({ name: 'tool', subcommands: [child] }))).toContain('run')
+})
+
 describe('walk path-typed group options', () => {
   it('resolves a relative value against the working directory', () => {
     // A group option declared 'path' has to mean what it means on a leaf, or
