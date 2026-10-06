@@ -14,6 +14,7 @@
 
 import logging
 import os
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -1105,12 +1106,23 @@ async def test_a_saved_non_boolean_knob_is_refused(tmp_path):
         await Workspace.from_state(state)
 
 
+class NotesRAM(RAMVFS):
+    name = "notes"
+
+    def ops(self):
+        return [replace(op, vfs=self.name) for op in super().ops()]
+
+    def commands(self):
+        return []
+
+
 @pytest.mark.asyncio
 async def test_a_disk_state_loads_into_ram_without_following_a_link(tmp_path):
     # A disk state names each file by host path and the load reads it
     # later: a link put in its place since must not carry a host file
-    # in, the refusal lands before any mount loads, and a mount keeping
-    # no content of its own reads none of the files.
+    # in, the refusal lands before any mount loads, a RAM mount under
+    # its own name still takes the files, and a mount keeping no content
+    # of its own reads none of them.
     captured = tmp_path / "captured"
     captured.write_bytes(b"mine")
     config = MinIOConfig(
@@ -1120,7 +1132,7 @@ async def test_a_disk_state_loads_into_ram_without_following_a_link(tmp_path):
         secret_access_key="s",
     )
     ws = Workspace(
-        {"/a": RAMVFS(), "/d": RAMVFS(), "/s": MinIOVFS(config)},
+        {"/a": RAMVFS(), "/d": NotesRAM(), "/s": MinIOVFS(config)},
         mode=MountMode.WRITE,
     )
     try:

@@ -39,6 +39,7 @@ from mirage.shell.job_table import Job, JobStatus
 from mirage.shell.variable import ShellVar
 from mirage.types import JsonValue, MountMode, ReadSpec, VFSName
 from mirage.version import __version__
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.loader import SCRIPT_MODULE_NAME
 from mirage.vfs.registry import (
@@ -514,10 +515,14 @@ async def apply_state_dict(
             )
             continue
         vfs_state = m[MountKey.VFS_STATE]
-        # A disk state loaded into a RAM or redis mount takes the disk's
-        # state in RAM's shape; a mount keeping no content reads no file.
-        if vfs_state.get(VFSStateKey.TYPE) == VFSName.DISK and (
-            mount.vfs.name in (VFSName.RAM, VFSName.REDIS)
+        # A disk state loaded into another mount that keeps content (one
+        # overriding load_state, as RAM and redis do, under any name)
+        # takes the disk's state in RAM's shape; a mount keeping no
+        # content reads no file.
+        if (
+            vfs_state.get(VFSStateKey.TYPE) == VFSName.DISK
+            and mount.vfs.name != VFSName.DISK
+            and type(mount.vfs).load_state is not BaseVFS.load_state
         ):
             vfs_state = await run_blocking(_disk_state_as_ram, vfs_state)
         loads.append((mount, vfs_state))

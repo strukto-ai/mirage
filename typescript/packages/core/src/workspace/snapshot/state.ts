@@ -16,7 +16,7 @@ import { indexConfigDump, restoreIndexConfig } from './config.ts'
 import { tokenOrNull } from '../../cache/file/utils.ts'
 import { CacheEntry } from '../../cache/file/entry.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
@@ -510,12 +510,14 @@ export async function applyStateDict(
       continue
     }
     if (vfsStateRequiresOverride(m.vfs_state)) continue
-    // A disk restored into a mount keeping content (the fresh RAM stand-in
-    // of `restoresAsFreshRAM`, or a RAM, redis or OPFS override) takes the
+    // A disk restored into another mount that keeps content (one
+    // overriding loadState, as the fresh RAM stand-in of
+    // `restoresAsFreshRAM`, redis and OPFS do, under any name) takes the
     // disk's state in RAM's shape; a mount keeping none reads no file.
     const vfsState =
       m.vfs_state.type === VFSName.DISK &&
-      ([VFSName.RAM, VFSName.REDIS, VFSName.OPFS] as string[]).includes(mount.vfs.name)
+      mount.vfs.name !== VFSName.DISK &&
+      mount.vfs.loadState !== BaseVFS.prototype.loadState
         ? await diskStateAsRam(m.vfs_state as unknown as Record<string, unknown>)
         : m.vfs_state
     loads.push([mount.vfs, vfsState])
