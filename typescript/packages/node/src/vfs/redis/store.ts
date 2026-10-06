@@ -17,7 +17,7 @@ import { escapeGlob } from '@struktoai/mirage-core/vfs/redis/store'
 import type { RedisRestore, RedisStoreLike } from '@struktoai/mirage-core/vfs/redis/store'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { RedisClientType } from 'redis'
-import { loadOptionalPeer } from '../../optional_peer.ts'
+import { connectRedis } from '../../optional_peer.ts'
 
 export interface RedisStoreOptions {
   url?: string
@@ -56,28 +56,12 @@ export class RedisStore implements RedisStoreLike {
   async client(): Promise<RedisClientType> {
     if (this.providedClient !== null) return this.providedClient
     if (this.clientPromise === null) {
-      const pending: Promise<RedisClientType> = (async () => {
-        const mod = await loadOptionalPeer(
-          () =>
-            import('redis') as unknown as Promise<{
-              createClient: (o: { url: string }) => RedisClientType
-            }>,
-          { feature: 'RedisVFS / RedisFileCacheStore', packageName: 'redis' },
-        )
-        const c = mod.createClient({
-          url: this.url,
-          socket: { reconnectStrategy: false },
-        } as Parameters<typeof mod.createClient>[0])
-        // node-redis throws an `error` nobody listens for, which would end the
-        // process; with reconnection off the client is dead after one, so it is
-        // dropped and the next call connects afresh.
-        c.on('error', () => {
-          if (this.clientPromise === pending) this.clientPromise = null
-        })
-        await c.connect()
+      const pending = connectRedis(this.url, 'RedisVFS / RedisFileCacheStore', () => {
+        if (this.clientPromise === pending) this.clientPromise = null
+      }).then(async (c) => {
         await c.sAdd(this.dk(), '/')
         return c
-      })()
+      })
       this.clientPromise = pending
     }
     return this.clientPromise

@@ -20,6 +20,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { HOSTNAME } from './hostname.ts'
 
 const ENC = new TextEncoder()
 
@@ -31,7 +32,7 @@ const ENC = new TextEncoder()
 // detail leaks.
 const UNAME_FIELDS: readonly (readonly [string, string])[] = [
   ['kernel_name', 'Linux'],
-  ['nodename', 'mirage'],
+  ['nodename', HOSTNAME],
   ['kernel_release', 'mirage'],
   ['kernel_version', '#1 Mirage'],
   ['machine', 'x86_64'],

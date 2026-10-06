@@ -1,5 +1,6 @@
 from urllib.parse import urlsplit
 
+from mirage.commands.cli.builtin.gh.accessor import web_origin
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.client import GitHubApiError
@@ -19,9 +20,7 @@ async def status(
     Args:
         inv (CLIInvocation[GhConfig]): configured GitHub invocation.
     """
-    host = urlsplit(inv.config.base_url or "https://github.com").hostname
-    if host == "api.github.com":
-        host = "github.com"
+    host = urlsplit(web_origin(inv.config)).hostname
     try:
         account = await login(inv.config)
     except GitHubApiError as exc:
@@ -55,10 +54,8 @@ async def token(
     """
     host = (
         FlagView(inv.flags).as_str("hostname")
-        or urlsplit(inv.config.base_url or "https://github.com").hostname
+        or urlsplit(web_origin(inv.config)).hostname
     )
-    if host == "api.github.com":
-        host = "github.com"
     text = (
         f"gh auth token: the token for {host} stays in Mirage "
         "configuration and is never printed; gh commands use it directly\n"

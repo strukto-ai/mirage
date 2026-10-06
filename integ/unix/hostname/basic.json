@@ -35,10 +35,10 @@
         "ram",
         "disk"
       ],
-      "command": "hostname -y; echo $?; hostname box; echo $?; hostname -F /etc/hostname; echo $?; hostname a b 2>&1 | head -2; exit ${PIPESTATUS[0]}",
+      "command": "hostname -y; echo $?; hostname box; echo $?; hostname -F /etc/hostname; echo $?; hostname -Q > /dev/null 2>&1; echo $?; hostname a b 2>&1 | head -1; exit ${PIPESTATUS[0]}",
       "expect": {
         "exit": 255,
-        "stdout": "hostname: Local domain name not set\n1\n1\n1\nUsage: hostname [-b] {hostname|-F file}         set host name (from file)\n       hostname [-a|-A|-d|-f|-i|-I|-s|-y]       display formatted name\n",
+        "stdout": "hostname: Local domain name not set\n1\n1\n1\n255\nUsage: hostname [-b] {hostname|-F file}         set host name (from file)\n",
         "stderr": "hostname: you must be root to change the host name\nhostname: you must be root to change the host name\n"
       }
     }

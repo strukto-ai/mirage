@@ -14,10 +14,10 @@
 
 # The first line of each program's own ``--help``, keyed by command
 # name and bare of the ``Usage: `` prefix, which belongs to the renderer.
-# GNU coreutils 9.7, grep 3.11, tar 1.35, gzip 1.13, Info-ZIP 3.0 on
-# ``debian:stable-slim``; gunzip, zcat and zgrep are spelled by their own
-# name rather than gzip's. A command absent here renders the synopsis
-# synthesized from its slots.
+# GNU coreutils 9.7, grep 3.11, tar 1.35, gzip 1.13, Info-ZIP 3.0, glibc
+# 2.41, hostname 3.25 and util-linux 2.41.5 on ``debian:stable-slim``;
+# gunzip, zcat and zgrep are spelled by their own name rather than gzip's.
+# A command absent here renders the synopsis synthesized from its slots.
 SYNOPSES: dict[str, str] = {
     "base64": "base64 [OPTION]... [FILE]",
     "basename": "basename NAME [SUFFIX]",
@@ -46,6 +46,8 @@ SYNOPSES: dict[str, str] = {
     "gunzip": "gunzip [OPTION]... [FILE]...",
     "gzip": "gzip [OPTION]... [FILE]...",
     "head": "head [OPTION]... [FILE]...",
+    "hostname": "hostname [-b] {hostname|-F file}         set host name "
+    "(from file)",
     "id": "id [OPTION]... [USER]...",
     "iconv": "iconv [OPTION...] [FILE...]",
     "join": "join [OPTION]... FILE1 FILE2",

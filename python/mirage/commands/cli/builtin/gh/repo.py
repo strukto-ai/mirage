@@ -15,7 +15,6 @@
 import base64
 from dataclasses import dataclass
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 from mirage.commands.cli.builtin.gh.accessor import (
     camel,
@@ -27,11 +26,9 @@ from mirage.commands.cli.builtin.gh.accessor import (
     list_limit,
     text_out,
     typed_out,
+    web_origin,
 )
-from mirage.commands.cli.builtin.gh.constants import (
-    GITHUB_HOST,
-    REPO_EDIT_FIELDS,
-)
+from mirage.commands.cli.builtin.gh.constants import REPO_EDIT_FIELDS
 from mirage.commands.cli.builtin.gh.shape import (
     ListOf,
     Shape,
@@ -49,7 +46,6 @@ from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.core.github.config import GhConfig
-from mirage.core.github.constants import API_BASE
 from mirage.core.github.repo import (
     RepoRef,
     create_repo,
@@ -600,22 +596,6 @@ async def fork(
     return text_out(f"✓ Created fork {full}\n")
 
 
-def clone_origin(config: GhConfig) -> str:
-    """Where the install's repositories are cloned from: github.com for
-    GitHub's own API, else the API host's own origin, which a GitHub
-    Enterprise server and a local stand-in serve git from.
-
-    Args:
-        config (GhConfig): the install's configuration.
-    """
-    if config.base_url is None:
-        return f"https://{GITHUB_HOST}"
-    parts = urlsplit(config.base_url)
-    if config.base_url.rstrip("/") == API_BASE:
-        return f"https://{GITHUB_HOST}"
-    return f"{parts.scheme}://{parts.netloc}"
-
-
 def token_header(config: GhConfig) -> dict[str, str]:
     """The Authorization git sends GitHub for the install's token: Basic
     with the token as the password, what gh's credential helper hands git.
@@ -650,7 +630,7 @@ async def clone_cmd(
         ref = RepoRef(owner=await login(inv.config), repo=spec)
     else:
         ref = parse_repo(spec)
-    url = f"{clone_origin(inv.config)}/{ref.owner}/{ref.repo}.git"
+    url = f"{web_origin(inv.config)}/{ref.owner}/{ref.repo}.git"
     target = names[1] if len(names) > 1 else ref.repo
     leaf, _ = find_node(GIT, ["clone"]) or (GIT, ())
     cwd = inv.env.get("PWD", "/")

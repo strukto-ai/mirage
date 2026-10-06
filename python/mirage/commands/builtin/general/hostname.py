@@ -16,10 +16,12 @@ from mirage.accessor.base import Accessor
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.synopsis import SYNOPSES
+from mirage.commands.spec.usage import usage_exit_code, usage_hint
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-# The node name uname -n prints: the one name every host answers with.
+# The one name every host answers with; uname -n prints it too.
 HOSTNAME = "mirage"
 
 # What each display option prints, as a Debian host with no DNS domain
@@ -39,44 +41,7 @@ DISPLAY: dict[str, str | None] = {
 }
 NOT_ROOT = b"hostname: you must be root to change the host name\n"
 NO_NIS_DOMAIN = b"hostname: Local domain name not set\n"
-# hostname 3.25's usage block, stderr and exit 255 for misfit operands.
-USAGE = (
-    "Usage: hostname [-b] {hostname|-F file}         set host name (from "
-    "file)\n"
-    "       hostname [-a|-A|-d|-f|-i|-I|-s|-y]       display formatted name\n"
-    "       hostname                                 display host name\n\n"
-    "       {yp,nis,}domainname {nisdomain|-F file}  set NIS domain name "
-    "(from file)\n"
-    "       {yp,nis,}domainname                      display NIS domain "
-    "name\n\n"
-    "       dnsdomainname                            display dns domain "
-    "name\n\n"
-    "       hostname -V|--version|-h|--help          print info and exit\n\n"
-    "Program name:\n"
-    "       {yp,nis,}domainname=hostname -y\n"
-    "       dnsdomainname=hostname -d\n\n"
-    "Program options:\n"
-    "    -a, --alias            alias names\n"
-    "    -A, --all-fqdns        all long host names (FQDNs)\n"
-    "    -b, --boot             set default hostname if none available\n"
-    "    -d, --domain           DNS domain name\n"
-    "    -f, --fqdn, --long     long host name (FQDN)\n"
-    "    -F, --file             read host name or NIS domain name from "
-    "given file\n"
-    "    -i, --ip-address       addresses for the host name\n"
-    "    -I, --all-ip-addresses all addresses for the host\n"
-    "    -s, --short            short host name\n"
-    "    -y, --yp, --nis        NIS/YP domain name\n\n"
-    "Description:\n"
-    "   This command can get or set the host name or the NIS domain name. "
-    "You can\n"
-    "   also get the DNS domain or the FQDN (fully qualified domain name).\n"
-    "   Unless you are using bind or NIS for host lookups you can change "
-    "the\n"
-    "   FQDN (Fully Qualified Domain Name) and the DNS domain name (which "
-    "is\n"
-    "   part of the FQDN) in the /etc/hosts file.\n"
-)
+USAGE = f"Usage: {SYNOPSES['hostname']}\n{usage_hint('hostname')}\n"
 
 
 @command("hostname", vfs=None, spec=SPECS["hostname"])
@@ -88,12 +53,15 @@ async def hostname(
 ) -> tuple[ByteSource | None, IOResult]:
     """hostname 3.25 (Debian): the name uname -n prints, never the host's. The
     last display option wins, and setting a name is the refusal an unprivileged
-    user gets.
+    user gets. Misfit operands print the usage line and the ``--help`` hint,
+    exit 255, where hostname dumps its whole help.
     """
     fl = FlagView(opts.flags, spec=SPECS["hostname"])
     typed = fl.typed_order(*DISPLAY)
     if len(texts) > 1 or (texts and typed):
-        return None, IOResult(exit_code=255, stderr=USAGE.encode())
+        return None, IOResult(
+            exit_code=usage_exit_code("hostname"), stderr=USAGE.encode()
+        )
     if texts or fl.as_str("file") is not None:
         return None, IOResult(exit_code=1, stderr=NOT_ROOT)
     shown = DISPLAY[typed[-1] if typed else "short"]

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.usage import usage_hint
 from mirage.shell.bytes import encode_text
 from mirage.types import MountMode, PathSpec
 from mirage.utils.hidden import path_visible
@@ -33,7 +34,7 @@ MODE_OPTIONS = {
 # The flags that ask for a mount, which with no operand is a bad usage
 # rather than the listing.
 MOUNTING = ("bind", "move", "rbind", "read_only", "rw")
-BAD_USAGE = "mount: bad usage\nTry 'mount --help' for more information.\n"
+BAD_USAGE = f"mount: bad usage\n{usage_hint('mount')}\n"
 
 
 def superuser(target: str) -> str:

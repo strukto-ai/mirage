@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import type { RedisClientType } from 'redis'
 import { SessionStore } from '@struktoai/mirage-core/workspace/session/store'
 import type { SessionFields } from '@struktoai/mirage-core/workspace/session/store'
-import { loadOptionalPeer } from '../../optional_peer.ts'
+import { connectRedis } from '../../optional_peer.ts'
 
 // Shipped next to this module in src and copied beside the bundle in
 // dist (scripts/copy-assets.mjs); byte-identical to the Python cas.lua. Generic
@@ -52,27 +52,9 @@ export class RedisSessionStore extends SessionStore {
 
   private async client(): Promise<RedisClientType> {
     if (this.clientPromise === null) {
-      const pending: Promise<RedisClientType> = (async () => {
-        const mod = await loadOptionalPeer(
-          () =>
-            import('redis') as unknown as Promise<{
-              createClient: (o: { url: string }) => RedisClientType
-            }>,
-          { feature: 'RedisSessionStore', packageName: 'redis' },
-        )
-        const c = mod.createClient({
-          url: this.url,
-          socket: { reconnectStrategy: false },
-        } as Parameters<typeof mod.createClient>[0])
-        // node-redis throws an `error` nobody listens for, which would end the
-        // process; with reconnection off the client is dead after one, so it is
-        // dropped and the next call connects afresh.
-        c.on('error', () => {
-          if (this.clientPromise === pending) this.clientPromise = null
-        })
-        await c.connect()
-        return c
-      })()
+      const pending = connectRedis(this.url, 'RedisSessionStore', () => {
+        if (this.clientPromise === pending) this.clientPromise = null
+      })
       this.clientPromise = pending
     }
     return this.clientPromise

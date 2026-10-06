@@ -46,9 +46,9 @@ import {
   textOut,
   textValue,
   typedOut,
+  webOrigin,
 } from './accessor.ts'
-import { GITHUB_HOST, REPO_EDIT_FIELDS } from './constants.ts'
-import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
+import { REPO_EDIT_FIELDS } from './constants.ts'
 import type { GhConfig } from '../../../../core/github/config.ts'
 import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
 import { findNode } from '../../walk.ts'
@@ -428,19 +428,6 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
 }
 
 /**
- * Where the install's repositories are cloned from: github.com for GitHub's
- * own API, else the API host's own origin, which a GitHub Enterprise server
- * and a local stand-in serve git from.
- */
-function cloneOrigin(config: GhConfig): string {
-  const base = config.baseUrl
-  if (base === undefined || base.replace(/\/+$/, '') === GITHUB_API_BASE) {
-    return `https://${GITHUB_HOST}`
-  }
-  return new URL(base).origin
-}
-
-/**
  * The Authorization git sends GitHub for the install's token: Basic with the
  * token as the password, what gh's credential helper hands git.
  */
@@ -464,7 +451,7 @@ export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     !spec.includes('/') && !spec.includes(':')
       ? { owner: await login(ghTransport(config)), repo: spec }
       : parseRepo(spec)
-  const url = `${cloneOrigin(config)}/${ref.owner}/${ref.repo}.git`
+  const url = `${webOrigin(config)}/${ref.owner}/${ref.repo}.git`
   const target = names[1] ?? ref.repo
   const leaf = findNode(GIT, ['clone'])?.node ?? GIT
   const cwd = inv.env.PWD ?? '/'

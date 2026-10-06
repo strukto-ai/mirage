@@ -15,7 +15,7 @@
 import type { RedisClientType } from 'redis'
 import { NamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
 import type { NodeFields } from '@struktoai/mirage-core/workspace/mount/namespace/store'
-import { loadOptionalPeer } from '../../../optional_peer.ts'
+import { connectRedis } from '../../../optional_peer.ts'
 
 export interface RedisNamespaceStoreOptions {
   url?: string
@@ -46,27 +46,9 @@ export class RedisNamespaceStore extends NamespaceStore {
 
   private async client(): Promise<RedisClientType> {
     if (this.clientPromise === null) {
-      const pending: Promise<RedisClientType> = (async () => {
-        const mod = await loadOptionalPeer(
-          () =>
-            import('redis') as unknown as Promise<{
-              createClient: (o: { url: string }) => RedisClientType
-            }>,
-          { feature: 'RedisNamespaceStore', packageName: 'redis' },
-        )
-        const c = mod.createClient({
-          url: this.url,
-          socket: { reconnectStrategy: false },
-        } as Parameters<typeof mod.createClient>[0])
-        // node-redis throws an `error` nobody listens for, which would end the
-        // process; with reconnection off the client is dead after one, so it is
-        // dropped and the next call connects afresh.
-        c.on('error', () => {
-          if (this.clientPromise === pending) this.clientPromise = null
-        })
-        await c.connect()
-        return c
-      })()
+      const pending = connectRedis(this.url, 'RedisNamespaceStore', () => {
+        if (this.clientPromise === pending) this.clientPromise = null
+      })
       this.clientPromise = pending
     }
     return this.clientPromise

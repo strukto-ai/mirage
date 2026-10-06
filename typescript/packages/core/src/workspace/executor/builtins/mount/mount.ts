@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { usageHint } from '../../../../commands/spec/usage.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { MountMode } from '../../../../types.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -34,7 +35,7 @@ const MODE_OPTIONS: Readonly<Record<MountMode, string>> = {
 // The flags that ask for a mount, which with no operand is a bad usage rather
 // than the listing.
 const MOUNTING = ['bind', 'move', 'rbind', 'read_only', 'rw']
-const BAD_USAGE = "mount: bad usage\nTry 'mount --help' for more information.\n"
+const BAD_USAGE = `mount: bad usage\n${usageHint('mount')}\n`
 
 function superuser(target: string): string {
   return (

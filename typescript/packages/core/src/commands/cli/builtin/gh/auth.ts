@@ -5,13 +5,12 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { ghTransport } from './accessor.ts'
+import { ghTransport, webOrigin } from './accessor.ts'
 
 /** Check the resolved config secret, whose original environment/file source is not retained. */
 export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
   const config = inv.config as GhConfig
-  let host = new URL(config.baseUrl ?? 'https://github.com').hostname
-  if (host === 'api.github.com') host = 'github.com'
+  const host = new URL(webOrigin(config)).hostname
   let account: string
   try {
     account = await login(ghTransport(config))
@@ -49,10 +48,7 @@ export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
  */
 export function token(inv: CLIInvocation): CommandFnResult {
   const config = inv.config as GhConfig
-  let host =
-    new FlagView(inv.flags).asStr('hostname') ??
-    new URL(config.baseUrl ?? 'https://github.com').hostname
-  if (host === 'api.github.com') host = 'github.com'
+  const host = new FlagView(inv.flags).asStr('hostname') ?? new URL(webOrigin(config)).hostname
   return [
     null,
     new IOResult({
