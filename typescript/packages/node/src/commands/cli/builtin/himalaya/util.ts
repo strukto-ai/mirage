@@ -15,9 +15,8 @@
 import type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import { IOResult } from '@struktoai/mirage-core/io/types'
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { IOResult, type ByteSource } from '@struktoai/mirage-core/io/types'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/utils/errors'
 import { mimeTypeFor } from '@struktoai/mirage-core/utils/filetype'
 import { parseRfc822, type ParsedRfc822 } from '../../../../core/email/_parse.ts'
@@ -48,12 +47,11 @@ export function firstText(texts: readonly string[], label: string): string {
  * An account CLI has no mount of its own; an attachment is an unrelated
  * workspace file, so it is read through the op dispatcher the executor
  * hands every CLI, the same door git reads repositories through. The
- * flag bag carries path values as their resolved virtual-path strings
- * (the python executor upgrades them to PathSpec instead).
+ * flag bag carries typed paths with their original directory walks.
  */
 async function loadAttachments(
   doors: CLIDoors | undefined,
-  paths: readonly string[],
+  paths: readonly PathSpec[],
 ): Promise<Attachment[]> {
   if (paths.length === 0) return []
   const dispatch = doors?.dispatch
@@ -64,15 +62,15 @@ async function loadAttachments(
   for (const path of paths) {
     let data: unknown
     try {
-      ;[data] = await dispatch('read', PathSpec.fromStrPath(path))
+      ;[data] = await dispatch('read', path)
     } catch (err) {
       if (isMissingPath(err) || isEnotdir(err)) {
         const strerror = fsStrerror(err) ?? 'No such file or directory'
-        throw new Error(`read attachment ${path}: ${strerror}`)
+        throw new Error(`read attachment ${path.virtual}: ${strerror}`)
       }
       throw err
     }
-    const trimmed = rstripSlash(path)
+    const trimmed = rstripSlash(path.virtual)
     const filename = trimmed.slice(trimmed.lastIndexOf('/') + 1) || 'attachment'
     attachments.push({
       filename,
@@ -106,7 +104,7 @@ export async function route(
       subject: fl.asStr('subject') ?? null,
       body: await readBody(fl, stdin),
       signature: fl.asStr('signature') ?? null,
-      attachments: await loadAttachments(doors, fl.asList('attach')),
+      attachments: await loadAttachments(doors, fl.asPaths('attach')),
     },
     source,
   )

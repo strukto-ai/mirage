@@ -26,7 +26,7 @@ from mirage.commands.builtin.sed_script import (
     compile_script,
     looks_ahead,
 )
-from mirage.commands.builtin.utils.paths import dispatch_stat, typed_spec
+from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.builtin.utils.stream import (
     read_stdin_async,
     stdin_bytes,
@@ -48,7 +48,7 @@ from mirage.shell.bytes import (
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line, fs_strerror
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import resolve_path
+from mirage.utils.path import resolve_path, typed_spec
 
 ReadBytes = Callable[..., Awaitable[bytes]]
 WriteBytes = Callable[..., Awaitable[None]]
@@ -536,7 +536,8 @@ async def sed_generic(
         paths (list[PathSpec]): The path operands, unresolved.
         texts (list[str]): Positional words (script, or files under -e/-f).
         opts (CommandOpts): Flags, stdin and cwd from the dispatcher.
-        resolve_glob (Callable): Expands globs against the backend.
+        resolve_glob (Callable[..., Awaitable[list[PathSpec]]]):
+            Expands globs against the backend.
         read_bytes (ReadBytes): Bound whole-file reader.
         write_bytes (WriteBytes | None): Bound writer, None when the
             backend is read-only.

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import posixpath
 from stat import S_IFMT, S_IFREG, S_IXUSR
 
 from dulwich.diff_tree import _similarity_score
@@ -32,6 +31,7 @@ from mirage.commands.cli.builtin.git.constants import (
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
+from mirage.commands.cli.builtin.git.pathspec import visible_entries
 from mirage.commands.cli.builtin.git.types import (
     IndexState,
     RepoLocation,
@@ -41,8 +41,9 @@ from mirage.commands.cli.builtin.git.types import (
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
+from mirage.utils.path import join_spec
 
 UNCHANGED = " "
 MODIFIED = "M"
@@ -286,7 +287,10 @@ def stage_changes(
 
 
 def staged_state(
-    repo: BaseRepo, entries: dict[bytes, IndexEntry], conflicts: set[bytes]
+    repo: BaseRepo,
+    entries: dict[bytes, IndexEntry],
+    conflicts: set[bytes],
+    location: RepoLocation,
 ) -> tuple[dict[str, tuple[str, str | None]], bool]:
     """Everything HEAD-against-index, computed off the event loop.
 
@@ -299,8 +303,11 @@ def staged_state(
         repo (BaseRepo): the opened repository.
         entries (dict[bytes, IndexEntry]): the index.
         conflicts (set[bytes]): paths left unmerged.
+        location (RepoLocation): repository and session visibility.
     """
     head = head_entries(repo)
+    if head is not None:
+        head = visible_entries(location, head)
     changed = stage_changes(repo.object_store, head, entries, conflicts)
     return changed, head is None
 
@@ -345,7 +352,7 @@ def _mode_differs(entry: IndexEntry, info: FileStat) -> bool:
 
 async def _differs(
     dispatch: DispatchFn,
-    worktree: str,
+    worktree: PathSpec,
     path: str,
     entry: IndexEntry,
     info: FileStat,
@@ -370,7 +377,7 @@ async def _differs(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        worktree (str): absolute virtual path of the working tree root.
+        worktree (PathSpec): absolute virtual path of the working tree root.
         path (str): repository-relative path.
         entry (IndexEntry): what the index staged for it.
         info (FileStat): what the mount says about it now.
@@ -380,9 +387,7 @@ async def _differs(
     if info.size is not None and entry.size and info.size != entry.size:
         return True
     try:
-        data = await entry_bytes(
-            dispatch, posixpath.join(worktree, path), info
-        )
+        data = await entry_bytes(dispatch, join_spec(worktree, path), info)
     except MISS_ERRORS:
         return True
     return Blob.from_string(data).id != entry.sha
@@ -390,7 +395,7 @@ async def _differs(
 
 async def work_changes(
     dispatch: DispatchFn,
-    worktree: str,
+    worktree: PathSpec,
     entries: dict[bytes, IndexEntry],
     found: WorkTree,
 ) -> dict[str, str]:
@@ -398,7 +403,7 @@ async def work_changes(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        worktree (str): absolute virtual path of the working tree root.
+        worktree (PathSpec): absolute virtual path of the working tree root.
         entries (dict[bytes, IndexEntry]): the index.
         found (WorkTree): what the walk of the working tree found.
     """
@@ -494,7 +499,7 @@ async def work_entries(
             continue
         blob = Blob.from_string(
             await entry_bytes(
-                dispatch, posixpath.join(location.worktree, name), info
+                dispatch, join_spec(location.worktree, name), info
             )
         )
         store.hold(blob)
@@ -560,21 +565,19 @@ async def collect(
         mode (str): which untracked files to report.
     """
     state = await read_index(dispatch, location.gitdir)
+    entries = visible_entries(location, state.entries)
+    conflicts = visible_entries(location, state.conflicts)
     staged, no_commits = await asyncio.to_thread(
-        staged_state, repo, state.entries, set(state.conflicts)
+        staged_state, repo, entries, set(conflicts), location
     )
     tracked = {
         path.decode("utf-8", errors="replace")
-        for path in (set(state.entries) | set(state.conflicts))
+        for path in (set(entries) | set(conflicts))
     }
     found = await scan(
         dispatch, stat_path, location, tracked, mode, links, show_ignored
     )
-    unstaged = await work_changes(
-        dispatch, location.worktree, state.entries, found
-    )
-    rows = merge(
-        staged, unstaged, conflict_codes(state.conflicts), found.untracked
-    )
+    unstaged = await work_changes(dispatch, location.worktree, entries, found)
+    rows = merge(staged, unstaged, conflict_codes(conflicts), found.untracked)
     rows.extend(StatusEntry(path, "!", "!") for path in sorted(found.ignored))
     return rows, state, no_commits

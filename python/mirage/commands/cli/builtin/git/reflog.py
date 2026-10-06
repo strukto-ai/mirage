@@ -33,6 +33,8 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.types import PathSpec
+from mirage.utils.path import join_spec
 
 LOGS_DIR = "logs"
 HEAD_LOG = "logs/HEAD"
@@ -67,7 +69,7 @@ def entry(
 
 
 async def append(
-    dispatch: DispatchFn, gitdir: str, path: str, line: bytes
+    dispatch: DispatchFn, gitdir: PathSpec, path: str, line: bytes
 ) -> None:
     """Add one line to a reflog, creating it if it is not there.
 
@@ -79,18 +81,18 @@ async def append(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of the git directory owning
+        gitdir (PathSpec): absolute virtual path of the git directory owning
             the log.
         path (str): log path relative to it, e.g. ``logs/HEAD``.
         line (bytes): the line to add, newline included.
     """
-    target = posixpath.join(gitdir, path)
+    target = join_spec(gitdir, path)
     existing = await read_optional(dispatch, target)
     await write_file(dispatch, target, (existing or b"") + line)
 
 
 async def logged(
-    dispatch: DispatchFn, location: RepoLocation, name: str, log: str
+    dispatch: DispatchFn, location: RepoLocation, name: str, log: PathSpec
 ) -> bool:
     """Whether an update to a ref is logged.
 
@@ -103,7 +105,7 @@ async def logged(
         dispatch (DispatchFn): workspace op dispatcher.
         location (RepoLocation): the discovered repository.
         name (str): the full ref name.
-        log (str): the path of its log.
+        log (PathSpec): the path of its log.
     """
     if await read_optional(dispatch, log) is not None:
         return True
@@ -121,8 +123,8 @@ async def logged(
 
 async def record(
     dispatch: DispatchFn,
-    gitdir: str,
-    commondir: str,
+    gitdir: PathSpec,
+    commondir: PathSpec,
     ref: str | None,
     before: bytes | None,
     after: bytes,
@@ -139,9 +141,9 @@ async def record(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of this checkout's git
+        gitdir (PathSpec): absolute virtual path of this checkout's git
             directory, which owns HEAD's log.
-        commondir (str): absolute virtual path of the shared git
+        commondir (PathSpec): absolute virtual path of the shared git
             directory, which owns the branches' logs.
         ref (str | None): the branch ref that also moved, None when
             HEAD is detached.
@@ -168,7 +170,7 @@ async def _log_of(
         ref (str): the ref name, ``HEAD`` or a full ``refs/`` name.
     """
     root = location.gitdir if ref == HEAD else location.commondir
-    return await read_optional(dispatch, posixpath.join(root, LOGS_DIR, ref))
+    return await read_optional(dispatch, join_spec(root, LOGS_DIR, ref))
 
 
 async def _named_log(

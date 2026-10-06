@@ -37,7 +37,7 @@ const LOCATIONS = new WeakMap<CLIDoors, RepoLocation>()
 
 /** The refusal of every verb whose first write is the index's. */
 export const indexLocked: ReadOnlyRefusal = (_inv, location) =>
-  new IndexLockError(location?.gitdir ?? '.git')
+  new IndexLockError(location?.gitdir.virtual ?? '.git')
 
 /**
  * A git verb whose `refname is ambiguous` warnings reach stderr, and whose
@@ -68,8 +68,8 @@ function gitWouldRefuse(
   path: string | undefined,
 ): boolean {
   if (location === null || path === undefined || path === '') return true
-  const root = inv.doors?.ns?.mounts?.rootOf(location.commondir) ?? '/'
-  return [root, location.gitdir].some(
+  const root = inv.doors?.ns?.mounts?.rootOf(location.commondir.virtual) ?? '/'
+  return [root, location.gitdir.virtual].some(
     (base) => path === base || path.startsWith(`${rstripSlash(base)}/`),
   )
 }
@@ -118,15 +118,16 @@ export async function opened(fl: FlagView, doors: CLIDoors, workTree = false): P
   if (statPath === undefined || mounts === undefined || dispatch === undefined) {
     throw new NoWorkspaceError()
   }
-  const chosen = fl.asStr('work_tree')
-  const location = await discover(
+  const chosen = fl.asPath('work_tree')
+  const found = await discover(
     dispatch,
     statPath,
     (path: string) => mounts.rootOf(path),
     startPoint(fl),
-    fl.asStr('git_dir'),
+    fl.asPath('git_dir'),
     chosen,
   )
+  const location = { ...found, ns: doors.ns ?? null }
   LOCATIONS.set(doors, location)
   if (workTree) await requireWorkTree(dispatch, statPath, location, chosen !== undefined)
   const warn = gitBool(

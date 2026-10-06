@@ -20,7 +20,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { GitError } from './errors.ts'
 import { readIndex } from './index_file.ts'
-import { pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
+import { visiblePath, pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
 import { quotePath, relativePath } from './render.ts'
 import { configBool } from './repo.ts'
 import { opened } from './session.ts'
@@ -41,7 +41,7 @@ export async function lsFiles(inv: CLIInvocation): Promise<CommandFnResult> {
     const repo = await opened(fl, inv.doors ?? {})
     const fully = await configBool(repo, 'core.quotepath', true)
     const state = await readIndex(repo, repo.dispatch)
-    const start = startPoint(fl)
+    const start = startPoint(fl).virtual
     const prefix = repoRelative(repo.location, start, '.')
     const patterns = pathspecPatterns(repo.location, start, inv.texts)
     const rows = [...state.entries.values()]
@@ -53,7 +53,11 @@ export async function lsFiles(inv: CLIInvocation): Promise<CommandFnResult> {
     const nul = fl.asBool('z')
     let out = ''
     for (const entry of rows) {
-      if (!pathspecSelects(entry.path, patterns.length ? patterns : [prefix])) continue
+      if (
+        !visiblePath(repo.location, entry.path) ||
+        !pathspecSelects(entry.path, patterns.length ? patterns : [prefix])
+      )
+        continue
       const relative = relativePath(entry.path, prefix)
       const label = nul ? relative : quotePath(relative, false, fully)
       const metadata = fl.asBool('stage')

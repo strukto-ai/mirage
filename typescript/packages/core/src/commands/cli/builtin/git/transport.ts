@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../../../types.ts'
+import { parentSpec, typedSpec } from '../../../../utils/path.ts'
 import git from 'isomorphic-git'
 
 import { HttpConnectError } from '../../../builtin/errors.ts'
 import { httpRequest } from '../../../builtin/utils/http.ts'
-import { posixNormpath } from '../../../../utils/path.ts'
 import type { CLIDoors } from '../../types.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { discover } from './discover.ts'
@@ -402,7 +403,7 @@ export function extraHeaders(values: readonly string[]): Record<string, string> 
  */
 export async function openTransport(
   url: string,
-  start: string,
+  start: PathSpec,
   doors: CLIDoors,
   headers: Record<string, string>,
 ): Promise<Transport> {
@@ -421,9 +422,9 @@ export async function openTransport(
   if (dispatch === undefined || statPath === undefined || mounts === undefined)
     throw new NoWorkspaceError()
   const raw = helper === null ? url : decodeURIComponent(new URL(url).pathname)
-  const path = posixNormpath(raw.startsWith('/') ? raw : `${start}/${raw}`)
+  const path = typedSpec(raw, start)
   for (const suffix of REPO_SUFFIXES) {
-    const candidate = path.replace(/\/+$/, '') + suffix
+    const candidate = typedSpec((path.dotted ?? path.virtual).replace(/\/+$/, '') + suffix, '/')
     if ((await statPath(candidate)) === null) continue
     let location
     try {
@@ -431,7 +432,7 @@ export async function openTransport(
         dispatch,
         statPath,
         (where) => mounts.rootOf(where),
-        candidate.slice(0, candidate.lastIndexOf('/')) || '/',
+        parentSpec(candidate),
         candidate,
       )
     } catch (err) {

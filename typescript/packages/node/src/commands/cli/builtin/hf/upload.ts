@@ -17,7 +17,8 @@ import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
-import { FileType, PathSpec } from '@struktoai/mirage-core/types'
+import { typedSpec, joinSpec } from '@struktoai/mirage-core/utils/path'
+import { FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/utils/errors'
 import { fnmatch } from '@struktoai/mirage-core/utils/fnmatch'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -35,8 +36,8 @@ interface Row {
   data: Uint8Array
 }
 
-async function isDir(dispatch: DispatchFn, path: string): Promise<boolean> {
-  const [stat] = await dispatch('stat', PathSpec.fromStrPath(path))
+async function isDir(dispatch: DispatchFn, path: PathSpec): Promise<boolean> {
+  const [stat] = await dispatch('stat', path)
   return (stat as { type?: string } | null)?.type === FileType.DIRECTORY
 }
 
@@ -54,38 +55,44 @@ async function isDir(dispatch: DispatchFn, path: string): Promise<boolean> {
  */
 async function collect(
   dispatch: DispatchFn,
-  local: string,
+  local: PathSpec,
 ): Promise<{ rows: Row[]; fromDir: boolean }> {
-  const base = rstripSlash(local)
+  const base = local
   let directory: boolean
   try {
     directory = await isDir(dispatch, base)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err)) {
-      throw new UsageError(`${local}: ${fsStrerror(err) ?? 'No such file or directory'}`)
+      throw new UsageError(`${local.rawPath}: ${fsStrerror(err) ?? 'No such file or directory'}`)
     }
     throw err
   }
   if (!directory) {
-    const [data] = await dispatch('read', PathSpec.fromStrPath(base))
+    const [data] = await dispatch('read', base)
     return {
-      rows: [{ name: base.slice(base.lastIndexOf('/') + 1), data: data as Uint8Array }],
+      rows: [
+        { name: base.virtual.slice(base.virtual.lastIndexOf('/') + 1), data: data as Uint8Array },
+      ],
       fromDir: false,
     }
   }
   const rows: Row[] = []
   const pending = [base]
   while (pending.length > 0) {
-    const current = pending.pop() ?? ''
-    const [entries] = await dispatch('readdir', PathSpec.fromStrPath(current))
+    const current = pending.pop()
+    if (current === undefined) break
+    const [entries] = await dispatch('readdir', current)
     for (const entry of entries as string[]) {
-      const child = entry.startsWith('/') ? entry : `${current}/${entry}`
+      const child = joinSpec(current, entry)
       if (await isDir(dispatch, child)) {
         pending.push(child)
         continue
       }
-      const [data] = await dispatch('read', PathSpec.fromStrPath(child))
-      rows.push({ name: child.slice(base.length + 1), data: data as Uint8Array })
+      const [data] = await dispatch('read', child)
+      rows.push({
+        name: child.virtual.slice(base.virtual.replace(/\/$/, '').length + 1),
+        data: data as Uint8Array,
+      })
     }
   }
   return {
@@ -154,7 +161,7 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   const local = operands[0] ?? '.'
   const inRepo = operands[1] ?? ''
-  const collected = await collect(dispatch, local)
+  const collected = await collect(dispatch, typedSpec(local, inv.env.PWD ?? '/'))
   const rows = keep(collected.rows, include, exclude)
   if (rows.length === 0) throw new UsageError(`no files matched under ${local}`)
   const base = inRepoBase(inRepo)

@@ -1,7 +1,7 @@
 import git from 'isomorphic-git'
 import Hash from 'sha.js'
 import type { StatPath } from '../../../../ops/types.ts'
-import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
+import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
@@ -12,7 +12,8 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { GitError, NoWorkspaceError } from './errors.ts'
 import { readIndex } from './index_file.ts'
-import { basename, readFile, readNames, readOptional, readRange, under } from './io.ts'
+import { basename, readFile, readNames, readOptional, readRange } from './io.ts'
+import { joinSpec } from '../../../../utils/path.ts'
 import { loadRefs } from './refs.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
@@ -24,20 +25,20 @@ const PACK_BLOCK = 1 << 18
 /** Hash bounded ranges, retaining only the trailing SHA-1 between reads. */
 export async function checkPack(
   dispatch: Dispatch,
-  path: string,
+  path: PathSpec,
   expected: Uint8Array,
 ): Promise<void> {
   const digest = new Hash.sha1()
   let tail = new Uint8Array()
   let offset = 0
   try {
-    const [info] = await dispatch('stat', PathSpec.fromStrPath(path))
+    const [info] = await dispatch('stat', path)
     const size = (info as FileStat | null)?.size ?? null
     while (size === null || offset < size) {
       const count = size === null ? PACK_BLOCK : Math.min(PACK_BLOCK, size - offset)
       const chunk = await readRange(dispatch, path, offset, count)
       if (chunk.length === 0) {
-        if (size !== null && offset < size) throw new GitError(`truncated pack: ${path}`)
+        if (size !== null && offset < size) throw new GitError(`truncated pack: ${path.virtual}`)
         break
       }
       offset += chunk.length
@@ -55,35 +56,35 @@ export async function checkPack(
     const detail =
       gnuStrerror((err as { code?: string }).code) ??
       (err instanceof Error ? err.message : String(err))
-    const failure = new GitError(`cannot read pack ${path}: ${detail}`)
+    const failure = new GitError(`cannot read pack ${path.virtual}: ${detail}`)
     failure.cause = err
     throw failure
   }
-  if (offset < 32) throw new GitError(`truncated pack: ${path}`)
+  if (offset < 32) throw new GitError(`truncated pack: ${path.virtual}`)
   if (digest.digest('hex') !== toHex(tail) || toHex(tail) !== toHex(expected))
-    throw new GitError(`pack checksum mismatch: ${path}`)
+    throw new GitError(`pack checksum mismatch: ${path.virtual}`)
 }
 
 async function objectIds(repo: Repo): Promise<Set<string>> {
-  const root = under(repo.location.commondir, 'objects')
+  const root = joinSpec(repo.location.commondir, 'objects')
   const ids = new Set<string>()
   for (const entry of await readNames(repo.dispatch, root)) {
     const fanout = basename(entry)
     if (!/^[0-9a-f]{2}$/.test(fanout)) continue
-    for (const name of await readNames(repo.dispatch, under(root, fanout))) {
+    for (const name of await readNames(repo.dispatch, joinSpec(root, fanout))) {
       const oid = fanout + basename(name)
       if (/^[0-9a-f]{40}$/.test(oid)) ids.add(oid)
     }
   }
-  for (const entry of await readNames(repo.dispatch, under(root, 'pack'))) {
+  for (const entry of await readNames(repo.dispatch, joinSpec(root, 'pack'))) {
     const name = basename(entry)
     if (!name.endsWith('.idx')) continue
-    const data = await readFile(repo.dispatch, under(root, `pack/${name}`))
+    const data = await readFile(repo.dispatch, joinSpec(root, `pack/${name}`))
     if (data.length < 1064) throw new GitError(`truncated pack index: ${name}`)
     if ((await sha1Hex(data.subarray(0, -20))) !== toHex(data.subarray(-20)))
       throw new GitError(`pack index checksum mismatch: ${name}`)
     const packName = name.slice(0, -4) + '.pack'
-    await checkPack(repo.dispatch, under(root, `pack/${packName}`), data.subarray(-40, -20))
+    await checkPack(repo.dispatch, joinSpec(root, `pack/${packName}`), data.subarray(-40, -20))
     const view = new DataView(data.buffer, data.byteOffset, data.length)
     const v2 = view.getUint32(0) === 0xff744f63
     if (v2 && view.getUint32(4) !== 2) throw new GitError(`unsupported pack index: ${name}`)
@@ -100,11 +101,11 @@ async function objectIds(repo: Repo): Promise<Set<string>> {
 async function logRoots(
   dispatch: Dispatch,
   statPath: StatPath,
-  path: string,
+  path: PathSpec,
 ): Promise<Set<string>> {
   const found = new Set<string>()
   for (const entry of await readNames(dispatch, path)) {
-    const target = under(path, basename(entry))
+    const target = joinSpec(path, basename(entry))
     if ((await statPath(target))?.type === FileType.DIRECTORY) {
       for (const oid of await logRoots(dispatch, statPath, target)) found.add(oid)
     } else {
@@ -132,7 +133,7 @@ export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
     const index = await readIndex(repo, repo.dispatch)
     for (const entry of index.entries.values()) if (entry.mode !== 0o160000) roots.add(entry.oid)
     for (const directory of new Set([repo.location.gitdir, repo.location.commondir])) {
-      for (const oid of await logRoots(repo.dispatch, statPath, under(directory, 'logs')))
+      for (const oid of await logRoots(repo.dispatch, statPath, joinSpec(directory, 'logs')))
         roots.add(oid)
     }
     const referenced = new Set(roots)
@@ -171,7 +172,7 @@ export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
       if (!objects.has(oid) && !roots.has(oid)) errors.push(`missing object ${oid}\n`)
     let stderr = errors.join('')
     if (roots.size === 0) {
-      const head = await readOptional(repo.dispatch, under(repo.location.gitdir, 'HEAD'))
+      const head = await readOptional(repo.dispatch, joinSpec(repo.location.gitdir, 'HEAD'))
       const branch = new TextDecoder()
         .decode(head ?? new Uint8Array())
         .trim()

@@ -684,13 +684,13 @@ GIT = CLISpec(
         DIRECTORY_OPTION,
         Option(
             long="--git-dir",
-            type="str",
+            type="path",
             env="GIT_DIR",
             description="Use the repository at <path>",
         ),
         Option(
             long="--work-tree",
-            type="str",
+            type="path",
             env="GIT_WORK_TREE",
             description="Use <path> as the working tree",
         ),

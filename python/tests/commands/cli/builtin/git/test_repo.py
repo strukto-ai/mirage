@@ -21,6 +21,7 @@ from dulwich.walk import Walker
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.repo import open_repo
+from mirage.utils.path import typed_spec
 
 from .conftest import commit_file, mounted, pack_everything, repo_facts
 
@@ -34,7 +35,7 @@ async def _open(ws):
     Args:
         ws (Workspace): the workspace under test.
     """
-    location = await discover(*repo_facts(ws), "/repo")
+    location = await discover(*repo_facts(ws), typed_spec("/repo", "/"))
     return await open_repo(ws.dispatch, location)
 
 

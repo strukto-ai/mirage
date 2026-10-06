@@ -28,6 +28,7 @@ from mirage.commands.cli.walk import (
 )
 from mirage.commands.spec.types import Option, UsageStyle
 from mirage.runtime.types import ScriptSource
+from mirage.utils.path import typed_spec
 
 
 async def _verb(config, paths, *texts, **flags):
@@ -461,9 +462,9 @@ def test_path_typed_group_option_resolves_against_cwd():
         subcommands=(CLISpec(name="run", fn=_verb),),
     )
     relative = walk("tool", tree, ["-C", "build", "run"], "/repo/src")
-    assert relative.group_flags == {"-C": "/repo/src/build"}
+    assert relative.group_flags == {"-C": typed_spec("build", "/repo/src")}
     absolute = walk("tool", tree, ["-C", "/other", "run"], "/repo/src")
-    assert absolute.group_flags == {"-C": "/other"}
+    assert absolute.group_flags == {"-C": typed_spec("/other", "/repo/src")}
 
 
 def test_path_typed_group_default_lands_as_the_cwd():
@@ -473,7 +474,7 @@ def test_path_typed_group_default_lands_as_the_cwd():
         subcommands=(CLISpec(name="run", fn=_verb),),
     )
     assert walk("tool", tree, ["run"], "/repo/src").group_flags == {
-        "-C": "/repo/src"
+        "-C": typed_spec(".", "/repo/src")
     }
 
 
@@ -484,7 +485,9 @@ def test_repeated_path_group_option_resolves_every_value():
         subcommands=(CLISpec(name="run", fn=_verb),),
     )
     result = walk("tool", tree, ["--dir", "a", "--dir", "/b", "run"], "/w")
-    assert result.group_flags == {"--dir": ["/w/a", "/b"]}
+    assert result.group_flags == {
+        "--dir": [typed_spec("a", "/w"), typed_spec("/b", "/w")]
+    }
 
 
 def _env_tree() -> CLISpec:
@@ -611,7 +614,7 @@ def test_option_shaped_alias_uses_the_declared_leaf():
     result = walk("tool", spec, ["--version"], cwd="/work")
     assert result.leaf is leaf
     assert result.path == ("version",)
-    assert result.group_flags["-C"] == "/work"
+    assert result.group_flags["-C"].virtual == "/work"
     assert result.argv == ()
     # A real option keeps its meaning even if a child also declares that alias.
     spec = replace(spec, options=(Option(short="-v"),))
@@ -677,4 +680,4 @@ def test_an_operand_base_moves_like_a_chdir(argv, expected):
         subcommands=(CLISpec(name="status", fn=_verb),),
     )
     result = walk("git", tree, [*argv, "status"], cwd="/work")
-    assert result.group_flags["-C"] == expected
+    assert result.group_flags["-C"].virtual == expected

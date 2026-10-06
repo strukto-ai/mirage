@@ -66,7 +66,7 @@ async def _cross_stat(
         path (PathSpec): the entry to stat.
         index (IndexCacheStore | None): unused, as for `_cross_readdir`.
     """
-    stat = await stat_path(path.virtual)
+    stat = await stat_path(path)
     if stat is None:
         raise FileNotFoundError(path.virtual)
     return stat
@@ -313,7 +313,7 @@ async def tree(
         # non-directory exists, so it is counted and the exit stays 0; a
         # path that is not there is not counted and exits 2.
         if stat_path is not None:
-            start = await stat_path(path.virtual)
+            start = await stat_path(path)
             if start is None:
                 body.append(root_label + UNOPENABLE_MARK)
                 failed = True

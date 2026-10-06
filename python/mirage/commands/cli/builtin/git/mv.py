@@ -26,7 +26,11 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import remove_file, rename_path
-from mirage.commands.cli.builtin.git.pathspec import repo_relative, under
+from mirage.commands.cli.builtin.git.pathspec import (
+    repo_relative,
+    under,
+    visible_entries,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import IndexState, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
@@ -43,8 +47,9 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
+from mirage.utils.path import join_spec
 
 # git's own wording for each way a source can be refused, in the shape
 # ``fatal: <reason>, source=<src>, destination=<dst>``.
@@ -118,17 +123,17 @@ class Move:
 
 
 async def lstat(
-    stat_path: StatPath, links: LinkView | None, path: str
+    stat_path: StatPath, links: LinkView | None, path: PathSpec
 ) -> FileStat | None:
     """What sits at a path, without following a link.
 
     Args:
         stat_path (StatPath): dispatcher-backed stat, both channels.
         links (LinkView | None): the name plane's link facts.
-        path (str): absolute virtual path.
+        path (PathSpec): absolute virtual path.
     """
     if links is not None:
-        link = links.stat_at(path)
+        link = links.stat_at(path.virtual)
         if link is not None:
             return link
     return await stat_path(path)
@@ -189,7 +194,9 @@ def clashing(move: Move, claimed: set[str]) -> tuple[str, str] | None:
     return None
 
 
-def spanning(mounts: MountView | None, path: str, landing: str) -> bool:
+def spanning(
+    mounts: MountView | None, path: PathSpec, landing: PathSpec
+) -> bool:
     """Whether renaming a path would leave a mount behind.
 
     A mount nested in the repository is served by another VFS, and
@@ -210,14 +217,14 @@ def spanning(mounts: MountView | None, path: str, landing: str) -> bool:
     Args:
         mounts (MountView | None): the name plane's mount boundaries,
             None outside a workspace.
-        path (str): absolute virtual path of the source.
-        landing (str): absolute virtual path the source moves to.
+        path (PathSpec): absolute virtual path of the source.
+        landing (PathSpec): absolute virtual path the source moves to.
     """
     if mounts is None:
         return False
-    if mounts.is_root(path) or bool(mounts.descendants(path)):
+    if mounts.is_root(path.virtual) or bool(mounts.descendants(path.virtual)):
         return True
-    return mounts.root_of(path) != mounts.root_of(landing)
+    return mounts.root_of(path.virtual) != mounts.root_of(landing.virtual)
 
 
 async def check(
@@ -253,14 +260,12 @@ async def check(
         tuple: the refusal wording or None, the tracked paths that move,
         and whether the source is a directory.
     """
-    info = await lstat(
-        stat_path, links, posixpath.join(location.worktree, source)
-    )
+    info = await lstat(stat_path, links, join_spec(location.worktree, source))
     if info is None:
         return BAD_SOURCE, (), False
     if destination == source or destination.startswith(f"{source}/"):
         return INTO_ITSELF, (), False
-    landing = posixpath.join(location.worktree, destination)
+    landing = join_spec(location.worktree, destination)
     if info.type is FileType.DIRECTORY:
         inside = tuple(sorted(path for path in tracked if under(path, source)))
         if any(path in conflicted for path in inside):
@@ -337,7 +342,7 @@ async def plan(
     """
     destination = repo_relative(location, start, operands[-1])
     target = await lstat(
-        stat_path, links, posixpath.join(location.worktree, destination)
+        stat_path, links, join_spec(location.worktree, destination)
     )
     into = destination == "" or (
         target is not None and target.type is FileType.DIRECTORY
@@ -380,8 +385,8 @@ async def plan(
                 reason, named = MULTIPLE_SOURCES, clash
         if reason is None and spanning(
             mounts,
-            posixpath.join(location.worktree, source),
-            posixpath.join(location.worktree, landing),
+            join_spec(location.worktree, source),
+            join_spec(location.worktree, landing),
         ):
             # Last, after every check git itself makes, so a source git
             # would refuse anyway is refused in git's own words. ``-k``
@@ -430,8 +435,8 @@ async def apply(
         force (bool): whether ``-f`` was given, which removes a file
             already at the destination first.
     """
-    source = posixpath.join(location.worktree, move.source)
-    destination = posixpath.join(location.worktree, move.destination)
+    source = join_spec(location.worktree, move.source)
+    destination = join_spec(location.worktree, move.destination)
     if force and not move.directory:
         await remove_file(dispatch, destination)
     try:
@@ -477,20 +482,22 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         repo, location = await opened(fl, doors, work_tree=True)
         state = await read_index(dispatch, location.gitdir)
         conflicted = {
-            path.decode("utf-8", errors="replace") for path in state.conflicts
+            path.decode("utf-8", errors="replace")
+            for path in visible_entries(location, state.conflicts)
         }
         # An unmerged path holds no ordinary entry, so a tracked set
         # built from the entries alone would call it untracked and let
         # a directory holding one move with its stages left behind.
         tracked = {
-            path.decode("utf-8", errors="replace") for path in state.entries
+            path.decode("utf-8", errors="replace")
+            for path in visible_entries(location, state.entries)
         } | conflicted
         moves = await plan(
             stat_path,
             links_of(doors),
             mounts_of(doors),
             location,
-            start_point(fl),
+            start_point(fl).virtual,
             texts,
             tracked,
             conflicted,

@@ -18,6 +18,7 @@ from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.types import MailmapEntry, RepoLocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.runtime.types import DispatchFn
+from mirage.utils.path import join_spec
 
 MAILMAP_LINE = re.compile(
     r"^\s*([^<>]*?)\s*<([^<>]+)>(?:\s*([^<>]*?)\s*<([^<>]*)>)?"
@@ -94,7 +95,9 @@ async def load_mailmap(
         dispatch (DispatchFn): op dispatcher.
         location (RepoLocation): discovered repository.
     """
-    data = await read_optional(dispatch, f"{location.worktree}/.mailmap")
+    data = await read_optional(
+        dispatch, join_spec(location.worktree, ".mailmap")
+    )
     return parse_mailmap((data or b"").decode("utf-8", "replace"))
 
 

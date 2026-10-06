@@ -13,13 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { humanScaled, humanSize } from '../../../../commands/builtin/utils/formatting.ts'
-import { CapacityState } from '../../../../types.ts'
-import type { CapacityResult, PathSpec } from '../../../../types.ts'
-import {
-  dispatchStat,
-  nearestAncestor,
-  typedSpec,
-} from '../../../../commands/builtin/utils/paths.ts'
+import { CapacityState, type CapacityResult, type PathSpec } from '../../../../types.ts'
+import { dispatchStat, nearestAncestor } from '../../../../commands/builtin/utils/paths.ts'
+import { typedSpec } from '../../../../utils/path.ts'
 import {
   enoent,
   enotdir,

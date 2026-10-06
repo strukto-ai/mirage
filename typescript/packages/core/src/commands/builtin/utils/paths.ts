@@ -14,8 +14,7 @@
 
 import type { LinkView, StatPath } from '../../../ops/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { FileStat } from '../../../types.ts'
-import { FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'
+import { type FileStat, FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'
 import {
   dotWalkError,
   eexist,
@@ -27,13 +26,13 @@ import {
 import { mountKey, rekey, respelled } from '../../../utils/key_prefix.ts'
 import {
   CycleError,
+  typedSpec,
   dotPrefixes,
-  dottedSpelling,
   norm,
   parent,
   resolvePath,
 } from '../../../utils/path.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 
 // Stat via dispatch in the shape the generics' probes take: destKind and
 // its kin are written against a backend stat that raises on a miss, so a
@@ -53,28 +52,10 @@ export function dispatchStat(dispatch: DispatchFn): StatFn {
 // Mirrors Python's stat_or_enoent.
 export function statOrEnoent(statPath: StatPath): StatFn {
   return async (path: PathSpec) => {
-    const row = await statPath(path.virtual)
+    const row = await statPath(path)
     if (row === null) throw enoent(path)
     return row
   }
-}
-
-// The PathSpec an operand names, its dotted spelling kept. A classified
-// operand already is one. A word a builtin resolves itself (a relative `ln`
-// name, a `[` operand) arrives as text, and resolving it with resolvePath
-// alone would simplify away the dots its walk has to prove. Mirrors
-// Python's typed_spec.
-export function typedSpec(word: string | PathSpec, cwd: string): PathSpec {
-  if (word instanceof PathSpec) return word
-  const virtual = resolvePath(word, cwd)
-  return new PathSpec({
-    virtual,
-    directory: virtual.slice(0, virtual.lastIndexOf('/') + 1) || '/',
-    vfsPath: stripSlash(virtual),
-    rawPath: word,
-    dotted: dottedSpelling(word, cwd),
-    walkError: word === '' ? 'ENOENT' : null,
-  })
 }
 
 // `path` spelled from its operand as typed, the way GNU names it. Mirrors
@@ -271,16 +252,7 @@ export function hasUnresolvedGlob(paths: PathSpec[]): boolean {
 // The spelling as typed rides along in rawPath, which is the name an
 // interpreter gives its program.
 export function resolveScript(name: string, cwd: string): PathSpec {
-  const path = resolvePath(name, cwd)
-  const lastSlash = path.lastIndexOf('/')
-  const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({
-    vfsPath: stripSlash(path),
-    virtual: path,
-    directory,
-    resolved: true,
-    rawPath: name,
-  })
+  return typedSpec(name, cwd)
 }
 
 // Default a command's path operands the way the shell would: explicit

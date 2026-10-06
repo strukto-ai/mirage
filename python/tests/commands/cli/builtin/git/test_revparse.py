@@ -27,6 +27,7 @@ from mirage.commands.cli.builtin.git.revparse import (
     split_operators,
 )
 from mirage.commands.cli.builtin.git.types import AncestryStep, PeelStep
+from mirage.utils.path import typed_spec
 
 from .conftest import repo_facts
 
@@ -97,7 +98,7 @@ def test_a_bare_suffix_string_means_head():
 
 @pytest.mark.asyncio
 async def test_resolves_refs_shas_and_ancestry(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
 
     head = resolve_commit(repo, "HEAD")
@@ -113,7 +114,7 @@ async def test_resolves_refs_shas_and_ancestry(workspace):
 
 @pytest.mark.asyncio
 async def test_walking_off_the_end_of_history_is_gits_fatal(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(AmbiguousArgumentError) as excinfo:
         resolve_commit(repo, "HEAD~99")
@@ -125,7 +126,7 @@ async def test_walking_off_the_end_of_history_is_gits_fatal(workspace):
 
 @pytest.mark.asyncio
 async def test_unknown_ref_is_gits_fatal(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_commit(repo, "nosuchref")
@@ -133,7 +134,7 @@ async def test_unknown_ref_is_gits_fatal(workspace):
 
 @pytest.mark.asyncio
 async def test_second_parent_of_a_linear_commit_is_refused(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_commit(repo, "HEAD^2")
@@ -178,7 +179,7 @@ def test_a_peel_that_is_never_closed_is_refused():
 
 @pytest.mark.asyncio
 async def test_a_peel_to_a_commit_is_the_commit(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     head = resolve_commit(repo, "HEAD")
     assert resolve_commit(repo, "HEAD^{}").id == head.id
@@ -187,7 +188,7 @@ async def test_a_peel_to_a_commit_is_the_commit(workspace):
 
 @pytest.mark.asyncio
 async def test_a_peel_to_another_type_is_no_commit(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_commit(repo, "HEAD^{tree}")
@@ -195,7 +196,7 @@ async def test_a_peel_to_another_type_is_no_commit(workspace):
 
 @pytest.mark.asyncio
 async def test_an_object_expression_reaches_a_tree(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     head = resolve_commit(repo, "HEAD")
     assert resolve_object(repo, "HEAD^{tree}").id == head.tree
@@ -203,7 +204,7 @@ async def test_an_object_expression_reaches_a_tree(workspace):
 
 @pytest.mark.asyncio
 async def test_an_object_expression_reaches_a_blob(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     found = resolve_object(repo, "HEAD:a.txt")
     assert found.type_name == b"blob"
@@ -212,14 +213,14 @@ async def test_an_object_expression_reaches_a_blob(workspace):
 
 @pytest.mark.asyncio
 async def test_an_ancestry_suffix_still_reads_inside_a_path(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     assert resolve_object(repo, "HEAD~2:a.txt").data == b"one\n"
 
 
 @pytest.mark.asyncio
 async def test_a_bare_object_id_is_itself(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     tree = resolve_commit(repo, "HEAD").tree.decode()
     assert resolve_object(repo, tree).id.decode() == tree
@@ -228,7 +229,7 @@ async def test_a_bare_object_id_is_itself(workspace):
 
 @pytest.mark.asyncio
 async def test_a_path_the_tree_lacks_is_unresolvable(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(
         PathNotInRevisionError,
@@ -239,7 +240,7 @@ async def test_a_path_the_tree_lacks_is_unresolvable(workspace):
 
 @pytest.mark.asyncio
 async def test_a_peel_naming_the_wrong_type_is_refused(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_object(repo, "HEAD^{blob}")
@@ -248,7 +249,7 @@ async def test_a_peel_naming_the_wrong_type_is_refused(workspace):
 @pytest.mark.asyncio
 async def test_a_typed_tag_peel_is_the_tag_itself(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     found = resolve_object(repo, "v1^{tag}")
     assert found.type_name == b"tag"
@@ -258,7 +259,7 @@ async def test_a_typed_tag_peel_is_the_tag_itself(git_rw):
 @pytest.mark.asyncio
 async def test_a_bare_peel_still_unwraps_the_tag(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     assert resolve_object(repo, "v1^{}").id == resolve_commit(repo, "HEAD").id
 
@@ -266,7 +267,7 @@ async def test_a_bare_peel_still_unwraps_the_tag(git_rw):
 @pytest.mark.asyncio
 async def test_a_commit_peel_still_unwraps_the_tag(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     found = resolve_object(repo, "v1^{commit}")
     assert found.id == resolve_commit(repo, "HEAD").id
@@ -275,7 +276,7 @@ async def test_a_commit_peel_still_unwraps_the_tag(git_rw):
 @pytest.mark.asyncio
 async def test_a_lightweight_tag_has_no_tag_to_peel_to(git_rw):
     await git_rw.shell("git -C /repo tag light")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_object(repo, "light^{tag}")
@@ -284,7 +285,7 @@ async def test_a_lightweight_tag_has_no_tag_to_peel_to(git_rw):
 @pytest.mark.asyncio
 async def test_a_bare_tag_id_is_the_tag_object(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     held = repo.refs[b"refs/tags/v1"]
     # git reads a bare id as that exact object, so the commit-ish
@@ -298,7 +299,7 @@ async def test_a_bare_tag_id_is_the_tag_object(git_rw):
 @pytest.mark.asyncio
 async def test_a_tag_name_stands_for_the_tag_itself(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     assert resolve_object(repo, "v1").type_name == b"tag"
     assert resolve_object(repo, "v1^{}").type_name == b"commit"
@@ -307,7 +308,7 @@ async def test_a_tag_name_stands_for_the_tag_itself(git_rw):
 @pytest.mark.asyncio
 async def test_a_path_reads_through_a_bare_tag_id(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     held = repo.refs[b"refs/tags/v1"].decode()
     # The rev half of a path expression is a tree-ish, so the tag comes
@@ -320,7 +321,7 @@ async def test_a_path_reads_through_a_bare_tag_id(git_rw):
 @pytest.mark.asyncio
 async def test_a_peel_through_a_bare_tag_id_still_reaches_the_tree(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     held = repo.refs[b"refs/tags/v1"].decode()
     assert resolve_object(repo, f"{held}^{{tree}}").type_name == b"tree"
@@ -330,7 +331,7 @@ async def test_a_peel_through_a_bare_tag_id_still_reaches_the_tree(git_rw):
 @pytest.mark.asyncio
 async def test_an_object_peel_keeps_whatever_type_it_finds(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     # ``^{object}`` is an existence check, not a type: every object
     # reports a concrete type name, so comparing one against the word
@@ -342,7 +343,7 @@ async def test_an_object_peel_keeps_whatever_type_it_finds(git_rw):
 @pytest.mark.asyncio
 async def test_an_object_peel_leaves_an_annotated_tag_wrapped(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     # The one thing that separates it from ``^{}``: the named object is
     # returned, so a tag stays a tag rather than being unwrapped.
@@ -355,7 +356,7 @@ async def test_an_object_peel_leaves_an_annotated_tag_wrapped(git_rw):
 @pytest.mark.asyncio
 async def test_a_commit_ish_still_reads_an_object_peel(git_rw):
     await git_rw.shell("git -C /repo tag -a v1 -m annotated")
-    location = await discover(*repo_facts(git_rw), "/repo")
+    location = await discover(*repo_facts(git_rw), typed_spec("/repo", "/"))
     repo = await open_repo(git_rw.dispatch, location)
     head = resolve_commit(repo, "HEAD")
     # A caller that wants a commit takes the wrapper off, which is what
@@ -370,7 +371,7 @@ async def test_a_peel_followed_by_a_step_walks_from_the_peeled_commit(
 ):
     # A peel used to be read only at the end of a revision, so every
     # chain that went on after one was refused although git takes it.
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     assert resolve_commit(repo, "HEAD^{commit}~1").message == b"second"
     assert resolve_commit(repo, "HEAD^{}^").message == b"second"
@@ -382,7 +383,7 @@ async def test_a_peel_followed_by_a_step_walks_from_the_peeled_commit(
 
 @pytest.mark.asyncio
 async def test_a_step_followed_by_a_peel_reads_that_commit(workspace):
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     parent = resolve_commit(repo, "HEAD~1")
     assert resolve_object(repo, "HEAD~1^{tree}").id == parent.tree
@@ -393,7 +394,7 @@ async def test_a_step_followed_by_a_peel_reads_that_commit(workspace):
 async def test_a_step_off_a_tree_is_refused(workspace):
     # git dies here too: a tree has no parent, so the step has nothing
     # to walk.
-    location = await discover(*repo_facts(workspace), "/repo")
+    location = await discover(*repo_facts(workspace), typed_spec("/repo", "/"))
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_object(repo, "HEAD^{tree}~1")

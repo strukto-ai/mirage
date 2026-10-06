@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { IOResult } from '../../../io/types.ts'
-import { MountMode, type PathSpec } from '../../../types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -60,7 +60,11 @@ describe('csplit names outputs in the working directory', () => {
   it.each([
     [{}, '/data', ['/data/xx00', '/data/xx01']],
     [{}, '/data/sub', ['/data/sub/xx00', '/data/sub/xx01']],
-    [{ prefix: '/data/sub/cs' }, '/data', ['/data/sub/cs00', '/data/sub/cs01']],
+    [
+      { prefix: PathSpec.fromStrPath('/data/sub/cs') },
+      '/data',
+      ['/data/sub/cs00', '/data/sub/cs01'],
+    ],
   ])('addresses stdin outputs with %j under %s', async (flags, cwd, named) => {
     const [specs, io] = await runCsplit(flags, cwd)
     expect(specs.map((p) => p.virtual)).toEqual(named)

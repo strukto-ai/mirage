@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { typedSpec } from '../../utils/path.ts'
+
 import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../../runtime/types.ts'
 import { Option, UsageStyle } from '../spec/types.ts'
@@ -461,9 +463,9 @@ describe('walk path-typed group options', () => {
       subcommands: [new CLISpec({ name: 'run', fn: verb })],
     })
     const relative = walk('tool', spec, ['-C', 'build', 'run'], '/repo/src')
-    expect(relative.groupFlags).toEqual({ '-C': '/repo/src/build' })
+    expect(relative.groupFlags).toEqual({ '-C': typedSpec('build', '/repo/src') })
     const absolute = walk('tool', spec, ['-C', '/other', 'run'], '/repo/src')
-    expect(absolute.groupFlags).toEqual({ '-C': '/other' })
+    expect(absolute.groupFlags).toEqual({ '-C': typedSpec('/other', '/repo/src') })
   })
 
   it('lands a default as the working directory', () => {
@@ -472,7 +474,9 @@ describe('walk path-typed group options', () => {
       options: [new Option({ short: '-C', type: 'path', default: '.' })],
       subcommands: [new CLISpec({ name: 'run', fn: verb })],
     })
-    expect(walk('tool', spec, ['run'], '/repo/src').groupFlags).toEqual({ '-C': '/repo/src' })
+    expect(walk('tool', spec, ['run'], '/repo/src').groupFlags).toEqual({
+      '-C': typedSpec('.', '/repo/src'),
+    })
   })
 
   it('resolves every value of a repeated option', () => {
@@ -482,7 +486,7 @@ describe('walk path-typed group options', () => {
       subcommands: [new CLISpec({ name: 'run', fn: verb })],
     })
     const result = walk('tool', spec, ['--dir', 'a', '--dir', '/b', 'run'], '/w')
-    expect(result.groupFlags).toEqual({ '--dir': ['/w/a', '/b'] })
+    expect(result.groupFlags).toEqual({ '--dir': [typedSpec('a', '/w'), typedSpec('/b', '/w')] })
   })
 })
 
@@ -642,7 +646,7 @@ it('resolves option-shaped aliases through their declared leaf, after real optio
   const result = walk('tool', spec, ['--version'], '/work')
   expect(result.leaf).toBe(leaf)
   expect(result.path).toEqual(['version'])
-  expect(result.groupFlags['-C']).toBe('/work')
+  expect(result.groupFlags['-C']).toMatchObject({ virtual: '/work' })
   expect(result.argv).toEqual([])
   const other = new CLISpec({
     name: 'tool',
@@ -697,5 +701,7 @@ it.each([
     options: [new Option({ short: '-C', type: 'path', default: '.' })],
     subcommands: [new CLISpec({ name: 'status', fn: verb })],
   })
-  expect(walk('git', git, [...argv, 'status'], '/work').groupFlags['-C']).toBe(expected)
+  expect(walk('git', git, [...argv, 'status'], '/work').groupFlags['-C']).toMatchObject({
+    virtual: expected,
+  })
 })

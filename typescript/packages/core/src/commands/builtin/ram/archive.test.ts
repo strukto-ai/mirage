@@ -13,16 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RAM_COMMANDS } from './index.ts'
+import { type CommandOpts, type RegisteredCommand } from '../../config.ts'
 import { describe, expect, it } from 'vitest'
-import type { RegisteredCommand } from '../../config.ts'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { LinkView } from '../../../ops/types.ts'
-import { FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, LINK_TARGET_KEY, PathSpec, MountMode } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { readTar } from '../tar_helper.ts'
 import { UsageError } from '../../errors.ts'
-import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 const RAM_TAR = RAM_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
@@ -87,7 +86,7 @@ async function runCmd(
   reg: readonly RegisteredCommand[],
   vfs: RAMVFS,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | number | string[]>,
+  flags: CommandOpts['flags'],
   texts: string[] = [],
   mountPrefix = '',
   links: LinkView | null = null,
@@ -129,12 +128,19 @@ describe('tar', () => {
     vfs.store.files.set('/b.txt', ENC.encode('bbb'))
     await runCmd(RAM_TAR, vfs, [PathSpec.fromStrPath('/a.txt'), PathSpec.fromStrPath('/b.txt')], {
       create: true,
-      file: '/archive.tar',
+      file: PathSpec.fromStrPath('/archive.tar'),
     })
-    const { out } = await runCmd(RAM_TAR, vfs, [], { list: true, file: '/archive.tar' })
+    const { out } = await runCmd(RAM_TAR, vfs, [], {
+      list: true,
+      file: PathSpec.fromStrPath('/archive.tar'),
+    })
     expect(DEC.decode(out).trim().split('\n')).toEqual(['a.txt', 'b.txt'])
     vfs.store.files.delete('/a.txt')
-    await runCmd(RAM_TAR, vfs, [], { extract: true, file: '/archive.tar', directory: '/' })
+    await runCmd(RAM_TAR, vfs, [], {
+      extract: true,
+      file: PathSpec.fromStrPath('/archive.tar'),
+      directory: PathSpec.fromStrPath('/'),
+    })
     expect(DEC.decode(vfs.store.files.get('/a.txt'))).toBe('content_a')
   })
 
@@ -147,11 +153,14 @@ describe('tar', () => {
     const { exitCode, out } = await runCmd(RAM_TAR, vfs, [dirSpec('/d', 'd')], {
       create: true,
       verbose: true,
-      file: '/out.tar',
+      file: PathSpec.fromStrPath('/out.tar'),
     })
     expect(exitCode).toBe(0)
     expect(DEC.decode(out).trim().split('\n')).toEqual(['d/', 'd/a.txt', 'd/sub/', 'd/sub/b.txt'])
-    const listed = await runCmd(RAM_TAR, vfs, [], { list: true, file: '/out.tar' })
+    const listed = await runCmd(RAM_TAR, vfs, [], {
+      list: true,
+      file: PathSpec.fromStrPath('/out.tar'),
+    })
     expect(DEC.decode(listed.out).trim().split('\n')).toEqual([
       'd/',
       'd/a.txt',
@@ -166,7 +175,7 @@ describe('tar', () => {
     vfs.store.files.set('/d/a.txt', ENC.encode('alpha'))
     const { stderr } = await runCmd(RAM_TAR, vfs, [dirSpec('/d', '/d')], {
       create: true,
-      file: '/out.tar',
+      file: PathSpec.fromStrPath('/out.tar'),
     })
     const text = DEC.decode(stderr)
     expect(text).toContain('Removing leading')
@@ -218,7 +227,7 @@ describe('tar', () => {
       RAM_TAR,
       vfs,
       operands.map(([virtual, raw]) => dirSpec(virtual ?? '', raw ?? '')),
-      { create: true, file: '/out.tar' },
+      { create: true, file: PathSpec.fromStrPath('/out.tar') },
     )
     expect(DEC.decode(stderr).split('\n').slice(0, 2)).toEqual(lines)
   })
@@ -231,7 +240,7 @@ describe('tar', () => {
       RAM_TAR,
       vfs,
       [dirSpec('/nope', 'nope'), dirSpec('/d', 'd')],
-      { create: true, file: '/out.tar' },
+      { create: true, file: PathSpec.fromStrPath('/out.tar') },
     )
     expect(exitCode).toBe(2)
     const text = DEC.decode(stderr)
@@ -245,7 +254,11 @@ describe('tar', () => {
       RAM_TAR,
       vfs,
       [dirSpec('/nodir/a.txt', 'a.txt')],
-      { create: true, file: '/out.tar', directory: '/nodir' },
+      {
+        create: true,
+        file: PathSpec.fromStrPath('/out.tar'),
+        directory: PathSpec.fromStrPath('/nodir'),
+      },
     )
     expect(exitCode).toBe(2)
     expect(DEC.decode(stderr)).toContain('tar: /nodir: Cannot open: No such file or directory')
@@ -260,11 +273,14 @@ describe('tar', () => {
     vfs.store.files.set('/d/sub/b.txt', ENC.encode('b'))
     const one = await runCmd(RAM_TAR, vfs, [dirSpec('/d', 'd')], {
       create: true,
-      file: '/two.tar',
+      file: PathSpec.fromStrPath('/two.tar'),
       exclude: 'sub/b.txt',
     })
     expect(one.exitCode).toBe(0)
-    const listedTwo = await runCmd(RAM_TAR, vfs, [], { list: true, file: '/two.tar' })
+    const listedTwo = await runCmd(RAM_TAR, vfs, [], {
+      list: true,
+      file: PathSpec.fromStrPath('/two.tar'),
+    })
     expect(DEC.decode(listedTwo.out).trim().split('\n')).toEqual(['d/', 'd/a.txt', 'd/sub/'])
   })
 
@@ -273,11 +289,21 @@ describe('tar', () => {
     vfs.store.dirs.add('/d')
     vfs.store.dirs.add('/d/empty')
     vfs.store.files.set('/d/a.txt', ENC.encode('a'))
-    await runCmd(RAM_TAR, vfs, [dirSpec('/d', 'd')], { create: true, file: '/out.tar' })
-    const listed = await runCmd(RAM_TAR, vfs, [], { list: true, file: '/out.tar' })
+    await runCmd(RAM_TAR, vfs, [dirSpec('/d', 'd')], {
+      create: true,
+      file: PathSpec.fromStrPath('/out.tar'),
+    })
+    const listed = await runCmd(RAM_TAR, vfs, [], {
+      list: true,
+      file: PathSpec.fromStrPath('/out.tar'),
+    })
     expect(DEC.decode(listed.out)).toContain('d/empty/')
     vfs.store.dirs.add('/out')
-    await runCmd(RAM_TAR, vfs, [], { extract: true, file: '/out.tar', directory: '/out' })
+    await runCmd(RAM_TAR, vfs, [], {
+      extract: true,
+      file: PathSpec.fromStrPath('/out.tar'),
+      directory: PathSpec.fromStrPath('/out'),
+    })
     expect(vfs.store.dirs.has('/out/d/empty')).toBe(true)
   })
 
@@ -301,7 +327,7 @@ describe('tar', () => {
       RAM_TAR,
       vfs,
       [operand],
-      { create: true, verbose: true, file: '/tdir.tar' },
+      { create: true, verbose: true, file: PathSpec.fromStrPath('/tdir.tar') },
       [],
       '/data',
     )
@@ -337,7 +363,9 @@ describe('zip / unzip', () => {
     expect(DEC.decode(out)).toContain('deep.txt')
     expect(DEC.decode(out)).not.toContain('sub/')
     vfs.store.files.delete('/a.txt')
-    await runCmd(RAM_UNZIP, vfs, [PathSpec.fromStrPath('/out.zip')], { d: '/' })
+    await runCmd(RAM_UNZIP, vfs, [PathSpec.fromStrPath('/out.zip')], {
+      d: PathSpec.fromStrPath('/'),
+    })
     expect(DEC.decode(vfs.store.files.get('/a.txt'))).toBe('zip_content')
   })
 
@@ -476,7 +504,7 @@ describe('unzip members', () => {
 
   it('extraction writes only the selected members', async () => {
     const vfs = await makeBook()
-    const r = await runCmd(RAM_UNZIP, vfs, book(), { d: '/ext' }, [
+    const r = await runCmd(RAM_UNZIP, vfs, book(), { d: PathSpec.fromStrPath('/ext') }, [
       'xl/workbook.xml',
       'NOSUCHFILE.xml',
     ])
@@ -498,7 +526,7 @@ describe('archive planner regressions', () => {
       RAM_TAR,
       vfs,
       [dirSpec('/d', 'd')],
-      { create: true, dereference: true, verbose: true, file: '/out.tar' },
+      { create: true, dereference: true, verbose: true, file: PathSpec.fromStrPath('/out.tar') },
       [],
       '',
       links,
@@ -516,7 +544,7 @@ describe('archive planner regressions', () => {
       RAM_TAR,
       vfs,
       [dirSpec('/d', 'd')],
-      { create: true, dereference: true, file: '/out.tar' },
+      { create: true, dereference: true, file: PathSpec.fromStrPath('/out.tar') },
       [],
       '',
       links,
@@ -538,7 +566,7 @@ describe('archive planner regressions', () => {
       RAM_TAR,
       vfs,
       [dirSpec('/link', 'link')],
-      { create: true, file: '/out.tar' },
+      { create: true, file: PathSpec.fromStrPath('/out.tar') },
       [],
       '',
       links,
@@ -562,7 +590,7 @@ describe('archive planner regressions', () => {
       RAM_TAR,
       vfs,
       [dirSpec('/link', 'link')],
-      { create: true, dereference: true, file: '/out.tar' },
+      { create: true, dereference: true, file: PathSpec.fromStrPath('/out.tar') },
       [],
       '',
       links,
@@ -582,7 +610,7 @@ describe('archive planner regressions', () => {
       RAM_TAR,
       vfs,
       [dirSpec('/link', 'link')],
-      { create: true, dereference: true, file: '/out.tar' },
+      { create: true, dereference: true, file: PathSpec.fromStrPath('/out.tar') },
       [],
       '',
       links,
@@ -598,8 +626,8 @@ describe('archive planner regressions', () => {
     vfs.store.files.set('/good/y.txt', ENC.encode('y'))
     const { exitCode, stderr } = await runCmd(RAM_TAR, vfs, [dirSpec('/good/y.txt', 'y.txt')], {
       create: true,
-      file: '/out.tar',
-      directory: ['/missing', '/good'],
+      file: PathSpec.fromStrPath('/out.tar'),
+      directory: ['/missing', '/good'].map((path) => PathSpec.fromStrPath(path)),
     })
     expect(exitCode).toBe(2)
     const text = DEC.decode(stderr)

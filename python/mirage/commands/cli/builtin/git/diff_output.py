@@ -46,6 +46,7 @@ from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
+from mirage.utils.path import join_spec
 
 RENAME_SCORE = 50
 
@@ -704,7 +705,9 @@ def text_lines(data: bytes) -> list[str]:
 async def renames_enabled(
     dispatch: DispatchFn, location: RepoLocation
 ) -> bool:
-    data = await read_optional(dispatch, f"{location.commondir}/config")
+    data = await read_optional(
+        dispatch, join_spec(location.commondir, "config")
+    )
     if data is None:
         return True
     cfg = ConfigFile.from_file(BytesIO(data))

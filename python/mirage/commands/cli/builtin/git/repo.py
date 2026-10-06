@@ -26,6 +26,7 @@ from mirage.commands.cli.builtin.git.refs import load_refs
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import git_bool
 from mirage.runtime.types import DispatchFn
+from mirage.utils.path import join_spec
 
 
 class Repo(BaseRepo):
@@ -113,7 +114,9 @@ async def config_values(
         section (bytes): the section, e.g. ``b"core"``.
         name (bytes): the variable, e.g. ``b"worktree"``.
     """
-    data = await read_optional(dispatch, f"{location.commondir}/config")
+    data = await read_optional(
+        dispatch, join_spec(location.commondir, "config")
+    )
     if data is None:
         return []
     config = ConfigFile.from_file(BytesIO(data))

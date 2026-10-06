@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
   basename,
@@ -20,9 +21,9 @@ import {
   readNames,
   readOptional,
   removeFile,
-  under,
   writeFile,
 } from './io.ts'
+import { joinSpec } from '../../../../utils/path.ts'
 import type { Dispatch, HeadRef, Refspec, SymbolicEnd } from './types.ts'
 
 const HEAD_FILE = 'HEAD'
@@ -43,8 +44,8 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
  * when the checkout is detached. A ref outside `refs/heads` keeps its full name,
  * which is what git shows for a checked-out tag or remote-tracking ref.
  */
-export async function readHead(dispatch: Dispatch, gitdir: string): Promise<HeadRef> {
-  const text = DEC.decode(await readFile(dispatch, under(gitdir, HEAD_FILE))).trim()
+export async function readHead(dispatch: Dispatch, gitdir: PathSpec): Promise<HeadRef> {
+  const text = DEC.decode(await readFile(dispatch, joinSpec(gitdir, HEAD_FILE))).trim()
   if (!text.startsWith(SYMREF_PREFIX)) {
     return { branch: null, ref: null, commit: text === '' ? null : text }
   }
@@ -62,14 +63,14 @@ export async function readHead(dispatch: Dispatch, gitdir: string): Promise<Head
  */
 async function walkLooseRefs(
   dispatch: Dispatch,
-  root: string,
+  root: PathSpec,
   prefix: string,
   refs: Map<string, string>,
 ): Promise<void> {
   for (const entry of await readNames(dispatch, root)) {
     const name = basename(entry)
     if (name === '') continue
-    const child = under(root, name)
+    const child = joinSpec(root, name)
     if (await isDirectory(dispatch, child)) {
       await walkLooseRefs(dispatch, child, `${prefix}/${name}`, refs)
       continue
@@ -94,11 +95,11 @@ async function walkLooseRefs(
  */
 export async function writeRef(
   dispatch: Dispatch,
-  commondir: string,
+  commondir: PathSpec,
   ref: string,
   sha: string,
 ): Promise<void> {
-  await writeFile(dispatch, under(commondir, ref), ENC.encode(`${sha}\n`))
+  await writeFile(dispatch, joinSpec(commondir, ref), ENC.encode(`${sha}\n`))
 }
 
 /**
@@ -140,9 +141,13 @@ export function withoutPacked(text: string, ref: string): string | null {
  * `git pack-refs` a ref exists nowhere else, and a force-updated one exists in
  * both, where dropping the loose file would resurrect the older packed value.
  */
-export async function deleteRef(dispatch: Dispatch, commondir: string, ref: string): Promise<void> {
-  await removeFile(dispatch, under(commondir, ref))
-  const path = under(commondir, PACKED_REFS)
+export async function deleteRef(
+  dispatch: Dispatch,
+  commondir: PathSpec,
+  ref: string,
+): Promise<void> {
+  await removeFile(dispatch, joinSpec(commondir, ref))
+  const path = joinSpec(commondir, PACKED_REFS)
   const data = await readOptional(dispatch, path)
   if (data === null) return
   const rewritten = withoutPacked(DEC.decode(data), ref)
@@ -150,13 +155,13 @@ export async function deleteRef(dispatch: Dispatch, commondir: string, ref: stri
 }
 
 /** Point HEAD at a branch, symbolically. */
-export async function setHead(dispatch: Dispatch, gitdir: string, ref: string): Promise<void> {
-  await writeFile(dispatch, under(gitdir, HEAD_FILE), ENC.encode(`${SYMREF_PREFIX}${ref}\n`))
+export async function setHead(dispatch: Dispatch, gitdir: PathSpec, ref: string): Promise<void> {
+  await writeFile(dispatch, joinSpec(gitdir, HEAD_FILE), ENC.encode(`${SYMREF_PREFIX}${ref}\n`))
 }
 
 /** Point HEAD straight at a commit, detaching it from any branch. */
-export async function detachHead(dispatch: Dispatch, gitdir: string, sha: string): Promise<void> {
-  await writeFile(dispatch, under(gitdir, HEAD_FILE), ENC.encode(`${sha}\n`))
+export async function detachHead(dispatch: Dispatch, gitdir: PathSpec, sha: string): Promise<void> {
+  await writeFile(dispatch, joinSpec(gitdir, HEAD_FILE), ENC.encode(`${sha}\n`))
 }
 
 /**
@@ -200,18 +205,18 @@ function parsePackedRefs(data: Uint8Array): Map<string, string> {
  */
 export async function loadRefs(
   dispatch: Dispatch,
-  gitdir: string,
-  commondir: string | null = null,
+  gitdir: PathSpec,
+  commondir: PathSpec | null = null,
 ): Promise<Map<string, string>> {
   const shared = commondir ?? gitdir
   const refs = new Map<string, string>()
-  const packed = await readOptional(dispatch, under(shared, PACKED_REFS))
+  const packed = await readOptional(dispatch, joinSpec(shared, PACKED_REFS))
   if (packed !== null) {
     for (const [name, sha] of parsePackedRefs(packed)) refs.set(name, sha)
   }
-  await walkLooseRefs(dispatch, under(shared, REFS_DIR), REFS_DIR, refs)
-  if (gitdir !== shared) {
-    await walkLooseRefs(dispatch, under(gitdir, REFS_DIR), REFS_DIR, refs)
+  await walkLooseRefs(dispatch, joinSpec(shared, REFS_DIR), REFS_DIR, refs)
+  if (gitdir.virtual !== shared.virtual) {
+    await walkLooseRefs(dispatch, joinSpec(gitdir, REFS_DIR), REFS_DIR, refs)
   }
   const head = await readHead(dispatch, gitdir)
   if (head.ref !== null) refs.set(HEAD_FILE, `${SYMREF_PREFIX}${head.ref}`)
@@ -303,14 +308,14 @@ export function wholeRefName(name: string): boolean {
  */
 export async function rawRef(
   dispatch: Dispatch,
-  gitdir: string,
+  gitdir: PathSpec,
   table: ReadonlyMap<string, string>,
   name: string,
 ): Promise<string | null> {
   const known = table.get(name)
   if (known !== undefined) return known
   if (name.startsWith(`${REFS_DIR}/`)) return null
-  const data = await readOptional(dispatch, under(gitdir, name))
+  const data = await readOptional(dispatch, joinSpec(gitdir, name))
   return data === null ? null : DEC.decode(data).trim()
 }
 
@@ -330,7 +335,7 @@ export async function rawRef(
  */
 export async function resolveSymbolic(
   dispatch: Dispatch,
-  gitdir: string,
+  gitdir: PathSpec,
   table: ReadonlyMap<string, string>,
   name: string,
   recurse: boolean,

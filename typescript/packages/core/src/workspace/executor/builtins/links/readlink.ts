@@ -14,7 +14,8 @@
 
 import { canonicalize } from '../../../../commands/builtin/generic/realpath.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
-import { dispatchStat, dotRefusal, typedSpec } from '../../../../commands/builtin/utils/paths.ts'
+import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
+import { typedSpec } from '../../../../utils/path.ts'
 import { gnuPhrase } from '../../../../errors/posix.ts'
 import { PathSpec } from '../../../../types.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'

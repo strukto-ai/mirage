@@ -59,6 +59,8 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.types import PathSpec
+from mirage.utils.path import join_spec
 from mirage.utils.posix import compile_posix_regex
 from mirage.version import __version__
 
@@ -76,7 +78,9 @@ async def repo_config(inv: CLIInvocation[None], fl: FlagView) -> ConfigFile:
     assert doors.dispatch is not None
     return ConfigFile.from_file(
         BytesIO(
-            await read_file(doors.dispatch, f"{location.commondir}/config")
+            await read_file(
+                doors.dispatch, join_spec(location.commondir, "config")
+            )
         )
     )
 
@@ -160,10 +164,16 @@ async def config(
             doors = inv.doors or CLIDoors()
             _, location = await opened(fl, doors)
             assert doors.dispatch is not None
-            source = f"{location.commondir}/config"
+            source = join_spec(location.commondir, "config").virtual
             data = await read_file(doors.dispatch, source)
-            ordinary = location.commondir == location.worktree + "/.git"
-            if ordinary and start_point(fl) == location.worktree:
+            ordinary = (
+                location.commondir.virtual
+                == location.worktree.virtual + "/.git"
+            )
+            if (
+                ordinary
+                and start_point(fl).virtual == location.worktree.virtual
+            ):
                 source = ".git/config"
             sources = [(source, ConfigFile.from_file(BytesIO(data)))]
         listing = fl.as_bool("list")
@@ -290,7 +300,7 @@ def config_key(key: str) -> str:
 
 async def _abbreviated(
     dispatch: DispatchFn,
-    gitdir: str,
+    gitdir: PathSpec,
     table: DictRefsContainer,
     revision: str,
     strict: bool,
@@ -309,7 +319,7 @@ async def _abbreviated(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): this checkout's git directory.
+        gitdir (PathSpec): this checkout's git directory.
         table (DictRefsContainer): every ref, as load_refs reads them.
         revision (str): the revision as typed.
         strict (bool): ``=strict``, or ``core.warnAmbiguousRefs`` when no
@@ -351,7 +361,9 @@ def _abbrev_strict(mode: FlagValue, warn: bool) -> bool:
 
 
 def _in_git_dir(start: str, location: RepoLocation) -> bool:
-    return start == location.gitdir or start.startswith(location.gitdir + "/")
+    return start == location.gitdir.virtual or start.startswith(
+        location.gitdir.virtual + "/"
+    )
 
 
 async def _place_answers(
@@ -371,25 +383,32 @@ async def _place_answers(
         start (str): the directory the line runs in.
     """
     in_git_dir = _in_git_dir(start, location)
-    top = "/" if location.worktree == "/" else location.worktree + "/"
+    top = (
+        "/"
+        if location.worktree.virtual == "/"
+        else location.worktree.virtual + "/"
+    )
     in_work_tree = (
         not in_git_dir
         and not await is_bare(dispatch, location)
-        and (start == location.worktree or start.startswith(top))
+        and (start == location.worktree.virtual or start.startswith(top))
     )
     prefix = (
         start[len(top) :] + "/"
-        if in_work_tree and start != location.worktree
+        if in_work_tree and start != location.worktree.virtual
         else ""
     )
-    if start == location.gitdir:
+    if start == location.gitdir.virtual:
         git_dir = "."
-    elif start == location.worktree and location.gitdir == top + GIT_DIR:
+    elif (
+        start == location.worktree.virtual
+        and location.gitdir.virtual == top + GIT_DIR
+    ):
         git_dir = GIT_DIR
     else:
-        git_dir = location.gitdir
+        git_dir = location.gitdir.virtual
     return {
-        SHOW_TOPLEVEL: f"{location.worktree}\n".encode(),
+        SHOW_TOPLEVEL: f"{location.worktree.virtual}\n".encode(),
         GIT_DIR_OPTION: f"{git_dir}\n".encode(),
         "--show-prefix": f"{prefix}\n".encode(),
         "--is-inside-work-tree": f"{str(in_work_tree).lower()}\n".encode(),
@@ -449,7 +468,7 @@ async def rev_parse(
         doors = inv.doors or CLIDoors()
         repo, location = await opened(fl, doors, work_tree=toplevel)
         assert doors.dispatch is not None
-        start = start_point(fl)
+        start = start_point(fl).virtual
         if toplevel and _in_git_dir(start, location):
             raise NotAWorkTreeError()
         answers = await _place_answers(doors.dispatch, location, start)

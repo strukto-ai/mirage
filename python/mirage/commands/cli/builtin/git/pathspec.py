@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import TypeVar
 
 from mirage.commands.cli.builtin.git.errors import (
     EmptyPathspecError,
@@ -23,6 +24,10 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.shell.bytes import byte_view
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.hidden import path_visible
+from mirage.utils.path import join_spec
+
+T = TypeVar("T")
 
 MAGIC = ":"
 SLASH = "/"
@@ -59,7 +64,7 @@ def repo_relative(location: RepoLocation, start: str, operand: str) -> str:
         start (str): absolute virtual path git is running in.
         operand (str): the operand as the user spelled it.
     """
-    root = location.worktree.rstrip("/") or "/"
+    root = location.worktree.virtual.rstrip("/") or "/"
     prefix = root if root.endswith("/") else f"{root}/"
     base = start if start == root or start.startswith(prefix) else root
     absolute = absolute_operand(base, operand)
@@ -165,3 +170,39 @@ def _selects(path: str, pattern: str, directory: bool) -> bool:
     if directory and (path == stem or under(stem, path)):
         return True
     return fnmatch(byte_view(path), byte_view(pattern))
+
+
+def visible_path(location: RepoLocation, relative: str) -> bool:
+    """Whether a repository entry belongs to the session's visible tree.
+
+    Args:
+        location (RepoLocation): repository and its namespace visibility.
+        relative (str): Git's repository-relative entry name.
+    """
+    ns = location.ns
+    if ns is None or ns.visibility is None:
+        return True
+    path = join_spec(location.worktree, relative)
+    if not path_visible(ns.visibility, path.virtual):
+        return False
+    parent = ns.links.resolve(path.directory) if ns.links else path.directory
+    followed = join_spec(parent, posixpath.basename(path.virtual))
+    return path_visible(ns.visibility, followed.virtual)
+
+
+def visible_entries(
+    location: RepoLocation, entries: Mapping[bytes, T]
+) -> dict[bytes, T]:
+    """A session view of Git entries; the persistent mapping stays intact.
+
+    Args:
+        location (RepoLocation): repository and the invocation's namespace.
+        entries (Mapping[bytes, T]): index or tree entries keyed by Git names.
+    """
+    return {
+        path: entry
+        for path, entry in entries.items()
+        if visible_path(
+            location, path.decode("utf-8", errors="surrogateescape")
+        )
+    }

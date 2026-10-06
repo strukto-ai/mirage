@@ -28,12 +28,13 @@ from mirage.commands.cli.builtin.git.pathspec import (
     under,
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.utils.path import typed_spec
 
 LOCATION = RepoLocation(
-    gitdir="/repo/.git",
-    commondir="/repo/.git",
-    worktree="/repo",
-    mount_root="/repo/",
+    gitdir=typed_spec("/repo/.git", "/"),
+    commondir=typed_spec("/repo/.git", "/"),
+    worktree=typed_spec("/repo", "/"),
+    mount_root=typed_spec("/repo/", "/"),
 )
 
 

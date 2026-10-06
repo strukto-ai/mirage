@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { joinSpec } from '../../../../utils/path.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { readOptional } from './io.ts'
 import type { Dispatch, MailmapEntry, RepoLocation } from './types.ts'
@@ -78,7 +79,7 @@ export async function loadMailmap(
   dispatch: Dispatch,
   location: RepoLocation,
 ): Promise<readonly MailmapEntry[]> {
-  const data = await readOptional(dispatch, `${location.worktree}/.mailmap`)
+  const data = await readOptional(dispatch, joinSpec(location.worktree, `.mailmap`))
   return parseMailmap(new TextDecoder().decode(data ?? new Uint8Array()))
 }
 

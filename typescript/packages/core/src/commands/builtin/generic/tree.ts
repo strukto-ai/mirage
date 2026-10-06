@@ -248,7 +248,7 @@ export async function treeGeneric(
       statPath === undefined
         ? null
         : async (p: PathSpec) => {
-            const s = await statPath(p.virtual)
+            const s = await statPath(p)
             // Stamped, not a bare Error: `isWalkError` keys on the code,
             // so an unstamped throw escapes the walk's catch and rejects
             // the whole run instead of skipping one vanished entry. The
@@ -278,7 +278,7 @@ export async function treeGeneric(
     // count and the status. A non-directory exists, so it is counted and
     // the exit stays 0; a path that is not there is not counted and exits 2.
     if (opts.statPath !== undefined) {
-      const start = await opts.statPath(p.virtual)
+      const start = await opts.statPath(p)
       if (start === null) {
         lines[before] = `${label}${UNOPENABLE_MARK}`
         anyError = true

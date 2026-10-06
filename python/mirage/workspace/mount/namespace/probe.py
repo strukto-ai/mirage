@@ -17,7 +17,7 @@ import posixpath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import ELOOP_STRERROR, MISS_ERRORS, DotWalkLoop
-from mirage.utils.path import CycleError
+from mirage.utils.path import CycleError, typed_spec
 from mirage.workspace.mount.namespace import Namespace
 
 # What an existence probe reads as nothing there: every miss, and a link
@@ -71,7 +71,9 @@ async def resolve_path_stat(
     )
 
 
-async def path_stat(dispatch: DispatchFn, virtual: str) -> FileStat | None:
+async def path_stat(
+    dispatch: DispatchFn, virtual: str | PathSpec
+) -> FileStat | None:
     """Stat one virtual path through the workspace, None when absent.
 
     Resolves through the op dispatcher rather than one backend, so a path
@@ -81,17 +83,13 @@ async def path_stat(dispatch: DispatchFn, virtual: str) -> FileStat | None:
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        virtual (str): absolute virtual path.
+        virtual (str | PathSpec): absolute virtual path.
     """
-    spec = PathSpec(
-        virtual=virtual,
-        directory=virtual[: virtual.rfind("/") + 1] or "/",
-        vfs_path="",
-    )
+    spec = typed_spec(virtual, "/")
     return await resolve_path_stat(dispatch, spec)
 
 
-async def miss_strerror(dispatch: DispatchFn, virtual: str) -> str:
+async def miss_strerror(dispatch: DispatchFn, virtual: str | PathSpec) -> str:
     """The strerror GNU names for a path ``path_stat`` found nothing at.
 
     ``path_stat`` answers None for both ways a lookup fails, since an
@@ -102,10 +100,10 @@ async def miss_strerror(dispatch: DispatchFn, virtual: str) -> str:
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        virtual (str): absolute virtual path.
+        virtual (str | PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("stat", PathSpec.from_str_path(virtual))
+        await dispatch("stat", typed_spec(virtual, "/"))
     except NotADirectoryError:
         return "Not a directory"
     except MISS_ERRORS:
@@ -115,7 +113,9 @@ async def miss_strerror(dispatch: DispatchFn, virtual: str) -> str:
     return "No such file or directory"
 
 
-async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:
+async def path_readdir(
+    dispatch: DispatchFn, virtual: str | PathSpec
+) -> list[str]:
     """List one virtual path through the workspace, as virtual paths.
 
     Resolves through the op dispatcher rather than one backend, so a
@@ -125,23 +125,19 @@ async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        virtual (str): absolute virtual path of the directory.
+        virtual (str | PathSpec): absolute virtual path of the directory.
     """
-    spec = PathSpec(
-        virtual=virtual,
-        directory=virtual[: virtual.rfind("/") + 1] or "/",
-        vfs_path="",
-    )
+    spec = typed_spec(virtual, "/")
     entries, _ = await dispatch("readdir", spec)
     return list(entries)
 
 
-async def path_exists(dispatch: DispatchFn, virtual: str) -> bool:
+async def path_exists(dispatch: DispatchFn, virtual: str | PathSpec) -> bool:
     """Whether a resolved virtual path names something that exists.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        virtual (str): absolute virtual path.
+        virtual (str | PathSpec): absolute virtual path.
     """
     try:
         return await path_stat(dispatch, virtual) is not None

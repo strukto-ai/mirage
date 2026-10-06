@@ -211,7 +211,9 @@ async def status(
             dispatch, location, b"core", b"quotepath", True
         )
         if not parsed.porcelain:
-            rows = await displayed(dispatch, location, start_point(fl), rows)
+            rows = await displayed(
+                dispatch, location, start_point(fl).virtual, rows
+            )
         upstream = await branch_upstream(
             dispatch, repo, location, head, no_commits
         )

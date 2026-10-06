@@ -1,5 +1,6 @@
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import read_stdin_async
@@ -9,7 +10,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.path import resolve_path
+from mirage.utils.path import resolve_path, typed_spec
 
 
 def _is_regex(pattern: str) -> bool:
@@ -175,8 +176,15 @@ async def csplit_generic(
         name = typed_prefix + suffix
         data = ("\n".join(part) + "\n").encode() if part else b""
         virtual = prefix_virtual + suffix
-        spec = PathSpec.from_str_path(
-            virtual, mount_key(virtual, mount_prefix)
+        spec = replace(
+            typed_spec(
+                (prefix.dotted or prefix.virtual) + suffix
+                if isinstance(prefix, PathSpec)
+                else virtual,
+                "/",
+            ),
+            vfs_path=mount_key(virtual, mount_prefix),
+            raw_path=name,
         )
         try:
             await write_bytes(spec, data)

@@ -44,11 +44,10 @@ async function trelloCardCommentAdd(
   const cardId = fl.asStr('card_id')
   if (cardId === undefined || cardId === '') throw new Error('--card_id is required')
   const inlineText = fl.asStr('text') ?? null
-  const textFile = fl.asStr('text_file') ?? null
+  const textFile = fl.asPath('text_file') ?? null
   const text = await resolveTextInput(accessor, {
     inlineText,
     filePath: textFile,
-    mountPrefix: opts.mountPrefix ?? '',
     stdin: opts.stdin,
     errorMessage: 'comment text is required',
   })

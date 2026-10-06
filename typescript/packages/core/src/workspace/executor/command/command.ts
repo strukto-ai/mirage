@@ -15,8 +15,7 @@
 import { registeredSpec } from '../../../commands/spec/builtins.ts'
 import { spreadOperands } from '../../../commands/spec/flag_view.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
-import type { ByteSource } from '../../../io/types.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
@@ -26,7 +25,7 @@ import {
   prepareProgram,
   programFiles,
 } from '../../../commands/builtin/generic/program.ts'
-import type { ParsedCommand } from './types.ts'
+import { type ParsedCommand, type ExecuteNodeFn, type Result } from './types.ts'
 import { identityFrom } from '../../../commands/builtin/utils/identity.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -45,8 +44,8 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import {
   handleCrossMount,
   isCrossMount,
+  type RunSingle,
 } from '../../../commands/builtin/generic/crossmount/index.ts'
-import type { RunSingle } from '../../../commands/builtin/generic/crossmount/index.ts'
 import { fanOutTraversal, runWithFanout, shouldFanOut } from '../fanout.ts'
 import {
   findExprTail,
@@ -59,15 +58,21 @@ import { FindParseError } from '../../../commands/errors.ts'
 import { withDispatchRuleGuard } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { maybeWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { resolveProducer, resolveLimit } from '../../../policy/index.ts'
-import type { JobHandlerResult } from '../jobs.ts'
-import type { ExecuteNodeFn } from './types.ts'
-import { handleDisown, handleFg, handleJobs, handleKill, handlePs, handleWait } from '../jobs.ts'
+import {
+  type JobHandlerResult,
+  handleDisown,
+  handleFg,
+  handleJobs,
+  handleKill,
+  handlePs,
+  handleWait,
+} from '../jobs.ts'
 import { standardRequest } from '../../../commands/spec/standard.ts'
 
 import { dropsMountCaches, handleCli } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { namespaceViewOf } from '../../mount/namespace/view.ts'
-import { dropMountCaches } from './run.ts'
+import { dropMountCaches, findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { sessionView } from '../../session/state.ts'
@@ -83,8 +88,6 @@ import {
   optionLoopExits,
   routedOperands,
 } from './routing.ts'
-import { findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
-import type { Result } from './types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 import { encodeText } from '../../../shell/bytes.ts'
@@ -260,7 +263,7 @@ export async function handleCommand(
           commandLimits: registry.commandLimits,
           entries: registry.runtimeEntries,
           dispatch,
-          statPath: (path: string) => pathStat(dispatch, path, null),
+          statPath: (path) => pathStat(dispatch, path, null),
           ns: namespaceViewOf(registry, namespace ?? null, dispatch, session),
           sessionView: sessionView(session, registry.policies),
           ...(registry.processView === undefined
@@ -417,7 +420,7 @@ export async function handleCommand(
         findExpr.newer,
         registry,
         session.cwd,
-        (path: string) => pathStat(dispatch, path, null),
+        (path) => pathStat(dispatch, path, null),
         namespace ?? null,
         dereferences(cmdName, parts),
       )
@@ -509,7 +512,7 @@ export async function handleCommand(
     // A per-operand native run is single-mount by construction, so a
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
-    const csStat: StatPath = (path: string) => pathStat(dispatch, path, null)
+    const csStat: StatPath = (path) => pathStat(dispatch, path, null)
     const runOperand = runWithFanout(
       runSingle,
       registry,
@@ -671,7 +674,7 @@ export async function handleCommand(
       : null
 
   const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch, session)
-  const singleStat: StatPath = (path: string) => pathStat(dispatch, path, null)
+  const singleStat: StatPath = (path) => pathStat(dispatch, path, null)
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
       cmdName,

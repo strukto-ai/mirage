@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ContextScope } from '../../utils/context_scope.ts'
-import { captureSessionContext } from '../../context/session_context.ts'
+import {
+  captureSessionContext,
+  effectiveMountMode,
+  requirePathsWritable,
+  runWithMountGate,
+  runWithWalkProbe,
+  strongestModeUnder,
+} from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { coerceReadPolicy } from './read_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
@@ -30,7 +37,7 @@ import type {
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
-import type { OpKwargs } from '../../ops/registry.ts'
+import { type OpKwargs, type RegisteredOp } from '../../ops/registry.ts'
 import type { LinkView } from '../../ops/types.ts'
 
 import { getExtension } from '../../commands/resolve.ts'
@@ -38,12 +45,10 @@ import { resolveLimit } from '../../policy/index.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError, UsageError } from '../../commands/errors.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
-import { materialize } from '../../io/types.ts'
+import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
-import type { ByteSource } from '../../io/types.ts'
-import { IOResult } from '../../io/types.ts'
 import { captureCacheContext, runWithCacheManager } from '../../cache/context.ts'
 import { captureCommandScope } from '../../cache/index/scope.ts'
 import type { CacheManager } from '../../cache/manager.ts'
@@ -56,7 +61,6 @@ import {
 } from '../../observe/context.ts'
 import { uuid7 } from '../../utils/ids.ts'
 import { VFSActivity } from './activity.ts'
-import type { RegisteredOp } from '../../ops/registry.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {
   type Limit,
@@ -68,13 +72,6 @@ import {
 } from '../../types.ts'
 import { ebusy, enotsup, formatFsError } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import {
-  effectiveMountMode,
-  requirePathsWritable,
-  runWithMountGate,
-  runWithWalkProbe,
-  strongestModeUnder,
-} from '../../context/session_context.ts'
 import { dispatchStat, linkFollow } from '../../commands/builtin/utils/paths.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -567,7 +564,7 @@ export class MountEntry {
         context.statPath !== undefined &&
         this.cmds.has(cmdKey(cmdName, extension))
       ) {
-        const entry = await context.statPath(first.virtual)
+        const entry = await context.statPath(first)
         if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
       }
 

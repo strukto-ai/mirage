@@ -38,16 +38,22 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Option
+from mirage.types import PathSpec
 
 
 def test_start_point_reads_the_resolved_c_flag():
-    assert start_point(FlagView({"C": "/repo/src"})) == "/repo/src"
+    assert (
+        start_point(
+            FlagView({"C": PathSpec.from_str_path("/repo/src")})
+        ).virtual
+        == "/repo/src"
+    )
 
 
 def test_start_point_falls_back_to_root_without_a_workspace():
     # Only reachable when a leaf is called outside a workspace: inside
     # one the walk always lands the "." default.
-    assert start_point(FlagView({})) == "/"
+    assert start_point(FlagView({})).virtual == "/"
 
 
 def test_fatal_renders_gits_wording_and_exit():
@@ -92,12 +98,14 @@ async def test_an_unsupported_show_flag_is_refused(git_ws):
 
 
 @pytest.mark.asyncio
-async def test_a_refused_flag_costs_no_object_reads(git_ws):
-    # The check runs before the repository is opened, so a bad flag is
-    # answered without touching the backend.
+async def test_directory_failure_precedes_leaf_flag_refusal(git_ws):
+    # Native git validates -C before the leaf interprets its flags.
     result = await git_ws.shell("git -C /nowhere log --zzz")
     assert result.exit_code == 128
-    assert result.stderr == b"fatal: unrecognized argument: --zzz\n"
+    assert (
+        result.stderr
+        == b"fatal: cannot change to '/nowhere': No such file or directory\n"
+    )
 
 
 @pytest.mark.asyncio
@@ -252,7 +260,7 @@ def test_every_occurrence_is_parsed():
 
 def test_a_later_relative_c_lands_under_the_one_before_it():
     result = walk("git", GIT, ["-C", "/repo", "-C", "docs", "status"], "/")
-    assert result.group_flags["-C"] == "/repo/docs"
+    assert result.group_flags["-C"].virtual == "/repo/docs"
 
 
 @pytest.mark.asyncio

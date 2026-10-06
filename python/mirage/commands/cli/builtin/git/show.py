@@ -391,7 +391,9 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             parsed,
             diff=replace(
                 parsed.diff,
-                pathspecs=pathspec_patterns(location, start_point(fl), paths),
+                pathspecs=pathspec_patterns(
+                    location, start_point(fl).virtual, paths
+                ),
             ),
         )
         rendered = await asyncio.to_thread(_render, repo, objects, parsed)
@@ -461,7 +463,9 @@ async def diff_tree(
         )
         parsed = replace(
             parsed,
-            pathspecs=pathspec_patterns(location, start_point(fl), paths),
+            pathspecs=pathspec_patterns(
+                location, start_point(fl).virtual, paths
+            ),
         )
         out = await asyncio.to_thread(
             _diff_tree,

@@ -22,7 +22,6 @@ from mirage.commands.builtin.utils.paths import (
     absent_dest_strerror,
     dispatch_stat,
     dot_refusal,
-    typed_spec,
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command
@@ -43,7 +42,7 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec, word_text
 from mirage.utils.errors import FS_ERRORS, DotWalkLoop, fs_strerror
 from mirage.utils.hidden import path_visible
-from mirage.utils.path import CycleError, dotted_spelling
+from mirage.utils.path import CycleError, dotted_spelling, typed_spec
 from mirage.workspace.executor.builtins.shared import abs_path, fail, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace

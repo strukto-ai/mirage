@@ -15,6 +15,7 @@
 import errno
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
+from dataclasses import replace
 
 from dulwich.repo import BaseRepo
 
@@ -58,7 +59,9 @@ def index_locked(
         inv (CLIInvocation[None]): the line's invocation record.
         location (RepoLocation | None): the repository it opened.
     """
-    return IndexLockError(location.gitdir if location is not None else ".git")
+    return IndexLockError(
+        location.gitdir.virtual if location is not None else ".git"
+    )
 
 
 def git_would_refuse(
@@ -81,10 +84,12 @@ def git_would_refuse(
     if location is None or not path:
         return True
     mounts = mounts_of(inv.doors or CLIDoors())
-    root = "/" if mounts is None else mounts.root_of(location.commondir)
+    root = (
+        "/" if mounts is None else mounts.root_of(location.commondir.virtual)
+    )
     return any(
         path == base or path.startswith(f"{base.rstrip('/')}/")
-        for base in (root, location.gitdir)
+        for base in (root, location.gitdir.virtual)
     )
 
 
@@ -173,7 +178,7 @@ async def opened(
     assert dispatch is not None and stat_path is not None
     LOCATIONS.set(location)
     if work_tree:
-        named = fl.as_str("work_tree") is not None
+        named = fl.as_path("work_tree") is not None
         await require_work_tree(dispatch, stat_path, location, named)
     warn = git_bool(
         await config_values(dispatch, location, b"core", b"warnambiguousrefs"),
@@ -198,12 +203,14 @@ async def located(fl: FlagView, doors: CLIDoors) -> RepoLocation:
     mounts = doors.ns.mounts if doors.ns is not None else None
     if stat_path is None or mounts is None or dispatch is None:
         raise NoWorkspaceError()
-    chosen = fl.as_str("work_tree")
-    return await discover(
+    chosen = fl.as_path("work_tree")
+    gitdir = fl.as_path("git_dir")
+    location = await discover(
         dispatch,
         stat_path,
         mounts.root_of,
         start_point(fl),
-        fl.as_str("git_dir"),
+        gitdir,
         chosen,
     )
+    return replace(location, ns=doors.ns)

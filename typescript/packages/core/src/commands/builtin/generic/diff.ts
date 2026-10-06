@@ -155,7 +155,7 @@ async function headerTime(walk: Walk, path: PathSpec, absent: boolean): Promise<
   if (absent) return fullIsoTime(null, walk.zone)
   if (isStdin(path)) return fullIsoTime(new Date().toISOString(), walk.zone)
   const info =
-    (walk.statPath !== null ? await walk.statPath(path.virtual) : null) ?? (await walk.stat(path))
+    (walk.statPath !== null ? await walk.statPath(path) : null) ?? (await walk.stat(path))
   return fullIsoTime(info.modified, walk.zone)
 }
 

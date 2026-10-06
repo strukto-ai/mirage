@@ -28,6 +28,7 @@ import {
 import type { CommandSpec, FlagValue } from '../../../commands/spec/types.ts'
 import type { ParsedCommand } from './types.ts'
 import { PathSpec } from '../../../types.ts'
+import { dottedSpelling, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 // Single-mount dispatch and cross-mount dispatch both parse through here,
@@ -47,7 +48,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
  * ENOENT, as a typed '' operand's does. Mirrors `synthesize_path_spec` in
  * the Python executor.
  */
-function synthesizePathSpec(value: string, rawPath = value): PathSpec {
+function synthesizePathSpec(value: string, rawPath = value, cwd = '/'): PathSpec {
   const slash = value.lastIndexOf('/')
   return new PathSpec({
     vfsPath: '',
@@ -55,6 +56,7 @@ function synthesizePathSpec(value: string, rawPath = value): PathSpec {
     rawPath,
     directory: slash >= 0 ? value.slice(0, slash + 1) : '/',
     resolved: true,
+    dotted: resolvePath(rawPath, cwd) === value ? dottedSpelling(rawPath, cwd) : null,
     walkError: rawPath === '' ? 'ENOENT' : null,
   })
 }
@@ -76,10 +78,11 @@ function takeSpelling(
   scopeMap: Map<string, PathSpec>,
   value: string,
   rawPath?: string,
+  cwd = '/',
 ): PathSpec {
   const taken = spellings.get(rstripSlash(value) || '/')?.shift()
   if (taken !== undefined) return taken
-  return scopeMap.get(value) ?? synthesizePathSpec(value, rawPath)
+  return scopeMap.get(value) ?? synthesizePathSpec(value, rawPath, cwd)
 }
 
 export function parseFlags(
@@ -154,19 +157,20 @@ export function parseFlags(
       if (shape === 'pair' && Array.isArray(value)) {
         flagKwargs[key] = parts.map((part, index) =>
           index % 2 === 1 && typeof part === 'string'
-            ? takeSpelling(spellings, scopeMap, part, rawParts[index])
+            ? takeSpelling(spellings, scopeMap, part, rawParts[index], cwd)
             : part,
         )
       } else if (shape === 'multiple' && Array.isArray(value)) {
         flagKwargs[key] = parts
           .filter((part): part is string => typeof part === 'string')
-          .map((part, index) => takeSpelling(spellings, scopeMap, part, rawParts[index]))
+          .map((part, index) => takeSpelling(spellings, scopeMap, part, rawParts[index], cwd))
       } else if (shape === 'single' && typeof value === 'string') {
         flagKwargs[key] = takeSpelling(
           spellings,
           scopeMap,
           value,
           typeof raw === 'string' ? raw : undefined,
+          cwd,
         )
       }
     }
@@ -188,7 +192,7 @@ export function parseFlags(
     const texts: string[] = []
     parsed.args.forEach(([value, kind], index) => {
       if (kind === 'path') {
-        paths.push(takeSpelling(spellings, scopeMap, value, parsed.rawOperands[index]?.[0]))
+        paths.push(takeSpelling(spellings, scopeMap, value, parsed.rawOperands[index]?.[0], cwd))
       } else {
         texts.push(value)
       }

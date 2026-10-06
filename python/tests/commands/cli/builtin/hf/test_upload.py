@@ -23,13 +23,14 @@ from mirage.commands.cli.builtin.hf.upload import (
     upload_cmd,
 )
 from mirage.commands.errors import UsageError
+from mirage.utils.path import typed_spec
 from tests.commands.cli.builtin.hf.conftest import ANON, inv
 
 
 @pytest.mark.asyncio
 async def test_collect_reads_one_file_under_its_basename(doors):
     record, _, _, _ = doors
-    assert await collect(record, "/work/a.txt") == (
+    assert await collect(record, typed_spec("/work/a.txt", "/")) == (
         [("a.txt", b"alpha")],
         False,
     )
@@ -38,7 +39,7 @@ async def test_collect_reads_one_file_under_its_basename(doors):
 @pytest.mark.asyncio
 async def test_collect_walks_a_directory_relative_to_it(doors):
     record, _, _, _ = doors
-    assert await collect(record, "/work") == (
+    assert await collect(record, typed_spec("/work", "/")) == (
         [("a.txt", b"alpha"), ("sub/b.txt", b"beta")],
         True,
     )
@@ -48,7 +49,7 @@ async def test_collect_walks_a_directory_relative_to_it(doors):
 async def test_collect_refuses_a_missing_path(doors):
     record, _, _, _ = doors
     with pytest.raises(UsageError, match="No such file"):
-        await collect(record, "/work/nope")
+        await collect(record, typed_spec("/work/nope", "/"))
 
 
 def test_keep_applies_include_then_exclude():

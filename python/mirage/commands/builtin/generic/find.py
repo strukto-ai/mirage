@@ -136,7 +136,7 @@ async def _row_mtime(
     none or is gone.
 
     Args:
-        stat (Callable): overlay-aware stat.
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): overlay-aware stat.
         mount_prefix (str): the mount prefix the row sits under.
         row (str): the row, as the backend keyed it.
     """
@@ -240,7 +240,8 @@ async def _missing_start(
 
     Args:
         search (PathSpec): the start point, as the operand named it.
-        stat (Callable | None): the mount's stat, None when the caller has
+        stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
+            the mount's stat, None when the caller has
             none to offer.
     """
     if stat is None:
@@ -286,7 +287,8 @@ async def resolve_start(
         stat_path (StatPath | None): dispatcher-backed stat, None when the
             command runs outside a workspace (the walk then decides).
         is_link (bool): whether the start point is itself a namespace link.
-        stat (Callable | None): the mount's stat, asked only to name the
+        stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
+            the mount's stat, asked only to name the
             errno of a start point ``stat_path`` found nothing at.
         follow (Callable[[str], str] | None): the namespace's link
             resolution, which the start point may already have been
@@ -320,7 +322,7 @@ async def resolve_start(
     if is_link:
         return WALK_START
     try:
-        start = await stat_path(search.virtual)
+        start = await stat_path(search)
     except OSError as exc:
         # A start point the door refuses to stat is GNU's own
         # diagnostic for it, quoted like a missing one
@@ -583,7 +585,8 @@ async def early_root(
         search (PathSpec): the start point, as the operand named it.
         args (FindArgs): parsed find expression, shared across operands.
         stat_path (StatPath | None): dispatcher-backed stat probe.
-        stat (Callable | None): overlay-aware stat for the mtime filter.
+        stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
+            overlay-aware stat for the mtime filter.
         links (LinkView | None): the namespace's symlink facts.
         visibility (Visibility | None): the session's visibility.
 
@@ -646,8 +649,10 @@ async def _find_root(
         args (FindArgs): parsed find expression, shared across operands.
         find_core (Callable): the backend's native find op.
         stat_path (StatPath | None): dispatcher-backed stat probe.
-        stat (Callable | None): overlay-aware stat for the mtime filter.
-        dir_empty (Callable | None): emptiness probe for ``-empty``.
+        stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
+            overlay-aware stat for the mtime filter.
+        dir_empty (Callable[[PathSpec], Awaitable[bool]] | None):
+            emptiness probe for ``-empty``.
         links (LinkView | None): the namespace's symlink facts.
         follow (bool): whether ``-L`` follows namespace links.
         visibility (Visibility | None): the session's visibility.
@@ -847,9 +852,11 @@ async def find_generic(
         opts (CommandOpts): Flags and namespace facts (stat_path, links)
             from the dispatcher.
         find_core (Callable): The backend's native find op, bound.
-        stat (Callable | None): Bound overlaid stat, when the backend
+        stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
+            Bound overlaid stat, when the backend
             serves local stats cheaply.
-        dir_empty (Callable | None): Whether a directory start point is
+        dir_empty (Callable[[PathSpec], Awaitable[bool]] | None):
+            Whether a directory start point is
             empty, for ``-empty``.
     """
     parsed = parse_flags(opts.flags)

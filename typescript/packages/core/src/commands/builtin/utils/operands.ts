@@ -14,8 +14,7 @@
 
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
-import type { FileStat, PathSpec } from '../../../types.ts'
-import { FileType } from '../../../types.ts'
+import { type FileStat, type PathSpec, FileType } from '../../../types.ts'
 import {
   eisdir,
   fsErrorLine,
@@ -81,8 +80,7 @@ export async function operandStat(
       (links?.subtree(path.virtual).length ?? 0) === 0
     )
       throw e
-    const fallback =
-      statPath === undefined || statPath === null ? null : await statPath(path.virtual)
+    const fallback = statPath === undefined || statPath === null ? null : await statPath(path)
     if (fallback === null) throw e
     return fallback
   }

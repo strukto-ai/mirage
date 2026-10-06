@@ -296,3 +296,23 @@ def leaf_refusal(
         shown, refused = git_option_refusal(word, path, spec)
         return encode_text(refused), USAGE_EXIT, encode_text(shown) or None
     return argparse_message, USAGE_EXIT, None
+
+
+def directory_refusal(
+    prog: str, path: str, reason: str, style: UsageStyle
+) -> tuple[bytes, int]:
+    """Render failure to enter a CLI's declared operand base.
+
+    Args:
+        prog (str): installed program name.
+        path (str): directory as the user supplied it.
+        reason (str): dispatcher refusal in platform-independent words.
+        style (UsageStyle): the program's diagnostic style.
+    """
+    if style is UsageStyle.GIT:
+        return encode_text(
+            f"fatal: cannot change to '{path}': {reason}\n"
+        ), 128
+    return encode_text(
+        f"{prog}: cannot change directory to '{path}': {reason}\n"
+    ), 1

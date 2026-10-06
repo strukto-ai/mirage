@@ -4829,6 +4829,220 @@
         "stdout": " T letters.txt\n",
         "stderr": "error: the following file has local modifications:\n    letters.txt\n(use --cached to keep the file, or -f to force removal)\n"
       }
+    },
+    {
+      "id": "git_profile_hidden_index_entries",
+      "seq": 567700,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git -C /repo status --porcelain && git -C /repo ls-files -- letters.txt && git -C /repo diff && ln -s /repo /pathspec-alias && git -C /pathspec-alias ls-files -- letters.txt && git -C /pathspec-alias status --porcelain; result=$?; rm -f /pathspec-alias; exit \"$result\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "session": "pathspec-veiled",
+      "session_profiles": {
+        "pathspec-veiled": {
+          "paths": {
+            "hide": [
+              "/repo/letters.txt",
+              "/repo/docs"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_profile_hidden_directory_dot_walk",
+      "seq": 567701,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/docs/.. status --porcelain",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to '/repo/docs/..': No such file or directory\n"
+      },
+      "session": "pathspec-veiled"
+    },
+    {
+      "id": "git_profile_bulk_stage_preserves_hidden_index",
+      "seq": 567702,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo add -A && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "session": "pathspec-veiled"
+    },
+    {
+      "id": "git_profile_bulk_stage_leaves_full_index_intact",
+      "seq": 567703,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo status --porcelain && git -C /repo ls-files -- letters.txt && printf 'hidden staged\\n' > /repo/letters.txt && printf 'visible staged\\n' > /repo/numbers.txt && git -C /repo add letters.txt numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_profile_repeated_directory_changes",
+      "seq": 567704,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/docs -C /repo status --porcelain",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to '/repo/docs': No such file or directory\n"
+      },
+      "session": "pathspec-veiled"
+    },
+    {
+      "id": "git_profile_cached_remove_hidden_path",
+      "seq": 567705,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(git -C /repo rm --cached letters.txt; result=$?; ! git -C /repo restore --staged letters.txt 2>/dev/null && ! git -C /repo reset -- letters.txt 2>/dev/null && exit \"$result\")",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: pathspec 'letters.txt' did not match any files\n"
+      },
+      "session": "pathspec-veiled"
+    },
+    {
+      "id": "git_directory_failure_precedes_leaf_flag_refusal",
+      "seq": 567707,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /nowhere log --zzz",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to '/nowhere': No such file or directory\n"
+      }
+    },
+    {
+      "id": "git_profile_refusals_preserve_staged_entries",
+      "seq": 567708,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo ls-files --stage -- letters.txt numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "100644 4b0499e3ad7d9db732f415d2a2af8ecbf2a20b3d 0\tletters.txt\n100644 33312d27e8c8eaca1e83b016082da8982a7d376a 0\tnumbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_profile_reset_unstages_only_visible_entries",
+      "seq": 567709,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo diff --cached --name-only && git -C /repo reset && git -C /repo diff --cached --name-only && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "numbers.txt\nUnstaged changes after reset:\nM\tnumbers.txt\n M numbers.txt\n",
+        "stderr": ""
+      },
+      "session": "pathspec-veiled"
+    },
+    {
+      "id": "git_profile_reset_preserves_hidden_content",
+      "seq": 567710,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo ls-files --stage -- letters.txt numbers.txt && cat /repo/letters.txt /repo/numbers.txt && git -C /repo reset -q && git -C /repo restore letters.txt numbers.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "100644 4b0499e3ad7d9db732f415d2a2af8ecbf2a20b3d 0\tletters.txt\n100644 814f4a422927b82f5f8a43f8fab6d3839e3983f2 0\tnumbers.txt\nhidden staged\nvisible staged\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_profile_directory_sources_preserve_walks",
+      "seq": 567711,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/pathspec-missing/.. status --porcelain; echo $?; GIT_DIR=docs/../.git git -C /repo status --porcelain; echo $?; git -C /repo --work-tree=docs/.. status --porcelain; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n128\n128\n",
+        "stderr": "fatal: cannot change to '/repo/pathspec-missing/..': No such file or directory\nfatal: not a git repository: 'docs/../.git'\nfatal: this operation must be run in a work tree\n"
+      },
+      "session": "pathspec-veiled"
+    },
+    {
+      "id": "git_profile_init_cannot_skip_a_hidden_parent",
+      "seq": 567712,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "! git -C /repo init docs/../pathspec-created > /dev/null 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "check": "absent\n"
+      },
+      "session": "pathspec-veiled",
+      "check": {
+        "stat": "/repo/pathspec-created",
+        "fields": [
+          "type"
+        ]
+      }
+    },
+    {
+      "id": "git_init_empty_path_cannot_initialize_cwd",
+      "seq": 567713,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(mkdir /repo/pathspec-empty-init && git -C /repo/pathspec-empty-init init -q ''; result=$?; rmdir /repo/pathspec-empty-init; exit \"$result\")",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot mkdir : No such file or directory\n",
+        "check": "absent\n"
+      },
+      "check": {
+        "stat": "/repo/pathspec-empty-init/.git",
+        "fields": [
+          "type"
+        ]
+      }
     }
   ]
 }

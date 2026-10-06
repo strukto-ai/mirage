@@ -18,10 +18,10 @@ import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
 import { boundedMap } from '@struktoai/mirage-core/concurrency/limiter'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/utils/errors'
 import { fnmatch } from '@struktoai/mirage-core/utils/fnmatch'
-import { parent } from '@struktoai/mirage-core/utils/path'
+import { typedSpec, joinSpec, parentSpec } from '@struktoai/mirage-core/utils/path'
 import type { HfHubAccessor } from '../../../../accessor/hf_hub.ts'
 import {
   blobPath,
@@ -44,7 +44,6 @@ import { fetchTree } from '../../../../core/hf_hub/tree.ts'
 import { isDirEntry, type TreeEntry } from '../../../../core/hf_hub/tree_entry.ts'
 import { hubFor, repoTypeOf, requireOperands, textOut } from './accessor.ts'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /**
  * Which repo paths a download line asks for.
@@ -82,22 +81,22 @@ export function selected(
  * a per-backend capability: the ops factory only wires `parents: true` for
  * backends that declare it, so a plain `mkdir` of `a/b` fails on the rest.
  */
-export async function ensureDir(dispatch: DispatchFn, path: string): Promise<void> {
-  const missing: string[] = []
-  let current = rstripSlash(path)
-  while (current !== '' && current !== '/') {
+export async function ensureDir(dispatch: DispatchFn, path: PathSpec): Promise<void> {
+  const missing: PathSpec[] = []
+  let current = path
+  while (current.virtual !== '/') {
     try {
-      await dispatch('stat', PathSpec.fromStrPath(current))
+      await dispatch('stat', current)
       break
     } catch (err) {
       if (!isMissingPath(err)) throw err
       missing.push(current)
-      current = parent(current)
+      current = parentSpec(current)
     }
   }
   for (const target of missing.reverse()) {
     try {
-      await dispatch('mkdir', PathSpec.fromStrPath(target))
+      await dispatch('mkdir', target)
     } catch (err) {
       // A parallel download fans out over files that share parents, so two
       // workers can read the same parent as missing and then both create
@@ -114,7 +113,7 @@ async function writeFile(
   dispatch: DispatchFn,
   accessor: HfHubAccessor,
   repoPath: string,
-  localDir: string,
+  localDir: PathSpec,
 ): Promise<string> {
   const url = resolveUrl(
     accessor.endpoint,
@@ -124,16 +123,16 @@ async function writeFile(
     repoPath,
   )
   const data = await hubBytes(accessor.token, url, undefined, accessor.timeoutMs)
-  const target = `${localDir}/${repoPath}`
-  await ensureDir(dispatch, parent(target))
-  await dispatch('write', PathSpec.fromStrPath(target), [data])
-  return target
+  const target = joinSpec(localDir, repoPath)
+  await ensureDir(dispatch, parentSpec(target))
+  await dispatch('write', target, [data])
+  return target.virtual
 }
 
 /** Whether anything is at a virtual path. */
-async function pathExists(dispatch: DispatchFn, path: string): Promise<boolean> {
+async function pathExists(dispatch: DispatchFn, path: PathSpec): Promise<boolean> {
   try {
-    await dispatch('stat', PathSpec.fromStrPath(path))
+    await dispatch('stat', path)
   } catch (err) {
     if (isMissingPath(err)) return false
     throw err
@@ -154,7 +153,7 @@ async function cacheFile(
   dispatch: DispatchFn,
   accessor: HfHubAccessor,
   entry: TreeEntry,
-  cacheDir: string,
+  cacheDir: PathSpec,
   folder: string,
   sha: string,
   force: boolean,
@@ -170,22 +169,22 @@ async function cacheFile(
       entry.path,
     )
     const data = await hubBytes(accessor.token, url, undefined, accessor.timeoutMs)
-    await ensureDir(dispatch, parent(blob))
-    await dispatch('write', PathSpec.fromStrPath(blob), [data])
+    await ensureDir(dispatch, parentSpec(blob))
+    await dispatch('write', blob, [data])
   }
   const link = snapshotPath(cacheDir, folder, sha, entry.path)
   if (force || !(await pathExists(dispatch, link))) {
-    await ensureDir(dispatch, parent(link))
+    await ensureDir(dispatch, parentSpec(link))
     try {
-      await dispatch('unlink', PathSpec.fromStrPath(link))
+      await dispatch('unlink', link)
     } catch (err) {
       if (!isMissingPath(err)) throw err
     }
-    await dispatch('symlink', PathSpec.fromStrPath(link), [], {
+    await dispatch('symlink', link, [], {
       target: linkTarget(entry.path, etag),
     })
   }
-  return link
+  return link.virtual
 }
 
 /** Populate the cache for one revision, bounded the same way. */
@@ -194,7 +193,7 @@ async function fetchIntoCache(
   accessor: HfHubAccessor,
   tree: Map<string, TreeEntry>,
   paths: readonly string[],
-  cacheDir: string,
+  cacheDir: PathSpec,
   force: boolean,
   workers: number,
 ): Promise<[string, string[]]> {
@@ -208,8 +207,8 @@ async function fetchIntoCache(
   // behind.
   if (accessor.revision !== sha) {
     const ref = refPath(cacheDir, folder, accessor.revision)
-    await ensureDir(dispatch, parent(ref))
-    await dispatch('write', PathSpec.fromStrPath(ref), [new TextEncoder().encode(sha)])
+    await ensureDir(dispatch, parentSpec(ref))
+    await dispatch('write', ref, [new TextEncoder().encode(sha)])
   }
   const written = await boundedMap(
     paths,
@@ -220,7 +219,7 @@ async function fetchIntoCache(
     },
     workers,
   )
-  return [snapshotDir(cacheDir, folder, sha), written]
+  return [snapshotDir(cacheDir, folder, sha).virtual, written]
 }
 
 /**
@@ -263,7 +262,7 @@ async function fetchAll(
   dispatch: DispatchFn,
   accessor: HfHubAccessor,
   paths: readonly string[],
-  localDir: string,
+  localDir: PathSpec,
   workers: number,
 ): Promise<string[]> {
   return boundedMap(paths, (path) => writeFile(dispatch, accessor, path, localDir), workers)
@@ -340,9 +339,11 @@ async function refuseAbsent(accessor: HfHubAccessor, names: readonly string[]): 
 export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   requireOperands(inv, ['repo_id'])
   const fl = new FlagView(inv.flags)
-  const localDir = fl.asStr('local_dir')
-  const cacheDir = fl.asStr('cache_dir') ?? cacheRoot(inv.env)
-  if ((localDir === undefined || localDir === '') && (cacheDir === null || cacheDir === '')) {
+  const localDir = fl.asPath('local_dir')
+  const cacheWord = cacheRoot(inv.env)
+  const cacheDir =
+    fl.asPath('cache_dir') ?? (cacheWord ? typedSpec(cacheWord, inv.env.PWD ?? '/') : undefined)
+  if (localDir === undefined && cacheDir === undefined) {
     throw new UsageError(
       'nothing to download into: pass --local-dir, or --cache-dir (or set ' +
         'HF_HUB_CACHE / HF_HOME), since a workspace has no home directory to ' +
@@ -365,19 +366,19 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
   const workers = fl.asInt('max_workers') ?? MAX_DOWNLOAD_WORKERS
   let base: string
   let written: string[]
-  if (localDir !== undefined && localDir !== '') {
+  if (localDir !== undefined) {
     // A named local directory downloads straight into it, with no cache in
     // between; that is what upstream does too, which is why --force-download
     // only means anything in cache mode.
-    base = rstripSlash(localDir)
-    written = await fetchAll(dispatch, accessor, paths, base, workers)
+    base = localDir.virtual
+    written = await fetchAll(dispatch, accessor, paths, localDir, workers)
   } else {
     ;[base, written] = await fetchIntoCache(
       dispatch,
       accessor,
       tree,
       paths,
-      rstripSlash(cacheDir ?? ''),
+      cacheDir ?? typedSpec('/', '/'),
       fl.asBool('force_download'),
       workers,
     )

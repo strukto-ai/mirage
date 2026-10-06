@@ -16,10 +16,16 @@ import type { CommandFnResult } from '../../../config.ts'
 import { HEAD } from './constants.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { GitError } from './errors.ts'
+import {
+  type GitError,
+  BadConfigValueError,
+  UnrecognizedArgumentError,
+  UsageError,
+} from './errors.ts'
 import { CLISpec, type CLIInvocation } from '../../types.ts'
-import { BadConfigValueError, UnrecognizedArgumentError, UsageError } from './errors.ts'
 import { HELP_SWITCH, gitOptionRefusal, gitUsage } from '../../refusal.ts'
+
+import { PathSpec } from '../../../../types.ts'
 
 const ROOT = '/'
 export const STDOUT = 'stdout'
@@ -53,14 +59,13 @@ const ENC = new TextEncoder()
  * resolves to the session cwd and a relative `-C build` is already absolute by
  * the time it arrives.
  *
- * Read as a string, not a PathSpec: group-level values are resolved by the walk
- * and reach a leaf as absolute virtual paths, while a leaf's own PATH flags are
- * recovered as PathSpec by parseFlags.
+ * Keep the PathSpec until the directory walk is checked. Repository-relative
+ * pathspec matching uses its virtual spelling after that check.
  *
  * @param fl spec-validated view over the leaf's flag bag
  */
-export function startPoint(fl: FlagView): string {
-  return fl.asStr('C') ?? ROOT
+export function startPoint(fl: FlagView): PathSpec {
+  return fl.asPath('C') ?? PathSpec.fromStrPath(ROOT)
 }
 
 /**

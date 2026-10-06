@@ -16,19 +16,13 @@ import type { TrelloAccessor } from '../../../accessor/trello.ts'
 import { read } from '../../../core/trello/read.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import type { CommandOpts } from '../../config.ts'
-import { mountKey } from '../../../utils/key_prefix.ts'
-import { PathSpec } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 export interface ResolveTextInputOptions {
   inlineText: string | null
-  filePath: string | null
-  // The mount the operand is addressed against. The core reader keys off
-  // the mount-relative path and quotes the virtual one in an ENOENT, so a
-  // `--*_file` operand that arrives as `/board/...` has to have the prefix
-  // taken off first -- handing it the virtual path makes every read miss.
-  mountPrefix: string
+  filePath: PathSpec | null
   stdin: CommandOpts['stdin']
   errorMessage: string
 }
@@ -38,14 +32,8 @@ export async function resolveTextInput(
   opts: ResolveTextInputOptions,
 ): Promise<string> {
   if (opts.inlineText !== null && opts.inlineText !== '') return opts.inlineText
-  if (opts.filePath !== null && opts.filePath !== '') {
-    const key = mountKey(opts.filePath, opts.mountPrefix)
-    const spec = new PathSpec({
-      virtual: opts.filePath,
-      directory: opts.filePath,
-      vfsPath: key,
-    })
-    const data = await read(accessor, spec)
+  if (opts.filePath !== null) {
+    const data = await read(accessor, opts.filePath)
     return DEC.decode(data)
   }
   const raw = await readStdinAsync(opts.stdin)

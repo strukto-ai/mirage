@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { joinSpec } from '@struktoai/mirage-core/utils/path'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { REPO_ID_SEPARATOR } from './constants.ts'
 import type { TreeEntry } from './tree_entry.ts'
 
@@ -41,28 +43,28 @@ export function etagOf(entry: TreeEntry): string {
 }
 
 /** Where one file's bytes live, shared across every snapshot. */
-export function blobPath(cacheDir: string, folder: string, etag: string): string {
-  return `${cacheDir}/${folder}/blobs/${etag}`
+export function blobPath(cacheDir: string | PathSpec, folder: string, etag: string): PathSpec {
+  return joinSpec(cacheDir, folder, 'blobs', etag)
 }
 
 /** The directory one commit's tree is rendered under. */
-export function snapshotDir(cacheDir: string, folder: string, sha: string): string {
-  return `${cacheDir}/${folder}/snapshots/${sha}`
+export function snapshotDir(cacheDir: string | PathSpec, folder: string, sha: string): PathSpec {
+  return joinSpec(cacheDir, folder, 'snapshots', sha)
 }
 
 /** Where one file appears within a commit's rendered tree. */
 export function snapshotPath(
-  cacheDir: string,
+  cacheDir: string | PathSpec,
   folder: string,
   sha: string,
   repoPath: string,
-): string {
-  return `${snapshotDir(cacheDir, folder, sha)}/${repoPath}`
+): PathSpec {
+  return joinSpec(snapshotDir(cacheDir, folder, sha), repoPath)
 }
 
 /** The file recording which commit a branch or tag points at. */
-export function refPath(cacheDir: string, folder: string, revision: string): string {
-  return `${cacheDir}/${folder}/refs/${revision}`
+export function refPath(cacheDir: string | PathSpec, folder: string, revision: string): PathSpec {
+  return joinSpec(cacheDir, folder, 'refs', revision)
 }
 
 /**

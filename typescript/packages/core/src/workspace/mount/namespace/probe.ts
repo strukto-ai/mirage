@@ -14,7 +14,7 @@
 
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { ELOOP_STRERROR, isEnotdir, isMissError } from '../../../utils/errors.ts'
-import { gnuBasename, posixNormpath } from '../../../utils/path.ts'
+import { gnuBasename, posixNormpath, typedSpec } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -86,13 +86,13 @@ export async function resolvePathStat(
 // Python's dispatcher applies it itself, this one does not.
 export async function pathStat(
   dispatch: DispatchFn,
-  virtual: string,
+  virtual: string | PathSpec,
   overlay: StatOverlay | null = null,
 ): Promise<FileStat | null> {
-  const spec = PathSpec.fromStrPath(virtual, '')
+  const spec = typedSpec(virtual, '/')
   const stat = await resolvePathStat(dispatch, spec)
   if (stat === null) return null
-  return overlay !== null ? overlay(virtual, stat) : stat
+  return overlay !== null ? overlay(spec.virtual, stat) : stat
 }
 
 // The strerror GNU names for a path pathStat found nothing at. pathStat
@@ -101,9 +101,12 @@ export async function pathStat(
 // path under a plain file, ELOOP for one a link loop stands in, ENOENT for
 // the rest. Asked only after a miss, so its round trip is on the failure
 // path. Mirrors miss_strerror in probe.py.
-export async function missStrerror(dispatch: DispatchFn, virtual: string): Promise<string> {
+export async function missStrerror(
+  dispatch: DispatchFn,
+  virtual: string | PathSpec,
+): Promise<string> {
   try {
-    await dispatch('stat', PathSpec.fromStrPath(virtual))
+    await dispatch('stat', typedSpec(virtual, '/'))
   } catch (err) {
     if (isEnotdir(err)) return 'Not a directory'
     if (isMissError(err)) return 'No such file or directory'
@@ -123,14 +126,20 @@ function isEloop(err: unknown): boolean {
 // directory served by another mount answers. This is what a walker reads
 // once it crosses a mount boundary: the subtree under a nested mount
 // lives in a VFS the walker's own accessor cannot open.
-export async function pathReaddir(dispatch: DispatchFn, virtual: string): Promise<string[]> {
-  const spec = PathSpec.fromStrPath(virtual, '')
+export async function pathReaddir(
+  dispatch: DispatchFn,
+  virtual: string | PathSpec,
+): Promise<string[]> {
+  const spec = typedSpec(virtual, '/')
   const [entries] = await dispatch('readdir', spec)
   return entries as string[]
 }
 
 // Whether a resolved virtual path names something that exists.
-export async function pathExists(dispatch: DispatchFn, virtual: string): Promise<boolean> {
+export async function pathExists(
+  dispatch: DispatchFn,
+  virtual: string | PathSpec,
+): Promise<boolean> {
   try {
     return (await pathStat(dispatch, virtual)) !== null
   } catch {

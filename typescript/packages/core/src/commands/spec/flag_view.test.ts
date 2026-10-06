@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { specOf } from './builtins.ts'
 import { flagKwargName, OPERAND, REFUSED } from './constants.ts'
 import { CommandSpec, Option } from './types.ts'
+import { typedSpec } from '../../utils/path.ts'
 import { FlagView, specFlagNames } from './flag_view.ts'
 import { parseCommand, parseToKwargs } from './parser.ts'
 
@@ -23,7 +24,15 @@ import { parseCommand, parseToKwargs } from './parser.ts'
 
 describe('FlagView', () => {
   it('reads each flag shape at its declared type', () => {
-    const fl = new FlagView({ i: true, m: '5', type: 'py', e: ['a', 'b'] })
+    const path = typedSpec('hidden/../file', '/repo')
+    const fl = new FlagView({
+      i: true,
+      m: '5',
+      type: 'py',
+      e: ['a', 'b'],
+      file: path,
+      files: [path],
+    })
     expect(fl.asBool('i')).toBe(true)
     expect(fl.asBool('v')).toBe(false)
     expect(fl.asInt('m')).toBe(5)
@@ -32,6 +41,10 @@ describe('FlagView', () => {
     expect(fl.asStr('glob')).toBeUndefined()
     expect(fl.asList('e')).toEqual(['a', 'b'])
     expect(fl.asList('f')).toEqual([])
+    expect(fl.asPath('file')).toBe(path)
+    expect(fl.asPaths('files')).toEqual([path])
+    expect(fl.asStr('file')).toBeUndefined()
+    expect(fl.asList('files')).toEqual([])
   })
 
   // Python's as_int calls int(), which raises on a partial or junk value.

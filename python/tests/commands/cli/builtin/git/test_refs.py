@@ -28,6 +28,7 @@ from mirage.commands.cli.builtin.git.refs import (
 )
 from mirage.commands.cli.builtin.git.types import Refspec
 from mirage.io import IOResult
+from mirage.utils.path import typed_spec
 
 from .conftest import make_branch, mounted, pack_refs
 
@@ -52,7 +53,8 @@ def _dispatch_returning(data: bytes):
 @pytest.mark.asyncio
 async def test_symbolic_ref_reports_the_short_branch():
     head = await read_head(
-        _dispatch_returning(b"ref: refs/heads/main\n"), "/repo/.git"
+        _dispatch_returning(b"ref: refs/heads/main\n"),
+        typed_spec("/repo/.git", "/"),
     )
     assert head.branch == "main"
     assert head.ref == "refs/heads/main"
@@ -62,7 +64,8 @@ async def test_symbolic_ref_reports_the_short_branch():
 @pytest.mark.asyncio
 async def test_branch_name_keeps_its_slashes():
     head = await read_head(
-        _dispatch_returning(b"ref: refs/heads/feat/git-cli\n"), "/repo/.git"
+        _dispatch_returning(b"ref: refs/heads/feat/git-cli\n"),
+        typed_spec("/repo/.git", "/"),
     )
     assert head.branch == "feat/git-cli"
 
@@ -70,7 +73,8 @@ async def test_branch_name_keeps_its_slashes():
 @pytest.mark.asyncio
 async def test_detached_head_reports_the_commit():
     head = await read_head(
-        _dispatch_returning(DETACHED_SHA.encode()), "/repo/.git"
+        _dispatch_returning(DETACHED_SHA.encode()),
+        typed_spec("/repo/.git", "/"),
     )
     assert head.branch is None
     assert head.ref is None
@@ -80,7 +84,8 @@ async def test_detached_head_reports_the_commit():
 @pytest.mark.asyncio
 async def test_ref_outside_refs_heads_keeps_its_full_name():
     head = await read_head(
-        _dispatch_returning(b"ref: refs/remotes/origin/main\n"), "/repo/.git"
+        _dispatch_returning(b"ref: refs/remotes/origin/main\n"),
+        typed_spec("/repo/.git", "/"),
     )
     assert head.branch == "refs/remotes/origin/main"
     assert head.ref == "refs/remotes/origin/main"
@@ -88,7 +93,7 @@ async def test_ref_outside_refs_heads_keeps_its_full_name():
 
 @pytest.mark.asyncio
 async def test_load_refs_reads_loose_branches(workspace):
-    refs = await load_refs(workspace.dispatch, "/repo/.git")
+    refs = await load_refs(workspace.dispatch, typed_spec("/repo/.git", "/"))
     keys = refs.allkeys()
     assert b"refs/heads/main" in keys
     assert b"HEAD" in keys
@@ -100,7 +105,7 @@ async def test_load_refs_reads_packed_refs(repo_path, workspace):
     # packed-refs, so a loose-only reader would miss them entirely.
     pack_refs(repo_path)
     with mounted(repo_path) as ws:
-        refs = await load_refs(ws.dispatch, "/repo/.git")
+        refs = await load_refs(ws.dispatch, typed_spec("/repo/.git", "/"))
     assert b"refs/heads/main" in refs.allkeys()
 
 
@@ -108,13 +113,13 @@ async def test_load_refs_reads_packed_refs(repo_path, workspace):
 async def test_load_refs_walks_nested_ref_names(repo_path, workspace):
     make_branch(repo_path, "feat/git-cli")
     with mounted(repo_path) as ws:
-        refs = await load_refs(ws.dispatch, "/repo/.git")
+        refs = await load_refs(ws.dispatch, typed_spec("/repo/.git", "/"))
     assert b"refs/heads/feat/git-cli" in refs.allkeys()
 
 
 @pytest.mark.asyncio
 async def test_head_symref_resolves_through_the_container(workspace):
-    refs = await load_refs(workspace.dispatch, "/repo/.git")
+    refs = await load_refs(workspace.dispatch, typed_spec("/repo/.git", "/"))
     assert refs[b"HEAD"] == refs[b"refs/heads/main"]
 
 

@@ -163,12 +163,8 @@ export interface TarFlags {
   verbose: boolean
   dereference: boolean
   toStdout: boolean
-  // The -f value as a string, and the word that spelled it.
-  archive: string | null
-  archiveOperand: PathSpec | undefined
-  // Every -C value, in order, and the words that spelled them.
-  directories: string[]
-  directoryOperands: PathSpec[]
+  archive: PathSpec | null
+  directories: PathSpec[]
   stripComponents: number
   exclude: string | null
   oneFileSystem: boolean
@@ -226,10 +222,8 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags {
     verbose: fl.asBool('verbose'),
     dereference: fl.asBool('dereference'),
     toStdout: fl.asBool('to_stdout'),
-    archive: fl.asStr('file') ?? null,
-    archiveOperand: fl.asPaths('file')[0],
-    directories: fl.asList('directory'),
-    directoryOperands: fl.asPaths('directory'),
+    archive: fl.asPath('file') ?? null,
+    directories: fl.asPaths('directory'),
     stripComponents,
     exclude: fl.asStr('exclude') ?? null,
     oneFileSystem: fl.asBool('one_file_system'),
@@ -503,13 +497,10 @@ export async function tarGeneric(
       new IOResult({ exitCode: 1, stderr: ENC.encode(`tar: ${missing} not supported\n`) }),
     ]
   }
-  const fFlag = parsed.archive
-  const CFlags = parsed.directories
-  // The words that spelled -f and each -C, for the lines that name them.
-  const archiveOperand = parsed.archiveOperand
-  const COperands = parsed.directoryOperands
+  const archiveOperand = parsed.archive
+  const COperands = parsed.directories
   // Only the last -C is a destination; create checks every one.
-  const CFlag = CFlags.length > 0 ? (CFlags[CFlags.length - 1] ?? null) : null
+  const CFlag = COperands.at(-1) ?? null
   const stripN = parsed.stripComponents
   const exclude = parsed.exclude
   const toStdout = parsed.toStdout
@@ -517,24 +508,19 @@ export async function tarGeneric(
   // With no -f the archive is standard input or output, which is GNU tar's
   // compiled-in default (no TAPE in the environment).
   const archiveSpec =
-    archiveOperand !== undefined
+    archiveOperand !== null
       ? makePathSpec(archiveOperand.virtual, mountPrefix, archiveOperand)
-      : fFlag !== null
-        ? makePathSpec(fFlag, mountPrefix)
-        : new PathSpec({
-            virtual: '/dev/stdin',
-            directory: '/dev/',
-            vfsPath: 'dev/stdin',
-            resolved: true,
-            rawPath: '-',
-          })
+      : new PathSpec({
+          virtual: '/dev/stdin',
+          directory: '/dev/',
+          vfsPath: 'dev/stdin',
+          resolved: true,
+          rawPath: '-',
+        })
   const destPath = extractDest(CFlag, opts.cwd)
-  const directories = CFlags.map((c, index) => {
-    const operand = COperands[index]
-    return operand === undefined
-      ? makePathSpec(c, mountPrefix)
-      : makePathSpec(operand.virtual, mountPrefix, operand)
-  })
+  const directories = COperands.map((operand) =>
+    makePathSpec(operand.virtual, mountPrefix, operand),
+  )
   const archiveStream = stdinStream(deps.stream, opts.stdin)
   const selectors = [...texts]
   const verboseLines: string[] = []

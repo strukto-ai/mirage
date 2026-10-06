@@ -36,7 +36,7 @@ import {
 } from './errors.ts'
 import { short } from './format.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
-import { under } from './io.ts'
+import { joinSpec } from '../../../../utils/path.ts'
 import type { ReadOnlyRefusal } from './types.ts'
 import {
   BRANCH_PREFIX,
@@ -267,5 +267,5 @@ export const switchReadOnly: ReadOnlyRefusal = (inv, location) => {
   const name = new FlagView(inv.flags).asStr('create')
   if (name === undefined) return indexLocked(inv, location)
   const ref = `${BRANCH_PREFIX}${name}`
-  return new RefReadOnlyError(ref, under(location?.commondir ?? '.git', ref))
+  return new RefReadOnlyError(ref, joinSpec(location?.commondir ?? '.git', ref).virtual)
 }

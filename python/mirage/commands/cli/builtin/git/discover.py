@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 from dataclasses import replace
 
 from mirage.commands.cli.builtin.git.constants import GIT_DIR
@@ -28,49 +27,16 @@ from mirage.commands.cli.builtin.git.repo import config_bool, config_values
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.ops.types import MountRoot, StatPath
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileType
+from mirage.types import FileType, PathSpec
+from mirage.utils.path import join_spec, parent_spec, typed_spec
 
 GITDIR_PREFIX = "gitdir:"
 COMMON_DIR = "commondir"
 
 
-def _normalize(path: str) -> str:
-    """Strip a virtual path to its canonical no-trailing-slash spelling.
-
-    Args:
-        path (str): absolute virtual path, with or without a trailing
-            slash (mount prefixes carry one, operands usually do not).
-    """
-    stripped = path.rstrip("/")
-    return stripped or "/"
-
-
-def _parent(path: str) -> str:
-    """The directory above a normalized virtual path, "/" at the top.
-
-    Args:
-        path (str): normalized absolute virtual path.
-    """
-    return posixpath.dirname(path) or "/"
-
-
-def _against(base: str, target: str) -> str:
-    """Resolve a path a git file names, relative to the file's directory.
-
-    git writes either form. A submodule and a ``--relative-paths``
-    worktree point relatively so the pair can be moved together; an
-    ordinary ``git worktree add`` writes an absolute path.
-
-    Args:
-        base (str): directory the naming file lives in.
-        target (str): the path as the file spelled it.
-    """
-    return _normalize(posixpath.normpath(posixpath.join(base, target)))
-
-
 async def _follow_gitfile(
-    dispatch: DispatchFn, stat_path: StatPath, gitfile: str
-) -> str:
+    dispatch: DispatchFn, stat_path: StatPath, gitfile: PathSpec
+) -> PathSpec:
     """Read a ``.git`` file and return the directory it points at.
 
     A ``.git`` that is a file rather than a directory holds one
@@ -82,28 +48,28 @@ async def _follow_gitfile(
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
-        gitfile (str): absolute virtual path of the ``.git`` file.
+        gitfile (PathSpec): absolute virtual path of the ``.git`` file.
     """
     text = (await read_file(dispatch, gitfile)).decode(
         "utf-8", errors="replace"
     )
     line = text.strip()
     if not line.startswith(GITDIR_PREFIX):
-        raise InvalidGitFileError(gitfile)
+        raise InvalidGitFileError(gitfile.virtual)
     target = line[len(GITDIR_PREFIX) :].strip()
     if not target:
-        raise InvalidGitFileError(gitfile)
-    resolved = _against(_parent(gitfile), target)
+        raise InvalidGitFileError(gitfile.virtual)
+    resolved = typed_spec(target, parent_spec(gitfile))
     if await stat_path(resolved) is None:
         # An absolute pointer names a path on the backend's own
         # filesystem, which is only reachable when the mount happens to
         # span it: a worktree mounted alone cannot see the repository it
         # was cut from. git says the same thing when the target is gone.
-        raise NotARepositoryError(resolved, quoted=False)
+        raise NotARepositoryError(resolved.virtual, quoted=False)
     return resolved
 
 
-async def _common_dir(dispatch: DispatchFn, gitdir: str) -> str:
+async def _common_dir(dispatch: DispatchFn, gitdir: PathSpec) -> PathSpec:
     """The shared git directory behind a per-worktree one.
 
     A linked worktree's git directory carries a ``commondir`` file
@@ -114,18 +80,18 @@ async def _common_dir(dispatch: DispatchFn, gitdir: str) -> str:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of the git directory.
+        gitdir (PathSpec): absolute virtual path of the git directory.
     """
-    data = await read_optional(dispatch, posixpath.join(gitdir, COMMON_DIR))
+    data = await read_optional(dispatch, join_spec(gitdir, COMMON_DIR))
     if data is None:
         return gitdir
     target = data.decode("utf-8", errors="replace").strip()
-    return _against(gitdir, target) if target else gitdir
+    return typed_spec(target, gitdir) if target else gitdir
 
 
 async def _validated(
-    dispatch: DispatchFn, stat_path: StatPath, gitdir: str
-) -> str | None:
+    dispatch: DispatchFn, stat_path: StatPath, gitdir: PathSpec
+) -> PathSpec | None:
     """git's ``is_git_directory``: the common directory, or None.
 
     A git directory holds its own HEAD and finds objects and refs in its
@@ -134,13 +100,13 @@ async def _validated(
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
-        gitdir (str): absolute virtual path of the candidate.
+        gitdir (PathSpec): absolute virtual path of the candidate.
     """
     common = await _common_dir(dispatch, gitdir)
     signatures = (
-        (f"{gitdir}/HEAD", FileType.FILE),
-        (f"{common}/objects", FileType.DIRECTORY),
-        (f"{common}/refs", FileType.DIRECTORY),
+        (join_spec(gitdir, "HEAD"), FileType.FILE),
+        (join_spec(common, "objects"), FileType.DIRECTORY),
+        (join_spec(common, "refs"), FileType.DIRECTORY),
     )
     for path, kind in signatures:
         entry = await stat_path(path)
@@ -153,9 +119,9 @@ async def discover(
     dispatch: DispatchFn,
     stat_path: StatPath,
     mount_root: MountRoot,
-    start: str,
-    gitdir: str | None = None,
-    worktree: str | None = None,
+    start: PathSpec,
+    gitdir: PathSpec | None = None,
+    worktree: PathSpec | None = None,
 ) -> RepoLocation:
     """Find the repository governing a path, or raise git's own fatal.
 
@@ -181,22 +147,28 @@ async def discover(
         stat_path (StatPath): dispatcher-backed stat asking both channels
             a backend can answer on; None means nothing is there.
         mount_root (MountRoot): the mount prefix serving a path.
-        start (str): absolute virtual path to start from, normally the
+        start (PathSpec): absolute virtual path to start from, normally the
             session cwd or the argument of ``-C``.
-        gitdir (str | None): explicit repository path; skips upward discovery.
-        worktree (str | None): explicit working tree, relative to start.
+        gitdir (PathSpec | None): explicit repository path; keeps the typed
+            spelling for refusals and skips upward discovery.
+        worktree (PathSpec | None): explicit working tree, relative to start.
     """
-    root = _normalize(mount_root(start))
+    root = typed_spec(mount_root(start.virtual), "/")
     if gitdir is not None:
         here = await stat_path(start)
         if here is None:
-            raise NoWorkingDirectoryError(start)
+            raise NoWorkingDirectoryError(
+                start.raw_path if start.dotted else start.virtual
+            )
         if here.type is not FileType.DIRECTORY:
-            raise NoWorkingDirectoryError(start, "Not a directory")
-        candidate = _against(start, gitdir)
+            raise NoWorkingDirectoryError(
+                start.raw_path if start.dotted else start.virtual,
+                "Not a directory",
+            )
+        candidate = gitdir
         info = await stat_path(candidate)
         if info is None:
-            raise NotARepositoryError(gitdir)
+            raise NotARepositoryError(gitdir.raw_path)
         # git names the target a pointer leads to unquoted, as it does for
         # one met on the way up.
         pointer = info.type is not FileType.DIRECTORY
@@ -208,17 +180,17 @@ async def discover(
         common = await _validated(dispatch, stat_path, resolved)
         if common is None:
             raise (
-                NotARepositoryError(resolved, quoted=False)
+                NotARepositoryError(resolved.virtual, quoted=False)
                 if pointer
-                else NotARepositoryError(gitdir)
+                else NotARepositoryError(gitdir.raw_path)
             )
         return await _location(
-            dispatch, stat_path, resolved, common, start, start, worktree, root
+            dispatch, stat_path, resolved, common, start, worktree, root
         )
-    current = _normalize(start)
+    current = start
     first = True
     while True:
-        candidate = posixpath.join(current, GIT_DIR)
+        candidate = join_spec(current, GIT_DIR)
         info = await stat_path(candidate)
         if info is not None:
             gitdir = (
@@ -232,7 +204,6 @@ async def discover(
                 stat_path,
                 gitdir,
                 common,
-                start,
                 current,
                 worktree,
                 root,
@@ -248,24 +219,28 @@ async def discover(
             # directory is there.
             here = await stat_path(current)
             if here is None:
-                raise NoWorkingDirectoryError(start)
+                raise NoWorkingDirectoryError(
+                    start.raw_path if start.dotted else start.virtual
+                )
             if here.type is not FileType.DIRECTORY:
-                raise NoWorkingDirectoryError(start, "Not a directory")
+                raise NoWorkingDirectoryError(
+                    start.raw_path if start.dotted else start.virtual,
+                    "Not a directory",
+                )
             first = False
-        if current == root or current == "/":
+        if current.virtual == root.virtual or current.virtual == "/":
             raise NotARepositoryError()
-        current = _parent(current)
+        current = parent_spec(current)
 
 
 async def _location(
     dispatch: DispatchFn,
     stat_path: StatPath,
-    gitdir: str,
-    common: str,
-    start: str,
-    default_worktree: str,
-    worktree: str | None,
-    root: str,
+    gitdir: PathSpec,
+    common: PathSpec,
+    default_worktree: PathSpec,
+    worktree: PathSpec | None,
+    root: PathSpec,
 ) -> RepoLocation:
     """Resolve the work tree once for every verb, after locating metadata.
 
@@ -283,12 +258,11 @@ async def _location(
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
-        gitdir (str): resolved checkout metadata directory.
-        common (str): shared repository directory.
-        start (str): invocation directory after -C.
-        default_worktree (str): discovered root, or start for explicit gitdir.
-        worktree (str | None): command-line or environment override.
-        root (str): mount boundary used for discovery.
+        gitdir (PathSpec): resolved checkout metadata directory.
+        common (PathSpec): shared repository directory.
+        default_worktree (PathSpec): discovered root, or start for explicit gitdir.
+        worktree (PathSpec | None): command-line or environment override.
+        root (PathSpec): mount boundary used for discovery.
 
     Raises:
         BadConfigValueError: a core.bare git cannot read as a boolean.
@@ -297,14 +271,14 @@ async def _location(
     located = RepoLocation(gitdir, common, default_worktree, root)
     bare = await config_bool(dispatch, located, b"core", b"bare", False)
     if worktree is not None:
-        return replace(located, worktree=_against(start, worktree))
-    if gitdir != common or bare:
+        return replace(located, worktree=worktree)
+    if gitdir.virtual != common.virtual or bare:
         return located
     configured = await config_values(dispatch, located, b"core", b"worktree")
     if not configured:
         return located
     spelled = configured[-1].decode("utf-8", errors="replace")
-    selected = _against(gitdir, spelled)
+    selected = typed_spec(spelled, gitdir)
     if not spelled.startswith("/"):
         info = await stat_path(selected)
         if info is None:
@@ -325,8 +299,9 @@ async def is_bare(dispatch: DispatchFn, location: RepoLocation) -> bool:
         dispatch (DispatchFn): workspace op dispatcher.
         location (RepoLocation): the discovered repository.
     """
-    return location.gitdir == location.commondir and await config_bool(
-        dispatch, location, b"core", b"bare", False
+    return (
+        location.gitdir.virtual == location.commondir.virtual
+        and await config_bool(dispatch, location, b"core", b"bare", False)
     )
 
 

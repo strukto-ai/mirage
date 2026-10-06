@@ -16,7 +16,9 @@ import errno
 import os
 import posixpath
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 
+from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 
 
@@ -479,3 +481,62 @@ def gnu_dirname(path: str) -> str:
     if j == 0:
         return "/"
     return path[:j]
+
+
+def typed_spec(word: str | PathSpec, cwd: str | PathSpec) -> PathSpec:
+    """The PathSpec an operand names, its dotted spelling kept.
+
+    A classified operand already is one. A word a builtin resolves itself
+    (a relative ``ln`` name, a ``[`` operand) arrives as text, and
+    resolving it with :func:`resolve_path` alone would simplify away the
+    dots its walk has to prove.
+
+    Args:
+        word (str | PathSpec): the operand or an already classified path.
+        cwd (str | PathSpec): base directory, retaining any unproven walk.
+    """
+    if isinstance(word, PathSpec):
+        return word
+    base = cwd.dotted or cwd.virtual if isinstance(cwd, PathSpec) else cwd
+    virtual = resolve_path(word, base)
+    return PathSpec(
+        virtual=virtual,
+        directory=virtual[: virtual.rfind("/") + 1] or "/",
+        vfs_path=virtual.strip("/"),
+        raw_path=word,
+        dotted=dotted_spelling(posixpath.join(base, word))
+        if isinstance(cwd, PathSpec) and cwd.dotted
+        else dotted_spelling(word, base),
+        walk_error=(
+            "ENOENT"
+            if word == ""
+            else cwd.walk_error
+            if isinstance(cwd, PathSpec) and not word.startswith("/")
+            else None
+        ),
+    )
+
+
+def join_spec(base: str | PathSpec, *parts: str) -> PathSpec:
+    """Join virtual path components without discarding an unproven walk.
+
+    Args:
+        base (str | PathSpec): absolute directory or typed base.
+        parts (str): path components, the last absolute component resets the base.
+    """
+    word = posixpath.join(*parts) if parts else ""
+    scope = typed_spec(word or ".", base)
+    return replace(scope, raw_path=scope.dotted or scope.virtual)
+
+
+def parent_spec(path: str | PathSpec) -> PathSpec:
+    """The lexical parent of a virtual path, retaining its spelled ancestors.
+
+    Args:
+        path (str | PathSpec): path whose parent will be accessed.
+    """
+    scope = typed_spec(path, "/")
+    return typed_spec(
+        posixpath.dirname((scope.dotted or scope.virtual).rstrip("/")) or "/",
+        "/",
+    )

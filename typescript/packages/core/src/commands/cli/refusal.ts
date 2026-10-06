@@ -258,3 +258,15 @@ export function leafRefusal(
   }
   return [argparseMessage, USAGE_EXIT, null]
 }
+
+/** Render failure to enter a CLI's declared operand base. */
+export function directoryRefusal(
+  prog: string,
+  path: string,
+  reason: string,
+  style: UsageStyle,
+): [Uint8Array, number] {
+  return style === UsageStyle.GIT
+    ? [new TextEncoder().encode(`fatal: cannot change to '${path}': ${reason}\n`), 128]
+    : [new TextEncoder().encode(`${prog}: cannot change directory to '${path}': ${reason}\n`), 1]
+}

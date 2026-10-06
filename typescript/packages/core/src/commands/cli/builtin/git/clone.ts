@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { startPoint, checkSwitches, configSection, fatal, verbUsage } from './util.ts'
+import { type PathSpec, FileType } from '../../../../types.ts'
+import { typedSpec, joinSpec } from '../../../../utils/path.ts'
+
 import { IOResult } from '../../../../io/types.ts'
-import { FileType } from '../../../../types.ts'
-import { posixNormpath } from '../../../../utils/path.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIDoors, CLIInvocation } from '../../types.ts'
@@ -22,14 +24,13 @@ import { DETACHED_ADVICE, switchTo } from './checkout.ts'
 import { CloneReadOnlyError, GitError, NoWorkspaceError, UsageError } from './errors.ts'
 import { configuredHeaders, fetchObjects, HEADS, ignoreFunny, TAGS } from './fetch.ts'
 import { layOut } from './init.ts'
-import { readNames, removeTree, under, writeFile } from './io.ts'
+import { readNames, removeTree, writeFile } from './io.ts'
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
 import { detachHead, setHead, validRefName, writeRef } from './refs.ts'
 import { openRepo } from './repo.ts'
 import { commitEntries } from './tree.ts'
 import { isLocal, openTransport, type Advertisement, type Transport } from './transport.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
-import { checkSwitches, configSection, fatal, startPoint, verbUsage } from './util.ts'
 
 const ENC = new TextEncoder()
 const DEFAULT_BRANCH = 'master'
@@ -106,15 +107,15 @@ export async function clone(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   const name = named ?? defaultDirectory(url)
   const quiet = fl.asBool('quiet')
-  let target: string
+  let target: PathSpec
   let fresh: boolean
   let transport: Transport
-  let start: string
+  let start: PathSpec
   try {
     const { dispatch, statPath } = doors
     if (dispatch === undefined || statPath === undefined) throw new NoWorkspaceError()
     start = startPoint(fl)
-    target = posixNormpath(name.startsWith('/') ? name : `${start}/${name}`)
+    target = typedSpec(name, start)
     const info = await statPath(target)
     if (
       info !== null &&
@@ -130,7 +131,7 @@ export async function clone(inv: CLIInvocation): Promise<CommandFnResult> {
   const local = isLocal(url)
   // git records a local path the way absolute_pathdup spells it: the directory
   // it ran in and the path as typed, not normalized.
-  const stored = !local || url.startsWith('/') ? url : `${start.replace(/\/+$/, '')}/${url}`
+  const stored = !local || url.startsWith('/') ? url : `${start.virtual.replace(/\/+$/, '')}/${url}`
   let notes = quiet ? '' : `Cloning into '${name}'...\n`
   try {
     notes += await populate(inv, doors, transport, target, stored, local && !quiet)
@@ -143,7 +144,7 @@ export async function clone(inv: CLIInvocation): Promise<CommandFnResult> {
     else if (dispatch !== undefined)
       for (const entry of await readNames(dispatch, target)) {
         const child = entry.replace(/\/+$/, '').split('/').at(-1) ?? ''
-        if (child) await removeTree(dispatch, under(target, child), links, mounts)
+        if (child) await removeTree(dispatch, joinSpec(target, child), links, mounts)
       }
     const refusal = err.prefix === null ? err.message : `${err.prefix}: ${err.message}`
     return [null, new IOResult({ exitCode: err.code, stderr: ENC.encode(`${notes}${refusal}\n`) })]
@@ -156,7 +157,7 @@ async function populate(
   inv: CLIInvocation,
   doors: CLIDoors,
   transport: Transport,
-  target: string,
+  target: PathSpec,
   url: string,
   local: boolean,
 ): Promise<string> {
@@ -164,7 +165,7 @@ async function populate(
   const { dispatch, statPath } = doors
   if (dispatch === undefined || statPath === undefined) throw new NoWorkspaceError()
   const mounts = doors.ns?.mounts ?? null
-  const gitdir = under(target, '.git')
+  const gitdir = joinSpec(target, '.git')
   const remote = fl.asStr('origin') ?? 'origin'
   if (!validRefName(`refs/remotes/${remote}/test`))
     throw new GitError(`'${remote}' is not a valid remote name`)
@@ -174,7 +175,7 @@ async function populate(
     gitdir,
     commondir: gitdir,
     worktree: target,
-    mountRoot: mounts?.rootOf(target) ?? '/',
+    mountRoot: typedSpec(mounts?.rootOf(target.virtual) ?? '/', '/'),
   }
   const [wants, funny] = ignoreFunny(
     [...advertised.refs]
@@ -226,12 +227,12 @@ async function populate(
     const tracking = `refs/remotes/${remote}/HEAD`
     await writeFile(
       dispatch,
-      under(gitdir, tracking),
+      joinSpec(gitdir, tracking),
       ENC.encode(`ref: refs/remotes/${remote}/${adv.head.slice(HEADS.length)}\n`),
     )
     await append(dispatch, gitdir, `logs/${tracking}`, entry(ZERO, headOid, IDENTITY, now, reason))
   }
-  await writeFile(dispatch, under(gitdir, 'config'), ENC.encode(config(url, remote, branch)))
+  await writeFile(dispatch, joinSpec(gitdir, 'config'), ENC.encode(config(url, remote, branch)))
   if (local) notes += 'done.\n'
   if (commit === null) {
     await setHead(dispatch, gitdir, `${HEADS}${branch ?? DEFAULT_BRANCH}`)

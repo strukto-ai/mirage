@@ -16,9 +16,8 @@ import { backupControl, backupTarget } from '../../../../commands/builtin/utils/
 import { DEFAULT_BACKUP_SUFFIX } from '../../../../commands/builtin/utils/constants.ts'
 import { UsageError } from '../../../../commands/errors.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
-import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts'
+import { parseCommand, parseToKwargs, type ParsedArgs } from '../../../../commands/spec/parser.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
-import { type ParsedArgs } from '../../../../commands/spec/parser.ts'
 import {
   ambiguousOptionError,
   missingValueError,
@@ -32,8 +31,15 @@ import {
   absentDestStrerror,
   dispatchStat,
   dotRefusal,
-  typedSpec,
 } from '../../../../commands/builtin/utils/paths.ts'
+import {
+  typedSpec,
+  CycleError,
+  dottedSpelling,
+  gnuBasename,
+  gnuDirname,
+  posixNormpath,
+} from '../../../../utils/path.ts'
 import {
   fsStrerror,
   isEacces,
@@ -43,13 +49,6 @@ import {
   isEnotdir,
   isErofs,
 } from '../../../../utils/errors.ts'
-import {
-  CycleError,
-  dottedSpelling,
-  gnuBasename,
-  gnuDirname,
-  posixNormpath,
-} from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
 import { sessionVisibility } from '../../../../context/session_context.ts'

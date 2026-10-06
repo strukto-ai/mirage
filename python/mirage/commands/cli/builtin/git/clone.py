@@ -76,7 +76,8 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType
+from mirage.types import FileType, PathSpec
+from mirage.utils.path import join_spec, typed_spec
 
 DEFAULT_BRANCH = "master"
 
@@ -180,7 +181,7 @@ async def clone(
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
         start = start_point(fl)
-        target = posixpath.normpath(posixpath.join(start, name))
+        target = join_spec(start, name)
         info = await stat_path(target)
         if info is not None and (
             info.type is not FileType.DIRECTORY
@@ -201,7 +202,7 @@ async def clone(
     stored = (
         url
         if not local or url.startswith("/")
-        else f"{start.rstrip('/')}/{url}"
+        else f"{start.virtual.rstrip('/')}/{url}"
     )
     notes = "" if quiet else f"Cloning into '{name}'...\n"
     try:
@@ -218,7 +219,7 @@ async def clone(
                 child = posixpath.basename(entry.rstrip("/"))
                 await remove_tree(
                     dispatch,
-                    posixpath.join(target, child),
+                    join_spec(target, child),
                     links_of(doors),
                     mounts_of(doors),
                 )
@@ -233,7 +234,7 @@ async def _populate(
     inv: CLIInvocation[None],
     doors: CLIDoors,
     transport: LocalTransport | HttpTransport,
-    target: str,
+    target: PathSpec,
     url: str,
     local: bool,
 ) -> str:
@@ -243,7 +244,7 @@ async def _populate(
         inv (CLIInvocation[None]): the parsed invocation.
         doors (CLIDoors): the invocation's doors.
         transport (LocalTransport | HttpTransport): the remote.
-        target (str): the clone's working tree.
+        target (PathSpec): the clone's working tree.
         url (str): the remote URL as the config records it.
         local (bool): whether git prints ``done.`` after copying.
 
@@ -254,14 +255,17 @@ async def _populate(
     dispatch, stat_path = doors.dispatch, doors.stat_path
     assert dispatch is not None and stat_path is not None
     mounts = doors.ns.mounts if doors.ns is not None else None
-    gitdir = posixpath.join(target, ".git")
+    gitdir = join_spec(target, ".git")
     remote = fl.as_str("origin") or "origin"
     if not valid_ref_name(f"refs/remotes/{remote}/test"):
         raise GitError(f"'{remote}' is not a valid remote name")
     await lay_out(dispatch, gitdir, DEFAULT_BRANCH, "")
     advertised = await transport.advertise()
     location = RepoLocation(
-        gitdir, gitdir, target, mounts.root_of(target) if mounts else "/"
+        gitdir,
+        gitdir,
+        target,
+        typed_spec(mounts.root_of(target.virtual) if mounts else "/", "/"),
     )
     wanted, notes = ignore_funny(
         [
@@ -315,7 +319,7 @@ async def _populate(
         tracking = f"refs/remotes/{remote}/HEAD"
         await write_file(
             dispatch,
-            posixpath.join(gitdir, tracking),
+            join_spec(gitdir, tracking),
             f"ref: refs/remotes/{remote}/{adv.head[len(HEADS) :]}\n".encode(),
         )
         await append(
@@ -326,7 +330,7 @@ async def _populate(
         )
     await write_file(
         dispatch,
-        posixpath.join(gitdir, "config"),
+        join_spec(gitdir, "config"),
         _config(url, remote, branch).encode(),
     )
     if local:

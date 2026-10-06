@@ -112,6 +112,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.utils.path import join_spec
 
 HEADS_PREFIX = b"refs/heads/"
 REMOTES_PREFIX = b"refs/remotes/"
@@ -210,7 +211,7 @@ async def _create(
     if held is not None:
         raise RefLockError(ref, held)
     await write_ref(dispatch, location.commondir, ref, commit.id)
-    log = posixpath.join(location.commondir, "logs", ref)
+    log = join_spec(location.commondir, "logs", ref)
     if await logged(dispatch, location, ref, log):
         line = entry(
             ZERO,
@@ -390,7 +391,7 @@ async def set_up_tracking(
         )
     if ref is None:
         return "", ""
-    path = f"{location.commondir}/config"
+    path = join_spec(location.commondir, "config")
     data = await read_optional(dispatch, path) or b""
     if data and not data.endswith(b"\n"):
         data += b"\n"
@@ -494,14 +495,14 @@ async def _delete(
     if ref not in repo.refs.allkeys():
         raise NoBranchError(name)
     if name == head.branch:
-        raise CheckedOutBranchError(name, location.worktree)
+        raise CheckedOutBranchError(name, location.worktree.virtual)
     sha = repo.refs[ref]
     if not force and not await asyncio.to_thread(
         _merged, repo, sha, head_commit(repo, head)
     ):
         raise UnmergedBranchError(name)
     await delete_ref(dispatch, location.commondir, ref.decode())
-    path = f"{location.commondir}/config"
+    path = join_spec(location.commondir, "config")
     data = await read_optional(dispatch, path)
     if data is not None:
         dropped = without_section(data, "branch", name)
@@ -830,7 +831,9 @@ async def branch_upstream(
     """
     if head.branch is None or no_commits:
         return None
-    data = await read_optional(dispatch, f"{location.commondir}/config")
+    data = await read_optional(
+        dispatch, join_spec(location.commondir, "config")
+    )
     cfg = ConfigFile.from_file(BytesIO(data or b""))
     ref = Ref(f"refs/heads/{head.branch}".encode())
     if (
@@ -855,7 +858,7 @@ def branch_read_only(
     """
     fl = FlagView(inv.flags)
     ref = f"{HEADS_PREFIX.decode()}{inv.texts[0] if inv.texts else ''}"
-    root = location.commondir if location is not None else ".git"
+    root = location.commondir.virtual if location is not None else ".git"
     path = posixpath.join(root, ref)
     if fl.as_bool("delete") or fl.as_bool("D"):
         return RefDeleteReadOnlyError(ref, path)

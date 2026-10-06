@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -32,7 +33,8 @@ import {
   SymbolicRefReadOnlyError,
   UsageError,
 } from './errors.ts'
-import { removeFile, under, writeFile } from './io.ts'
+import { removeFile, writeFile } from './io.ts'
+import { joinSpec } from '../../../../utils/path.ts'
 import { shortenRef } from './ref_fields.ts'
 import { append, entry, logged, ZERO } from './reflog.ts'
 import {
@@ -68,7 +70,7 @@ function switched(fl: FlagView, name: string, fallback: boolean): boolean {
  * The git directory a ref lives in: HEAD and the one-level names belong to the
  * checkout, every `refs/` name to the repository its worktrees share.
  */
-function ownerOf(location: RepoLocation, name: string): string {
+function ownerOf(location: RepoLocation, name: string): PathSpec {
   return name === HEAD || !name.startsWith(REFS_PREFIX) ? location.gitdir : location.commondir
 }
 
@@ -77,7 +79,7 @@ export const symbolicRefReadOnly: ReadOnlyRefusal = (inv, location) => {
   const name = inv.texts[0] ?? ''
   return new SymbolicRefReadOnlyError(
     name,
-    under(location === null ? '.git' : ownerOf(location, name), name),
+    joinSpec(location === null ? '.git' : ownerOf(location, name), name).virtual,
   )
 }
 
@@ -113,9 +115,9 @@ async function setSymbolic(
   if (held !== null) throw new SymbolicRefLockError(name, held)
   const before = await objectOf(repo, table, name)
   const owner = ownerOf(repo.location, name)
-  await writeFile(repo.dispatch, under(owner, name), ENC.encode(`${SYMREF_PREFIX}${target}\n`))
+  await writeFile(repo.dispatch, joinSpec(owner, name), ENC.encode(`${SYMREF_PREFIX}${target}\n`))
   const after = await objectOf(repo, table, target)
-  const log = under(owner, LOGS_DIR, name)
+  const log = joinSpec(owner, LOGS_DIR, name)
   if (after === null || !(await logged(repo.dispatch, repo.location, name, log))) return
   await append(
     repo.dispatch,
@@ -153,7 +155,7 @@ export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> 
       if (name === HEAD) throw new DeleteHeadError()
       const owner = ownerOf(repo.location, name)
       await deleteRef(repo.dispatch, owner, name)
-      await removeFile(repo.dispatch, under(owner, LOGS_DIR, name))
+      await removeFile(repo.dispatch, joinSpec(owner, LOGS_DIR, name))
       return [null, new IOResult()]
     }
     if (inv.texts.length === 2 && target !== undefined) {

@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '@struktoai/mirage-core/types'
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { ensureDir } from './download.ts'
 
@@ -45,8 +44,8 @@ describe('ensureDir', () => {
       throw new Error(`unexpected op ${op}`)
     }
     await Promise.all([
-      ensureDir(dispatch as never, '/work/out'),
-      ensureDir(dispatch as never, '/work/out'),
+      ensureDir(dispatch as never, PathSpec.fromStrPath('/work/out')),
+      ensureDir(dispatch as never, PathSpec.fromStrPath('/work/out')),
     ])
     expect([...dirs].sort()).toEqual(['/work', '/work/out'])
   })
@@ -56,6 +55,8 @@ describe('ensureDir', () => {
       if (op === 'stat') return Promise.reject(exists('ENOENT', spec.virtual))
       return Promise.reject(exists('EACCES', spec.virtual))
     }
-    await expect(ensureDir(dispatch as never, '/work/out')).rejects.toThrow(/work/)
+    await expect(ensureDir(dispatch as never, PathSpec.fromStrPath('/work/out'))).rejects.toThrow(
+      /work/,
+    )
   })
 })

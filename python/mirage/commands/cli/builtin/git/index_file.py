@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 from io import BytesIO
 from typing import IO, BinaryIO, cast
 
@@ -27,12 +26,14 @@ from mirage.commands.cli.builtin.git.errors import ResolveIndexError
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.runtime.types import DispatchFn
+from mirage.types import PathSpec
+from mirage.utils.path import join_spec
 
 INDEX_FILE = "index"
 MERGE_HEAD = "MERGE_HEAD"
 
 
-async def read_index(dispatch: DispatchFn, gitdir: str) -> IndexState:
+async def read_index(dispatch: DispatchFn, gitdir: PathSpec) -> IndexState:
     """Read ``.git/index`` through the dispatcher.
 
     The index is the third thing ``status`` compares, and the only one
@@ -51,11 +52,11 @@ async def read_index(dispatch: DispatchFn, gitdir: str) -> IndexState:
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of this checkout's git
+        gitdir (PathSpec): absolute virtual path of this checkout's git
             directory.
     """
-    data = await read_optional(dispatch, posixpath.join(gitdir, INDEX_FILE))
-    merging = await read_optional(dispatch, posixpath.join(gitdir, MERGE_HEAD))
+    data = await read_optional(dispatch, join_spec(gitdir, INDEX_FILE))
+    merging = await read_optional(dispatch, join_spec(gitdir, MERGE_HEAD))
     if data is None:
         return IndexState(
             entries={}, conflicts={}, merging=merging is not None
@@ -76,7 +77,7 @@ async def read_index(dispatch: DispatchFn, gitdir: str) -> IndexState:
 
 
 async def write_index(
-    dispatch: DispatchFn, gitdir: str, state: IndexState
+    dispatch: DispatchFn, gitdir: PathSpec, state: IndexState
 ) -> None:
     """Write ``.git/index`` back through the dispatcher.
 
@@ -90,7 +91,7 @@ async def write_index(
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
-        gitdir (str): absolute virtual path of this checkout's git
+        gitdir (PathSpec): absolute virtual path of this checkout's git
             directory.
         state (IndexState): what the index should now say.
     """
@@ -100,7 +101,7 @@ async def write_index(
     buffer = BytesIO()
     write_index_dict(cast(IO[bytes], buffer), merged)
     await write_file(
-        dispatch, posixpath.join(gitdir, INDEX_FILE), buffer.getvalue()
+        dispatch, join_spec(gitdir, INDEX_FILE), buffer.getvalue()
     )
 
 

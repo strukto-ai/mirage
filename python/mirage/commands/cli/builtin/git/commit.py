@@ -58,6 +58,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import SessionView
+from mirage.utils.path import join_spec
 
 # git tags the first commit on a branch so the reflog reads
 # "commit (initial): ..." rather than plain "commit: ...".
@@ -198,7 +199,7 @@ async def commit(
         # git takes the index's lock before it looks for anything to
         # commit, so a read-only repository refuses an empty commit too.
         try:
-            await take_lock(dispatch, f"{location.gitdir}/index")
+            await take_lock(dispatch, join_spec(location.gitdir, "index"))
         except FileExistsError as exc:
             raise LockExistsError(exc.filename) from exc
         state = await read_index(dispatch, location.gitdir)
@@ -226,7 +227,7 @@ async def commit(
                     repo,
                     location,
                     head,
-                    start_point(fl),
+                    start_point(fl).virtual,
                     links_of(doors),
                 )
             )

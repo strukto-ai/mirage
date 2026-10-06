@@ -26,14 +26,15 @@ from mirage.commands.cli.builtin.git.worktree import (
     tracked_directories,
 )
 from mirage.types import LINK_TARGET_KEY, FileType
+from mirage.utils.path import typed_spec
 from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.namespace.view import namespace_view_of
 
 LOCATION = RepoLocation(
-    gitdir="/repo/.git",
-    commondir="/repo/.git",
-    worktree="/repo",
-    mount_root="/repo/",
+    gitdir=typed_spec("/repo/.git", "/"),
+    commondir=typed_spec("/repo/.git", "/"),
+    worktree=typed_spec("/repo", "/"),
+    mount_root=typed_spec("/repo/", "/"),
 )
 TRACKED = {"a.txt", "b.txt"}
 

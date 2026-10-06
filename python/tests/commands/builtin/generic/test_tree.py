@@ -107,7 +107,8 @@ def _dispatch_pair(parent: dict, child: dict, root: str):
         _, readdir = owner(virtual)
         return await readdir(_spec(virtual))
 
-    async def stat_path(virtual: str):
+    async def stat_path(path: str | PathSpec):
+        virtual = path.virtual if isinstance(path, PathSpec) else path
         rows, _ = owner(virtual)
         return rows.get(virtual)
 

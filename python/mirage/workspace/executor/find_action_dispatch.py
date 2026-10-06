@@ -221,9 +221,7 @@ async def _delete(
             and ns.links.stat_at(ps.virtual) is not None
         )
         st = (
-            await stat_path(ps.virtual)
-            if not link and stat_path is not None
-            else None
+            await stat_path(ps) if not link and stat_path is not None else None
         )
         if not link and stat_path is not None and st is None:
             raise enoent(ps)
@@ -277,7 +275,7 @@ async def _row_stat(
         else None
     )
     try:
-        st = link if link is not None else await stat_path(ps.virtual)
+        st = link if link is not None else await stat_path(ps)
     except Exception as exc:
         if not is_entry_error(exc):
             raise

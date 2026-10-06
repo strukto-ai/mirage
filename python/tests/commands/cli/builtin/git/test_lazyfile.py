@@ -21,6 +21,7 @@ import pytest_asyncio
 from mirage.commands.cli.builtin.git import lazyfile
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
 from mirage.types import MountMode
+from mirage.utils.path import typed_spec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -46,7 +47,10 @@ async def opened(ws) -> LazyFile:
         ws (Workspace): the workspace holding the blob.
     """
     return LazyFile(
-        ws.dispatch, PATH, len(CONTENT), asyncio.get_running_loop()
+        ws.dispatch,
+        typed_spec(PATH, "/"),
+        len(CONTENT),
+        asyncio.get_running_loop(),
     )
 
 

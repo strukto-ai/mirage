@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { typedSpec, parentSpec, joinSpec } from '../../../../utils/path.ts'
+
 import { configValues } from './fs.ts'
 import type { MountRoot, StatPath } from '../../../../ops/types.ts'
 import { GIT_DIR } from './constants.ts'
-import { FileType } from '../../../../types.ts'
-import { parent, posixNormpath } from '../../../../utils/path.ts'
+import { FileType, type PathSpec } from '../../../../types.ts'
 import {
   InvalidGitFileError,
   NotARepositoryError,
@@ -24,33 +25,14 @@ import {
   NoWorkingDirectoryError,
   WorkTreeChdirError,
 } from './errors.ts'
-import { readFile, readOptional, under } from './io.ts'
+import { readFile, readOptional } from './io.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
-import { rstripSlash } from '../../../../utils/slash.ts'
 import { gitBool } from './util.ts'
 
 const GITDIR_PREFIX = 'gitdir:'
 const COMMON_DIR = 'commondir'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-/** Strip a virtual path to its canonical no-trailing-slash spelling. */
-function normalize(path: string): string {
-  const stripped = rstripSlash(path)
-  return stripped === '' ? '/' : stripped
-}
-
-/**
- * Resolve a path a git file names, relative to the file's directory.
- *
- * git writes either form. A submodule and a `--relative-paths` worktree point
- * relatively so the pair can be moved together; an ordinary `git worktree add`
- * writes an absolute path.
- */
-function against(base: string, target: string): string {
-  if (target.startsWith('/')) return normalize(posixNormpath(target))
-  return normalize(posixNormpath(`${base}/${target}`))
-}
 
 /**
  * Read a `.git` file and return the directory it points at.
@@ -63,19 +45,19 @@ function against(base: string, target: string): string {
 async function followGitfile(
   dispatch: Dispatch,
   statPath: StatPath,
-  gitfile: string,
-): Promise<string> {
+  gitfile: PathSpec,
+): Promise<PathSpec> {
   const line = DEC.decode(await readFile(dispatch, gitfile)).trim()
-  if (!line.startsWith(GITDIR_PREFIX)) throw new InvalidGitFileError(gitfile)
+  if (!line.startsWith(GITDIR_PREFIX)) throw new InvalidGitFileError(gitfile.virtual)
   const target = line.slice(GITDIR_PREFIX.length).trim()
-  if (target === '') throw new InvalidGitFileError(gitfile)
-  const resolved = against(parent(gitfile), target)
+  if (target === '') throw new InvalidGitFileError(gitfile.virtual)
+  const resolved = typedSpec(target, parentSpec(gitfile))
   if ((await statPath(resolved)) === null) {
     // An absolute pointer names a path on the backend's own filesystem, which
     // is only reachable when the mount happens to span it: a worktree mounted
     // alone cannot see the repository it was cut from. git says the same thing
     // when the target is gone.
-    throw new NotARepositoryError(resolved, false)
+    throw new NotARepositoryError(resolved.virtual, false)
   }
   return resolved
 }
@@ -88,11 +70,11 @@ async function followGitfile(
  * branches live there; only HEAD and the index are the worktree's own. An
  * ordinary checkout has no such file and is its own common directory.
  */
-async function commonDir(dispatch: Dispatch, gitdir: string): Promise<string> {
-  const data = await readOptional(dispatch, under(gitdir, COMMON_DIR))
+async function commonDir(dispatch: Dispatch, gitdir: PathSpec): Promise<PathSpec> {
+  const data = await readOptional(dispatch, joinSpec(gitdir, COMMON_DIR))
   if (data === null) return gitdir
   const target = DEC.decode(data).trim()
-  return target === '' ? gitdir : against(gitdir, target)
+  return target === '' ? gitdir : typedSpec(target, gitdir)
 }
 
 /**
@@ -104,13 +86,13 @@ async function commonDir(dispatch: Dispatch, gitdir: string): Promise<string> {
 async function validated(
   dispatch: Dispatch,
   statPath: StatPath,
-  gitdir: string,
-): Promise<string | null> {
+  gitdir: PathSpec,
+): Promise<PathSpec | null> {
   const common = await commonDir(dispatch, gitdir)
   for (const [path, kind] of [
-    [under(gitdir, 'HEAD'), FileType.FILE],
-    [under(common, 'objects'), FileType.DIRECTORY],
-    [under(common, 'refs'), FileType.DIRECTORY],
+    [joinSpec(gitdir, 'HEAD'), FileType.FILE],
+    [joinSpec(common, 'objects'), FileType.DIRECTORY],
+    [joinSpec(common, 'refs'), FileType.DIRECTORY],
   ] as const) {
     const entry = await statPath(path)
     if (entry?.type !== kind) return null
@@ -149,33 +131,39 @@ export async function discover(
   dispatch: Dispatch,
   statPath: StatPath,
   mountRoot: MountRoot,
-  start: string,
-  gitdir: string | null = null,
-  worktree: string | null = null,
+  start: PathSpec,
+  gitdir: PathSpec | null = null,
+  worktree: PathSpec | null = null,
 ): Promise<RepoLocation> {
-  const root = normalize(mountRoot(start))
+  const root = typedSpec(mountRoot(start.virtual), '/')
   if (gitdir !== null) {
     const here = await statPath(start)
-    if (here === null) throw new NoWorkingDirectoryError(start)
+    if (here === null)
+      throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual)
     if (here.type !== FileType.DIRECTORY)
-      throw new NoWorkingDirectoryError(start, 'Not a directory')
-    const candidate = against(start, gitdir)
+      throw new NoWorkingDirectoryError(
+        start.dotted ? start.rawPath : start.virtual,
+        'Not a directory',
+      )
+    const candidate = gitdir
     const info = await statPath(candidate)
-    if (info === null) throw new NotARepositoryError(gitdir)
+    if (info === null) throw new NotARepositoryError(gitdir.rawPath)
     // git names the target a pointer leads to unquoted, as it does for one met
     // on the way up.
     const pointer = info.type !== FileType.DIRECTORY
     const resolved = pointer ? await followGitfile(dispatch, statPath, candidate) : candidate
     const common = await validated(dispatch, statPath, resolved)
     if (common === null) {
-      throw pointer ? new NotARepositoryError(resolved, false) : new NotARepositoryError(gitdir)
+      throw pointer
+        ? new NotARepositoryError(resolved.virtual, false)
+        : new NotARepositoryError(gitdir.rawPath)
     }
-    return location(dispatch, statPath, resolved, common, start, start, worktree, root)
+    return location(dispatch, statPath, resolved, common, start, worktree, root)
   }
-  let current = normalize(start)
+  let current = start
   let first = true
   for (;;) {
-    const candidate = under(current, GIT_DIR)
+    const candidate = joinSpec(current, GIT_DIR)
     const info = await statPath(candidate)
     if (info !== null) {
       const gitdir =
@@ -187,7 +175,6 @@ export async function discover(
         statPath,
         gitdir,
         await commonDir(dispatch, gitdir),
-        start,
         current,
         worktree,
         root,
@@ -202,14 +189,18 @@ export async function discover(
       // first probe missed, because a hit already proves the directory is
       // there.
       const here = await statPath(current)
-      if (here === null) throw new NoWorkingDirectoryError(start)
+      if (here === null)
+        throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual)
       if (here.type !== FileType.DIRECTORY) {
-        throw new NoWorkingDirectoryError(start, 'Not a directory')
+        throw new NoWorkingDirectoryError(
+          start.dotted ? start.rawPath : start.virtual,
+          'Not a directory',
+        )
       }
       first = false
     }
-    if (current === root || current === '/') throw new NotARepositoryError()
-    current = parent(current)
+    if (current.virtual === root.virtual || current.virtual === '/') throw new NotARepositoryError()
+    current = parentSpec(current)
   }
 }
 
@@ -229,12 +220,11 @@ export async function discover(
 async function location(
   dispatch: Dispatch,
   statPath: StatPath,
-  gitdir: string,
-  common: string,
-  start: string,
-  defaultWorktree: string,
-  worktree: string | null,
-  root: string,
+  gitdir: PathSpec,
+  common: PathSpec,
+  defaultWorktree: PathSpec,
+  worktree: PathSpec | null,
+  root: PathSpec,
 ): Promise<RepoLocation> {
   const located: RepoLocation = {
     gitdir,
@@ -243,11 +233,11 @@ async function location(
     mountRoot: root,
   }
   const bare = gitBool(await configValues(dispatch, located, 'core.bare'), 'core.bare', false)
-  if (worktree !== null) return { ...located, worktree: against(start, worktree) }
-  if (gitdir !== common || bare) return located
+  if (worktree !== null) return { ...located, worktree }
+  if (gitdir.virtual !== common.virtual || bare) return located
   const configured = (await configValues(dispatch, located, 'core.worktree')).at(-1)
   if (configured === undefined) return located
-  const selected = against(gitdir, configured)
+  const selected = typedSpec(configured, gitdir)
   if (!configured.startsWith('/')) {
     const info = await statPath(selected)
     if (info === null) throw new WorkTreeChdirError(configured)
@@ -265,7 +255,7 @@ async function location(
  * never bare. A named work tree overrides it.
  */
 export async function isBare(dispatch: Dispatch, location: RepoLocation): Promise<boolean> {
-  if (location.gitdir !== location.commondir) return false
+  if (location.gitdir.virtual !== location.commondir.virtual) return false
   return gitBool(await configValues(dispatch, location, 'core.bare'), 'core.bare', false)
 }
 

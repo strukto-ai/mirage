@@ -21,13 +21,16 @@ from mirage.utils.path import (
     glob_prefix_match,
     gnu_basename,
     gnu_dirname,
+    join_spec,
     norm,
     norm_dir,
     owner_prefix,
     parent,
+    parent_spec,
     resolve_path,
     resolve_symlinks,
     respell_one,
+    typed_spec,
 )
 
 
@@ -347,3 +350,43 @@ def test_link_targets_walk_dots_and_links_in_order(path, links, expected):
 def test_resolve_symlinks_preserves_directory_suffix(path, expected):
     links = {"/data/al": "/other/dir", "/data/root": "/"}
     assert resolve_symlinks(path, links) == expected
+
+
+@pytest.mark.parametrize(
+    "base, parts, virtual, dotted, error",
+    [
+        (
+            "/hidden/../repo",
+            (".git", "HEAD"),
+            "/repo/.git/HEAD",
+            "/hidden/../repo/.git/HEAD",
+            None,
+        ),
+        (
+            "/hidden/../repo",
+            ("unused", "/other", "file"),
+            "/other/file",
+            None,
+            None,
+        ),
+        ("/repo", (), "/repo", None, None),
+        ("/repo", ("",), "/repo", None, None),
+        ("", ("file",), "/file", None, "ENOENT"),
+        ("", ("/other",), "/other", None, None),
+    ],
+)
+def test_derived_paths_preserve_or_reset_the_base_walk(
+    base, parts, virtual, dotted, error
+):
+    child = join_spec(typed_spec(base, "/"), *parts)
+    assert (child.virtual, child.dotted, child.walk_error) == (
+        virtual,
+        dotted,
+        error,
+    )
+    assert typed_spec(child, "/elsewhere") is child
+
+
+def test_parent_retains_spelled_ancestors():
+    child = join_spec(typed_spec("/hidden/../repo", "/"), ".git", "HEAD")
+    assert parent_spec(child).dotted == "/hidden/../repo/.git"

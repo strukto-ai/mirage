@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import posixpath
 import time
 from dataclasses import dataclass, replace
 from io import BytesIO
@@ -68,6 +67,7 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.utils.path import join_spec
 
 HEADS = "refs/heads/"
 TAGS = "refs/tags/"
@@ -649,7 +649,9 @@ async def fetch(
         if dispatch is None:
             raise NoWorkspaceError()
         config = _config(
-            await read_optional(dispatch, f"{location.commondir}/config")
+            await read_optional(
+                dispatch, join_spec(location.commondir, "config")
+            )
         )
         head = await read_head(dispatch, location.gitdir)
         texts = list(inv.texts)
@@ -709,7 +711,7 @@ async def fetch(
             if want.local is not None and want.local == checked:
                 raise GitError(
                     f"refusing to fetch into branch '{checked}' "
-                    f"checked out at '{location.worktree}'"
+                    f"checked out at '{location.worktree.virtual}'"
                 )
         tag_opt = multivar(config, (b"remote", name.encode()), b"tagopt")
         follow = not fl.as_bool("no_tags") and tag_opt[-1:] != [b"--no-tags"]
@@ -725,7 +727,7 @@ async def fetch(
         )
         await write_file(
             dispatch,
-            posixpath.join(location.gitdir, FETCH_HEAD),
+            join_spec(location.gitdir, FETCH_HEAD),
             fetch_head(url, taken),
         )
         shown = pruned + [
@@ -753,8 +755,10 @@ def fetch_read_only(
         inv (CLIInvocation[None]): the line's invocation record.
         location (RepoLocation | None): the repository it opened.
     """
-    if location is None or location.gitdir == posixpath.join(
+    if location is None or location.gitdir == join_spec(
         location.worktree, ".git"
     ):
         return FetchHeadReadOnlyError(f".git/{FETCH_HEAD}")
-    return FetchHeadReadOnlyError(posixpath.join(location.gitdir, FETCH_HEAD))
+    return FetchHeadReadOnlyError(
+        join_spec(location.gitdir, FETCH_HEAD).virtual
+    )

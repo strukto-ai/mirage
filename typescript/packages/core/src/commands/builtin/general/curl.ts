@@ -27,8 +27,8 @@ import {
 } from '../utils/http.ts'
 import { UsageError } from '../../errors.ts'
 import { gnuStrerror, isFsError, isWalkError, enotsup } from '../../../utils/errors.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
+import { typedSpec } from '../../../utils/path.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { encodeBase64 } from '../../../utils/base64.ts'
 
@@ -76,15 +76,8 @@ const DATA_SPELLING: Record<string, string> = {
 const DATA_STRIPPED = new Set([0x0d, 0x0a, 0x00])
 const UNRESERVED = /^[A-Za-z0-9\-._~]$/
 
-export function resolveTarget(o: string, cwd: string): PathSpec {
-  let path = o
-  if (!o.startsWith('/')) {
-    const base = rstripSlash(cwd)
-    path = base !== '' ? `${base}/${o}` : `/${o}`
-  }
-  const lastSlash = path.lastIndexOf('/')
-  const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ vfsPath: stripSlash(path), virtual: path, directory, resolved: true })
+export function resolveTarget(o: string | PathSpec, cwd: string): PathSpec {
+  return typedSpec(o, cwd)
 }
 
 /**
@@ -332,16 +325,12 @@ async function curl(
   const request = fl.asStr('request') ?? null
   const hasData = fl.occurrences(...DATA_OPTIONS).length > 0
   const form = fl.asStr('form') ?? null
-  const outputValue = fl.raw('output')
-  const output =
-    outputValue instanceof PathSpec && outputValue.rawPath === '-'
-      ? '-'
-      : (fl.asStr('output') ?? null)
-  // -D names a file, or stdout as a lone `-`, which the parser leaves
-  // unresolved (STDOUT_DASH_OPTIONS); `./-` is a file.
-  const dumpHeader = fl.asStr('dump_header') ?? null
-  const dumpToStdout = dumpHeader === '-' || fl.asPaths('dump_header')[0]?.rawPath === '-'
-  const dumpFile = dumpHeader !== null && !dumpToStdout ? dumpHeader : null
+  const output = fl.asPath('output') ?? fl.asStr('output') ?? null
+  const outputIsStdout = output === '-' || (output instanceof PathSpec && output.rawPath === '-')
+  const dumpHeader = fl.asPath('dump_header') ?? fl.asStr('dump_header') ?? null
+  const dumpToStdout =
+    dumpHeader === '-' || (dumpHeader instanceof PathSpec && dumpHeader.rawPath === '-')
+  const dumpFile = dumpToStdout ? null : dumpHeader
   // -k skips certificate verification through the fetch the host registered
   // (utils/http.ts); the browser has none, so there certificates are still
   // verified.
@@ -541,7 +530,7 @@ async function curl(
       try {
         await opts.dispatch('write', resolveTarget(dumpFile, opts.cwd), [blocks])
       } catch (err) {
-        const line = writeFailure(dumpFile, err)
+        const line = writeFailure(dumpFile instanceof PathSpec ? dumpFile.virtual : dumpFile, err)
         return await finish(
           null,
           new IOResult({
@@ -552,7 +541,7 @@ async function curl(
         )
       }
     }
-    writes[dumpFile] = blocks
+    writes[dumpFile instanceof PathSpec ? dumpFile.virtual : dumpFile] = blocks
   }
   const headerOut = dumpToStdout ? blocks : null
   // Only -f makes an error status an error, and then no body is written; the
@@ -576,13 +565,13 @@ async function curl(
   } else if (include) {
     result = concat([blocks, result])
   }
-  if (output !== null && output !== '-') {
+  if (output !== null && !outputIsStdout) {
     if (opts.dispatch !== undefined) {
       const scope = resolveTarget(output, opts.cwd)
       try {
         await opts.dispatch('write', scope, [result])
       } catch (err) {
-        const line = writeFailure(output, err)
+        const line = writeFailure(output instanceof PathSpec ? output.virtual : output, err)
         return await finish(
           headerOut,
           new IOResult({
@@ -594,7 +583,7 @@ async function curl(
         )
       }
     }
-    writes[output] = result
+    writes[output instanceof PathSpec ? output.virtual : output] = result
     // Real curl writes the body to the file and prints nothing else on
     // stdout, the headers -D sends there aside.
     return await finish(headerOut, new IOResult({ writes, stderr: trace }), resp)

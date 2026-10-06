@@ -15,7 +15,7 @@
 import { headEntries, stagedEntries, workEntries } from './changes.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
 import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
-import { compare, limited, renderChanges } from './diff_output.ts'
+import { compare, limited, renderChanges, parseDiffFlags, renamesEnabled } from './diff_output.ts'
 import { HEAD } from './constants.ts'
 
 import { IOResult } from '../../../../io/types.ts'
@@ -29,8 +29,7 @@ import {
   NoWorkspaceError,
   UsageError,
 } from './errors.ts'
-import { parseDiffFlags, renamesEnabled } from './diff_output.ts'
-import { pathspecPatterns } from './pathspec.ts'
+import { pathspecPatterns, visibleEntries } from './pathspec.ts'
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { mergeBases, rangeCommits, resolveCommit } from './revparse.ts'
@@ -133,7 +132,9 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
         after = fresh
       }
     }
-    const pathspecs = pathspecPatterns(repo.location, startPoint(fl), paths)
+    before = visibleEntries(repo.location, before)
+    after = visibleEntries(repo.location, after)
+    const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
     const flags = { ...parsed, pathspecs }
     const body = await renderChanges(
       repo,

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec, MountMode } from '../../../../types.ts'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import {
@@ -34,7 +35,6 @@ import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
-import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { blockingRef } from './refs.ts'
@@ -1863,7 +1863,7 @@ describe('a gitlink in the tree', () => {
     const h = await harness((repo) => {
       gitlinkIndex(repo, 'sub')
     })
-    await removeTree(h.dispatch, '/repo/sub', null, null)
+    await removeTree(h.dispatch, PathSpec.fromStrPath('/repo/sub'), null, null)
     expect(await h.run('restore sub')).toEqual([0, '', ''])
     expect(await readNames(h.dispatch, '/repo/sub')).toEqual([])
     // A directory, not a file: readNames answers empty for both, so the write
@@ -1875,7 +1875,7 @@ describe('a gitlink in the tree', () => {
     const h = await harness((repo) => {
       gitlinkIndex(repo, 'sub')
     })
-    await removeTree(h.dispatch, '/repo/sub', null, null)
+    await removeTree(h.dispatch, PathSpec.fromStrPath('/repo/sub'), null, null)
     await h.ws.shell("printf 'i am a file\\n' > /repo/sub")
     expect(await h.run('restore sub')).toEqual([0, '', ''])
     expect(await readOptional(h.dispatch, '/repo/sub')).toBeNull()
@@ -2620,7 +2620,7 @@ describe('removeTree meeting a link', () => {
 
   it('unlinks it without descending', async () => {
     const { calls, dispatch } = recorder()
-    await removeTree(dispatch, '/repo/slot', links, null)
+    await removeTree(dispatch, PathSpec.fromStrPath('/repo/slot'), links, null)
     expect(calls).toContainEqual(['unlink', '/repo/slot/link'])
     // The whole point: readdir dereferences, so listing the link at all is the
     // walk stepping outside the directory being replaced.
@@ -2630,7 +2630,7 @@ describe('removeTree meeting a link', () => {
 
   it('has nothing to ask without a namespace', async () => {
     const { calls, dispatch } = recorder()
-    await removeTree(dispatch, '/repo/slot', null, null)
+    await removeTree(dispatch, PathSpec.fromStrPath('/repo/slot'), null, null)
     expect(calls).toContainEqual(['readdir', '/repo/slot/link'])
   })
 })
@@ -2650,13 +2650,13 @@ describe('a removal meeting a mount boundary', () => {
 
   it('refuses the mount root itself', () => {
     expect(() => {
-      refuseMount(mountsOver(['/repo/slot']), '/repo/slot')
+      refuseMount(mountsOver(['/repo/slot']), PathSpec.fromStrPath('/repo/slot'))
     }).toThrow("cannot remove '/repo/slot': it is a mount root")
   })
 
   it('names a nested mount, in order', () => {
     expect(() => {
-      refuseMount(mountsOver(['/repo/slot/z', '/repo/slot/a']), '/repo/slot')
+      refuseMount(mountsOver(['/repo/slot/z', '/repo/slot/a']), PathSpec.fromStrPath('/repo/slot'))
     }).toThrow("cannot remove '/repo/slot': '/repo/slot/a' is a mount root")
   })
 
@@ -2664,16 +2664,19 @@ describe('a removal meeting a mount boundary', () => {
     // Avoiding a boundary and naming one are two different questions, and a
     // hidden mount's name is what the hide exists to withhold.
     expect(() => {
-      refuseMount(mountsOver(['/repo/slot/data'], ['/repo/slot/data']), '/repo/slot')
+      refuseMount(
+        mountsOver(['/repo/slot/data'], ['/repo/slot/data']),
+        PathSpec.fromStrPath('/repo/slot'),
+      )
     }).toThrow("cannot remove '/repo/slot': it holds a mount root")
   })
 
   it('lets an unobstructed path through', () => {
     expect(() => {
-      refuseMount(mountsOver(['/other/mount']), '/repo/slot')
+      refuseMount(mountsOver(['/other/mount']), PathSpec.fromStrPath('/repo/slot'))
     }).not.toThrow()
     expect(() => {
-      refuseMount(null, '/repo/slot')
+      refuseMount(null, PathSpec.fromStrPath('/repo/slot'))
     }).not.toThrow()
   })
 
@@ -2689,7 +2692,12 @@ describe('a removal meeting a mount boundary', () => {
       return { calls: seen, dispatch: fn }
     })()
     await expect(
-      removeTree(dispatch, '/repo/slot', null, mountsOver(['/repo/slot/data'])),
+      removeTree(
+        dispatch,
+        PathSpec.fromStrPath('/repo/slot'),
+        null,
+        mountsOver(['/repo/slot/data']),
+      ),
     ).rejects.toThrow('is a mount root')
     // Nothing at all: the refusal is the first thing the walk does, so the
     // directory is still whole when the caller hears about it.
@@ -2706,8 +2714,8 @@ describe('a removal meeting a mount boundary', () => {
     }) as unknown as Dispatch
     await removeEmptyParents(
       dispatch,
-      '/repo/slot/data/x.txt',
-      '/repo',
+      PathSpec.fromStrPath('/repo/slot/data/x.txt'),
+      PathSpec.fromStrPath('/repo'),
       mountsOver(['/repo/slot/data']),
     )
     expect(calls).not.toContainEqual(['rmdir', '/repo/slot/data'])
@@ -2722,7 +2730,12 @@ describe('a removal meeting a mount boundary', () => {
       if (op === 'readdir') return Promise.resolve([[], new IOResult()])
       return Promise.resolve([null, new IOResult()])
     }) as unknown as Dispatch
-    await removeEmptyParents(dispatch, '/repo/docs/x.txt', '/repo', mountsOver([]))
+    await removeEmptyParents(
+      dispatch,
+      PathSpec.fromStrPath('/repo/docs/x.txt'),
+      PathSpec.fromStrPath('/repo'),
+      mountsOver([]),
+    )
     expect(calls).toContainEqual(['rmdir', '/repo/docs'])
   })
 })

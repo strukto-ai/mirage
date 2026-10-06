@@ -182,7 +182,8 @@ describe('treeGeneric across a nested mount', () => {
         },
       },
       readdirPath: (virtual: string) => Promise.resolve(listing(owner(virtual), virtual)),
-      statPath: (virtual: string) => {
+      statPath: (path: string | PathSpec) => {
+        const virtual = path instanceof PathSpec ? path.virtual : path
         const type = owner(virtual)[virtual]
         return Promise.resolve(
           type === undefined ? null : new FileStat({ name: virtual.split('/').pop() ?? '', type }),

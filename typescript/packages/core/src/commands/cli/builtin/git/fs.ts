@@ -15,12 +15,11 @@
 import { GitConfigManager } from 'isomorphic-git/managers'
 import { FileSystem } from 'isomorphic-git/models'
 
-import { FileType, PathSpec } from '../../../../types.ts'
-import type { FileStat } from '../../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { enoent } from '../../../../utils/errors.ts'
-import { basename, ensureDir, exists, readNames, removeFile, under } from './io.ts'
+import { basename, ensureDir, exists, readNames, removeFile } from './io.ts'
+import { joinSpec, posixNormpath } from '../../../../utils/path.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
-import { posixNormpath } from '../../../../utils/path.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -143,23 +142,31 @@ export function gitFs(
   // isomorphic-git accepts one gitdir and does not follow commondir itself.
   // Route shared storage here so every library operation keeps the selected
   // checkout's HEAD/index while using the common objects, refs and config.
+  const roots =
+    location === undefined
+      ? []
+      : [location.gitdir, location.commondir, location.worktree].sort(
+          (a, b) => b.virtual.length - a.virtual.length,
+        )
   const dispatch: Dispatch = (op, path, args, kwargs) => {
-    let virtual = posixNormpath(path.virtual)
-    if (location !== undefined && location.gitdir !== location.commondir) {
-      const prefix = `${location.gitdir}/`
-      if (virtual.startsWith(prefix)) {
-        const relative = virtual.slice(prefix.length)
-        const shared = ['objects', 'refs', 'packed-refs', 'config', 'shallow'].some(
-          (name) => relative === name || relative.startsWith(`${name}/`),
-        )
-        const local = ['refs/bisect', 'refs/worktree', 'refs/rewritten'].some(
-          (name) => relative === name || relative.startsWith(`${name}/`),
-        )
-        if (shared && !local) virtual = under(location.commondir, relative)
-      }
+    if (location === undefined) return source(op, path, args, kwargs)
+    const virtual = posixNormpath(path.virtual)
+    for (const root of roots) {
+      const prefix = `${root.virtual.replace(/\/$/, '')}/`
+      if (virtual !== root.virtual && !virtual.startsWith(prefix)) continue
+      const relative = virtual === root.virtual ? '' : virtual.slice(prefix.length)
+      const shared = ['objects', 'refs', 'packed-refs', 'config', 'shallow'].some(
+        (name) => relative === name || relative.startsWith(`${name}/`),
+      )
+      const local = ['refs/bisect', 'refs/worktree', 'refs/rewritten'].some(
+        (name) => relative === name || relative.startsWith(`${name}/`),
+      )
+      const base = root === location.gitdir && shared && !local ? location.commondir : root
+      return source(op, relative ? joinSpec(base, relative) : base, args, kwargs)
     }
-    return source(op, PathSpec.fromStrPath(virtual), args, kwargs)
+    return source(op, path, args, kwargs)
   }
+
   const readFile = async (path: string, options?: string | { encoding?: string }) => {
     const encoding = typeof options === 'string' ? options : options?.encoding
     const [data] = await dispatch('read', PathSpec.fromStrPath(path))
@@ -226,8 +233,8 @@ export async function configValues(
   path: string,
 ): Promise<string[]> {
   const config = await GitConfigManager.get({
-    fs: new FileSystem(gitFs(dispatch)) as never,
-    gitdir: location.commondir,
+    fs: new FileSystem(gitFs(dispatch, location)) as never,
+    gitdir: location.commondir.virtual,
   })
   // Section and name fold case; a subsection between them does not.
   const first = path.indexOf('.')

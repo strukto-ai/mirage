@@ -1,7 +1,8 @@
+import { typedSpec, joinSpec } from '../../../../utils/path.ts'
+import { type PathSpec, FileType } from '../../../../types.ts'
+
 import { IOResult } from '../../../../io/types.ts'
-import { FileType } from '../../../../types.ts'
 import { isEexist, isErofs } from '../../../../utils/errors.ts'
-import { resolvePath } from '../../../../utils/path.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -14,7 +15,7 @@ import {
   NoWorkspaceError,
   NoWorkingDirectoryError,
 } from './errors.ts'
-import { ensureDir, readOptional, takeLock, under, writeFile } from './io.ts'
+import { ensureDir, readOptional, takeLock, writeFile } from './io.ts'
 import { validRefName } from './refs.ts'
 import type { Dispatch } from './types.ts'
 import { fatal, startPoint } from './util.ts'
@@ -22,19 +23,19 @@ import { fatal, startPoint } from './util.ts'
 /** Write a new git directory's skeleton, keeping what is there. */
 export async function layOut(
   dispatch: Dispatch,
-  gitdir: string,
+  gitdir: PathSpec,
   branch: string,
   config: string,
 ): Promise<void> {
   for (const directory of ['objects/info', 'objects/pack', 'refs/heads', 'refs/tags', 'info'])
-    await ensureDir(dispatch, under(gitdir, directory))
+    await ensureDir(dispatch, joinSpec(gitdir, directory))
   const files = {
     HEAD: `ref: refs/heads/${branch}\n`,
     config,
     description: "Unnamed repository; edit this file 'description' to name the repository.\n",
   }
   for (const [name, text] of Object.entries(files)) {
-    const path = under(gitdir, name)
+    const path = joinSpec(gitdir, name)
     if ((await readOptional(dispatch, path)) === null)
       await writeFile(dispatch, path, new TextEncoder().encode(text))
   }
@@ -44,12 +45,12 @@ export async function layOut(
  * The git directory an `init` line names: `--git-dir`, the directory itself
  * under `--bare`, and its `.git` otherwise.
  */
-function namedGitdir(fl: FlagView, texts: readonly string[]): string {
+function namedGitdir(fl: FlagView, texts: readonly string[]): PathSpec {
   const start = startPoint(fl)
-  const explicit = fl.asStr('git_dir')
-  if (explicit !== undefined) return resolvePath(explicit, start)
-  const target = resolvePath(texts[0] ?? '.', start)
-  return fl.asBool('bare') ? target : under(target, '.git')
+  const explicit = fl.asPath('git_dir')
+  if (explicit !== undefined) return explicit
+  const target = typedSpec(texts[0] ?? '.', start)
+  return fl.asBool('bare') ? target : joinSpec(target, '.git')
 }
 
 /**
@@ -78,10 +79,12 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     const here = await doors.statPath(start)
     if (here?.type !== FileType.DIRECTORY)
       throw new NoWorkingDirectoryError(
-        start,
+        start.rawPath,
         here === null ? 'No such file or directory' : 'Not a directory',
       )
-    const target = resolvePath(inv.texts[0] ?? '.', start)
+    const target = typedSpec(inv.texts[0] ?? '.', start)
+    if (target.walkError === 'ENOENT')
+      throw new CannotMkdirError(target.rawPath, 'No such file or directory')
     const bare = fl.asBool('bare')
     let gitdir = namedGitdir(fl, inv.texts)
     const branch = fl.asStr('initial_branch') ?? 'master'
@@ -91,7 +94,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     if (
       info !== null &&
       (info.type !== FileType.DIRECTORY ||
-        (await readOptional(dispatch, under(gitdir, 'HEAD'))) !== null)
+        (await readOptional(dispatch, joinSpec(gitdir, 'HEAD'))) !== null)
     ) {
       const location = await discover(
         dispatch,
@@ -99,14 +102,14 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
         (path) => mounts.rootOf(path),
         target,
         gitdir,
-        fl.asStr('work_tree') ?? null,
+        fl.asPath('work_tree') ?? null,
       )
       gitdir = location.commondir
     }
-    const existing = (await readOptional(dispatch, under(gitdir, 'HEAD'))) !== null
+    const existing = (await readOptional(dispatch, joinSpec(gitdir, 'HEAD'))) !== null
     const [typed] = inv.texts
     const made = typed !== undefined && (await doors.statPath(target)) === null
-    const settings = under(gitdir, 'config')
+    const settings = joinSpec(gitdir, 'config')
     try {
       await layOut(
         dispatch,
@@ -117,16 +120,16 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
       if (existing) await takeLock(dispatch, settings)
     } catch (err) {
       const path = (err as { virtualPath?: string }).virtualPath
-      const locked = path === `${settings}.lock`
-      if (locked && isEexist(err)) throw new ConfigLockError(settings, 'File exists')
+      const locked = path === `${settings.virtual}.lock`
+      if (locked && isEexist(err)) throw new ConfigLockError(settings.virtual, 'File exists')
       if (!isErofs(err)) throw err
       if (made) throw new CannotMkdirError(typed)
-      if (locked) throw new ConfigLockError(settings, 'Read-only file system')
-      throw new InitReadOnlyError(path ?? gitdir)
+      if (locked) throw new ConfigLockError(settings.virtual, 'Read-only file system')
+      throw new InitReadOnlyError(path ?? gitdir.virtual)
     }
     const text = existing
-      ? `Reinitialized existing Git repository in ${gitdir}/\n`
-      : `Initialized empty Git repository in ${gitdir}/\n`
+      ? `Reinitialized existing Git repository in ${gitdir.virtual}/\n`
+      : `Initialized empty Git repository in ${gitdir.virtual}/\n`
     const warning =
       existing && fl.asStr('initial_branch')
         ? `warning: re-init: ignored --initial-branch=${branch}\n`

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { respelled } from './key_prefix.ts'
+import { PathSpec } from '../types.ts'
 import { fnmatch } from './fnmatch.ts'
 import { rstripSlash, stripSlash } from './slash.ts'
 
@@ -282,4 +284,46 @@ export function gnuDirname(path: string): string {
   while (j > 0 && path[j - 1] === '/') j--
   if (j === 0) return '/'
   return path.slice(0, j)
+}
+
+// The PathSpec an operand names, its dotted spelling kept. A classified
+// operand already is one. A word a builtin resolves itself (a relative `ln`
+// name, a `[` operand) arrives as text, and resolving it with resolvePath
+// alone would simplify away the dots its walk has to prove. Mirrors
+// Python's typed_spec.
+export function typedSpec(word: string | PathSpec, cwd: string | PathSpec): PathSpec {
+  if (word instanceof PathSpec) return word
+  const base = cwd instanceof PathSpec ? (cwd.dotted ?? cwd.virtual) : cwd
+  const virtual = resolvePath(word, base)
+  return new PathSpec({
+    virtual,
+    directory: virtual.slice(0, virtual.lastIndexOf('/') + 1) || '/',
+    vfsPath: virtual.replace(/^\/+|\/+$/g, ''),
+    rawPath: word,
+    dotted:
+      cwd instanceof PathSpec && cwd.dotted !== null
+        ? dottedSpelling(word.startsWith('/') ? word : `${base}/${word}`)
+        : dottedSpelling(word, base),
+    walkError:
+      word === ''
+        ? 'ENOENT'
+        : cwd instanceof PathSpec && !word.startsWith('/')
+          ? cwd.walkError
+          : null,
+  })
+}
+
+/** Join virtual path components without discarding an unproven walk. */
+export function joinSpec(base: string | PathSpec, ...parts: string[]): PathSpec {
+  let word = ''
+  for (const part of parts) word = part.startsWith('/') ? part : word ? `${word}/${part}` : part
+  const scope = typedSpec(word || '.', base)
+  return respelled(scope, scope.dotted ?? scope.virtual)
+}
+
+/** The lexical parent of a virtual path, retaining its spelled ancestors. */
+export function parentSpec(path: string | PathSpec): PathSpec {
+  const scope = typedSpec(path, '/')
+  const spelled = (scope.dotted ?? scope.virtual).replace(/\/+$/g, '')
+  return typedSpec(spelled.slice(0, spelled.lastIndexOf('/')) || '/', '/')
 }

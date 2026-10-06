@@ -15,17 +15,14 @@
 from functools import partial
 
 from mirage.commands.builtin.generic.realpath import canonicalize
-from mirage.commands.builtin.utils.paths import (
-    dispatch_stat,
-    dot_refusal,
-    typed_spec,
-)
+from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.errors import fs_error_line, fs_strerror, walk_refusal
+from mirage.utils.path import typed_spec
 from mirage.workspace.executor.builtins.links.ln import operand_abs
 from mirage.workspace.executor.builtins.shared import (
     fail,

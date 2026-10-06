@@ -25,6 +25,7 @@ from mirage.core.hf_hub.cache import (
     snapshot_path,
 )
 from mirage.core.hf_hub.tree_entry import TreeEntry
+from mirage.utils.path import typed_spec
 
 
 def entry(path: str, oid: str = "oid1", lfs: str = "") -> TreeEntry:
@@ -68,12 +69,18 @@ def test_etag_prefers_the_lfs_sha():
 
 def test_layout_paths():
     folder = repo_folder_name("acme/w", "model")
-    assert blob_path("/c", folder, "e1") == "/c/models--acme--w/blobs/e1"
-    assert ref_path("/c", folder, "main") == "/c/models--acme--w/refs/main"
     assert (
-        snapshot_dir("/c", folder, "sha") == "/c/models--acme--w/snapshots/sha"
+        blob_path("/c", folder, "e1").virtual == "/c/models--acme--w/blobs/e1"
     )
-    assert snapshot_path("/c", folder, "sha", "sub/b.json") == (
+    assert (
+        ref_path("/c", folder, "main").virtual
+        == "/c/models--acme--w/refs/main"
+    )
+    assert (
+        snapshot_dir("/c", folder, "sha").virtual
+        == "/c/models--acme--w/snapshots/sha"
+    )
+    assert snapshot_path("/c", folder, "sha", "sub/b.json").virtual == (
         "/c/models--acme--w/snapshots/sha/sub/b.json"
     )
 
@@ -105,3 +112,10 @@ def test_cache_root_reports_that_nothing_named_one():
     inventing a path."""
     assert cache_root({}) is None
     assert cache_root(None) is None
+
+
+def test_cache_paths_keep_the_roots_directory_walk():
+    root = typed_spec("/hidden/../cache", "/")
+    blob = blob_path(root, "models--acme--w", "e1")
+    assert blob.virtual == "/cache/models--acme--w/blobs/e1"
+    assert blob.dotted == "/hidden/../cache/models--acme--w/blobs/e1"

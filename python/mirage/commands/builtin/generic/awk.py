@@ -12,7 +12,7 @@ from typing import Any
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.awk_types import USAGE, AwkFlags
-from mirage.commands.builtin.utils.paths import dispatch_stat, typed_spec
+from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.constants import ROOT_CWD
 from mirage.commands.errors import UsageError
@@ -44,6 +44,7 @@ from mirage.shell.bytes import (
 from mirage.shell.join import shell_join
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, WALK_ERRORS, eisdir, fs_strerror
+from mirage.utils.path import typed_spec
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
 

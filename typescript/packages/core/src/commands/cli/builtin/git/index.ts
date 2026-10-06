@@ -17,15 +17,13 @@ import { forEachRef } from './for_each_ref.ts'
 import { reflog } from './reflog.ts'
 import { fetch, fetchReadOnly } from './fetch.ts'
 import { clone, cloneReadOnly } from './clone.ts'
-import { Operand, Option } from '../../../spec/types.ts'
-import { CLISpec } from '../../types.ts'
-import { UsageStyle } from '../../../spec/types.ts'
+import { Operand, Option, UsageStyle } from '../../../spec/types.ts'
+import { CLISpec, type CLIInvocation } from '../../types.ts'
 import { add } from './add.ts'
 import { init } from './init.ts'
 import { fsck } from './fsck.ts'
 import { stashList, stashShow } from './stash.ts'
 import { nodeHelp, findNode } from '../../walk.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { branch, branchReadOnly } from './branch.ts'
@@ -37,9 +35,8 @@ import { mv } from './mv.ts'
 import { reset } from './reset.ts'
 import { restore } from './restore.ts'
 import { rm } from './rm.ts'
-import { revParse } from './inspect.ts'
+import { revParse, config, remote, revList, version, showRef } from './inspect.ts'
 import { shortlog } from './shortlog.ts'
-import { config, remote, revList, version, showRef } from './inspect.ts'
 import { symbolicRef, symbolicRefReadOnly } from './symbolic_ref.ts'
 import { indexLocked, verb } from './session.ts'
 import { show, diffTree } from './show.ts'
@@ -589,13 +586,13 @@ export const GIT = new CLISpec({
     DIRECTORY_OPTION,
     new Option({
       long: '--git-dir',
-      type: 'str',
+      type: 'path',
       env: 'GIT_DIR',
       description: 'Use the repository at <path>',
     }),
     new Option({
       long: '--work-tree',
-      type: 'str',
+      type: 'path',
       env: 'GIT_WORK_TREE',
       description: 'Use <path> as the working tree',
     }),

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -20,7 +21,8 @@ import { GitError } from './errors.ts'
 import { resolveCommit } from './revparse.ts'
 import { opened } from './session.ts'
 import { checkOperands, fatal, maybeBool } from './util.ts'
-import { readOptional, under, writeFile } from './io.ts'
+import { readOptional, writeFile } from './io.ts'
+import { joinSpec } from '../../../../utils/path.ts'
 import { HEAD } from './constants.ts'
 import { isBare } from './discover.ts'
 import { configValues } from './fs.ts'
@@ -71,11 +73,11 @@ export function entry(
  */
 export async function append(
   dispatch: Dispatch,
-  gitdir: string,
+  gitdir: PathSpec,
   path: string,
   line: Uint8Array,
 ): Promise<void> {
-  const target = under(gitdir, path)
+  const target = joinSpec(gitdir, path)
   const existing = (await readOptional(dispatch, target)) ?? new Uint8Array(0)
   const merged = new Uint8Array(existing.length + line.length)
   merged.set(existing)
@@ -100,7 +102,7 @@ export async function logged(
   dispatch: Dispatch,
   location: RepoLocation,
   name: string,
-  log: string,
+  log: PathSpec,
 ): Promise<boolean> {
   if ((await readOptional(dispatch, log)) !== null) return true
   const value = (await configValues(dispatch, location, 'core.logAllRefUpdates')).at(-1)
@@ -130,8 +132,8 @@ export async function logged(
  */
 export async function record(
   dispatch: Dispatch,
-  gitdir: string,
-  commondir: string,
+  gitdir: PathSpec,
+  commondir: PathSpec,
   ref: string | null,
   before: string | null,
   after: string,
@@ -151,7 +153,7 @@ async function logOf(
   ref: string,
 ): Promise<Uint8Array | null> {
   const root = ref === HEAD ? location.gitdir : location.commondir
-  return readOptional(dispatch, `${root}/${LOGS_DIR}/${ref}`)
+  return readOptional(dispatch, joinSpec(root, LOGS_DIR, ref))
 }
 
 /**

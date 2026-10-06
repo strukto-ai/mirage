@@ -14,11 +14,7 @@
 
 from functools import partial
 
-from mirage.commands.builtin.utils.paths import (
-    dispatch_stat,
-    dot_refusal,
-    typed_spec,
-)
+from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.io.types import materialize
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, ExitSignal
@@ -30,6 +26,7 @@ from mirage.utils.path import (
     dotted_spelling,
     resolve_path,
     resolve_symlinks,
+    typed_spec,
 )
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY,

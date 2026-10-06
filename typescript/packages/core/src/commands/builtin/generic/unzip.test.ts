@@ -41,7 +41,12 @@ it('a refused probe still reports the entry and goes on', async () => {
   const result = await unzipGeneric(
     [PathSpec.fromStrPath('/a.zip')],
     [],
-    { flags: { d: '/out', q: true }, stdin: null, filetypeFns: null, cwd: '/' },
+    {
+      flags: { d: PathSpec.fromStrPath('/out'), q: true },
+      stdin: null,
+      filetypeFns: null,
+      cwd: '/',
+    },
     read,
     (path, bytes) => {
       written.set(path.virtual, bytes)
