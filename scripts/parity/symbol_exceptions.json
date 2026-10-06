@@ -294,8 +294,7 @@
   "server/routers/documents": {
    "python_only": {
     "document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "get_document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "put_document": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
+    "_register": "FastAPI routes are added per document on the module router; Fastify registers the same GET and PUT routes in registerDocumentsRoutes. Cross-host document and session behavior is covered by integ/access."
    },
    "typescript_only": {
     "DocumentParams": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",

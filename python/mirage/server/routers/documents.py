@@ -72,30 +72,38 @@ async def document(
     return Response(content, media_type="text/markdown")
 
 
-@router.get("/{workspace_id}/{kind}-md")
-@router.get("/{workspace_id}/sessions/{session_id}/{kind}-md")
-async def get_document(
-    workspace_id: str,
-    kind: Literal["vfs", "skill"],
-    request: Request,
-    session_id: str | None = None,
-    profile: str | None = None,
-) -> Response:
-    return await document(
-        request, workspace_id, kind, None, session_id, profile
-    )
+def _register(kind: Literal["vfs", "skill"]) -> None:
+    """Add one document's GET and PUT routes, workspace and session.
+
+    Args:
+        kind (Literal["vfs", "skill"]): the document the routes serve.
+    """
+
+    async def get(
+        workspace_id: str,
+        request: Request,
+        session_id: str | None = None,
+        profile: str | None = None,
+    ) -> Response:
+        return await document(
+            request, workspace_id, kind, None, session_id, profile
+        )
+
+    async def put(
+        workspace_id: str,
+        body: DocumentPath,
+        request: Request,
+        session_id: str | None = None,
+        profile: str | None = None,
+    ) -> Response:
+        return await document(
+            request, workspace_id, kind, body.path, session_id, profile
+        )
+
+    for base in ("/{workspace_id}", "/{workspace_id}/sessions/{session_id}"):
+        router.add_api_route(f"{base}/{kind}-md", get, methods=["GET"])
+        router.add_api_route(f"{base}/{kind}-md", put, methods=["PUT"])
 
 
-@router.put("/{workspace_id}/{kind}-md")
-@router.put("/{workspace_id}/sessions/{session_id}/{kind}-md")
-async def put_document(
-    workspace_id: str,
-    kind: Literal["vfs", "skill"],
-    body: DocumentPath,
-    request: Request,
-    session_id: str | None = None,
-    profile: str | None = None,
-) -> Response:
-    return await document(
-        request, workspace_id, kind, body.path, session_id, profile
-    )
+_register("vfs")
+_register("skill")
