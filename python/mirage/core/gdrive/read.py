@@ -31,7 +31,7 @@ from mirage.core.google.client import TokenManager
 from mirage.core.google.drive import download_file
 from mirage.core.gsheets.read import read_spreadsheet
 from mirage.core.gslides.read import read_presentation
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import (
     active_recorder,
     record,
@@ -169,7 +169,7 @@ async def read(
     if entry is None:
         raise enoent(virtual)
     if entry.resource_type in DIRECTORY_RESOURCE_TYPES:
-        raise IsADirectoryError(virtual)
+        raise eisdir(virtual)
     if entry.resource_type not in NATIVE_RESOURCE_TYPES:
         return await read_file_versioned(
             accessor.token_manager, entry.id, virtual, entry, offset, size

@@ -22,7 +22,7 @@ from mirage.core.gdrive.resolve import (
     resolve_parent,
 )
 from mirage.core.google.drive import update_file_content, upload_file
-from mirage.errors.fs import eisdir
+from mirage.errors.fs import eacces, eisdir
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -41,7 +41,7 @@ async def write(accessor: GDriveAccessor, path: PathSpec, data: bytes) -> None:
     # Google-native files are written through the gws commands, not raw
     # bytes; the command chokepoint renders this as "Permission denied".
     if node is not None and node.is_native:
-        raise PermissionError(virtual)
+        raise eacces(virtual)
     if node is not None:
         await update_file_content(token_manager, node.id, data)
     else:

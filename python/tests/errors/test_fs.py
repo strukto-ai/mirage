@@ -19,13 +19,19 @@ import pytest
 from mirage.errors import FsCondition, classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import (
+    dot_walk_error,
     eacces,
+    ebadf,
+    ebusy,
+    eexist,
     efbig,
+    eisdir,
     eloop,
     enoent,
     enotdir,
     enotempty,
     enotsup,
+    erofs,
     error_path,
     exdev,
     fs_error,
@@ -35,6 +41,7 @@ from mirage.errors.fs import (
     readdir_error,
     walk_refusal,
 )
+from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.render import (
     format_fs_error,
     fs_error_line,
@@ -44,6 +51,7 @@ from mirage.errors.types import (
     DotWalkError,
     DotWalkLoop,
     DotWalkMissing,
+    DotWalkNotDir,
     FileTooLargeError,
     NoMountError,
     OperationNotSupportedError,
@@ -71,13 +79,14 @@ def test_enoent_uses_virtual_path():
     spec = PathSpec.from_str_path("/a/missing.txt")
     exc = enoent(spec)
     assert isinstance(exc, FileNotFoundError)
-    assert str(exc) == "/a/missing.txt"
+    assert exc.errno == errno.ENOENT
+    assert exc.filename == "/a/missing.txt"
 
 
 def test_enotdir_accepts_plain_string():
     exc = enotdir("/a/file.txt/x")
     assert isinstance(exc, NotADirectoryError)
-    assert str(exc) == "/a/file.txt/x"
+    assert exc.filename == "/a/file.txt/x"
 
 
 def test_enotsup_carries_op_and_operand():
@@ -378,3 +387,45 @@ def test_fs_error_raises_each_condition_as_its_class(condition, kind):
     assert type(exc) is kind
     assert classify(exc) is condition
     assert error_path(exc) == "/data/x"
+
+
+@pytest.mark.parametrize(
+    ("make", "condition"),
+    [
+        (enoent, FsCondition.ENOENT),
+        (enotdir, FsCondition.ENOTDIR),
+        (eisdir, FsCondition.EISDIR),
+        (eexist, FsCondition.EEXIST),
+        (eacces, FsCondition.EACCES),
+        (erofs, FsCondition.EROFS),
+        (ebadf, FsCondition.EBADF),
+        (efbig, FsCondition.EFBIG),
+        (enotempty, FsCondition.ENOTEMPTY),
+        (exdev, FsCondition.EXDEV),
+        (ebusy, FsCondition.EBUSY),
+        (eloop, FsCondition.ELOOP),
+    ],
+)
+def test_every_constructor_stamps_the_kernel_shape(make, condition):
+    # errno, phrase and the operand as filename, the way the kernel and
+    # the disk backend raise it, so no reader has to guess the shape.
+    exc = make(PathSpec.from_str_path("/data/x"))
+    assert exc.errno == posix_errno(condition)
+    assert exc.strerror == posix_phrase(condition)
+    assert exc.filename == "/data/x"
+    assert classify(exc) is condition
+
+
+@pytest.mark.parametrize(
+    ("condition", "kind"),
+    [
+        (FsCondition.ENOENT, DotWalkMissing),
+        (FsCondition.ENOTDIR, DotWalkNotDir),
+        (FsCondition.ELOOP, DotWalkLoop),
+    ],
+)
+def test_dot_walk_error_raises_the_walk_refusal(condition, kind):
+    exc = dot_walk_error("a/..", condition)
+    assert type(exc) is kind
+    assert classify(exc) is condition
+    assert error_path(exc) == "a/.."

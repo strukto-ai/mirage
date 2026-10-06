@@ -17,7 +17,7 @@ import { SharedInput } from '../io/async_line_iterator.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import { type Channel, JobConsole, type OwnedStream, Terminal } from './console/index.ts'
 import type { PathSpec } from '../types.ts'
-import { ebadfStdin } from '../errors/fs.ts'
+import { ebadf } from '../errors/fs.ts'
 import { RedirectKind, type Redirect } from './types.ts'
 import { encodeText } from './bytes.ts'
 
@@ -60,7 +60,7 @@ export function badDescriptorLine(fd: number): Uint8Array {
  */
 export function unreadableStdin(): AsyncIterable<Uint8Array> {
   return {
-    [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(ebadfStdin()) }),
+    [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(ebadf('-')) }),
   }
 }
 

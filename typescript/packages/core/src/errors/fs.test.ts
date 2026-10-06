@@ -13,12 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { classify } from './classify.ts'
 import {
   eacces,
-  eaccesRefused,
+  ebadf,
   efbig,
+  eisdir,
   eloop,
-  erofsReadOnly,
+  erofs,
   enoent,
   enotsup,
   enotdir,
@@ -72,7 +74,7 @@ describe('efbig', () => {
 
 describe('erofsReadOnly', () => {
   it('keeps the read-only message while stamping EROFS and the operand', () => {
-    const err = erofsReadOnly("mount '/mail/' is read-only", '/mail/a.txt')
+    const err = erofs('/mail/a.txt', "mount '/mail/' is read-only")
     expect(err.code).toBe('EROFS')
     expect(err.virtualPath).toBe('/mail/a.txt')
     expect(err.message).toContain('read-only')
@@ -82,7 +84,7 @@ describe('erofsReadOnly', () => {
 
 describe('eaccesRefused', () => {
   it('carries a caller message while stamping EACCES and the operand', () => {
-    const err = eaccesRefused('S3 refused to delete 2 source object(s)', '/mail/a.txt')
+    const err = eacces('/mail/a.txt', 'S3 refused to delete 2 source object(s)')
     expect(err.code).toBe('EACCES')
     expect(err.virtualPath).toBe('/mail/a.txt')
     expect(fsStrerror(err)).toBe('Permission denied')
@@ -317,5 +319,31 @@ describe('walkRefusal', () => {
     expect(fsErrorLine('tail', '', enoent(''))).toBe(
       "tail: cannot open '' for reading: No such file or directory\n",
     )
+  })
+})
+
+describe('the constructors', () => {
+  it.each([
+    [enoent, 'ENOENT'],
+    [enotdir, 'ENOTDIR'],
+    [eisdir, 'EISDIR'],
+    [eacces, 'EACCES'],
+    [erofs, 'EROFS'],
+    [ebadf, 'EBADF'],
+    [efbig, 'EFBIG'],
+    [enotempty, 'ENOTEMPTY'],
+    [exdev, 'EXDEV'],
+    [eloop, 'ELOOP'],
+  ] as const)('stamps the code and the operand (%#)', (make, code) => {
+    const err = make('/data/x')
+    expect(err.code).toBe(code)
+    expect(err.virtualPath).toBe('/data/x')
+    expect(classify(err)).toBe(code)
+  })
+
+  it('keeps a message that names what was refused', () => {
+    const err = eacces('/data/x', 'S3 refused to delete 2 source object(s)')
+    expect(err.message).toBe('S3 refused to delete 2 source object(s)')
+    expect(fsStrerror(err)).toBe('Permission denied')
   })
 })

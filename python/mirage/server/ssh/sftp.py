@@ -37,6 +37,7 @@ from asyncssh.constants import (
     FXF_TRUNC,
 )
 
+from mirage.errors.fs import eexist, eisdir, enoent
 from mirage.errors.types import NoMountError
 from mirage.fuse.core import MountCore
 from mirage.fuse.errors import classify_error
@@ -212,18 +213,14 @@ def open_file(core: MountCore, path: str, pflags: int) -> OpenFile:
     """
     found = exists(core, path)
     if found and pflags & FXF_CREAT and pflags & FXF_EXCL:
-        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), path)
+        raise eexist(path)
     if not found:
         if not pflags & FXF_CREAT:
-            raise FileNotFoundError(
-                errno.ENOENT, os.strerror(errno.ENOENT), path
-            )
+            raise enoent(path)
         fh = core.create(path)
     else:
         if stat.S_ISDIR(core.getattr(path)["st_mode"]):
-            raise IsADirectoryError(
-                errno.EISDIR, os.strerror(errno.EISDIR), path
-            )
+            raise eisdir(path)
         fh = core.open(path, os.O_TRUNC if pflags & FXF_TRUNC else 0)
     append_at = None
     if pflags & FXF_APPEND:
@@ -256,7 +253,7 @@ def rename_new(core: MountCore, old: str, new: str) -> None:
         new (str): the new path.
     """
     if exists(core, new):
-        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), new)
+        raise eexist(new)
     core.rename(old, new)
 
 

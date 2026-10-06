@@ -13,25 +13,44 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 from mirage.errors.classify import classify
 from mirage.errors.constants import CONDITION_CLASS, OPERAND_CONDITIONS
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import (
+    BadDescriptorError,
     DotWalkError,
     DotWalkLoop,
     DotWalkMissing,
+    DotWalkNotDir,
     FileTooLargeError,
     FsCondition,
     NoMountError,
     OperationNotSupportedError,
+    ReadOnlyError,
 )
 from mirage.types import PathSpec
+
+E = TypeVar("E", bound=OSError)
 
 
 def virtual_of(path: str | PathSpec) -> str:
     original = getattr(path, "virtual", None)
     return original if original is not None else str(path)
+
+
+def _stamped(
+    kind: type[E],
+    condition: FsCondition,
+    path: str | PathSpec,
+    message: str | None = None,
+) -> E:
+    return kind(
+        posix_errno(condition),
+        posix_phrase(condition) if message is None else message,
+        virtual_of(path),
+    )
 
 
 def fs_error(path: str | PathSpec, condition: FsCondition) -> OSError:
@@ -40,21 +59,45 @@ def fs_error(path: str | PathSpec, condition: FsCondition) -> OSError:
     Stamped the way the kernel stamps it: the host errno, the condition's
     phrase, and the operand as ``filename``. Raised as mirage's own class
     for a condition that has one (``ReadOnlyError`` for EROFS), else as the
-    builtin CPython picks for the errno. Mirrors TS ``fsError``.
+    builtin CPython picks for the errno. Every constructor below is this
+    one with its class spelled out. Mirrors TS ``fsError``.
 
     Args:
         path (str | PathSpec): the operand; ``virtual`` is the reported
             spelling.
         condition (FsCondition): the condition to raise.
     """
-    kind = CONDITION_CLASS.get(condition, OSError)
-    return kind(
-        posix_errno(condition), posix_phrase(condition), virtual_of(path)
-    )
+    return _stamped(CONDITION_CLASS.get(condition, OSError), condition, path)
 
 
 def enoent(path: str | PathSpec) -> FileNotFoundError:
-    return FileNotFoundError(virtual_of(path))
+    return _stamped(FileNotFoundError, FsCondition.ENOENT, path)
+
+
+def ebadf(path: str | PathSpec) -> BadDescriptorError:
+    """EBADF: a read from a descriptor that is closed or write-only.
+
+    Args:
+        path (str | PathSpec): the operand the reader names, ``-`` for
+            standard input.
+    """
+    return _stamped(BadDescriptorError, FsCondition.EBADF, path)
+
+
+def dot_walk_error(
+    path: str | PathSpec, condition: FsCondition
+) -> DotWalkError:
+    """A walk refusal: ENOENT, ENOTDIR or ELOOP at a name the walk met.
+
+    Args:
+        path (str | PathSpec): the operand as the command reports it.
+        condition (FsCondition): ENOENT, ENOTDIR or ELOOP.
+    """
+    if condition is FsCondition.ENOTDIR:
+        return _stamped(DotWalkNotDir, condition, path)
+    if condition is FsCondition.ELOOP:
+        return _stamped(DotWalkLoop, condition, path)
+    return _stamped(DotWalkMissing, FsCondition.ENOENT, path)
 
 
 def walk_refusal(path: PathSpec) -> DotWalkError:
@@ -67,20 +110,12 @@ def walk_refusal(path: PathSpec) -> DotWalkError:
         path (PathSpec): an operand whose ``walk_error`` is set.
     """
     if path.walk_error == "ELOOP":
-        return eloop(path.raw_path)
-    return DotWalkMissing(
-        posix_errno(FsCondition.ENOENT),
-        posix_phrase(FsCondition.ENOENT),
-        path.raw_path,
-    )
+        return dot_walk_error(path.raw_path, FsCondition.ELOOP)
+    return dot_walk_error(path.raw_path, FsCondition.ENOENT)
 
 
 def efbig(path: str | PathSpec) -> FileTooLargeError:
-    return FileTooLargeError(
-        posix_errno(FsCondition.EFBIG),
-        posix_phrase(FsCondition.EFBIG),
-        virtual_of(path),
-    )
+    return _stamped(FileTooLargeError, FsCondition.EFBIG, path)
 
 
 def ebusy(path: str | PathSpec) -> OSError:
@@ -103,28 +138,35 @@ def enotdir(path: str | PathSpec) -> NotADirectoryError:
         path (str | PathSpec): the operand; ``virtual`` is the reported
             spelling.
     """
-    return NotADirectoryError(virtual_of(path))
+    return _stamped(NotADirectoryError, FsCondition.ENOTDIR, path)
 
 
 def eexist(path: str | PathSpec) -> FileExistsError:
-    return FileExistsError(virtual_of(path))
+    return _stamped(FileExistsError, FsCondition.EEXIST, path)
 
 
 def eisdir(path: str | PathSpec) -> IsADirectoryError:
-    return IsADirectoryError(virtual_of(path))
+    return _stamped(IsADirectoryError, FsCondition.EISDIR, path)
 
 
 def eacces(path: str | PathSpec) -> PermissionError:
-    return PermissionError(virtual_of(path))
+    return _stamped(PermissionError, FsCondition.EACCES, path)
+
+
+def erofs(path: str | PathSpec) -> ReadOnlyError:
+    """EROFS: a write into a region whose mode stops below ``w``.
+
+    The mode voice, distinct from the hide voice (ENOENT) and the policy
+    voice (EACCES). Mirrors TS ``erofs``.
+
+    Args:
+        path (str | PathSpec): the operand the write named.
+    """
+    return _stamped(ReadOnlyError, FsCondition.EROFS, path)
 
 
 def no_mount(path: str | PathSpec) -> NoMountError:
     return NoMountError(f"no mount matches path: {str(path)!r}")
-
-
-# The three conditions below have no typed builtin, so their errno is
-# the stamp (mirage.errors.classify reads it); the strerror rides along
-# for raw tracebacks and `filename` carries the operand, like enotsup.
 
 
 def enotempty(path: str | PathSpec) -> OSError:
@@ -140,27 +182,21 @@ def exdev(path: str | PathSpec) -> OSError:
 
 
 def einval(path: str | PathSpec, message: str | None = None) -> OSError:
-    if message is None:
-        return fs_error(path, FsCondition.EINVAL)
-    return OSError(posix_errno(FsCondition.EINVAL), message, virtual_of(path))
+    return _stamped(OSError, FsCondition.EINVAL, path, message)
 
 
 def eloop(path: str | PathSpec) -> DotWalkLoop:
     """ELOOP: a link loop stands in the path's walk.
 
-    Typed, unlike the three above, because it is a walk refusal: final
-    for every layer that re-reads a miss, and an OSError, so a per-operand
-    catch words it where the namespace's own ``CycleError`` escaped every
-    one. The door raises it for a loop above any name it is handed.
+    A walk refusal: final for every layer that re-reads a miss, and an
+    OSError, so a per-operand catch words it where the namespace's own
+    ``CycleError`` escaped every one. The door raises it for a loop above
+    any name it is handed.
 
     Args:
         path (str | PathSpec): the path whose walk looped.
     """
-    return DotWalkLoop(
-        posix_errno(FsCondition.ELOOP),
-        posix_phrase(FsCondition.ELOOP),
-        virtual_of(path),
-    )
+    return _stamped(DotWalkLoop, FsCondition.ELOOP, path)
 
 
 async def readdir_error(
@@ -274,10 +310,11 @@ def enotsup(
         op_name (str): The unresolvable op (e.g. ``unlink``).
         path (object): The operand; ``virtual`` is the reported spelling.
     """
-    return OperationNotSupportedError(
-        posix_errno(FsCondition.ENOTSUP),
+    return _stamped(
+        OperationNotSupportedError,
+        FsCondition.ENOTSUP,
+        path,
         f"{vfs}: no op {op_name!r}",
-        virtual_of(path),
     )
 
 
@@ -302,10 +339,10 @@ def fs_strerror(exc: BaseException) -> str | None:
 def error_path(exc: BaseException) -> str:
     """The path an fs error is about.
 
-    Two conventions meet here and both mean the same thing. The store
-    backends raise with the bare operand as the message
-    (``enoent(spec)``), while the real-filesystem backends stamp
-    ``filename`` (``disk_errors``, and the kernel before it). An error may
+    The stamped ``filename``, which every constructor here sets and the
+    kernel sets for the disk backend. An error raised bare, with the
+    operand as its only argument (``FileNotFoundError(path)`` from a
+    third-party mount), names it in the message instead. An error may
     also name something other than the operand it was raised for:
     ``mkdir -p`` reports the component of the chain it tripped on, so the
     stamped path wins over what the caller was holding.

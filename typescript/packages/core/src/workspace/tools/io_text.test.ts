@@ -184,7 +184,7 @@ describe('errorText', () => {
       askId: null,
     }
     expect(errorText(new PolicyDenied('Permission denied', '/data/x', refusal))).toBe(
-      'Error: Permission denied\npolicy denied: sealed\n',
+      'Error: /data/x: Permission denied\npolicy denied: sealed\n',
     )
     expect(errorText(new Error('No such file or directory'))).toBe(
       'Error: No such file or directory',

@@ -15,7 +15,6 @@
 import errno
 import functools
 import logging
-import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -39,14 +38,16 @@ from mirage.context import (
 from mirage.context.session_context import require_paths_writable
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
+    eacces,
     eexist,
     eisdir,
     enoent,
     enotdir,
     enotsup,
+    erofs,
     walk_refusal,
 )
-from mirage.errors.types import DotWalkError, ReadOnlyError
+from mirage.errors.types import DotWalkError
 from mirage.io import IOResult
 from mirage.ops.generic.factory import refuse_taken
 from mirage.ops.namespace_view import paths_scoped
@@ -683,9 +684,7 @@ def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
         dst (PathSpec): where it would land.
     """
     if _move_would_reveal(src, dst):
-        raise PermissionError(
-            errno.EACCES, os.strerror(errno.EACCES), src.virtual
-        )
+        raise eacces(src.virtual)
 
 
 async def _pair_src_is_dir(stat: StatOp, accessor: Any, src: PathSpec) -> bool:
@@ -734,9 +733,7 @@ async def _guarded_pair(
     if reveal and (
         assume_dir or await _pair_src_is_dir(stat, args[0], specs[0])
     ):
-        raise PermissionError(
-            errno.EACCES, os.strerror(errno.EACCES), specs[0].virtual
-        )
+        raise eacces(specs[0].virtual)
     return await fn(*args, **kwargs)
 
 
@@ -1131,7 +1128,7 @@ async def _mkdir_on_read_only(
     base = prefix.rstrip("/")
     leaf = path.virtual.rstrip("/") or "/"
     if leaf != base and not leaf.startswith(base + "/"):
-        raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)
+        raise erofs(path.virtual)
     # Each component's backend key keeps the leaf's own key prefix,
     # recovered from its (virtual, vfs_path) pair as PathSpec.dir does.
     cut = len(leaf) - len(path.vfs_path.strip("/"))
@@ -1155,9 +1152,7 @@ async def _mkdir_on_read_only(
                 ),
                 path,
             )
-            raise ReadOnlyError(
-                errno.EROFS, "Read-only file system", blame.virtual
-            ) from exc
+            raise erofs(blame.virtual) from exc
         if row.type is not FileType.DIRECTORY:
             if index == len(chain) - 1:
                 raise eexist(path)

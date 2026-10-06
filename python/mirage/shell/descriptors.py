@@ -13,12 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import errno
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
-from mirage.errors.types import BadDescriptorError
+from mirage.errors.fs import ebadf
 from mirage.io.async_line_iterator import SharedInput
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole, OwnedStream, Terminal
@@ -75,7 +74,7 @@ async def unreadable_stdin() -> AsyncIterator[bytes]:
     ``<cmd>: -: Bad file descriptor`` and exits 1, which is what the
     chokepoint renders from the error this raises.
     """
-    raise BadDescriptorError(errno.EBADF, "Bad file descriptor", "-")
+    raise ebadf("-")
     yield b""  # pragma: no cover - makes this an async generator
 
 

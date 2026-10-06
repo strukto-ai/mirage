@@ -1,5 +1,3 @@
-import errno
-import os
 from dataclasses import dataclass, field
 from functools import partial
 
@@ -7,6 +5,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.errors.fs import eisdir
 from mirage.types import FileType, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.types import (
@@ -125,9 +124,7 @@ def append_from_read(
                 await write(accessor, path, data)
                 return
             if found.type == FileType.DIRECTORY:
-                raise IsADirectoryError(
-                    errno.EISDIR, os.strerror(errno.EISDIR), path.virtual
-                )
+                raise eisdir(path.virtual)
             return
         try:
             previous = await read(accessor, path)

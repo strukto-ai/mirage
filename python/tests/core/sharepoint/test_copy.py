@@ -198,4 +198,4 @@ async def test_copy_names_the_side_that_does_not_resolve(src, dst, named):
                     vfs_path=mount_key(dst, "/sp"), virtual=dst, directory=dst
                 ),
             )
-    assert str(exc.value) == named
+    assert exc.value.filename == named

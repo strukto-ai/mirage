@@ -210,8 +210,7 @@ def test_error_text_adds_the_policy_line_to_a_plain_eacces():
         refusal=Refusal(kind="deny", reason="sealed"),
     )
     assert error_text(refused) == (
-        "Error: [Errno 13] Permission denied: '/data/x'\n"
-        "policy denied: sealed\n"
+        "Error: /data/x: Permission denied\npolicy denied: sealed\n"
     )
     missing = FileNotFoundError(errno.ENOENT, "No such file or directory")
-    assert error_text(missing) == "Error: [Errno 2] No such file or directory"
+    assert error_text(missing) == "Error: No such file or directory"

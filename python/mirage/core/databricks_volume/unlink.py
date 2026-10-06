@@ -20,7 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import FileType, PathSpec
 
@@ -39,7 +39,7 @@ async def unlink(
 ) -> None:
     file_stat = await stat(accessor, path, index)
     if file_stat.type == FileType.DIRECTORY:
-        raise IsADirectoryError(path.virtual)
+        raise eisdir(path.virtual)
     remote_path = backend_path(accessor.config, path)
     timer = start_op()
     try:

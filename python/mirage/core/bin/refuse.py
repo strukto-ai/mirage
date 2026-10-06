@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
 from typing import Any
 
 from mirage.accessor.bin import BinAccessor
-from mirage.errors.types import ReadOnlyError
+from mirage.errors.fs import erofs
 from mirage.types import PathSpec
 
 
@@ -32,4 +31,4 @@ async def refuse(
         accessor (BinAccessor): Accessor holding the lookup.
         path (PathSpec): The path the op writes; a rename's source.
     """
-    raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)
+    raise erofs(path.virtual)

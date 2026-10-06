@@ -37,7 +37,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import eisdir, fs_strerror
+from mirage.errors.fs import eacces, eisdir, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
@@ -105,7 +105,7 @@ class _Doors:
             await self.dispatch("write", path, data=data)
             return
         if self.write_bytes is None:
-            raise PermissionError(13, "Permission denied", name)
+            raise eacces(name)
         await self.write_bytes(path, data)
 
 

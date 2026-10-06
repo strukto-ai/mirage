@@ -16,7 +16,7 @@ from mirage.commands.builtin.utils.links import LinkDoor
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import eloop
+from mirage.errors.fs import eloop, enoent
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkMissing
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -211,7 +211,7 @@ async def open_gzip_input(
             return None
         try:
             if door is not None and name is path and door.vanished(name):
-                raise FileNotFoundError(name.raw_path)
+                raise enoent(name.raw_path)
             # The router followed the operand itself; a retried name it
             # never saw is followed through the door.
             reads = (

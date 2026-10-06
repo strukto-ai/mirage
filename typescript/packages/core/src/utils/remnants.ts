@@ -29,11 +29,13 @@ export type Allowed = (virtual: string) => boolean
 export class VisibleRemnant extends Error {
   readonly code = 'ENOTEMPTY'
   readonly virtual: string
+  readonly virtualPath: string
 
   constructor(virtual: string) {
     super(`ENOTEMPTY: directory not empty, '${virtual}'`)
     this.name = 'VisibleRemnant'
     this.virtual = virtual
+    this.virtualPath = virtual
   }
 }
 

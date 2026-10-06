@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ebadfStdin, eisdir, enoent, enotdir, enotempty, exdev } from './fs.ts'
+import { ebadf, eisdir, enoent, enotdir, enotempty, exdev } from './fs.ts'
 import { formatFsError, fsErrorLine, revoiceFsErrorLine } from './render.ts'
+import { CycleError } from '../utils/path.ts'
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
@@ -116,7 +117,7 @@ describe('fsErrorLine — commands that name the failed open', () => {
   })
 
   it('leaves standard input bare', () => {
-    expect(fsErrorLine('tail', '-', ebadfStdin())).toBe('tail: -: Bad file descriptor\n')
+    expect(fsErrorLine('tail', '-', ebadf('-'))).toBe('tail: -: Bad file descriptor\n')
   })
 
   it('words a head open failure at the chokepoint', () => {
@@ -170,7 +171,7 @@ describe('fsErrorLine — commands that name the failed open', () => {
   })
 
   it('leaves tac standard input bare', () => {
-    expect(fsErrorLine('tac', '-', ebadfStdin())).toBe('tac: -: Bad file descriptor\n')
+    expect(fsErrorLine('tac', '-', ebadf('-'))).toBe('tac: -: Bad file descriptor\n')
   })
 
   it('names an empty operand as typed', () => {
@@ -193,6 +194,14 @@ describe('fsErrorLine — commands that name the failed open', () => {
   it('words a stat failure at the chokepoint', () => {
     expect(decode(formatFsError('stat', enoent('/a/gone.txt')))).toBe(
       "stat: cannot statx '/a/gone.txt': No such file or directory\n",
+    )
+  })
+})
+
+describe('a link loop', () => {
+  it('is named by its path at the chokepoint', () => {
+    expect(decode(formatFsError('cat', new CycleError('/data/l1')))).toBe(
+      'cat: /data/l1: Too many levels of symbolic links\n',
     )
   })
 })

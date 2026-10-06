@@ -109,7 +109,7 @@ async def test_mkdir_parents_names_the_file_it_stops_at(rel, error, named):
             payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
         )
         m.get(_DRIVE + "/root:/f", payload={"id": "1", "file": {}})
-        with pytest.raises(error, match=f"^{named}$"):
+        with pytest.raises(error, match=f"'{named}'$"):
             await mkdir(_accessor(), _spec(rel), parents=True)
 
 
@@ -233,7 +233,7 @@ async def test_mkdir_names_a_file_in_the_hidden_prefix_as_the_root(
             payload={"error": {"code": "nameAlreadyExists", "message": "x"}},
         )
         m.get(_DRIVE + "/root:/team", payload={"id": "1", "file": {}})
-        with pytest.raises(NotADirectoryError, match=f"^{named}$"):
+        with pytest.raises(NotADirectoryError, match=f"'{named}'$"):
             await mkdir(
                 _scoped_accessor(), _scoped_spec("lt"), parents=parents
             )

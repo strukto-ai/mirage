@@ -24,6 +24,7 @@ from mirage.core.gdrive.resolve import (
     root_context,
 )
 from mirage.core.google.drive import create_folder
+from mirage.errors.fs import eexist, enotdir
 from mirage.types import PathSpec
 
 
@@ -37,7 +38,7 @@ async def mkdir(
     if not key:
         if parents:
             return
-        raise FileExistsError(virtual)
+        raise eexist(virtual)
     if not parents:
         parent_id, _ = await resolve_parent(accessor, path)
         await create_folder(token_manager, posixpath.basename(key), parent_id)
@@ -68,8 +69,8 @@ async def mkdir(
             # -p only silences EEXIST for directories: a file at the leaf is
             # File exists, a file in the middle is Not a directory.
             if i == len(segments) - 1:
-                raise FileExistsError(virtual)
-            raise NotADirectoryError(virtual)
+                raise eexist(virtual)
+            raise enotdir(virtual)
         parent_id = node.id
         drive_id = node.drive_id
     await invalidate_after_write(path)

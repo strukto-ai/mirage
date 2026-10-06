@@ -23,7 +23,7 @@ import { getExtension } from '../../commands/resolve.ts'
 import { IOResult, type OpReport } from '../../io/types.ts'
 import {
   eacces,
-  erofsReadOnly,
+  erofs,
   eexist,
   einval,
   enoent,
@@ -603,12 +603,12 @@ export class Dispatcher {
         : null
     if (this.opsRegistry.find(opName, vfs)?.write === true) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofsReadOnly(`mount at '${p.virtual}' is read-only`, p)
+        throw erofs(p, `mount at '${p.virtual}' is read-only`)
       }
       // A rename mutates its destination too, so both endpoints answer.
       const wDst = opName === 'rename' && args?.[0] instanceof PathSpec ? args[0] : null
       if (wDst !== null && effectivePathMode(wDst.virtual, mountPrefix, mode) === MountMode.READ) {
-        throw erofsReadOnly(`mount at '${wDst.virtual}' is read-only`, wDst)
+        throw erofs(wDst, `mount at '${wDst.virtual}' is read-only`)
       }
     }
     // Ops registered under a rendered filetype (gdocs/gsheets/gslides/

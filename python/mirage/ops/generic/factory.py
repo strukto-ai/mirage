@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.errors.fs import eexist, einval, enotsup
+from mirage.errors.fs import eexist, einval, eisdir, enotsup
 from mirage.ops.generic.types import OpCoreFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import FileType, PathSpec
@@ -148,9 +146,7 @@ def _make_emulated_append(
                 await write_bytes(accessor, path, data)
                 return
             if found.type == FileType.DIRECTORY:
-                raise IsADirectoryError(
-                    errno.EISDIR, os.strerror(errno.EISDIR), path.virtual
-                )
+                raise eisdir(path.virtual)
             return
         # The read takes the caller's index, like every other read here:
         # an id-addressed backend (Box, Drive) turns a path into an id
@@ -210,9 +206,7 @@ def _make_emulated_pwrite(
                 await write_bytes(accessor, path, data)
                 return
             if found.type == FileType.DIRECTORY:
-                raise IsADirectoryError(
-                    errno.EISDIR, os.strerror(errno.EISDIR), path.virtual
-                )
+                raise eisdir(path.virtual)
             return
         try:
             existing = await read_bytes(accessor, path, index)
@@ -225,9 +219,7 @@ def _make_emulated_pwrite(
             except FileNotFoundError:
                 found = None
             if found is not None and found.type == FileType.DIRECTORY:
-                raise IsADirectoryError(
-                    errno.EISDIR, os.strerror(errno.EISDIR), path.virtual
-                )
+                raise eisdir(path.virtual)
             existing = b""
         await write_bytes(
             accessor, path, splice_window(existing, offset, data)

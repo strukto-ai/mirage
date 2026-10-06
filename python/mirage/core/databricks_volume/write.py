@@ -24,7 +24,7 @@ from mirage.core.databricks_volume._helpers import (
 )
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
-from mirage.errors.fs import enoent
+from mirage.errors.fs import enoent, enotdir
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -45,10 +45,10 @@ def _ensure_parent_directory_sync(
         metadata = accessor.files.get_metadata(remote_parent)
     except Exception as exc:
         if is_not_found(exc):
-            raise FileNotFoundError(virtual_target) from not_found
+            raise enoent(virtual_target) from not_found
         raise
     if not is_directory_metadata(metadata):
-        raise NotADirectoryError(virtual_target)
+        raise enotdir(virtual_target)
 
 
 def _upload_bytes_sync(

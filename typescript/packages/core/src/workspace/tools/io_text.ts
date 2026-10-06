@@ -15,6 +15,7 @@
 import { PolicyDenied, describeRefusal, saysWhy } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import type { ExecuteResult } from '../workspace/workspace.ts'
+import { errorVirtualPath, fsStrerror } from '../../errors/fs.ts'
 
 export function decode(value: Uint8Array | null | undefined): string {
   if (value === null || value === undefined) return ''
@@ -44,14 +45,20 @@ export function withRefusal(text: string, refusal: Refusal | null): string {
 }
 
 /**
- * A tool's failure as the agent reads it: the error's own words (a
- * policy's refusal reads as a plain `Permission denied`), then the
- * refusal's line when a policy refused the op. Mirrors Python's
- * `error_text`.
+ * A tool's failure as the agent reads it: a filesystem error as
+ * `<path>: <phrase>` (a policy's refusal reads as `Permission denied`),
+ * anything else in its own words, then the refusal's line when a policy
+ * refused the op. Mirrors Python's `error_text`.
  */
 export function errorText(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  return withRefusal(`Error: ${message}`, error instanceof PolicyDenied ? error.refusal : null)
+  const strerror = fsStrerror(error)
+  const words =
+    strerror !== null
+      ? `${errorVirtualPath(error)}: ${strerror}`
+      : error instanceof Error
+        ? error.message
+        : String(error)
+  return withRefusal(`Error: ${words}`, error instanceof PolicyDenied ? error.refusal : null)
 }
 
 export function ioToStr(io: ExecuteResult): string {

@@ -12,18 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 from collections.abc import Callable
 from dataclasses import replace
 
-from mirage.errors.fs import eexist, enoent
+from mirage.errors.fs import dot_walk_error, eexist, eloop, enoent
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import (
-    DotWalkLoop,
-    DotWalkMissing,
-    DotWalkNotDir,
     FsCondition,
 )
 from mirage.ops.types import LinkView, StatPath
@@ -371,7 +366,7 @@ async def dot_refusal(
     try:
         prefixes = dot_prefixes(dotted, follow)
     except CycleError:
-        return DotWalkLoop(errno.ELOOP, os.strerror(errno.ELOOP), name)
+        return eloop(name)
     for prefix in prefixes:
         if any(done.startswith(prefix + "/") for done in proved):
             continue
@@ -381,10 +376,8 @@ async def dot_refusal(
             proved.append(prefix)
             continue
         if not exists and (await nearest_ancestor(stat, spec))[1]:
-            return DotWalkMissing(
-                errno.ENOENT, os.strerror(errno.ENOENT), name
-            )
-        return DotWalkNotDir(errno.ENOTDIR, os.strerror(errno.ENOTDIR), name)
+            return dot_walk_error(name, FsCondition.ENOENT)
+        return dot_walk_error(name, FsCondition.ENOTDIR)
     if dotted.endswith("/"):
         exists, is_dir = await entry_kind(
             stat, PathSpec.from_str_path(path.virtual)
@@ -392,7 +385,5 @@ async def dot_refusal(
         if exists and not is_dir:
             if creates:
                 return eexist(name)
-            return DotWalkNotDir(
-                errno.ENOTDIR, os.strerror(errno.ENOTDIR), name
-            )
+            return dot_walk_error(name, FsCondition.ENOTDIR)
     return None

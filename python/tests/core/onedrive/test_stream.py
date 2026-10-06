@@ -47,7 +47,7 @@ async def test_read_stream_missing_raises_file_not_found():
                 ),
             ):
                 pass
-    assert str(exc.value) == "/od/Docs/a.txt"
+    assert exc.value.filename == "/od/Docs/a.txt"
 
 
 @pytest.mark.asyncio

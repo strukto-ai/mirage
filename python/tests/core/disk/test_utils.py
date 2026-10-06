@@ -58,7 +58,7 @@ def test_refuses_a_directory_link_on_the_way_naming_the_operand(tree):
         resolve_inside_sync(
             tree, PathSpec.from_str_path("/data/lib64/a.txt"), "/lib64/a.txt"
         )
-    assert str(caught.value) == "/data/lib64/a.txt"
+    assert caught.value.filename == "/data/lib64/a.txt"
 
 
 def test_refuses_a_link_out_of_the_root_as_the_leaf(tree):

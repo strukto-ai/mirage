@@ -30,7 +30,7 @@ from mirage.commands.spec.usage import (
 )
 from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import enoent, fs_strerror
 from mirage.io import IOResult
 from mirage.io.stream import SharedStdin, async_chain, materialize, yield_bytes
 from mirage.io.types import ByteSource
@@ -820,7 +820,7 @@ async def handle_xargs(
     else:
         try:
             if dispatch is None:
-                raise FileNotFoundError(arg_file)
+                raise enoent(arg_file)
             data = await read_script_bytes(dispatch, arg_file, session.cwd)
         except FS_ERRORS as exc:
             return _refuse(

@@ -30,7 +30,7 @@ from mirage.core.google.drive import (
     list_files,
     list_shared_drives,
 )
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eacces, enoent, enotdir
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
@@ -59,9 +59,7 @@ def eacces_on_denied(
         except aiohttp.ClientResponseError as exc:
             if exc.status == 403:
                 spec = next((a for a in args if isinstance(a, PathSpec)), None)
-                raise PermissionError(
-                    spec.virtual if spec is not None else ""
-                ) from exc
+                raise eacces(spec.virtual if spec is not None else "") from exc
             raise
 
     return wrapper
@@ -231,7 +229,7 @@ async def resolve_key(accessor: GDriveAccessor, key: str) -> DriveNode | None:
             return None
         if i < len(segments) - 1:
             if not node.is_folder:
-                raise NotADirectoryError("/" + "/".join(segments[: i + 1]))
+                raise enotdir("/" + "/".join(segments[: i + 1]))
             parent_id = node.id
             drive_id = node.drive_id
     return node
@@ -255,11 +253,11 @@ async def resolve_dir(
     try:
         node = await resolve_key(accessor, key)
     except NotADirectoryError as exc:
-        raise NotADirectoryError(virtual) from exc
+        raise enotdir(virtual) from exc
     if node is None:
         raise enoent(virtual)
     if not node.is_folder:
-        raise NotADirectoryError(virtual)
+        raise enotdir(virtual)
     return node.id, node.drive_id
 
 

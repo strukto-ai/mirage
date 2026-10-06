@@ -14,7 +14,7 @@
 
 import type { BinAccessor } from '../../accessor/bin.ts'
 import type { PathSpec } from '../../types.ts'
-import { erofsReadOnly } from '../../errors/fs.ts'
+import { erofs } from '../../errors/fs.ts'
 
 /**
  * Refuse a write into the view, as a read-only file system does. What the
@@ -22,5 +22,5 @@ import { erofsReadOnly } from '../../errors/fs.ts'
  * it would have done; `path` is the path the op writes, a rename's source.
  */
 export function refuse(_accessor: BinAccessor, path: PathSpec): Promise<never> {
-  return Promise.reject(erofsReadOnly('Read-only file system', path))
+  return Promise.reject(erofs(path))
 }

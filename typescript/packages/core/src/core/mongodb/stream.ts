@@ -20,12 +20,7 @@ import { iterDocuments, iterInserts } from './client.ts'
 import { entityGuard } from './readdir.ts'
 import { detectScope } from './scope.ts'
 import { PRIMARY_KEY } from './types.ts'
-
-function notFound(p: string): Error {
-  const err = new Error(p) as Error & { code?: string }
-  err.code = 'ENOENT'
-  return err
-}
+import { enoent } from '../../errors/fs.ts'
 
 export function applyElision(
   value: Record<string, unknown>,
@@ -107,7 +102,7 @@ export async function* readStream(
       : path
   const scope = detectScope(ps)
   if (scope.kind !== 'documents') {
-    throw notFound(ps.virtual)
+    throw enoent(ps.virtual)
   }
   // The entity guard is what applies the mount's `databases` filter; this
   // stream is the read_stream op, which a caller reaches without a stat first
@@ -140,7 +135,7 @@ export async function* watchStream(
       : path
   const scope = detectScope(ps)
   if (scope.kind !== 'documents') {
-    throw notFound(ps.virtual)
+    throw enoent(ps.virtual)
   }
   await entityGuard(accessor, scope, ps.virtual)
   const elide = elisionPaths(accessor, scope.slots.database ?? '', scope.slots.name ?? '')

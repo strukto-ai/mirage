@@ -14,7 +14,7 @@
 
 import { operandExitCode } from '../commands/spec/usage.ts'
 import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
-import { eacces, erofsReadOnly } from '../errors/fs.ts'
+import { eacces, erofs } from '../errors/fs.ts'
 import { fsErrorLine } from '../errors/render.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
@@ -298,7 +298,7 @@ export async function preOpsGate(
     return
   }
   const deciding = trace === DryRun.DECIDING
-  if (deciding && write) throw erofsReadOnly('Read-only file system', path)
+  if (deciding && write) throw erofs(path)
   if (!(policies.wants('preOps') || checkHidden || (write && context.mode !== undefined))) {
     return
   }

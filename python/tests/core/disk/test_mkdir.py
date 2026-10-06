@@ -59,7 +59,7 @@ async def test_mkdir_p_across_a_file_names_the_component(tmp_path):
         await mkdir(accessor, spec("/a.txt/sub"), parents=True)
     # The kernel names the whole path; GNU names the component it tripped
     # on, and the host root never appears.
-    assert str(excinfo.value) == "/a.txt"
+    assert excinfo.value.filename == "/a.txt"
     assert str(tmp_path) not in str(excinfo.value)
     assert (tmp_path / "a.txt").read_bytes() == b"hi"
 

@@ -46,7 +46,7 @@ async def test_mkdir_parent_missing_fails(accessor, files, remote_root, index):
 
     with pytest.raises(FileNotFoundError) as raised:
         await mkdir(accessor, _path("/dbx/a/b"), index=index)
-    assert str(raised.value) == "/dbx/a/b"
+    assert raised.value.filename == "/dbx/a/b"
     assert files.create_directory_calls == []
 
 

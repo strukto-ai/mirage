@@ -16,7 +16,6 @@ import asyncio
 import base64
 import binascii
 import concurrent.futures
-import errno
 import json
 import logging
 import os
@@ -33,6 +32,8 @@ import asyncssh
 from mirage import Workspace
 from mirage.errors import FsCondition, classify
 from mirage.errors.classify import failure_text
+from mirage.errors.fs import eexist, enoent
+from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import NoMountError
 from mirage.fuse.core import MountCore
 from mirage.io.types import ByteSource
@@ -269,7 +270,7 @@ def write_file(core: MountCore, path: str, data: bytes) -> None:
     """
     parent = lookup(core, posixpath.dirname(path))
     if parent is None:
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
+        raise enoent(path)
     fh = (
         core.open(path, os.O_TRUNC)
         if lookup(core, path)
@@ -285,9 +286,9 @@ def write_file(core: MountCore, path: str, data: bytes) -> None:
 
 def make_directory(core: MountCore, path: str) -> None:
     if lookup(core, path) is not None:
-        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), path)
+        raise eexist(path)
     if lookup(core, posixpath.dirname(path)) is None:
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
+        raise enoent(path)
     core.mkdir(path)
 
 
@@ -1022,7 +1023,10 @@ class CodexChannel:
             if force:
                 return {}
             raise rpc_error(
-                FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT))
+                FileNotFoundError(
+                    posix_errno(FsCondition.ENOENT),
+                    posix_phrase(FsCondition.ENOENT),
+                )
             )
         if not stat.S_ISDIR(st["st_mode"]):
             await self._fs(lambda core: core.unlink(path))

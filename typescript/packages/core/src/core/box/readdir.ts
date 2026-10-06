@@ -50,9 +50,7 @@ export async function readdir(
     folderId = accessor.rootFolderId
   } else {
     if (index === undefined) {
-      const e = new Error(`ENOENT: ${path.virtual}`) as Error & { code: string }
-      e.code = 'ENOENT'
-      throw e
+      throw enoent(path.virtual)
     }
     const probed = activeCacheManager()?.probedStat(path)
     if (probed != null && probed.type !== FileType.DIRECTORY) throw enotdir(path.virtual)

@@ -16,7 +16,7 @@ from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.box.api import upload_file_version, upload_new_file
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
-from mirage.errors.fs import enoent
+from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -24,7 +24,7 @@ from mirage.types import PathSpec
 async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     parts = path_parts(path)
     if not parts:
-        raise IsADirectoryError(path.virtual)
+        raise eisdir(path.virtual)
     tm = accessor.token_manager
     timer = start_op()
     existing = await resolve_item(accessor, parts)

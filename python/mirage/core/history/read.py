@@ -15,6 +15,7 @@
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.history.render import render_bash_history
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
 
 VIEW_NAME = ".bash_history"
@@ -38,6 +39,6 @@ async def read(
     """
     key = path.mount_path if isinstance(path, PathSpec) else path
     if key.strip("/") not in VIEW_KEYS:
-        raise FileNotFoundError(key)
+        raise enoent(key)
     events = await accessor.observer.command_events()
     return render_bash_history(events).encode()

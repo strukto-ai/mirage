@@ -15,7 +15,6 @@
 import errno
 import inspect
 import logging
-import os
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -27,9 +26,10 @@ from mirage.context import (
     reset_explaining,
     set_explaining,
 )
-from mirage.errors.fs import eacces
+from mirage.errors.fs import eacces, erofs
+from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.render import fs_error_line
-from mirage.errors.types import ReadOnlyError
+from mirage.errors.types import FsCondition
 from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
@@ -169,7 +169,7 @@ def says_why(text: str, refusal: Refusal) -> bool:
 
 
 def policy_denied(
-    deny: Deny, filename: str, strerror: str = os.strerror(errno.EACCES)
+    deny: Deny, filename: str, strerror: str = posix_phrase(FsCondition.EACCES)
 ) -> PolicyDenied:
     """The error a door raises for a policy's Deny, its record noted for
     the line running it.
@@ -187,7 +187,9 @@ def policy_denied(
     """
     refusal = refusal_of(deny)
     note_refusal(refusal)
-    return PolicyDenied(errno.EACCES, strerror, filename, refusal=refusal)
+    return PolicyDenied(
+        posix_errno(FsCondition.EACCES), strerror, filename, refusal=refusal
+    )
 
 
 def policy_pending(pending: Pending, filename: str) -> PolicyDenied:
@@ -202,7 +204,10 @@ def policy_pending(pending: Pending, filename: str) -> PolicyDenied:
     refusal = refusal_of(pending)
     note_refusal(refusal)
     return PolicyDenied(
-        errno.EACCES, os.strerror(errno.EACCES), filename, refusal=refusal
+        posix_errno(FsCondition.EACCES),
+        posix_phrase(FsCondition.EACCES),
+        filename,
+        refusal=refusal,
     )
 
 
@@ -291,7 +296,7 @@ async def pre_ops_gate(
         return
     deciding = trace is DryRun.DECIDING
     if deciding and write:
-        raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)
+        raise erofs(path.virtual)
     if not (
         policies.wants("pre_ops")
         or check_hidden

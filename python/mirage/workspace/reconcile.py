@@ -19,6 +19,7 @@ from functools import partial
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.config import Evicted
 from mirage.cache.index.ram import ListingCheckStore
+from mirage.errors.fs import enoent
 from mirage.errors.types import OperationNotSupportedError
 from mirage.types import FileStat, ListingVersion, PathSpec, ReadPolicy
 from mirage.utils.path import ancestors
@@ -220,7 +221,7 @@ class Reconciler:
             return True
         verdict = await self._probe_or_unknown(mount, path)
         if verdict is Verdict.GONE:
-            raise FileNotFoundError(path)
+            raise enoent(path)
         return verdict is Verdict.FRESH
 
     async def may_serve_listing(

@@ -26,24 +26,32 @@ export function virtualOf(path: string | { virtual: string; rawPath?: string }):
   return path.rawPath ?? path.virtual
 }
 
-export function fsError(path: string | { virtual: string }, code: string): FsError {
+// The error a mount raises for one code at one path: the code stamped, the
+// operand as virtualPath, and the path itself as the message unless the
+// caller names what was refused. Every constructor below is this one.
+// Mirrors Python's fs_error.
+export function fsError(
+  path: string | { virtual: string },
+  code: string,
+  message?: string,
+): FsError {
   const virtual = virtualOf(path)
-  const err = new Error(virtual) as FsError
+  const err = new Error(message ?? virtual) as FsError
   err.code = code
   err.virtualPath = virtual
   return err
 }
 
-// Mirrors Python's FileNotFoundError(virtual). The strerror suffix ("No such
-// file or directory") is appended once at the command chokepoints.
+// Mirrors Python's enoent. The strerror suffix ("No such file or directory")
+// is appended once at the command chokepoints.
 export function enoent(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOENT')
 }
 
-/** EBADF for a read of standard input that is closed or write-only;
- * python's BadDescriptorError, with `-` as the operand cat would name. */
-export function ebadfStdin(): FsError {
-  return fsError('-', 'EBADF')
+/** EBADF for a read from a descriptor that is closed or write-only, named
+ * as the reader names it (`-` for standard input). Mirrors Python's ebadf. */
+export function ebadf(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EBADF')
 }
 
 /** EFBIG: a read the backend refuses to render whole (a records file past its
@@ -109,8 +117,20 @@ export function eexist(path: string | { virtual: string }): FsError {
   return fsError(path, 'EEXIST')
 }
 
-export function eacces(path: string | { virtual: string }): FsError {
-  return fsError(path, 'EACCES')
+// A refused mutation that is not absence and not a mode: a lock or a policy
+// in practice. A caller may name what was refused (the s3 batch delete names
+// its count).
+export function eacces(path: string | { virtual: string }, message?: string): FsError {
+  return fsError(path, 'EACCES', message)
+}
+
+// The below-mode refusal, stamped EROFS + operand so fs chokepoints render
+// 'Read-only file system', matching Python's erofs from the same guard: the
+// mode voice, distinct from both the hide voice (ENOENT) and the policy voice
+// (EACCES). The message may say which mount (executor builtins sniff
+// 'read-only').
+export function erofs(path: string | { virtual: string }, message?: string): FsError {
+  return fsError(path, 'EROFS', message)
 }
 
 // An extended attribute the path does not carry. ENODATA is linux's
@@ -126,9 +146,7 @@ export function enotempty(path: string | { virtual: string }): FsError {
 // readlink on a path that exists but is not a symlink. Mirrors Python's
 // OSError(errno.EINVAL).
 export function einval(path: string | { virtual: string }, message?: string): FsError {
-  const err = fsError(path, 'EINVAL')
-  if (message !== undefined) err.message = message
-  return err
+  return fsError(path, 'EINVAL', message)
 }
 
 // A rename whose two ends sit on different mounts. POSIX's answer for a
@@ -251,11 +269,9 @@ export function enotsup(
   op: string,
   path: string | { virtual: string; rawPath?: string },
 ): MissingOpError {
-  const err = new Error(`no op registered: ${op} for VFS ${vfs}`) as MissingOpError
-  err.code = 'ENOTSUP'
-  err.op = op
-  err.virtualPath = virtualOf(path)
-  return err
+  return Object.assign(fsError(path, 'ENOTSUP', `no op registered: ${op} for VFS ${vfs}`), {
+    op,
+  })
 }
 
 // True when the error is the missing-op stamp for this specific op — the
@@ -265,34 +281,6 @@ export function enotsup(
 export function isMissingOp(err: unknown, op: string): boolean {
   const stamped = err as { code?: unknown; op?: unknown }
   return stamped.code === 'ENOTSUP' && stamped.op === op
-}
-
-// A refused mutation that is not absence and not a mode: a lock or a
-// policy in practice. Message-carrying, unlike `eacces`, because its
-// callers name what was refused (the s3 batch delete names its count).
-export function eaccesRefused(
-  message: string,
-  path: string | { virtual: string; rawPath?: string },
-): FsError {
-  const err = new Error(message) as FsError
-  err.code = 'EACCES'
-  err.virtualPath = virtualOf(path)
-  return err
-}
-
-// The below-mode refusal keeps its human message (executor builtins and
-// the FUSE bridge sniff 'read-only') but is stamped EROFS + operand so fs
-// chokepoints render 'Read-only file system', matching Python's
-// ReadOnlyError from the same guard: the mode voice, distinct from both
-// the hide voice (ENOENT) and the policy voice (EACCES).
-export function erofsReadOnly(
-  message: string,
-  path: string | { virtual: string; rawPath?: string },
-): FsError {
-  const err = new Error(message) as FsError
-  err.code = 'EROFS'
-  err.virtualPath = virtualOf(path)
-  return err
 }
 
 // The phrase a command line ends with for a failed operand, read from the
@@ -322,22 +310,26 @@ export function isFsError(err: unknown): boolean {
   return fsStrerror(err) !== null
 }
 
+function hasCode(err: unknown, code: string): boolean {
+  return err instanceof Error && (err as Error & { code?: string }).code === code
+}
+
 // `enoent()` puts the *path* in the message, so matching on message text never
 // fires; the stamped code is the only reliable signal. Python's twin is
 // `except FileNotFoundError`. Three modules had grown their own copy of this.
 export function isEnoent(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'ENOENT'
+  return hasCode(err, 'ENOENT')
 }
 
 // Python's twin is `except NotADirectoryError`: a component of the path is
 // a plain file, the other way a lookup fails besides ENOENT.
 export function isEnotdir(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'ENOTDIR'
+  return hasCode(err, 'ENOTDIR')
 }
 
 // Python's twin is `except FileTooLargeError`.
 export function isEfbig(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'EFBIG'
+  return hasCode(err, 'EFBIG')
 }
 
 // Python's twin is `except IsADirectoryError`. A command sometimes spells a
@@ -345,25 +337,25 @@ export function isEfbig(err: unknown): boolean {
 // --check says the literal "read error"), so callers need the code, not
 // just the walk-error class.
 export function isEisdir(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'EISDIR'
+  return hasCode(err, 'EISDIR')
 }
 
 // Python's twin is `except FileExistsError`: the name is taken, which is
 // the door's answer to a create that will not overwrite (symlink(2)).
 export function isEexist(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'EEXIST'
+  return hasCode(err, 'EEXIST')
 }
 
 // Python's twin is `except PermissionError`: a refusal (a rule at the
 // command guard or the op door, a read-only mount), which a walk reports
 // per entry the way it reports an unreadable one.
 export function isEacces(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'EACCES'
+  return hasCode(err, 'EACCES')
 }
 
 // The mode gate's refusal (Python's `except ReadOnlyError`).
 export function isErofs(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'EROFS'
+  return hasCode(err, 'EROFS')
 }
 
 // The per-entry swallow set for walk-and-warn commands (ls, tree, rg):

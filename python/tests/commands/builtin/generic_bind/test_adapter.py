@@ -606,7 +606,7 @@ async def test_dir_guard_names_the_virtual_path_not_the_backend_one():
     )
     with pytest.raises(IsADirectoryError) as caught:
         await ops.read_bytes(None, PathSpec.from_str_path("/mnt/sub"))
-    assert str(caught.value) == "/mnt/sub"
+    assert caught.value.filename == "/mnt/sub"
 
 
 @pytest.mark.asyncio

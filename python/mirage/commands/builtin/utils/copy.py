@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
 
 from mirage.commands.builtin.utils.paths import descendant_path
+from mirage.errors.fs import eloop, enoent, enotdir
 from mirage.errors.posix import posix_phrase
-from mirage.errors.types import DotWalkLoop, FsCondition
+from mirage.errors.types import FsCondition
 from mirage.types import FileType, PathSpec, StatFn
 
 # The destination verdicts GNU meets at the destination's own stat, before
@@ -71,14 +71,10 @@ def copy_targets(
     """
     if len(sources) > 1 and not dst_is_dir:
         if dst_err == posix_phrase(FsCondition.ELOOP):
-            raise DotWalkLoop(
-                errno.ELOOP,
-                posix_phrase(FsCondition.ELOOP),
-                f"target '{dst.raw_path}'",
-            )
+            raise eloop(f"target '{dst.raw_path}'")
         if not dst_exists and dst_err != posix_phrase(FsCondition.ENOTDIR):
-            raise FileNotFoundError(f"target '{dst.raw_path}'")
-        raise NotADirectoryError(f"target '{dst.raw_path}'")
+            raise enoent(f"target '{dst.raw_path}'")
+        raise enotdir(f"target '{dst.raw_path}'")
     if not dst_is_dir:
         return [(sources[0], dst)]
     pairs: list[tuple[PathSpec, PathSpec]] = []

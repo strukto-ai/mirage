@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 from dataclasses import replace
 
 from mirage.accessor.base import Accessor
@@ -246,7 +244,7 @@ async def _make_walked(
                 mkdir_fn, accessor, path, node, root, links
             )
         except FileExistsError:
-            why = os.strerror(errno.ENOTDIR)
+            why = posix_phrase(FsCondition.ENOTDIR)
         except FS_ERRORS as exc:
             why = fs_strerror(exc)
         if why is not None:
@@ -288,9 +286,9 @@ async def _enter_node(
             return posix_phrase(FsCondition.ELOOP)
         target = await links.target_stat(node)
         if target is None:
-            return os.strerror(errno.EEXIST)
+            return posix_phrase(FsCondition.EEXIST)
         if target.type != FileType.DIRECTORY:
-            return os.strerror(errno.ENOTDIR)
+            return posix_phrase(FsCondition.ENOTDIR)
         return None
     probe = get_walk_probe()
     if probe is not None:
@@ -298,7 +296,7 @@ async def _enter_node(
             probe.stat, PathSpec.from_str_path(node)
         )
         if exists:
-            return None if is_dir else os.strerror(errno.ENOTDIR)
+            return None if is_dir else posix_phrase(FsCondition.ENOTDIR)
     real = links.resolve(node) if links is not None else node
     if real.startswith(root + "/"):
         await mkdir_fn(accessor, descendant_path(path, real), parents=True)

@@ -78,7 +78,7 @@ async def test_write_into_a_missing_repo_names_the_virtual_path(make_acc):
     acc.operator = lambda: _MissingRepoOperator(files={})
     with pytest.raises(FileNotFoundError) as caught:
         await write(acc, PathSpec.from_str_path("/out.txt"), b"hi")
-    assert str(caught.value) == "/out.txt"
+    assert caught.value.filename == "/out.txt"
 
 
 @pytest.mark.asyncio
@@ -87,4 +87,4 @@ async def test_create_into_a_missing_repo_names_the_virtual_path(make_acc):
     acc.operator = lambda: _MissingRepoOperator(files={})
     with pytest.raises(FileNotFoundError) as caught:
         await create(acc, PathSpec.from_str_path("/new.txt"))
-    assert str(caught.value) == "/new.txt"
+    assert caught.value.filename == "/new.txt"

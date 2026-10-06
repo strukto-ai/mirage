@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno as host_errno
 from pathlib import Path
 from typing import Any
 
+from mirage.errors.fs import einval, enoent, exdev
 from mirage.runtime.constants import ABSENT_PATH
 from mirage.runtime.handles import FlushStep
 from mirage.runtime.types import VFSEntry, VFSStat
@@ -105,7 +105,7 @@ class WasmView:
             return None
         if self._build is None:
             if self._core is None:
-                raise FileNotFoundError(path)
+                raise enoent(path)
             return None
         if self._core is None:
             return self._build
@@ -145,7 +145,7 @@ class WasmView:
                 does not serve `path`.
         """
         if self._core is None or not self._core.serves(path):
-            raise FileNotFoundError(path)
+            raise enoent(path)
         return self._core
 
     def _core_call(self, op: str, path: str, **kwargs: Any) -> Any:
@@ -197,12 +197,12 @@ class WasmView:
             nofollow (bool): report a trailing symlink itself.
         """
         if self._core is None:
-            raise FileNotFoundError(path)
+            raise enoent(path)
         if self._core.serves(path):
             return self._core.stat(path, nofollow=nofollow)
         row = self._core.view_stat(path)
         if row is None:
-            raise FileNotFoundError(path)
+            raise enoent(path)
         return row
 
     def stat_or_none(
@@ -306,7 +306,7 @@ class WasmView:
         dst_build = self._serving_build(dst) is not None
         if src_build or dst_build:
             if src_build != dst_build:
-                raise OSError(host_errno.EXDEV, "cross-device rename", src)
+                raise exdev(src)
             raise PermissionError(READONLY_HINT)
         self._content_core(dst)
         self._content_core(src).rename(src, dst)
@@ -335,9 +335,9 @@ class WasmView:
                 guards, and the build holds no links.
         """
         if self._serving_build(path) is not None:
-            raise OSError(host_errno.EINVAL, "not a symbolic link", path)
+            raise einval(path)
         if self._core is None:
-            raise FileNotFoundError(path)
+            raise enoent(path)
         return str(self._core.call("readlink", path))
 
     def setattr(

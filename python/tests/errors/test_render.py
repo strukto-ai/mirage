@@ -34,6 +34,7 @@ from mirage.errors.types import (
     BadDescriptorError,
 )
 from mirage.types import PathSpec
+from mirage.utils.path import CycleError
 
 
 def test_format_fs_error_appends_strerror():
@@ -312,4 +313,10 @@ def test_format_fs_error_words_a_condition_without_a_class():
     )
     assert format_fs_error("mv", exdev("/d")) == (
         b"mv: /d: Invalid cross-device link\n"
+    )
+
+
+def test_format_fs_error_names_a_link_loop_by_its_path():
+    assert format_fs_error("cat", CycleError("/data/l1")) == (
+        b"cat: /data/l1: Too many levels of symbolic links\n"
     )
