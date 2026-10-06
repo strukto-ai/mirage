@@ -14,6 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IndexEntry, LookupStatus } from './config.ts'
+import { REGISTRY_PAGE } from './constants.ts'
 import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
 
 describe('RedisIndexCacheStore default keyPrefix', () => {
@@ -136,6 +137,58 @@ ${script}`,
     expect((await store.listDir('/literal[1]')).status).toBe(LookupStatus.NOT_FOUND)
     expect((await store.get('/literal[1]/nested/child')).entry).toBeDefined()
     expect((await store.get('/literal[1]sibling/child')).entry).toBeDefined()
+  })
+
+  it('probes a subtree through a seed not yet flushed', async () => {
+    store.seed(
+      new Map([['/x/dir/sub/f', entry('f', 'f')]]),
+      new Map([['/x/dir/sub', ['/x/dir/sub/f']]]),
+      new Date(Date.now() + 3600000),
+    )
+    expect(await store.holdsSubtree('/x/dir')).toBe(true)
+  })
+
+  it('rebuilds an evicted path registry before probing a subtree', async () => {
+    const client = await redis()
+    await store.setDir('/x/dir/sub', [['f', entry('f', 'f')]])
+    await client.del(`${prefix}mirage:idx:paths`)
+    // An empty registry would read as "nothing below", so a folder delete
+    // would keep its subtree; the probe must rebuild it first.
+    expect(await store.holdsSubtree('/x/dir')).toBe(true)
+    expect(await client.exists(`${prefix}mirage:idx:paths`)).toBe(1)
+  })
+
+  async function buried(count: number): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      const dir = `/x/dir/a${String(i).padStart(4, '0')}`
+      await store.setDir(dir, [['g', entry('g', 'g')]])
+      await store.invalidateDir(dir)
+    }
+  }
+
+  it('reads one registry page per subtree probe script', async () => {
+    // Buried listings stay registered as tombstones; walking all of them in
+    // one atomic script would block the shared server for the whole history
+    // of the folder.
+    const client = await redis()
+    await buried(REGISTRY_PAGE + 12)
+    const spy = vi.spyOn(client, 'eval')
+    try {
+      expect(await store.holdsSubtree('/x/dir')).toBe(false)
+      expect(
+        spy.mock.calls.filter(([script]) => script.includes('return {0, #paths == page')),
+      ).toHaveLength(2)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('finds a live listing at the end of a full page', async () => {
+    // The next page starts strictly after the last member read, so the last
+    // member of a full page is checked only on that page.
+    await buried(REGISTRY_PAGE - 1)
+    await store.setDir('/x/dir/z', [['g', entry('g', 'g')]])
+    expect(await store.holdsSubtree('/x/dir')).toBe(true)
   })
 
   it('recovers a cold registry without scanning inside Lua', async () => {

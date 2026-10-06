@@ -274,6 +274,12 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
+  // No ownership filter: answering false for a path a nested mount owns would
+  // keep that subtree cached, the non-conservative way.
+  override holdsSubtree(path: string): Promise<boolean> {
+    return this.fence(() => this.inner.holdsSubtree(path))
+  }
+
   invalidate(): Promise<void> {
     return this.fence(async () => {
       if (this.owns(this.prefix)) await this.inner.invalidate()

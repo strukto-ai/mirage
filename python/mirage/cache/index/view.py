@@ -329,6 +329,12 @@ class IndexView(IndexCacheStore):
                     vfs_path, excluded=excluded + self._excluded_prefixes()
                 )
 
+    async def holds_subtree(self, vfs_path: str) -> bool:
+        # No ownership filter: answering False for a path a nested mount
+        # owns would keep that subtree cached, the non-conservative way.
+        async with self._fence():
+            return await self._store.holds_subtree(vfs_path)
+
     async def invalidate(self) -> None:
         async with self._fence():
             if self._owns(self._prefix):

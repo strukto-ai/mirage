@@ -14,7 +14,11 @@ from redis.asyncio import Redis
 
 from mirage.cache.index import redis as redis_index
 from mirage.cache.index.config import IndexEntry, LookupStatus
-from mirage.cache.index.constants import CHILDREN_PREFIX, ENTRY_PREFIX
+from mirage.cache.index.constants import (
+    CHILDREN_PREFIX,
+    ENTRY_PREFIX,
+    REGISTRY_PAGE,
+)
 from mirage.cache.index.redis import RedisIndexCacheStore
 
 
@@ -854,7 +858,7 @@ def test_the_two_inline_lua_copies_are_byte_identical():
         for name, value in vars(redis_index).items()
         if name.startswith("_")
         and isinstance(value, str)
-        and "redis.call(" in value
+        and ("redis.call(" in value or name == "_PATH_RANGE")
     }
     assert copies.keys() == originals.keys()
     for name, original in originals.items():
@@ -919,3 +923,74 @@ async def test_paged_invalidation_cannot_leave_a_refill_naming_deleted_rows(
         LookupStatus.NOT_FOUND,
         LookupStatus.EXPIRED,
     )
+
+
+@pytest.mark.asyncio
+async def test_holds_subtree_sees_a_seed_not_yet_flushed(rolling_client):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    store.seed(
+        {"/x/dir/sub/f": IndexEntry(id="f", name="f", resource_type="file")},
+        {"/x/dir/sub": ["/x/dir/sub/f"]},
+        datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    assert await store.holds_subtree("/x/dir") is True
+
+
+@pytest.mark.asyncio
+async def test_holds_subtree_recovers_an_evicted_path_registry(
+    rolling_client,
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    child = IndexEntry(id="f", name="f", resource_type="file")
+    await store.set_dir("/x/dir/sub", [("f", child)])
+    await client.delete(prefix + "mirage:idx:paths")
+    # An empty registry would read as "nothing below", so a folder
+    # delete would keep its subtree; the probe must rebuild it first.
+    assert await store.holds_subtree("/x/dir") is True
+    assert await client.zscore(prefix + "mirage:idx:paths", "") is not None
+
+
+async def _buried(store: RedisIndexCacheStore, count: int) -> None:
+    child = IndexEntry(id="g", name="g", resource_type="file")
+    for i in range(count):
+        await store.set_dir(f"/x/dir/a{i:04}", [("g", child)])
+        await store.invalidate_dir(f"/x/dir/a{i:04}")
+
+
+@pytest.mark.asyncio
+async def test_the_subtree_probe_reads_one_registry_page_per_script(
+    rolling_client, monkeypatch
+):
+    # Buried listings stay registered as tombstones; walking all of them
+    # in one atomic script would block the shared server for the whole
+    # history of the folder.
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    await _buried(store, REGISTRY_PAGE + 12)
+    evaluate = client.eval
+    probes = []
+
+    async def counted(script, *args, **kwargs):
+        if script == redis_index._HOLDS_SUBTREE:
+            probes.append(script)
+        return await evaluate(script, *args, **kwargs)
+
+    monkeypatch.setattr(client, "eval", counted)
+    assert await store.holds_subtree("/x/dir") is False
+    assert len(probes) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_live_listing_at_the_end_of_a_full_page_is_found(
+    rolling_client,
+):
+    # The next page starts strictly after the last member read, so the
+    # last member of a full page is checked only on that page.
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    await _buried(store, REGISTRY_PAGE - 1)
+    child = IndexEntry(id="g", name="g", resource_type="file")
+    await store.set_dir("/x/dir/z", [("g", child)])
+    assert await store.holds_subtree("/x/dir") is True

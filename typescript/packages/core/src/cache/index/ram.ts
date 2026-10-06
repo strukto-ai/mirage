@@ -233,6 +233,13 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     return Promise.resolve()
   }
 
+  override holdsSubtree(vfsPath: string): Promise<boolean> {
+    for (const key of this.children.keys()) {
+      if (underPath(key, vfsPath)) return Promise.resolve(true)
+    }
+    return Promise.resolve(false)
+  }
+
   private dropPrefix(
     vfsPath: string,
     keepTombstones = false,

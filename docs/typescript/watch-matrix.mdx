@@ -85,7 +85,9 @@ not at the call: the loop above and the `notify` call belong to different tasks
 the iterator drops the event.
 
 The guarantee is the same on every backend: caches for the changed path and
-its ancestor listings are invalidated before delivery.
+its ancestor listings are invalidated before delivery, plus the cached subtree
+of a removed folder that still has a listing cached at or under it, so reads
+after an event are fresh within the limit [Watch](/typescript/watch) describes.
 
 One thing every backend has to agree on for that to hold: the index is
 keyed by the mount-absolute path (`/m/data/x`), which is what

@@ -42,6 +42,7 @@ from mirage.cache.index.constants import (
     ENTRY_PREFIX,
     GENERATION_KEY,
     PATHS_KEY,
+    REGISTRY_PAGE,
     TOMBSTONE_PREFIX,
 )
 from mirage.cache.index.store import IndexCacheStore
@@ -57,7 +58,19 @@ _PendingSeed = tuple[
     dict[str, IndexEntry], dict[str, list[str]], datetime, str | None
 ]
 
-_PATH_REGISTRY = """
+_PATH_RANGE = """
+local function path_range(root)
+  root = string.gsub(root, '/+$', '')
+  if root == '' then root = '/' end
+  local lower = root == '/' and '/' or root .. '/'
+  local upper = root == '/' and '0' or root .. '0'
+  return root, lower, upper
+end
+"""
+
+_PATH_REGISTRY = (
+    _PATH_RANGE
+    + """
 local function track(registry, prefixes, paths)
   for _, path in ipairs(paths) do redis.call('ZADD', registry, 0, path) end
 end
@@ -68,10 +81,7 @@ local function prune(registry, prefixes, path)
   redis.call('ZREM', registry, path)
 end
 local function subtree(registry, root)
-  root = string.gsub(root, '/+$', '')
-  if root == '' then root = '/' end
-  local lower = root == '/' and '/' or root .. '/'
-  local upper = root == '/' and '0' or root .. '0'
+  local root, lower, upper = path_range(root)
   local paths = redis.call('ZRANGEBYLEX', registry, '[' .. lower, '(' .. upper)
   paths[#paths + 1] = root
   return paths
@@ -82,6 +92,7 @@ local function is_kind(row_type, kind)
     or string.sub(row_type, -(#kind + 1)) == '/' .. kind)
 end
 """
+)
 
 _TRACK_PATHS = (
     _PATH_REGISTRY
@@ -125,14 +136,12 @@ end
 local prefixes = {ARGV[1], ARGV[2], ARGV[3], ARGV[4]}
 local removed = cjson.decode(ARGV[5])
 local excluded = cjson.decode(ARGV[7])
-local root = string.gsub(ARGV[6], '/+$', '')
-if root == '' then root = '/' end
-local lower = root == '/' and '/' or root .. '/'
-local upper = root == '/' and '0' or root .. '0'
+local root, lower, upper = path_range(ARGV[6])
+local page = tonumber(ARGV[9])
 local after = ARGV[8] == '' and '[' .. lower or '(' .. ARGV[8]
 local paths = redis.call('ZRANGEBYLEX', KEYS[1], after, '(' .. upper,
-  'LIMIT', 0, 128)
-local cursor = #paths == 128 and paths[#paths] or ''
+  'LIMIT', 0, page)
+local cursor = #paths == page and paths[#paths] or ''
 if ARGV[8] == '' then paths[#paths + 1] = root end
 for _, path in ipairs(paths) do
   local protected = false
@@ -149,6 +158,27 @@ for _, path in ipairs(paths) do
   end
 end
 return cursor
+"""
+)
+
+_HOLDS_SUBTREE = (
+    _PATH_RANGE
+    + """
+if not redis.call('ZSCORE', KEYS[1], '') then
+  error('MIRAGE_INDEX_REGISTRY_MISSING')
+end
+local key, lower, upper = path_range(ARGV[2])
+local cursor, page = ARGV[3], tonumber(ARGV[4])
+if cursor == '' and redis.call('EXISTS', ARGV[1] .. key) == 1 then
+  return {1, ''}
+end
+local after = cursor == '' and '[' .. lower or '(' .. cursor
+local paths = redis.call('ZRANGEBYLEX', KEYS[1], after, '(' .. upper,
+  'LIMIT', 0, page)
+for _, path in ipairs(paths) do
+  if redis.call('EXISTS', ARGV[1] .. path) == 1 then return {1, ''} end
+end
+return {0, #paths == page and paths[#paths] or ''}
 """
 )
 
@@ -426,12 +456,20 @@ class RedisIndexCacheStore(IndexCacheStore):
 
     async def _eval_complete(
         self, script: str, keys: list[str], args: list[str]
-    ) -> str | bytes | tuple[list[str | bytes], list[int]]:
+    ) -> (
+        str
+        | bytes
+        | tuple[list[str | bytes], list[int]]
+        | tuple[int, str | bytes]
+    ):
         for attempt in range(3):
             try:
                 return await cast(
                     Awaitable[
-                        str | bytes | tuple[list[str | bytes], list[int]]
+                        str
+                        | bytes
+                        | tuple[list[str | bytes], list[int]]
+                        | tuple[int, str | bytes]
                     ],
                     self._client.eval(script, len(keys), *keys, *args),
                 )
@@ -800,6 +838,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     vfs_path,
                     json.dumps([p.rstrip("/") for p in excluded]),
                     cursor,
+                    str(REGISTRY_PAGE),
                 ],
             )
             cursor = _text(cast(str | bytes, raw))
@@ -817,6 +856,22 @@ class RedisIndexCacheStore(IndexCacheStore):
             vfs_path,
             excluded,
         )
+
+    async def holds_subtree(self, vfs_path: str) -> bool:
+        await self._flush_seed()
+        cursor = ""
+        while True:
+            raw = await self._eval_complete(
+                _HOLDS_SUBTREE,
+                [self._paths_key],
+                [self._children_prefix, vfs_path, cursor, str(REGISTRY_PAGE)],
+            )
+            found, after = cast(tuple[int, str | bytes], raw)
+            if found == 1:
+                return True
+            cursor = _text(after)
+            if not cursor:
+                return False
 
     async def invalidate(self) -> None:
         await self._flush_seed()

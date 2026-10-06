@@ -324,6 +324,7 @@ const FENCED: [string, (view: IndexView) => Promise<unknown>][] = [
   ['invalidateDir', (view) => view.invalidateDir('/data')],
   ['invalidatePrefix', (view) => view.invalidatePrefix('/data')],
   ['invalidate', (view) => view.invalidate()],
+  ['holdsSubtree', (view) => view.holdsSubtree('/data')],
 ]
 
 describe('a lock-held view', () => {
@@ -927,5 +928,18 @@ describe('the listing gate', () => {
       new Date(Date.now() + 3600000),
     )
     expect(noted).toEqual(['/data', '/data/p', '/data/s', '/data/t'])
+  })
+})
+
+describe('a view probing for a subtree', () => {
+  it.each([true, false])('answers from its store (owns=%s)', async (owned) => {
+    const cache = new RAMFileCacheStore()
+    const holding = new RAMIndexCacheStore()
+    await holding.setDir('/data/dir/sub', [['f', ROW]])
+    const view = new IndexView(holding, cache, '/data', () => owned)
+    expect(await view.holdsSubtree('/data/dir')).toBe(true)
+    const empty = new IndexView(new RAMIndexCacheStore(), cache, '/data', () => owned)
+    expect(await empty.holdsSubtree('/data/dir')).toBe(false)
+    await cache.close()
   })
 })

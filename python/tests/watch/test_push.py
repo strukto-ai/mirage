@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 
 import pytest
 
@@ -90,4 +91,42 @@ async def test_a_scoped_event_is_delivered_to_a_matching_watch(tmp_path):
     assert got.kind is FileChangeKind.CREATE
     assert got.path.virtual == "/d/day/c.txt"
     await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_host_rm_r_reported_children_first_leaves_nothing_listed(
+    tmp_path,
+):
+    # A host `rm -r` arrives as one `deleted` per path, children first;
+    # each level's listing is gone by the time its own event arrives,
+    # except an empty folder's, which only its own event clears.
+    day = tmp_path / "day"
+    (day / "sub").mkdir(parents=True)
+    (day / "empty").mkdir()
+    (day / "sub" / "a.txt").write_text("a")
+    (day / "b.txt").write_text("b")
+    ws = await _ws(tmp_path)
+    assert "a.txt" in await (await ws.shell("ls /d/day/sub")).stdout_str()
+    assert (await ws.shell("ls /d/day/empty")).exit_code == 0
+    assert "b.txt" in await (await ws.shell("ls /d/day")).stdout_str()
+
+    removed = [
+        day / "sub" / "a.txt",
+        day / "sub",
+        day / "empty",
+        day / "b.txt",
+        day,
+    ]
+    shutil.rmtree(day)
+    hook = DiskEventHook(ws.registry.mount_for("/d").vfs.accessor)
+    for path in removed:
+        for change in await hook.to_events(
+            _root(), "deleted", {"src_path": str(path)}
+        ):
+            await ws.notify(change)
+
+    assert (await ws.shell("ls /d/day/sub")).exit_code != 0
+    assert (await ws.shell("ls /d/day/empty")).exit_code != 0
+    assert (await ws.shell("ls /d/day")).exit_code != 0
     await ws.close()

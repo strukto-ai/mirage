@@ -60,7 +60,7 @@ export class Watcher implements WatchRuntime {
   }
 
   /**
-   * Evict one path and every cached ancestor listing above it.
+   * Evict a changed path, its affected subtree and ancestor listings.
    *
    * The chain itself is the cache manager's to walk, not this class's: it
    * already walks one for the keyed stores that materialize a missing level on
@@ -71,14 +71,29 @@ export class Watcher implements WatchRuntime {
    * precision was lost and everything under the path must be re-inventoried,
    * which is what a push notification that can name only a scope reports
    * (IMAP IDLE says a mailbox changed, not which message), so it takes the
-   * subtree. Every other kind names a path and evicts that path alone.
+   * subtree. A DELETE names a path but not whether it was a folder, so it is a
+   * removal: the path alone, plus whatever is cached beneath it when a listing
+   * at or under it is still cached (a disk watcher's `mv dir` or a feed naming
+   * only a folder). Every other kind names a path and evicts that path alone.
    */
   private async evict(mount: WatchMount, path: PathSpec, kind: FileChangeKind): Promise<void> {
     const manager = mount.cacheManager
     if (manager === null) return
-    if (kind === FileChangeKind.DELETE) await manager.invalidateAfterUnlink(path)
-    else if (kind === FileChangeKind.UNKNOWN) await manager.invalidateSubtree(path)
-    else await manager.invalidateAfterWrite(path)
+    try {
+      if (kind === FileChangeKind.DELETE) await manager.invalidateAfterRemove(path)
+      else if (kind === FileChangeKind.UNKNOWN) await manager.invalidateSubtree(path)
+      else await manager.invalidateAfterWrite(path)
+    } catch (error) {
+      try {
+        await manager.invalidateAncestors(path)
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'watch invalidation and ancestor cleanup failed',
+        )
+      }
+      throw error
+    }
     await manager.invalidateAncestors(path)
   }
 
