@@ -220,3 +220,5 @@ def test_error_text_adds_the_policy_line_to_a_plain_eacces():
     assert error_text(FileNotFoundError("/data/x")) == (
         "Error: /data/x: No such file or directory"
     )
+    named = IsADirectoryError(errno.EISDIR, "Is a directory", "Is a directory")
+    assert error_text(named) == "Error: Is a directory: Is a directory"

@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { Refusal } from '../../types.ts'
 import { ExecuteResult } from '../workspace/workspace.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
+import { eisdir } from '../../errors/fs.ts'
 import { decode, errorText, ioToStr, replaceText, withRefusal } from './io_text.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
@@ -191,5 +192,7 @@ describe('errorText', () => {
     )
     const pathless = Object.assign(new Error('Permission denied'), { code: 'EACCES' })
     expect(errorText(pathless)).toBe('Error: Permission denied')
+    expect(errorText(eisdir('Is a directory'))).toBe('Error: Is a directory: Is a directory')
+    expect(errorText(undefined)).toBe('Error: undefined')
   })
 })

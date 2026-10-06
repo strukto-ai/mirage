@@ -47,21 +47,23 @@ export function withRefusal(text: string, refusal: Refusal | null): string {
 /**
  * A tool's failure as the agent reads it: a filesystem error as
  * `<path>: <phrase>` (a policy's refusal reads as `Permission denied`),
- * or the phrase alone when the error names no path, anything else in its
- * own words, then the refusal's line when a policy refused the op.
- * Mirrors Python's `error_text`.
+ * or the phrase alone when no path was stamped and the message adds
+ * nothing, anything else in its own words, then the refusal's line when a
+ * policy refused the op. Mirrors Python's `error_text`.
  */
 export function errorText(error: unknown): string {
   const strerror = fsStrerror(error)
-  const path = errorVirtualPath(error)
+  const message = error instanceof Error ? error.message : String(error)
+  const stamped =
+    strerror !== null && typeof (error as { virtualPath?: unknown }).virtualPath === 'string'
   const words =
     strerror === null
-      ? error instanceof Error
-        ? error.message
-        : String(error)
-      : path === '' || path === strerror
-        ? strerror
-        : `${path}: ${strerror}`
+      ? message
+      : stamped
+        ? `${errorVirtualPath(error)}: ${strerror}`
+        : message === '' || message === strerror
+          ? strerror
+          : `${message}: ${strerror}`
   return withRefusal(`Error: ${words}`, error instanceof PolicyDenied ? error.refusal : null)
 }
 
