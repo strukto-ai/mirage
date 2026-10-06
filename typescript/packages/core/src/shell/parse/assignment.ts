@@ -5,12 +5,37 @@ import { SourceNode } from './source.ts'
 
 const MARKER = ' a='
 const SEPARATORS = new Set([';', '&', '&&', '||', '|'])
+const REDIRECT_RUN = new Set(['file_redirect', 'comment'])
 
 /** The grammar needs two assignments to recognize an assignment-only redirect.
  * A temporary second assignment selects that production; the adapter removes
- * it and translates every native position back before execution sees the tree. */
+ * it and translates every native position back before execution sees the tree.
+ * A repaired statement can expose the next one (`a=1 >f; b=2 >g` parses as one
+ * command until the first is split off), so the repair repeats until a pass
+ * finds no new assignment. */
 export function repairAssignments(parser: NativeParser, root: ShellNode, text: string): ShellNode {
   if (!root.hasError) return root
+  const positions = new Set<number>()
+  let current = root
+  for (let pass = text.split('=').length - 1; pass > 0; pass -= 1) {
+    const found = [...assignmentEnds(current)].filter((at) => !positions.has(at))
+    if (found.length === 0) break
+    for (const at of found) positions.add(at)
+    const ordered = [...positions].sort((a, b) => a - b)
+    let input = text
+    for (const position of [...ordered].reverse())
+      input = input.slice(0, position) + MARKER + input.slice(position)
+    current = new AssignmentNode(
+      parseProtected(parser, input),
+      text,
+      ordered.map((at, i) => at + i * MARKER.length),
+    )
+  }
+  return current
+}
+
+/** Where each assignment-only redirect's assignment ends. */
+function assignmentEnds(root: ShellNode): Set<number> {
   const positions = new Set<number>()
   const pending = [root]
   while (pending.length > 0) {
@@ -22,8 +47,12 @@ export function repairAssignments(parser: NativeParser, root: ShellNode, text: s
     const assignment = children[0]
     if (assignment?.type !== 'variable_assignment') continue
     let at = 1
-    while (children[at]?.type === 'file_redirect') at += 1
-    if (at === 1) continue
+    let redirects = 0
+    while (REDIRECT_RUN.has(children[at]?.type ?? '')) {
+      if (children[at]?.type === 'file_redirect') redirects += 1
+      at += 1
+    }
+    if (redirects === 0) continue
     const tail = children[at]
     if (
       tail !== undefined &&
@@ -35,17 +64,7 @@ export function repairAssignments(parser: NativeParser, root: ShellNode, text: s
       continue
     positions.add(assignment.endIndex)
   }
-  if (positions.size === 0) return root
-  let input = text
-  const ordered = [...positions].sort((a, b) => a - b)
-  for (const position of [...ordered].reverse())
-    input = input.slice(0, position) + MARKER + input.slice(position)
-  const retried = parseProtected(parser, input)
-  return new AssignmentNode(
-    retried,
-    text,
-    ordered.map((at, i) => at + i * MARKER.length),
-  )
+  return positions
 }
 
 class AssignmentNode extends SourceNode {

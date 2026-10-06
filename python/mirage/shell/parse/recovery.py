@@ -488,7 +488,9 @@ def _statement_boundaries(data: bytes) -> bytes:
     when the following statement has a file redirect. A newline between
     children of a simple command cannot be whitespace in bash: quoted
     newlines belong to a child, and continuations have already been joined.
-    Insert a semicolon without removing bytes so source maps remain valid.
+    Insert a semicolon without removing bytes so source maps remain valid,
+    before a comment that ends the statement, since one after it would be
+    read as part of the comment.
 
     Args:
         data (bytes): source after heredoc lowering and continuation removal.
@@ -510,7 +512,11 @@ def _statement_boundaries(data: bytes) -> bytes:
         for left, right in zip(node.children, node.children[1:]):
             gap = data[left.end_byte : right.start_byte]
             if b"\n" in gap and not gap.strip():
-                offsets.add(left.end_byte + gap.index(b"\n"))
+                offsets.add(
+                    left.start_byte
+                    if left.type == "comment"
+                    else left.end_byte + gap.index(b"\n")
+                )
     for offset in sorted(offsets, reverse=True):
         data = data[:offset] + b";" + data[offset:]
     return data

@@ -203,6 +203,146 @@
         "stdout": "failed\nok\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "assign_redirect_repeated",
+      "seq": 940084,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "a=1 >/dev/null; a=2 >/dev/null; echo $a; unset a",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "assign_redirect_and_list",
+      "seq": 940098,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "a=1 >/dev/null && b=2 >/dev/null; echo $a$b; unset a b",
+      "expect": {
+        "exit": 0,
+        "stdout": "12\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "assign_redirect_lines",
+      "seq": 940099,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "a=1 >/dev/null\nb=2 >/dev/null\necho $a$b; unset a b",
+      "expect": {
+        "exit": 0,
+        "stdout": "12\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "assign_redirect_comment",
+      "seq": 940115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "a=1 >/dev/null # c\necho $a; unset a",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": []
     }
   ]
 }

@@ -358,7 +358,8 @@ export function statementBoundaries(parser: NativeParser, text: string): string 
       const right = children[i]
       if (left === undefined || right === undefined) continue
       const gap = text.slice(left.endIndex, right.startIndex)
-      if (gap.includes('\n') && gap.trim() === '') offsets.add(left.endIndex + gap.indexOf('\n'))
+      if (gap.includes('\n') && gap.trim() === '')
+        offsets.add(left.type === 'comment' ? left.startIndex : left.endIndex + gap.indexOf('\n'))
     }
   }
   for (const offset of [...offsets].sort((a, b) => b - a))

@@ -6,11 +6,16 @@ from mirage.shell.types import TSNodeLike
 
 MARKER = b" a="
 SEPARATORS = frozenset({b";", b"&", b"&&", b"||", b"|"})
+REDIRECT_RUN = frozenset({"file_redirect", "comment"})
 
 
 def repair_assignments(root: TSNodeLike, data: bytes) -> TSNodeLike:
     """Select the assignment-only redirect production with an invisible second
     assignment, removed by the adapter before execution sees the tree.
+
+    A repaired statement can expose the next one (``a=1 >f; b=2 >g`` parses
+    as one command until the first is split off), so the repair repeats
+    until a pass finds no new assignment.
 
     Args:
         root (TSNodeLike): the parsed tree to repair.
@@ -18,6 +23,31 @@ def repair_assignments(root: TSNodeLike, data: bytes) -> TSNodeLike:
     """
     if not root.has_error:
         return root
+    positions: set[int] = set()
+    current = root
+    for _ in range(data.count(b"=")):
+        found = _assignment_ends(current) - positions
+        if not found:
+            break
+        positions |= found
+        ordered = sorted(positions)
+        amended = data
+        for at in reversed(ordered):
+            amended = amended[:at] + MARKER + amended[at:]
+        current = AssignmentNode(
+            _parse_bytes(amended),
+            data,
+            tuple(at + i * len(MARKER) for i, at in enumerate(ordered)),
+        )
+    return current
+
+
+def _assignment_ends(root: TSNodeLike) -> set[int]:
+    """Where each assignment-only redirect's assignment ends.
+
+    Args:
+        root (TSNodeLike): the tree to scan.
+    """
     positions: set[int] = set()
     pending = [root]
     while pending:
@@ -28,10 +58,11 @@ def repair_assignments(root: TSNodeLike, data: bytes) -> TSNodeLike:
         children = node.children
         if not children or children[0].type != "variable_assignment":
             continue
-        at = 1
-        while at < len(children) and children[at].type == "file_redirect":
+        at, redirects = 1, 0
+        while at < len(children) and children[at].type in REDIRECT_RUN:
+            redirects += children[at].type == "file_redirect"
             at += 1
-        if at == 1:
+        if not redirects:
             continue
         tail = children[at] if at < len(children) else None
         if tail is not None and not (
@@ -43,18 +74,7 @@ def repair_assignments(root: TSNodeLike, data: bytes) -> TSNodeLike:
         ):
             continue
         positions.add(children[0].end_byte)
-    if not positions:
-        return root
-    amended = data
-    ordered = sorted(positions)
-    for at in reversed(ordered):
-        amended = amended[:at] + MARKER + amended[at:]
-    retried = _parse_bytes(amended)
-    return AssignmentNode(
-        retried,
-        data,
-        tuple(at + i * len(MARKER) for i, at in enumerate(ordered)),
-    )
+    return positions
 
 
 class AssignmentNode(SourceNode):
