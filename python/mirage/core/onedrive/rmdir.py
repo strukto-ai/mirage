@@ -18,8 +18,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.client import graph_delete
 from mirage.core.msgraph.drive import drive_root_empty
 from mirage.core.onedrive.client import drive_loc
+from mirage.errors.fs import enotempty
 from mirage.types import PathSpec
-from mirage.utils.errors import enotempty
 
 
 async def rmdir(

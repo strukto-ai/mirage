@@ -3,7 +3,7 @@ import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PathSpec } from '../types.ts'
 import { ancestorEntry, resolveEntry, type ReaddirFn } from './hierarchy/probe.ts'
 import type { ScopeMatch } from './hierarchy/scope.ts'
-import { enoent } from '../utils/errors.ts'
+import { enoent } from '../errors/fs.ts'
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
 

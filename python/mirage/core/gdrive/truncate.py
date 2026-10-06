@@ -16,8 +16,8 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
 from mirage.core.gdrive.write import write
 from mirage.core.google.drive import download_file
+from mirage.errors.fs import eisdir, enotsup
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enotsup
 
 
 @eacces_on_denied

@@ -164,7 +164,7 @@ async def test_mkdir_parents_names_the_file_it_stops_at(
             "mirage.core.box.mkdir.create_folder", new_callable=AsyncMock
         ) as cf,
     ):
-        with pytest.raises(error, match="^/data/a.txt$"):
+        with pytest.raises(error, match="'/data/a.txt'$"):
             await mkdir(root_accessor, _spec(virtual), parents=True)
     cf.assert_not_awaited()
 

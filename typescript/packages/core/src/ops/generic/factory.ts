@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { enotsup } from '../../utils/errors.ts'
+import { enotsup } from '../../errors/fs.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import type { MakeGenericOpsOptions, OpsTable } from './types.ts'
 import { isUnsatisfiableRange, sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../utils/glob_walk.ts'
-import { eexist, einval, eisdir, isEnotdir, isMissingPath } from '../../utils/errors.ts'
+import { eexist, einval, eisdir, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 
 const expectPathSpec = (value: unknown, op: string): PathSpec => {

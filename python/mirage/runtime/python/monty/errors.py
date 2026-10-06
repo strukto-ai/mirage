@@ -16,7 +16,7 @@ import builtins
 from dataclasses import dataclass
 
 from mirage.errors import FsCondition
-from mirage.errors.posix import gnu_phrase, linux_errno
+from mirage.errors.posix import linux_errno, posix_phrase
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +60,7 @@ def cpython_error(condition: FsCondition) -> CPythonError:
     Args:
         condition (FsCondition): the named condition.
     """
-    phrase = gnu_phrase(condition)
+    phrase = posix_phrase(condition)
     if condition is FsCondition.NO_XATTR:
         phrase = "No data available"
     return CPythonError(

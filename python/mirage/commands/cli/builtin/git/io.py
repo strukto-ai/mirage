@@ -12,16 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
 import logging
-import os
 
 from mirage.commands.cli.builtin.git.constants import PERMISSION_BITS, SYMLINK
 from mirage.commands.cli.builtin.git.errors import MountInWayError
+from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.fs import eexist
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
-from mirage.utils.errors import MISS_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -365,9 +364,7 @@ async def take_lock(dispatch: DispatchFn, path: str | PathSpec) -> None:
         f"{scope.dotted or scope.virtual}.lock", cwd="/"
     )
     if await exists(dispatch, lock):
-        raise FileExistsError(
-            errno.EEXIST, os.strerror(errno.EEXIST), lock.virtual
-        )
+        raise eexist(lock)
     await dispatch("write", lock, data=b"")
     await remove_file(dispatch, lock)
 

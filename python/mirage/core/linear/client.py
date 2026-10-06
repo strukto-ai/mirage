@@ -37,6 +37,7 @@ from mirage.core.linear.queries import (
     TEAM_PROJECTS_QUERY,
     USER_LOOKUP_QUERY,
 )
+from mirage.errors.fs import enoent
 from mirage.types import JsonValue
 from mirage.vfs.secrets import reveal_secret
 
@@ -222,7 +223,7 @@ async def resolve_team(
     for team in teams:
         if team.get("id") == key_or_id or team.get("key") == key_or_id:
             return team
-    raise FileNotFoundError(key_or_id)
+    raise enoent(key_or_id)
 
 
 async def get_issue(
@@ -271,7 +272,7 @@ async def resolve_issue_id(
     )
     nodes: list[dict[str, Any]] = data["issues"]["nodes"]
     if not nodes:
-        raise FileNotFoundError(issue_key)
+        raise enoent(issue_key)
     found: str = nodes[0]["id"]
     return found
 
@@ -291,7 +292,7 @@ async def resolve_user_id(
     )
     nodes: list[dict[str, Any]] = data["users"]["nodes"]
     if not nodes:
-        raise FileNotFoundError(assignee_email)
+        raise enoent(assignee_email)
     found: str = nodes[0]["id"]
     return found
 

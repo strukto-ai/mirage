@@ -19,8 +19,8 @@ from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.msgraph.drive import FolderTarget, create_child_folder
 from mirage.core.sharepoint.client import item_url
 from mirage.core.sharepoint.resolve import resolve_item
+from mirage.errors.fs import enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import enotdir
 
 
 async def _create_dir(

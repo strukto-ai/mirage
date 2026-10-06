@@ -51,10 +51,10 @@ from mirage.core.hf_hub.repo import (
 )
 from mirage.core.hf_hub.tree import fetch_tree
 from mirage.core.hf_hub.tree_entry import TreeEntry
+from mirage.errors.constants import MISS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.utils.errors import MISS_ERRORS
 
 logger = logging.getLogger(__name__)
 

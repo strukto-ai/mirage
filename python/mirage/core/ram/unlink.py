@@ -15,8 +15,8 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.core.ram.dest import lookup_error
+from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir
 from mirage.utils.path import norm
 
 

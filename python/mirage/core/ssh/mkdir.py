@@ -17,8 +17,8 @@ import asyncssh
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.ssh.utils import join_root
+from mirage.errors.fs import eexist, enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import eexist, enoent
 
 
 async def mkdir(

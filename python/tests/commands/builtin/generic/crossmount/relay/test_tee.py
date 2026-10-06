@@ -1,9 +1,9 @@
 import pytest
 
 from mirage.commands.builtin.generic.crossmount.relay.tee import run_tee
+from mirage.errors.fs import enoent
 from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec
-from mirage.utils.errors import enoent
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 

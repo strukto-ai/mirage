@@ -12,22 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 from collections.abc import Callable
 from dataclasses import replace
 
+from mirage.errors.fs import dot_walk_error, eexist, eloop, enoent
+from mirage.errors.render import operand_spelling
+from mirage.errors.types import (
+    FsCondition,
+)
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
-from mirage.utils.errors import (
-    DotWalkLoop,
-    DotWalkMissing,
-    DotWalkNotDir,
-    eexist,
-    enoent,
-    operand_spelling,
-)
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import (
     CycleError,
@@ -188,15 +183,17 @@ async def nearest_ancestor(stat: StatFn, path: PathSpec) -> tuple[str, bool]:
     return "/", True
 
 
-async def absent_dest_strerror(stat: StatFn, target: PathSpec) -> str | None:
-    """The strerror a create at an absent path meets in its parent chain.
+async def absent_dest_error(
+    stat: StatFn, target: PathSpec
+) -> FsCondition | None:
+    """The condition a create at an absent path meets in its parent chain.
 
     None when the immediate parent is a directory, so the path can be
-    made there; ``Not a directory`` when a plain file stands in the
-    chain; ``No such file or directory`` when a directory higher up is
-    the nearest thing there, the components below it being absent. For
-    a caller that already knows ``target`` is not there, which is what
-    :func:`dest_kind` finds out first.
+    made there; ENOTDIR when a plain file stands in the chain; ENOENT
+    when a directory higher up is the nearest thing there, the
+    components below it being absent. For a caller that already knows
+    ``target`` is not there, which is what :func:`dest_kind` finds out
+    first. Mirrors TS ``absentDestError``.
 
     Args:
         stat (StatFn): Stats a path; raises when missing.
@@ -204,10 +201,10 @@ async def absent_dest_strerror(stat: StatFn, target: PathSpec) -> str | None:
     """
     node, is_dir = await nearest_ancestor(stat, target)
     if not is_dir:
-        return "Not a directory"
+        return FsCondition.ENOTDIR
     if node == parent(norm(target.virtual)):
         return None
-    return "No such file or directory"
+    return FsCondition.ENOENT
 
 
 def link_follow(links: LinkView | None) -> Callable[[str], str] | None:
@@ -334,7 +331,7 @@ async def dot_refusal(
     try:
         prefixes = dot_prefixes(dotted, follow)
     except CycleError:
-        return DotWalkLoop(errno.ELOOP, os.strerror(errno.ELOOP), name)
+        return eloop(name)
     for prefix in prefixes:
         if any(done.startswith(prefix + "/") for done in proved):
             continue
@@ -344,10 +341,8 @@ async def dot_refusal(
             proved.append(prefix)
             continue
         if not exists and (await nearest_ancestor(stat, spec))[1]:
-            return DotWalkMissing(
-                errno.ENOENT, os.strerror(errno.ENOENT), name
-            )
-        return DotWalkNotDir(errno.ENOTDIR, os.strerror(errno.ENOTDIR), name)
+            return dot_walk_error(name, FsCondition.ENOENT)
+        return dot_walk_error(name, FsCondition.ENOTDIR)
     if dotted.endswith("/"):
         exists, is_dir = await entry_kind(
             stat, PathSpec.from_str_path(path.virtual)
@@ -355,7 +350,5 @@ async def dot_refusal(
         if exists and not is_dir:
             if creates:
                 return eexist(name)
-            return DotWalkNotDir(
-                errno.ENOTDIR, os.strerror(errno.ENOTDIR), name
-            )
+            return dot_walk_error(name, FsCondition.ENOTDIR)
     return None

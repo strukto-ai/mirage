@@ -16,7 +16,8 @@ import { visiblePath, repoRelative, under as inside } from './pathspec.ts'
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
-import { isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
+import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -49,10 +50,6 @@ const SOURCE_DIRECTORY_EMPTY = 'source directory is empty'
 const NOT_UNDER_VERSION_CONTROL = 'not under version control'
 const MULTIPLE_SOURCES = 'multiple sources for the same target'
 const CONFLICTED = 'conflicted'
-// Mount boundaries and session visibility are mirage-only refusals,
-// expressed with the corresponding filesystem error.
-const BUSY = 'Device or resource busy'
-const DENIED = 'Permission denied'
 
 /** The parsed shape of a `git mv` invocation. */
 export interface MvFlags {
@@ -204,7 +201,7 @@ export async function check(
           !visiblePath(location, destination + path.slice(source.length)),
       )
     ) {
-      return { reason: DENIED, paths: [], directory: true }
+      return { reason: posixPhrase('EACCES'), paths: [], directory: true }
     }
     if (held.some((path) => conflicted.has(path))) {
       return { reason: CONFLICTED, paths: held, directory: true }
@@ -320,9 +317,11 @@ export async function plan(
     ) {
       // Last, after every check git itself makes, so a source git would refuse
       // anyway is refused in git's own words. `-k` skips it like any other
-      // rename this source cannot survive.
+      // rename this source cannot survive. git has no word for a mount,
+      // mirage's own boundary, so the refusal borrows the kernel's EBUSY for
+      // a rename it will not perform.
       if (flags.skip) continue
-      throw new RenameFailedError(source, BUSY)
+      throw new RenameFailedError(source, 'EBUSY')
     }
     if (reason !== null) {
       if (flags.skip) continue

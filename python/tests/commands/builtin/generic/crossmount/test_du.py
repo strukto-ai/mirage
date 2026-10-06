@@ -17,11 +17,11 @@ import pytest
 from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+from mirage.errors.fs import eacces
 from mirage.io import IOResult
 from mirage.io.types import SizedRun
 from mirage.ops.registry import op
 from mirage.types import FileStat, FileType, MountMode
-from mirage.utils.errors import eacces
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 

@@ -17,9 +17,9 @@ from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.dropbox.api import create_folder, get_metadata
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.errors.fs import eexist, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def _metadata_tag(
@@ -54,7 +54,7 @@ async def mkdir(
     if api_path == accessor.root_path:
         if parents:
             return
-        raise FileExistsError(path.virtual)
+        raise eexist(path.virtual)
     if parents and await _metadata_tag(accessor, api_path) == "folder":
         return
     if not parents:
@@ -69,7 +69,7 @@ async def mkdir(
         await create_folder(accessor.token_manager, api_path)
     except DropboxApiError as exc:
         if exc.summary.startswith("path/conflict"):
-            raise FileExistsError(path.virtual) from exc
+            raise eexist(path.virtual) from exc
         raise
     record("mkdir", path.virtual, "dropbox", 0, timer)
     await invalidate_after_write(path)

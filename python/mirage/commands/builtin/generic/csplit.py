@@ -6,9 +6,10 @@ from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import missing_operand_error
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_key
 
 

@@ -19,16 +19,13 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.usage import invalid_argument_error, usage_hint
 from mirage.context import DEFAULT_UMASK
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror, walk_refusal
+from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
-from mirage.utils.errors import (
-    FS_ERRORS,
-    OperationNotSupportedError,
-    fs_strerror,
-    walk_refusal,
-)
 from mirage.workspace.executor.builtins.metadata.metadata import (
     apply_link_attrs,
     follow_operand,

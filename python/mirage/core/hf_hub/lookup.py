@@ -36,8 +36,8 @@ from mirage.core.hf_hub.tree import (
     local_rows,
     refill_snapshot,
 )
+from mirage.errors.fs import eacces
 from mirage.types import PathSpec
-from mirage.utils.errors import eacces
 
 log = logging.getLogger(__name__)
 

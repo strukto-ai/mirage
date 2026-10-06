@@ -1,5 +1,5 @@
 import type { NotionAccessor } from '../../accessor/notion.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { NotionAPIError } from './client.ts'
 import { pageSegmentName } from './normalize.ts'

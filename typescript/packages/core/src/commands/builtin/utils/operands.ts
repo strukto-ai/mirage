@@ -14,15 +14,11 @@
 
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
-import { type FileStat, type PathSpec, FileType } from '../../../types.ts'
-import {
-  eisdir,
-  fsErrorLine,
-  isDotWalkError,
-  isEisdir,
-  isFsError,
-  READ_FAILURES,
-} from '../../../utils/errors.ts'
+import type { FileStat, PathSpec } from '../../../types.ts'
+import { FileType } from '../../../types.ts'
+import { eisdir, isDotWalkError, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { READ_FAILURES } from '../../../errors/constants.ts'
 import { readFailExitCode } from '../../spec/usage.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'

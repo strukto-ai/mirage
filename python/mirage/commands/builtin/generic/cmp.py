@@ -20,9 +20,10 @@ from mirage.commands.spec.usage import (
     missing_operand_error,
     usage_hint,
 )
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import format_fs_error
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
-from mirage.utils.errors import FS_ERRORS, format_fs_error
 
 _TRY_HELP = "\n" + usage_hint(CommandName.CMP)
 _NEWLINE = ord(b"\n")

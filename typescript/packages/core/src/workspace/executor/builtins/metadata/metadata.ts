@@ -21,13 +21,14 @@ import type { SessionState } from '../../../session/session.ts'
 import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import type { FlagView } from '../../../../commands/spec/flag_view.ts'
-import { fsStrerror, isEnoent, isEnotdir, walkRefusal } from '../../../../utils/errors.ts'
+import { fsStrerror, isEnoent, isEnotdir, walkRefusal } from '../../../../errors/fs.ts'
 import { CycleError } from '../../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { expandOperands, result } from '../shared.ts'
 import type { Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 
 export function parseOwner(text: string): [number | string | null, number | string | null] {
   const sep = text.indexOf(':')
@@ -128,7 +129,7 @@ export function isReadOnlyError(err: unknown): boolean {
 // uses. `action` is GNU's phrase for the write (`cannot touch`, `changing
 // permissions of`). Mirrors Python's `permission_error`.
 export function permissionError(cmd: string, action: string, path: PathSpec, err: unknown): string {
-  return `${cmd}: ${action} '${path.rawPath}': ${fsStrerror(err) ?? 'Read-only file system'}\n`
+  return `${cmd}: ${action} '${path.rawPath}': ${fsStrerror(err) ?? posixPhrase('EROFS')}\n`
 }
 
 // Route one attribute write through the op door. The door applies what
@@ -181,7 +182,7 @@ export async function resolveOperand(
       : await dotRefusal(dispatchStat(dispatch), target, (v) => namespace.follow(v))
   if (refusal !== null) {
     errors.push(
-      `${cmd}: cannot access '${target.rawPath}': ${fsStrerror(refusal) ?? 'No such file or directory'}\n`,
+      `${cmd}: cannot access '${target.rawPath}': ${fsStrerror(refusal) ?? posixPhrase('ENOENT')}\n`,
     )
     return null
   }

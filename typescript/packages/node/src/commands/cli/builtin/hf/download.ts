@@ -19,7 +19,7 @@ import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
 import { boundedMap } from '@struktoai/mirage-core/concurrency/limiter'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { isMissingPath } from '@struktoai/mirage-core/utils/errors'
+import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { fnmatch } from '@struktoai/mirage-core/utils/fnmatch'
 
 import type { HfHubAccessor } from '../../../../accessor/hf_hub.ts'

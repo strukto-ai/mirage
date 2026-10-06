@@ -21,8 +21,8 @@ from mirage.core.databricks_volume._helpers import parent_path
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
+from mirage.errors.fs import enoent, enotdir
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import enoent, enotdir
 
 
 def _create_directory_sync(

@@ -31,7 +31,7 @@ import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
 import type { ExecuteFn } from '../../expand/node.ts'
 import { CommandTimeoutError, UsageError } from '../../../commands/errors.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
-import { formatFsError } from '../../../utils/errors.ts'
+import { formatFsError } from '../../../errors/render.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 import { makeAbortError, mergeSignals } from '../../abort.ts'

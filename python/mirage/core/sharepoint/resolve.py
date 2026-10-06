@@ -22,8 +22,8 @@ from mirage.core.msgraph.client import graph_list, id_segment
 from mirage.core.msgraph.config import MsGraphConfig, graph_api
 from mirage.core.msgraph.drive import DriveLoc
 from mirage.core.sharepoint.client import drive_ref_path, item_url
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 @dataclass(frozen=True, slots=True)

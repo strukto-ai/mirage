@@ -31,9 +31,9 @@ from mirage.core.hf_hub.client import repo_url
 from mirage.core.hf_hub.commit import Addition, commit
 from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import DEFAULT_COMMIT_MESSAGE
+from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import fs_strerror
 
 
 async def collect(

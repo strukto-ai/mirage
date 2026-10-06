@@ -32,10 +32,10 @@ from mirage.commands.spec.types import FlagValue
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import RepoRef, parse_repo, repo_host
 from mirage.core.jq import JqHalt, JqRun, jq_raised, jq_run
+from mirage.errors.fs import fs_strerror
 from mirage.io.stream import materialize, yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
-from mirage.utils.errors import fs_strerror
 
 
 def check_host(config: GhConfig, host: str | None) -> None:

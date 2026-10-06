@@ -26,10 +26,10 @@ from mirage.core.object_store.driver import (
     WriteFn,
 )
 from mirage.core.object_store.stat import make_stat
+from mirage.errors.fs import eexist, enoent, enotdir, enotsup
 from mirage.observe.context import record, start_op
 from mirage.types import FileStat, PathSpec
 from mirage.utils import key_prefix as kp
-from mirage.utils.errors import eexist, enoent, enotdir, enotsup
 from mirage.utils.path import ancestors, norm, parent
 from mirage.utils.stat_view import is_dir
 

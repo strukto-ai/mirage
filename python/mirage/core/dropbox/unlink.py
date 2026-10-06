@@ -17,9 +17,9 @@ from mirage.cache.context import invalidate_after_unlink, invalidate_ancestors
 from mirage.core.dropbox.api import delete_path, get_metadata
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent
 
 
 async def unlink(accessor: DropboxAccessor, path: PathSpec) -> None:

@@ -43,12 +43,14 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.constants import MISS_ERRORS
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import MISS_ERRORS
 
 # git's own wording for each way a source can be refused, in the shape
 # ``fatal: <reason>, source=<src>, destination=<dst>``.
@@ -60,10 +62,6 @@ SOURCE_DIRECTORY_EMPTY = "source directory is empty"
 NOT_UNDER_VERSION_CONTROL = "not under version control"
 MULTIPLE_SOURCES = "multiple sources for the same target"
 CONFLICTED = "conflicted"
-# Mount boundaries and session visibility are mirage-only refusals,
-# expressed with the corresponding filesystem error.
-BUSY = "Device or resource busy"
-DENIED = "Permission denied"
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,7 +272,7 @@ async def check(
             or not visible_path(location, destination + path[len(source) :])
             for path in inside
         ):
-            return DENIED, (), True
+            return posix_phrase(FsCondition.EACCES), (), True
         if any(path in conflicted for path in inside):
             return CONFLICTED, inside, True
         if await lstat(stat_path, links, landing) is not None:
@@ -396,9 +394,12 @@ async def plan(
             # Last, after every check git itself makes, so a source git
             # would refuse anyway is refused in git's own words. ``-k``
             # skips it like any other rename this source cannot survive.
+            # git has no word for a mount, mirage's own boundary, so the
+            # refusal borrows the kernel's EBUSY for a rename it will not
+            # perform.
             if flags.skip:
                 continue
-            raise RenameFailedError(source, BUSY)
+            raise RenameFailedError(source, FsCondition.EBUSY)
         if reason is not None:
             if flags.skip:
                 continue

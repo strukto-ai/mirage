@@ -17,12 +17,13 @@ from dataclasses import replace
 from functools import partial
 
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.path import CycleError, dotted_spelling, resolve_path
 from mirage.workspace.executor.builtins.dirs.constants import CD_USAGE
 from mirage.workspace.executor.builtins.dirs.dirs import (

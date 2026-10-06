@@ -14,7 +14,7 @@
 
 import type { ProcessView } from '../../process/types.ts'
 import type { SessionState } from '../session/session.ts'
-import { isNoMount, noMount } from '../../utils/errors.ts'
+import { isNoMount, noMount } from '../../errors/fs.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { WorkspaceRuntime } from '../../runtime/table.ts'

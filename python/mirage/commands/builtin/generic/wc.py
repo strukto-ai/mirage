@@ -19,11 +19,12 @@ from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, CountedRun, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn
-from mirage.utils.errors import FS_ERRORS, fs_error_line
 from mirage.utils.quote import shell_quote
 from mirage.utils.width import advance_column, is_space
 

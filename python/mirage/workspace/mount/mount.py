@@ -49,6 +49,8 @@ from mirage.context import (
     set_walk_probe,
     strongest_mode_under,
 )
+from mirage.errors.fs import ebusy, enotsup
+from mirage.errors.render import format_fs_error
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
@@ -73,7 +75,6 @@ from mirage.types import (
     WalkProbe,
 )
 from mirage.utils.context_scope import ContextScope
-from mirage.utils.errors import ebusy, enotsup, format_fs_error
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.base import BaseVFS

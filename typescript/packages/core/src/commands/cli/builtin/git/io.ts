@@ -14,7 +14,7 @@
 
 import { FileType, LINK_TARGET_KEY, type FileStat, PathSpec } from '../../../../types.ts'
 
-import { eexist, isEisdir, isEnotdir, isMissingPath } from '../../../../utils/errors.ts'
+import { eexist, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { PERMISSION_BITS, SYMLINK_MODE } from './constants.ts'

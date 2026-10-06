@@ -1,7 +1,7 @@
 import { PathSpec, FileType } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
-import { isEexist, isErofs } from '../../../../utils/errors.ts'
+import { isEexist, isErofs } from '../../../../errors/fs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -77,10 +77,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     const start = startPoint(fl)
     const here = await doors.statPath(start)
     if (here?.type !== FileType.DIRECTORY)
-      throw new NoWorkingDirectoryError(
-        start.rawPath,
-        here === null ? 'No such file or directory' : 'Not a directory',
-      )
+      throw new NoWorkingDirectoryError(start.rawPath, here === null ? 'ENOENT' : 'ENOTDIR')
     const target = PathSpec.fromStrPath(inv.texts[0] ?? '.', undefined, start)
     if (target.walkError === 'ENOENT')
       throw new CannotMkdirError(target.rawPath, 'No such file or directory')
@@ -120,10 +117,10 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     } catch (err) {
       const path = (err as { virtualPath?: string }).virtualPath
       const locked = path === `${settings.virtual}.lock`
-      if (locked && isEexist(err)) throw new ConfigLockError(settings.virtual, 'File exists')
+      if (locked && isEexist(err)) throw new ConfigLockError(settings.virtual, 'EEXIST')
       if (!isErofs(err)) throw err
       if (made) throw new CannotMkdirError(typed)
-      if (locked) throw new ConfigLockError(settings.virtual, 'Read-only file system')
+      if (locked) throw new ConfigLockError(settings.virtual, 'EROFS')
       throw new InitReadOnlyError(path ?? gitdir.virtual)
     }
     const text = existing

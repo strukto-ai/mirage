@@ -33,8 +33,8 @@ from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.time_range import TimeRange, parse_time
+from mirage.errors.fs import enoent
 from mirage.types import JsonValue, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.glob_walk import glob_prefix, literal_span
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.vfs.gcal.event_entry import (

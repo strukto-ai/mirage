@@ -18,8 +18,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.box.api import delete_file, delete_folder
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.resolve import path_parts, resolve_item
+from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir, enotempty
 
 
 async def rmdir(

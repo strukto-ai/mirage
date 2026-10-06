@@ -13,12 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { ELOOP_STRERROR, isEnotdir, isMissError } from '../../../utils/errors.ts'
+import { isEnotdir, isMissError } from '../../../errors/fs.ts'
 import { gnuBasename, posixNormpath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { Namespace } from './namespace.ts'
+import type { FsCondition } from '../../../errors/types.ts'
 
 export async function statOrNull(dispatch: DispatchFn, path: PathSpec): Promise<FileStat | null> {
   // A missing destination is an expected mv case (plain rename), not an
@@ -48,7 +49,7 @@ export async function statOrNull(dispatch: DispatchFn, path: PathSpec): Promise<
 //
 // A link loop in the path is absence too: the walk reaches nothing there,
 // which is the question this answers, and a diagnostic that has to name
-// the errno asks missStrerror.
+// the errno asks missCondition.
 export async function resolvePathStat(
   dispatch: DispatchFn,
   path: PathSpec,
@@ -95,25 +96,25 @@ export async function pathStat(
   return overlay !== null ? overlay(spec.virtual, stat) : stat
 }
 
-// The strerror GNU names for a path pathStat found nothing at. pathStat
-// answers null for both ways a lookup fails, since an existence probe treats
-// them alike, while a diagnostic names the one the stat met: ENOTDIR for a
-// path under a plain file, ELOOP for one a link loop stands in, ENOENT for
-// the rest. Asked only after a miss, so its round trip is on the failure
-// path. Mirrors miss_strerror in probe.py.
-export async function missStrerror(
+// The condition a diagnostic names for a path pathStat found nothing at.
+// pathStat answers null for both ways a lookup fails, since an existence
+// probe treats them alike, while a diagnostic names the one the stat met:
+// ENOTDIR for a path under a plain file, ELOOP for one a link loop stands
+// in, ENOENT for the rest. Asked only after a miss, so its round trip is on
+// the failure path. Mirrors miss_condition in probe.py.
+export async function missCondition(
   dispatch: DispatchFn,
   virtual: string | PathSpec,
-): Promise<string> {
+): Promise<FsCondition> {
   try {
     await dispatch('stat', PathSpec.fromStrPath(virtual, undefined, '/'))
   } catch (err) {
-    if (isEnotdir(err)) return 'Not a directory'
-    if (isMissError(err)) return 'No such file or directory'
-    if (isEloop(err)) return ELOOP_STRERROR
+    if (isEnotdir(err)) return 'ENOTDIR'
+    if (isMissError(err)) return 'ENOENT'
+    if (isEloop(err)) return 'ELOOP'
     throw err
   }
-  return 'No such file or directory'
+  return 'ENOENT'
 }
 
 function isEloop(err: unknown): boolean {

@@ -1,21 +1,20 @@
-import errno
 import logging
-import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.paths import (
-    absent_dest_strerror,
+    absent_dest_error,
     entry_kind,
 )
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.fs import eisdir, enotdir, fs_error, fs_strerror
+from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
-from mirage.utils.errors import fs_error_line, fs_strerror
 
 logger = logging.getLogger(__name__)
 
@@ -117,18 +116,16 @@ async def open_refusal(
     if any(
         path.virtual.startswith(f"{o.virtual.rstrip('/')}/") for o in opened
     ):
-        return NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR))
+        return enotdir(path)
     exists, is_dir = await entry_kind(stat, path)
     if is_dir:
-        return IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
+        return eisdir(path)
     if exists:
         return None
-    strerror = await absent_dest_strerror(stat, path)
-    if strerror is None:
+    condition = await absent_dest_error(stat, path)
+    if condition is None:
         return None
-    if strerror == os.strerror(errno.ENOTDIR):
-        return NotADirectoryError(errno.ENOTDIR, strerror)
-    return FileNotFoundError(errno.ENOENT, strerror)
+    return fs_error(path, condition)
 
 
 async def write_output(

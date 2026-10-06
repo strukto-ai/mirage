@@ -26,7 +26,7 @@ import {
   isHttpError,
 } from '../utils/http.ts'
 import { UsageError } from '../../errors.ts'
-import { gnuStrerror, isFsError, isWalkError, enotsup } from '../../../utils/errors.ts'
+import { fsStrerror, isFsError, isWalkError, enotsup } from '../../../errors/fs.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import { FlagView } from '../../spec/flag_view.ts'
@@ -303,11 +303,11 @@ function doubled(hops: HttpResponse[]): string {
  * (read-only mount, unsupported op), so the exit code matches curl while the
  * message keeps path and reason. The refusals whose wording is load-bearing
  * (read-only mount, unsupported op) keep their raw message; an unusable path
- * carries only the path as its message, so it needs the GNU strerror.
+ * carries only the path as its message, so it needs the strerror text.
  */
 function writeFailure(shown: string, err: unknown): string {
   const code = (err as { code?: string }).code
-  const strerror = gnuStrerror(code)
+  const strerror = fsStrerror(err)
   const raw = code === 'EACCES' || code === 'ENOTSUP' || !isFsError(err)
   const detail =
     !raw && strerror !== null ? strerror : err instanceof Error ? err.message : String(err)

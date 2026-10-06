@@ -139,10 +139,7 @@ export async function discover(
     if (here === null)
       throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual)
     if (here.type !== FileType.DIRECTORY)
-      throw new NoWorkingDirectoryError(
-        start.dotted ? start.rawPath : start.virtual,
-        'Not a directory',
-      )
+      throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual, 'ENOTDIR')
     const candidate = gitdir
     const info = await statPath(candidate)
     if (info === null) throw new NotARepositoryError(gitdir.rawPath)
@@ -190,10 +187,7 @@ export async function discover(
       if (here === null)
         throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual)
       if (here.type !== FileType.DIRECTORY) {
-        throw new NoWorkingDirectoryError(
-          start.dotted ? start.rawPath : start.virtual,
-          'Not a directory',
-        )
+        throw new NoWorkingDirectoryError(start.dotted ? start.rawPath : start.virtual, 'ENOTDIR')
       }
       first = false
     }
@@ -239,8 +233,7 @@ async function location(
   if (!configured.startsWith('/')) {
     const info = await statPath(selected)
     if (info === null) throw new WorkTreeChdirError(configured)
-    if (info.type !== FileType.DIRECTORY)
-      throw new WorkTreeChdirError(configured, 'Not a directory')
+    if (info.type !== FileType.DIRECTORY) throw new WorkTreeChdirError(configured, 'ENOTDIR')
   }
   return { ...located, worktree: selected }
 }

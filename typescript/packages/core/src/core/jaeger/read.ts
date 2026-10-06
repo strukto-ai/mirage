@@ -15,7 +15,7 @@
 import type { JaegerAccessor } from '../../accessor/jaeger.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonBytes } from '../render/json.ts'

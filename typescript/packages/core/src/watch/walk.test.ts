@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { FileStat, FileType, PathSpec, type WalkEntry } from '../types.ts'
-import { enoent } from '../utils/errors.ts'
+import { enoent } from '../errors/fs.ts'
 import { entryOf, ReaddirWalk, synthDirs } from './walk.ts'
 
 function root(virtual: string, vfsPath: string): PathSpec {

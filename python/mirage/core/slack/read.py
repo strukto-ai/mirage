@@ -23,8 +23,8 @@ from mirage.core.slack.readdir import readdir
 from mirage.core.slack.scope import detect_scope
 from mirage.core.slack.users import get_user_profile, user_json_bytes
 from mirage.core.time_range import day_channel_id, guard_day
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def _read_chat(

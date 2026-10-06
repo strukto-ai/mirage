@@ -19,8 +19,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hierarchy.probe import A, ReaddirFn, resolve_entry
 from mirage.core.hierarchy.scope import INVALID, DetectFn, ScopeMatch
+from mirage.errors.fs import eisdir, enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 DeleteFn = Callable[[A, ScopeMatch, IndexEntry], Awaitable[None]]
@@ -61,7 +61,7 @@ def make_unlink(
             if match.kind != INVALID and (
                 match.scope is None or not match.scope.leaf
             ):
-                raise IsADirectoryError(path.virtual)
+                raise eisdir(path.virtual)
             raise enoent(path)
         entry = await resolve_entry(readdir, accessor, path, index)
         if entry is None:

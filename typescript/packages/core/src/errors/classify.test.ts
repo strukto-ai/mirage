@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { CrossMountError } from '../runtime/errors.ts'
-import { enoent, enotsup, noMount } from '../utils/errors.ts'
+import { enoent, enotsup, noMount } from './fs.ts'
 import { CycleError } from '../utils/path.ts'
 import { classify } from './classify.ts'
 
@@ -54,7 +54,7 @@ describe('classify', () => {
     expect(classify(new CrossMountError('/a/x', '/b/x'))).toBe('EXDEV')
   })
 
-  it('reads the constructors built by utils/errors', () => {
+  it('reads the constructors built by errors/fs', () => {
     expect(classify(enoent('/x'))).toBe('ENOENT')
     expect(classify(enotsup('ram', 'unlink', '/x'))).toBe('ENOTSUP')
   })

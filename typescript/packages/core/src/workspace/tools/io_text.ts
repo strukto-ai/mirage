@@ -15,6 +15,7 @@
 import { PolicyDenied, describeRefusal, saysWhy } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import type { ExecuteResult } from '../workspace/workspace.ts'
+import { errorVirtualPath, fsStrerror } from '../../errors/fs.ts'
 
 export function decode(value: Uint8Array | null | undefined): string {
   if (value === null || value === undefined) return ''
@@ -24,7 +25,7 @@ export function decode(value: Uint8Array | null | undefined): string {
 /**
  * The one line a text surface appends for a refusal, newline included,
  * or the empty string when there is nothing to add: no record, or a text
- * that already says why (an operand-scoped denial's GNU line, wherever
+ * that already says why (an operand-scoped denial's own line, wherever
  * it landed). A command-scoped refusal's stderr is bash's bare
  * `Permission denied`, which never does. Mirrors Python's `refusal_line`.
  */
@@ -44,14 +45,26 @@ export function withRefusal(text: string, refusal: Refusal | null): string {
 }
 
 /**
- * A tool's failure as the agent reads it: the error's own words (a
- * policy's refusal reads as a plain `Permission denied`), then the
- * refusal's line when a policy refused the op. Mirrors Python's
- * `error_text`.
+ * A tool's failure as the agent reads it: a filesystem error as
+ * `<path>: <phrase>` (a policy's refusal reads as `Permission denied`),
+ * or the phrase alone when no path was stamped and the message adds
+ * nothing, anything else in its own words, then the refusal's line when a
+ * policy refused the op. Mirrors Python's `error_text`.
  */
 export function errorText(error: unknown): string {
+  const strerror = fsStrerror(error)
   const message = error instanceof Error ? error.message : String(error)
-  return withRefusal(`Error: ${message}`, error instanceof PolicyDenied ? error.refusal : null)
+  const stamped =
+    strerror !== null && typeof (error as { virtualPath?: unknown }).virtualPath === 'string'
+  const words =
+    strerror === null
+      ? message
+      : stamped
+        ? `${errorVirtualPath(error)}: ${strerror}`
+        : message === '' || message === strerror
+          ? strerror
+          : `${message}: ${strerror}`
+  return withRefusal(`Error: ${words}`, error instanceof PolicyDenied ? error.refusal : null)
 }
 
 export function ioToStr(io: ExecuteResult): string {

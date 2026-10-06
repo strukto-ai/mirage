@@ -21,6 +21,7 @@ from mirage.runtime.constants import HARD_LINK_REFUSAL
 # module, and 18 here is EDOM where the host's 18 is EXDEV. The table
 # is total over the vocabulary; test_errors.py fails a half-added member.
 WASI: dict[FsCondition, int] = {
+    FsCondition.EBADF: 8,
     FsCondition.ENOENT: 44,
     FsCondition.ENOTDIR: 54,
     FsCondition.EISDIR: 31,
@@ -35,6 +36,7 @@ WASI: dict[FsCondition, int] = {
     FsCondition.EIO: 29,
     FsCondition.EBUSY: 10,
     FsCondition.EROFS: 69,
+    FsCondition.EFBIG: 22,
     # preview1 has no xattr syscalls, so this row is unreachable from a
     # guest; ENOTSUP is the honest answer if a future host ever asks.
     FsCondition.NO_XATTR: 58,
@@ -50,11 +52,8 @@ def wasi_errno(condition: FsCondition) -> int:
     return WASI[condition]
 
 
-# errno. EBADF stays a local literal because a bad guest fd is the fd
-# table's condition, never a mount's, so the vocabulary does not name
-# it.
 OK = 0
-EBADF = 8
+EBADF = wasi_errno(FsCondition.EBADF)
 EINVAL = wasi_errno(FsCondition.EINVAL)
 EIO = wasi_errno(FsCondition.EIO)
 ENOENT = wasi_errno(FsCondition.ENOENT)

@@ -21,8 +21,8 @@ from mirage.core.email.scope import detect_scope
 from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def _read_message(

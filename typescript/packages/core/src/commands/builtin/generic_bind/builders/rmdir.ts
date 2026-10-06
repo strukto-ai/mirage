@@ -16,7 +16,7 @@ import { UsageError } from '../../../errors.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView } from '../../../../ops/types.ts'
 import { FileType, type PathSpec } from '../../../../types.ts'
-import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { mountPrefixOf, mountedPath, respelled } from '../../../../utils/key_prefix.ts'
 import { CycleError, resolvePath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
@@ -24,15 +24,7 @@ import { formatRecords } from '../../utils/output.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { type Builder, requireOp, resolveGlobOf, type BuilderFn } from '../adapter.ts'
-
-// What rmdir(2) answers for a mount point, which is what the walk up from
-// -p meets at the mount root.
-const MOUNT_ROOT_BUSY = 'Device or resource busy'
-
-// An ancestor gone by the time -p reaches it held the entry just removed, so
-// it was a keyed store's implicit prefix that vanished with its last key: the
-// directory GNU's rmdir would have removed is already gone.
-const VANISHED = 'No such file or directory'
+import { posixPhrase } from '../../../../errors/posix.ts'
 
 // `virtual` with its parent resolved through the namespace's links: rmdir(2)
 // follows every component but the last, which stays as named, so a link
@@ -102,7 +94,7 @@ const rmdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
     // asked for a directory the call refuses to resolve. No backend can
     // see a link, so the name plane answers.
     if (links !== null && links.statAt(p.virtual) !== null) {
-      return p.rawPath.endsWith('/') ? 'Symbolic link not followed' : 'Not a directory'
+      return p.rawPath.endsWith('/') ? 'Symbolic link not followed' : posixPhrase('ENOTDIR')
     }
     let isDir = false
     try {
@@ -112,8 +104,8 @@ const rmdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
       if (!isFsError(exc)) throw exc
       return fsStrerror(exc) ?? String(exc)
     }
-    if (!isDir) return 'Not a directory'
-    if ((await ops.readdir(accessor, p, idx)).length > 0) return 'Directory not empty'
+    if (!isDir) return posixPhrase('ENOTDIR')
+    if ((await ops.readdir(accessor, p, idx)).length > 0) return posixPhrase('ENOTEMPTY')
     try {
       await rmdirOp(accessor, p, idx)
     } catch (exc) {
@@ -125,7 +117,7 @@ const rmdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
       // the raw error.
       const code = (exc as { code?: string }).code
       const detail =
-        code === 'ENOTEMPTY' || code === 'EEXIST' ? 'Directory not empty' : fsStrerror(exc)
+        code === 'ENOTEMPTY' || code === 'EEXIST' ? posixPhrase('ENOTEMPTY') : fsStrerror(exc)
       if (detail === null) throw exc
       return detail
     }
@@ -135,7 +127,7 @@ const rmdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
     if (verbose) lines.push(`rmdir: removing directory, '${p.rawPath}'`)
     const reason = await remove(p)
     if (reason !== null) {
-      if (!(ignore && reason === 'Directory not empty')) {
+      if (!(ignore && reason === posixPhrase('ENOTEMPTY'))) {
         errors.push(`rmdir: failed to remove '${p.rawPath}': ${reason}`)
       }
       continue
@@ -143,10 +135,14 @@ const rmdir: BuilderFn = async (ops, accessor, paths, _texts, opts) => {
     if (!fl.asBool('parents')) continue
     for (const [ancestor, typed] of ancestors(p, opts.cwd, links)) {
       if (verbose) lines.push(`rmdir: removing directory, '${typed}'`)
-      const failed = ancestor === null ? MOUNT_ROOT_BUSY : await remove(ancestor)
-      if (failed === null || failed === VANISHED) continue
-      if (!(ignore && failed === 'Directory not empty')) {
-        const what = failed === 'Not a directory' ? '' : 'directory '
+      // The walk up meets the mount root, which rmdir(2) answers with EBUSY.
+      // An ancestor already gone held the entry just removed, so it was a
+      // keyed store's implicit prefix that vanished with its last key: it
+      // counts as removed.
+      const failed = ancestor === null ? posixPhrase('EBUSY') : await remove(ancestor)
+      if (failed === null || failed === posixPhrase('ENOENT')) continue
+      if (!(ignore && failed === posixPhrase('ENOTEMPTY'))) {
+        const what = failed === posixPhrase('ENOTDIR') ? '' : 'directory '
         errors.push(`rmdir: failed to remove ${what}'${typed}': ${failed}`)
       }
       break

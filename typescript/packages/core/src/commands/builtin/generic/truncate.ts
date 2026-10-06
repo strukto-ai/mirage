@@ -1,13 +1,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
-import {
-  eisdir,
-  enoent,
-  enotdir,
-  fsErrorLine,
-  isEnotdir,
-  isFsError,
-} from '../../../utils/errors.ts'
+import { eisdir, enoent, enotdir, isEnotdir, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 import { isDir } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
@@ -15,7 +9,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { sizeSuffixes } from '../utils/size_suffix.ts'
-import { absentDestStrerror } from '../utils/paths.ts'
+import { absentDestError } from '../utils/paths.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 // GNU truncate's letter set differs from split's and od's: lowercase
@@ -161,8 +155,8 @@ async function truncateOne(
     const code = (err as { code?: unknown }).code
     if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err
     if (isEnotdir(err) && (flags.noCreate || !path.rawPath.endsWith('/'))) throw err
-    const why = await absentDestStrerror(stat, path)
-    if (why === 'Not a directory') throw enotdir(path)
+    const why = await absentDestError(stat, path)
+    if (why === 'ENOTDIR') throw enotdir(path)
     if (flags.noCreate) return
     if (why !== null) throw enoent(path)
     current = 0

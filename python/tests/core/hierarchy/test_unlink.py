@@ -22,7 +22,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.unlink import make_unlink
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 from tests.core.hierarchy.conftest import (
     FakeAccessor,
     detect_scope,
@@ -100,4 +100,4 @@ def test_unlink_names_the_operand_when_the_parent_is_absent(accessor):
     path = spec("/rooms/red/a.json")
     with pytest.raises(FileNotFoundError) as excinfo:
         asyncio.run(unlink(accessor, path, RAMIndexCacheStore()))
-    assert str(excinfo.value) == path.virtual
+    assert excinfo.value.filename == path.virtual

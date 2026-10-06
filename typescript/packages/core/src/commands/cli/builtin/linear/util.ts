@@ -22,7 +22,7 @@ import {
 import type { LinearTransport } from '../../../../core/linear/client.ts'
 import type { LinearConfig } from '../../../../core/linear/config.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
-import { enoent } from '../../../../utils/errors.ts'
+import { enoent } from '../../../../errors/fs.ts'
 
 const ISSUE_KEY_RE = /^[A-Za-z][A-Za-z0-9]*-\d+$/
 const DEC = new TextDecoder()

@@ -42,8 +42,9 @@ import {
   isFsError,
   isMissingPath,
   isWalkError,
-} from '../../../utils/errors.ts'
+} from '../../../errors/fs.ts'
 import { shellJoin } from '../../../shell/join.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 
 const ENC = new TextEncoder()
 
@@ -98,7 +99,7 @@ async function* guarded(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8A
     yield* chunks(source)
   } catch (err) {
     if (!isFsError(err)) throw err
-    throw new AwkIOError(fsStrerror(err) ?? 'No such file or directory')
+    throw new AwkIOError(fsStrerror(err) ?? posixPhrase('ENOENT'))
   }
 }
 
@@ -135,7 +136,7 @@ export class AwkStreams implements AwkHost {
 
   private async *readPath(name: string | PathSpec): AsyncIterable<Uint8Array> {
     const dispatch = this.opts.dispatch
-    if (dispatch === undefined) throw new AwkIOError('No such file or directory')
+    if (dispatch === undefined) throw new AwkIOError(posixPhrase('ENOENT'))
     const path = PathSpec.fromStrPath(name, undefined, this.opts.cwd)
     // A keyed store reads a directory as nothing at all, and other backends
     // fail it in their own words, so the stat goes first to fail it the way
@@ -272,7 +273,7 @@ export async function awkGeneric(
         // GNU awk exits 2 when a -f program file cannot be opened;
         // anything that is not absence keeps propagating.
         if (!isMissingPath(err) && !isEnotdir(err)) throw err
-        const msg = `awk: ${programFile.rawPath}: ${fsStrerror(err) ?? 'No such file or directory'}`
+        const msg = `awk: ${programFile.rawPath}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`
         return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
       }
     }

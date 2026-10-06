@@ -23,8 +23,8 @@ from mirage.core.box.api import (
     list_folder_items,
 )
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
+from mirage.errors.fs import eisdir, enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir, enoent, enotdir
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 

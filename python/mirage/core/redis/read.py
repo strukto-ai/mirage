@@ -15,9 +15,9 @@
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
+from mirage.errors.fs import eisdir
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.errors import eisdir
 from mirage.utils.path import norm
 
 

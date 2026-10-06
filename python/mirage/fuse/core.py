@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import errno
 import functools
 import logging
 import os
@@ -25,6 +24,7 @@ from typing import Any, Coroutine
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
+from mirage.errors.fs import einval, enoent, erofs
 from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
 from mirage.policy.match import skipped_at_op_doors
@@ -401,9 +401,7 @@ class MountCore:
         # Reject early to avoid hitting the ops layer.
         name = path.rsplit("/", 1)[-1]
         if is_macos_metadata(name):
-            raise FileNotFoundError(
-                errno.ENOENT, os.strerror(errno.ENOENT), path
-            )
+            raise enoent(path)
         # Link check must precede the ops stat: the ops facade follows
         # namespace links, so stat on a link path reports the target.
         target = self.link_target(path)
@@ -557,7 +555,7 @@ class MountCore:
         """
         target = self.link_target(path)
         if target is None:
-            raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), path)
+            raise einval(path)
         return target
 
     def symlink(self, target: str, source: str) -> None:
@@ -578,7 +576,7 @@ class MountCore:
             OSError: EROFS when the workspace has no namespace links.
         """
         if self._ops.links is None:
-            raise OSError(errno.EROFS, os.strerror(errno.EROFS), target)
+            raise erofs(target)
         stored = self.resolve(source) if source.startswith("/") else source
         self._run(self._ops.symlink(self.resolve(target), stored))
 

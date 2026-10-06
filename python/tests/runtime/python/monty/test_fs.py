@@ -17,12 +17,12 @@ import errno
 
 import pytest
 
+from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import RunArgs
 from mirage.types import ContentType, FileStat, FileType
-from mirage.utils.errors import OperationNotSupportedError
 
 
 class FakeDispatch:

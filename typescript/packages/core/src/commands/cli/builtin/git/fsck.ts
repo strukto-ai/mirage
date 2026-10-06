@@ -5,7 +5,7 @@ import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
-import { isWalkError, gnuStrerror } from '../../../../utils/errors.ts'
+import { isWalkError, fsStrerror } from '../../../../errors/fs.ts'
 import { toHex } from '../../../../utils/hex.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -53,9 +53,7 @@ export async function checkPack(
     }
   } catch (err) {
     if (!isWalkError(err)) throw err
-    const detail =
-      gnuStrerror((err as { code?: string }).code) ??
-      (err instanceof Error ? err.message : String(err))
+    const detail = fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
     const failure = new GitError(`cannot read pack ${path.virtual}: ${detail}`)
     failure.cause = err
     throw failure

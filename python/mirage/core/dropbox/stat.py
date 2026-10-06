@@ -25,8 +25,8 @@ from mirage.core.dropbox.constants import CONTENT_HASH, MISS_SUMMARIES
 from mirage.core.dropbox.fingerprint import token_of
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.readdir import readdir
+from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 

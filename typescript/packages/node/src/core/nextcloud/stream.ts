@@ -1,7 +1,7 @@
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { recordStream } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { DEFAULT_CHUNK_SIZE } from './constants.ts'
 import { isNotFound, nextcloudKey } from './util.ts'

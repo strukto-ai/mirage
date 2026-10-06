@@ -14,14 +14,14 @@
 
 import asyncio
 import codecs
-import errno
 import io
 import logging
-import os
 from collections.abc import Iterable, Iterator
 from types import TracebackType
 from typing import TYPE_CHECKING, Self
 
+from mirage.errors.posix import posix_errno, posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.ops import Ops
 from mirage.runtime.handles import FileHandle
 from mirage.runtime.handles.mode import parse_mode
@@ -79,7 +79,10 @@ class _HandleRaw(io.RawIOBase):
     def seek(self, offset: int, whence: int = 0) -> int:
         pos = self._handle.seek(offset, whence)
         if pos is None:
-            raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
+            raise OSError(
+                posix_errno(FsCondition.EINVAL),
+                posix_phrase(FsCondition.EINVAL),
+            )
         return pos
 
     def tell(self) -> int:

@@ -70,7 +70,8 @@ import {
   MountMode,
   PathSpec,
 } from '../../types.ts'
-import { ebusy, enotsup, formatFsError } from '../../utils/errors.ts'
+import { ebusy, enotsup } from '../../errors/fs.ts'
+import { formatFsError } from '../../errors/render.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { dispatchStat, linkFollow } from '../../commands/builtin/utils/paths.ts'
 import type { DispatchFn } from '../../runtime/types.ts'

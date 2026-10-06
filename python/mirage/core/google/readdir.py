@@ -21,8 +21,8 @@ from mirage.core.google.date_glob import glob_to_modified_range
 from mirage.core.google.drive import list_all_files
 from mirage.core.hierarchy.probe import ReaddirFn
 from mirage.core.hierarchy.scope import DetectFn
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 

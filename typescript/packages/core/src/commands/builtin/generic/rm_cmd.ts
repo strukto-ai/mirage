@@ -16,7 +16,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec, VFSName } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
-import { fsStrerror, isFsError } from '../../../utils/errors.ts'
+import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import {
   command,
   type CommandFnResult,

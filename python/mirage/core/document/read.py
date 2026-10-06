@@ -14,8 +14,8 @@
 
 from mirage.accessor.document import DocumentAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def read(

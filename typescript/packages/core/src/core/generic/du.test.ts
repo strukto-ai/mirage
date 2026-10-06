@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { Accessor } from '../../accessor/base.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
 import { makeWalkedDu } from './du.ts'
 
 class FakeAccessor extends Accessor {}

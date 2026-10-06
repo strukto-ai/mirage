@@ -17,7 +17,7 @@ import {
   clapMissingOperands,
   leafRefusal,
 } from '../../../commands/cli/refusal.ts'
-import { missStrerror } from '../../mount/namespace/probe.ts'
+import { missCondition } from '../../mount/namespace/probe.ts'
 import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../process/types.ts'
@@ -248,7 +248,7 @@ export async function handleCli(
     for (const base of result.operandBases) {
       const info = await context.statPath(base)
       if (info !== null && info.type === FileType.DIRECTORY) continue
-      const reason = info === null ? await missStrerror(context.dispatch, base) : 'Not a directory'
+      const reason = info === null ? await missCondition(context.dispatch, base) : 'ENOTDIR'
       const [stderr, code] = directoryRefusal(
         install.name,
         base.rawPath,

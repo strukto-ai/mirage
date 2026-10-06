@@ -15,7 +15,7 @@
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { MountView } from '../../../ops/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
-import { isMissError } from '../../../utils/errors.ts'
+import { isMissError } from '../../../errors/fs.ts'
 import { operandName } from './operands.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 

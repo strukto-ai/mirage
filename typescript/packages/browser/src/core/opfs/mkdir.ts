@@ -14,7 +14,7 @@
 
 import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { eexist, enotdir } from '@struktoai/mirage-core/utils/errors'
+import { eexist, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { ancestors, norm } from '@struktoai/mirage-core/utils/path'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'

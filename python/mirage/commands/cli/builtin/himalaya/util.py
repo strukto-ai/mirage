@@ -31,10 +31,10 @@ from mirage.commands.cli.builtin.himalaya.deliver import (
 from mirage.commands.cli.types import CLIDoors
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.config import EmailConfig
+from mirage.errors.fs import fs_strerror
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import fs_strerror
 from mirage.utils.filetype import mime_type_for
 
 

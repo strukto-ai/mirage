@@ -1,5 +1,4 @@
 import errno
-import os
 
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.errors import (
@@ -20,6 +19,7 @@ from mirage.commands.cli.builtin.git.refs import valid_ref_name
 from mirage.commands.cli.builtin.git.util import fatal, start_point
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
@@ -105,9 +105,7 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         if here is None or here.type is not FileType.DIRECTORY:
             raise NoWorkingDirectoryError(
                 start.raw_path,
-                "No such file or directory"
-                if here is None
-                else "Not a directory",
+                FsCondition.ENOENT if here is None else FsCondition.ENOTDIR,
             )
         target = PathSpec.from_str_path(
             inv.texts[0] if inv.texts else ".", cwd=start
@@ -153,15 +151,17 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         except OSError as exc:
             locked = exc.filename == f"{settings.virtual}.lock"
             if locked and exc.errno == errno.EEXIST:
-                reason = os.strerror(errno.EEXIST)
-                raise ConfigLockError(settings.virtual, reason) from exc
+                raise ConfigLockError(
+                    settings.virtual, FsCondition.EEXIST
+                ) from exc
             if exc.errno != errno.EROFS:
                 raise
             if made:
                 raise CannotMkdirError(inv.texts[0]) from exc
             if locked:
-                reason = os.strerror(errno.EROFS)
-                raise ConfigLockError(settings.virtual, reason) from exc
+                raise ConfigLockError(
+                    settings.virtual, FsCondition.EROFS
+                ) from exc
             raise InitReadOnlyError(exc.filename or gitdir.virtual) from exc
         action = "Reinitialized existing" if existing else "Initialized empty"
         text = f"{action} Git repository in {gitdir.virtual}/\n"

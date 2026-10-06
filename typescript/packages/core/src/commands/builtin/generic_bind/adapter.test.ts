@@ -33,7 +33,8 @@ import {
   withPolicyGuard,
 } from './adapter.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
-import { eacces, eisdir, enoent, formatFsError } from '../../../utils/errors.ts'
+import { eacces, eisdir, enoent } from '../../../errors/fs.ts'
+import { formatFsError } from '../../../errors/render.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts } from '../../config.ts'

@@ -12,11 +12,14 @@ from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.render import ZERO_LENGTH_NAME
+from mirage.errors.types import DotWalkError, FsCondition
 from mirage.io.types import IOResult, SizedRun
 from mirage.ops.namespace_view import paths_scoped
 from mirage.ops.types import LinkView, MountView, NamespaceView, StatPath
 from mirage.types import FileStat, PathSpec, Visibility
-from mirage.utils.errors import ZERO_LENGTH_NAME, DotWalkError, fs_strerror
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
@@ -171,9 +174,6 @@ def cwd_spec(cwd: PathSpec | str) -> PathSpec:
     )
 
 
-ENOENT_TEXT = "No such file or directory"
-
-
 async def du_operands(
     paths: list[PathSpec],
     cwd: PathSpec | str,
@@ -232,7 +232,9 @@ async def du_operands(
     if not resolved:
         # An unmatched glob reaches GNU as the literal pattern, which it
         # then reports as unreadable.
-        missing = [(p.raw_path, ENOENT_TEXT) for p in targets]
+        missing = [
+            (p.raw_path, posix_phrase(FsCondition.ENOENT)) for p in targets
+        ]
     for path in resolved:
         if links is not None and links.stat_at(path.virtual) is not None:
             present.append(path)
@@ -243,13 +245,18 @@ async def du_operands(
         except DotWalkError as exc:
             # The operand did not resolve, so no channel asked about the
             # path it simplifies to can find it there.
-            missing.append((path.raw_path, fs_strerror(exc) or ENOENT_TEXT))
+            missing.append(
+                (
+                    path.raw_path,
+                    fs_strerror(exc) or posix_phrase(FsCondition.ENOENT),
+                )
+            )
             continue
         except NotADirectoryError:
             # An operand typed with a trailing slash that did not name a
             # directory. Unreadable like a missing one, but GNU reports
             # the errno it got, so the two cannot share a wording.
-            missing.append((path.raw_path, "Not a directory"))
+            missing.append((path.raw_path, posix_phrase(FsCondition.ENOTDIR)))
             continue
         except (FileNotFoundError, ValueError):
             stattable = False
@@ -263,7 +270,7 @@ async def du_operands(
             missing.append((path.raw_path, fs_strerror(exc) or str(exc)))
             continue
         if not exists:
-            missing.append((path.raw_path, ENOENT_TEXT))
+            missing.append((path.raw_path, posix_phrase(FsCondition.ENOENT)))
             continue
         present.append(path)
     return present, missing

@@ -12,8 +12,8 @@ from mirage.cache.index import (
     ResourceType,
 )
 from mirage.core.nextcloud.constants import SCOPE_ERROR
+from mirage.errors.fs import enoent, enotdir, listing_error
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent, enotdir, listing_error
 from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)

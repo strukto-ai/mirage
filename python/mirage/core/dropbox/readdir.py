@@ -21,8 +21,8 @@ from mirage.core.dropbox.api import get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.constants import CONTENT_HASH
 from mirage.core.dropbox.fingerprint import token_of
+from mirage.errors.fs import listing_error
 from mirage.types import PathSpec
-from mirage.utils.errors import listing_error
 from mirage.utils.key_prefix import mount_prefix_of
 
 

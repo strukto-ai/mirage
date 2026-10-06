@@ -222,7 +222,7 @@ async def test_read_shared_drive_raises_is_a_directory(accessor, index):
                 ),
                 index,
             )
-        assert str(excinfo.value) == "/Team Drive"
+        assert excinfo.value.filename == "/Team Drive"
     mock_download.assert_not_awaited()
 
 

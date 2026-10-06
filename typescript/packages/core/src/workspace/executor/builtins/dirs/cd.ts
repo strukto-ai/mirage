@@ -14,7 +14,7 @@
 
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import { dottedSpelling, resolvePath, CycleError, posixNormpath } from '../../../../utils/path.ts'
-import { fsStrerror } from '../../../../utils/errors.ts'
+import { fsStrerror } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PathSpec, type StatFn, FileType } from '../../../../types.ts'
 import type { SessionState } from '../../../session/session.ts'

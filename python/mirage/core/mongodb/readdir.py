@@ -28,7 +28,7 @@ from mirage.core.mongodb.types import (
     KIND_TO_RESOURCE_TYPE,
     RESOURCE_TYPE_DATABASE,
 )
-from mirage.utils.errors import enoent
+from mirage.errors.fs import enoent
 
 ENTITY_FILES = ("schema.json", "documents.jsonl")
 

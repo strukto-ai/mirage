@@ -15,7 +15,8 @@
 import { compareCodePoints } from '../../utils/sort.ts'
 import { contentSize } from '../../utils/stat_view.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { enoent, gnuStrerror } from '../../utils/errors.ts'
+import { enoent } from '../../errors/fs.ts'
+import { posixPhrase } from '../../errors/posix.ts'
 import { failureText } from '../../errors/classify.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import {
@@ -253,7 +254,7 @@ async function rowStat(
     return null
   }
   if (st === null) {
-    errors.push(encodeText(`find: '${path}': ${gnuStrerror('ENOENT') ?? 'ENOENT'}\n`))
+    errors.push(encodeText(`find: '${path}': ${posixPhrase('ENOENT')}\n`))
     return null
   }
   return st

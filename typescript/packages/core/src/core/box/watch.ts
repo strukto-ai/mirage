@@ -21,7 +21,7 @@ import {
   type PathSpec,
   type WalkEntry,
 } from '../../types.ts'
-import { isEnoent } from '../../utils/errors.ts'
+import { isEnoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../watch/base.ts'

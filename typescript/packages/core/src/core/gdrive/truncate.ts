@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { enotsup } from '../../utils/errors.ts'
+import { enotsup } from '../../errors/fs.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
-import { eisdir } from '../../utils/errors.ts'
+import { eisdir } from '../../errors/fs.ts'
 import { downloadFile } from '../google/drive.ts'
 import { eaccesOnDenied, isFolder, isNative, resolveKey } from './resolve.ts'
 import { write } from './write.ts'

@@ -22,7 +22,7 @@ import { ensurePathSpec } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { stat } from './stat.ts'
-import { eisdir, enoent } from '../../utils/errors.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
 
 export async function unlink(
   accessor: DatabricksVolumeAccessor,

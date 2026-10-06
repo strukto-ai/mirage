@@ -3,8 +3,8 @@ from opendal.exceptions import NotFound
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.context import invalidate_subtree
 from mirage.core.nextcloud.util import nextcloud_key
+from mirage.errors.fs import enoent
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 async def rename(

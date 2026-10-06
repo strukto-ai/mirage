@@ -4,7 +4,7 @@ from typing import Literal, TypeAlias
 
 from mirage.commands.builtin.generic.archive.types import MemberKind
 from mirage.types import PathSpec
-from mirage.utils.errors import GzipDataError
+from mirage.utils.compress import GzipDataError
 
 CompressionSuffix: TypeAlias = Literal["", ":gz", ":bz2", ":xz"]
 WriteMode: TypeAlias = Literal["w", "w:gz", "w:bz2", "w:xz"]

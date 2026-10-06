@@ -41,6 +41,7 @@ from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.concurrency.limiter import run_blocking
+from mirage.errors.types import FsCondition
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -57,7 +58,7 @@ from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
 from mirage.workspace.lookup.lookup import verb_visible
-from mirage.workspace.mount.namespace.probe import miss_strerror
+from mirage.workspace.mount.namespace.probe import miss_condition
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
@@ -361,9 +362,9 @@ async def handle_cli(
             if info is not None and info.type is FileType.DIRECTORY:
                 continue
             reason = (
-                await miss_strerror(dispatch, base)
+                await miss_condition(dispatch, base)
                 if info is None
-                else "Not a directory"
+                else FsCondition.ENOTDIR
             )
             stderr, code = directory_refusal(
                 install.name, base.raw_path, reason, install.spec.usage_style

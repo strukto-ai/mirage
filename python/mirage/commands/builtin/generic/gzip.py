@@ -25,10 +25,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 from mirage.utils.compress import gzip_compress, gzip_compress_stream
-from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import gnu_basename
 

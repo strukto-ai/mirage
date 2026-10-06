@@ -120,7 +120,7 @@ async def test_mkdir_p_across_a_file_names_the_component():
         )
     # GNU quotes the component it tripped on, not the operand, and the file
     # it collided with is left alone.
-    assert str(excinfo.value) == "/g/a.txt"
+    assert excinfo.value.filename == "/g/a.txt"
     assert "/g/a.txt" not in s.dirs
     assert s.files["/g/a.txt"] == b"hi"
 
@@ -142,7 +142,7 @@ async def test_mkdir_p_stops_at_the_first_bad_component():
             ),
             parents=True,
         )
-    assert str(excinfo.value) == "/a.txt"
+    assert excinfo.value.filename == "/a.txt"
 
 
 @pytest.mark.asyncio

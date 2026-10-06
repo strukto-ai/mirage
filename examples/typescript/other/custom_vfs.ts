@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createHash } from "node:crypto";
-import { eexist } from "@struktoai/mirage-core/utils/errors";
+import { eexist } from "@struktoai/mirage-core/errors/fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

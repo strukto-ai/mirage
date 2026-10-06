@@ -23,6 +23,7 @@ from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
 from mirage.core.databricks_volume.stat import stat
 from mirage.core.databricks_volume.write import write
+from mirage.errors.fs import eisdir
 from mirage.types import FileType, PathSpec
 
 
@@ -91,7 +92,7 @@ async def copy(
     )
     if src_stat.type == FileType.DIRECTORY:
         if not recursive:
-            raise IsADirectoryError(src.virtual)
+            raise eisdir(src.virtual)
         if same_path:
             return
         remote_src = backend_path(accessor.config, src)

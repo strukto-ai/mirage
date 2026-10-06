@@ -24,6 +24,8 @@ import { operandSlot, optionMetavar } from '../spec/help.ts'
 import { type CommandSpec, UsageStyle } from '../spec/types.ts'
 import type { ParsedCommand } from '../../workspace/executor/command/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { posixPhrase } from '../../errors/posix.ts'
+import type { FsCondition } from '../../errors/types.ts'
 
 export const ARGPARSE_EXIT = 2
 const LONG_PREFIX = '--'
@@ -263,10 +265,15 @@ export function leafRefusal(
 export function directoryRefusal(
   prog: string,
   path: string,
-  reason: string,
+  reason: FsCondition,
   style: UsageStyle,
 ): [Uint8Array, number] {
   return style === UsageStyle.GIT
-    ? [new TextEncoder().encode(`fatal: cannot change to '${path}': ${reason}\n`), 128]
-    : [new TextEncoder().encode(`${prog}: cannot change directory to '${path}': ${reason}\n`), 1]
+    ? [new TextEncoder().encode(`fatal: cannot change to '${path}': ${posixPhrase(reason)}\n`), 128]
+    : [
+        new TextEncoder().encode(
+          `${prog}: cannot change directory to '${path}': ${posixPhrase(reason)}\n`,
+        ),
+        1,
+      ]
 }

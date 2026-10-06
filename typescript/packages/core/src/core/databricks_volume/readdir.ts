@@ -23,7 +23,7 @@ import { dbxFetch, type DbxEndpoint } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath, virtualPath } from './path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { listingError } from '../../utils/errors.ts'
+import { listingError } from '../../errors/fs.ts'
 
 export interface DbxDirectoryEntry {
   path: string

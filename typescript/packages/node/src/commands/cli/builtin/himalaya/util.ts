@@ -17,13 +17,14 @@ import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/utils/errors'
+import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { mimeTypeFor } from '@struktoai/mirage-core/utils/filetype'
 import { parseRfc822, type ParsedRfc822 } from '../../../../core/email/_parse.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { build, readBody, splitAddresses, type Attachment, type Source } from './builder.ts'
 import { deliver, saveSentCopy } from './deliver.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 
 const ENC = new TextEncoder()
 
@@ -65,7 +66,7 @@ async function loadAttachments(
       ;[data] = await dispatch('read', path)
     } catch (err) {
       if (isMissingPath(err) || isEnotdir(err)) {
-        const strerror = fsStrerror(err) ?? 'No such file or directory'
+        const strerror = fsStrerror(err) ?? posixPhrase('ENOENT')
         throw new Error(`read attachment ${path.virtual}: ${strerror}`)
       }
       throw err

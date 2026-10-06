@@ -6,9 +6,9 @@ from mirage.commands.builtin.generic.cat import (
     display_lines,
 )
 from mirage.commands.config import CommandOpts
+from mirage.errors.fs import efbig
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import efbig
 
 
 async def _drain(gen):

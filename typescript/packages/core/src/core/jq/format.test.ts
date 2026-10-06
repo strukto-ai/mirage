@@ -23,7 +23,7 @@ import {
   printable,
 } from './format.ts'
 import { jqOptions, type JqOptions } from './types.ts'
-import { eacces, eisdir, enoent } from '../../utils/errors.ts'
+import { eacces, eisdir, enoent } from '../../errors/fs.ts'
 
 const DEC = new TextDecoder()
 const PRETTY = jqOptions()
