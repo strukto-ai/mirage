@@ -114,17 +114,16 @@ async function query(repo: Repo, mode: string, name: string): Promise<[Uint8Arra
 }
 
 /**
- * One `--batch`/`--batch-check` answer: the format line, then the object's
- * bytes under `--batch`; `<name> missing` for a name that stands for nothing.
- * With `%(rest)` in the format the name ends at the first blank and the rest
- * of the line is `%(rest)`.
+ * One `--batch`/`--batch-check` format line and the id it names, `<name>
+ * missing` and null for a name that stands for nothing. With `%(rest)` in the
+ * format the name ends at the first blank and the rest of the line is
+ * `%(rest)`.
  */
-async function batchLine(
+async function batchHead(
   repo: Repo,
   line: string,
   template: string,
-  contents: boolean,
-): Promise<Uint8Array> {
+): Promise<[Uint8Array, string | null]> {
   let name = line
   let rest = ''
   if (template.includes('%(rest)')) {
@@ -138,35 +137,35 @@ async function batchLine(
   try {
     obj = await resolveObject(repo, name)
   } catch (err) {
-    if (err instanceof GitError) return ENC.encode(`${name} missing\n`)
+    if (err instanceof GitError) return [ENC.encode(`${name} missing\n`), null]
     throw err
   }
-  const body = await raw(repo, obj.oid)
   const atoms: Record<string, string> = {
     objectname: obj.oid,
     objecttype: obj.type,
-    objectsize: String(body.length),
+    objectsize: String((await raw(repo, obj.oid)).length),
     rest,
   }
-  const head = ENC.encode(
-    template.replace(FORMAT_ATOM, (_, atom: string) => atoms[atom] ?? '') + '\n',
-  )
-  if (!contents) return head
-  const out = new Uint8Array(head.length + body.length + 1)
-  out.set(head)
-  out.set(body, head.length)
-  out[out.length - 1] = 10
-  return out
+  const head = template.replace(FORMAT_ATOM, (_, atom: string) => atoms[atom] ?? '')
+  return [ENC.encode(`${head}\n`), obj.oid]
 }
 
-/** Each line's batch answer as it is read, so a long batch never holds every object at once. */
+/**
+ * The batch answers in order, each object's bytes read only when its turn
+ * comes, so a long `--batch` never holds every object at once.
+ */
 async function* batchLines(
   repo: Repo,
-  lines: readonly string[],
-  template: string,
+  heads: readonly [Uint8Array, string | null][],
   contents: boolean,
 ): AsyncIterable<Uint8Array> {
-  for (const line of lines) yield await batchLine(repo, line, template, contents)
+  for (const [head, oid] of heads) {
+    yield head
+    if (contents && oid !== null) {
+      yield await raw(repo, oid)
+      yield ENC.encode('\n')
+    }
+  }
 }
 
 /**
@@ -202,7 +201,9 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
       const text = DEC.decode((await readStdinAsync(inv.stdin ?? null)) ?? new Uint8Array())
       const lines = text.split('\n')
       if (lines.at(-1) === '') lines.pop()
-      return [batchLines(repo, lines, template, batch === 'batch'), new IOResult()]
+      const heads: [Uint8Array, string | null][] = []
+      for (const line of lines) heads.push(await batchHead(repo, line, template))
+      return [batchLines(repo, heads, batch === 'batch'), new IOResult()]
     }
     if (first === undefined && texts.length === 0) throw new UsageError('', verbUsage(inv))
     if (first !== undefined) {

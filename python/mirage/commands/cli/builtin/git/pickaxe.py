@@ -40,52 +40,34 @@ def _blob(store: BaseObjectStore, sha: ObjectID | None) -> bytes:
     return obj.data if isinstance(obj, Blob) else b""
 
 
-def _match_from(
-    text: str, pattern: re.Pattern[str], start: int, bol: bool
-) -> tuple[int, int] | None:
-    """The first match at or after ``start`` inside one line, as glibc's
-    regexec finds it under REG_NEWLINE: ``^`` holds after each newline past
-    ``start``, and at ``start`` itself only while ``bol``.
-
-    Args:
-        text (str): the blob's text.
-        pattern (re.Pattern[str]): the compiled expression.
-        start (int): where the search starts.
-        bol (bool): whether ``start`` may match ``^``, git's first search.
-    """
-    at = start
-    while True:
-        begin = text.rfind("\n", 0, at) + 1
-        end = text.find("\n", at)
-        end = len(text) if end < 0 else end
-        if at == start == begin and not bol:
-            found = pattern.search("\0" + text[begin:end], 1)
-            shift = begin - 1
-        else:
-            found, shift = pattern.search(text[begin:end], at - begin), begin
-        if found is not None:
-            return found.start() + shift, found.end() + shift
-        if end == len(text):
-            return None
-        at = end + 1
-
-
 def contains(text: str, pattern: re.Pattern[str]) -> int:
     """How many times a pattern matches a blob, git's ``contains`` under
-    ``--pickaxe-regex``: each search resumes where the last match ended, a
-    step further after an empty one, and ``^`` never holds where it resumes.
+    ``--pickaxe-regex`` and glibc's REG_NEWLINE: a match stays in its line,
+    each search resumes where the last match ended (a step further after an
+    empty one), and ``^`` never holds where it resumes. Each line is sliced
+    once, however many matches it holds.
 
     Args:
         text (str): the blob's text.
         pattern (re.Pattern[str]): the compiled expression.
     """
-    count, start = 0, 0
-    while start < len(text):
-        found = _match_from(text, pattern, start, count == 0)
-        if found is None:
-            break
-        count += 1
-        start = found[1] + (found[0] == found[1] and found[1] < len(text))
+    count, start, begin = 0, 0, 0
+    while start < len(text) and begin <= len(text):
+        end = text.find("\n", begin)
+        end = len(text) if end < 0 else end
+        line = text[begin:end]
+        while start <= end and start < len(text):
+            if count and start == begin:
+                found, shift = pattern.search("\0" + line, 1), begin - 1
+            else:
+                found = pattern.search(line, max(start - begin, 0))
+                shift = begin
+            if found is None:
+                break
+            count += 1
+            stop = found.end() + shift
+            start = stop + (found.start() == found.end() and stop < len(text))
+        begin = end + 1
     return count
 
 

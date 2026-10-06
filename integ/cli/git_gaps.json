@@ -1227,11 +1227,11 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "git -C /repo cat-file -t HEAD; git -C /repo cat-file -s HEAD:letters.txt; git -C /repo cat-file -p 'HEAD^{tree}'; git -C /repo cat-file -p :numbers.txt; git -C /repo cat-file -e HEAD:nope; echo $?; git -C /repo cat-file blob HEAD:numbers.txt; git -C /repo cat-file commit HEAD; printf 'HEAD\\nHEAD:numbers.txt rest\\nnope\\n' | git -C /repo cat-file --batch-check; printf 'HEAD:numbers.txt x y\\n' | git -C /repo cat-file --batch='%(objecttype) %(objectsize) %(objectname) %(rest)'",
+      "command": "git -C /repo cat-file -t HEAD; git -C /repo cat-file -s HEAD:letters.txt; git -C /repo cat-file -p 'HEAD^{tree}'; git -C /repo cat-file -p :numbers.txt; git -C /repo cat-file -e HEAD:nope; echo $?; git -C /repo cat-file blob HEAD:numbers.txt; git -C /repo cat-file commit HEAD; printf 'HEAD\\nHEAD:numbers.txt rest\\nnope\\n' | git -C /repo cat-file --batch-check; printf 'HEAD:numbers.txt x y\\n' | git -C /repo cat-file --batch='%(objecttype) %(objectsize) %(objectname) %(rest)'; git -C /repo tag topic HEAD~2 && printf 'topic\\n' | git -C /repo cat-file --batch-check; git -C /repo tag -d topic > /dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "commit\n23\n040000 tree 24f073f4fa69a811e1bb64f65729188ccc3ce32a\tdocs\n100644 blob 7a28df3c975fa62270a452251c4e0b24d685c4ba\tletters.txt\n100644 blob 814f4a422927b82f5f8a43f8fab6d3839e3983f2\tnumbers.txt\none\ntwo\n128\none\ntwo\ntree 213a314abdd4e23f24dccd80a763c4b533bdb01d\nparent 225f39c50d27e015653a38d589474ce2880399e6\nauthor Integ Author <integ@example.com> 1767883500 +0000\ncommitter Integ Author <integ@example.com> 1767883500 +0000\n\nadd two\n8ef25423772bbfe671c8e285ae1d63991d59db19 commit 220\nHEAD:numbers.txt rest missing\nnope missing\nblob 8 814f4a422927b82f5f8a43f8fab6d3839e3983f2 x y\none\ntwo\n\n",
-        "stderr": "fatal: path 'nope' does not exist in 'HEAD'\n"
+        "stdout": "commit\n23\n040000 tree 24f073f4fa69a811e1bb64f65729188ccc3ce32a\tdocs\n100644 blob 7a28df3c975fa62270a452251c4e0b24d685c4ba\tletters.txt\n100644 blob 814f4a422927b82f5f8a43f8fab6d3839e3983f2\tnumbers.txt\none\ntwo\n128\none\ntwo\ntree 213a314abdd4e23f24dccd80a763c4b533bdb01d\nparent 225f39c50d27e015653a38d589474ce2880399e6\nauthor Integ Author <integ@example.com> 1767883500 +0000\ncommitter Integ Author <integ@example.com> 1767883500 +0000\n\nadd two\n8ef25423772bbfe671c8e285ae1d63991d59db19 commit 220\nHEAD:numbers.txt rest missing\nnope missing\nblob 8 814f4a422927b82f5f8a43f8fab6d3839e3983f2 x y\none\ntwo\n\n265ec3adb16a0c90ad09a180687677927b9d7b7f commit 222\n",
+        "stderr": "fatal: path 'nope' does not exist in 'HEAD'\nwarning: refname 'topic' is ambiguous.\n"
       }
     },
     {

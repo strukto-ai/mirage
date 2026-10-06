@@ -35,47 +35,31 @@ async function blob(repo: Repo, oid: string | null): Promise<Uint8Array> {
 }
 
 /**
- * The first match at or after `start` inside one line, as glibc's regexec finds
- * it under REG_NEWLINE: `^` holds after each newline past `start`, and at
- * `start` itself only while `bol`. `pattern` carries the `g` flag.
- */
-function matchFrom(
-  text: string,
-  pattern: RegExp,
-  start: number,
-  bol: boolean,
-): [number, number] | null {
-  let at = start
-  for (;;) {
-    const begin = at === 0 ? 0 : text.lastIndexOf('\n', at - 1) + 1
-    const newline = text.indexOf('\n', at)
-    const end = newline < 0 ? text.length : newline
-    const resumed = at === start && at === begin && !bol
-    pattern.lastIndex = resumed ? 1 : at - begin
-    const found = pattern.exec(resumed ? `\0${text.slice(begin, end)}` : text.slice(begin, end))
-    if (found !== null) {
-      const shift = resumed ? begin - 1 : begin
-      return [found.index + shift, found.index + found[0].length + shift]
-    }
-    if (end === text.length) return null
-    at = end + 1
-  }
-}
-
-/**
  * How many times a pattern matches a blob, git's `contains` under
- * `--pickaxe-regex`: each search resumes where the last match ended, a step
- * further after an empty one, and `^` never holds where it resumes.
+ * `--pickaxe-regex` and glibc's REG_NEWLINE: a match stays in its line, each
+ * search resumes where the last match ended (a step further after an empty
+ * one), and `^` never holds where it resumes. Each line is sliced once, however
+ * many matches it holds.
  */
 export function contains(text: string, needle: RegExp): number {
   const pattern = new RegExp(needle.source, needle.flags.replace('g', '') + 'g')
   let count = 0
   let start = 0
-  while (start < text.length) {
-    const found = matchFrom(text, pattern, start, count === 0)
-    if (found === null) break
-    count += 1
-    start = found[1] + (found[0] === found[1] && found[1] < text.length ? 1 : 0)
+  let begin = 0
+  while (start < text.length && begin <= text.length) {
+    const newline = text.indexOf('\n', begin)
+    const end = newline < 0 ? text.length : newline
+    const line = text.slice(begin, end)
+    while (start <= end && start < text.length) {
+      const resumed = count > 0 && start === begin
+      pattern.lastIndex = resumed ? 1 : Math.max(start - begin, 0)
+      const found = pattern.exec(resumed ? `\0${line}` : line)
+      if (found === null) break
+      count += 1
+      const stop = found.index + found[0].length + (resumed ? begin - 1 : begin)
+      start = stop + (found[0].length === 0 && stop < text.length ? 1 : 0)
+    }
+    begin = end + 1
   }
   return count
 }

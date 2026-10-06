@@ -117,19 +117,18 @@ def _query(repo: BaseRepo, mode: str, name: str) -> tuple[bytes, int]:
     return pretty(obj), 0
 
 
-def _batch_line(
-    repo: BaseRepo, line: str, template: str, contents: bool
-) -> bytes:
-    """One ``--batch``/``--batch-check`` answer: the format line, then
-    the object's bytes under ``--batch``; ``<name> missing`` for a name
-    that stands for nothing. With ``%(rest)`` in the format the name
-    ends at the first blank and the rest of the line is ``%(rest)``.
+def _batch_head(
+    repo: BaseRepo, line: str, template: str
+) -> tuple[bytes, ObjectID | None]:
+    """One ``--batch``/``--batch-check`` format line and the id it names,
+    ``<name> missing`` and None for a name that stands for nothing. With
+    ``%(rest)`` in the format the name ends at the first blank and the rest
+    of the line is ``%(rest)``.
 
     Args:
         repo (BaseRepo): the opened repository.
         line (str): one line of input.
         template (str): the format.
-        contents (bool): ``--batch``, which prints the bytes too.
     """
     name, rest = line, ""
     if "%(rest)" in template:
@@ -137,36 +136,35 @@ def _batch_line(
     try:
         obj = resolve_object(repo, name)
     except GitError:
-        return f"{name} missing\n".encode()
-    raw = obj.as_raw_string()
+        return f"{name} missing\n".encode(), None
     atoms = {
         "objectname": obj.id.decode(),
         "objecttype": obj.type_name.decode(),
-        "objectsize": str(len(raw)),
+        "objectsize": str(len(obj.as_raw_string())),
         "rest": rest,
     }
-
-    head = FORMAT_ATOM.sub(lambda m: atoms[m.group(1)], template).encode()
-    head += b"\n"
-    return head + raw + b"\n" if contents else head
+    head = FORMAT_ATOM.sub(lambda m: atoms[m.group(1)], template)
+    return f"{head}\n".encode(), obj.id
 
 
 async def _batch_lines(
-    repo: BaseRepo, lines: list[str], template: str, contents: bool
+    repo: BaseRepo, heads: list[tuple[bytes, ObjectID | None]], contents: bool
 ) -> AsyncIterator[bytes]:
-    """Each line's batch answer as it is read, so a long batch never holds
-    every object at once.
+    """The batch answers in order, each object's bytes read only when its
+    turn comes, so a long ``--batch`` never holds every object at once.
 
     Args:
         repo (BaseRepo): the opened repository.
-        lines (list[str]): the names stdin listed.
-        template (str): the format.
+        heads (list[tuple[bytes, ObjectID | None]]): each line's format
+            answer and the id it names.
         contents (bool): ``--batch``, which prints the bytes too.
     """
-    for line in lines:
-        yield await asyncio.to_thread(
-            _batch_line, repo, line, template, contents
-        )
+    for head, sha in heads:
+        if not contents or sha is None:
+            yield head
+            continue
+        obj = await asyncio.to_thread(repo.__getitem__, sha)
+        yield head + obj.as_raw_string() + b"\n"
 
 
 async def cat_file(
@@ -209,8 +207,12 @@ async def cat_file(
             lines = text.split("\n")
             if lines[-1] == "":
                 lines.pop()
+            heads = [
+                await asyncio.to_thread(_batch_head, repo, line, template)
+                for line in lines
+            ]
             contents = batch[-1] == "batch"
-            return _batch_lines(repo, lines, template, contents), IOResult()
+            return _batch_lines(repo, heads, contents), IOResult()
         if not modes and not texts:
             raise UsageError("", verb_usage(inv))
         if modes:
