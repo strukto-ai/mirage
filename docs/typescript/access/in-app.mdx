@@ -261,10 +261,10 @@ session.explain.vfs.<op>(...): Promise<Explanation>
 The session's doors as a dry run, under the same names: what a line, or one file op, would do as the session, without running it. A line gets the refusal the agent would read, every policy's answer and the line's placement; an op gets every policy's answer and the error the call would throw. See [Dry runs](/home/permissions#dry-runs).
 
 ```ts
-const [expl] = await session.explain.shell('rm /data/x')
-console.log(expl?.exitCode, expl?.answers.map((a) => a.policy))
-const op = await session.explain.vfs.write('/data/x', 'hi')
-console.log(op.error, op.answers.map((a) => a.policy))
+const [shellRes] = await session.explain.shell('rm /data/x')
+console.log(shellRes?.exitCode, shellRes?.answers.map((a) => a.policy))
+const vfsRes = await session.explain.vfs.write('/data/x', 'hi')
+console.log(vfsRes.error, vfsRes.answers.map((a) => a.policy))
 ```
 
 ### session.vfs

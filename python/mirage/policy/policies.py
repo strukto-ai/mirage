@@ -39,6 +39,7 @@ from mirage.policy.types import (
     CommandContext,
     Deny,
     DenyScope,
+    DryRun,
     ExecuteResultContext,
     Explanation,
     Hide,
@@ -51,7 +52,7 @@ from mirage.policy.types import (
 )
 from mirage.runtime.routing.types import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Refusal
-from mirage.utils.errors import eacces, fs_error_line
+from mirage.utils.errors import ReadOnlyError, eacces, fs_error_line
 
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
@@ -253,6 +254,8 @@ async def pre_ops_gate(
         Explained: in a dry run (``explaining``), once the gate's answer
             is noted and the op would refuse or has no gate left: the
             door stops before any backend or cache is touched.
+        ReadOnlyError: a write a policy makes while it decides a dry
+            run's op, which the dry run may not let change anything.
     """
     ctx = OpsContext(
         op=op,
@@ -265,11 +268,8 @@ async def pre_ops_gate(
         subtree=subtree,
     )
     trace = explaining()
-    if trace is not None:
-        # The policies decide for real: what one reads while it decides
-        # (a profile script reading a mounted file) runs, and only the op
-        # explained stops here.
-        token = set_explaining(None)
+    if isinstance(trace, list):
+        token = set_explaining(DryRun.DECIDING)
         try:
             hidden = check_hidden and await policies.hides(ctx)
             noted = (
@@ -285,6 +285,12 @@ async def pre_ops_gate(
         if final or noted.error:
             raise Explained()
         return
+    if trace is DryRun.DECIDING:
+        if write:
+            raise ReadOnlyError(
+                errno.EROFS, "Read-only file system", path.virtual
+            )
+        decisions = None
     if not (
         policies.wants("pre_ops")
         or check_hidden

@@ -120,4 +120,24 @@ describe('session.explain.vfs', () => {
     const said = await new Session(ws, 'agent').explain.vfs.write('/data/new', 'x')
     expect([said.reason, said.answers.map((a) => a.reason)]).toEqual(['closed', ['closed']])
   })
+
+  it('lets a policy change nothing while it decides', async () => {
+    const errors: (string | undefined)[] = []
+    const failed = (err: unknown): void => {
+      errors.push((err as { code?: string }).code)
+    }
+    const busy: Policy = {
+      async preOps(ctx: OpsContext): Promise<null> {
+        if (ctx.op !== 'write' || ctx.path.virtual !== '/data/new') return null
+        await new Session(ws, 'agent').vfs.read('/data/out/q').catch(failed)
+        await ws.vfs.write('/data/stamp', 'seen').catch(failed)
+        return null
+      },
+    }
+    ws.policies.add(busy)
+    await new Session(ws, 'agent').explain.vfs.write('/data/new', 'x')
+    expect(errors).toEqual(['EACCES', 'EROFS'])
+    expect(ws.decisions.pending('agent')).toEqual([])
+    expect(await ws.vfs.exists('/data/stamp')).toBe(false)
+  })
 })

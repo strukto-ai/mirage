@@ -14,7 +14,7 @@
 
 import { operandExitCode } from '../commands/spec/usage.ts'
 import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
-import { eacces, fsErrorLine } from '../utils/errors.ts'
+import { eacces, erofsReadOnly, fsErrorLine } from '../utils/errors.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
@@ -24,6 +24,7 @@ import { Explained, PolicyDenied, PolicyError } from './errors.ts'
 import { isSessionScoped } from './mixin.ts'
 import type { Decisions } from './decisions.ts'
 import {
+  DryRun,
   Outcome,
   VALIDITY,
   type Ask,
@@ -259,7 +260,8 @@ async function explainedOp(
  * only for a rename's source, whose destination is gated next. In a dry
  * run (`explaining`) the gate notes its answer and throws `Explained`
  * once the op would refuse or has no gate left, so the door stops before
- * any backend or cache is touched.
+ * any backend or cache is touched; a write a policy makes while it
+ * decides that op throws EROFS, since the dry run may change nothing.
  */
 export async function preOpsGate(
   policies: Policies,
@@ -275,7 +277,8 @@ export async function preOpsGate(
     final?: boolean
   } = {},
 ): Promise<void> {
-  const { checkHidden = true, decisions = null, final = true, ...context } = access
+  const { checkHidden = true, decisions: ledger = null, final = true, ...context } = access
+  let decisions = ledger
   const ctx: OpsContext = {
     op,
     path,
@@ -286,17 +289,18 @@ export async function preOpsGate(
     ...context,
   }
   const trace = explaining()
-  if (trace !== null) {
-    // The policies decide for real: what one reads while it decides (a
-    // profile script reading a mounted file) runs, and only the op
-    // explained stops here.
-    const noted = await runExplaining(null, async () =>
+  if (Array.isArray(trace)) {
+    const noted = await runExplaining(DryRun.DECIDING, async () =>
       checkHidden && (await policies.hides(ctx)) ? null : explainedOp(policies, ctx, decisions),
     )
     if (noted === null) throw new Explained()
     trace.push(noted)
     if (final || noted.error !== '') throw new Explained()
     return
+  }
+  if (trace === DryRun.DECIDING) {
+    if (write) throw erofsReadOnly('Read-only file system', path)
+    decisions = null
   }
   if (!(policies.wants('preOps') || checkHidden || (write && context.mode !== undefined))) {
     return

@@ -787,6 +787,18 @@ VALIDITY: dict[str, frozenset[str]] = {
 }
 
 
+class DryRun(StrEnum):
+    """What a dry run's calls are while the policies decide the op it
+    explains.
+
+    DECIDING is a policy's own ops: a read runs for real, a refusal
+    raises the door's error with no question recorded, and a write is
+    refused as on a read-only mount, so an explanation changes nothing.
+    """
+
+    DECIDING = "deciding"
+
+
 @dataclass(frozen=True, slots=True)
 class Explanation:
     """What one command of a line, or one call on a session's file ops,
@@ -799,7 +811,8 @@ class Explanation:
     an explanation of a refused line is byte-identical to the refusal.
     A file op has no terminal of its own: ``command`` is the op,
     ``argv`` its paths as given, and ``error`` names the error the call
-    would raise, while ``exit_code`` and ``stderr`` stay empty.
+    would raise, while ``exit_code``, ``stderr``, ``rule``, ``source``
+    and ``matched_path`` stay empty: ``answers`` says who spoke.
 
     ``outcome`` is the document's answer and ``rule`` says who gave it.
     The two refusals the allow list produces both arrive as ``DENY``

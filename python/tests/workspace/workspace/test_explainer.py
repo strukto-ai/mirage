@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import errno
 
 import pytest
 import pytest_asyncio
@@ -130,3 +131,34 @@ async def test_a_policy_reads_for_real_while_it_decides(ws):
         "closed",
         (Deny("closed", policy="_Flag"),),
     )
+
+
+class _Busy(Policy):
+    """Deciding a write, reads an asked file as the agent and stamps one."""
+
+    def __init__(self, ws: Workspace) -> None:
+        self.ws = ws
+        self.errors: list[int | None] = []
+
+    async def pre_ops(self, ctx: OpsContext) -> None:
+        if ctx.op != "write" or ctx.path.virtual != "/data/new":
+            return None
+        try:
+            await Session(self.ws, "agent").vfs.read("/data/out/q")
+        except PermissionError as exc:
+            self.errors.append(exc.errno)
+        try:
+            await self.ws.vfs.write("/data/stamp", b"seen")
+        except PermissionError as exc:
+            self.errors.append(exc.errno)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_policy_changes_nothing_while_it_decides(ws):
+    busy = _Busy(ws)
+    ws.policies.add(busy)
+    await Session(ws, "agent").explain.vfs.write("/data/new", b"x")
+    assert busy.errors == [errno.EACCES, errno.EROFS]
+    assert ws.decisions.pending("agent") == ()
+    assert not await ws.vfs.exists("/data/stamp")

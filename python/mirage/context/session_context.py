@@ -42,7 +42,7 @@ from mirage.utils.path import parent
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
     from mirage.policy.policies import Policies
-    from mirage.policy.types import Explanation, HandOff
+    from mirage.policy.types import DryRun, Explanation, HandOff
     from mirage.workspace.session.manager import SessionManager
     from mirage.workspace.session.session import SessionState
 
@@ -416,21 +416,22 @@ def get_op_call(owner: "Decisions") -> "HandOff | None":
     return call[1] if call is not None and call[0] is owner else None
 
 
-_explaining: ContextVar["list[Explanation] | None"] = ContextVar(
+_explaining: ContextVar["list[Explanation] | DryRun | None"] = ContextVar(
     "mirage_explaining",
     default=None,
 )
 
 
-def set_explaining(trace: "list[Explanation] | None") -> Token[Any]:
+def set_explaining(trace: "list[Explanation] | DryRun | None") -> Token[Any]:
     """Make the calls in this context a dry run: the op gate notes on
     ``trace`` what it would answer and stops the op before any backend
-    or cache is touched. None makes them run again, for what a policy
-    does while it decides the op explained.
+    or cache is touched. ``DryRun.DECIDING`` is what a policy does while
+    it decides the op explained: its reads run, nothing changes.
 
     Args:
-        trace (list[Explanation] | None): where the gate notes its
-            answers, None to run.
+        trace (list[Explanation] | DryRun | None): where the gate notes
+            its answers, DECIDING for a deciding policy's ops, None to
+            run.
     """
     return _explaining.set(trace)
 
@@ -440,9 +441,9 @@ def reset_explaining(token: Token[Any]) -> None:
     _explaining.reset(token)
 
 
-def explaining() -> "list[Explanation] | None":
+def explaining() -> "list[Explanation] | DryRun | None":
     """The dry run's trace when the calls in this context only explain,
-    None when they run."""
+    DECIDING while its policies decide, None when they run."""
     return _explaining.get()
 
 

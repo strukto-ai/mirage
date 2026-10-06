@@ -425,18 +425,21 @@ real operands.
 names: `session.explain.shell(line)` is `session.shell(line)` and
 `session.explain.vfs.<op>(...)` is `session.vfs.<op>(...)`, each taking
 the arguments the real call does. Nothing runs: no command, no backend
-or cache read, no grant spent and no question recorded.
+or cache read, no grant spent and no question recorded. A policy that
+reads a file to decide (a profile script checking a flag) reads it for
+real, but changes nothing: a write it makes fails with `EROFS`, and a
+read the session may not make fails without recording a question.
 
 ```python
 explain = (await ws.session("reviewer")).explain
-[expl] = await explain.shell("rm /data/x")
-op = await explain.vfs.write("/vault/key", b"x")
+[shell_res] = await explain.shell("rm /data/x")
+vfs_res = await explain.vfs.write("/vault/key", b"x")
 ```
 
 ```typescript
 const explain = (await ws.session('reviewer')).explain
-const [expl] = await explain.shell('rm /data/x')
-const op = await explain.vfs.write('/vault/key', 'x')
+const [shellRes] = await explain.shell('rm /data/x')
+const vfsRes = await explain.vfs.write('/vault/key', 'x')
 ```
 
 `explain.shell` (also `ws.explain(line, session_id)`) runs the gate

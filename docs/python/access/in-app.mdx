@@ -256,10 +256,10 @@ await session.explain.vfs.<op>(...) -> Explanation
 The session's doors as a dry run, under the same names: what a line, or one file op, would do as the session, without running it. A line gets the refusal the agent would read, every policy's answer and the line's placement; an op gets every policy's answer and the error the call would raise. See [Dry runs](/home/permissions#dry-runs).
 
 ```python
-[expl] = await session.explain.shell("rm /data/x")
-print(expl.exit_code, [a.policy for a in expl.answers])
-op = await session.explain.vfs.write("/data/x", b"hi")
-print(op.error, [a.policy for a in op.answers])
+[shell_res] = await session.explain.shell("rm /data/x")
+print(shell_res.exit_code, [a.policy for a in shell_res.answers])
+vfs_res = await session.explain.vfs.write("/data/x", b"hi")
+print(vfs_res.error, [a.policy for a in vfs_res.answers])
 ```
 
 ### session.vfs

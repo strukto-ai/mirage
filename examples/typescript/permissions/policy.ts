@@ -137,12 +137,12 @@ async function main(): Promise<void> {
     // a line, and one op of a door that sees no command (a file tool,
     // FUSE).
     const explain = (await ws.session('reviewer')).explain
-    const [said] = await explain.shell('cat /repo/flagged.txt')
-    for (const a of said?.answers ?? []) {
+    const [shellRes] = await explain.shell('cat /repo/flagged.txt')
+    for (const a of shellRes?.answers ?? []) {
       console.log(`${pad('explain', 9)} ${pad('cat /repo/flagged.txt', 30)} ${a.policy ?? ''}: ${a.reason}`)
     }
-    const op = await explain.vfs.write('/scratch/cold/f', 'draft')
-    for (const a of op.answers) {
+    const vfsRes = await explain.vfs.write('/scratch/cold/f', 'draft')
+    for (const a of vfsRes.answers) {
       console.log(`${pad('explain', 9)} ${pad('write /scratch/cold/f', 30)} ${a.policy ?? ''}: ${a.reason}`)
     }
   } finally {

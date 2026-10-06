@@ -22,7 +22,7 @@ import { eacces, enoent, erofsReadOnly } from '../utils/errors.ts'
 import { parent } from '../utils/path.ts'
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
-import type { Explanation, HandOff } from '../policy/types.ts'
+import type { DryRun, Explanation, HandOff } from '../policy/types.ts'
 import type { EntryGate, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
@@ -429,20 +429,27 @@ export function getOpCall(owner: Decisions): HandOff | null {
   return call?.[0] === owner ? call[1] : null
 }
 
-const explainingStorage = createAsyncContext<Explanation[] | null>()
+const explainingStorage = createAsyncContext<Explanation[] | DryRun | null>()
 
 /**
  * Run `fn` as a dry run: the op gate notes on `trace` what it would
- * answer and stops the op before any backend or cache is touched. A null
- * trace runs `fn` for real again, for what a policy does while it
- * decides the op explained. Mirrors Python's `set_explaining`.
+ * answer and stops the op before any backend or cache is touched.
+ * `DryRun.DECIDING` is what a policy does while it decides the op
+ * explained: its reads run, nothing changes. A null trace runs `fn` for
+ * real. Mirrors Python's `set_explaining`.
  */
-export function runExplaining<T>(trace: Explanation[] | null, fn: () => Promise<T>): Promise<T> {
+export function runExplaining<T>(
+  trace: Explanation[] | DryRun | null,
+  fn: () => Promise<T>,
+): Promise<T> {
   return Promise.resolve(explainingStorage.run(trace, fn))
 }
 
-/** The dry run's trace when the calls in this context only explain, null when they run. */
-export function explaining(): Explanation[] | null {
+/**
+ * The dry run's trace when the calls in this context only explain,
+ * DECIDING while its policies decide, null when they run.
+ */
+export function explaining(): Explanation[] | DryRun | null {
   return explainingStorage.getStore() ?? null
 }
 

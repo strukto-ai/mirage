@@ -615,6 +615,17 @@ export const VALIDITY: Readonly<
 export type PolicyHook = keyof typeof VALIDITY
 
 /**
+ * What a dry run's calls are while the policies decide the op it
+ * explains. DECIDING is a policy's own ops: a read runs for real, a
+ * refusal throws the door's error with no question recorded, and a write
+ * is refused as on a read-only mount, so an explanation changes nothing.
+ * Mirrors the Python DryRun.
+ */
+export enum DryRun {
+  DECIDING = 'deciding',
+}
+
+/**
  * What one command of a line, or one call on a session's file ops, would
  * do, without doing it.
  *
@@ -624,8 +635,9 @@ export type PolicyHook = keyof typeof VALIDITY
  * and `stderr` come out of the one outcome table, so an explanation of a
  * refused line is byte-identical to the refusal. A file op has no
  * terminal of its own: `command` is the op, `argv` its paths as given,
- * and `error` names the error the call would throw, while `exitCode` and
- * `stderr` stay empty.
+ * and `error` names the error the call would throw, while `exitCode`,
+ * `stderr`, `rule`, `source` and `matchedPath` stay empty: `answers` says
+ * who spoke.
  *
  * `outcome` is the document's answer and `rule` says who gave it. The
  * two refusals the allow list produces both arrive as `DENY` with no

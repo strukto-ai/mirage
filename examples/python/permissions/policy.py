@@ -169,13 +169,13 @@ async def main() -> None:
         # doors: a line, and one op of a door that sees no command (a
         # file tool, FUSE).
         explain = (await ws.session("reviewer")).explain
-        [said] = await explain.shell("cat /repo/flagged.txt")
-        for a in said.answers:
+        [shell_res] = await explain.shell("cat /repo/flagged.txt")
+        for a in shell_res.answers:
             print(
                 f"{'explain':9} {'cat /repo/flagged.txt':30} {a.policy}: {a.reason}"
             )
-        op = await explain.vfs.write("/scratch/cold/f", b"draft")
-        for a in op.answers:
+        vfs_res = await explain.vfs.write("/scratch/cold/f", b"draft")
+        for a in vfs_res.answers:
             print(
                 f"{'explain':9} {'write /scratch/cold/f':30} {a.policy}: {a.reason}"
             )

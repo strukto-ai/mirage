@@ -26,9 +26,11 @@ import type { Workspace } from './workspace.ts'
  * the policies would decide.
  *
  * Nothing runs: no command, no backend or cache read, no grant spent and
- * no question put to a host. A hide never surfaces: a path the session
- * cannot see explains like any path no policy refuses. Mirrors the Python
- * `Explainer`.
+ * no question put to a host. A policy deciding the call reads what it
+ * reads for real, but changes nothing: its own writes are refused and its
+ * own refused reads record no question. A hide never surfaces: a path the
+ * session cannot see explains like any path no policy refuses. Mirrors
+ * the Python `Explainer`.
  */
 export class Explainer {
   constructor(
