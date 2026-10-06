@@ -14,6 +14,7 @@
 
 import logging
 import os
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -1103,3 +1104,57 @@ async def test_a_saved_non_boolean_knob_is_refused(tmp_path):
     _disk_state(state)[VFSStateKey.CONFIG]["folder_versions"] = "false"
     with pytest.raises(VFSConfigError, match="must be a boolean"):
         await Workspace.from_state(state)
+
+
+class NotesRAM(RAMVFS):
+    name = "notes"
+
+    def ops(self):
+        return [replace(op, vfs=self.name) for op in super().ops()]
+
+    def commands(self):
+        return []
+
+
+@pytest.mark.asyncio
+async def test_a_disk_state_loads_into_ram_without_following_a_link(tmp_path):
+    # A disk state names each file by host path and the load reads it
+    # later: a link put in its place since must not carry a host file
+    # in, the refusal lands before any mount loads, a RAM mount under
+    # its own name still takes the files, and a mount keeping no content
+    # of its own reads none of them.
+    captured = tmp_path / "captured"
+    captured.write_bytes(b"mine")
+    config = MinIOConfig(
+        bucket="b",
+        endpoint_url="http://localhost:9000",
+        access_key_id="k",
+        secret_access_key="s",
+    )
+    ws = Workspace(
+        {"/a": RAMVFS(), "/d": NotesRAM(), "/s": MinIOVFS(config)},
+        mode=MountMode.WRITE,
+    )
+    try:
+        state = await to_state_dict(ws)
+        for m in state[StateKey.MOUNTS]:
+            file = {"/d/": captured, "/s/": tmp_path / "gone"}.get(
+                m[MountKey.PREFIX]
+            )
+            if file is not None:
+                m[MountKey.VFS_STATE] = {
+                    "type": "disk",
+                    "files": {"sub/f": file},
+                }
+        await apply_state_dict(ws, state)
+        assert await ws.vfs.read("/d/sub/f") == b"mine"
+        await ws.vfs.write("/a/kept", b"live")
+        (tmp_path / "secret").write_bytes(b"host")
+        captured.unlink()
+        captured.symlink_to(tmp_path / "secret")
+        with pytest.raises(OSError):
+            await apply_state_dict(ws, state)
+        assert await ws.vfs.read("/a/kept") == b"live"
+        assert await ws.vfs.read("/d/sub/f") == b"mine"
+    finally:
+        await ws.close()

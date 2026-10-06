@@ -15,6 +15,7 @@
 import importlib
 import logging
 import tempfile
+from pathlib import Path, PurePosixPath
 from typing import Any, cast, get_args
 
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ from pydantic import BaseModel
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLISpec
 from mirage.concurrency.limiter import run_blocking
+from mirage.core.disk.utils import open_regular
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
@@ -37,6 +39,7 @@ from mirage.shell.job_table import Job, JobStatus
 from mirage.shell.variable import ShellVar
 from mirage.types import JsonValue, MountMode, ReadSpec, VFSName
 from mirage.version import __version__
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.loader import SCRIPT_MODULE_NAME
 from mirage.vfs.registry import (
@@ -500,7 +503,10 @@ async def apply_state_dict(
         await ws._cache.clear()
     # load_state runs for ALL mounts (overridden too), so disk content
     # is written into the new root, redis content into the new URL, etc.
-    # Cred-only mounts (S3 et al.) define load_state as no-op.
+    # Cred-only mounts (S3 et al.) define load_state as no-op. Every
+    # state is prepared before any mount loads, so a captured disk file
+    # that is gone or now a link fails the load with no mount changed.
+    loads = []
     for m in state[StateKey.MOUNTS]:
         mount = ws._registry.try_mount_for_prefix(m[MountKey.PREFIX])
         if mount is None:
@@ -514,10 +520,23 @@ async def apply_state_dict(
                 m[MountKey.PREFIX],
             )
             continue
+        vfs_state = m[MountKey.VFS_STATE]
+        # A disk state loaded into another mount that keeps content (one
+        # overriding load_state, as RAM and redis do, under any name)
+        # takes the disk's state in RAM's shape; a mount keeping no
+        # content reads no file.
+        if (
+            vfs_state.get(VFSStateKey.TYPE) == VFSName.DISK
+            and mount.vfs.name != VFSName.DISK
+            and type(mount.vfs).load_state is not BaseVFS.load_state
+        ):
+            vfs_state = await run_blocking(_disk_state_as_ram, vfs_state)
+        loads.append((mount, vfs_state))
+    for mount, vfs_state in loads:
         if mount.vfs.name in (VFSName.DISK, VFSName.REDIS):
-            await run_blocking(mount.vfs.load_state, m[MountKey.VFS_STATE])
+            await run_blocking(mount.vfs.load_state, vfs_state)
         else:
-            mount.vfs.load_state(m[MountKey.VFS_STATE])
+            mount.vfs.load_state(vfs_state)
 
     await _restore_sessions(ws, state, sessions)
     # The env template is constructor state the rebuilt workspace was
@@ -532,6 +551,35 @@ async def apply_state_dict(
     await _restore_history(ws, state)
     _restore_jobs(ws, state)
     await _restore_nodes(ws, state)
+
+
+def _disk_state_as_ram(vfs_state: dict[str, Any]) -> dict[str, Any]:
+    """A disk mount's state as a RAM mount takes it, each host file read
+    through ``open_regular``, so one swapped for a link since capture is
+    refused, never followed.
+
+    Args:
+        vfs_state (dict[str, Any]): a disk mount's captured state.
+    """
+    files: dict[str, bytes] = {}
+    attrs: dict[str, dict[str, int]] = {}
+    dirs = {"/"}
+    modes = vfs_state.get("modes") or {}
+    for rel, data in (vfs_state.get(VFSStateKey.FILES) or {}).items():
+        key = "/" + rel
+        if isinstance(data, Path):
+            with open_regular(data) as f:
+                data = f.read()
+        files[key] = data
+        if rel in modes:
+            attrs[key] = {"mode": modes[rel]}
+        dirs.update(str(p) for p in PurePosixPath(key).parents)
+    return {
+        VFSStateKey.TYPE: VFSName.RAM,
+        VFSStateKey.FILES: files,
+        VFSStateKey.DIRS: sorted(dirs),
+        "attrs": attrs,
+    }
 
 
 async def _restore_nodes(ws, state: dict[str, Any]) -> None:
