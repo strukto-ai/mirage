@@ -28,7 +28,7 @@ def refusal_line(text: str, refusal: Refusal | None) -> str:
     """The one line a text surface appends for a refusal, newline
     included, or the empty string when there is nothing to add: no
     record, or a text that already says why (an operand-scoped
-    denial's GNU line, wherever a redirect landed it). A command-scoped
+    denial's own line, wherever a redirect landed it). A command-scoped
     refusal's stderr is bash's bare ``Permission denied``, which never
     does.
 
@@ -74,20 +74,24 @@ def with_refusal_bytes(data: bytes, refusal: Refusal | None) -> bytes:
 def error_text(exc: Exception) -> str:
     """A tool's failure as the agent reads it: a filesystem error as
     ``<path>: <phrase>`` (a policy's refusal reads as ``Permission
-    denied``), anything else in its own words, then the refusal's line
-    when a policy refused the op. Mirrors TS ``errorText``.
+    denied``), or the phrase alone when the error names no path, anything
+    else in its own words, then the refusal's line when a policy refused
+    the op. Mirrors TS ``errorText``.
 
     Args:
         exc (Exception): the failure.
     """
     refusal = exc.refusal if isinstance(exc, PolicyDenied) else None
     strerror = fs_strerror(exc)
+    path = error_path(exc)
     if strerror is None:
         words = str(exc)
-    elif isinstance(exc, OSError) and exc.errno and exc.filename is None:
+    elif path in ("", strerror) or (
+        isinstance(exc, OSError) and exc.errno and exc.filename is None
+    ):
         words = strerror
     else:
-        words = f"{error_path(exc)}: {strerror}"
+        words = f"{path}: {strerror}"
     return with_refusal(f"Error: {words}", refusal)
 
 

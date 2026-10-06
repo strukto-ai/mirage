@@ -25,7 +25,7 @@ export function decode(value: Uint8Array | null | undefined): string {
 /**
  * The one line a text surface appends for a refusal, newline included,
  * or the empty string when there is nothing to add: no record, or a text
- * that already says why (an operand-scoped denial's GNU line, wherever
+ * that already says why (an operand-scoped denial's own line, wherever
  * it landed). A command-scoped refusal's stderr is bash's bare
  * `Permission denied`, which never does. Mirrors Python's `refusal_line`.
  */
@@ -47,17 +47,21 @@ export function withRefusal(text: string, refusal: Refusal | null): string {
 /**
  * A tool's failure as the agent reads it: a filesystem error as
  * `<path>: <phrase>` (a policy's refusal reads as `Permission denied`),
- * anything else in its own words, then the refusal's line when a policy
- * refused the op. Mirrors Python's `error_text`.
+ * or the phrase alone when the error names no path, anything else in its
+ * own words, then the refusal's line when a policy refused the op.
+ * Mirrors Python's `error_text`.
  */
 export function errorText(error: unknown): string {
   const strerror = fsStrerror(error)
+  const path = errorVirtualPath(error)
   const words =
-    strerror !== null
-      ? `${errorVirtualPath(error)}: ${strerror}`
-      : error instanceof Error
+    strerror === null
+      ? error instanceof Error
         ? error.message
         : String(error)
+      : path === '' || path === strerror
+        ? strerror
+        : `${path}: ${strerror}`
   return withRefusal(`Error: ${words}`, error instanceof PolicyDenied ? error.refusal : null)
 }
 

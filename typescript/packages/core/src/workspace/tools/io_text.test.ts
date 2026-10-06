@@ -81,7 +81,7 @@ describe('ioToStr with a refusal', () => {
   })
 
   it('leaves an operand refusal alone', () => {
-    // The stderr line already names the reason, GNU-style.
+    // The command's stderr line already names the reason.
     const operand: Refusal = {
       kind: 'deny',
       reason: "cannot remove 'x': keys",
@@ -95,7 +95,7 @@ describe('ioToStr with a refusal', () => {
   })
 
   it('describes an operand refusal whose line was redirected away', () => {
-    // `cat /protected 2>/dev/null`: the GNU line is gone, so the record
+    // `cat /protected 2>/dev/null`: cat's line is gone, so the record
     // is the only reason left to hand over.
     const operand: Refusal = {
       kind: 'deny',
@@ -141,7 +141,7 @@ describe('ioToStr with a refusal', () => {
   })
 
   it('trusts the reason wherever the line landed', () => {
-    // `2>&1` moved the GNU line onto stdout; the text still says why.
+    // `2>&1` moved cat's line onto stdout; the text still says why.
     const operand: Refusal = {
       kind: 'deny',
       reason: '/protected: frozen',
@@ -189,5 +189,7 @@ describe('errorText', () => {
     expect(errorText(new Error('No such file or directory'))).toBe(
       'Error: No such file or directory',
     )
+    const pathless = Object.assign(new Error('Permission denied'), { code: 'EACCES' })
+    expect(errorText(pathless)).toBe('Error: Permission denied')
   })
 })
